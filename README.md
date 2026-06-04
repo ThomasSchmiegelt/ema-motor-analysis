@@ -1,6 +1,6 @@
 # E-Maschinen Analyse
 
-Browser-basiertes Werkzeug zur Auslegung und Analyse von Innenläufer-Permanentmagnetmotoren (IPM). Der Nutzer konfiguriert die Motor-Geometrie im Browser, dann läuft eine automatisierte Kette: FreeCAD-Geometrieerzeugung → 2D-FDM-Elektromagnetfeldberechnung → CalculiX-Strukturmechanik (Fliehkraft). Optional kann ein PDF-Bericht über ein lokales LLM (Ollama) erzeugt werden.
+Browser-basiertes Werkzeug zur Auslegung und Analyse von Innenläufer-Permanentmagnetmotoren (IPM). Der Nutzer konfiguriert die Motor-Geometrie im Browser, dann läuft eine automatisierte Kette: FreeCAD-Geometrieerzeugung → 2D-FDM-Elektromagnetfeldberechnung → CalculiX-Strukturmechanik (Fliehkraft). Optional kann ein PDF-Bericht über ein lokales LLM (Ollama) erzeugt werden. Ob das Ergebniss richtig ist? Wer weiß! 
 
 ---
 
