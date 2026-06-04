@@ -204,3 +204,4 @@ Alle Versionen: `requirements.txt`. Die Ollama-REST-API wird direkt über `urlli
 ## Lizenz
 
 MIT — siehe [LICENSE](LICENSE).
+# ema-motor-analysis
