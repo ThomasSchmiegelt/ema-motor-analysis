@@ -1,6 +1,6 @@
 """E-Maschinen Analyse-Server: serves ema.html + full analysis pipeline."""
 
-import json, os, threading
+import json, os, threading, time, urllib.error
 from flask import Flask, request, jsonify, send_from_directory, send_file, Response
 
 app = Flask(__name__, static_folder=os.path.dirname(__file__))
@@ -12,11 +12,24 @@ os.makedirs(PROJECTS_ROOT, exist_ok=True)
 
 _state  = {"status": "idle", "progress": 0, "log": [],
            "results": None, "project_dir": None, "project_id": None}
-_frames = []   # field animation frames (base64 PNG strings)
+# Field animation frames (base64 PNG) keyed by mode bucket: rotate/react/load.
+_frames = {"rotate": [], "react": [], "load": []}
+# mode bucket → on-disk subdir (must match ema_pipeline.FIELD_SUBDIRS)
+FIELD_SUBDIRS = {"rotate": "frames", "react": "frames_react", "load": "frames_load"}
 
 # Report generation state (separate from analysis pipeline)
 _report_state = {"status": "idle", "progress": 0, "log": [],
                  "pdf_path": None, "project_id": None}
+
+# Target-value optimisation state (LLM-steered fast search)
+_opt_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+
+# Parameter-study state (one parameter swept at a fixed speed, fast evaluator)
+_study_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+
+# Geometry-only CAD preview + smoke-test state (staged workflow, separate threads)
+_cad_state   = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+_smoke_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
 
 
 # ── Static ────────────────────────────────────────────────────────────────────
@@ -37,11 +50,232 @@ def analyse():
 
     data = request.get_json(force=True)
     _state.update({"status": "running", "progress": 0, "log": [], "results": None})
-    _frames.clear()
+    for _b in _frames.values():
+        _b.clear()
 
     t = threading.Thread(target=_run, args=(data,), daemon=True)
     t.start()
     return jsonify({"status": "started"}), 202
+
+
+# ── Staged workflow: CAD-only preview + smoke test ──────────────────────────────
+
+@app.route("/cad_preview", methods=["POST", "OPTIONS"])
+def cad_preview():
+    """Build ONLY the geometry (FreeCAD + STEP + 2D images), no analysis — so the
+    user can look at the CAD model before running the real calculation."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if _state["status"] == "running":
+        return jsonify({"error": "Analyse läuft bereits"}), 409
+    if _cad_state["status"] == "running":
+        return jsonify({"error": "CAD-Vorschau läuft bereits"}), 409
+    data = request.get_json(force=True)
+    _cad_state.update({"status": "running", "progress": 0, "log": [],
+                       "result": None, "error": None})
+    threading.Thread(target=_run_cad_preview, args=(data,), daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+def _run_cad_preview(data):
+    from ema_pipeline import build_cad_preview, create_project_dir
+    try:
+        proj_dir, proj_id = create_project_dir(
+            PROJECTS_ROOT, data.get("project_name") or "cad_vorschau")
+        _state["project_dir"] = proj_dir   # so /open_freecad + /download_step work
+        _state["project_id"]  = proj_id
+        _cad_state["result"]   = build_cad_preview(data, _cad_state, proj_dir)
+        _cad_state["status"]   = "done"
+        _cad_state["progress"] = 100
+    except Exception as e:
+        import traceback
+        _cad_state["error"] = str(e)
+        _cad_state["log"].append("⚠ " + str(e))
+        _cad_state["log"].append(traceback.format_exc()[:500])
+        _cad_state["status"] = "error"
+
+
+@app.route("/cad_preview/status")
+def cad_preview_status():
+    return jsonify({k: _cad_state[k]
+                    for k in ("status", "progress", "log", "result", "error")})
+
+
+@app.route("/smoke_test", methods=["POST", "OPTIONS"])
+def smoke_test_run():
+    """Run smoke_test.py (fast ~15 s sanity check, no FreeCAD) in a subprocess."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if _smoke_state["status"] == "running":
+        return jsonify({"error": "Smoke-Test läuft bereits"}), 409
+    _smoke_state.update({"status": "running", "progress": 0, "log": [],
+                         "result": None, "error": None})
+    threading.Thread(target=_run_smoke, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+def _run_smoke():
+    import subprocess, sys, re
+    _ansi = re.compile(r"\x1b\[[0-9;]*m")
+    try:
+        script = os.path.join(os.path.dirname(__file__), "smoke_test.py")
+        proc = subprocess.Popen(
+            [sys.executable, script], cwd=os.path.dirname(__file__),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        for line in proc.stdout:
+            _smoke_state["log"].append(_ansi.sub("", line.rstrip("\n")))
+            _smoke_state["log"] = _smoke_state["log"][-300:]
+        proc.wait()
+        ok = (proc.returncode == 0)
+        summary = next((l for l in reversed(_smoke_state["log"]) if "RESULT:" in l), "")
+        _smoke_state["result"] = {"ok": ok, "returncode": proc.returncode,
+                                  "summary": summary}
+        _smoke_state["progress"] = 100
+        _smoke_state["status"]   = "done" if ok else "error"
+    except Exception as e:
+        _smoke_state["error"]  = str(e)
+        _smoke_state["log"].append("⚠ " + str(e))
+        _smoke_state["status"] = "error"
+
+
+@app.route("/smoke_test/status")
+def smoke_test_status():
+    return jsonify({k: _smoke_state[k]
+                    for k in ("status", "progress", "log", "result", "error")})
+
+
+@app.route("/preview_field", methods=["POST", "OPTIONS"])
+def preview_field():
+    """Render a single field frame (no FreeCAD/FEM/animation) for a quick preview."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if _state["status"] == "running":
+        return jsonify({"error": "Pipeline läuft bereits"}), 409
+    data = request.get_json(force=True)
+    try:
+        from ema_pipeline import render_preview_frame
+        out = render_preview_frame(data)
+        return jsonify(out)
+    except Exception as e:
+        import traceback
+        return jsonify({"error": str(e), "trace": traceback.format_exc()[:400]}), 500
+
+
+@app.route("/optimize", methods=["POST", "OPTIONS"])
+def optimize_start():
+    """Start an LLM-steered target-value optimisation (fast analytical evaluator).
+    Body = {base_payload, objective, constraints, free, iterations, batch}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if _opt_state["status"] == "running":
+        return jsonify({"error": "Optimierung läuft bereits"}), 409
+    spec = request.get_json(force=True)
+    _opt_state.update({"status": "running", "progress": 0, "log": [],
+                       "result": None, "error": None})
+
+    def _worker():
+        import ema_optimize
+        def cb(msg, pct=None):
+            _opt_state["log"].append(msg)
+            if pct is not None:
+                _opt_state["progress"] = int(pct)
+        try:
+            _opt_state["result"] = ema_optimize.optimize(spec, progress_cb=cb)
+            _opt_state["status"] = "done"
+            _opt_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _opt_state["error"] = str(e)
+            _opt_state["log"].append("⚠ " + str(e))
+            _opt_state["status"] = "error"
+            print(traceback.format_exc())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/optimize/status")
+def optimize_status():
+    return jsonify({
+        "status":   _opt_state["status"],
+        "progress": _opt_state["progress"],
+        "log":      _opt_state["log"][-40:],
+        "result":   _opt_state["result"],
+        "error":    _opt_state["error"],
+    })
+
+
+@app.route("/text2ema", methods=["POST", "OPTIONS"])
+def text2ema():
+    """Derive an IPM parameter set from a free-text application description (LLM).
+    Body: {description}. Returns {params, begruendung, model}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_text2ema
+    data = request.get_json(force=True)
+    try:
+        return jsonify(ema_text2ema.derive(data.get("description", "")))
+    except urllib.error.URLError:
+        return jsonify({"error": "Ollama nicht erreichbar (localhost:11434)."}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/optimize/meta")
+def optimize_meta():
+    """Available free parameters + metrics for the optimiser UI."""
+    import ema_optimize
+    fp = {k: {"label": v["label"], "lo": v["lo"], "hi": v["hi"],
+              "int": v["type"] is int}
+          for k, v in ema_optimize.FREE_PARAMS.items()}
+    return jsonify({"free_params": fp, "metrics": ema_optimize.METRICS})
+
+
+@app.route("/param_study", methods=["POST", "OPTIONS"])
+def param_study_start():
+    """Sweep ONE parameter from x to y in N steps at a FIXED speed (fast evaluator).
+    Body = {payload, param, lo, hi, steps, rpm}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if _study_state["status"] == "running":
+        return jsonify({"error": "Parameterstudie läuft bereits"}), 409
+    data = request.get_json(force=True)
+    _study_state.update({"status": "running", "progress": 0, "log": [],
+                         "result": None, "error": None})
+
+    def _worker():
+        import ema_paramstudy
+        def cb(msg, pct=None):
+            _study_state["log"].append(msg)
+            if pct is not None:
+                _study_state["progress"] = int(pct)
+        try:
+            _study_state["result"] = ema_paramstudy.run_study(
+                data["payload"], data["param"], data["lo"], data["hi"],
+                steps=int(data.get("steps", 100)), rpm=data.get("rpm"),
+                progress_cb=cb)
+            _study_state["status"] = "done"
+            _study_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _study_state["error"] = str(e)
+            _study_state["log"].append("⚠ " + str(e))
+            _study_state["status"] = "error"
+            print(traceback.format_exc())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/param_study/status")
+def param_study_status():
+    return jsonify({
+        "status":   _study_state["status"],
+        "progress": _study_state["progress"],
+        "log":      _study_state["log"][-40:],
+        "result":   _study_state["result"],
+        "error":    _study_state["error"],
+    })
 
 
 def _run(data):
@@ -74,12 +308,62 @@ def results():
     return jsonify(_state["results"])
 
 
+@app.route("/chat", methods=["POST", "OPTIONS"])
+def chat():
+    """LLM Q&A over the loaded project's results, or over a variant comparison.
+    Body: {message, history:[{role,content}], scope:"project"|"compare", ids:[...]}.
+    """
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_chat
+    data = request.get_json(force=True)
+    msg = (data.get("message") or "").strip()
+    if not msg:
+        return jsonify({"error": "leere Nachricht"}), 400
+    history = data.get("history") or []
+    scope = data.get("scope", "project")
+    try:
+        if scope == "compare":
+            import ema_compare
+            ids = [i for i in (data.get("ids") or []) if _safe_name(i)]
+            variants = ema_compare.load_projects(PROJECTS_ROOT, ids)
+            if len(variants) < 2:
+                return jsonify({"error": "Mindestens 2 Projekte für den Vergleichs-Chat wählen"}), 400
+            reply = ema_chat.chat_compare(msg, history, variants)
+        else:
+            results = _state.get("results")
+            if not results:
+                return jsonify({"error": "Kein Projekt geladen — erst eine Analyse ausführen oder ein Projekt laden"}), 400
+            # Load the project's meta.json so the chat is grounded on its parameter
+            # datasheet (results.json holds outputs only, not the input parameters).
+            meta = {}
+            pd = _state.get("project_dir")
+            if pd and os.path.exists(os.path.join(pd, "meta.json")):
+                try:
+                    with open(os.path.join(pd, "meta.json")) as f:
+                        meta = json.load(f)
+                except Exception:
+                    meta = {}
+            reply = ema_chat.chat_results(msg, history, results, meta=meta)
+        return jsonify({"reply": reply})
+    except urllib.error.URLError:
+        return jsonify({"error": "Ollama nicht erreichbar (localhost:11434). Läuft der Dienst?"}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
 @app.route("/field/<int:n>")
 def field_frame(n: int):
+    return field_frame_mode("rotate", n)   # legacy alias → rotate bucket
+
+
+@app.route("/field/<mode>/<int:n>")
+def field_frame_mode(mode: str, n: int):
     import base64
-    if n >= len(_frames):
+    bucket = _frames.get(mode, [])
+    if n >= len(bucket):
         return "", 404
-    img = base64.b64decode(_frames[n])
+    img = base64.b64decode(bucket[n])
     return Response(img, mimetype="image/png",
                     headers={"Cache-Control": "no-store"})
 
@@ -305,15 +589,42 @@ def download_step():
 
 # ── Project management ──────────────────────────────────────────────────────
 
+_SUMMARY_CACHE: dict = {}   # pid -> (mtime, summary_dict)
+
+
+def _project_summary(path: str, pid: str) -> dict:
+    """results.json['summary'] for a project, cached by mtime. results.json is
+    ~1 MB (inline base64), so it is parsed at most once per change — only used
+    for the detailed project gallery, not the lightweight dropdown/compare list."""
+    rp = os.path.join(path, "results.json")
+    try:
+        mt = os.path.getmtime(rp)
+    except OSError:
+        return {}
+    cached = _SUMMARY_CACHE.get(pid)
+    if cached and cached[0] == mt:
+        return cached[1]
+    try:
+        with open(rp) as f:
+            summary = (json.load(f) or {}).get("summary", {}) or {}
+    except Exception:
+        summary = {}
+    _SUMMARY_CACHE[pid] = (mt, summary)
+    return summary
+
+
 @app.route("/projects")
 def list_projects():
-    """List all saved projects."""
+    """List all saved projects. ?detail=1 adds topology + headline metrics for the
+    project gallery (mtime-cached); the bare call stays light (meta.json only)."""
+    from ema_topology import TOPOLOGY_LABELS
+    detail = request.args.get("detail") == "1"
     if not os.path.isdir(PROJECTS_ROOT):
         return jsonify({"projects": []})
     projs = []
     for name in sorted(os.listdir(PROJECTS_ROOT), reverse=True):
         path = os.path.join(PROJECTS_ROOT, name)
-        if not os.path.isdir(path):
+        if not os.path.isdir(path) or name.startswith("_"):
             continue
         meta_path = os.path.join(path, "meta.json")
         meta = {}
@@ -325,7 +636,9 @@ def list_projects():
         has_results = os.path.exists(os.path.join(path, "results.json"))
         has_fcstd   = os.path.exists(os.path.join(path, "motor.FCStd"))
         has_step    = os.path.exists(os.path.join(path, "motor.step"))
-        projs.append({
+        report_file = _latest_report(path)
+        geom = meta.get("geom", {}) or {}
+        card = {
             "id":          name,
             "label":       meta.get("label", name),
             "created":     meta.get("created", ""),
@@ -333,8 +646,136 @@ def list_projects():
             "has_results": has_results,
             "has_fcstd":   has_fcstd,
             "has_step":    has_step,
-        })
+            "has_thumb":   os.path.exists(os.path.join(path, "cad_images", "motor_cross_section.png")),
+            "has_em_field": os.path.exists(os.path.join(path, "charts", "em_field.png")),
+            "has_report":  bool(report_file),
+            "report_file": report_file or "",
+        }
+        if detail:
+            card["topology"] = TOPOLOGY_LABELS.get(geom.get("magShape", "v"), geom.get("magShape"))
+            card["p"]         = geom.get("p")
+            card["stator_od"] = geom.get("statorOD")
+            card["axial"]     = meta.get("axial_len") or geom.get("axialLen")
+            card["cooling"]   = meta.get("cooling")
+            if has_results:
+                s = _project_summary(path, name)
+                card["metrics"] = {
+                    "Kt":           s.get("Kt_Nm_per_A"),
+                    "T_maxwell":    s.get("T_maxwell_Nm"),
+                    "max_safe_rpm": s.get("max_safe_rpm"),
+                    "T_magnet":     s.get("T_magnet_C"),
+                    "mass_g":       s.get("mass_g"),
+                    "P_total":      s.get("P_total_W"),
+                    "verbrauch":    s.get("cycle_kWh100km"),
+                }
+        projs.append(card)
     return jsonify({"projects": projs, "current": _state.get("project_id")})
+
+
+@app.route("/project/<pid>/thumb")
+def project_thumb(pid: str):
+    """Serve a project's cross-section thumbnail for the gallery."""
+    if not _safe_name(pid):
+        return "", 403
+    base = os.path.join(PROJECTS_ROOT, pid, "cad_images")
+    for fn in ("motor_cross_section.png", "motor_side_view.png"):
+        p = os.path.join(base, fn)
+        if os.path.exists(p):
+            resp = send_file(p, mimetype="image/png")
+            resp.headers["Cache-Control"] = "max-age=3600"
+            return resp
+    return "", 404
+
+
+@app.route("/project/<pid>/em_field")
+def project_em_field(pid: str):
+    """Serve a project's high-res EM-simulation field map for the gallery (open
+    circuit). Falls back to the loaded-field image if only that one exists."""
+    if not _safe_name(pid):
+        return "", 403
+    base = os.path.join(PROJECTS_ROOT, pid, "charts")
+    for fn in ("em_field.png", "em_field_load.png"):
+        p = os.path.join(base, fn)
+        if os.path.exists(p):
+            resp = send_file(p, mimetype="image/png")
+            resp.headers["Cache-Control"] = "max-age=3600"
+            return resp
+    return "", 404
+
+
+def _latest_report(path: str) -> str | None:
+    """Basename of the most recently generated report PDF in a project (by mtime),
+    or None. Honours "immer nur der letzte Bericht" when the UI links to it."""
+    cands = []
+    for fn in ("bericht.pdf", "bericht_agentisch.pdf"):
+        p = os.path.join(path, fn)
+        if os.path.exists(p):
+            cands.append((os.path.getmtime(p), fn))
+    return max(cands)[1] if cands else None
+
+
+def _reload_frames_from_disk(path: str) -> dict:
+    """Re-populate every field-mode bucket in `_frames` from its subdir on disk.
+    Returns {bucket: count}. Shared by /project/<id>/load and the partial recompute
+    (so the viewer keeps its frames when the field stage isn't re-run)."""
+    import base64 as _b64
+    counts = {}
+    for bucket, subdir in FIELD_SUBDIRS.items():
+        _frames[bucket].clear()
+        fdir = os.path.join(path, subdir)
+        if not os.path.isdir(fdir):
+            counts[bucket] = 0
+            continue
+        n = len([f for f in os.listdir(fdir) if f.endswith(".png")])
+        for i in range(n):
+            fp = os.path.join(fdir, f"frame_{i:04d}.png")
+            if os.path.exists(fp):
+                with open(fp, "rb") as f:
+                    _frames[bucket].append(_b64.b64encode(f.read()).decode())
+        counts[bucket] = len(_frames[bucket])
+    return counts
+
+
+@app.route("/project/<pid>/recompute", methods=["POST", "OPTIONS"])
+def project_recompute(pid: str):
+    """Re-run only the SELECTED (forgotten) pipeline stages on an existing project,
+    merging into its saved results. Stages ⊆ {field, structural, thermal, drivecycle};
+    geometry/EM are reused from disk. Uses the CURRENT form payload so the forgotten
+    calc can be (re)configured. Reuses _state + /status + /results like /analyse."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    path = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(path) or not os.path.exists(os.path.join(path, "results.json")):
+        return jsonify({"error": "Projekt nicht gefunden (results.json fehlt)"}), 404
+    if _state["status"] == "running":
+        return jsonify({"error": "Pipeline läuft bereits"}), 409
+
+    data    = request.get_json(force=True)
+    allowed = {"field", "structural", "thermal", "drivecycle"}
+    stages  = {s for s in (data.get("stages") or []) if s in allowed}
+    if not stages:
+        return jsonify({"error": "Keine gültige Stufe gewählt"}), 400
+
+    # Preload existing frames so the viewer keeps them when "field" is not re-run.
+    _reload_frames_from_disk(path)
+    _state.update({"status": "running", "progress": 0, "log": [], "results": None})
+    threading.Thread(target=_run_partial, args=(data, path, pid, stages),
+                     daemon=True).start()
+    return jsonify({"status": "started", "stages": sorted(stages)}), 202
+
+
+def _run_partial(data, proj_dir, pid, stages):
+    from ema_pipeline import run_pipeline
+    try:
+        _state["project_dir"] = proj_dir
+        _state["project_id"]  = pid
+        run_pipeline(data, _state, _frames, WORKSPACE, proj_dir, stages=stages)
+    except Exception as e:
+        import traceback
+        _state["log"].append(f"FATAL: {e}\n{traceback.format_exc()[:600]}")
+        _state["status"] = "error"
 
 
 @app.route("/project/<pid>/load")
@@ -354,28 +795,81 @@ def load_project(pid: str):
     except Exception as e:
         return jsonify({"error": f"results.json lesen fehlgeschlagen: {e}"}), 500
 
-    # Load frames index
-    frames_dir = os.path.join(path, "frames")
-    n_frames = 0
-    if os.path.isdir(frames_dir):
-        n_frames = len([f for f in os.listdir(frames_dir) if f.endswith(".png")])
-    if n_frames > 0:
-        # Re-populate _frames from disk as base64
-        import base64 as _b64
-        _frames.clear()
-        for i in range(n_frames):
-            fp = os.path.join(frames_dir, f"frame_{i:04d}.png")
-            if os.path.exists(fp):
-                with open(fp, "rb") as f:
-                    _frames.append(_b64.b64encode(f.read()).decode())
+    # Re-populate every field-mode bucket from its subdir on disk
+    counts = _reload_frames_from_disk(path)
 
     _state["results"]     = results
     _state["project_dir"] = path
     _state["project_id"]  = pid
     _state["status"]      = "done"
     return jsonify({"status": "loaded", "id": pid,
-                    "n_frames": len(_frames),
+                    "n_frames": len(_frames["rotate"]),
+                    "frame_counts": counts,
                     "summary": results.get("summary", {})})
+
+
+def _label_to_key(table: dict, label: str, default: str) -> str:
+    """Reverse-lookup a material key by its 'label' (for legacy projects whose
+    meta.json stored only the material label, not the key)."""
+    for k, v in table.items():
+        if v.get("label") == label:
+            return k
+    return default
+
+
+def _reconstruct_payload(meta: dict) -> dict:
+    """Build a form-loadable payload from a legacy meta.json (no stored payload).
+
+    Carries over what meta has (geom + the handful of run settings); material keys
+    are recovered from their labels. Anything absent (resolutions, field modes,
+    vehicle…) is simply omitted so the form keeps its current/default values.
+    """
+    from ema_pipeline import LAMINATES, HAIRPIN_MATS, MAGNETS
+    mats = meta.get("materials", {}) or {}
+    rng  = (meta.get("rpm_range") or "").replace("U/min", "").strip()
+    rpm_from = rpm_to = None
+    for sep in ("–", "-", "—"):
+        if sep in rng:
+            a, b = rng.split(sep, 1)
+            try: rpm_from, rpm_to = float(a), float(b)
+            except ValueError: pass
+            break
+    p = {
+        "geom":       meta.get("geom", {}),
+        "axial_len":  meta.get("axial_len"),
+        "load_nm":    meta.get("load_nm"),
+        "cooling":    meta.get("cooling"),
+        "T_ambient":  meta.get("T_ambient"),
+        "rpm_step":   meta.get("rpm_step"),
+        "n_frames":   meta.get("frames_per_rpm"),
+        "rotor_lam":  _label_to_key(LAMINATES,    mats.get("rotor", ""),   "m270_35a"),
+        "stator_lam": _label_to_key(LAMINATES,    mats.get("stator", ""),  "m270_35a"),
+        "hairpin_mat":_label_to_key(HAIRPIN_MATS, mats.get("hairpin", ""), "cu_etp"),
+        "magnet":     _label_to_key(MAGNETS,      mats.get("magnet", ""),  "ndfeb_n35"),
+    }
+    if rpm_from is not None: p["rpm_from"] = rpm_from
+    if rpm_to   is not None: p["rpm_to"]   = rpm_to
+    return {k: v for k, v in p.items() if v is not None}
+
+
+@app.route("/project/<pid>/template")
+def project_template(pid: str):
+    """Return a project's input payload so the UI can use it as a template for a
+    new run (repopulate the form, then the user tweaks + re-analyses)."""
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    meta_path = os.path.join(PROJECTS_ROOT, pid, "meta.json")
+    if not os.path.exists(meta_path):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    try:
+        with open(meta_path) as f:
+            meta = json.load(f)
+    except Exception as e:
+        return jsonify({"error": f"meta.json lesen fehlgeschlagen: {e}"}), 500
+    payload = meta.get("payload") or _reconstruct_payload(meta)
+    payload.pop("cycle_csv", None)
+    return jsonify({"payload": payload, "label": meta.get("label", ""),
+                    "reconstructed": "payload" not in meta})
 
 
 # ── Report generation (LLM → PDF) ────────────────────────────────────────────
@@ -412,6 +906,13 @@ def make_report(pid: str):
                 from ema_report import generate_report
                 r = generate_report(proj, model=model, progress_cb=_cb)
             _report_state["pdf_path"] = r["pdf"]
+            # "Immer nur der letzte Bericht": drop the other-mode PDF so exactly one
+            # report stays in the project (and thus a single entry in the gallery).
+            _keep = os.path.basename(r["pdf"])
+            for _other in ("bericht.pdf", "bericht_agentisch.pdf"):
+                if _other != _keep:
+                    try: os.remove(os.path.join(proj, _other))
+                    except OSError: pass
             _report_state["status"]   = "done"
             _report_state["progress"] = 100
         except Exception as e:
@@ -442,7 +943,10 @@ def download_report(pid: str):
     if not _safe_name(pid):
         return "", 403
     mode = request.args.get("mode", "standard")
-    fname = "bericht_agentisch.pdf" if mode == "agentic" else "bericht.pdf"
+    if mode == "latest":
+        fname = _latest_report(os.path.join(PROJECTS_ROOT, pid)) or "bericht.pdf"
+    else:
+        fname = "bericht_agentisch.pdf" if mode == "agentic" else "bericht.pdf"
     pdf = os.path.join(PROJECTS_ROOT, pid, fname)
     if not os.path.exists(pdf):
         # fall back to whichever exists
@@ -464,8 +968,8 @@ def compare():
     ids = [i.strip() for i in ids_raw.split(",") if i.strip() and _safe_name(i.strip())]
     if not ids:
         return jsonify({"error": "Keine Projekt-IDs angegeben"}), 400
-    if len(ids) > 4:
-        ids = ids[:4]
+    if len(ids) > 10:
+        ids = ids[:10]
     from ema_compare import run_compare
     try:
         result = run_compare(PROJECTS_ROOT, ids)
@@ -488,6 +992,390 @@ def delete_project(pid: str):
         _state["project_id"] = None
         _state["project_dir"] = None
     return jsonify({"status": "deleted"})
+
+
+# ── Field-animation video download ───────────────────────────────────────────
+
+@app.route("/project/<pid>/video/<mode>")
+def project_video(pid: str, mode: str):
+    # field-animation modes + the structural deformation ramp (frames_struct)
+    video_subdirs = {**FIELD_SUBDIRS, "struct": "frames_struct"}
+    if not _safe_name(pid) or mode not in video_subdirs:
+        return jsonify({"error": "ungültig"}), 403
+    base = os.path.join(PROJECTS_ROOT, pid) if pid and pid != "current" else _state.get("project_dir")
+    if not base or not os.path.isdir(base):
+        base = _state.get("project_dir")
+    mp4 = os.path.join(base, video_subdirs[mode], "anim.mp4") if base else None
+    if not mp4 or not os.path.exists(mp4):
+        return jsonify({"error": "Kein Video für diesen Modus"}), 404
+    return send_file(mp4, mimetype="video/mp4", as_attachment=True,
+                     download_name=f"{pid}_{mode}.mp4")
+
+
+# ── Comparison report (multiple variants → one PDF) ──────────────────────────
+
+@app.route("/compare/report", methods=["POST"])
+def compare_report():
+    if _report_state["status"] == "running":
+        return jsonify({"error": "Berichtgenerierung läuft bereits"}), 409
+    body = request.get_json(force=True) or {}
+    ids = [i.strip() for i in body.get("ids", []) if _safe_name(str(i).strip())]
+    if len(ids) < 2:
+        return jsonify({"error": "Mindestens 2 Projekte wählen"}), 400
+    ids = ids[:10]
+    model = body.get("model", "ministral-3:14b")
+    agentic = bool(body.get("agentic")) or body.get("mode") == "agentic"
+
+    import time
+    out_dir = os.path.join(PROJECTS_ROOT, "_comparisons",
+                           time.strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(out_dir, exist_ok=True)
+    _report_state.update({"status": "running", "progress": 0, "log": [],
+                          "pdf_path": None, "project_id": os.path.basename(out_dir),
+                          "mode": "comparison"})
+
+    def _cb(msg, pct):
+        _report_state["log"].append(msg)
+        if pct is not None:
+            _report_state["progress"] = int(pct)
+
+    def _run_cmp():
+        try:
+            if agentic:
+                from ema_report import generate_comparison_report_agentic
+                r = generate_comparison_report_agentic(ids, PROJECTS_ROOT, out_dir,
+                                                       model=model, progress_cb=_cb)
+            else:
+                from ema_report import generate_comparison_report
+                r = generate_comparison_report(ids, PROJECTS_ROOT, out_dir,
+                                               model=model, progress_cb=_cb)
+            _report_state["pdf_path"] = r["pdf"]
+            _report_state["status"] = "done"
+            _report_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _report_state["log"].append(f"FATAL: {e}\n{traceback.format_exc()[:400]}")
+            _report_state["status"] = "error"
+
+    threading.Thread(target=_run_cmp, daemon=True).start()
+    return jsonify({"status": "started", "ids": ids, "model": model}), 202
+
+
+@app.route("/compare/report/download")
+def compare_report_download():
+    pdf = _report_state.get("pdf_path")
+    if _report_state.get("mode") != "comparison" or not pdf or not os.path.exists(pdf):
+        return jsonify({"error": "Kein Vergleichsbericht erzeugt"}), 404
+    return send_file(pdf, as_attachment=True, download_name="vergleichsbericht.pdf")
+
+
+# ── Variant sets (parameter studies) ─────────────────────────────────────────
+# A variant set is a JSON file holding up to 10 analysis payloads, so the user
+# can store a parameter study and batch-run / compare it.
+
+VARIANTS_ROOT = os.path.join(PROJECTS_ROOT, "_variants")
+os.makedirs(VARIANTS_ROOT, exist_ok=True)
+
+
+@app.route("/variants/list")
+def variants_list():
+    sets = []
+    for fn in sorted(os.listdir(VARIANTS_ROOT)):
+        if not fn.endswith(".json"):
+            continue
+        path = os.path.join(VARIANTS_ROOT, fn)
+        try:
+            with open(path) as f:
+                data = json.load(f)
+            sets.append({"name": fn[:-5],
+                         "label": data.get("name", fn[:-5]),
+                         "created": data.get("created", ""),
+                         "n_variants": len(data.get("variants", []))})
+        except Exception:
+            continue
+    return jsonify({"sets": sets})
+
+
+@app.route("/variants/save", methods=["POST"])
+def variants_save():
+    body = request.get_json(force=True) or {}
+    name = str(body.get("name", "")).strip()
+    if not name or not _safe_name(name):
+        return jsonify({"error": "ungültiger Set-Name"}), 400
+    vset = {
+        "schema_version": 1,
+        "kind": "ema_variant_set",
+        "name": name,
+        "created": body.get("created", ""),
+        "variants": body.get("variants", [])[:10],
+    }
+    tmp = os.path.join(VARIANTS_ROOT, f".{name}.tmp")
+    final = os.path.join(VARIANTS_ROOT, f"{name}.json")
+    with open(tmp, "w") as f:
+        json.dump(vset, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, final)
+    return jsonify({"status": "saved", "name": name,
+                    "n_variants": len(vset["variants"])})
+
+
+@app.route("/variants/load/<name>")
+def variants_load(name: str):
+    if not _safe_name(name):
+        return jsonify({"error": "ungültiger Set-Name"}), 403
+    path = os.path.join(VARIANTS_ROOT, f"{name}.json")
+    if not os.path.exists(path):
+        return jsonify({"error": "Set nicht gefunden"}), 404
+    with open(path) as f:
+        return jsonify(json.load(f))
+
+
+@app.route("/variants/delete/<name>", methods=["POST"])
+def variants_delete(name: str):
+    if not _safe_name(name):
+        return jsonify({"error": "ungültiger Set-Name"}), 403
+    path = os.path.join(VARIANTS_ROOT, f"{name}.json")
+    if os.path.exists(path):
+        os.remove(path)
+    return jsonify({"status": "deleted"})
+
+
+# ── Last-Sitzung (serverseitige Sicherung der Eingabe-Maske) ─────────────────
+# Spiegelt das clientseitige localStorage-Autosave server-/geräteübergreifend: die
+# zuletzt benutzte Formular-Konfiguration (ohne Einmal-CSV) liegt als EINE Datei,
+# damit sie auch in einem anderen Browser/auf einem anderen Rechner wieder da ist.
+SESSION_PATH = os.path.join(PROJECTS_ROOT, "_session", "last_session.json")
+os.makedirs(os.path.dirname(SESSION_PATH), exist_ok=True)
+
+
+@app.route("/session/save", methods=["POST", "OPTIONS"])
+def session_save():
+    if request.method == "OPTIONS":
+        return "", 200
+    body = request.get_json(force=True) or {}
+    payload = body.get("payload")
+    if not isinstance(payload, dict):
+        return jsonify({"error": "kein payload"}), 400
+    payload.pop("cycle_csv", None)            # Einmal-Upload nie persistieren
+    rec = {"t": int(body.get("t") or (time.time() * 1000)), "payload": payload}
+    tmp = SESSION_PATH + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(rec, f, ensure_ascii=False)
+    os.replace(tmp, SESSION_PATH)
+    return jsonify({"status": "saved", "t": rec["t"]})
+
+
+@app.route("/session/load")
+def session_load():
+    if not os.path.exists(SESSION_PATH):
+        return jsonify({})                    # noch keine Sitzung gesichert
+    try:
+        with open(SESSION_PATH) as f:
+            return jsonify(json.load(f))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/session/clear", methods=["POST"])
+def session_clear():
+    if os.path.exists(SESSION_PATH):
+        os.remove(SESSION_PATH)
+    return jsonify({"status": "cleared"})
+
+
+# ── Wissensbasis (RAG) — gemeinsame Basis, Kategorien "maschinen" / "doku" ───
+@app.route("/rag/list")
+def rag_list():
+    import ema_rag
+    return jsonify({"documents": ema_rag.list_documents(), "stats": ema_rag.stats()})
+
+
+@app.route("/rag/add", methods=["POST", "OPTIONS"])
+def rag_add():
+    """Plain-text document. Body: {text, title, category}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_rag
+    d = request.get_json(force=True) or {}
+    try:
+        res = ema_rag.add_text(d.get("text", ""), d.get("title", ""),
+                               d.get("category", "doku"))
+        return jsonify({"status": "added", **res})
+    except urllib.error.URLError:
+        return jsonify({"error": "Ollama-Embeddings nicht erreichbar (localhost:11434)."}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/rag/upload", methods=["POST"])
+def rag_upload():
+    """Multipart file upload (txt/md/csv/pdf) + form fields category, title."""
+    import ema_rag
+    f = request.files.get("file")
+    if not f:
+        return jsonify({"error": "keine Datei"}), 400
+    category = request.form.get("category", "doku")
+    title    = request.form.get("title", "") or f.filename
+    try:
+        res = ema_rag.add_file(f.filename, f.read(), category, title=title)
+        return jsonify({"status": "added", **res})
+    except urllib.error.URLError:
+        return jsonify({"error": "Ollama-Embeddings nicht erreichbar (localhost:11434)."}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/rag/delete/<doc_id>", methods=["POST"])
+def rag_delete(doc_id: str):
+    import ema_rag
+    return jsonify({"status": "deleted" if ema_rag.delete_document(doc_id) else "missing"})
+
+
+@app.route("/rag/search")
+def rag_search():
+    """Debug/preview retrieval: ?q=…&category=…&k=…"""
+    import ema_rag
+    q = request.args.get("q", "")
+    cat = request.args.get("category") or None
+    k = int(request.args.get("k", 5))
+    if not q:
+        return jsonify({"error": "q fehlt"}), 400
+    try:
+        return jsonify({"hits": ema_rag.search(q, category=cat, k=k)})
+    except urllib.error.URLError:
+        return jsonify({"error": "Ollama-Embeddings nicht erreichbar."}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+# ── Parameter table schema (für den Spalten-Editor „Parameter-Tabelle") ──────
+# Liefert den kuratierten Parametersatz (Labels/Ranges/Enums) aus ema_text2ema.SCHEMA,
+# angereichert um lesbare Enum-Labels aus den Material-/Topologie-Tabellen, damit
+# das Frontend die Tabelle aufbauen und Dropdown-Zellen befüllen kann.
+
+@app.route("/param_schema")
+def param_schema():
+    import ema_text2ema as T2E
+    from ema_pipeline import LAMINATES, HAIRPIN_MATS, MAGNETS
+    try:
+        import ema_report as R
+        topo_labels = R.TOPOLOGY_LABELS
+    except Exception:
+        topo_labels = {}
+    cool_labels = {"natural": "Selbstkühlung", "forced": "Zwangsluft",
+                   "water": "Wasserkühlung", "oil": "Ölkühlung"}
+
+    def _opts(keys, table=None, labelmap=None):
+        out = []
+        for k in keys:
+            if table is not None and k in table:
+                out.append({"value": k, "label": table[k].get("label", k)})
+            elif labelmap is not None:
+                out.append({"value": k, "label": labelmap.get(k, k)})
+            else:
+                out.append({"value": k, "label": k})
+        return out
+
+    enum_opts = {
+        "magShape":    _opts(getattr(T2E, "_SHAPE", []), labelmap=topo_labels),
+        "rotor_lam":   _opts(getattr(T2E, "_LAM", []),  table=LAMINATES),
+        "stator_lam":  _opts(getattr(T2E, "_LAM", []),  table=LAMINATES),
+        "hairpin_mat": _opts(getattr(T2E, "_HAIR", []), table=HAIRPIN_MATS),
+        "magnet":      _opts(getattr(T2E, "_MAG", []),  table=MAGNETS),
+        "cooling":     _opts(getattr(T2E, "_COOL", []), labelmap=cool_labels),
+    }
+    # geom keys vs. top-level payload keys (für den Frontend-Payload-Bau)
+    geom_keys = {"statorOD", "statorID", "rotorOD", "shaftD", "shaftBoreD",
+                 "slots", "slotDepth", "p", "magShape", "magAngle", "magDepthRel",
+                 "magWidth", "magThick", "magDist", "nAx", "nCirc"}
+    params = []
+    for key, spec in T2E.SCHEMA.items():
+        p = {"key": key, "desc": spec.get("desc", key),
+             "kind": spec.get("kind", "num"),
+             "in_geom": key in geom_keys}
+        if spec.get("kind") == "num":
+            p.update({"lo": spec.get("lo"), "hi": spec.get("hi"),
+                      "def": spec.get("def"), "int": bool(spec.get("int"))})
+        else:
+            p["options"] = enum_opts.get(key, _opts(spec.get("opts", [])))
+            p["def"] = spec.get("def")
+        params.append(p)
+    return jsonify({"params": params})
+
+
+# ── Bewertung „gut/schlecht" + fortlaufendes Trainingsfile ───────────────────
+
+@app.route("/project/<pid>/rating", methods=["GET", "POST"])
+def project_rating(pid: str):
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    import ema_training
+    if request.method == "GET":
+        rec = ema_training.get_record(pid)
+        if rec is None:
+            return jsonify({"label": None, "comment": "", "exists": False})
+        # Heuristik-Vorschlag mitliefern (Frontend zeigt ihn, wenn unbewertet)
+        proj = os.path.join(PROJECTS_ROOT, pid)
+        results, meta = {}, {}
+        try:
+            with open(os.path.join(proj, "results.json")) as f: results = json.load(f)
+            with open(os.path.join(proj, "meta.json")) as f: meta = json.load(f)
+        except Exception:
+            pass
+        return jsonify({"label": rec.get("label"), "comment": rec.get("comment", ""),
+                        "exists": True, "auto": ema_training.auto_label(results, meta)})
+
+    body = request.get_json(silent=True) or {}
+    label = body.get("label")            # "gut" | "schlecht" | null
+    comment = str(body.get("comment", ""))
+    if label not in ("gut", "schlecht", None):
+        return jsonify({"error": "label muss 'gut', 'schlecht' oder null sein"}), 400
+    rec = ema_training.set_label(pid, label, comment)
+    if rec is None:
+        # Zeile fehlt (z.B. Altprojekt) → aus den gespeicherten Dateien neu anlegen
+        proj = os.path.join(PROJECTS_ROOT, pid)
+        try:
+            with open(os.path.join(proj, "results.json")) as f: results = json.load(f)
+            with open(os.path.join(proj, "meta.json")) as f: meta = json.load(f)
+            rec = ema_training.upsert(pid, meta, results, label=label,
+                                      comment=comment, project_dir=proj)
+        except Exception as e:
+            return jsonify({"error": f"Projektdaten nicht ladbar: {e}"}), 404
+    return jsonify({"status": "saved", "label": rec.get("label"),
+                    "comment": rec.get("comment", "")})
+
+
+@app.route("/training/stats")
+def training_stats():
+    import ema_training
+    return jsonify(ema_training.stats())
+
+
+@app.route("/training/download")
+def training_download():
+    import ema_training
+    if not os.path.exists(ema_training.SFT_FILE):
+        return jsonify({"error": "Noch keine Trainingsdaten vorhanden"}), 404
+    return send_file(ema_training.SFT_FILE, as_attachment=True,
+                     download_name="ema_dataset_sft.jsonl",
+                     mimetype="application/x-ndjson")
+
+
+@app.route("/training/vlm/export", methods=["POST"])
+def training_vlm_export():
+    """Regeneriert das VLM-Manifest aus den SFT-Records und liefert die Statistik."""
+    import ema_training
+    n = ema_training.export_vlm()
+    return jsonify({"status": "ok", "n_vlm": n, **ema_training.stats()})
+
+
+@app.route("/training/vlm/download")
+def training_vlm_download():
+    import ema_training
+    if not os.path.exists(ema_training.VLM_FILE):
+        return jsonify({"error": "Noch kein VLM-Manifest vorhanden"}), 404
+    return send_file(ema_training.VLM_FILE, as_attachment=True,
+                     download_name="ema_dataset_vlm.jsonl",
+                     mimetype="application/x-ndjson")
 
 
 @app.after_request

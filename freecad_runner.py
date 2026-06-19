@@ -10,6 +10,7 @@ import subprocess
 import tempfile
 import os
 import json
+import re
 
 FREECAD_ROOT  = os.path.expanduser("~/freecad_1.1_quellcode")
 FREECAD_BIN   = os.path.join(FREECAD_ROOT, "build/release/bin/FreeCAD")
@@ -52,7 +53,10 @@ def run_freecad_script(code: str, timeout: int = 120) -> dict:
             line = line.strip()
             if line.startswith("CAD_FACES:"):
                 try:
-                    parsed["faces"] = json.loads(line[10:])
+                    # FreeCAD sometimes appends its version banner to the same
+                    # stdout line (no newline), so json.loads would see "Extra
+                    # data". raw_decode parses the leading JSON and ignores the rest.
+                    parsed["faces"], _ = json.JSONDecoder().raw_decode(line[10:])
                 except json.JSONDecodeError:
                     pass
             elif line.startswith("CAD_VOLUME:"):
@@ -72,7 +76,23 @@ def run_freecad_script(code: str, timeout: int = 120) -> dict:
                 parsed["frd_file"] = line[9:]
             elif line.startswith("FEM_RESULT:"):
                 try:
-                    parsed["fem_result"] = json.loads(line[11:])
+                    parsed["fem_result"], _ = json.JSONDecoder().raw_decode(line[11:])
+                except json.JSONDecodeError:
+                    pass
+
+        # Robust fallback: a fine 2nd-order Gmsh mesh dumps a huge comma-separated
+        # nonpositive-Jacobian node list to stdout WITHOUT a trailing newline, so the
+        # Python marker prints get concatenated onto / scrambled with that dump and the
+        # line-based parse above misses them. Search the whole blob by regex too.
+        if "frd_file" not in parsed:
+            m = re.search(r"FRD_FILE:(\S+)", stdout)
+            if m:
+                parsed["frd_file"] = m.group(1)
+        if "fem_result" not in parsed:
+            m = re.search(r'FEM_RESULT:(\{.*?\})', stdout)
+            if m:
+                try:
+                    parsed["fem_result"] = json.loads(m.group(1))
                 except json.JSONDecodeError:
                     pass
 

@@ -12,7 +12,8 @@
 Connections (conductances G [W/K]):
   W  ↔ Si   slot insulation + tooth body
   Si ↔ H    shrink-fit / contact
-  Si ↔ M    airgap convection + radiation
+  Si ↔ M    airgap convection + radiation (yoke share of the bore)
+  W  ↔ M    airgap convection + radiation (tooth-tip/slot-wedge share, near windings)
   M  ↔ Ri   bonded magnet in pocket
   Ri ↔ Sh   shaft press-fit
   Sh ↔ H    via bearings
@@ -81,6 +82,13 @@ def rated_torque(geom: dict, axial: float, cooling: str) -> float:
     return max(1.0, 2.0 * sigma * V_rot)
 
 
+def _conductors_per_slot(geom: dict) -> int:
+    """Conductors (radial layers) per slot, clamped to even 2..12 — matches the
+    CAD hairpin generator in ema_freecad.build_full_motor_script."""
+    n = int(geom.get("conductorsPerSlot", 2))
+    return max(2, min(12, n + (n % 2)))
+
+
 def copper_volume(geom: dict, axial: float) -> float:
     """Total conductor volume [m³] in the slots (incl. end-turn overhang)."""
     n_slots  = int(geom["slots"])
@@ -91,7 +99,7 @@ def copper_volume(geom: dict, axial: float) -> float:
     dtheta   = 2 * math.pi / n_slots
     slot_w   = max(3e-3, R_si * dtheta * sw_ratio)
     ins      = 0.8e-3
-    n_layers = 2
+    n_layers = _conductors_per_slot(geom)
     cond_w   = max(1.5e-3, slot_w - 2 * ins)
     layer_h  = max(2e-3, (slot_dep - 2e-3 - (n_layers + 1) * ins) / n_layers)
     return n_slots * n_layers * (cond_w * layer_h) * L_cond
@@ -184,7 +192,7 @@ def compute_losses(geom: dict, axial: float, rpm: float, iq: float, id_: float,
     dtheta   = 2 * math.pi / n_slots
     slot_w   = max(3e-3, R_si * dtheta * sw_ratio)
     ins      = 0.8e-3
-    n_layers = 2
+    n_layers = _conductors_per_slot(geom)
     cond_w   = max(1.5e-3, slot_w - 2 * ins)
     layer_h  = max(2e-3, (slot_dep - 2e-3 - (n_layers + 1) * ins) / n_layers)
     A_cond   = cond_w * layer_h                  # m² per layer
@@ -208,7 +216,25 @@ def compute_losses(geom: dict, axial: float, rpm: float, iq: float, id_: float,
     # Magnet eddy losses — empirical 0.5 % of stator copper at base speed,
     # scaling quadratically with electrical frequency (eddy ∝ f²)
     f_base_ratio = (f_el / max(50, f_el))        # cap at 1 — eddy already non-trivial above f_base
-    P_Mag    = 0.005 * P_Cu + 0.02 * P_Fe_total * (f_el / 200)**2
+    P_Mag_unseg = 0.005 * P_Cu + 0.02 * P_Fe_total * (f_el / 200)**2
+
+    # Magnet segmentation: eddy loss drops ~1/n² per cut direction (axial n_ax,
+    # circumferential n_circ). This holds in the resistance-limited regime, i.e.
+    # while a segment is narrower than the skin depth δ; once a segment is wider
+    # than δ (high frequency) further segmentation no longer follows 1/n².
+    n_ax   = max(1, int(geom.get("nAx", 1)))
+    n_circ = max(1, int(geom.get("nCirc", 1)))
+    k_seg  = (1.0 / n_ax**2) * (1.0 / n_circ**2 if n_circ > 1 else 1.0)
+    P_Mag  = P_Mag_unseg * k_seg
+
+    rho_mag = float(mag.get("rho_el", 1.4e-6))               # NdFeB ≈ 1.4 µΩ·m
+    mu_mag  = 4e-7 * math.pi * float(mag.get("mu_r", 1.05))
+    delta_skin_mm = (math.sqrt(rho_mag / (math.pi * f_el * mu_mag)) * 1000.0
+                     if f_el > 0 else 1e9)
+    magW_mm  = float(geom.get("magWidth", 35))
+    w_seg_mm = min(magW_mm / n_circ, axial / n_ax)           # smallest segment dim
+    seg_active = (n_ax > 1 or n_circ > 1)
+    seg_warning = seg_active and (w_seg_mm > delta_skin_mm)   # δ < segment ⇒ ineffective
 
     # Bearing / windage — proportional to mechanical power
     omega    = rpm * 2 * math.pi / 60
@@ -222,9 +248,15 @@ def compute_losses(geom: dict, axial: float, rpm: float, iq: float, id_: float,
         "P_Fe_stator":  round(P_Fe_s, 1),
         "P_Fe_rotor":   round(P_Fe_r, 1),
         "P_Mag_eddy":   round(P_Mag, 1),
+        "P_Mag_unseg":  round(P_Mag_unseg, 1),
         "P_Bearing":    round(P_Bearing, 1),
         "P_total":      round(P_total, 1),
         "R_phase_mOhm": round(R_phase * 1000, 2),
+        "n_ax":         n_ax,
+        "n_circ":       n_circ,
+        "k_seg":        round(k_seg, 4),
+        "delta_skin_mm": round(delta_skin_mm, 3),
+        "seg_warning":  seg_warning,
     }
 
 
@@ -241,8 +273,6 @@ def compute_capacities(geom: dict, axial: float,
     R_shaft   = geom["shaftD"]   / 2 / 1000
     slot_dep  = float(geom["slotDepth"]) / 1000
     sw_ratio  = float(geom.get("slotWidthRatio", 0.5))
-    magH      = float(geom["magThick"]) / 1000
-    magW      = float(geom.get("magWidth", 35)) / 1000
     L_st      = axial / 1000
     end_turn  = 0.018
 
@@ -260,17 +290,25 @@ def compute_capacities(geom: dict, axial: float,
     V_slots   = n_slots * slot_dep * slot_w * L_st
     m_st      = max(0.01, (V_st_ring - V_slots) * st_mat["density"])
 
-    # Rotor iron (with magnet pockets)
-    n_mags = n_poles * (2 if geom.get("magShape", "v") == "v" else 1)
-    V_rot_ring = math.pi * (R_rot**2 - R_shaft**2) * L_st
-    V_mag_total = n_mags * magW * magH * L_st
-    m_ri = max(0.01, (V_rot_ring - V_mag_total) * mat["density"])
+    # Rotor iron (with magnet pockets) — magnet count/volume from the topology legs
+    from ema_topology import magnet_legs
+    _legs, _meta = magnet_legs(geom)
+    A_mag_pole  = sum((lg.length / 1000) * (lg.thickness / 1000) for lg in _legs)  # m²/pole
+    V_mag_total = n_poles * A_mag_pole * L_st
+    V_rot_ring  = math.pi * (R_rot**2 - R_shaft**2) * L_st
+    # Surface magnets sit on the rotor OD (additive), interior magnets are pockets
+    # carved from the iron ring.
+    if _meta.is_surface:
+        m_ri = max(0.01, V_rot_ring * mat["density"])
+    else:
+        m_ri = max(0.01, (V_rot_ring - V_mag_total) * mat["density"])
 
     # Magnets (NdFeB density ~7500 kg/m³)
     m_mag = V_mag_total * 7500
 
-    # Shaft (steel)
-    V_sh = math.pi * R_shaft**2 * (L_st + 0.06)
+    # Shaft (steel) — hollow if shaftBoreD > 0
+    R_bore = float(geom.get("shaftBoreD", 0)) / 2 / 1000
+    V_sh = math.pi * (R_shaft**2 - R_bore**2) * (L_st + 0.06)
     m_sh = V_sh * 7850
 
     # Housing (Al, 6 mm wall, length L_st + 0.05 m)
@@ -320,10 +358,24 @@ def conductances(geom: dict, axial: float, cooling: str, rpm: float) -> dict:
     A_si_h = 2 * math.pi * R_so * L
     G_si_h = 1500 * A_si_h                       # h_contact ~ 1500 W/m²K typical
 
-    # Stator ↔ Magnet (across airgap, convection + rotation effect)
-    A_gap = 2 * math.pi * R_si * L
-    h_gap = 6 + 0.02 * rpm                       # increases with rotor speed
-    G_si_m = h_gap * A_gap
+    # Across the airgap → rotor magnets. Two mechanisms in parallel:
+    #   • convection, enhanced by rotor windage (Taylor-Couette): h grows with rpm
+    #   • radiation between the (close, concentric) bore and rotor surfaces,
+    #     linearised around ~360 K with an oxidised/coated-iron emissivity ε≈0.3
+    #     → h_rad ≈ 4·ε·σ·T³ ≈ 3 W/m²K (rpm-independent)
+    A_gap  = 2 * math.pi * R_si * L
+    h_conv = 6 + 0.02 * rpm
+    h_rad  = 3.0
+    G_gap  = (h_conv + h_rad) * A_gap
+    # The airgap surface is the stator BORE — tooth tips / slot wedges sit right
+    # next to the (hot) winding, the rest is yoke iron. With only W and Si nodes,
+    # split the gap exchange so a fraction couples the winding DIRECTLY to the
+    # magnets (this is the rotor's heat input from the copper) and the rest the
+    # stator iron. Without this the yoke (cooled hard by the housing) keeps the
+    # bore artificially cool and the magnets never see the winding losses.
+    GAP_BORE_WINDING_FRAC = 0.35
+    G_w_m  = GAP_BORE_WINDING_FRAC * G_gap
+    G_si_m = (1.0 - GAP_BORE_WINDING_FRAC) * G_gap
 
     # Magnet ↔ Rotor iron (sintered + glued)
     G_m_ri = 80.0                                # K/W — pretty high contact
@@ -346,6 +398,7 @@ def conductances(geom: dict, axial: float, cooling: str, rpm: float) -> dict:
         "G_w_si":   G_w_si,
         "G_si_h":   G_si_h,
         "G_si_m":   G_si_m,
+        "G_w_m":    G_w_m,
         "G_m_ri":   G_m_ri,
         "G_ri_sh":  G_ri_sh,
         "G_sh_h":   G_sh_h,
@@ -372,6 +425,7 @@ def build_GA(G: dict) -> tuple[np.ndarray, np.ndarray]:
     add(W,  SI, G["G_w_si"])
     add(SI, H,  G["G_si_h"])
     add(SI, M,  G["G_si_m"])
+    add(W,  M,  G["G_w_m"])     # airgap bore near the windings → magnets (rotor heat input)
     add(M,  RI, G["G_m_ri"])
     add(RI, SH, G["G_ri_sh"])
     add(SH, H,  G["G_sh_h"])
@@ -618,6 +672,13 @@ def design_point_losses(geom: dict, axial: float, rpm: float, load_nm: float,
         "R_phase_mOhm": base["R_phase_mOhm"],
         "T_rated_Nm":   round(T_rated, 1),
         "J_Apmm2":      round(J / 1e6, 2),
+        # Magnet-segmentation metadata (carried from compute_losses)
+        "P_Mag_unseg":  base["P_Mag_unseg"],
+        "n_ax":         base["n_ax"],
+        "n_circ":       base["n_circ"],
+        "k_seg":        base["k_seg"],
+        "delta_skin_mm": base["delta_skin_mm"],
+        "seg_warning":  base["seg_warning"],
     }
 
 

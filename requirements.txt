@@ -1,3 +1,6 @@
 flask>=3.0.0
 numpy>=1.26.0
 matplotlib>=3.8.0
+scipy>=1.11.0   # direct sparse FDM solver (falls back to iterative SOR if absent)
+pyamg>=5.0      # iterativer AMG-Solver für sehr hohe FDM-Auflösung (>2500 px)
+pypdf>=4.0      # PDF-Textextraktion für die Wissensbasis (RAG); nur dafür benötigt

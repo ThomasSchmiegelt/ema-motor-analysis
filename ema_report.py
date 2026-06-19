@@ -16,6 +16,8 @@ from __future__ import annotations
 import os, json, re, shutil, subprocess, urllib.request
 from typing import Iterable
 
+from ema_topology import TOPOLOGY_LABELS
+
 
 OLLAMA_URL = "http://localhost:11434"
 DEFAULT_MODEL = "ministral-3:14b"
@@ -38,6 +40,8 @@ def build_context(project_dir: str) -> dict:
     pairs = [
         ("cross_section", "cad_images/motor_cross_section.png", "Querschnitt (XY-Ebene)"),
         ("side_view",     "cad_images/motor_side_view.png",     "Axialschnitt (XZ-Ebene)"),
+        ("em_field",      "charts/em_field.png",                 "FDM-Magnetfeld im Leerlauf (Flussdichte |B|)"),
+        ("em_field_load", "charts/em_field_load.png",            "FDM-Magnetfeld unter Last (Ankerrückwirkung)"),
         ("airgap",        "charts/airgap.png",                   "Luftspaltflussdichte"),
         ("em_curve",      "charts/em_curve.png",                 "EM-Kennlinie über Drehzahl"),
         ("structural",    "charts/structural_sweep.png",         "Strukturkennlinie"),
@@ -81,6 +85,8 @@ def build_context(project_dir: str) -> dict:
             "poles":    int(geom.get("p", 0)) * 2,
             "slots":    geom.get("slots"),
             "magShape": geom.get("magShape"),
+            "magTopologie": TOPOLOGY_LABELS.get(geom.get("magShape", "v"),
+                                                geom.get("magShape")),
             "axial":    meta.get("axial_len"),
             "n_faces":  (results.get("geometry") or {}).get("n_faces"),
             "mass_kg":  round((results.get("geometry") or {}).get("mass_g", 0) / 1000, 2),
@@ -148,6 +154,36 @@ def build_context(project_dir: str) -> dict:
         "images": list(imgs.keys()),
         "_img_map": imgs,
     }
+
+    seg = results.get("segmentation") or {}
+    if seg:
+        ctx["segmentierung"] = {
+            "n_axial":         seg.get("n_ax"),
+            "n_umfang":        seg.get("n_circ"),
+            "verlustfaktor":   seg.get("k_seg"),
+            "P_Mag_unsegm_W":  seg.get("P_Mag_unseg_W"),
+            "P_Mag_segm_W":    seg.get("P_Mag_eddy_W"),
+            "skintiefe_mm":    seg.get("delta_skin_mm"),
+            "warnung_wirkungslos": seg.get("warning"),
+        }
+
+    adv = results.get("em_advanced") or {}
+    if adv and not adv.get("error"):
+        dm = adv.get("demag") or {}
+        ctx["em_erweitert"] = {
+            "Ld_mH":  adv.get("Ld_mH"),
+            "Lq_mH":  adv.get("Lq_mH"),
+            "salienz_xi": adv.get("xi"),
+            "Isc_A":  adv.get("Isc_A"),
+            "psi_pm_Wb": adv.get("psi_pm_Wb"),
+            "mtpa":   adv.get("mtpa"),
+            "demag": {
+                "magnet_temp_C": dm.get("magnet_temp_C"),
+                "Br_T":          dm.get("Br_T"),
+                "reserve_T":     dm.get("margin_T"),
+                "risiko":        dm.get("risk"),
+            },
+        }
     return ctx
 
 
@@ -185,22 +221,34 @@ Hier sind die Analyse-Ergebnisse als JSON:
 {payload_json}
 ```
 
+WICHTIG — KEINE ZAHLEN IM FLIESSTEXT: Alle Zahlenwerte stehen ausschließlich in der
+Kennwerttabelle, die automatisch eingefügt wird. Im Fließtext beschreibst du die
+Ergebnisse NUR QUALITATIV (z. B. „hohe Luftspaltflussdichte", „ausreichende
+Sicherheit", „thermisch unkritisch", „die Reluktanz dominiert das Drehmoment"),
+ohne konkrete Zahlen, Einheiten oder Rechnungen. Begründung: falsch zugeordnete
+Werte im Text machen den Bericht unbrauchbar — die Tabelle ist die einzige Quelle
+der Zahlen.
+
+Füge die Zeile `[TABELLE:kennwerte]` GENAU EINMAL direkt nach der Zusammenfassung
+(Abschnitt 1) ein — dort wird die vollständige Parameter- und Kennwerttabelle
+eingesetzt.
+
 Schreibe einen strukturierten, sachlichen Bericht in Markdown mit genau diesen Abschnitten:
 
-1. **Zusammenfassung** — 3–5 Sätze zu den wichtigsten Kennwerten und der Gesamtbewertung
-2. **Geometrie und Konstruktion** — Abmessungen, Polzahl/Nutzahl, gewähltes Magnetlayout, Masse
-3. **Elektromagnetische Auslegung** — B_gap, Kt, Drehmoment, Aussage zum Rastmoment (LCM)
+1. **Zusammenfassung** — 3–5 Sätze zur Gesamtbewertung (qualitativ, ohne Zahlen)
+2. **Geometrie und Konstruktion** — Abmessungen, Polzahl/Nutzahl, gewählte Magnet-Topologie (`geometry.magTopologie`) und ihre Eignung, Masse
+3. **Elektromagnetische Auslegung** — B_gap, Kt, Drehmoment, Rastmoment (LCM); falls `em_erweitert` vorhanden: Ld/Lq und Salienz ξ, Magnet- vs. Reluktanzmoment-Anteil (besonders bei PMa-SynRM/Spoke), MTPA-Stromwinkel, Kurzschlussstrom Isc; falls `segmentierung` vorhanden: Wirkung der Magnetsegmentierung auf die Wirbelstromverluste (Verlustfaktor, Skintiefe, ggf. Wirkungslos-Warnung)
 4. **Festigkeit** — σ_v,max, Sicherheitsfaktor, Verschiebung, max. sichere Drehzahl
-5. **Thermisches Verhalten** — Kühlung, Endtemperaturen, Gesamtverluste, ggf. Warnungen
+5. **Thermisches Verhalten** — Kühlung, Endtemperaturen, Gesamtverluste, ggf. Warnungen; falls `em_erweitert.demag` vorhanden: Demagnetisierungs-Reserve bei Magnettemperatur (Risiko ja/nein)
 {fahrzyklus_section}
-7. **Empfehlungen** — 3–5 konkrete Verbesserungsvorschläge basierend auf den Zahlen
+7. **Empfehlungen** — 3–5 konkrete Verbesserungsvorschläge basierend auf den Zahlen (inkl. Topologie-/Segmentierungs-Eignung)
 
 BEBILDERUNG: Füge Platzhalter `[BILD:KEY]` an sinnvollen Stellen im Fließtext ein.
 Verfügbare Bild-KEYs: {available}
 
 Zuordnung (strikt einhalten — kein Bild in Abschnitt 1 Zusammenfassung):
 - Abschnitt 2 Geometrie:              [BILD:cross_section] oder [BILD:side_view]
-- Abschnitt 3 Elektromagnetik:        [BILD:airgap]  und  [BILD:em_curve]
+- Abschnitt 3 Elektromagnetik:        [BILD:em_field]  und  [BILD:em_field_load]  und  [BILD:airgap]  und  [BILD:em_curve]
 - Abschnitt 4 Festigkeit:             [BILD:structural]  und ggf. [BILD:deformation]
 - Abschnitt 5 Thermik:                [BILD:thermal]
 - Abschnitt 6 Fahrzyklus:             [BILD:drivecycle]{(f"  und  {vollast_img}") if vollast_img else ""}{(f"  und  {anhaenger_img}") if anhaenger_img else ""}
@@ -208,9 +256,21 @@ Zuordnung (strikt einhalten — kein Bild in Abschnitt 1 Zusammenfassung):
 FORMATIERUNGSREGELN (unbedingt einhalten):
 - Schreibe echten Fließtext in Absätzen. Kein Zeilenumbruch mitten im Satz.
 - Pro Abschnitt 1–3 Absätze, danach ggf. eine Aufzählung. Keine abgebrochenen Listen.
-- Masse in kg ausgeben (mass_g-Feld durch 1000 teilen und als kg angeben).
-- Alle Größen mit SI-Einheit: MPa, Nm, kWh, °C, U/min, kg usw.
+- KEINE Tabellen (kein Markdown mit `|`) selbst schreiben — die Tabelle kommt über
+  `[TABELLE:kennwerte]`.
+- KEINE Zahlenwerte und KEINE Einheiten im Fließtext (keine MPa/Nm/°C/U/min/kg/T/%
+  mit Zahl). Beschreibe Größen relativ und qualitativ. Verweise bei Bedarf mit
+  „siehe Kennwerttabelle".
 - Keine Codeblöcke, keine Einleitungsfloskeln, keine einzelnen Stichworte als eigene Zeile.
+- FORMELN nur SYMBOLISCH als LaTeX-Mathematik (wird im PDF gesetzt), OHNE eingesetzte
+  Zahlen:
+  - Im Satz eingebettet mit einfachen Dollarzeichen, z.B. $\\xi = L_q/L_d$,
+    $T \\propto \\psi_{{PM}}\\,i_q$.
+  - Abgesetzte Formeln auf EINER Zeile mit doppelten Dollarzeichen, z.B.
+    $$T = \\tfrac{{3}}{{2}}\\,p\\,(\\psi_{{PM}}\\,i_q + (L_d - L_q)\\,i_d\\,i_q)$$
+  - Echte LaTeX-Syntax verwenden: `\\frac`, `\\cdot`, `\\sqrt`, Indizes `_{{...}}`,
+    Hochzahlen `^{{...}}`, griechische Buchstaben `\\sigma`, `\\omega`, `\\psi`.
+    KEINE Unicode-Sonderzeichen in Formeln (kein σ, ², · — stattdessen \\sigma, ^2, \\cdot).
 
 Beginne direkt mit `# Auslegungsbericht: {ctx.get('label', '')}` ohne weitere Vorrede."""
 
@@ -260,7 +320,10 @@ def _normalize_paragraphs(md: str) -> str:
             or line.lstrip().startswith("#")
             or bool(_re.match(r"^\s*[-*+]|\s*\d+\.", line))
             or line.strip().startswith("![")
+            or line.lstrip().startswith("|")          # markdown table rows
+            or "$$" in line                            # display-math line (keep alone)
             or "[BILD:" in line
+            or "[TABELLE:" in line
         )
 
     def _one_pass(text: str) -> tuple[str, bool]:
@@ -290,6 +353,24 @@ def _normalize_paragraphs(md: str) -> str:
     return md
 
 
+def _ensure_em_images(md: str, img_map: dict) -> str:
+    """Guarantee the FDM field maps land IN the electromagnetic section. The local
+    model often forgets the `[BILD:em_field]` placeholders, which would otherwise
+    dump these (the report's visual highlight) into the appendix. Inject them right
+    after the EM-section heading when present and not already referenced."""
+    inject = [k for k in ("em_field", "em_field_load")
+              if k in img_map and not re.search(rf"\[BILD\s*:\s*{k}\s*\]", md, re.I)]
+    if not inject:
+        return md
+    block = "\n" + "\n".join(f"[BILD:{k}]" for k in inject)
+    lines = md.split("\n")
+    for i, ln in enumerate(lines):
+        if ln.lstrip().startswith("#") and "elektromagnet" in ln.lower():
+            lines.insert(i + 1, block)
+            return "\n".join(lines)
+    return md + "\n" + block        # fallback: appendix (old behaviour)
+
+
 def insert_images(md: str, img_map: dict) -> str:
     """Replace [BILD:key] with ![title](path) for each known key.
     Also strips backticks the LLM tends to add around the placeholder, and
@@ -316,12 +397,33 @@ def insert_images(md: str, img_map: dict) -> str:
     return md
 
 
-def render_pdf(md: str, project_dir: str, out_filename: str = "bericht.pdf") -> str:
-    """Write `bericht.md` + `bericht.pdf` into project_dir. Returns PDF path."""
-    md_path  = os.path.join(project_dir, "bericht.md")
+_LATEX_HEADER = r"""\usepackage[document]{ragged2e}
+% Left-align (ragged-right) the whole document: with narrow margins + long
+% non-breakable tokens (units, i_q=-155 A, formulas) full justification stretches
+% the spaces and produces the "one or two words per line" look. Ragged-right plus a
+% generous emergencystretch keeps lines naturally filled and left-aligned.
+\setlength{\RaggedRightParindent}{0pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlength{\emergencystretch}{3em}
+\usepackage{float}
+\let\origfigure\figure
+\let\endorigfigure\endfigure
+% Keep images near where they are referenced rather than floating to page ends.
+\renewenvironment{figure}[1][]{\origfigure[H]}{\endorigfigure}
+"""
+
+
+def render_pdf(md: str, project_dir: str, out_filename: str = "bericht.pdf",
+               md_filename: str = "bericht.md", page_numbers: bool = True) -> str:
+    """Write the markdown + PDF into project_dir. Returns PDF path."""
+    md_path  = os.path.join(project_dir, md_filename)
     pdf_path = os.path.join(project_dir, out_filename)
+    hdr_path = os.path.join(project_dir, "_report_header.tex")
     with open(md_path, "w", encoding="utf-8") as f:
         f.write(md)
+    with open(hdr_path, "w", encoding="utf-8") as f:
+        f.write(_LATEX_HEADER)
 
     # Pandoc with xelatex for utf-8 + image embedding. Margins narrower than
     # default to fit the wide chart PNGs.
@@ -340,9 +442,12 @@ def render_pdf(md: str, project_dir: str, out_filename: str = "bericht.pdf") -> 
         "-V", "colorlinks=true",
         "-V", "lang=de",
         "-V", "linestretch=1.08",
+        "--include-in-header", hdr_path,
         "--resource-path", project_dir,
         "-o", pdf_path,
     ]
+    if not page_numbers:                 # per-chapter render → no restarting "1,1,1"
+        cmd[1:1] = ["-V", "pagestyle=empty"]
     res = subprocess.run(cmd, cwd=project_dir, capture_output=True,
                           text=True, timeout=180)
     if res.returncode != 0 or not os.path.exists(pdf_path):
@@ -383,7 +488,11 @@ def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
     _log(f"LLM-Antwort: {len(md_raw)} Zeichen", 70)
 
     _log("Bilder einfügen…", 75)
+    md_raw   = _strip_md_tables(md_raw)   # local models emit malformed centered tables
+    md_raw   = _strip_value_numbers(md_raw)   # Zahlen nur in der Tabelle, nicht im Fließtext
+    md_raw   = _ensure_em_images(md_raw, ctx["_img_map"])  # EM field maps into §3
     md_final = insert_images(md_raw, ctx["_img_map"])
+    md_final = insert_tables(md_final, {"kennwerte": _single_md_tables(ctx)})
 
     _log("Rendere PDF (pandoc + xelatex)…", 85)
     pdf_path = render_pdf(md_final, project_dir)
@@ -441,7 +550,11 @@ def generate_report_agentic(
     _log(f"Hauptbericht: {len(md_main)} Zeichen", 72)
 
     _log("Bilder einfügen…", 74)
+    md_main = _strip_md_tables(md_main)   # drop malformed centered LLM tables
+    md_main = _strip_value_numbers(md_main)   # Zahlen nur in der Tabelle, nicht im Fließtext
+    md_main = _ensure_em_images(md_main, ctx["_img_map"])  # EM field maps into §3
     md_main = insert_images(md_main, ctx["_img_map"])
+    md_main = insert_tables(md_main, {"kennwerte": _single_md_tables(ctx)})
 
     # Append expert section (with images + paragraph normalisation)
     expert_md = assemble_expert_section(expert_out, img_map=ctx["_img_map"])
@@ -459,3 +572,1040 @@ def generate_report_agentic(
         "n_chars":        len(md_final),
         "expert_outputs": expert_out,
     }
+
+
+# ── Comparison report (multiple variants) ────────────────────────────────────
+
+_TAB_RE = re.compile(r"`?\s*\[TABELLE\s*:\s*([a-z_]+)\s*\]\s*`?", re.IGNORECASE)
+
+
+def _num(x):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return None
+
+
+def _mdesc(s):
+    return str(s).replace("|", "\\|")
+
+
+def _fmt_val(x, nd=None, unit=""):
+    """Human-readable cell value; numbers get `nd` decimals + thin-space thousands."""
+    if x is None or x == "":
+        return "—"
+    if isinstance(x, bool):
+        s = "ja" if x else "nein"
+    elif isinstance(x, (int, float)):
+        s = f"{x:,.{nd}f}".replace(",", " ") if nd is not None else f"{x:g}"
+    else:
+        s = str(x)
+    return f"{s} {unit}".strip() if unit else s
+
+
+def _vals_differ(raw):
+    seen = [x for x in raw if x not in (None, "", "—")]
+    return len({str(x) for x in seen}) > 1
+
+
+# Output metrics shown in the comparison: (label, results-summary key, unit, decimals, better)
+_METRIC_SPECS = [
+    ("B_gap (Peak)",            "B_gap_T",            "T",          3, None),
+    ("Drehmomentkonstante Kt",  "Kt_Nm_per_A",        "Nm/A",       3, "up"),
+    ("Maxwell-Moment",          "T_maxwell_Nm",       "Nm",         1, "up"),
+    ("Max. sichere Drehzahl",   "max_safe_rpm",       "U/min",      0, "up"),
+    ("Rotor-Masse",             "mass_g",             "g",          0, "down"),
+    ("T_Wicklung",              "T_winding_C",        "°C",         1, "down"),
+    ("T_Magnet",                "T_magnet_C",         "°C",         1, "down"),
+    ("Verluste P_ges",          "P_total_W",          "W",          0, "down"),
+    ("Verbrauch",               "verbrauch_kWh100km", "kWh/100km",  2, "down"),
+    ("Kurzschlussstrom Isc",    "Isc_A",              "A",          0, None),
+    ("Demag-Risiko",            "demag_risiko",       "",        None, None),
+]
+
+
+def _input_param_rows(variants):
+    """Per-variant geometry + operating INPUT parameters (from meta), one row each,
+    flagged when the value differs across variants."""
+    G  = lambda v: (v["meta"].get("geom") or {})
+    M  = lambda v: v["meta"]
+    MT = lambda v: (v["meta"].get("materials") or {})
+
+    def topo(v):
+        gg = G(v)
+        return TOPOLOGY_LABELS.get(gg.get("magShape", "v"), gg.get("magShape", "?"))
+
+    specs = [
+        ("Topologie",                 "",   topo,                                       None),
+        ("Polpaare p",                "",   lambda v: G(v).get("p"),                    None),
+        ("Nuten",                     "",   lambda v: G(v).get("slots"),                None),
+        ("Stator-Außen-Ø",            "mm", lambda v: G(v).get("statorOD"),             1),
+        ("Stator-Innen-Ø",            "mm", lambda v: G(v).get("statorID"),             1),
+        ("Rotor-Ø",                   "mm", lambda v: G(v).get("rotorOD"),              1),
+        ("Luftspalt",                 "mm", lambda v: G(v).get("airGap"),               2),
+        ("Wellen-Ø",                  "mm", lambda v: G(v).get("shaftD"),               1),
+        ("Wellen-Bohrung",            "mm", lambda v: G(v).get("shaftBoreD", 0),        1),
+        ("Blechpaketlänge",           "mm", lambda v: M(v).get("axial_len") or G(v).get("axialLen"), 1),
+        ("Nuttiefe",                  "mm", lambda v: G(v).get("slotDepth"),            1),
+        ("Magnet-Länge",              "mm", lambda v: G(v).get("magWidth"),             1),
+        ("Magnet-Dicke",              "mm", lambda v: G(v).get("magThick"),             1),
+        ("Öffnungswinkel",            "°",  lambda v: G(v).get("magAngle"),             0),
+        ("Magnet-Position (Radius)",  "%",  lambda v: (lambda x: x * 100 if x is not None else None)(G(v).get("magDepthRel")), 0),
+        ("Steg-Abstand",              "mm", lambda v: G(v).get("magDist"),              1),
+        ("Segmentierung n_ax×n_circ", "",   lambda v: f"{G(v).get('nAx',1)}×{G(v).get('nCirc',1)}", None),
+        ("Rotorblech",                "",   lambda v: MT(v).get("rotor"),               None),
+        ("Statorblech",               "",   lambda v: MT(v).get("stator"),              None),
+        ("Hairpin-Leiter",            "",   lambda v: MT(v).get("hairpin"),             None),
+        ("Magnet-Typ",                "",   lambda v: MT(v).get("magnet"),              None),
+        ("Lastmoment (Auslegung)",    "Nm", lambda v: M(v).get("load_nm"),              1),
+        ("Kühlung",                   "",   lambda v: M(v).get("cooling"),              None),
+        ("Umgebungstemperatur",       "°C", lambda v: M(v).get("T_ambient"),            0),
+        ("Drehzahlbereich",           "",   lambda v: M(v).get("rpm_range"),            None),
+    ]
+    rows = []
+    for label, unit, fn, nd in specs:
+        raw = []
+        for v in variants:
+            try:
+                raw.append(fn(v))
+            except Exception:
+                raw.append(None)
+        rows.append({"label": label,
+                     "values": [_fmt_val(x, nd, unit) for x in raw],
+                     "differ": _vals_differ(raw)})
+    return rows
+
+
+def _md_param_table(variants, param_rows):
+    names = [v["meta"].get("label", v["id"])[:22] for v in variants]
+    lines = ["| Parameter | " + " | ".join(_mdesc(n) for n in names) + " | Δ |",
+             "|" + "---|" * (len(names) + 2)]
+    for r in param_rows:
+        mark  = "●" if r["differ"] else ""
+        label = f"**{r['label']}**" if r["differ"] else r["label"]
+        cells = " | ".join(_mdesc(x) for x in r["values"])
+        lines.append(f"| {label} | {cells} | {mark} |")
+    return "\n".join(lines)
+
+
+def _md_metric_table(rows):
+    names = [r["name"][:22] for r in rows]
+    lines = ["| Kennwert | " + " | ".join(_mdesc(n) for n in names) + " | Einheit |",
+             "|" + "---|" * (len(names) + 2)]
+    for label, key, unit, nd, _better in _METRIC_SPECS:
+        cells = [_fmt_val(r.get(key), nd) for r in rows]
+        if all(c == "—" for c in cells):
+            continue
+        lines.append(f"| {label} | " + " | ".join(_mdesc(c) for c in cells) + f" | {unit} |")
+    return "\n".join(lines)
+
+
+def _md_influence(variants, param_rows, rows):
+    """Baseline = variant 0. Show (a) which inputs each variant changed vs the
+    baseline and (b) the resulting % change of each headline metric."""
+    if len(rows) < 2:
+        return "_Einfluss-Analyse benötigt mindestens zwei Varianten._"
+    base = rows[0]["name"][:22]
+    out = [f"_Basis-Variante: **{_mdesc(base)}**. Δ% bezieht sich auf diese Basis._\n"]
+
+    diff_rows = [r for r in param_rows if r["differ"]]
+    if diff_rows:
+        out.append("**Geänderte Eingabe-Parameter gegenüber der Basis:**\n")
+        lines = ["| Variante | " + " | ".join(_mdesc(r["label"]) for r in diff_rows) + " |",
+                 "|" + "---|" * (len(diff_rows) + 1)]
+        for i, v in enumerate(variants[1:], start=1):
+            cells = []
+            for r in diff_rows:
+                cur = r["values"][i] if i < len(r["values"]) else "—"
+                base_v = r["values"][0] if r["values"] else "—"
+                cells.append(cur if cur != base_v else "=")
+            lines.append(f"| {_mdesc(rows[i]['name'][:22])} | " + " | ".join(_mdesc(c) for c in cells) + " |")
+        out.append("\n".join(lines))
+
+    out.append("\n**Resultierende Kennwert-Änderungen (Δ% gegenüber Basis):**\n")
+    metrics = [m for m in _METRIC_SPECS if m[4] in ("up", "down")]
+    hdr_names = [rows[i]["name"][:18] for i in range(1, len(rows))]
+    lines = ["| Kennwert | " + " | ".join(_mdesc(n) for n in hdr_names) + " | besser |",
+             "|" + "---|" * (len(hdr_names) + 2)]
+    for label, key, unit, nd, better in metrics:
+        b0 = _num(rows[0].get(key))
+        cells = []
+        for i in range(1, len(rows)):
+            xi = _num(rows[i].get(key))
+            if b0 in (None, 0) or xi is None:
+                cells.append("—")
+            else:
+                cells.append(f"{(xi - b0) / abs(b0) * 100:+.0f}%")
+        if all(c == "—" for c in cells):
+            continue
+        lines.append(f"| {label} | " + " | ".join(cells) + f" | {'↑' if better=='up' else '↓'} |")
+    out.append("\n".join(lines))
+    return "\n".join(out)
+
+
+def _strip_md_tables(md: str) -> str:
+    """Remove any pipe-table blocks (and stray bold-only lines) the LLM wrote
+    itself. Comparison tables come ONLY from the deterministic injector — local
+    models tend to ignore the "no tables" instruction and emit malformed ones
+    that break pandoc. The [TABELLE:…] placeholders are not pipe rows, so they
+    survive and get filled by insert_tables()."""
+    out = []
+    for line in md.split("\n"):
+        s = line.strip()
+        if s.startswith("|"):                      # pipe-table row or separator
+            continue
+        # table delimiter row even WITHOUT a leading pipe (e.g. "---|---|---")
+        if re.match(r"^:?-{2,}:?(\s*\|\s*:?-{2,}:?)+$", s):
+            continue
+        # thematic-break / horizontal-rule lines (--- *** ___): the local model
+        # scatters them between paragraphs; in context pandoc misreads them as a
+        # 1-column table → a 5.6%-wide column → "one syllable per line". Drop them.
+        if re.match(r"^([-*_])\1{2,}$", s):
+            continue
+        if s and set(s) <= {"*"}:                  # stray "**" / "***" lines
+            continue
+        if re.search(r"\(\s*[Ww]ird durch .*?ersetzt\s*\)", s):  # placeholder echoes
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def _escape_pipes(text: str) -> str:
+    """Escape unescaped `|` in prose so pandoc never turns a sentence with a pipe
+    separator (e.g. 'Vorteile … | Nachteile …') into a narrow table — the cause of
+    the 'two words per line' columns on the expert pages. Deterministic tables are
+    assembled separately and never pass through here."""
+    return re.sub(r"(?<!\\)\|", r"\\|", text)
+
+
+# Numeric quantities (number + physical unit) are stripped from the running text so
+# the prose can NEVER mis-assign a value — all numbers live in the tables only. The
+# unit is kept and the number replaced by "…", which reads as "see table".
+# Multi-character / unambiguous units may follow the number without a space.
+_U_SAFE  = (r"°C|kWh/100\s?km|kWh|Nm/A|Nm|U/min|km/h|MPa|GPa|kW|µH|mH|Wb|Hz|"
+            r"mm|cm|µm|km|kg|m²|%")
+# Single-character / ambiguous units (T, A, V, W, °) REQUIRE a leading space so a
+# material code like "M270-35A" or a magnet grade "N52" is never mangled.
+_U_AMBIG = r"°|T|A|V|W"
+_NUM     = r"[-+]?\d[\d.,]*(?:\s?(?:–|-|bis|\.\.\.|…)\s?\d[\d.,]*)?"
+# Lookbehind also rejects a preceding hyphen/word char (inside an identifier/code).
+_VAL_NUM_RE = re.compile(
+    r"(?<![\w.,$\\-])" + _NUM +
+    r"(?:\s?(" + _U_SAFE + r")|\s(" + _U_AMBIG + r"))(?![A-Za-zµ])"
+)
+
+
+def _strip_value_numbers(md: str) -> str:
+    """Remove numeric VALUES (number + unit) from the running prose, keeping the
+    unit and inserting `…`. The report's numbers belong in the tables; the local
+    model routinely mis-assigns them in the flow text, which makes the report
+    nonsensical. Headings, table rows, image/placeholder lines and fenced math are
+    left untouched."""
+    out, in_fence = [], False
+    for line in md.split("\n"):
+        s = line.lstrip()
+        if s.startswith("```") or s.startswith("$$"):
+            in_fence = not in_fence if s.startswith("```") else in_fence
+            out.append(line)
+            continue
+        if in_fence:
+            out.append(line)
+            continue
+        # skip structural lines: headings, table rows, image / placeholder lines
+        if (not s) or s.startswith(("#", "|", "!", "[", ">")) or "[BILD:" in s \
+                or "[TABELLE:" in s or s.startswith("---"):
+            out.append(line)
+            continue
+        out.append(_VAL_NUM_RE.sub(
+            lambda m: "… " + (m.group(1) or m.group(2)), line))
+    return "\n".join(out)
+
+
+def _single_md_tables(ctx: dict) -> str:
+    """Comprehensive, deterministic parameter+result table for the single-project
+    report. ALL numeric values of the report live here (the prose stays qualitative
+    and value-free), grouped by domain."""
+    g = ctx.get("geometry", {}) or {}
+    mt = ctx.get("materials", {}) or {}
+    em = ctx.get("em", {}) or {}
+    st = ctx.get("structural", {}) or {}
+    th = ctx.get("thermal", {}) or {}
+    dc = ctx.get("drivecycle", {}) or {}
+    adv = ctx.get("em_erweitert", {}) or {}
+    seg = ctx.get("segmentierung", {}) or {}
+
+    def _tbl(title, rows):
+        rows = [(lbl, _fmt_val(val, nd, unit)) for lbl, val, unit, nd in rows
+                if val not in (None, "", [])]
+        if not rows:
+            return ""
+        out = [f"### {title}", "", "| Kennwert | Wert |", "|---|---|"]
+        out += [f"| {_mdesc(l)} | {_mdesc(v)} |" for l, v in rows]
+        return "\n".join(out) + "\n"
+
+    blocks = []
+    blocks.append(_tbl("Geometrie und Konstruktion", [
+        ("Magnet-Topologie", g.get("magTopologie"), "", None),
+        ("Polzahl",          g.get("poles"),        "", None),
+        ("Nutzahl",          g.get("slots"),        "", None),
+        ("Stator Außen-Ø",   g.get("statorOD"),     "mm", 1),
+        ("Stator Innen-Ø",   g.get("statorID"),     "mm", 1),
+        ("Rotor-Ø",          g.get("rotorOD"),      "mm", 1),
+        ("Wellen-Ø",         g.get("shaftD"),       "mm", 1),
+        ("Blechpaketlänge",  g.get("axial"),        "mm", 1),
+        ("Aktivteil-Masse",  g.get("mass_kg"),      "kg", 2),
+    ]))
+    blocks.append(_tbl("Werkstoffe", [
+        ("Rotorblech",  mt.get("rotor"),   "", None),
+        ("Statorblech", mt.get("stator"),  "", None),
+        ("Wicklung",    mt.get("hairpin"), "", None),
+        ("Magnet",      mt.get("magnet"),  "", None),
+    ]))
+    em_rows = [
+        ("Luftspaltflussdichte B_gap (Peak)", em.get("B_gap_T"),      "T",    3),
+        ("Drehmomentkonstante Kt",            em.get("Kt_Nm_per_A"),  "Nm/A", 3),
+        ("Maxwell-Moment",                    em.get("T_maxwell_Nm"), "Nm",   1),
+        ("LCM (Nut/Pol)",                     em.get("lcm"),          "",     None),
+    ]
+    if adv:
+        dm = adv.get("demag", {}) or {}
+        em_rows += [
+            ("Ld", adv.get("Ld_mH"), "mH", 3),
+            ("Lq", adv.get("Lq_mH"), "mH", 3),
+            ("Salienz ξ = Lq/Ld", adv.get("salienz_xi"), "", 2),
+            ("Permanentmagnetfluss ψ_PM", adv.get("psi_pm_Wb"), "Wb", 4),
+            ("Kurzschlussstrom Isc", adv.get("Isc_A"), "A", 0),
+            ("Demag-Reserve @ T_Magnet", dm.get("reserve_T"), "T", 3),
+            ("Demag-Risiko", ("ja" if dm.get("risiko") else "nein")
+                if dm.get("risiko") is not None else None, "", None),
+        ]
+    blocks.append(_tbl("Elektromagnetische Auslegung", em_rows))
+    if seg:
+        blocks.append(_tbl("Magnet-Segmentierung", [
+            ("Segmente axial",        seg.get("n_axial"),        "", None),
+            ("Segmente Umfang",       seg.get("n_umfang"),       "", None),
+            ("Verlustfaktor",         seg.get("verlustfaktor"),  "", 3),
+            ("Wirbelstromverlust unsegm.", seg.get("P_Mag_unsegm_W"), "W", 1),
+            ("Wirbelstromverlust segm.",   seg.get("P_Mag_segm_W"),   "W", 1),
+            ("Skintiefe",             seg.get("skintiefe_mm"),   "mm", 2),
+        ]))
+    blocks.append(_tbl("Festigkeit (Fliehkraft-FEM)", [
+        ("Vergleichsspannung σ_v,max", st.get("sigma_v_max_MPa"), "MPa", 1),
+        ("Sicherheitsfaktor",          st.get("safety_factor"),   "",    2),
+        ("Max. Verschiebung",          st.get("u_max_um"),        "µm",  1),
+        ("FEM-Drehzahl",               st.get("rpm_fem"),         "U/min", 0),
+        ("Max. sichere Drehzahl",      st.get("max_safe_rpm"),    "U/min", 0),
+    ]))
+    blocks.append(_tbl("Thermisches Verhalten", [
+        ("Kühlung",        th.get("cooling"),    "", None),
+        ("T_Wicklung",     th.get("T_winding"),  "°C", 1),
+        ("T_Magnet",       th.get("T_magnet"),   "°C", 1),
+        ("T_Gehäuse",      th.get("T_housing"),  "°C", 1),
+        ("Gesamtverluste", th.get("P_total_W"),  "W", 0),
+    ]))
+    if dc:
+        blocks.append(_tbl(f"Fahrzyklus ({dc.get('name') or '—'})", [
+            ("Strecke",          dc.get("distance_km"),   "km", 1),
+            ("Verbrauch",        dc.get("kWh_per_100km"), "kWh/100km", 2),
+            ("Antriebswirkungsgrad", dc.get("eta_drive"), "", 3),
+            ("Rekuperationsanteil",  dc.get("regen_share"), "", 3),
+            ("v_max",            dc.get("v_max_kmh"),     "km/h", 0),
+        ]))
+    return "\n".join(b for b in blocks if b).strip()
+
+
+def insert_tables(md: str, table_map: dict) -> str:
+    """Replace [TABELLE:key] with the deterministic markdown table; append any the
+    LLM forgot to place (so no table is ever lost). Run AFTER insert_images so the
+    table markdown never passes through paragraph normalisation."""
+    used: set[str] = set()
+
+    def _repl(m: re.Match) -> str:
+        key = m.group(1).lower().strip()
+        if key in table_map:
+            used.add(key)
+            return f"\n\n{table_map[key]}\n\n"
+        return ""
+    md = _TAB_RE.sub(_repl, md)
+
+    titles = {"parameter": "Parameter-Vergleich (Eingaben)",
+              "kennwerte": "Ergebnis-Kennwerte",
+              "einfluss":  "Einfluss der Parameteränderungen"}
+    for k, tbl in table_map.items():
+        if k not in used and tbl:
+            md += f"\n\n## {titles.get(k, k)}\n\n{tbl}\n"
+    return md
+
+
+def _comparison_context(project_ids, projects_root):
+    """Per-variant key metrics + topology label for the comparison prompt."""
+    import ema_compare
+    variants = ema_compare.load_projects(projects_root, project_ids)
+    rows = []
+    for v in variants:
+        s = v["results"].get("summary", {}) or {}
+        g = v["meta"].get("geom", {}) or {}
+        adv = v["results"].get("em_advanced", {}) or {}
+        seg = v["results"].get("segmentation", {}) or {}
+        rows.append({
+            "name":          v["meta"].get("label", v["id"]),
+            "topologie":     TOPOLOGY_LABELS.get(g.get("magShape", "v"), g.get("magShape")),
+            "B_gap_T":       s.get("B_gap_T"),
+            "Kt_Nm_per_A":   s.get("Kt_Nm_per_A"),
+            "T_maxwell_Nm":  s.get("T_maxwell_Nm"),
+            "max_safe_rpm":  s.get("max_safe_rpm"),
+            # FEM-Festigkeit (maßgeblich; analytischer Sweep ist zu optimistisch)
+            "safety_factor_fem": s.get("safety_factor_fem"),
+            "structural_ok": s.get("structural_ok"),
+            "fem_rpm":       s.get("fem_rpm"),
+            "mass_g":        s.get("mass_g"),
+            "mass_kg":       (round(s.get("mass_g") / 1000.0, 2)
+                              if s.get("mass_g") is not None else None),
+            "T_winding_C":   s.get("T_winding_C"),
+            "T_magnet_C":    s.get("T_magnet_C"),
+            # WICHTIG: das ist VERLUSTLEISTUNG (Abwärme), NICHT Nutz-/Wellenleistung!
+            # (klarer Label-Key für das LLM; P_total_W bleibt für _md_metric_table erhalten)
+            "verlustleistung_abwaerme_W": s.get("P_total_W"),
+            "P_total_W":     s.get("P_total_W"),
+            "verbrauch_kWh100km": s.get("cycle_kWh100km"),
+            "Isc_A":         adv.get("Isc_A"),
+            "demag_risiko":  (adv.get("demag") or {}).get("risk"),
+            "segmentierung": (f"n_ax={seg.get('n_ax')},n_circ={seg.get('n_circ')}"
+                              if seg else None),
+        })
+    return variants, rows
+
+
+# ── Deterministische Bewertung & Warnungen (NICHT vom LLM erzeugt) ───────────
+
+def _variant_verdict(row: dict) -> dict:
+    """Harte, regelbasierte Beurteilung einer Variante aus den Kennwerten.
+    Diese Logik ist deterministisch und überschreibt jede LLM-Aussage — eine
+    Variante, die strukturell oder thermisch versagt, darf NIE empfohlen werden."""
+    warn, ok = [], True
+    sf = row.get("safety_factor_fem")
+    if sf is not None:
+        if sf < 1.0:
+            warn.append(f"MECHANISCHES VERSAGEN: FEM-Sicherheitsfaktor {sf:.2f} < 1 "
+                        f"bei {_fmt_val(row.get('fem_rpm'),0)} U/min (Rotor fließt/berstet)")
+            ok = False
+        elif sf < 1.5:
+            warn.append(f"Festigkeit unzureichend: FEM-Sicherheitsfaktor {sf:.2f} < 1,5")
+            ok = False
+    tm = row.get("T_magnet_C")
+    if tm is not None and tm > 150:
+        warn.append(f"Magnettemperatur {tm:.0f} °C > 150 °C (Entmagnetisierungsgefahr)")
+        ok = False
+    tw = row.get("T_winding_C")
+    if tw is not None and tw > 180:
+        warn.append(f"Wicklungstemperatur {tw:.0f} °C > 180 °C (Isolationsklasse H)")
+        ok = False
+    return {"empfohlen": ok, "warnungen": warn}
+
+
+def _md_verdict_table(rows):
+    """Deterministische Ampel-Tabelle: Eignung + Warnungen je Variante."""
+    head = ["Variante", "FEM-SF", "sichere Drehzahl [U/min]", "T_Magnet [°C]",
+            "Bewertung"]
+    out = ["| " + " | ".join(head) + " |", "|" + "---|" * len(head)]
+    for i, r in enumerate(rows):
+        v = _variant_verdict(r)
+        status = "✅ einsetzbar" if v["empfohlen"] else "❌ NICHT einsetzbar"
+        out.append("| " + " | ".join(_mdesc(x) for x in [
+            f"V{i+1} {r['name'][:18]}",
+            _fmt_val(r.get("safety_factor_fem"), 2),
+            _fmt_val(r.get("max_safe_rpm"), 0),
+            _fmt_val(r.get("T_magnet_C"), 0),
+            status,
+        ]) + " |")
+    return "\n".join(out)
+
+
+def _md_warnings_block(rows):
+    """Aufzählung der konkreten Warnungen je Variante (deterministisch)."""
+    lines = []
+    for i, r in enumerate(rows):
+        v = _variant_verdict(r)
+        if v["warnungen"]:
+            lines.append(f"**V{i+1} – {_mdesc(r['name'])}:**\n")
+            for w in v["warnungen"]:
+                lines.append(f"- {_mdesc(w)}")
+            lines.append("")
+    if not lines:
+        return "_Keine kritischen Grenzwertverletzungen festgestellt._"
+    return "\n".join(lines)
+
+
+def _comparison_prompt(rows, diff_labels):
+    payload = json.dumps({"varianten": rows}, ensure_ascii=False, indent=2)
+    diffs = ", ".join(diff_labels) if diff_labels else "(keine — Varianten sind identisch parametriert)"
+    return f"""Du bist ein erfahrener E-Maschinen-Auslegungsingenieur und schreibst einen
+**Vergleichsbericht** über {len(rows)} Motor-Varianten auf Deutsch.
+
+Kennwerte je Variante als JSON (Variante 0 ist die Basis):
+
+```json
+{payload}
+```
+
+Zwischen den Varianten unterscheiden sich diese Eingabe-Parameter: {diffs}.
+
+WICHTIG: Tabellen werden automatisch eingefügt — schreibe selbst KEINE Tabellen.
+Setze stattdessen exakt diese Platzhalter (jeweils in einer eigenen Zeile) an den
+passenden Stellen; sie werden durch fertige Tabellen/Diagramme ersetzt:
+[TABELLE:parameter]  [TABELLE:kennwerte]  [TABELLE:einfluss]  [BILD:kennlinien]  [BILD:thermal]
+
+Gliederung (genau diese Abschnitte, als Markdown-Überschriften):
+
+1. **Überblick** — welche Varianten/Topologien verglichen werden und das Ziel
+2. **Eingabe-Parameter** — kurze Einleitung, dann [TABELLE:parameter]; benenne in
+   Worten, WO die Varianten sich unterscheiden (die mit ● markierten Zeilen)
+3. **Ergebnis-Kennwerte** — [TABELLE:kennwerte], dann [BILD:kennlinien]; beschreibe
+   die elektromagnetischen Unterschiede (B_gap, Kt, Maxwell-Moment, Isc)
+4. **Einfluss der Änderungen** — [TABELLE:einfluss]; das ist der Kern: erkläre
+   KAUSAL, welche Parameter-Änderung welche Kennwert-Änderung bewirkt
+   (z.B. „größerer Öffnungswinkel → +x % Kt, aber höheres T_Magnet"). Stütze jede
+   Aussage auf die Δ%-Zahlen der Tabelle.
+5. **Festigkeit & Thermik** — max. sichere Drehzahl, Masse, Temperaturen,
+   Verluste; [BILD:thermal]; weise auf Demagnetisierungs-Risiken hin
+6. **Ranking & Empfehlung** — ordne die Varianten nach Eignung, nenne klar die
+   beste und begründe mit Zahlen
+7. **Fazit** — 2–3 Sätze
+
+Beziehe dich durchgehend auf konkrete Zahlen. Erfinde keine Werte."""
+
+
+def generate_comparison_report(project_ids, projects_root, out_dir,
+                               model: str = DEFAULT_MODEL, progress_cb=None) -> dict:
+    """Multi-variant comparison report: ema_compare charts + LLM narrative → PDF."""
+    import base64 as _b64
+    import ema_compare
+
+    def _log(msg, pct=None):
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    os.makedirs(os.path.join(out_dir, "charts"), exist_ok=True)
+    _log("Lade Varianten + erzeuge Vergleichs-Diagramme…", 10)
+    variants, rows = _comparison_context(project_ids, projects_root)
+    if len(variants) < 2:
+        raise ValueError("Mindestens 2 gültige Projekte für einen Vergleich nötig")
+
+    cmp = ema_compare.run_compare(projects_root, project_ids)
+    img_map = {}
+    for key, b64key, title in [("kennlinien", "kennlinien_b64", "Kennlinien-Vergleich"),
+                               ("thermal", "thermal_b64", "Thermik & Energie")]:
+        if cmp.get(b64key):
+            rel = f"charts/cmp_{key}.png"
+            with open(os.path.join(out_dir, rel), "wb") as f:
+                f.write(_b64.b64decode(cmp[b64key]))
+            img_map[key] = {"path": rel, "title": title}
+
+    # Deterministic tables (formatting under our control, not the LLM's)
+    param_rows  = _input_param_rows(variants)
+    diff_labels = [r["label"] for r in param_rows if r["differ"]]
+    table_map = {
+        "parameter": _md_param_table(variants, param_rows),
+        "kennwerte": _md_metric_table(rows),
+        "einfluss":  _md_influence(variants, param_rows, rows),
+    }
+
+    _log(f"Frage {model} (Vergleichsanalyse)…", 35)
+    md_raw = call_ollama(_comparison_prompt(rows, diff_labels), model=model)
+    _log(f"LLM-Antwort: {len(md_raw)} Zeichen", 75)
+
+    md_raw = _strip_md_tables(md_raw)          # tables come only from our injector
+    md_final = insert_images(md_raw, img_map)
+    md_final = insert_tables(md_final, table_map)
+    _log("Rendere PDF…", 85)
+    pdf_path = render_pdf(md_final, out_dir, out_filename="vergleichsbericht.pdf")
+    _log(f"✓ Vergleichsbericht: {os.path.basename(pdf_path)}", 100)
+    return {"pdf": pdf_path, "md": os.path.join(out_dir, "bericht.md"),
+            "model": model, "n_variants": len(variants), "n_chars": len(md_final)}
+
+
+# ── Comprehensive agentic comparison report — deterministic skeleton ─────────
+# The local model is unreliable at structure (centered two-word lines, malformed
+# tables, forgotten images). So the agentic comparison report is built
+# DETERMINISTICALLY: methodology (with LaTeX formulas), all tables, all images and
+# per-variant galleries are assembled by us; the LLM only writes cleaned prose
+# blocks and the comparative expert findings.
+
+# Per-variant source images copied into the report's charts/ dir.
+_VARIANT_IMG_SRC = [
+    ("cross_section", "cad_images/motor_cross_section.png", "Querschnitt"),
+    ("em_field",      "charts/em_field.png",                "EM-Feld (Leerlauf)"),
+    ("em_field_load", "charts/em_field_load.png",           "EM-Feld (Last)"),
+    ("airgap",        "charts/airgap.png",                  "Luftspaltflussdichte"),
+    ("em_curve",      "charts/em_curve.png",                "EM-Kennlinie"),
+    ("deformation",   "charts/deformation.png",             "Verformung (FEM)"),
+    ("connection",    "charts/connection.png",              "Welle-Nabe-Verbindung"),
+    ("thermal",       "charts/thermal.png",                 "Thermik (LPTN)"),
+]
+
+
+def _variant_names(variants):
+    return [v["meta"].get("label", v["id"]) or v["id"] for v in variants]
+
+
+def _copy_variant_images(variants, projects_root, out_dir):
+    """Copy each variant's existing PNGs into out_dir/charts as vN_<key>.png.
+    Returns [{idx, name, images:{key: relpath}}] (only images that exist)."""
+    import shutil
+    os.makedirs(os.path.join(out_dir, "charts"), exist_ok=True)
+    per = []
+    for i, v in enumerate(variants, start=1):
+        pdir = os.path.join(projects_root, v["id"])
+        imgs = {}
+        for key, rel, _title in _VARIANT_IMG_SRC:
+            src = os.path.join(pdir, rel)
+            if os.path.exists(src):
+                dst_rel = f"charts/v{i}_{key}.png"
+                try:
+                    shutil.copyfile(src, os.path.join(out_dir, dst_rel))
+                    imgs[key] = dst_rel
+                except Exception:
+                    pass
+        per.append({"idx": i, "name": _variant_names(variants)[i-1], "images": imgs})
+    return per
+
+
+# Erklärung je Bildtyp ("auskommentieren") — was zeigt das Bild, worauf achten.
+_GALLERY_DESC = {
+    "em_field":      "Farbskala = Flussdichte |B|. Rote Zonen im Eisen zeigen Sättigung, "
+                     "der Luftspaltring die nutzbare Felddichte; die Feldlinien (Höhenlinien "
+                     "des Vektorpotentials A) verdeutlichen den Flussverlauf je Pol.",
+    "em_field_load": "Magnetfeld unter Last (Statorstrom aktiv). Im Vergleich zum Leerlauf "
+                     "zeigt sich die Ankerrückwirkung: das Statorfeld verzerrt das Magnetfeld "
+                     "und verschiebt die Flussverteilung.",
+    "airgap":        "Radiale (B_r) und tangentiale (B_t) Luftspaltflussdichte über dem "
+                     "Polumfang. Die Grundwellen-Amplitude bestimmt das Drehmoment, der "
+                     "Oberwellengehalt das Rastmoment und die Eisenverluste.",
+    "em_curve":      "Induzierte Spannung (EMK) und Drehmomentkonstante Kt über der Drehzahl. "
+                     "Der Knick markiert die Eckdrehzahl, ab der Feldschwächung einsetzt.",
+    "deformation":   "Fliehkraftbedingte radiale Aufweitung des Rotors (überhöht dargestellt) "
+                     "bei Maximaldrehzahl. Die Verformung skaliert quadratisch mit der Drehzahl.",
+    "connection":    "Kennfeld der Welle-Nabe-Verbindung: Fugendruck und übertragbares Moment "
+                     "bzw. Lösedrehzahl, bei der die Fliehkraft den Pressverband löst.",
+    "thermal":       "Stationäre Knotentemperaturen (Wicklung, Eisen, Magnet, Gehäuse) und der "
+                     "transiente Temperaturanstieg aus dem Lumped-Parameter-Netzwerk.",
+}
+
+
+def _gallery_md(per_variant, key, title):
+    """Markdown-Bildgalerie: erklärender Text + je Variante eine eigene captioned Figure."""
+    figs = [f"![{title} – Variante V{p['idx']} ({_mdesc(p['name'])})]({p['images'][key]})"
+            for p in per_variant if key in p.get("images", {})]
+    if not figs:
+        return ""
+    desc = _GALLERY_DESC.get(key)
+    head = (f"*{desc}*\n\n" if desc else "")
+    # leere Zeile zwischen den Bildern → jedes wird zu einer eigenen Abbildung mit Untertitel
+    return "\n" + head + "\n\n".join(figs) + "\n"
+
+
+def _md_simple_table(header, rows):
+    """rows = [(label, [cell1, cell2, …]), …]; header = ['Kennwert', 'V1', …]."""
+    out = ["| " + " | ".join(_mdesc(h) for h in header) + " |",
+           "|" + "---|" * len(header)]
+    for label, cells in rows:
+        out.append(f"| {_mdesc(label)} | " + " | ".join(_mdesc(c) for c in cells) + " |")
+    return "\n".join(out)
+
+
+def _md_magnet_thermal_table(rows):
+    names = [r["name"][:18] for r in rows]
+    body = []
+    specs = [("T_Magnet [°C]", "T_magnet_C", 1), ("T_Wicklung [°C]", "T_winding_C", 1),
+             ("Verluste P_ges [W]", "P_total_W", 0)]
+    for label, key, nd in specs:
+        body.append((label, [_fmt_val(r.get(key), nd) for r in rows]))
+    return _md_simple_table(["Kennwert"] + [f"V{i+1}" for i in range(len(rows))], body)
+
+
+def _md_energy_table(rows):
+    body = [
+        ("Verbrauch WLTP [kWh/100km]", [_fmt_val(r.get("verbrauch_kWh100km"), 2) for r in rows]),
+    ]
+    return _md_simple_table(["Kennwert"] + [f"V{i+1}" for i in range(len(rows))], body)
+
+
+def _md_connection_table(variants):
+    names = [f"V{i+1}" for i in range(len(variants))]
+    specs = [
+        ("Typ",                      lambda c: c.get("note") or c.get("type")),
+        ("Übertragb. Moment [Nm]",   lambda c: _fmt_val(c.get("T_capacity_Nm"), 0)),
+        ("Auslegungsmoment [Nm]",    lambda c: _fmt_val(c.get("T_rated_Nm"), 0)),
+        ("Ausnutzung",               lambda c: _fmt_val(c.get("utilization"), 2)),
+        ("Fugendruck [MPa]",         lambda c: _fmt_val(c.get("p_MPa"), 1)),
+        ("Lösedrehzahl [U/min]",     lambda c: _fmt_val(c.get("loosening_rpm"), 0)),
+    ]
+    body = []
+    for label, fn in specs:
+        cells = []
+        for v in variants:
+            c = (v["results"].get("connection") or {})
+            try: cells.append(fn(c))
+            except Exception: cells.append("—")
+        body.append((label, cells))
+    return _md_simple_table(["Kennwert"] + names, body)
+
+
+def _methodology_md():
+    """Static methodology section with LaTeX formulas (renders via xelatex)."""
+    return r"""## 1. Berechnungsmethodik
+
+Alle **Kennzahlen, Tabellen und Diagramme** dieses Berichts stammen aus einer rein
+numerisch-physikalischen Rechenkette (FDM-Feld, CalculiX-FEM, LPTN-Thermik) — die
+**Zahlen werden NICHT von einem Sprachmodell erzeugt**. Ein lokales Sprachmodell formuliert
+lediglich die **erläuternden Fließtexte** und die vergleichende Experten-Einschätzung
+(Kapitel 10); maßgeblich für die Eignung ist stets die regelbasierte Bewertungstabelle, nicht
+der generierte Text.
+
+### 1.1 Elektromagnetik – 2D-Finite-Differenzen-Feldlöser
+
+Das Magnetfeld wird in der Querschnittsebene über das magnetische Vektorpotential
+$A_z(x,y)$ aus der nichtlinearen Poisson-Gleichung berechnet:
+
+$$\nabla \cdot \left( \nu \, \nabla A_z \right) = -J_z$$
+
+mit der Reluktivität $\nu = 1/\mu$ (Eisen $\mu_r \approx 500$, Magnet $\mu_r \approx 1{,}05$)
+und der Stromdichte $J_z$ aus Magnet-Ersatzströmen und Statorstrom. Das Gleichungssystem
+wird mit einer direkten Sparse-Faktorisierung exakt gelöst. Die Flussdichte folgt aus
+$\vec{B} = \nabla \times \vec{A}$, d.h. $B_x = \partial A_z/\partial y$ und
+$B_y = -\partial A_z/\partial x$. Die radiale Luftspaltflussdichte wird entlang des
+Spaltkreises über die winkelstabile Ableitung
+
+$$B_r(\theta) = \frac{1}{r}\,\frac{\partial A_z}{\partial \theta}$$
+
+abgetastet. Das Drehmoment setzt sich aus Permanentmagnet- und Reluktanzanteil zusammen:
+
+$$T = \frac{3}{2}\,p\,\Big(\psi_{PM}\,i_q + (L_d - L_q)\,i_d\,i_q\Big)$$
+
+Unterhalb der Eckdrehzahl folgt der Betriebspunkt der MTPA-Strategie (maximales Moment
+pro Ampere, $i_d < 0$ bei Schenkeligkeit $\xi = L_q/L_d > 1$), darüber kommt
+Feldschwächung hinzu.
+
+### 1.2 Strukturmechanik – FEM (CalculiX)
+
+Der Rotor wird unter Fliehkraft als Volumenkörper vernetzt und linear-elastisch gelöst.
+Die volumenbezogene Fliehkraft ist $f = \rho\,\omega^2\,r$. Beurteilt wird die
+Vergleichsspannung nach von Mises
+
+$$\sigma_v = \sqrt{\tfrac{1}{2}\big[(\sigma_1-\sigma_2)^2+(\sigma_2-\sigma_3)^2+(\sigma_3-\sigma_1)^2\big]}$$
+
+gegen die Streckgrenze $R_e$ über den Sicherheitsfaktor $\mathrm{SF} = R_e/\sigma_v$.
+Da die Last $\propto \omega^2$ und das Problem linear ist, skalieren Verschiebung und
+Spannung exakt mit $(\omega/\omega_0)^2$; daraus folgt die Berstdrehzahl
+
+$$n_{berst} = n_{solve}\,\sqrt{R_e/\sigma_{solve}}.$$
+
+### 1.3 Thermik – Lumped-Parameter-Netzwerk (LPTN)
+
+Ein thermisches Knotennetzwerk (Wicklung, Eisen, Magnet, Gehäuse, …) wird stationär und
+transient gelöst. Im stationären Fall gilt pro Knoten die Wärmebilanz
+
+$$\sum_j \frac{T_j - T_i}{R_{ij}} + P_i = 0,$$
+
+mit den Verlustquellen $P_i$ (Kupfer-, Eisen-, Magnetverluste) und thermischen Widerständen
+$R_{ij}$ je nach Kühlung. Bewertet werden Magnet- (Entmagnetisierung) und
+Wicklungstemperatur (Isolationsklasse).
+
+### 1.4 Welle–Blechpaket-Verbindung
+
+Analytisch bewertet: Querpressverband über die Lamé-Gleichungen (Fugendruck $p$,
+übertragbares Moment $T \approx \mu\,p\,\pi\,d^2 l / 2$, Lösedrehzahl, bei der die
+fliehkraftbedingte Bohrungsaufweitung das Übermaß aufhebt); Keil-/Polygonprofile über
+Flanken- bzw. Flächenpressung.
+
+### 1.5 Fahrzyklus & Energiebilanz
+
+Über den Fahrzyklus (z.B. WLTP) werden Mechanik- und Verlustleistung zeitlich integriert,
+$E = \int (P_{mech} + P_{verl})\,dt$, woraus Verbrauch (kWh/100 km), Wirkungsgrad und die
+Energieaufteilung (Cu/Fe/Magnet/Lager vs. Nutzenergie) folgen.
+"""
+
+
+def _clean_prose(text: str) -> str:
+    """LLM-Prosa säubern: Think-Blöcke + Tabellen raus, Absätze normalisieren,
+    Überschriften entfernen (Struktur kommt von uns)."""
+    text = _THINK_RE.sub("", text or "").strip()
+    text = _strip_md_tables(text)
+    text = _strip_value_numbers(text)   # Zahlen gehören in die Tabellen, nicht in die Prosa
+    text = _normalize_paragraphs(text)
+    # eigene Überschriften des Modells entfernen (wir setzen die Struktur)
+    text = "\n".join(l for l in text.split("\n") if not l.lstrip().startswith("#"))
+    return _escape_pipes(text.strip())
+
+
+# Harte Leitplanken — gegen die beobachteten gefährlichen LLM-Fehlinterpretationen
+# (Verluste als Nutzleistung gedeutet, mechanisches Versagen ignoriert, falsche
+# Rechen-/Größenvergleiche, versagende Variante empfohlen).
+_PROSE_GUARDRAILS = (
+    "VERBINDLICHE REGELN (Verstoß = grober Fehler):\n"
+    "1. Verwende AUSSCHLIESSLICH die Zahlen aus den Daten. ERFINDE KEINE Werte und "
+    "rechne nichts Neues aus (keine eigenen Massen-/Leistungs-/Wirkungsgradrechnungen).\n"
+    "2. 'verlustleistung_abwaerme_W' ist VERLUSTLEISTUNG = ABWÄRME, NICHT Nutz- oder "
+    "Wellenleistung. Ein hoher Wert ist SCHLECHT (mehr Verluste), nicht 'leistungsstark'.\n"
+    "3. Festigkeit: maßgeblich ist 'safety_factor_fem'. SF < 1,0 = der Rotor VERSAGT "
+    "(fließt/berstet); SF < 1,5 = unzulässig. Eine solche Variante darf NIEMALS für hohe "
+    "Drehzahlen oder als beste empfohlen werden — auch nicht relativierend.\n"
+    "4. 'max_safe_rpm' ist bereits die FEM-deratete sichere Drehzahl; widersprich ihr nicht.\n"
+    "5. Größen-/Reihenfolge-Aussagen (schwerer/leichter, höher/niedriger) müssen mit den "
+    "Zahlen übereinstimmen. Wenn die Varianten identische Werte haben, sage das klar.\n"
+    "6. Triff KEINE Sicherheits-/Eignungs-Endurteile, die der Bewertungstabelle "
+    "widersprechen.\n"
+)
+
+
+def _section_prose(model, role, task, context):
+    """Ein fokussierter LLM-Aufruf für EINEN Fließtext-Abschnitt (gesäubert)."""
+    payload = json.dumps(context, ensure_ascii=False, indent=2)
+    prompt = (
+        f"Du bist {role} und schreibst einen Abschnitt eines technischen "
+        f"Vergleichsberichts über Motor-Varianten auf Deutsch.\n\n"
+        f"Aufgabe: {task}\n\n"
+        f"{_PROSE_GUARDRAILS}\n"
+        f"Daten (JSON):\n```json\n{payload}\n```\n\n"
+        f"FORMAT: Nur zusammenhängender Fließtext (2–4 Absätze), beziehe dich auf konkrete "
+        f"Zahlen aus den Daten. KEINE Überschrift, KEINE Tabellen, KEINE Aufzählungslisten, "
+        f"KEINE Code-Blöcke, keine Einleitungsfloskeln. Kein Zeilenumbruch nach einzelnen "
+        f"Wörtern/Zahlen/Einheiten; Absätze durch genau eine Leerzeile trennen."
+    )
+    try:
+        return _clean_prose(call_ollama(prompt, model=model))
+    except Exception as e:
+        return f"_Abschnitt nicht verfügbar: {e}_"
+
+
+def generate_comparison_report_agentic(project_ids, projects_root, out_dir,
+                                       model: str = DEFAULT_MODEL,
+                                       expert_model: str | None = None,
+                                       progress_cb=None) -> dict:
+    """Umfangreicher, professioneller agentischer Vergleichsbericht.
+
+    Deterministisches Gerüst (Methodik mit LaTeX-Formeln, alle Tabellen, alle Bilder
+    inkl. pro-Variante-Galerien für EM-Feld/Luftspalt/Verformung/Verbindung) + LLM nur
+    für gesäuberte Fließtext-Abschnitte und die 6 vergleichenden Experten."""
+    import base64 as _b64
+    import ema_compare
+    from ema_experts import run_expert_agents_compare, assemble_expert_section_compare
+
+    def _log(msg, pct=None):
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    os.makedirs(os.path.join(out_dir, "charts"), exist_ok=True)
+    _log("Lade Varianten + erzeuge Vergleichs-Diagramme…", 5)
+    variants, rows = _comparison_context(project_ids, projects_root)
+    if len(variants) < 2:
+        raise ValueError("Mindestens 2 gültige Projekte für einen Vergleich nötig")
+    names = _variant_names(variants)
+
+    # Overlay-Diagramme (Kennlinien + Thermik/Energie)
+    cmp = ema_compare.run_compare(projects_root, project_ids)
+    overlay = {}
+    for key, b64key, title in [("kennlinien", "kennlinien_b64", "Kennlinien-Vergleich"),
+                               ("thermal", "thermal_b64", "Thermik & Energie (Magnettemperaturen + Energieaufteilung)")]:
+        if cmp.get(b64key):
+            rel = f"charts/cmp_{key}.png"
+            with open(os.path.join(out_dir, rel), "wb") as f:
+                f.write(_b64.b64decode(cmp[b64key]))
+            overlay[key] = {"path": rel, "title": title}
+
+    # Pro-Variante-Bilder kopieren
+    _log("Kopiere Varianten-Bilder (EM-Feld, Luftspalt, Verformung, Verbindung)…", 12)
+    per_var = _copy_variant_images(variants, projects_root, out_dir)
+
+    # Deterministische Tabellen
+    param_rows  = _input_param_rows(variants)
+    diff_labels = [r["label"] for r in param_rows if r["differ"]]
+    tbl_param   = _md_param_table(variants, param_rows)
+    tbl_metric  = _md_metric_table(rows)
+    tbl_infl    = _md_influence(variants, param_rows, rows)
+    tbl_magtherm = _md_magnet_thermal_table(rows)
+    tbl_energy  = _md_energy_table(rows)
+    tbl_conn    = _md_connection_table(variants)
+
+    # 6 vergleichende Experten
+    _log("Starte 6 Experten-Agenten (vergleichend)…", 22)
+    emodel = expert_model or model
+    expert_vars = [{"name": names[i], "results": v["results"], "meta": v["meta"]}
+                   for i, v in enumerate(variants)]
+    expert_out = run_expert_agents_compare(
+        expert_vars, model=emodel,
+        progress_cb=lambda msg, pct: _log(f"  {msg}", None),
+    )
+    expert_md = _clean_prose_keep_headings(assemble_expert_section_compare(expert_out))
+
+    # LLM-Fließtext je Abschnitt (gesäubert)
+    legend = "; ".join(f"V{i+1} = {n}" for i, n in enumerate(names))
+    _log(f"Verfasse Fließtext-Abschnitte ({model})…", 60)
+    p_over = _section_prose(model, "ein erfahrener E-Maschinen-Auslegungsingenieur",
+        "Gib einen Überblick: welche Topologien/Varianten werden verglichen und mit welchem Ziel. 1 Absatz.",
+        {"varianten": rows})
+    p_design = _section_prose(model, "ein Konstrukteur für E-Maschinen",
+        "Beschreibe die Unterschiede in Gestaltung und Auslegung der Varianten (Geometrie, "
+        "Magnete, Wicklung, Material, Verbindung). Welche Parameter unterscheiden sich (●)?",
+        {"unterschiede": diff_labels, "varianten": rows})
+    p_em = _section_prose(model, "ein EM-Feld-Experte",
+        "Vergleiche die Elektromagnetik der Varianten (Luftspaltflussdichte B_gap, Kt, "
+        "Maxwell-Moment, Kurzschlussstrom). Erkläre die Feldbilder und Kennlinien.",
+        {"varianten": rows})
+    p_therm = _section_prose(model, "ein Thermik-Experte",
+        "Vergleiche besonders die MAGNETTEMPERATUREN der Varianten (Entmagnetisierungsrisiko) "
+        "sowie Wicklungstemperatur und Verluste.",
+        {"varianten": rows})
+    p_energy = _section_prose(model, "ein Antriebsstrang-Experte",
+        "Vergleiche die Energiebilanz: Verbrauch (kWh/100km), Wirkungsgrad und Energieaufteilung.",
+        {"varianten": rows})
+    # Deterministische Bewertung (regelbasiert, NICHT vom LLM) — Quelle der Wahrheit
+    verdicts    = [_variant_verdict(r) for r in rows]
+    tbl_verdict = _md_verdict_table(rows)
+    warn_block  = _md_warnings_block(rows)
+    einsetzbar  = [f"V{i+1} ({names[i]})" for i, v in enumerate(verdicts) if v["empfohlen"]]
+    nicht_ok    = [f"V{i+1} ({names[i]})" for i, v in enumerate(verdicts) if not v["empfohlen"]]
+    det_reco = ("**Deterministische Eignung:** "
+                + ("einsetzbar: " + ", ".join(einsetzbar) + ". " if einsetzbar
+                   else "KEINE Variante erfüllt alle Festigkeits-/Thermikgrenzen. ")
+                + ("NICHT einsetzbar: " + ", ".join(nicht_ok) + "." if nicht_ok else ""))
+
+    p_rank = _section_prose(model, "ein leitender Auslegungsingenieur",
+        "Ranking und klare Empfehlung. WICHTIG: Die regelbasierte Eignung steht im Kontext "
+        "('verdict' je Variante) und ist VERBINDLICH — eine als NICHT einsetzbar markierte "
+        "Variante (z.B. FEM-Sicherheitsfaktor < 1,5) darf NICHT empfohlen werden, auch nicht "
+        "für hohe Drehzahlen. Begründe das Ranking mit den Zahlen; bei mechanischem Versagen "
+        "ist die Festigkeit das K.-o.-Kriterium.",
+        {"varianten": [dict(r, verdict=verdicts[i]) for i, r in enumerate(rows)],
+         "deterministische_eignung": {"einsetzbar": einsetzbar, "nicht_einsetzbar": nicht_ok}})
+
+    # Bericht in EINZELNE KAPITEL zerlegen → jedes separat rendern → zusammenfügen.
+    # So reißt ein einzelnes problematisches Kapitel nicht den ganzen Bericht.
+    _log("Setze Kapitel zusammen…", 84)
+    def _join(*parts):
+        return "\n".join(p for p in parts if p)
+
+    ov_kenn = (f"![{overlay['kennlinien']['title']}]({overlay['kennlinien']['path']})\n"
+               if "kennlinien" in overlay else "")
+    ov_therm = (f"![{overlay['thermal']['title']}]({overlay['thermal']['path']})\n"
+                if "thermal" in overlay else "")
+
+    chapters = [
+        ("00_titel", _join(
+            f"# Vergleichsbericht: {len(variants)} Varianten einer IPM-Synchronmaschine\n",
+            f"_Verglichene Varianten: {legend}._\n", p_over)),
+        ("00b_bewertung", _join(
+            "## Bewertung & Eignung (regelbasiert)\n",
+            "_Diese Ampel ist deterministisch aus den berechneten Kennwerten abgeleitet "
+            "(FEM-Sicherheitsfaktor ≥ 1,5; Magnet ≤ 150 °C; Wicklung ≤ 180 °C) und ist "
+            "gegenüber dem nachfolgenden, sprachlich generierten Text maßgeblich._\n",
+            tbl_verdict, "",
+            "**Konkrete Warnungen:**\n", warn_block, "",
+            det_reco)),
+        ("01_methodik", _methodology_md()),
+        ("02_gestaltung", _join(
+            "## 2. Gestaltung und Auslegung der Varianten\n", tbl_param, "", p_design)),
+        ("03_em", _join(
+            "## 3. Elektromagnetik\n", tbl_metric, "", ov_kenn,
+            _gallery_md(per_var, "em_field", "EM-Feld (Leerlauf)"),
+            _gallery_md(per_var, "em_field_load", "EM-Feld (Last)"),
+            _gallery_md(per_var, "em_curve", "EM-Kennlinie"), "", p_em)),
+        ("04_luftspalt", _join(
+            "## 4. Luftspaltflussdichte\n",
+            _gallery_md(per_var, "airgap", "Luftspaltflussdichte"))),
+        ("05_festigkeit", _join(
+            "## 5. Festigkeit und Verformung\n",
+            _gallery_md(per_var, "deformation", "Verformung (FEM)"))),
+        ("06_verbindung", _join(
+            "## 6. Welle–Blechpaket-Verbindung\n", tbl_conn, "",
+            _gallery_md(per_var, "connection", "Welle-Nabe-Verbindung"))),
+        ("07_thermik", _join(
+            "## 7. Thermik und Magnettemperaturen\n", tbl_magtherm, "", ov_therm,
+            _gallery_md(per_var, "thermal", "Thermik (LPTN)"), "", p_therm)),
+        ("08_energie", _join(
+            "## 8. Energiebilanz\n", tbl_energy, "", p_energy)),
+        ("09_einfluss", _join(
+            "## 9. Einfluss der Auslegungsänderungen\n", tbl_infl)),
+        ("10_experten", expert_md),
+        ("11_ranking", _join("## 11. Ranking und Empfehlung\n",
+                             det_reco, "", p_rank)),
+    ]
+
+    _log("Rendere Kapitel einzeln + füge zusammen (pandoc + xelatex)…", 90)
+    pdf_path = _render_chapters_pdf(chapters, out_dir,
+                                    out_filename="vergleichsbericht_agentisch.pdf",
+                                    progress_cb=_log)
+    # Gesamtes Markdown zur Referenz ablegen
+    md_full = "\n\n".join(c[1] for c in chapters)
+    with open(os.path.join(out_dir, "bericht.md"), "w", encoding="utf-8") as f:
+        f.write(md_full)
+    _log(f"✓ Agentischer Vergleichsbericht: {os.path.basename(pdf_path)}", 100)
+    return {"pdf": pdf_path, "md": os.path.join(out_dir, "bericht.md"),
+            "model": model, "expert_model": emodel,
+            "n_variants": len(variants), "n_chars": len(md_full),
+            "n_chapters": len(chapters), "expert_outputs": expert_out}
+
+
+def _clean_prose_keep_headings(text: str) -> str:
+    """Wie _clean_prose, aber Überschriften (Experten-Abschnitte) bleiben erhalten."""
+    text = _THINK_RE.sub("", text or "").strip()
+    text = _strip_md_tables(text)
+    return _escape_pipes(_normalize_paragraphs(text).strip())
+
+
+def _render_chapters_pdf(chapters, out_dir, out_filename="bericht.pdf", progress_cb=None):
+    """Rendere jedes Kapitel (id, markdown) zu einem eigenen PDF und füge sie mit
+    pdfunite zu einem Gesamtbericht zusammen. Schlägt ein Kapitel im LaTeX fehl,
+    wird es als reiner Text-Fallback gerendert, statt den ganzen Bericht zu kippen."""
+    def _log(msg, pct=None):
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    parts = []
+    n = len(chapters)
+    for i, (cid, md) in enumerate(chapters):
+        if not (md or "").strip():
+            continue
+        pdf_i = f"_kap_{i:02d}_{cid}.pdf"
+        md_i  = f"_kap_{i:02d}_{cid}.md"
+        _log(f"  Kapitel {i+1}/{n}: {cid}", None)
+        try:
+            p = render_pdf(md, out_dir, out_filename=pdf_i,
+                           md_filename=md_i, page_numbers=False)
+            parts.append(p)
+        except Exception as e:
+            _log(f"  ⚠ Kapitel {cid} fehlgeschlagen ({str(e)[:80]}) → Text-Fallback", None)
+            # harte Bereinigung: nur Überschriften + Fließtext, keine Bilder/Tabellen/Math
+            safe = "\n".join(
+                l for l in md.split("\n")
+                if not l.lstrip().startswith(("|", "![", "$$"))
+            )
+            safe = re.sub(r"\$[^$]*\$", "", safe)          # Inline-Math entfernen
+            try:
+                p = render_pdf(safe or f"## {cid}\n\n(Kapitel nicht darstellbar)",
+                               out_dir, out_filename=pdf_i, md_filename=md_i,
+                               page_numbers=False)
+                parts.append(p)
+            except Exception as e2:
+                _log(f"  ⚠ Kapitel {cid} auch im Fallback fehlgeschlagen: {str(e2)[:80]}", None)
+
+    final = os.path.join(out_dir, out_filename)
+    if not parts:
+        raise RuntimeError("Kein Kapitel konnte gerendert werden")
+    if len(parts) == 1:
+        os.replace(parts[0], final)
+    else:
+        res = subprocess.run(["pdfunite", *parts, final],
+                             capture_output=True, text=True, timeout=120)
+        if res.returncode != 0 or not os.path.exists(final):
+            # Fallback-Merge via Ghostscript
+            gs = subprocess.run(["gs", "-dBATCH", "-dNOPAUSE", "-q",
+                                 "-sDEVICE=pdfwrite", f"-sOutputFile={final}", *parts],
+                                capture_output=True, text=True, timeout=120)
+            if gs.returncode != 0 or not os.path.exists(final):
+                raise RuntimeError(f"PDF-Merge fehlgeschlagen: {res.stderr[-200:]}")
+        # Kapitel-Einzel-PDFs aufräumen
+        for p in parts:
+            try: os.remove(p)
+            except OSError: pass
+    return final

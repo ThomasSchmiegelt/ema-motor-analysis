@@ -6,10 +6,25 @@ import numpy as np
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.cm as cm
+import matplotlib.colors as mcolors
+
+MAX_VARIANTS = 10
+
+# Up to 10 distinct, consistent variant colours across all comparison charts.
+_CMAP = cm.get_cmap("tab10")
 
 
-# Variant colors (consistent across all comparison charts)
-VARIANT_COLORS = ["#00d4ff", "#ff6b35", "#27ae60", "#e74c3c"]
+def _vcolor(i: int):
+    return _CMAP(i % 10)
+
+
+def _vhex(i: int) -> str:
+    return mcolors.to_hex(_vcolor(i))
+
+
+def _legend_ncol(n: int) -> int:
+    return 1 if n <= 4 else (2 if n <= 8 else 3)
 
 
 def _fig_b64(fig) -> str:
@@ -23,7 +38,7 @@ def _fig_b64(fig) -> str:
 def load_projects(projects_root: str, ids: list[str]) -> list[dict]:
     """Load results.json + meta.json for each id. Skip missing."""
     out = []
-    for pid in ids[:4]:
+    for pid in ids[:MAX_VARIANTS]:
         path = os.path.join(projects_root, pid)
         rfile = os.path.join(path, "results.json")
         mfile = os.path.join(path, "meta.json")
@@ -52,8 +67,9 @@ def chart_kennlinien(variants: list[dict]) -> str:
 
     ax_emf, ax_kt, ax_sig, ax_eta = axes.flat
 
+    n = len(variants)
     for i, v in enumerate(variants):
-        col   = VARIANT_COLORS[i % 4]
+        col   = _vcolor(i)
         lbl   = v["meta"].get("label", v["id"])[:24]
         em    = v["results"].get("em", {}) or {}
         sweep = em.get("speed_sweep", []) or []
@@ -78,7 +94,8 @@ def chart_kennlinien(variants: list[dict]) -> str:
     ax_emf.set_title("Strangspannung EMK (eff.)", color="white", fontsize=10)
     ax_emf.set_xlabel("Drehzahl [U/min]", color="#aaa", fontsize=9)
     ax_emf.set_ylabel("U_rms [V]",        color="#aaa", fontsize=9)
-    ax_emf.legend(facecolor="#222", labelcolor="white", fontsize=8, framealpha=0.85)
+    ax_emf.legend(facecolor="#222", labelcolor="white", fontsize=7, framealpha=0.85,
+                  ncol=_legend_ncol(n), loc="best")
 
     ax_kt.set_title("Drehmomentkonstante Kt", color="white", fontsize=10)
     ax_kt.set_xlabel("Drehzahl [U/min]",      color="#aaa", fontsize=9)
@@ -93,7 +110,8 @@ def chart_kennlinien(variants: list[dict]) -> str:
     ax_sig.set_title("Spannung σ_v,max", color="white", fontsize=10)
     ax_sig.set_xlabel("Drehzahl [U/min]", color="#aaa", fontsize=9)
     ax_sig.set_ylabel("σ [MPa]",          color="#aaa", fontsize=9)
-    ax_sig.legend(facecolor="#222", labelcolor="white", fontsize=7, framealpha=0.85)
+    ax_sig.legend(facecolor="#222", labelcolor="white", fontsize=6, framealpha=0.85,
+                  ncol=_legend_ncol(n), loc="best")
 
     ax_eta.set_title("Verbrauch WLTP / Custom", color="white", fontsize=10)
     ax_eta.set_xticks(range(len(variants)))
@@ -229,7 +247,7 @@ def summary_table(variants: list[dict]) -> dict:
     return {"rows": rows,
             "variants": [{"id": v["id"],
                           "label": v["meta"].get("label", v["id"])[:30],
-                          "color": VARIANT_COLORS[i % 4]}
+                          "color": _vhex(i)}
                          for i, v in enumerate(variants)]}
 
 

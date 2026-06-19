@@ -13,19 +13,33 @@
     }
     *{box-sizing:border-box}
     body{font-family:"Segoe UI",sans-serif;background:var(--bg);color:var(--text);
-         margin:0;display:flex;height:100vh;overflow:hidden}
+         margin:0;display:flex;flex-direction:column;height:100vh;overflow:hidden}
 
-    /* ── Sidebar ──────────────────────────────────────────────────────────── */
-    .sidebar{width:360px;background:var(--panel);border-right:1px solid var(--brd);
-             display:flex;flex-direction:column;overflow-y:auto;flex-shrink:0}
-    .sidebar-header{padding:12px 15px;border-bottom:1px solid var(--brd);background:#2d2d30}
-    .sidebar-header h2{margin:0;font-size:1.05rem;color:#fff}
-    .sidebar-header small{color:#888;font-size:.75rem}
+    /* ── Top bar (brand + workflow tabs) ──────────────────────────────────── */
+    .topbar{display:flex;align-items:center;gap:18px;background:#2d2d30;
+            border-bottom:1px solid var(--brd);flex-shrink:0;padding:0 14px}
+    .brand{font-size:1rem;font-weight:700;color:#fff;white-space:nowrap;padding:8px 0}
+    .brand small{display:block;font-size:.66rem;color:#888;font-weight:400}
+
+    /* ── Workspace: active panel + persistent preview pane ────────────────── */
+    #workspace{flex:1;display:flex;min-height:0;overflow:hidden}
+    #panel-area{flex:1;overflow-y:auto;min-width:0;background:var(--panel)}
+    #preview-pane{width:440px;flex-shrink:0;background:#111;
+                  border-left:1px solid var(--brd);position:relative;
+                  display:flex;flex-direction:column;min-height:0}
+    #preview-pane.hidden{display:none}
+    .tab-panel{display:none}
+    .tab-panel.active{display:block}
+    .panel-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));
+                gap:0 16px;align-items:start;padding:4px 4px 60px}
+    .full-panel{padding:16px}
     .section{padding:12px 15px;border-bottom:1px solid var(--brd)}
     .section-title{font-size:.8rem;text-transform:uppercase;color:#888;
                    margin-bottom:10px;font-weight:bold;letter-spacing:.5px}
     .input-group{display:grid;grid-template-columns:1fr 80px 30px;gap:6px;
                  align-items:center;margin-bottom:7px;font-size:.85rem}
+    .chk-row{display:flex;gap:7px;align-items:center;cursor:pointer;
+             font-size:.84rem;margin-bottom:5px}
     .slider-group{margin-bottom:11px}
     .slider-header{display:flex;justify-content:space-between;font-size:.82rem;margin-bottom:3px}
     input[type=number]{background:var(--inp);border:1px solid var(--brd);color:#fff;
@@ -49,18 +63,48 @@
     .btn-group{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
     .sep{margin:4px 0;border:none;border-top:1px solid #333}
 
-    /* ── Main view ────────────────────────────────────────────────────────── */
-    .main-view{flex:1;display:flex;flex-direction:column;background:#111;overflow:hidden}
-    .tab-bar{display:flex;background:#2d2d30;border-bottom:1px solid var(--brd);flex-shrink:0}
-    .tab-btn{background:none;border:none;color:#888;padding:10px 20px;cursor:pointer;
-             font-size:.85rem;font-weight:600;text-transform:none;width:auto;letter-spacing:0;
+    /* ── Tab bar (lives inside the top bar) ───────────────────────────────── */
+    .tab-bar{display:flex;flex-wrap:wrap;flex:1}
+    .tab-btn{background:none;border:none;color:#888;padding:12px 15px;cursor:pointer;
+             font-size:.84rem;font-weight:600;text-transform:none;width:auto;letter-spacing:0;
              border-bottom:2px solid transparent;border-radius:0;transition:color .15s}
     .tab-btn:hover{color:#ccc;filter:none}
     .tab-btn.active{color:#fff;border-bottom-color:var(--acc)}
-    .tab-content{flex:1;overflow:hidden;position:relative;display:flex;flex-direction:column;min-height:0}
-    #tab-sim{flex:1;display:flex;flex-direction:column;min-height:0}
-    #tab-results{flex:1;overflow-y:auto;padding:16px;background:#111;display:none}
+    .tab-btn:disabled{opacity:.4;cursor:default}
+
+    /* results / compare are full-width tab panels inside #panel-area */
+    #tab-results,#tab-compare{display:none;background:#111}
+    #tab-results.active,#tab-compare.active{display:block}
+
+    /* preview pane interior (the live field canvas) */
     #simCanvas{flex:1;display:block;min-height:0;width:100%}
+
+    /* ── Draggable splitters ──────────────────────────────────────────────── */
+    #vsplit{width:6px;flex-shrink:0;cursor:col-resize;background:var(--brd);
+            transition:background .15s}
+    #vsplit:hover,#vsplit.dragging{background:var(--acc)}
+    #vsplit.hidden{display:none}
+    #hsplit{height:6px;flex-shrink:0;cursor:row-resize;background:var(--brd);
+            transition:background .15s}
+    #hsplit:hover,#hsplit.dragging{background:var(--acc)}
+
+    /* ── Footer: global run button + analysis progress (drag taller for full log) */
+    #footer{flex-shrink:0;background:#2d2d30;border-top:1px solid var(--brd);
+            padding:6px 14px;display:flex;flex-direction:column;gap:5px;
+            height:52px;overflow:hidden}
+    .foot-row{display:flex;align-items:center;gap:16px;flex-shrink:0}
+    #footer .foot-start{width:auto;flex-shrink:0;padding:9px 26px;font-size:.85rem}
+    #footer .foot-secondary{width:auto;flex-shrink:0;padding:9px 14px;font-size:.8rem;
+            background:#3a3a42;color:#dde}
+    #footer .foot-secondary:hover{background:#474752}
+    #footer .foot-secondary:disabled{opacity:.5;cursor:default}
+    #footer #analysis-progress{flex:1;min-width:0;background:none;padding:0;margin:0;
+            display:none;align-items:center;gap:12px}
+    #footer #analysis-progress.show{display:flex}
+    #footer #progress-title{font-size:.78rem;color:#aaa;white-space:nowrap;flex-shrink:0}
+    #footer .progress-bar-bg{flex:1;min-width:80px;margin:0}
+    #footer #progress-log{flex:1;min-height:0;overflow-y:auto;margin:0;
+            font-size:.72rem;line-height:1.5}
 
     /* Live overlay */
     .overlay{position:absolute;top:14px;right:14px;background:rgba(20,20,20,.88);
@@ -124,42 +168,67 @@
 </head>
 <body>
 
-<!-- ═══════════════════ SIDEBAR ═══════════════════════════════════════════════ -->
-<div class="sidebar">
-  <div class="sidebar-header">
-    <h2>⚡ E-Maschinen Designer</h2>
-    <small>Design → FEM-Analyse → Ergebnisse</small>
+<!-- ═══════════════════ TOP BAR (brand + workflow tabs) ═══════════════════════ -->
+<div class="topbar">
+  <div class="brand">⚡ E-Maschinen Designer<small>Geometrie → Betrieb → Berechnung → Ergebnisse</small></div>
+  <div class="tab-bar">
+    <button class="tab-btn active" id="tbtn-geo"     onclick="switchTab('geo')">① Geometrie</button>
+    <button class="tab-btn"        id="tbtn-betrieb" onclick="switchTab('betrieb')">② Betrieb &amp; Material</button>
+    <button class="tab-btn"        id="tbtn-calc"    onclick="switchTab('calc')">③ Berechnung</button>
+    <button class="tab-btn"        id="tbtn-live"    onclick="switchTab('live')">▶ Live-Simulation</button>
+    <button class="tab-btn"        id="tbtn-results" onclick="switchTab('results')" disabled>📊 FEM-Ergebnisse</button>
+    <button class="tab-btn"        id="tbtn-report"  onclick="switchTab('report')" disabled>📄 Bericht</button>
+    <button class="tab-btn"        id="tbtn-compare" onclick="switchTab('compare')">⚖ Vergleich</button>
   </div>
+</div>
+
+<!-- ═══════════════════ WORKSPACE (panels + persistent preview pane) ══════════ -->
+<div id="workspace">
+<div id="panel-area">
+
+<!-- ════════ TAB: Geometrie ════════ -->
+<div class="tab-panel active" id="panel-geo">
+  <div class="panel-grid">
 
   <!-- 1. Hauptabmessungen -->
   <div class="section">
     <div class="section-title">Hauptabmessungen</div>
     <div class="input-group">
       <label>Stator Außen-Ø</label>
-      <input type="number" id="dim_stator_out" value="280"/><span>mm</span>
+      <input type="number" id="dim_stator_out" value="280" min="10" max="3000" step="1"/><span>mm</span>
     </div>
     <div class="input-group">
       <label>Stator Innen-Ø</label>
-      <input type="number" id="dim_stator_in" value="190"/><span>mm</span>
+      <input type="number" id="dim_stator_in" value="190" min="5" max="2980" step="1"/><span>mm</span>
     </div>
     <div class="input-group">
       <label>Rotor Ø</label>
-      <input type="number" id="dim_rotor_out" value="188.6"/><span>mm</span>
+      <input type="number" id="dim_rotor_out" value="188.6" min="5" max="2970" step="0.1"/><span>mm</span>
     </div>
     <div class="input-group">
       <label>Wellen-Ø</label>
-      <input type="number" id="dim_shaft" value="60"/><span>mm</span>
+      <input type="number" id="dim_shaft" value="60" min="2" max="2000" step="0.5"/><span>mm</span>
+    </div>
+    <div class="input-group">
+      <label>Wellen-Bohrung (Hohlwelle, 0=voll)</label>
+      <input type="number" id="dim_shaft_bore" value="0" min="0" max="1900" step="0.5"/><span>mm</span>
     </div>
     <div class="input-group">
       <label>Blechpaketlänge</label>
-      <input type="number" id="dim_axial" value="80" min="20" max="300"/><span>mm</span>
+      <input type="number" id="dim_axial" value="80" min="5" max="3000" step="1"/><span>mm</span>
     </div>
   </div>
 
-  <!-- Apply geometry preview -->
+  <!-- Apply geometry preview + Text→EMA -->
   <div class="section" style="padding:10px 15px">
-    <button id="btn_apply" style="background:#444;font-size:.78rem;padding:8px">
+    <button id="btn_apply" style="background:#444;font-size:.78rem;padding:8px;margin-bottom:6px">
       ↺ Vorschau aktualisieren
+    </button>
+    <button onclick="openText2Ema()" style="background:#1f7a5a;font-size:.78rem;padding:9px;width:100%">
+      🧠 Aus Beschreibung ableiten (Text → Auslegung)
+    </button>
+    <button onclick="openRag()" style="background:#5a4a7a;font-size:.78rem;padding:9px;width:100%;margin-top:6px">
+      📚 Wissensbasis (Referenzmaschinen &amp; Doku)
     </button>
   </div>
 
@@ -168,11 +237,133 @@
     <div class="section-title">Stator / Wicklung</div>
     <div class="input-group">
       <label>Anzahl Nuten</label>
-      <input type="number" id="stator_slots" value="54" step="3"/><span>-</span>
+      <input type="number" id="stator_slots" value="54" min="3" max="240" step="3"/><span>-</span>
     </div>
     <div class="slider-group">
       <div class="slider-header"><span>Nuttiefe</span><span id="disp_slot_depth">25 mm</span></div>
-      <input type="range" id="slot_depth" min="5" max="60" step="1" value="25"/>
+      <input type="range" id="slot_depth" min="2" max="200" step="1" value="25"/>
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><span>Leiter pro Nut (Hairpin)</span><span id="disp_cond_per_slot">4</span></div>
+      <input type="range" id="cond_per_slot" min="2" max="12" step="2" value="4"/>
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><span>Spulenweite (Nutschritte, 0=auto)</span><span id="disp_coil_pitch">0</span></div>
+      <input type="range" id="coil_pitch" min="0" max="60" step="1" value="0"/>
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><span>Wickelkopf-Aufweitung (radial)</span><span id="disp_wh_flare">6 mm</span></div>
+      <input type="range" id="wh_flare" min="0" max="25" step="1" value="6"/>
+    </div>
+    <div class="input-group">
+      <label>Wickelkopf-Darstellung</label>
+      <select id="wh_style" style="grid-column:2/-1">
+        <option value="sweep" selected>Zugkörper (glatt, geloftet)</option>
+        <option value="box">Box-Segmente (einfach)</option>
+      </select>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Hairpin-Wickelkopf als glatter Sweep-Zugkörper, der radial nach außen aufweitet (mit automatischem Box-Fallback). Nur im 3D-CAD/STEP sichtbar.</small>
+    </div>
+  </div>
+
+  <!-- 2b. Wellenverbindung Blechpaket–Welle -->
+  <div class="section">
+    <div class="section-title">Wellenverbindung (Blechpaket–Welle)</div>
+    <div class="input-group">
+      <label>Verbindungstyp</label>
+      <select id="shaft_connection" style="grid-column:2/-1">
+        <option value="press" selected>Querpressverband (Schrumpfsitz)</option>
+        <option value="spline">Keilwelle (Vielnut)</option>
+        <option value="polygon">Polygonprofil (P3G)</option>
+      </select>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">CAD-Profil (Bohrung + Welle) + analytische Bewertung (Ergebnis-Tab „Wellenverbindung"). Kein FEM.</small>
+    </div>
+    <div class="slider-group" id="grp_press">
+      <div class="slider-header"><span>Übermaß (diametral)</span><span id="disp_press_interf">40 µm</span></div>
+      <input type="range" id="press_interf" min="0" max="120" step="5" value="40"/>
+    </div>
+    <div class="slider-group" id="grp_spline_teeth" style="display:none">
+      <div class="slider-header"><span>Keilwellen-Zähne</span><span id="disp_spline_teeth">10</span></div>
+      <input type="range" id="spline_teeth" min="4" max="30" step="1" value="10"/>
+    </div>
+    <div class="slider-group" id="grp_spline_depth" style="display:none">
+      <div class="slider-header"><span>Zahn-Tiefe</span><span id="disp_spline_depth">2 mm</span></div>
+      <input type="range" id="spline_depth" min="0.5" max="6" step="0.5" value="2"/>
+    </div>
+    <div class="slider-group" id="grp_poly_lobes" style="display:none">
+      <div class="slider-header"><span>Polygon-Lappen</span><span id="disp_poly_lobes">3</span></div>
+      <input type="range" id="poly_lobes" min="3" max="5" step="1" value="3"/>
+    </div>
+    <div class="slider-group" id="grp_poly_ecc" style="display:none">
+      <div class="slider-header"><span>Polygon-Exzentrizität</span><span id="disp_poly_ecc">2 mm</span></div>
+      <input type="range" id="poly_ecc" min="0.5" max="6" step="0.5" value="2"/>
+    </div>
+  </div>
+
+  <!-- 2c. Komponenten (stufenweise Geometrie-Erzeugung) -->
+  <div class="section">
+    <div class="section-title">Komponenten (Geometrie-Erzeugung)</div>
+    <small style="display:block;font-size:.7rem;color:#666;margin-bottom:6px">
+      Wählt, welche Bauteile beim 3D-/STEP-Aufbau erzeugt werden — z.B. zuerst nur
+      Welle + Rotorblech + Magnete + Hairpins, dann schrittweise erweitern. Steuert
+      nur die CAD-Geometrie; EM-/Thermik-/Struktur-Rechnung bleibt unverändert.
+    </small>
+    <label class="chk-row"><input type="checkbox" id="gen_shaft"  checked/> Welle</label>
+    <label class="chk-row"><input type="checkbox" id="gen_rotor"  checked/> Rotor-Blechpaket</label>
+    <label class="chk-row"><input type="checkbox" id="gen_magnets" checked/> Magnete</label>
+    <label class="chk-row"><input type="checkbox" id="gen_stator" checked/> Stator-Blechpaket</label>
+    <label class="chk-row"><input type="checkbox" id="gen_hairpins" checked/> Hairpins (Nut-Stäbe)</label>
+    <label class="chk-row"><input type="checkbox" id="gen_whead"   checked/> Wickelköpfe (U-Bügel)</label>
+    <label class="chk-row"><input type="checkbox" id="gen_bear_a"/> Lager A-Seite (−z)</label>
+    <label class="chk-row"><input type="checkbox" id="gen_bear_b"/> Lager B-Seite (+z)</label>
+    <label class="chk-row"><input type="checkbox" id="gen_insul"/> Isolationspapier Wickelköpfe</label>
+    <label class="chk-row"><input type="checkbox" id="gen_balance"/> Wuchtscheiben-Bolzen (Bohrung + Bolzen durch das Paket)</label>
+
+    <div id="grp_balance" style="display:none;margin-top:6px">
+      <small style="display:block;font-size:.7rem;color:#666;margin-bottom:4px">
+        Symmetrische Bohrungen durch das gesamte Blechpaket, Anzahl = Polzahl. Gewinde ab M4
+        (Bohrung = Nenn-Ø + 0,4 mm, z.B. M6 → 6,4 mm). Die Bohrungen schwächen den Rotor und
+        gehen in die Fliehkraft-FEM ein.
+      </small>
+      <div class="input-group">
+        <label>Gewinde</label>
+        <select id="bal_thread" style="grid-column:2/-1">
+          <option value="M4">M4 (Ø 4,4)</option>
+          <option value="M5">M5 (Ø 5,4)</option>
+          <option value="M6" selected>M6 (Ø 6,4)</option>
+          <option value="M8">M8 (Ø 8,4)</option>
+          <option value="M10">M10 (Ø 10,4)</option>
+          <option value="M12">M12 (Ø 12,4)</option>
+          <option value="M16">M16 (Ø 16,4)</option>
+          <option value="M20">M20 (Ø 20,4)</option>
+        </select>
+      </div>
+      <div class="input-group">
+        <label>Lochkreis-Ø (0 = auto)</label>
+        <input type="number" id="bal_circle_d" value="0" min="0" max="3000" step="1"/><span>mm</span>
+      </div>
+      <div class="input-group">
+        <label>Versatzwinkel</label>
+        <input type="number" id="bal_offset" value="0" min="-180" max="180" step="1"/><span>°</span>
+      </div>
+    </div>
+
+    <div id="grp_bearing" style="display:none;margin-top:6px">
+      <div class="slider-group">
+        <div class="slider-header"><span>Lager Außen-Ø (0=auto)</span><span id="disp_bearing_od">0 mm</span></div>
+        <input type="range" id="bearing_od" min="0" max="300" step="5" value="0"/>
+      </div>
+      <div class="slider-group">
+        <div class="slider-header"><span>Lager-Breite</span><span id="disp_bearing_w">14 mm</span></div>
+        <input type="range" id="bearing_w" min="4" max="60" step="1" value="14"/>
+      </div>
+      <div class="slider-group">
+        <div class="slider-header"><span>Lager-Abstand (axial vom Paket)</span><span id="disp_bearing_gap">5 mm</span></div>
+        <input type="range" id="bearing_gap" min="0" max="80" step="1" value="5"/>
+      </div>
+    </div>
+    <div class="slider-group" id="grp_insul" style="display:none;margin-top:6px">
+      <div class="slider-header"><span>Isolationspapier-Dicke</span><span id="disp_insul_thk">0.4 mm</span></div>
+      <input type="range" id="insul_thk" min="0.1" max="3" step="0.1" value="0.4"/>
     </div>
   </div>
 
@@ -181,36 +372,109 @@
     <div class="section-title">Magnet-Topologie</div>
     <div class="input-group">
       <label>Polpaare (p)</label>
-      <input type="number" id="p_pairs" value="3" min="1" max="12"/><span>-</span>
+      <input type="number" id="p_pairs" value="3" min="1" max="40" step="1"/><span>-</span>
     </div>
     <div class="input-group">
       <label style="grid-column:1/-1;margin-bottom:3px">Magnet Anordnung</label>
       <select id="mag_shape" style="grid-column:1/-1">
         <option value="v" selected>V-Form (IPM)</option>
+        <option value="vasym">Asymmetrisches V (IPM)</option>
+        <option value="vv">Doppel-V (mehrlagig)</option>
+        <option value="u">U-Form (IPM)</option>
+        <option value="delta">Delta-Form (IPM)</option>
+        <option value="pmasynrm">PMa-SynRM (Flussbarrieren)</option>
+        <option value="spm">SPM radial (Oberfläche)</option>
+        <option value="halbach">Halbach-Array (gerade Magnete)</option>
+        <option value="spoke">Speichen-Typ (Flusskonzentration)</option>
         <option value="bar">Balken (Flach)</option>
       </select>
     </div>
-    <div class="slider-group">
-      <div class="slider-header"><span>Öffnungswinkel</span><span id="disp_mag_angle">120°</span></div>
+    <div class="input-group">
+      <label style="grid-column:1/-1;margin-bottom:3px">Magnet-Orientierung (Polung)</label>
+      <select id="mag_orient" style="grid-column:1/-1">
+        <option value="transverse" selected>Lange Seite N/S (quer magnetisiert)</option>
+        <option value="longitudinal">Kurze Seite N/S (längs, 90° gedreht)</option>
+      </select>
+    </div>
+    <div class="input-group topo-param" id="pocket_mode_wrap" data-topos="v">
+      <label style="grid-column:1/-1;margin-bottom:3px">Magnettasche definieren über</label>
+      <select id="pocket_mode" style="grid-column:1/-1">
+        <option value="position" selected>Position (Radius) + Länge</option>
+        <option value="diameter">Durchmesser (Außen-Ø / Innen-Ø) + Winkel</option>
+      </select>
+    </div>
+    <div class="slider-group topo-param" data-topos="v vasym vv u delta pmasynrm">
+      <div class="slider-header"><span>Öffnungswinkel<span class="topo-param" data-topos="vv"> (innen)</span></span><span id="disp_mag_angle">120°</span></div>
       <input type="range" id="mag_angle" min="40" max="170" step="1" value="120"/>
     </div>
-    <div class="slider-group">
+    <div class="slider-group topo-param" data-topos="vasym">
+      <div class="slider-header"><span>Asymmetrie (Arm-Winkel-Versatz)</span><span id="disp_mag_asym">0°</span></div>
+      <input type="range" id="mag_asym" min="-60" max="60" step="1" value="0"/>
+    </div>
+    <div class="input-group pocket-dia" style="display:none">
+      <label>Tasche Außen-Ø</label>
+      <input type="number" id="pocket_outer_d" value="178" min="10" max="2970" step="1"/><span>mm</span>
+    </div>
+    <div class="input-group pocket-dia" style="display:none">
+      <label>Tasche Innen-Ø</label>
+      <input type="number" id="pocket_inner_d" value="150" min="5" max="2960" step="1"/><span>mm</span>
+    </div>
+    <div class="slider-group topo-param" data-topos="vv">
+      <div class="slider-header"><span>Öffnungswinkel außen</span><span id="disp_mag_angle2">90°</span></div>
+      <input type="range" id="mag_angle2" min="40" max="170" step="1" value="90"/>
+    </div>
+    <div class="slider-group pocket-pos">
       <div class="slider-header"><span>Position (Radius)</span><span id="disp_mag_depth">70%</span></div>
       <input type="range" id="mag_depth" min="30" max="95" step="1" value="70"/>
     </div>
-    <div class="slider-group">
+    <div class="slider-group topo-param" data-topos="v vasym vv u delta pmasynrm">
       <div class="slider-header"><span>Magnet Abstand (Steg)</span><span id="disp_mag_dist">2 mm</span></div>
-      <input type="range" id="mag_dist" min="0" max="30" step="0.5" value="2"/>
+      <input type="range" id="mag_dist" min="0" max="80" step="0.5" value="2"/>
     </div>
-    <div class="slider-group">
+    <div class="slider-group pocket-pos">
       <div class="slider-header"><span>Magnet Länge</span><span id="disp_mag_width">45 mm</span><span id="disp_mag_width_eff" style="color:#f90;font-size:.8em;margin-left:4px"></span></div>
-      <input type="range" id="mag_width" min="10" max="100" step="1" value="45"/>
+      <input type="range" id="mag_width" min="3" max="400" step="1" value="45"/>
     </div>
     <div class="slider-group">
       <div class="slider-header"><span>Magnet Dicke</span><span id="disp_mag_thick">6 mm</span></div>
-      <input type="range" id="mag_thick" min="2" max="20" step="0.5" value="6"/>
+      <input type="range" id="mag_thick" min="1" max="80" step="0.5" value="6"/>
+    </div>
+    <div class="slider-group topo-param" data-topos="u delta">
+      <div class="slider-header"><span>Tangentialmagnet Länge (0=auto)</span><span id="disp_mag_tang_len">0 mm</span></div>
+      <input type="range" id="mag_tang_len" min="0" max="200" step="1" value="0"/>
+    </div>
+    <div class="slider-group topo-param" data-topos="vv pmasynrm">
+      <div class="slider-header"><span>Lagen-Abstand</span><span id="disp_mag_layer_gap">8 mm</span></div>
+      <input type="range" id="mag_layer_gap" min="1" max="50" step="0.5" value="8"/>
+    </div>
+    <div class="slider-group topo-param" data-topos="pmasynrm">
+      <div class="slider-header"><span>Lagen-Anzahl</span><span id="disp_mag_layers">3</span></div>
+      <input type="range" id="mag_layers" min="2" max="4" step="1" value="3"/>
+    </div>
+    <div class="slider-group topo-param" data-topos="spm halbach">
+      <div class="slider-header"><span>Polbedeckung</span><span id="disp_pole_arc">83%</span></div>
+      <input type="range" id="pole_arc" min="50" max="98" step="1" value="83"/>
+    </div>
+    <div class="slider-group topo-param" data-topos="halbach">
+      <div class="slider-header"><span>Magnete / Pol (Halbach)</span><span id="disp_seg_per_pole">6</span></div>
+      <input type="range" id="seg_per_pole" min="2" max="24" step="1" value="6"/>
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><span>Segmente axial (n_ax)</span><span id="disp_n_ax">1</span></div>
+      <input type="range" id="n_ax" min="1" max="12" step="1" value="1"/>
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><span>Segmente umfang (n_circ)</span><span id="disp_n_circ">1</span></div>
+      <input type="range" id="n_circ" min="1" max="6" step="1" value="1"/>
     </div>
   </div>
+
+  </div><!-- /panel-grid -->
+</div><!-- /panel-geo -->
+
+<!-- ════════ TAB: Live-Simulation ════════ -->
+<div class="tab-panel" id="panel-live">
+  <div class="panel-grid">
 
   <!-- 4. Simulation & Feld -->
   <div class="section">
@@ -252,6 +516,13 @@
     </div>
   </div>
 
+  </div><!-- /panel-grid -->
+</div><!-- /panel-live -->
+
+<!-- ════════ TAB: Berechnung ════════ -->
+<div class="tab-panel" id="panel-calc">
+  <div class="panel-grid">
+
   <!-- 5. Analyse-Einstellungen -->
   <div class="section">
     <div class="section-title">Analyse-Einstellungen</div>
@@ -282,6 +553,15 @@
         <option value="72">72 (Cine)</option>
       </select>
     </div>
+    <div class="input-group" style="grid-column:1/-1;font-size:.78rem;color:#ccc;margin-top:4px">
+      <span style="grid-column:1/-1;color:#aaa;margin-bottom:3px">Feld-Darstellung (Rotor-Rotation immer aktiv):</span>
+      <label style="grid-column:1/-1;display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="fm_current_angle"/> Ankerrückwirkung (Rotor steht, Stromwinkel β)
+      </label>
+      <label style="grid-column:1/-1;display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="fm_load_ramp"/> Last-Rampe (Rotor steht, Last 0→Volllast)
+      </label>
+    </div>
     <div class="input-group" style="grid-column:1/-1;font-size:.74rem;color:#aaa;margin-top:6px;line-height:1.3">
       <span style="grid-column:1/-1">⏱ Geschätzte Laufzeit:<br/>
       <span id="runtime_estimate" style="color:#7db9e8;font-family:monospace">— Sek.</span></span>
@@ -289,27 +569,121 @@
     <div class="input-group">
       <label>FDM Auflösung</label>
       <select id="fdm_resolution" style="grid-column:2/-1">
-        <option value="60">60 px — schnell</option>
-        <option value="100">100 px</option>
-        <option value="150" selected>150 px — Standard</option>
-        <option value="200">200 px — fein</option>
-        <option value="300">300 px — hoch</option>
-        <option value="400">400 px — sehr hoch</option>
-        <option value="500">500 px — maximal</option>
+        <option value="100">100 px — schnell</option>
+        <option value="150">150 px</option>
+        <option value="200">200 px</option>
+        <option value="300" selected>300 px — Zähne aufgelöst</option>
+        <option value="400">400 px — Luftspalt ~1 px</option>
+        <option value="600">600 px — Luftspalt aufgelöst</option>
+        <option value="800">800 px — maximal (Luftspalt 2 px)</option>
       </select>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Statisches Feld (einmalig). Direkter Sparse-Solver — exakt bei jeder Auflösung.</small>
     </div>
     <div class="input-group">
       <label>Frame-Auflösung</label>
       <select id="frame_resolution" style="grid-column:2/-1">
-        <option value="100">100 px — schnell</option>
-        <option value="120" selected>120 px — Standard</option>
-        <option value="180">180 px — fein</option>
-        <option value="240">240 px — sehr fein</option>
-        <option value="300">300 px — maximal</option>
+        <option value="120">120 px — schnell</option>
+        <option value="180" selected>180 px — Standard</option>
+        <option value="240">240 px — Zähne aufgelöst</option>
+        <option value="300">300 px — fein</option>
+        <option value="400">400 px — Luftspalt ~1 px</option>
+        <option value="600">600 px — Luftspalt aufgelöst (langsam)</option>
       </select>
-      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Auflösung der animierten Field-Frames</small>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Animierte Frames. Pro Rotorwinkel wird einmal faktorisiert, je Drehzahl nur rück­substituiert.</small>
+    </div>
+    <div class="input-group">
+      <label>Flussdichte-Skala</label>
+      <input type="number" id="field_bmax" value="0" min="0" max="6" step="0.1" style="grid-column:2/-1">
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Maximum der |B|-Farbskala in Tesla. 0 = automatisch. Setzt die obere Grenze für Heatmap + Sättigungs-Clip (z. B. 2.1 Standard, 3 zum Sichtbarmachen von Spitzen).</small>
     </div>
   </div>
+
+  <div class="section">
+    <div class="section-title">Strukturanalyse (Festigkeit)</div>
+    <div class="input-group">
+      <label>Netz-Auflösung</label>
+      <select id="struct_mesh_mm" style="grid-column:2/-1">
+        <option value="4">4 mm — grob, schnell (~0.5 min)</option>
+        <option value="3" selected>3 mm — Standard, fein (~1.5 min)</option>
+        <option value="2.5">2.5 mm — sehr fein (~3 min)</option>
+        <option value="2">2 mm — Stegspannungen aufgelöst (langsam, ~6 min)</option>
+      </select>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Gmsh-Elementgröße (quadratische Tetraeder). Kleiner = feiner; löst Spannungsspitzen an den Magnettaschen-Stegen besser auf. CalculiX rechnet einmalig bei Maximaldrehzahl, andere Drehzahlen werden über rpm²-Skalierung abgeleitet.</small>
+    </div>
+    <div class="input-group">
+      <label>Einzelbild-Auflösung</label>
+      <select id="struct_img_px" style="grid-column:2/-1">
+        <option value="1500">1500 px</option>
+        <option value="3000" selected>3000 px — Standard</option>
+        <option value="5000">5000 px — maximal</option>
+      </select>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Hochauflösende Verformungsbilder bei Nennlast, Maximaldrehzahl und Berstdrehzahl.</small>
+    </div>
+    <div class="input-group" style="grid-column:1/-1;font-size:.78rem;color:#ccc;margin-top:4px">
+      <label style="grid-column:1/-1;display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="struct_video" checked/> Verformungs-Video (Drehzahl-Rampe 0→max)
+      </label>
+    </div>
+    <div class="input-group">
+      <label>Video-Frames</label>
+      <select id="struct_frames" style="grid-column:2/-1">
+        <option value="20">20 (schnell)</option>
+        <option value="30" selected>30 (Standard)</option>
+        <option value="48">48 (fein)</option>
+        <option value="72">72 (Cine)</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Zielwertoptimierung</div>
+    <div style="font-size:.76rem;color:#888;margin-bottom:8px">LLM-gesteuerte Suche: Randbedingungen einhalten, freie Parameter (mit Bereichen) variieren, Zielwert optimieren. Schnelle Analytik in der Schleife, finaler Volllauf auf den besten Treffer.</div>
+    <button onclick="openOptimizer()" style="background:#b8860b;width:100%;padding:10px;font-size:.8rem">🎯 Zielwertoptimierung öffnen</button>
+  </div>
+
+  <div class="section">
+    <div class="section-title">Parameterstudie (fester Drehzahl)</div>
+    <div style="font-size:.76rem;color:#888;margin-bottom:8px">
+      Variiert EINEN Parameter von x bis y in N Schritten bei fester Drehzahl und zeigt
+      den Einfluss auf alle Kennwerte (z.B. Öffnungswinkel auf Drehmoment). Schnelle
+      Analytik (kein FreeCAD/FEM) — die Geometrie wird je Schritt mitgeführt.
+    </div>
+    <div class="input-group">
+      <label>Parameter</label>
+      <select id="study_param" style="grid-column:2/-1"></select>
+    </div>
+    <div class="input-group">
+      <label>von x</label>
+      <input type="number" id="study_lo" value="90" step="any"/><span id="study_unit1">-</span>
+    </div>
+    <div class="input-group">
+      <label>bis y</label>
+      <input type="number" id="study_hi" value="160" step="any"/><span id="study_unit2">-</span>
+    </div>
+    <div class="input-group">
+      <label>Schritte</label>
+      <input type="number" id="study_steps" value="100" min="2" max="500" step="1"/><span>-</span>
+    </div>
+    <div class="input-group">
+      <label>Drehzahl (fest)</label>
+      <input type="number" id="study_rpm" value="12000" min="100" max="60000" step="100"/><span>U/min</span>
+    </div>
+    <button id="btn_study" onclick="runParamStudy()" style="background:#2d7d5a;width:100%;padding:10px;font-size:.8rem">📈 Parameterstudie starten</button>
+    <div id="study_progress" style="display:none;margin-top:8px">
+      <div style="font-size:.75rem;color:#9aa" id="study_msg">…</div>
+      <div style="background:#21262d;border-radius:4px;height:8px;margin-top:4px;overflow:hidden">
+        <div id="study_bar" style="background:#2d7d5a;height:100%;width:0%;transition:width .2s"></div>
+      </div>
+    </div>
+    <div id="study_result" style="margin-top:10px"></div>
+  </div>
+
+  </div><!-- /panel-grid -->
+</div><!-- /panel-calc -->
+
+<!-- ════════ TAB: Betrieb & Material ════════ -->
+<div class="tab-panel" id="panel-betrieb">
+  <div class="panel-grid">
 
   <!-- 6. Werkstoff & FEM-Analyse -->
   <div class="section">
@@ -394,11 +768,10 @@
     </div>
     <div id="anhaenger_hint" style="display:none;margin-bottom:8px;font-size:.72rem;
          background:#1a2a1a;border:1px solid #2a4a2a;border-radius:3px;padding:6px;color:#7ec87e">
-      ⛰ Anhänger-Modus: Die Fahrzeugfelder bleiben der Basis-PKW. Nur im
-      Anhänger-Alpenpass-Zyklus werden zusätzlich +1 800 kg, +0,85 m² c_wA,
-      Tandemachs-Reibung (2 Achsen), c_r ≥ 0,018 und Regen 30 % aufgeschlagen;
-      v ≤ 100 km/h. WLTP und Autobahn fahren ohne Anhänger. Steigungsprofil
-      kommt automatisch aus dem Zyklus.
+      ⛰ Anhänger-Modus: Auf den Basis-PKW kommen Anhängermasse, +0,85 m² c_wA,
+      Achs­reibung (je Achse), c_r ≥ 0,018 und Regen 30 %; v ≤ 100 km/h. Die
+      steilste Bergauffahrt erreicht die unten eingestellte Steigung. WLTP und
+      Autobahn fahren ohne Anhänger.
     </div>
     <div id="csv_upload_wrap" style="display:none;margin-bottom:8px">
       <input type="file" id="cycle_csv_file" accept=".csv,.txt" style="font-size:.75rem;width:100%"/>
@@ -432,6 +805,20 @@
       <label>Regen-Anteil</label>
       <input type="number" id="veh_regen" value="0.55" min="0" max="0.95" step="0.05"/><span>-</span>
     </div>
+
+    <div style="font-size:.74rem;color:#7ec87e;margin:8px 0 4px;font-weight:600">⛰ Anhänger (für Anhänger-Zyklus)</div>
+    <div class="input-group">
+      <label>Anhänger-Masse (inkl. Nutzlast)</label>
+      <input type="number" id="trailer_mass" value="1800" min="200" max="3500" step="50"/><span>kg</span>
+    </div>
+    <div class="input-group">
+      <label>Anhänger-Achsen</label>
+      <input type="number" id="trailer_axles" value="2" min="1" max="4" step="1"/><span>-</span>
+    </div>
+    <div class="input-group">
+      <label>max. Steigung (Bergauffahrt)</label>
+      <input type="number" id="trailer_grade" value="15" min="3" max="30" step="1"/><span>%</span>
+    </div>
     <hr class="sep"/>
 
     <!-- Projekt-Verwaltung -->
@@ -445,10 +832,32 @@
       <select id="project_load" style="width:100%;background:#222;border:1px solid #444;color:#ddd;padding:6px;border-radius:3px;font-size:.74rem">
         <option value="">— neues Projekt —</option>
       </select>
+      <button onclick="openProjectGallery()"
+              style="background:#3a3f4b;width:100%;margin-top:5px;padding:8px;font-size:.76rem">
+        📂 Projekt-Browser (Galerie)
+      </button>
     </div>
-
-    <button id="btn_analyse" class="start" style="padding:13px;font-size:.85rem;margin-bottom:6px">
-      ⚙ Analyse starten
+    <div style="display:flex;gap:4px;margin-bottom:6px;align-items:stretch">
+      <button id="btn_preview" onclick="previewFrame()"
+              style="background:#2c5d8a;flex:1;padding:9px;font-size:.78rem">
+        🖼 Nur ein Frame rechnen
+      </button>
+      <select id="preview_res" title="Vorschau-Auflösung (Gitter + Bild)"
+              style="background:#3c3c3c;color:#fff;border:1px solid #555;border-radius:3px;font-size:.74rem;width:96px">
+        <option value="400">400 px</option>
+        <option value="800" selected>800 px</option>
+        <option value="1200">1200 px</option>
+        <option value="1600">1600 px · fein</option>
+        <option value="2000">2000 px · sehr fein</option>
+        <option value="2500">2500 px · max direkt</option>
+        <option value="3000">3000 px · Multigrid</option>
+        <option value="4000">4000 px · Multigrid</option>
+        <option value="5000">5000 px · Multigrid (mehrere Min.)</option>
+      </select>
+    </div>
+    <button id="btn_remember_geo" onclick="rememberGeometry()"
+            style="background:#27ae60;width:100%;padding:9px;font-size:.78rem;margin-bottom:6px">
+      ＋ Geometrie merken (Variante <span id="var-badge">0</span>/10) → Vergleich
     </button>
     <div style="display:flex;gap:4px;margin-bottom:6px">
       <button id="btn_freecad" style="background:#444;display:none;font-size:.74rem;padding:7px;flex:1">
@@ -458,71 +867,76 @@
         📦 STEP
       </button>
     </div>
-    <div id="report_btns" style="display:none;display:flex;flex-direction:column;gap:5px;display:none">
-      <button id="btn_report"
-              style="background:#6a4caf;font-size:.76rem;padding:8px;width:100%">
+  </div><!-- /section Fahrzyklus -->
+
+  </div><!-- /panel-grid -->
+</div><!-- /panel-betrieb -->
+
+<!-- ════════ TAB: Bericht ════════ -->
+<div class="tab-panel full-panel" id="panel-report">
+  <div style="max-width:540px">
+    <div class="section-title">Berechnungsbericht</div>
+    <p style="font-size:.82rem;color:#aaa;line-height:1.5">
+      Erzeugt einen technischen PDF-Bericht aus dem aktuellen Projekt über das lokale
+      LLM <code>ministral-3:14b</code> (Ollama). Erst nach einer abgeschlossenen Analyse verfügbar.
+    </p>
+    <div id="report_btns" style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
+      <button id="btn_report" style="background:#6a4caf;font-size:.8rem;padding:11px;width:100%">
         📄 Bericht Standard (ministral-3:14b)
       </button>
-      <button id="btn_report_agentic"
-              style="background:#4a6caf;font-size:.76rem;padding:8px;width:100%">
+      <button id="btn_report_agentic" style="background:#4a6caf;font-size:.8rem;padding:11px;width:100%">
         🤖 Bericht Agentisch (6 Experten + ministral-3)
       </button>
     </div>
-    <div id="report_status" style="display:none;margin-top:6px;font-size:.74rem;color:#aaa">
+    <div id="report_status" style="display:none;margin-top:14px;font-size:.78rem;color:#aaa">
       <div id="report_msg">…</div>
-      <div style="background:#222;height:5px;border-radius:3px;margin-top:4px;overflow:hidden">
+      <div style="background:#222;height:6px;border-radius:3px;margin-top:5px;overflow:hidden">
         <div id="report_bar" style="background:#7d3cff;height:100%;width:0%;transition:width .3s"></div>
       </div>
     </div>
   </div>
-</div><!-- /sidebar -->
+</div><!-- /panel-report -->
 
-<!-- ═══════════════════ MAIN VIEW ══════════════════════════════════════════════ -->
-<div class="main-view">
-
-  <!-- Tab bar -->
-  <div class="tab-bar">
-    <button class="tab-btn active" id="tbtn-sim" onclick="switchTab('sim')">▶ Live-Simulation</button>
-    <button class="tab-btn" id="tbtn-results" onclick="switchTab('results')" disabled>
-      📊 FEM-Ergebnisse
-    </button>
-    <button class="tab-btn" id="tbtn-compare" onclick="switchTab('compare')">
-      ⚖ Vergleich
-    </button>
-  </div>
-
-  <!-- ── Tab: Live-Simulation ── -->
-  <div id="tab-sim" class="tab-content">
-    <canvas id="simCanvas"></canvas>
-    <div class="loading-bar" id="load_bar"></div>
-    <div class="overlay">
-      <h3>Echtzeit-Daten</h3>
-      <div class="data-row"><span>Status:</span><span class="val" id="val_status" style="color:var(--ok)">LÄUFT</span></div>
-      <div class="data-row"><span>Drehzahl:</span><span class="val" id="val_rpm">0</span></div>
-      <div class="data-row"><span>Drehmoment:</span><span class="val" id="val_torque">0</span></div>
-      <div class="data-row"><span>Strom I_q:</span><span class="val" id="val_iq">0</span></div>
-      <div class="data-row"><span>Strom I_d:</span><span class="val" id="val_id">0</span></div>
-      <div class="data-row"><span>Leistung:</span><span class="val" id="val_power">0</span></div>
-      <div class="data-row"><span>Grid:</span><span class="val" id="val_grid">100px</span></div>
-      <div style="margin-top:8px;font-size:.73rem;color:#888">FDM Physikmodell<br>2p = <span id="poles_display">6</span></div>
-    </div>
-  </div>
-
-  <!-- ── Tab: FEM-Ergebnisse ── -->
-  <div id="tab-results" class="tab-content">
-
-    <!-- Progress -->
-    <div id="analysis-progress" class="progress-wrap" style="display:none">
-      <div style="font-weight:600;color:#aaa;margin-bottom:4px" id="progress-title">Analyse läuft…</div>
-      <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
-      <div class="progress-log" id="progress-log"></div>
-    </div>
+<!-- ════════ TAB: FEM-Ergebnisse ════════ -->
+<div id="tab-results" class="tab-panel full-panel">
 
     <!-- Results -->
     <div id="results-content" style="display:none">
 
       <!-- Summary metrics -->
       <div class="summary-grid" id="summary-grid"></div>
+
+      <!-- Ergebnis-Bewertung (gut/schlecht) → fließt ins LLM-Trainingsfile -->
+      <div id="rating-panel" style="margin:4px 0 12px;background:#22262e;border:1px solid #3a4250;border-radius:6px;padding:10px 14px">
+        <div style="display:flex;align-items:center;flex-wrap:wrap;gap:10px">
+          <span style="font-size:.85rem;color:#cde;font-weight:bold">Ist dieses Ergebnis gut oder schlecht?</span>
+          <button id="rate_gut"      onclick="setRating('gut')"      style="background:#2e7d4f;padding:6px 14px;font-size:.8rem">👍 gut</button>
+          <button id="rate_schlecht" onclick="setRating('schlecht')" style="background:#a23b3b;padding:6px 14px;font-size:.8rem">👎 schlecht</button>
+          <input id="rate_comment" placeholder="Kommentar (optional)"
+                 style="flex:1;min-width:160px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px 8px;border-radius:4px;font-size:.78rem"/>
+          <span id="rate_status" style="font-size:.76rem;color:#888"></span>
+        </div>
+        <div id="rate_auto" style="font-size:.74rem;color:#8aa;margin-top:6px"></div>
+      </div>
+
+      <!-- Stufen nachrechnen: vergessene Berechnungen selektiv nachziehen -->
+      <details id="recompute-panel" style="margin:4px 0 12px;background:#26262b;border:1px solid #3a3a3a;border-radius:6px;padding:9px 12px">
+        <summary style="cursor:pointer;font-size:.82rem;color:#cde;font-weight:bold">🔁 Stufen nachrechnen (vergessene Berechnung nachziehen)</summary>
+        <div style="font-size:.74rem;color:#9ab;margin:8px 0;line-height:1.5">
+          Rechnet nur die gewählten Stufen mit den <b>aktuellen Formular-Eingaben</b> neu und
+          mischt sie ins geladene Projekt. Geometrie und EM-Grundfeld werden <b>nicht</b> neu
+          gebaut (bestehende <code>motor.FCStd</code> wird genutzt). Voraussetzung: ein geladenes
+          bzw. gerade abgeschlossenes Projekt.
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:14px;margin-bottom:9px">
+          <label class="chk-row"><input type="checkbox" id="rc_field"/> Feld-Animation</label>
+          <label class="chk-row"><input type="checkbox" id="rc_structural"/> Struktur-FEM + Verformung</label>
+          <label class="chk-row"><input type="checkbox" id="rc_thermal"/> Thermik</label>
+          <label class="chk-row"><input type="checkbox" id="rc_drivecycle"/> Fahrzyklen</label>
+        </div>
+        <button id="btn_recompute" onclick="recomputeStages()"
+                style="background:#1f7a5a;font-size:.78rem;padding:8px 16px">▶ Ausgewählte Stufen nachrechnen</button>
+      </details>
 
       <!-- Result sub-tabs -->
       <div class="rtab-bar">
@@ -544,6 +958,11 @@
           <img id="field-img" src="" alt="Feldverteilung" style="width:600px;max-width:90%;border-radius:5px;border:1px solid #333"/>
 
           <div class="anim-ctrl">
+            <label style="font-size:.78rem;color:#aaa;min-width:60px">Modus:</label>
+            <select id="field-mode-select" onchange="selectFieldMode(this.value)" style="flex:1;background:#3c3c3c;color:#fff;border:1px solid #555;border-radius:3px;padding:4px;font-size:.8rem"></select>
+            <span id="field-video-links" style="font-size:.75rem"></span>
+          </div>
+          <div class="anim-ctrl" id="rpm-row">
             <label style="font-size:.78rem;color:#aaa;min-width:60px">Drehzahl:</label>
             <select id="rpm-select" style="flex:1;background:#3c3c3c;color:#fff;border:1px solid #555;border-radius:3px;padding:4px;font-size:.8rem">
             </select>
@@ -611,17 +1030,31 @@
             </tr></thead><tbody id="struct-tbody"></tbody></table>
           </div>
         </div>
+        <div id="conn-wrap" style="margin-top:16px;display:none">
+          <div class="section-h">🔗 Wellenverbindung (Blechpaket–Welle)</div>
+          <div class="two-col">
+            <div class="fem-box" id="conn-box"></div>
+            <img id="conn-img" class="chart-img" src="" alt="Wellenverbindung" style="max-width:520px"/>
+          </div>
+        </div>
       </div>
 
       <!-- FEM deformation -->
       <div id="rtab-deform" class="rtab-content">
         <div style="display:flex;flex-direction:column;gap:14px">
+          <div id="deform-burst-banner" style="display:none"></div>
           <div>
-            <div class="section-h">Verformung bei maximaler Drehzahl</div>
+            <div class="section-h">Verformung bei ausgewählter Drehzahl</div>
+            <div id="deform-img-tabs" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap"></div>
             <img id="deform-img" class="chart-img" src="" alt="FEM Verformung" style="max-width:900px"/>
             <div style="font-size:.74rem;color:#666;margin-top:5px">
-              Verschiebung farbcodiert in µm. Verformung visualisiert mit Skalierungsfaktor (deformation × N) zur Sichtbarmachung.
+              Verschiebung farbcodiert in µm; Geometrie mit fester Überhöhung dargestellt (gleiche Überhöhung für alle Drehzahlen, damit das Anwachsen sichtbar ist). Eine FEM-Lösung bei Maximaldrehzahl, andere Drehzahlen über rpm²-Skalierung.
             </div>
+          </div>
+          <div id="deform-video-wrap" style="display:none">
+            <div class="section-h">Verformungs-Video (Drehzahl-Rampe 0→max)</div>
+            <video id="deform-video" controls loop style="max-width:700px;width:100%;background:#000;border-radius:6px"></video>
+            <div style="margin-top:5px"><a id="deform-video-dl" href="#" download style="font-size:.76rem;color:#7db9e8">⬇ Video herunterladen (MP4)</a></div>
           </div>
           <div id="deform-table-wrap"></div>
         </div>
@@ -793,21 +1226,96 @@
     </div><!-- /results-content -->
   </div><!-- /tab-results -->
 
-  <!-- ── Tab: Vergleich ── -->
-  <div id="tab-compare" class="tab-content" style="overflow-y:auto;padding:16px;background:#111;display:none">
+  <!-- ════════ TAB: Vergleich ════════ -->
+  <div id="tab-compare" class="tab-panel full-panel">
     <div style="max-width:1250px;margin:0 auto">
       <h2 style="color:#fff;margin:0 0 4px">Varianten-Vergleich</h2>
       <div style="font-size:.82rem;color:#888;margin-bottom:14px">
-        Wähle 2–4 Projekte aus deinen gespeicherten Analysen. Kennlinien werden überlagert, Thermal/Energie als gruppierter Balken.
+        Stelle bis zu 10 Parameter-Varianten zusammen, speichere sie in eine Datei, führe sie als Batch aus und vergleiche die Ergebnisse (Kennlinien überlagert, Thermik/Energie als gruppierter Balken) — inkl. Vergleichsbericht.
+      </div>
+
+      <!-- Variant manager -->
+      <div id="var-panel" style="background:#1a1a2e;border:1px solid #333;padding:12px;border-radius:5px;margin-bottom:14px">
+        <div style="font-size:.82rem;color:#aaa;margin-bottom:6px">Parameter-Varianten (max. 10)</div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <input id="var-name" placeholder="Variantenname" style="flex:1;min-width:140px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px 8px;border-radius:4px;font-size:.8rem"/>
+          <button onclick="addVariant()" style="background:var(--acc);padding:7px 12px;font-size:.78rem">+ Aktuelle Konfig</button>
+        </div>
+        <div id="var-list" style="display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;margin-bottom:8px"></div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <button id="btn_run_all" onclick="runAllVariants()" style="background:#27ae60;padding:7px 14px;font-size:.78rem">▶ Alle ausführen</button>
+          <button onclick="exportVariants()" style="background:#444;padding:7px 12px;font-size:.78rem">⬇ Export Datei</button>
+          <label style="background:#444;padding:7px 12px;font-size:.78rem;border-radius:4px;cursor:pointer">⬆ Import
+            <input type="file" accept=".json,.emavars.json" onchange="importVariants(event)" style="display:none"/>
+          </label>
+          <span style="width:1px;height:20px;background:#444"></span>
+          <input id="var-set-name" placeholder="Set-Name (Server)" style="background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px 8px;border-radius:4px;font-size:.78rem;width:130px"/>
+          <button onclick="saveVariantSet()" style="background:#444;padding:7px 12px;font-size:.78rem">💾 Server</button>
+          <select id="var-set-list" onchange="loadVariantSet(this.value)" style="background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px 8px;border-radius:4px;font-size:.78rem"><option value="">— Server-Set laden —</option></select>
+          <span id="var-status" style="font-size:.75rem;color:#888"></span>
+        </div>
+      </div>
+
+      <!-- Parameter table (column variation): col 1 = baseline, extra columns edited -->
+      <div id="paramtab-panel" style="background:#1a1a2e;border:1px solid #333;padding:12px;border-radius:5px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:6px">
+          <div style="font-size:.82rem;color:#aaa">🧮 Parameter-Tabelle (Spalten-Variation)</div>
+          <span id="ptab-status" style="font-size:.75rem;color:#888"></span>
+        </div>
+        <div style="font-size:.78rem;color:#777;margin-bottom:8px">
+          Spalte 1 = Ausgangswerte aus dem aktuellen Entwurf. Lege weitere Spalten an, ändere
+          einzelne Zellen und rechne alle Spalten als Varianten durch (bis zu 10).
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+          <button onclick="buildParamTable()" style="background:var(--acc);padding:7px 12px;font-size:.78rem">📋 Tabelle aus Entwurf erzeugen</button>
+          <button onclick="addParamColumn()" style="background:#444;padding:7px 12px;font-size:.78rem">＋ Spalte</button>
+          <button onclick="removeParamColumn()" style="background:#444;padding:7px 12px;font-size:.78rem">－ Spalte</button>
+          <button onclick="runParamTable()" style="background:#27ae60;padding:7px 14px;font-size:.78rem">▶ Alle Spalten rechnen</button>
+          <span style="width:1px;height:20px;background:#444"></span>
+          <button onclick="paramTableToVariants()" style="background:#444;padding:7px 12px;font-size:.78rem">→ als Varianten übernehmen</button>
+        </div>
+        <div id="ptab-wrap" style="overflow-x:auto;max-height:420px">
+          <div style="color:#666;font-size:.82rem;padding:14px">Noch keine Tabelle — „Tabelle aus Entwurf erzeugen" klicken.</div>
+        </div>
       </div>
 
       <div id="cmp-picker" style="background:#1a1a2e;border:1px solid #333;padding:12px;border-radius:5px;margin-bottom:14px">
-        <div style="font-size:.82rem;color:#aaa;margin-bottom:6px">Projekte (max. 4)</div>
+        <div style="font-size:.82rem;color:#aaa;margin-bottom:6px">Projekte (max. 10)</div>
         <div id="cmp-project-list" style="display:flex;flex-direction:column;gap:5px;max-height:220px;overflow-y:auto;padding-right:4px"></div>
         <div style="margin-top:10px;display:flex;gap:8px;align-items:center">
           <button id="btn_compare" style="background:var(--acc);padding:8px 18px;font-size:.82rem">⚖ Vergleich starten</button>
+          <button id="btn_cmp_report" onclick="makeComparisonReport()" style="background:#8e44ad;padding:8px 14px;font-size:.78rem">📄 Vergleichsbericht</button>
+          <button id="btn_cmp_report_ag" onclick="makeComparisonReport(true)" style="background:#6c3483;padding:8px 14px;font-size:.78rem">🧠 6-Experten-Recherche (PDF)</button>
+          <button id="btn_cmp_report_triple" onclick="makeComparisonReportTriple()" style="background:#2c5f8e;padding:8px 14px;font-size:.78rem">🔬 3 Modelle nacheinander</button>
+          <label style="font-size:.74rem;color:#888">Modell:
+            <select id="cmp_model" style="background:#0f0f1a;border:1px solid #444;color:#eee;padding:5px 6px;border-radius:4px;font-size:.74rem">
+              <option value="ministral-3:14b" selected>ministral-3:14b (schnell)</option>
+              <option value="gemma4:26b">gemma4:26b (stärker, langsamer)</option>
+              <option value="gemma4:e4b">gemma4:e4b</option>
+              <option value="medgemma:27b">medgemma:27b</option>
+            </select>
+          </label>
           <button onclick="refreshComparePicker()" style="background:#444;padding:8px 14px;font-size:.78rem">⟳ Liste neu laden</button>
           <span id="cmp-count" style="font-size:.78rem;color:#888"></span>
+          <span id="cmp-report-status" style="font-size:.75rem;color:#888"></span>
+        </div>
+        <div id="cmp-triple-links" style="margin-top:8px;display:flex;flex-direction:column;gap:4px"></div>
+      </div>
+
+      <!-- LLM training dataset (continuously appended per calculation) -->
+      <div id="training-panel" style="background:#1a1a2e;border:1px solid #333;padding:12px;border-radius:5px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div style="font-size:.82rem;color:#aaa">📚 LLM-Trainingsdaten <span id="training-stats" style="color:#777;font-size:.78rem"></span></div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button onclick="refreshTrainingStats()" style="background:#444;padding:6px 12px;font-size:.78rem">⟳</button>
+            <a id="training-dl" href="/training/download" style="background:#444;padding:6px 12px;font-size:.78rem;border-radius:4px;color:#eee;text-decoration:none">⬇ Text (SFT)</a>
+            <a id="training-dl-vlm" href="/training/vlm/download" style="background:#444;padding:6px 12px;font-size:.78rem;border-radius:4px;color:#eee;text-decoration:none">⬇ Bild (VLM)</a>
+          </div>
+        </div>
+        <div style="font-size:.78rem;color:#777;margin-top:6px">
+          Jede Berechnung wird automatisch angehängt: <b>Text-Dataset</b> (Geometrie+Material → Kennwerte,
+          inkl. Bild-Pfade) und ein <b>VLM-Manifest</b> (ein Eintrag je Auswertungsbild fürs Vision-Finetuning).
+          Bewerte jedes Ergebnis im Tab „FEM-Ergebnisse" mit 👍/👎, um das Label zu setzen.
         </div>
       </div>
 
@@ -835,25 +1343,244 @@
     </div>
   </div>
 
-</div><!-- /main-view -->
+</div><!-- /panel-area -->
+
+<div id="vsplit" title="Ziehen: Vorschau-Breite ändern"></div>
+
+<!-- ── Persistent live preview pane (visible on the input tabs) ── -->
+<div id="preview-pane">
+  <canvas id="simCanvas"></canvas>
+  <div class="loading-bar" id="load_bar"></div>
+  <div class="overlay">
+    <button id="ov_play" onclick="toggleSim()"
+            style="width:100%;margin-bottom:8px;padding:6px;font-size:.74rem;pointer-events:auto;background:var(--err)">⏸ Pause</button>
+    <h3>Echtzeit-Daten</h3>
+    <div class="data-row"><span>Status:</span><span class="val" id="val_status" style="color:var(--ok)">LÄUFT</span></div>
+    <div class="data-row"><span>Drehzahl:</span><span class="val" id="val_rpm">0</span></div>
+    <div class="data-row"><span>Drehmoment:</span><span class="val" id="val_torque">0</span></div>
+    <div class="data-row"><span>Strom I_q:</span><span class="val" id="val_iq">0</span></div>
+    <div class="data-row"><span>Strom I_d:</span><span class="val" id="val_id">0</span></div>
+    <div class="data-row"><span>Leistung:</span><span class="val" id="val_power">0</span></div>
+    <div class="data-row"><span>Grid:</span><span class="val" id="val_grid">100px</span></div>
+    <div style="margin-top:8px;font-size:.73rem;color:#888">FDM Physikmodell<br>2p = <span id="poles_display">6</span></div>
+  </div>
+</div><!-- /preview-pane -->
+
+</div><!-- /workspace -->
+
+<div id="hsplit" title="Ziehen: Footer-Höhe ändern (zeigt das volle Analyse-Log)"></div>
+
+<!-- ═══════════════════ FOOTER (global run + progress) ════════════════════════ -->
+<div id="footer">
+  <div class="foot-row">
+    <button id="btn_cad_preview" class="foot-secondary" title="Nur Geometrie bauen und ansehen (FreeCAD/STEP), ohne Rechnung">🧊 CAD ansehen</button>
+    <button id="btn_smoke" class="foot-secondary" title="Schneller Selbsttest der Rechenkette (~15 s)">🧪 Smoke-Test</button>
+    <button id="btn_analyse" class="start foot-start">⚙ Echte Berechnung</button>
+    <div id="analysis-progress">
+      <span id="progress-title">Analyse läuft…</span>
+      <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
+    </div>
+  </div>
+  <div class="progress-log" id="progress-log"></div>
+</div>
+
+<!-- ═══════════════════ PROJEKT-GALERIE (Modal) ═══════════════════════════════ -->
+<div id="project-gallery" style="display:none;position:fixed;inset:0;z-index:200;
+     background:rgba(0,0,0,.78);overflow-y:auto;padding:24px">
+  <div style="max-width:1280px;margin:0 auto;background:#1b1b1f;border:1px solid #3e3e42;
+       border-radius:8px;padding:18px">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+      <h2 style="margin:0;color:#fff;font-size:1.1rem">📂 Projekt-Browser</h2>
+      <input id="gallery-search" oninput="renderGallery()" placeholder="Filtern (Name, Topologie)…"
+             style="flex:1;max-width:340px;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:7px;border-radius:4px;font-size:.82rem"/>
+      <label style="font-size:.78rem;color:#aaa;display:flex;gap:5px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="gallery-only-results" checked onchange="renderGallery()"/> nur mit Ergebnissen
+      </label>
+      <span id="gallery-count" style="font-size:.78rem;color:#888;margin-left:auto"></span>
+      <button onclick="closeProjectGallery()" style="background:#555;width:auto;padding:7px 16px;font-size:.8rem">✕ Schließen</button>
+    </div>
+    <div id="gallery-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px">
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ TEXT → EMA (Modal) ════════════════════════════════════ -->
+<div id="t2e-modal" style="display:none;position:fixed;inset:0;z-index:215;
+     background:rgba(0,0,0,.8);overflow-y:auto;padding:22px">
+  <div style="max-width:820px;margin:0 auto;background:#1b1b1f;border:1px solid #3e3e42;border-radius:8px;padding:18px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px">
+      <h2 style="margin:0;color:#fff;font-size:1.1rem">🧠 Text → Auslegung</h2>
+      <button onclick="closeText2Ema()" style="margin-left:auto;background:#555;width:auto;padding:7px 16px;font-size:.8rem">✕ Schließen</button>
+    </div>
+    <div style="font-size:.8rem;color:#999;margin-bottom:8px">Beschreibe die Anwendung in eigenen Worten — Leistung, Drehzahl, Drehmoment, Bauraum, Kühlung, Kosten/Effizienz-Ziele. Das lokale LLM leitet einen ersten, in sich stimmigen Parametersatz ab (du kannst danach alles im Formular feinjustieren).</div>
+    <textarea id="t2e-desc" rows="4" placeholder="z.B. Traktionsmotor für ein kompaktes E-Auto, ca. 150 kW, hohes Anfahrmoment, Maximaldrehzahl 16000 U/min, wassergekühlt, möglichst effizient und leicht."
+              style="width:100%;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:9px;border-radius:4px;font-size:.84rem;resize:vertical;font-family:inherit"></textarea>
+    <button id="t2e-run" onclick="runText2Ema()" style="background:#1f7a5a;width:100%;padding:11px;font-size:.82rem;margin-top:8px">⚙ Parameter ableiten</button>
+    <div id="t2e-out" style="margin-top:12px"></div>
+  </div>
+</div>
+
+<!-- ═══════════════════ WISSENSBASIS / RAG (Modal) ════════════════════════════ -->
+<div id="rag-modal" style="display:none;position:fixed;inset:0;z-index:216;
+     background:rgba(0,0,0,.8);overflow-y:auto;padding:22px">
+  <div style="max-width:900px;margin:0 auto;background:#1b1b1f;border:1px solid #3e3e42;border-radius:8px;padding:18px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+      <h2 style="margin:0;color:#fff;font-size:1.1rem">📚 Wissensbasis (RAG)</h2>
+      <span id="rag-stats" style="font-size:.74rem;color:#888"></span>
+      <button onclick="closeRag()" style="margin-left:auto;background:#555;width:auto;padding:7px 16px;font-size:.8rem">✕ Schließen</button>
+    </div>
+    <div style="font-size:.78rem;color:#999;margin-bottom:12px">
+      Hinterlege technische/geometrische Daten. <b>Referenzmaschinen</b> fließen in „Aus
+      Beschreibung ableiten" ein, <b>Dokumentation</b> in den Chat. Suche per lokalem
+      Embedding-Modell (Ollama) — die relevantesten Ausschnitte werden automatisch
+      mitgegeben.
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+      <label style="font-size:.8rem;color:#bbb">Kategorie</label>
+      <select id="rag-cat" style="flex:0 0 auto;width:auto">
+        <option value="maschinen">Referenzmaschinen (Text→Auslegung)</option>
+        <option value="doku">Dokumentation (Chat)</option>
+      </select>
+      <input id="rag-title" placeholder="Titel (optional)" style="flex:1;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:7px;border-radius:4px;font-size:.82rem"/>
+    </div>
+
+    <textarea id="rag-text" rows="5" placeholder="Text einfügen — z.B. Datenblatt-Auszug, Geometrie/Kennwerte einer guten Maschine, oder eine technische Notiz/Doku."
+              style="width:100%;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:9px;border-radius:4px;font-size:.83rem;resize:vertical;font-family:inherit"></textarea>
+    <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
+      <button id="rag-add-btn" onclick="ragAddText()" style="background:#5a4a7a;width:auto;padding:9px 16px;font-size:.8rem">＋ Text hinzufügen</button>
+      <span style="color:#666;font-size:.78rem">oder Datei:</span>
+      <input type="file" id="rag-file" accept=".txt,.md,.csv,.pdf" style="font-size:.78rem;color:#bbb"/>
+      <button id="rag-up-btn" onclick="ragUpload()" style="background:#46688a;width:auto;padding:9px 16px;font-size:.8rem">⬆ Datei hochladen (txt/md/csv/pdf)</button>
+      <span id="rag-msg" style="font-size:.78rem;color:#9c9"></span>
+    </div>
+
+    <div style="font-size:.82rem;color:#ccc;margin:14px 0 6px;font-weight:600">Hinterlegte Dokumente</div>
+    <div id="rag-list" style="font-size:.8rem;color:#bbb">Lade…</div>
+  </div>
+</div>
+
+<!-- ═══════════════════ ZIELWERTOPTIMIERUNG (Modal) ═══════════════════════════ -->
+<div id="opt-modal" style="display:none;position:fixed;inset:0;z-index:215;
+     background:rgba(0,0,0,.8);overflow-y:auto;padding:22px">
+  <div style="max-width:1080px;margin:0 auto;background:#1b1b1f;border:1px solid #3e3e42;border-radius:8px;padding:18px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:14px">
+      <h2 style="margin:0;color:#fff;font-size:1.1rem">🎯 Zielwertoptimierung</h2>
+      <button onclick="closeOptimizer()" style="margin-left:auto;background:#555;width:auto;padding:7px 16px;font-size:.8rem">✕ Schließen</button>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:18px">
+      <!-- left: setup -->
+      <div id="opt-setup">
+        <div class="section-h">Ziel</div>
+        <div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+          <select id="opt-obj-metric" style="flex:1"></select>
+          <select id="opt-obj-goal" onchange="document.getElementById('opt-obj-target-wrap').style.display=this.value==='target'?'':'none'" style="width:130px">
+            <option value="max">maximieren</option>
+            <option value="min">minimieren</option>
+            <option value="target">Zielwert</option>
+          </select>
+        </div>
+        <div id="opt-obj-target-wrap" style="display:none;margin-bottom:6px">
+          <input type="number" id="opt-obj-target" placeholder="Zielwert" style="width:100%;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:6px;border-radius:3px"/>
+        </div>
+
+        <div class="section-h" style="margin-top:12px">Randbedingungen (müssen gelten)</div>
+        <div id="opt-constraints"></div>
+        <button onclick="addOptConstraint()" style="background:#3a3f4b;width:100%;padding:6px;font-size:.74rem;margin-top:4px">＋ Randbedingung</button>
+
+        <div class="section-h" style="margin-top:12px">Freie Parameter (Bereich von–bis)</div>
+        <div id="opt-free"></div>
+
+        <div style="display:flex;gap:6px;align-items:center;margin-top:12px">
+          <label style="font-size:.78rem;color:#aaa">Budget (Auswertungen)</label>
+          <input type="number" id="opt-budget" value="24" min="6" max="80" step="2" style="width:70px;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:5px;border-radius:3px"/>
+        </div>
+        <button id="opt-run" onclick="runOptimize()" style="background:#27ae60;width:100%;padding:11px;font-size:.82rem;margin-top:10px">▶ Optimierung starten</button>
+      </div>
+      <!-- right: progress + result -->
+      <div id="opt-out">
+        <div class="section-h">Fortschritt</div>
+        <div style="background:#222;height:7px;border-radius:8px;margin-bottom:6px;overflow:hidden">
+          <div id="opt-bar" style="background:#b8860b;height:100%;width:0%;transition:width .3s"></div>
+        </div>
+        <div id="opt-log" style="font-family:monospace;font-size:.7rem;color:#aaa;max-height:170px;overflow-y:auto;line-height:1.5;background:#141416;border-radius:4px;padding:7px"></div>
+        <div id="opt-result" style="margin-top:12px"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ ERGEBNIS-CHAT (Ollama) ════════════════════════════════ -->
+<button id="chat-fab" onclick="toggleChat()" title="Ergebnis-Chat"
+        style="position:fixed;bottom:18px;right:18px;z-index:210;width:auto;border-radius:24px;
+               padding:11px 18px;font-size:.82rem;background:#6a4caf;box-shadow:0 2px 10px rgba(0,0,0,.5)">💬 Chat</button>
+<div id="chat-panel" style="display:none;position:fixed;bottom:70px;right:18px;z-index:210;
+     width:380px;max-width:94vw;height:520px;max-height:80vh;background:#1c1c20;border:1px solid #3e3e42;
+     border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.55);display:none;flex-direction:column">
+  <div style="display:flex;align-items:center;gap:8px;padding:10px 12px;border-bottom:1px solid #333">
+    <strong style="color:#fff;font-size:.9rem">💬 Ergebnis-Chat</strong>
+    <span id="chat-scope" style="font-size:.7rem;color:#888"></span>
+    <button onclick="clearChat()" title="Verlauf löschen" style="margin-left:auto;background:#444;width:auto;padding:4px 9px;font-size:.7rem">Neu</button>
+    <button onclick="toggleChat()" style="background:#555;width:auto;padding:4px 9px;font-size:.7rem">✕</button>
+  </div>
+  <div id="chat-msgs" style="flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:9px;font-size:.82rem"></div>
+  <div style="display:flex;gap:6px;padding:10px;border-top:1px solid #333">
+    <textarea id="chat-input" rows="2" placeholder="Frage zu den Ergebnissen…"
+              style="flex:1;background:#2a2a2e;border:1px solid #444;color:#ddd;border-radius:4px;padding:7px;font-size:.82rem;resize:none;font-family:inherit"
+              onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendChat();}"></textarea>
+    <button id="chat-send" onclick="sendChat()" style="width:auto;padding:7px 14px;font-size:.78rem">➤</button>
+  </div>
+</div>
 
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
+const TABS = ['geo','betrieb','calc','live','results','report','compare'];
+// tabs that keep the live preview pane (field canvas) visible on the right
+const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
+const PANEL_OF = {
+  geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
+  results:'tab-results', report:'panel-report', compare:'tab-compare'
+};
+
 function switchTab(name) {
-  document.getElementById('tab-sim').style.display     = name === 'sim'     ? 'flex' : 'none';
-  document.getElementById('tab-results').style.display = name === 'results' ? 'flex' : 'none';
-  document.getElementById('tab-compare').style.display = name === 'compare' ? 'block' : 'none';
-  ['sim','results','compare'].forEach(t => {
+  window._activeTab = name;
+  TABS.forEach(t => {
+    const panel = document.getElementById(PANEL_OF[t]);
+    if (panel) panel.classList.toggle('active', t === name);
     const btn = document.getElementById('tbtn-' + t);
     if (btn) btn.classList.toggle('active', t === name);
   });
-  // Two RAFs: first applies display:flex, second measures after layout
-  if (name === 'sim') requestAnimationFrame(() => requestAnimationFrame(() => {
+  const showPreview = PREVIEW_TABS.has(name);
+  const pane = document.getElementById('preview-pane');
+  if (pane) pane.classList.toggle('hidden', !showPreview);
+  const vsp = document.getElementById('vsplit');
+  if (vsp) vsp.classList.toggle('hidden', !showPreview);
+  // Two RAFs: first applies the layout change, second measures the canvas
+  if (PREVIEW_TABS.has(name)) requestAnimationFrame(() => requestAnimationFrame(() => {
     if (typeof resize === 'function') resize();
   }));
-  if (name === 'compare') refreshComparePicker();
+  if (name === 'calc' && typeof initParamStudy === 'function') initParamStudy();
+  if (name === 'compare') { refreshComparePicker(); renderVariantList(); refreshVariantSets(); refreshTrainingStats(); }
+  if (history.replaceState) history.replaceState(null, '', '#' + name);
 }
+
+// Deep-link: open a tab directly via URL hash (e.g. …/#compare). Disabled tabs are ignored.
+window.addEventListener('load', () => {
+  const h = location.hash.slice(1);
+  if (TABS.includes(h)) {
+    const btn = document.getElementById('tbtn-' + h);
+    if (btn && !btn.disabled) switchTab(h);
+  } else if (h === 'projects') {
+    openProjectGallery();
+  } else if (h === 'optimize') {
+    openOptimizer();
+  } else if (h === 'text2ema') {
+    openText2Ema();
+  } else if (h === 'rag') {
+    openRag();
+  }
+});
 
 // ── Compare tab ────────────────────────────────────────────────────────────────
 
@@ -885,9 +1612,9 @@ function updateCompareCount() {
   const sel = document.querySelectorAll('.cmp-checkbox:checked');
   const cnt = document.getElementById('cmp-count');
   if (sel.length === 0) { cnt.textContent = ''; return; }
-  cnt.textContent = `${sel.length}/4 ausgewählt`;
-  // Limit to 4: disable other unchecked
-  if (sel.length >= 4) {
+  cnt.textContent = `${sel.length}/10 ausgewählt`;
+  // Limit to 10: disable other unchecked
+  if (sel.length >= 10) {
     document.querySelectorAll('.cmp-checkbox:not(:checked)').forEach(cb => cb.disabled = true);
   } else {
     document.querySelectorAll('.cmp-checkbox').forEach(cb => cb.disabled = false);
@@ -899,7 +1626,7 @@ document.getElementById('btn_compare').addEventListener('click', runCompare);
 async function runCompare() {
   const ids = [...document.querySelectorAll('.cmp-checkbox:checked')].map(cb => cb.value);
   if (ids.length < 1) { alert('Mindestens ein Projekt auswählen'); return; }
-  if (ids.length > 4) { alert('Maximal 4 Projekte'); return; }
+  if (ids.length > 10) { alert('Maximal 10 Projekte'); return; }
   const btn = document.getElementById('btn_compare');
   btn.disabled = true; btn.textContent = '⏳ lädt…';
   try {
@@ -936,6 +1663,421 @@ function renderCompareResults(r) {
       `<td style="color:#666;font-size:.78rem">${escHtml(row.unit || '')}</td></tr>`;
   }).join('');
 }
+
+async function makeComparisonReport(agentic = false) {
+  const ids = [...document.querySelectorAll('.cmp-checkbox:checked')].map(cb => cb.value);
+  if (ids.length < 2) { alert('Mindestens 2 Projekte für einen Vergleichsbericht wählen'); return; }
+  const btn = document.getElementById(agentic ? 'btn_cmp_report_ag' : 'btn_cmp_report');
+  const st  = document.getElementById('cmp-report-status');
+  btn.disabled = true;
+  st.textContent = agentic ? '⏳ 6 Experten analysieren die Varianten…' : '⏳ Bericht wird erzeugt…';
+  try {
+    const model = (document.getElementById('cmp_model') || {}).value || 'ministral-3:14b';
+    const r = await fetch('/compare/report', { method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ ids, agentic, model }) }).then(x => x.json());
+    if (r.error) { st.textContent = '❌ ' + r.error; btn.disabled = false; return; }
+    const poll = setInterval(async () => {
+      const s = await fetch('/report/status').then(x => x.json());
+      st.textContent = `⏳ ${s.progress}% — ${(s.log[s.log.length-1] || '').slice(0, 60)}`;
+      if (s.status === 'done') {
+        clearInterval(poll); btn.disabled = false;
+        st.innerHTML = '✓ fertig — <a href="/compare/report/download" style="color:#0cf">herunterladen</a>';
+      } else if (s.status === 'error') {
+        clearInterval(poll); btn.disabled = false; st.textContent = '❌ Fehler bei der Berichterzeugung';
+      }
+    }, 1500);
+  } catch (e) { st.textContent = '❌ ' + e.message; btn.disabled = false; }
+}
+
+// Poll the report status until done/error; resolve with the final status string.
+function _pollReportDone() {
+  return new Promise(resolve => {
+    const st = document.getElementById('cmp-report-status');
+    const t = setInterval(async () => {
+      try {
+        const s = await fetch('/report/status').then(x => x.json());
+        st.textContent = `⏳ ${s.progress}% — ${(s.log[s.log.length-1] || '').slice(0, 70)}`;
+        if (s.status === 'done' || s.status === 'error') { clearInterval(t); resolve(s.status); }
+      } catch (e) { /* keep polling */ }
+    }, 1500);
+  });
+}
+
+// Run the agentic comparison report sequentially with three models so they can be
+// compared side by side. Each finished PDF is captured (blob) before the next run
+// overwrites the server-side report state, and offered as a labelled download link.
+async function makeComparisonReportTriple() {
+  const ids = [...document.querySelectorAll('.cmp-checkbox:checked')].map(cb => cb.value);
+  if (ids.length < 2) { alert('Mindestens 2 Projekte wählen'); return; }
+  const models = ['gemma4:e4b', 'ministral-3:14b', 'gemma4:26b'];
+  const btn = document.getElementById('btn_cmp_report_triple');
+  const st  = document.getElementById('cmp-report-status');
+  const box = document.getElementById('cmp-triple-links');
+  btn.disabled = true; box.innerHTML = '';
+  const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '');
+  for (let i = 0; i < models.length; i++) {
+    const m = models[i];
+    st.textContent = `⏳ (${i + 1}/3) ${m} startet…`;
+    try {
+      const r = await fetch('/compare/report', { method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ ids, agentic: true, model: m }) }).then(x => x.json());
+      if (r.error) {
+        box.insertAdjacentHTML('beforeend', `<span style="color:#e57;font-size:.78rem">❌ ${m}: ${r.error}</span>`);
+        continue;
+      }
+      const status = await _pollReportDone();
+      if (status !== 'done') {
+        box.insertAdjacentHTML('beforeend', `<span style="color:#e57;font-size:.78rem">❌ ${m}: Fehler bei der Erzeugung</span>`);
+        continue;
+      }
+      // Grab the freshly rendered PDF before the next model overwrites it
+      const blob = await fetch('/compare/report/download').then(x => x.blob());
+      const url  = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.textContent = `📄 Vergleichsbericht — ${m}`;
+      a.download = `vergleich_${m.replace(/[:.]/g, '-')}_${stamp}.pdf`;
+      a.style.cssText = 'color:#0cf;font-size:.82rem;text-decoration:none';
+      box.appendChild(a);
+    } catch (e) {
+      box.insertAdjacentHTML('beforeend', `<span style="color:#e57;font-size:.78rem">❌ ${m}: ${e.message}</span>`);
+    }
+  }
+  st.textContent = '✓ alle Modelle fertig — Berichte unten herunterladen';
+  btn.disabled = false;
+}
+
+// ── Variant manager ─────────────────────────────────────────────────────────
+let variants = [];
+
+function _updateVarBadge() {
+  const el = document.getElementById('var-badge');
+  if (el) el.textContent = variants.length;
+}
+
+// Save the current canvas geometry as a variant (callable from the config panel).
+async function rememberGeometry() {
+  if (variants.length >= 10) { alert('Maximal 10 Geometrien — im Tab „Vergleich" verwalten/ausführen.'); return; }
+  const nm = (document.getElementById('project_name').value || '').trim()
+             || `Geometrie ${variants.length + 1}`;
+  const payload = await buildPayload();
+  payload.project_name = nm;
+  variants.push({ name: nm, payload });
+  _updateVarBadge();
+  renderVariantList();
+  const b = document.getElementById('btn_remember_geo');
+  const prev = b.textContent;
+  b.textContent = `✓ „${nm}" gemerkt (${variants.length}/10)`;
+  setTimeout(() => { b.innerHTML = `＋ Geometrie merken (Variante <span id="var-badge">${variants.length}</span>/10) → Vergleich`; }, 1100);
+}
+
+function renderVariantList() {
+  const el = document.getElementById('var-list');
+  _updateVarBadge();
+  if (!el) return;
+  if (!variants.length) {
+    el.innerHTML = '<div style="color:#666;font-size:.78rem">Noch keine Varianten — „＋ Geometrie merken" (Konfig-Panel) oder „+ Aktuelle Konfig" fügt die aktuellen Parameter hinzu.</div>';
+    return;
+  }
+  el.innerHTML = variants.map((v, i) =>
+    `<div style="display:flex;gap:6px;align-items:center;background:#0f0f1a;border:1px solid #333;border-radius:4px;padding:4px 6px">
+       <span style="color:#888;font-size:.75rem;width:22px">#${i+1}</span>
+       <input value="${escHtml(v.name)}" onchange="variants[${i}].name=this.value" style="flex:1;background:transparent;border:none;color:#eee;font-size:.8rem"/>
+       <span style="color:#666;font-size:.72rem">${escHtml(v.payload.geom.magShape)} · p${v.payload.geom.p}</span>
+       <button onclick="deleteVariant(${i})" style="background:#822;padding:2px 8px;font-size:.72rem">✕</button>
+     </div>`).join('');
+}
+
+async function addVariant() {
+  if (variants.length >= 10) { alert('Maximal 10 Varianten'); return; }
+  const nm = (document.getElementById('var-name').value || '').trim()
+             || `Variante ${variants.length + 1}`;
+  const payload = await buildPayload();
+  payload.project_name = nm;
+  variants.push({ name: nm, payload });
+  document.getElementById('var-name').value = '';
+  renderVariantList();
+}
+
+function deleteVariant(i) { variants.splice(i, 1); renderVariantList(); }
+
+function exportVariants() {
+  if (!variants.length) { alert('Keine Varianten zum Exportieren'); return; }
+  const set = { schema_version: 1, kind: 'ema_variant_set',
+                name: document.getElementById('var-set-name').value || 'varianten',
+                created: new Date().toISOString(), variants };
+  const blob = new Blob([JSON.stringify(set, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = (set.name || 'varianten') + '.emavars.json';
+  a.click(); URL.revokeObjectURL(a.href);
+}
+
+function importVariants(ev) {
+  const f = ev.target.files[0]; if (!f) return;
+  const rd = new FileReader();
+  rd.onload = () => {
+    try {
+      const set = JSON.parse(rd.result);
+      if (set.kind !== 'ema_variant_set' || !Array.isArray(set.variants))
+        throw new Error('Kein gültiges Varianten-Set');
+      variants = set.variants.slice(0, 10);
+      if (set.name) document.getElementById('var-set-name').value = set.name;
+      renderVariantList();
+      document.getElementById('var-status').textContent = `${variants.length} Varianten importiert`;
+    } catch (e) { alert('Import fehlgeschlagen: ' + e.message); }
+  };
+  rd.readAsText(f);
+  ev.target.value = '';
+}
+
+function _pollUntilDone() {
+  return new Promise((resolve) => {
+    const t = setInterval(async () => {
+      try {
+        const s = await fetch('/status').then(r => r.json());
+        document.getElementById('progress-fill').style.width = s.progress + '%';
+        if (s.log && s.log.length) {
+          const logEl = document.getElementById('progress-log');
+          logEl.innerHTML = s.log.map(l => `<p>${escHtml(l)}</p>`).join('');
+          logEl.scrollTop = logEl.scrollHeight;
+        }
+        if (s.status === 'done' || s.status === 'error') { clearInterval(t); resolve(s.status); }
+      } catch (e) { /* keep polling */ }
+    }, 1200);
+  });
+}
+
+async function runAllVariants() {
+  if (!variants.length) { alert('Keine Varianten'); return; }
+  const btn = document.getElementById('btn_run_all');
+  btn.disabled = true;
+  document.getElementById('tbtn-results').disabled = false;
+  switchTab('results');
+  document.getElementById('analysis-progress').classList.add('show');
+  document.getElementById('results-content').style.display   = 'none';
+  const ranIds = [];
+  for (let i = 0; i < variants.length; i++) {
+    const v = variants[i];
+    document.getElementById('progress-title').textContent =
+      `⚙ Variante ${i+1}/${variants.length}: ${v.name}`;
+    document.getElementById('var-status').textContent = `läuft: ${i+1}/${variants.length}`;
+    try {
+      const resp = await fetch('/analyse', { method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(v.payload) });
+      if (!resp.ok) { addLog('❌ Variante ' + v.name + ' Start fehlgeschlagen'); continue; }
+      const st = await _pollUntilDone();
+      const cur = await fetch('/status').then(r => r.json());
+      if (cur.project_id) ranIds.push(cur.project_id);
+      if (st === 'error') addLog('❌ Variante ' + v.name + ' fehlgeschlagen');
+    } catch (e) { addLog('❌ ' + v.name + ': ' + e.message); }
+  }
+  btn.disabled = false;
+  document.getElementById('var-status').textContent = `fertig: ${ranIds.length} Projekte`;
+  // Jump back to compare and preselect the freshly-run projects
+  switchTab('compare');
+  await refreshComparePicker();
+  ranIds.forEach(id => {
+    const cb = document.querySelector(`.cmp-checkbox[value="${id}"]`);
+    if (cb) cb.checked = true;
+  });
+  updateCompareCount();
+}
+
+async function saveVariantSet() {
+  const name = (document.getElementById('var-set-name').value || '').trim();
+  if (!name) { alert('Set-Name angeben'); return; }
+  if (!variants.length) { alert('Keine Varianten'); return; }
+  const r = await fetch('/variants/save', { method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ name, created: new Date().toISOString(), variants }) }).then(x => x.json());
+  if (r.error) { alert(r.error); return; }
+  document.getElementById('var-status').textContent = `Set „${name}" gespeichert`;
+  refreshVariantSets();
+}
+
+async function loadVariantSet(name) {
+  if (!name) return;
+  const set = await fetch('/variants/load/' + encodeURIComponent(name)).then(x => x.json());
+  if (set.error) { alert(set.error); return; }
+  variants = (set.variants || []).slice(0, 10);
+  document.getElementById('var-set-name').value = set.name || name;
+  renderVariantList();
+  document.getElementById('var-status').textContent = `Set „${name}" geladen (${variants.length})`;
+}
+
+async function refreshVariantSets() {
+  try {
+    const r = await fetch('/variants/list').then(x => x.json());
+    const sel = document.getElementById('var-set-list');
+    sel.innerHTML = '<option value="">— Server-Set laden —</option>' +
+      (r.sets || []).map(s => `<option value="${escHtml(s.name)}">${escHtml(s.label)} (${s.n_variants})</option>`).join('');
+  } catch (e) { /* ignore */ }
+}
+
+// ── Parameter table (column variation) ───────────────────────────────────────
+// Spalte 1 = Ausgangswerte; jede weitere Spalte ist eine editierbare Variante.
+let _ptabSchema = null;            // [{key,desc,kind,in_geom,lo,hi,int,options,def}]
+let _ptabCols   = [];             // [{name, values:{key:val}}]  (col 0 = Basis)
+
+// Map a schema key into the full /analyse payload (geom vs. top-level vs. axial_len)
+function _ptabApply(payload, key, val, spec) {
+  if (val === undefined || val === null || val === '') return;
+  if (spec.kind === 'num') val = spec.int ? parseInt(val) : parseFloat(val);
+  if (spec.in_geom)        payload.geom[key] = val;
+  else if (key === 'axialLen') payload.axial_len = val;
+  else                     payload[key] = val;
+}
+// Read a schema key's value out of a built payload (for the baseline column)
+function _ptabRead(payload, spec) {
+  const key = spec.key;
+  if (spec.in_geom)        return payload.geom ? payload.geom[key] : undefined;
+  if (key === 'axialLen')  return payload.axial_len;
+  return payload[key];
+}
+
+async function buildParamTable() {
+  const st = document.getElementById('ptab-status');
+  try {
+    if (!_ptabSchema) {
+      const r = await fetch('/param_schema').then(x => x.json());
+      _ptabSchema = r.params || [];
+    }
+    const base = await buildPayload();
+    const vals = {};
+    _ptabSchema.forEach(spec => {
+      let v = _ptabRead(base, spec);
+      if (v === undefined || v === null) v = spec.def;
+      vals[spec.key] = v;
+    });
+    _ptabCols = [{ name: 'Ausgangswerte', values: vals }];
+    renderParamTable();
+    st.textContent = `${_ptabSchema.length} Parameter geladen`;
+  } catch (e) { st.textContent = '❌ ' + e.message; }
+}
+
+function addParamColumn() {
+  if (!_ptabCols.length) { buildParamTable(); return; }
+  if (_ptabCols.length >= 10) { alert('Maximal 10 Spalten'); return; }
+  const last = _ptabCols[_ptabCols.length - 1];
+  _ptabCols.push({ name: `Variante ${_ptabCols.length}`, values: { ...last.values } });
+  renderParamTable();
+}
+
+function removeParamColumn() {
+  if (_ptabCols.length <= 1) { alert('Die Ausgangsspalte bleibt erhalten'); return; }
+  _ptabCols.pop();
+  renderParamTable();
+}
+
+function _ptabCell(spec, ci, val) {
+  // Column 0 (baseline) is read-only; the rest are editable.
+  const ro = ci === 0;
+  const id = `ptab_${spec.key}_${ci}`;
+  if (spec.kind === 'enum') {
+    const opts = (spec.options || []).map(o =>
+      `<option value="${escHtml(o.value)}" ${o.value == val ? 'selected' : ''}>${escHtml(o.label)}</option>`).join('');
+    return `<select ${ro ? 'disabled' : ''} onchange="_ptabSet('${spec.key}',${ci},this.value)"
+              style="width:100%;background:${ro ? '#15151f' : '#0f0f1a'};border:1px solid #333;color:#ddd;padding:3px;border-radius:3px;font-size:.74rem">${opts}</select>`;
+  }
+  const step = spec.int ? '1' : 'any';
+  return `<input type="number" step="${step}" value="${val ?? ''}" ${ro ? 'readonly' : ''}
+            min="${spec.lo ?? ''}" max="${spec.hi ?? ''}"
+            onchange="_ptabSet('${spec.key}',${ci},this.value)"
+            style="width:88px;background:${ro ? '#15151f' : '#0f0f1a'};border:1px solid #333;color:#ddd;padding:3px 4px;border-radius:3px;font-size:.74rem"/>`;
+}
+
+function _ptabSet(key, ci, val) {
+  if (_ptabCols[ci]) _ptabCols[ci].values[key] = val;
+}
+
+function renderParamTable() {
+  const wrap = document.getElementById('ptab-wrap');
+  if (!_ptabCols.length) {
+    wrap.innerHTML = '<div style="color:#666;font-size:.82rem;padding:14px">Noch keine Tabelle.</div>';
+    return;
+  }
+  let head = '<tr><th style="text-align:left;min-width:210px">Parameter</th>';
+  _ptabCols.forEach((c, ci) => {
+    head += `<th style="min-width:100px">${ci === 0
+      ? escHtml(c.name)
+      : `<input value="${escHtml(c.name)}" onchange="_ptabCols[${ci}].name=this.value"
+           style="width:96px;background:transparent;border:none;border-bottom:1px solid #444;color:#7db9e8;font-size:.78rem;text-align:center"/>`}</th>`;
+  });
+  head += '</tr>';
+  let body = '';
+  _ptabSchema.forEach(spec => {
+    body += `<tr><td style="font-size:.76rem;color:#bbb">${escHtml(spec.desc)}</td>`;
+    _ptabCols.forEach((c, ci) => {
+      body += `<td style="text-align:center">${_ptabCell(spec, ci, c.values[spec.key])}</td>`;
+    });
+    body += '</tr>';
+  });
+  wrap.innerHTML = `<table class="data-table" style="font-size:.76rem">
+    <thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+// Build a full /analyse payload for one table column (baseline form + overrides)
+async function _ptabColPayload(col) {
+  const p = await buildPayload();
+  _ptabSchema.forEach(spec => _ptabApply(p, spec.key, col.values[spec.key], spec));
+  p.project_name = col.name || 'Variante';
+  return p;
+}
+
+function paramTableToVariants() {
+  if (_ptabCols.length < 1) { alert('Keine Tabelle'); return; }
+  Promise.all(_ptabCols.map(async c => ({ name: c.name, payload: await _ptabColPayload(c) })))
+    .then(vs => { variants = vs.slice(0, 10); renderVariantList(); _updateVarBadge();
+      document.getElementById('ptab-status').textContent = `${variants.length} Spalten als Varianten übernommen`; });
+}
+
+async function runParamTable() {
+  if (_ptabCols.length < 1) { alert('Erst eine Tabelle erzeugen'); return; }
+  const st = document.getElementById('ptab-status');
+  document.getElementById('tbtn-results').disabled = false;
+  switchTab('results');
+  document.getElementById('analysis-progress').classList.add('show');
+  document.getElementById('results-content').style.display = 'none';
+  const ranIds = [];
+  for (let i = 0; i < _ptabCols.length; i++) {
+    const col = _ptabCols[i];
+    document.getElementById('progress-title').textContent =
+      `⚙ Spalte ${i+1}/${_ptabCols.length}: ${col.name}`;
+    try {
+      const payload = await _ptabColPayload(col);
+      const resp = await fetch('/analyse', { method: 'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify(payload) });
+      if (!resp.ok) { addLog('❌ Spalte ' + col.name + ' Start fehlgeschlagen'); continue; }
+      const s = await _pollUntilDone();
+      const cur = await fetch('/status').then(r => r.json());
+      if (cur.project_id) ranIds.push(cur.project_id);
+      if (s === 'error') addLog('❌ Spalte ' + col.name + ' fehlgeschlagen');
+    } catch (e) { addLog('❌ ' + col.name + ': ' + e.message); }
+  }
+  switchTab('compare');
+  await refreshComparePicker();
+  ranIds.forEach(id => {
+    const cb = document.querySelector(`.cmp-checkbox[value="${id}"]`);
+    if (cb) cb.checked = true;
+  });
+  updateCompareCount();
+  refreshTrainingStats();
+  if (st) st.textContent = `fertig: ${ranIds.length} Spalten gerechnet`;
+}
+
+async function refreshTrainingStats() {
+  try {
+    const s = await fetch('/training/stats').then(x => x.json());
+    const el = document.getElementById('training-stats');
+    if (el) el.textContent = `— ${s.n_total} Datensätze (👍 ${s.n_gut} · 👎 ${s.n_schlecht} · offen ${s.n_unbewertet}) · ${s.n_images || 0} Bilder → ${s.n_vlm || 0} VLM-Einträge`;
+    const dl = document.getElementById('training-dl');
+    if (dl) dl.style.opacity = s.exists ? '1' : '0.4';
+    const dlv = document.getElementById('training-dl-vlm');
+    if (dlv) dlv.style.opacity = s.vlm_exists ? '1' : '0.4';
+  } catch (e) { /* ignore */ }
+}
 function showRtab(name) {
   document.querySelectorAll('.rtab-content').forEach(el => el.classList.remove('active'));
   document.querySelectorAll('.rtab-btn').forEach(btn => btn.classList.remove('active'));
@@ -952,6 +2094,10 @@ let _rpmList      = [];
 let _rpmStats     = {};  // {rpm: {iq, id, B_gap, ...}}
 let _currentRpm   = 0;
 let _framesPerRpm = 36;
+let _fieldMode    = 'rotate';     // bucket: rotate | react | load
+let _modeMeta     = {};           // bucket → meta {mode,label,sweep_label,sweep_values,...}
+
+const _MODE_BUCKET = { rotate: 'rotate', current_angle: 'react', load_ramp: 'load' };
 
 function _frameFlatIndex(rpm, frameIdx) {
   const ri = _rpmList.indexOf(rpm);
@@ -959,14 +2105,35 @@ function _frameFlatIndex(rpm, frameIdx) {
   return ri * _framesPerRpm + frameIdx;
 }
 
+function _modeFrameCount() {
+  const m = _modeMeta[_fieldMode] || {};
+  return _fieldMode === 'rotate' ? _framesPerRpm
+                                 : (m.sweep_values ? m.sweep_values.length : (m.frames || 0));
+}
+
 function showFrame(n) {
-  const img  = document.getElementById('field-img');
-  const lbl  = document.getElementById('anim-angle-lbl');
-  const sld  = document.getElementById('anim-slider');
-  const flat = _frameFlatIndex(_currentRpm, n);
-  img.src    = '/field/' + flat + '?t=' + Date.now();
-  sld.value  = n;
-  lbl.textContent = (_frameAngles[n] !== undefined ? _frameAngles[n].toFixed(1) : n) + '°';
+  const img = document.getElementById('field-img');
+  const lbl = document.getElementById('anim-angle-lbl');
+  const sld = document.getElementById('anim-slider');
+  const m   = _modeMeta[_fieldMode] || {};
+  if (_fieldMode === 'rotate') {
+    img.src = '/field/' + _frameFlatIndex(_currentRpm, n) + '?t=' + Date.now();
+    lbl.textContent = (_frameAngles[n] !== undefined ? _frameAngles[n].toFixed(1) : n) + '°';
+  } else {
+    img.src = '/field/' + _fieldMode + '/' + n + '?t=' + Date.now();
+    const sv = (m.sweep_values || [])[n];
+    lbl.textContent = (sv !== undefined ? sv : n) + (m.sweep_label ? ' ' + m.sweep_label.replace(/\[|\]/g, '').replace(/.*\s/, '') : '');
+  }
+  sld.value = n;
+}
+
+function selectFieldMode(bucket) {
+  _fieldMode = bucket;
+  document.getElementById('rpm-row').style.display = (bucket === 'rotate') ? '' : 'none';
+  const sld = document.getElementById('anim-slider');
+  sld.max = Math.max(0, _modeFrameCount() - 1);
+  sld.value = 0;
+  showFrame(0);
 }
 
 function selectRpm(rpm) {
@@ -988,8 +2155,9 @@ function toggleAnim() {
     btn.textContent = '▶ Play';
   } else {
     let frame = +document.getElementById('anim-slider').value;
+    const cnt = Math.max(1, _modeFrameCount());
     _animInterval = setInterval(() => {
-      frame = (frame + 1) % _framesPerRpm;
+      frame = (frame + 1) % cnt;
       showFrame(frame);
     }, 120);
     btn.textContent = '⏸ Pause';
@@ -1004,9 +2172,12 @@ function _updateRuntimeEstimate() {
   const nf    = +(document.getElementById('n_frames')?.value || 36);
   const fres  = +(document.getElementById('frame_resolution')?.value || 120);
   const nRpms = Math.max(1, Math.floor((rTo - rFrom) / Math.max(1, rStep)) + 1);
-  // measured: ~0.075 s at N=120 with Red-Black SOR float64
-  const secPerFrame = (fres * fres / 14400) * 0.075;
-  const total = nRpms * nf * secPerFrame + 30;  // +30 s overhead (FreeCAD, charts)
+  // Direct sparse solver: the operator is factorised ONCE per rotor angle
+  // (nf distinct angles) and only back-substituted per RPM.  Measured at N=300:
+  // factor ~0.41 s (~(N/300)^3), solve ~0.016 s (~(N/300)^2).
+  const factorPer = Math.pow(fres / 300, 3) * 0.41;   // per distinct rotor angle
+  const solvePer  = Math.pow(fres / 300, 2) * 0.016;  // per frame (back-substitution)
+  const total = nf * factorPer + nRpms * nf * solvePer + 30;  // +30 s overhead
   const el = document.getElementById('runtime_estimate');
   if (el) {
     const min = total / 60;
@@ -1023,6 +2194,8 @@ window.addEventListener('load', _updateRuntimeEstimate);
 let _pollTimer = null;
 
 document.getElementById('btn_analyse').addEventListener('click', startAnalysis);
+document.getElementById('btn_cad_preview').addEventListener('click', startCadPreview);
+document.getElementById('btn_smoke').addEventListener('click', startSmokeTest);
 document.getElementById('btn_freecad').addEventListener('click', openFreeCAD);
 document.getElementById('btn_step').addEventListener('click', downloadStep);
 document.getElementById('btn_report').addEventListener('click', () => generateReport('standard'));
@@ -1055,23 +2228,34 @@ async function refreshProjectList() {
 }
 
 async function onProjectSelect(e) {
-  const pid = e.target.value;
+  if (e.target.value) loadProjectById(e.target.value);
+}
+
+async function loadProjectById(pid) {
   if (!pid) return;
   document.getElementById('tbtn-results').disabled = false;
   switchTab('results');
-  document.getElementById('analysis-progress').style.display = 'none';
+  document.getElementById('analysis-progress').classList.remove('show');
   document.getElementById('results-content').style.display   = 'block';
   try {
     const r = await fetch('/project/' + encodeURIComponent(pid) + '/load').then(x => x.json());
     if (r.error) { alert('Laden fehlgeschlagen: ' + r.error); return; }
     const data = await fetch('/results').then(x => x.json());
+    const sel = document.getElementById('project_load'); if (sel) sel.value = pid;
+    // Sync the form to the project's saved inputs so "Stufen nachrechnen" (which uses
+    // the current form) matches this project. Best-effort; ignore on legacy projects.
+    try {
+      const tpl = await fetch('/project/' + encodeURIComponent(pid) + '/template').then(x => x.json());
+      if (tpl && tpl.payload) applyPayload(tpl.payload);
+    } catch (e) { /* keep current form */ }
     renderSummary(data.summary);
     renderField(data.em);
     renderCadImages(data.cad_images);
     renderAirgap(data.em);
     renderEmCurve(data.em);
     renderStress(data.structural_fem, data.structural_sweep, data.structural_sweep_chart_b64);
-    renderDeformation(data.deformation);
+    renderConnection(data.connection);
+    renderDeformation(data.deformation, data.structural_fem);
     renderThermal(data.thermal);
     renderDriveCycle(data.drivecycle);
     renderDriveCycleExtra(data.drivecycle_vollast,   'cycle-autobahn',  'cycle-autobahn-energy',  'cycle-autobahn-stats',  'rtab-btn-cycle-autobahn',  'cycle-autobahn-thermal',  'cycle-autobahn-therm-avg',  'cycle-autobahn-therm-peak',  'cycle-autobahn-therm-warn');
@@ -1080,25 +2264,536 @@ async function onProjectSelect(e) {
     document.getElementById('btn_freecad').style.display  = 'block';
     document.getElementById('btn_step').style.display     = 'block';
     document.getElementById('report_btns').style.display  = 'flex';
+    document.getElementById('tbtn-report').disabled = false;
+    renderRating(pid);
     showFrame(0);
   } catch(err) { alert('Fehler beim Laden: ' + err.message); }
 }
 
 refreshProjectList();
 
-async function startAnalysis() {
-  const btn = document.getElementById('btn_analyse');
-  btn.disabled = true;
-  btn.textContent = '⏳ Analyse läuft…';
+// ── Project gallery (browse + open + delete) ─────────────────────────────────
+let _galleryProjects = [];
+async function openProjectGallery() {
+  const ov = document.getElementById('project-gallery');
+  ov.style.display = 'block';
+  document.getElementById('gallery-grid').innerHTML =
+    '<div style="color:#888;padding:20px">Lade Projekte…</div>';
+  try {
+    const j = await fetch('/projects?detail=1').then(r => r.json());
+    _galleryProjects = j.projects || [];
+  } catch (e) {
+    document.getElementById('gallery-grid').innerHTML =
+      '<div style="color:#e57;padding:20px">Fehler beim Laden der Projekte.</div>';
+    return;
+  }
+  renderGallery();
+}
+function closeProjectGallery() { document.getElementById('project-gallery').style.display = 'none'; }
 
-  // Switch to results tab and show progress
-  document.getElementById('tbtn-results').disabled = false;
-  switchTab('results');
-  document.getElementById('analysis-progress').style.display = 'block';
-  document.getElementById('results-content').style.display   = 'none';
-  document.getElementById('progress-log').innerHTML = '';
-  document.getElementById('progress-fill').style.width = '0%';
+function _gNum(x, d = 0) {
+  return (x === null || x === undefined) ? '—'
+    : Number(x).toLocaleString('de-DE', { minimumFractionDigits: d, maximumFractionDigits: d });
+}
+function renderGallery() {
+  const q = (document.getElementById('gallery-search').value || '').toLowerCase();
+  const onlyRes = document.getElementById('gallery-only-results').checked;
+  const list = _galleryProjects.filter(p =>
+    (!onlyRes || p.has_results) &&
+    (!q || (p.label + ' ' + (p.topology || '') + ' ' + p.id).toLowerCase().includes(q)));
+  document.getElementById('gallery-count').textContent = list.length + ' Projekte';
+  const grid = document.getElementById('gallery-grid');
+  if (!list.length) { grid.innerHTML = '<div style="color:#888;padding:20px">Keine Projekte.</div>'; return; }
+  grid.innerHTML = list.map(p => {
+    const m = p.metrics || {};
+    const pid = encodeURIComponent(p.id);
+    const thumb = p.has_thumb
+      ? `<img src="/project/${pid}/thumb" loading="lazy"
+             style="width:100%;height:150px;object-fit:contain;background:#0d0d0d;border-radius:4px"/>`
+      : `<div style="height:150px;background:#0d0d0d;border-radius:4px;display:flex;align-items:center;justify-content:center;color:#555;font-size:.8rem">kein Bild</div>`;
+    // High-res EM-simulation field map (open circuit) — auto-saved by the pipeline.
+    const emThumb = p.has_em_field
+      ? `<a href="/project/${pid}/em_field" target="_blank" rel="noopener" title="EM-Feldsimulation in voller Auflösung öffnen">
+           <img src="/project/${pid}/em_field" loading="lazy"
+                style="width:100%;height:132px;object-fit:contain;background:#0d0d0d;border-radius:4px;margin-top:5px;cursor:zoom-in"/>
+         </a>
+         <div style="font-size:.64rem;color:#789;text-align:center;margin-top:1px">⚡ EM-Feld (Leerlauf) — klicken für volle Auflösung</div>`
+      : '';
+    const badges = [p.has_results ? 'Ergebnisse' : '', p.has_step ? 'STEP' : '',
+                    p.has_fcstd ? 'FCStd' : '', p.has_report ? '📄 Bericht' : '']
+      .filter(Boolean).map(b => `<span style="background:#2c5d8a;color:#cde;border-radius:3px;padding:1px 6px;font-size:.66rem">${b}</span>`).join(' ');
+    const reportBtn = p.has_report
+      ? `<a href="/project/${pid}/report/download?mode=latest" target="_blank" rel="noopener"
+            title="Letzten erzeugten Bericht öffnen (${escHtml(p.report_file || 'PDF')})"
+            style="display:block;text-align:center;margin-top:5px;background:#6a4caf;color:#fff;padding:7px;font-size:.74rem;border-radius:4px;text-decoration:none">📄 Bericht öffnen (PDF)</a>`
+      : '';
+    const metricsHtml = p.has_results ? `
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:.7rem;color:#bbb;margin-top:6px">
+        <span>Kt: <b>${_gNum(m.Kt, 3)}</b></span><span>M: <b>${_gNum(m.T_maxwell, 1)}</b> Nm</span>
+        <span>n_max: <b>${_gNum(m.max_safe_rpm)}</b></span><span>T_Mag: <b>${_gNum(m.T_magnet, 0)}</b> °C</span>
+        <span>P: <b>${_gNum(m.P_total, 0)}</b> W</span><span>${m.verbrauch != null ? _gNum(m.verbrauch, 1) + ' kWh' : ''}</span>
+      </div>` : '';
+    return `<div style="background:#252528;border:1px solid #3a3a3e;border-radius:6px;padding:10px;display:flex;flex-direction:column">
+      ${thumb}
+      ${emThumb}
+      <div style="font-weight:600;color:#fff;font-size:.86rem;margin-top:7px">${escHtml(p.label)}</div>
+      <div style="font-size:.7rem;color:#888">${escHtml((p.created || '').slice(0, 16).replace('T', ' '))}</div>
+      <div style="font-size:.72rem;color:#9bd;margin-top:2px">${escHtml(p.topology || '—')} · p${p.p ?? '?'} · Ø${p.stator_od ?? '?'} mm · ${p.axial ?? '?'} mm</div>
+      ${metricsHtml}
+      <div style="display:flex;gap:4px;margin-top:7px;flex-wrap:wrap">${badges}</div>
+      <div style="display:flex;gap:5px;margin-top:8px">
+        <button ${p.has_results ? '' : 'disabled'} onclick="galleryOpen('${p.id}')"
+                style="flex:1;background:#27ae60;padding:7px;font-size:.74rem">Ergebnisse ansehen</button>
+        <button onclick="galleryDelete('${p.id}')" title="Projekt löschen"
+                style="background:#7a3030;width:auto;padding:7px 9px;font-size:.74rem">🗑</button>
+      </div>
+      <button onclick="useAsTemplate('${p.id}')" title="Parameter dieses Projekts ins Formular laden"
+              style="margin-top:5px;width:100%;background:#2c5d8a;padding:7px;font-size:.74rem">📋 Als Vorlage verwenden</button>
+      ${reportBtn}
+    </div>`;
+  }).join('');
+}
+// ── Text → EMA (Beschreibung → Parametersatz) ────────────────────────────────
+const T2E_APPLY = {  // param key → {id, [to]} ; selects + sliders fire input/change
+  statorOD:'dim_stator_out', statorID:'dim_stator_in', rotorOD:'dim_rotor_out',
+  shaftD:'dim_shaft', shaftBoreD:'dim_shaft_bore', axialLen:'dim_axial',
+  slots:'stator_slots', slotDepth:'slot_depth', p:'p_pairs', magShape:'mag_shape',
+  magAngle:'mag_angle', magWidth:'mag_width', magThick:'mag_thick', magDist:'mag_dist',
+  nAx:'n_ax', nCirc:'n_circ', rotor_lam:'sel_rotor_lam', stator_lam:'sel_stator_lam',
+  hairpin_mat:'sel_hairpin', magnet:'sel_magnet', cooling:'sel_cooling',
+  rpm_from:'rpm_from', rpm_to:'rpm_to', load_nm:'sim_load', T_ambient:'T_ambient',
+  magDepthRel:{id:'mag_depth', to:v=>Math.round(v*100)},
+};
+function openText2Ema(){ document.getElementById('t2e-modal').style.display='block';
+  document.getElementById('t2e-desc').focus(); }
+function closeText2Ema(){ document.getElementById('t2e-modal').style.display='none'; }
+async function runText2Ema(){
+  const desc=document.getElementById('t2e-desc').value.trim();
+  if(!desc){ alert('Bitte eine Beschreibung eingeben'); return; }
+  const btn=document.getElementById('t2e-run'); btn.disabled=true;
+  const out=document.getElementById('t2e-out');
+  out.innerHTML='<span style="color:#888">⏳ LLM leitet Parameter ab…</span>';
+  try{
+    const r=await fetch('/text2ema',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({description:desc})}).then(x=>x.json());
+    if(r.error){ out.innerHTML='<span style="color:#e57">⚠ '+escHtml(r.error)+'</span>'; return; }
+    _t2eParams=r.params;
+    const rows=Object.entries(r.params).map(([k,v])=>
+      `<tr><td style="color:#888;padding:1px 8px 1px 0">${escHtml(k)}</td><td style="color:#fff">${escHtml(String(v))}</td></tr>`).join('');
+    out.innerHTML=`
+      ${r.rag_used?'<div style="font-size:.74rem;color:#9c9;margin-bottom:6px">📚 Mit Referenzmaschinen aus der Wissensbasis angereichert</div>':''}
+      <div class="section-h">Begründung</div>
+      <div style="font-size:.8rem;color:#cde;line-height:1.5;margin-bottom:8px">${escHtml(r.begruendung||'—')}</div>
+      <div class="section-h">Abgeleitete Parameter</div>
+      <table style="font-size:.76rem;border-collapse:collapse;columns:2">${rows}</table>
+      <button onclick="applyText2Ema()" style="background:#27ae60;width:100%;padding:10px;font-size:.8rem;margin-top:10px">✓ In Formular übernehmen</button>`;
+  }catch(e){ out.innerHTML='<span style="color:#e57">Fehler: '+escHtml(e.message)+'</span>'; }
+  finally{ btn.disabled=false; }
+}
+let _t2eParams=null;
+function applyText2Ema(){
+  for(const [k,v] of Object.entries(_t2eParams||{})){
+    const a=T2E_APPLY[k]; if(!a) continue;
+    const id=typeof a==='string'?a:a.id;
+    const el=document.getElementById(id); if(!el) continue;
+    el.value=(typeof a==='object'&&a.to)?a.to(v):v;
+    el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change'));
+  }
+  closeText2Ema(); switchTab('geo');
+}
 
+// ── Wissensbasis (RAG) ───────────────────────────────────────────────────────
+function openRag(){ document.getElementById('rag-modal').style.display='block'; refreshRagList(); }
+function closeRag(){ document.getElementById('rag-modal').style.display='none'; }
+async function refreshRagList(){
+  const box=document.getElementById('rag-list');
+  try{
+    const r=await fetch('/rag/list').then(x=>x.json());
+    const st=r.stats||{};
+    document.getElementById('rag-stats').textContent =
+      `${st.n_documents||0} Dokumente · ${st.n_chunks||0} Abschnitte · Modell ${st.embed_model||'?'}`;
+    const docs=r.documents||[];
+    if(!docs.length){ box.innerHTML='<span style="color:#777">Noch keine Dokumente hinterlegt.</span>'; return; }
+    box.innerHTML=docs.map(d=>{
+      const cat = d.category==='maschinen' ? '🛠 Maschine' : '📄 Doku';
+      return `<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #2a2a2e">
+        <span style="flex:0 0 auto;font-size:.72rem;color:#9a9">${cat}</span>
+        <span style="flex:1;color:#ddd">${escHtml(d.title)}</span>
+        <span style="flex:0 0 auto;font-size:.72rem;color:#777">${d.n_chunks} Abschn. · ${d.created||''}</span>
+        <button onclick="ragDelete('${d.id}')" style="flex:0 0 auto;background:#7a3030;width:auto;padding:3px 9px;font-size:.72rem">✕</button>
+      </div>`;
+    }).join('');
+  }catch(e){ box.innerHTML='<span style="color:#e57">Fehler: '+escHtml(e.message)+'</span>'; }
+}
+async function ragAddText(){
+  const text=document.getElementById('rag-text').value.trim();
+  const msg=document.getElementById('rag-msg');
+  if(!text){ alert('Bitte Text einfügen'); return; }
+  const btn=document.getElementById('rag-add-btn'); btn.disabled=true;
+  msg.style.color='#9c9'; msg.textContent='⏳ Wird eingebettet…';
+  try{
+    const r=await fetch('/rag/add',{method:'POST',headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({text, title:document.getElementById('rag-title').value,
+        category:document.getElementById('rag-cat').value})}).then(x=>x.json());
+    if(r.error){ msg.style.color='#e57'; msg.textContent='⚠ '+r.error; return; }
+    msg.textContent='✓ hinzugefügt ('+r.n_chunks+' Abschnitte)';
+    document.getElementById('rag-text').value=''; document.getElementById('rag-title').value='';
+    refreshRagList();
+  }catch(e){ msg.style.color='#e57'; msg.textContent='Fehler: '+e.message; }
+  finally{ btn.disabled=false; }
+}
+async function ragUpload(){
+  const f=document.getElementById('rag-file').files[0];
+  const msg=document.getElementById('rag-msg');
+  if(!f){ alert('Bitte eine Datei wählen'); return; }
+  const btn=document.getElementById('rag-up-btn'); btn.disabled=true;
+  msg.style.color='#9c9'; msg.textContent='⏳ Lese + bette ein…';
+  try{
+    const fd=new FormData();
+    fd.append('file', f);
+    fd.append('category', document.getElementById('rag-cat').value);
+    fd.append('title', document.getElementById('rag-title').value);
+    const r=await fetch('/rag/upload',{method:'POST',body:fd}).then(x=>x.json());
+    if(r.error){ msg.style.color='#e57'; msg.textContent='⚠ '+r.error; return; }
+    msg.textContent='✓ '+escHtml(r.title)+' ('+r.n_chunks+' Abschnitte)';
+    document.getElementById('rag-file').value='';
+    refreshRagList();
+  }catch(e){ msg.style.color='#e57'; msg.textContent='Fehler: '+e.message; }
+  finally{ btn.disabled=false; }
+}
+async function ragDelete(id){
+  if(!confirm('Dokument löschen?')) return;
+  await fetch('/rag/delete/'+encodeURIComponent(id),{method:'POST'});
+  refreshRagList();
+}
+
+// ── Zielwertoptimierung ──────────────────────────────────────────────────────
+let _optMeta = null;
+const OPT_APPLY = {   // free-param key → form input + value transform
+  magWidth:{id:'mag_width',to:v=>v}, magThick:{id:'mag_thick',to:v=>v},
+  magAngle:{id:'mag_angle',to:v=>v}, magDist:{id:'mag_dist',to:v=>v},
+  magDepthRel:{id:'mag_depth',to:v=>Math.round(v*100)}, slotDepth:{id:'slot_depth',to:v=>v},
+  p:{id:'p_pairs',to:v=>Math.round(v)}, axial:{id:'dim_axial',to:v=>v},
+};
+function _optMetricOpts() {
+  return Object.entries(_optMeta.metrics).map(([k, m]) => `<option value="${k}">${escHtml(m.label)}</option>`).join('');
+}
+async function openOptimizer() {
+  document.getElementById('opt-modal').style.display = 'block';
+  if (!_optMeta) _optMeta = await fetch('/optimize/meta').then(r => r.json());
+  document.getElementById('opt-obj-metric').innerHTML = _optMetricOpts();
+  document.getElementById('opt-obj-metric').value = 'T_maxwell';
+  document.getElementById('opt-free').innerHTML = Object.entries(_optMeta.free_params).map(([k, f]) => `
+    <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;font-size:.76rem">
+      <label style="flex:1;display:flex;gap:5px;align-items:center;cursor:pointer">
+        <input type="checkbox" class="opt-free-cb" data-k="${k}" ${['magWidth','magThick','magAngle'].includes(k)?'checked':''}/> ${escHtml(f.label)}</label>
+      <input type="number" class="opt-free-lo" data-k="${k}" value="${f.lo}" style="width:60px;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:3px;border-radius:3px"/>
+      <span style="color:#666">–</span>
+      <input type="number" class="opt-free-hi" data-k="${k}" value="${f.hi}" style="width:60px;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:3px;border-radius:3px"/>
+    </div>`).join('');
+  if (!document.querySelector('.opt-constraint-row')) { addOptConstraint(); }
+}
+function closeOptimizer() { document.getElementById('opt-modal').style.display = 'none'; }
+function addOptConstraint() {
+  const div = document.createElement('div');
+  div.className = 'opt-constraint-row';
+  div.style.cssText = 'display:flex;gap:6px;align-items:center;margin-bottom:4px';
+  div.innerHTML = `<select class="opt-c-metric" style="flex:1">${_optMetricOpts()}</select>
+    <select class="opt-c-op" style="width:54px"><option value="<=">≤</option><option value=">=">≥</option></select>
+    <input type="number" class="opt-c-val" placeholder="Wert" style="width:80px;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:5px;border-radius:3px"/>
+    <button onclick="this.parentElement.remove()" style="background:#7a3030;width:auto;padding:4px 8px;font-size:.72rem">✕</button>`;
+  document.getElementById('opt-constraints').appendChild(div);
+}
+async function runOptimize() {
+  const free = [...document.querySelectorAll('.opt-free-cb:checked')].map(cb => {
+    const k = cb.dataset.k;
+    const lo = +document.querySelector(`.opt-free-lo[data-k="${k}"]`).value;
+    const hi = +document.querySelector(`.opt-free-hi[data-k="${k}"]`).value;
+    return { param: k, min: Math.min(lo, hi), max: Math.max(lo, hi) };
+  });
+  if (!free.length) { alert('Mindestens einen freien Parameter wählen'); return; }
+  const cons = [...document.querySelectorAll('.opt-constraint-row')].map(r => ({
+    metric: r.querySelector('.opt-c-metric').value, op: r.querySelector('.opt-c-op').value,
+    value: parseFloat(r.querySelector('.opt-c-val').value),
+  })).filter(c => !isNaN(c.value));
+  const goal = document.getElementById('opt-obj-goal').value;
+  const objective = { metric: document.getElementById('opt-obj-metric').value, goal };
+  if (goal === 'target') objective.target = +document.getElementById('opt-obj-target').value;
+  const base = await buildPayload();
+  const spec = { base_payload: base, objective, constraints: cons, free,
+                 iterations: +document.getElementById('opt-budget').value, batch: 6 };
+  document.getElementById('opt-run').disabled = true;
+  document.getElementById('opt-result').innerHTML = '';
+  document.getElementById('opt-log').innerHTML = 'Starte…';
+  const r = await fetch('/optimize', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                       body: JSON.stringify(spec) }).then(x => x.json());
+  if (r.error) { alert(r.error); document.getElementById('opt-run').disabled = false; return; }
+  _pollOptimize();
+}
+async function _pollOptimize() {
+  const s = await fetch('/optimize/status').then(x => x.json());
+  document.getElementById('opt-bar').style.width = (s.progress || 0) + '%';
+  const lg = document.getElementById('opt-log');
+  lg.innerHTML = (s.log || []).map(escHtml).join('<br>'); lg.scrollTop = 1e9;
+  if (s.status === 'running') { setTimeout(_pollOptimize, 800); return; }
+  document.getElementById('opt-run').disabled = false;
+  if (s.status === 'error') { document.getElementById('opt-result').innerHTML = '<span style="color:#e57">Fehler: ' + escHtml(s.error || '') + '</span>'; return; }
+  if (s.result) renderOptResult(s.result);
+}
+function renderOptResult(res) {
+  const bm = res.best_metrics || {}, bp = res.best_params || {};
+  const pj = Object.entries(bp).map(([k, v]) => `${k}=${(+v).toFixed(2)}`).join(', ');
+  const mrows = Object.entries(bm).filter(([k]) => k !== 'error')
+    .map(([k, v]) => `<tr><td style="color:#888;padding:2px 0">${escHtml(k)}</td><td style="color:#fff;text-align:right">${escHtml(String(v))}</td></tr>`).join('');
+  document.getElementById('opt-result').innerHTML = `
+    <div class="section-h">Beste${res.best_feasible ? ' (zulässige)' : ' — ⚠ keine zulässige gefunden'} Lösung</div>
+    <div style="font-size:.76rem;color:#cde;margin-bottom:6px">${escHtml(pj)}</div>
+    <table style="width:100%;font-size:.76rem;border-collapse:collapse">${mrows}</table>
+    <div style="font-size:.7rem;color:#666;margin:6px 0">${res.n_evaluated} Auswertungen</div>
+    <div style="display:flex;gap:6px">
+      <button onclick='applyOptBest(${JSON.stringify(bp)},false)' style="flex:1;background:#2c5d8a;padding:8px;font-size:.76rem">Parameter übernehmen</button>
+      <button onclick='applyOptBest(${JSON.stringify(bp)},true)' style="flex:1;background:#27ae60;padding:8px;font-size:.76rem">Übernehmen &amp; Voll-Analyse</button>
+    </div>`;
+}
+function applyOptBest(params, andRun) {
+  for (const [k, v] of Object.entries(params || {})) {
+    const a = OPT_APPLY[k]; if (!a) continue;
+    const el = document.getElementById(a.id); if (!el) continue;
+    el.value = a.to(v);
+    el.dispatchEvent(new Event('input')); el.dispatchEvent(new Event('change'));
+  }
+  closeOptimizer(); switchTab('geo');
+  if (andRun) document.getElementById('btn_analyse').click();
+}
+
+// ── Parameterstudie (ein Parameter über fester Drehzahl) ─────────────────────
+async function initParamStudy() {
+  const sel = document.getElementById('study_param');
+  if (!sel || sel.options.length) return;            // already populated
+  if (!_optMeta) _optMeta = await fetch('/optimize/meta').then(r => r.json());
+  sel.innerHTML = Object.entries(_optMeta.free_params)
+    .map(([k, f]) => `<option value="${k}">${escHtml(f.label)}</option>`).join('');
+  sel.onchange = _studyParamChanged;
+  _studyParamChanged();
+}
+function _studyParamChanged() {
+  // prefill x/y from the parameter's default range
+  const sel = document.getElementById('study_param');
+  const f = _optMeta && _optMeta.free_params[sel.value];
+  if (!f) return;
+  document.getElementById('study_lo').value = f.lo;
+  document.getElementById('study_hi').value = f.hi;
+  const lbl = (f.label.match(/\[([^\]]+)\]/) || [,'-'])[1];
+  document.getElementById('study_unit1').textContent = lbl;
+  document.getElementById('study_unit2').textContent = lbl;
+}
+async function runParamStudy() {
+  const param = document.getElementById('study_param').value;
+  const lo = +document.getElementById('study_lo').value;
+  const hi = +document.getElementById('study_hi').value;
+  const steps = +document.getElementById('study_steps').value;
+  const rpm = +document.getElementById('study_rpm').value;
+  if (lo === hi) { alert('Bereich x..y darf nicht leer sein (x ≠ y)'); return; }
+  const payload = await buildPayload();
+  document.getElementById('btn_study').disabled = true;
+  document.getElementById('study_result').innerHTML = '';
+  document.getElementById('study_progress').style.display = 'block';
+  const r = await fetch('/param_study', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ payload, param, lo, hi, steps, rpm })
+  }).then(x => x.json());
+  if (r.error) { alert(r.error); document.getElementById('btn_study').disabled = false; return; }
+  _pollParamStudy();
+}
+async function _pollParamStudy() {
+  const s = await fetch('/param_study/status').then(x => x.json());
+  document.getElementById('study_bar').style.width = (s.progress || 0) + '%';
+  const log = (s.log || []);
+  document.getElementById('study_msg').textContent = log[log.length - 1] || '…';
+  if (s.status === 'running') { setTimeout(_pollParamStudy, 700); return; }
+  document.getElementById('btn_study').disabled = false;
+  if (s.status === 'error') {
+    document.getElementById('study_result').innerHTML =
+      '<span style="color:#e57">Fehler: ' + escHtml(s.error || '') + '</span>';
+    return;
+  }
+  if (s.result) {
+    const res = s.result;
+    document.getElementById('study_result').innerHTML =
+      `<div style="font-size:.72rem;color:#888;margin-bottom:4px">${res.n_ok} ausgewertet`
+      + (res.n_fail ? `, ${res.n_fail} fehlgeschlagen` : '') + `</div>`
+      + `<img src="data:image/png;base64,${res.chart_b64}" style="width:100%;border-radius:4px;cursor:zoom-in" `
+      + `onclick="window.open(this.src)"/>`;
+  }
+}
+
+// ── Ergebnis-Chat (Ollama) ───────────────────────────────────────────────────
+let _chatHistory = [];
+function toggleChat() {
+  const p = document.getElementById('chat-panel');
+  const open = p.style.display === 'none' || !p.style.display;
+  p.style.display = open ? 'flex' : 'none';
+  if (open) { _updateChatScope(); document.getElementById('chat-input').focus();
+              if (!_chatHistory.length) _renderChat(); }
+}
+function clearChat() { _chatHistory = []; _renderChat(); }
+
+// Scope follows the active tab: on the Vergleich tab with ≥2 projects ticked we
+// chat about the comparison, otherwise about the currently loaded project.
+function _chatScope() {
+  if (window._activeTab === 'compare') {
+    const ids = [...document.querySelectorAll('.cmp-checkbox:checked')].map(c => c.value);
+    if (ids.length >= 2) return { scope: 'compare', ids };
+  }
+  return { scope: 'project', ids: [] };
+}
+function _updateChatScope() {
+  const s = _chatScope();
+  const el = document.getElementById('chat-scope');
+  el.textContent = s.scope === 'compare' ? `· Vergleich (${s.ids.length} Varianten)` : '· aktuelles Projekt';
+}
+function _mdLite(t) {
+  return escHtml(t).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+}
+function _renderChat() {
+  const box = document.getElementById('chat-msgs');
+  if (!_chatHistory.length) {
+    box.innerHTML = '<div style="color:#777;font-size:.78rem">Frag mich etwas zu den Ergebnissen — z.B. „Warum ist T_Magnet so hoch?" oder im Vergleich „Welche Variante ist am effizientesten und warum?".</div>';
+    return;
+  }
+  box.innerHTML = _chatHistory.map(m => {
+    const mine = m.role === 'user';
+    return `<div style="align-self:${mine ? 'flex-end' : 'flex-start'};max-width:88%;
+      background:${mine ? '#2c5d8a' : '#2d2d33'};color:#eee;padding:7px 10px;border-radius:8px;line-height:1.45">
+      ${m.role === 'assistant' ? _mdLite(m.content) : escHtml(m.content)}</div>`;
+  }).join('');
+  box.scrollTop = box.scrollHeight;
+}
+async function sendChat() {
+  const inp = document.getElementById('chat-input');
+  const msg = inp.value.trim();
+  if (!msg) return;
+  const { scope, ids } = _chatScope();
+  _chatHistory.push({ role: 'user', content: msg });
+  inp.value = '';
+  _renderChat();
+  const btn = document.getElementById('chat-send'); btn.disabled = true;
+  _chatHistory.push({ role: 'assistant', content: '…' });
+  _renderChat();
+  try {
+    const r = await fetch('/chat', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: msg, history: _chatHistory.slice(0, -2), scope, ids })
+    }).then(x => x.json());
+    _chatHistory.pop();
+    _chatHistory.push({ role: 'assistant', content: r.error ? ('⚠ ' + r.error) : (r.reply || '(leere Antwort)') });
+  } catch (e) {
+    _chatHistory.pop();
+    _chatHistory.push({ role: 'assistant', content: '⚠ Fehler: ' + e.message });
+  }
+  btn.disabled = false;
+  _renderChat();
+}
+
+// ── Draggable splitters (preview width + footer height; canvas resizes live) ──
+(function initSplitters() {
+  const ws     = document.getElementById('workspace');
+  const pane   = document.getElementById('preview-pane');
+  const footer = document.getElementById('footer');
+  const vs     = document.getElementById('vsplit');
+  const hs     = document.getElementById('hsplit');
+  const live   = () => { if (typeof resize === 'function') resize(); };
+  let mode = null;
+
+  function onMove(e) {
+    if (mode === 'v') {
+      const r = ws.getBoundingClientRect();
+      let w = r.right - e.clientX;                       // preview width from the right edge
+      w = Math.max(260, Math.min(r.width - 320, w));
+      pane.style.width = w + 'px';
+      live();
+    } else if (mode === 'h') {
+      let h = window.innerHeight - e.clientY;            // footer height from the bottom
+      h = Math.max(40, Math.min(window.innerHeight * 0.6, h));
+      footer.style.height = h + 'px';
+      live();
+    }
+  }
+  function stop() {
+    if (!mode) return;
+    (mode === 'v' ? vs : hs).classList.remove('dragging');
+    document.body.style.userSelect = '';
+    mode = null;
+    live();
+  }
+  function start(m, el) {
+    return (e) => { mode = m; el.classList.add('dragging');
+                    document.body.style.userSelect = 'none'; e.preventDefault(); };
+  }
+  vs.addEventListener('mousedown', start('v', vs));
+  hs.addEventListener('mousedown', start('h', hs));
+  window.addEventListener('mousemove', onMove);
+  window.addEventListener('mouseup', stop);
+})();
+
+function galleryOpen(pid) { closeProjectGallery(); loadProjectById(pid); }
+async function galleryDelete(pid) {
+  if (!confirm('Projekt „' + pid + '" wirklich unwiderruflich löschen?')) return;
+  try {
+    await fetch('/project/' + encodeURIComponent(pid) + '/delete', { method: 'POST' });
+    _galleryProjects = _galleryProjects.filter(p => p.id !== pid);
+    renderGallery(); refreshProjectList();
+  } catch (e) { alert('Löschen fehlgeschlagen: ' + e.message); }
+}
+
+// Assemble the exact /analyse request body from the current form + GEOM.
+// Reused by startAnalysis() and by the variant manager ("save current config").
+// ── Auto-Speichern der Eingaben (localStorage) ───────────────────────────────
+// Schützt vor versehentlichem Schließen/Neuladen des Browsers: die komplette
+// Formular-Konfiguration wird bei jeder Änderung (entprellt) lokal gesichert und
+// beim nächsten Öffnen automatisch wiederhergestellt. Fertige Analysen liegen
+// ohnehin als Projekt unter ~/cae_projekte und sind über den Projekt-Browser
+// erreichbar — hier geht es nur um die noch nicht gerechnete Eingabe-Maske.
+const _FORM_KEY = 'ema_form_v1';
+let _saveTimer = null;
+function saveFormState() {
+  buildPayload().then(p => {
+    delete p.cycle_csv;            // einmalig (File), kann nicht restauriert werden
+    const rec = { t: Date.now(), payload: p };
+    try { localStorage.setItem(_FORM_KEY, JSON.stringify(rec)); }     // lokal (sofort)
+    catch (e) { /* Quota/Privatmodus — still ignorieren */ }
+    try {                                                             // serverseitig (geräteübergreifend)
+      fetch('/session/save', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(rec), keepalive: true }).catch(() => {});
+    } catch (e) {}
+  }).catch(() => {});
+}
+function _scheduleSave() { clearTimeout(_saveTimer); _saveTimer = setTimeout(saveFormState, 600); }
+async function restoreFormState() {
+  let local = null;
+  try { const raw = localStorage.getItem(_FORM_KEY); if (raw) local = JSON.parse(raw); } catch (e) {}
+  let server = null;
+  try { const r = await fetch('/session/load').then(x => x.json()); if (r && r.payload) server = r; }
+  catch (e) {}
+  // Neuere der beiden Sitzungen gewinnt (lokal vs. Server).
+  let best = (local && local.payload) ? local : null;
+  if (server && (!best || (server.t || 0) > (best.t || 0))) best = server;
+  if (best && best.payload) { applyPayload(best.payload); return true; }
+  return false;
+}
+function clearFormState() {
+  try { localStorage.removeItem(_FORM_KEY); } catch (e) {}
+  try { fetch('/session/clear', { method: 'POST' }).catch(() => {}); } catch (e) {}
+}
+async function setupAutosave() {
+  document.addEventListener('input',  _scheduleSave, true);
+  document.addEventListener('change', _scheduleSave, true);
+  window.addEventListener('beforeunload', saveFormState);   // best effort beim Schließen
+  if ((await restoreFormState()) && typeof _toast === 'function') _toast('Eingaben wiederhergestellt');
+}
+
+async function buildPayload() {
   const payload = {
     geom:             { ...GEOM },
     project_name:     document.getElementById('project_name').value || '',
@@ -1110,6 +2805,11 @@ async function startAnalysis() {
     n_frames:         +document.getElementById('n_frames').value,
     fdm_resolution:   +document.getElementById('fdm_resolution').value,
     frame_resolution: +document.getElementById('frame_resolution').value,
+    field_bmax:       +(document.getElementById('field_bmax')?.value || 0),
+    struct_mesh_mm:   +document.getElementById('struct_mesh_mm').value,
+    struct_img_px:    +document.getElementById('struct_img_px').value,
+    struct_video:     document.getElementById('struct_video').checked,
+    struct_frames:    +document.getElementById('struct_frames').value,
     rpm_from:         +document.getElementById('rpm_from').value,
     rpm_to:           +document.getElementById('rpm_to').value,
     rpm_step:         +document.getElementById('rpm_step').value,
@@ -1127,18 +2827,158 @@ async function startAnalysis() {
       eta_drive:  +document.getElementById('veh_eta').value,
       regen_frac: +document.getElementById('veh_regen').value,
     },
+    trailer: {
+      mass_kg:   +document.getElementById('trailer_mass').value,
+      n_axles:   +document.getElementById('trailer_axles').value,
+      grade_pct: +document.getElementById('trailer_grade').value,
+    },
   };
-  // Read CSV file content if user picked custom cycle
   if (payload.cycle === 'csv') {
     const f = document.getElementById('cycle_csv_file').files[0];
-    if (f) {
-      payload.cycle_csv = await f.text();
-    } else {
-      addLog('⚠ CSV-Datei wählen oder Zyklus auf WLTP umstellen');
-      payload.cycle = 'wltp3';
-    }
+    if (f) payload.cycle_csv = await f.text();
+    else   payload.cycle = 'wltp3';
   }
+  const fmodes = ['rotate'];
+  if (document.getElementById('fm_current_angle')?.checked) fmodes.push('current_angle');
+  if (document.getElementById('fm_load_ramp')?.checked)     fmodes.push('load_ramp');
+  payload.field_modes = fmodes;
   payload.geom.axialLen = payload.axial_len;
+  return payload;
+}
+
+// Set a form field's value (or checkbox) and fire input+change so all bound
+// callbacks run (GEOM update, displays, topology visibility, solver reset).
+function _setField(id, val) {
+  const el = document.getElementById(id);
+  if (!el || val === undefined || val === null) return;
+  if (el.type === 'checkbox') el.checked = !!val;
+  else el.value = val;
+  el.dispatchEvent(new Event('input'));
+  el.dispatchEvent(new Event('change'));
+}
+
+// Inverse of buildPayload: repopulate the WHOLE form from a saved payload
+// (used by "Projekt aus Vorlage erstellen"). Geometry selects are set first so
+// the topology-dependent fields are visible; numeric % fields are scaled back to
+// their displayed value. Geom keys without a form input (e.g. slotWidthRatio) are
+// written straight onto GEOM.
+function applyPayload(payload) {
+  if (!payload) return;
+  const G = payload.geom || {};
+  for (const [k, v] of Object.entries(G)) GEOM[k] = v;   // incl. input-less keys
+
+  // geometry selects first (drive topology/pocket/connection visibility via handlers)
+  _setField('mag_shape',   G.magShape);
+  _setField('pocket_mode', G.pocketMode);
+  _setField('mag_orient',  G.magOrient);
+  _setField('wh_style',    G.windingHeadStyle);
+  _setField('shaft_connection', G.shaftConnection);
+
+  const pct = v => (v != null ? Math.round(v * 100) : undefined);
+  const geoMap = {
+    dim_stator_out: G.statorOD, dim_stator_in: G.statorID, dim_rotor_out: G.rotorOD,
+    dim_shaft: G.shaftD, dim_shaft_bore: G.shaftBoreD,
+    stator_slots: G.slots, p_pairs: G.p,
+    pocket_outer_d: G.pocketOuterD, pocket_inner_d: G.pocketInnerD,
+    mag_angle: G.magAngle, mag_angle2: G.magAngle2, mag_asym: G.magAsym, mag_tang_len: G.magTangLen,
+    mag_depth: pct(G.magDepthRel), mag_width: G.magWidth, mag_thick: G.magThick,
+    mag_dist: G.magDist, mag_layer_gap: G.magLayerGap, mag_layers: G.magLayers,
+    pole_arc: pct(G.poleArcFrac), seg_per_pole: G.segPerPole, n_ax: G.nAx, n_circ: G.nCirc,
+    slot_depth: G.slotDepth, cond_per_slot: G.conductorsPerSlot, coil_pitch: G.coilPitch,
+    wh_flare: G.windingHeadFlare, press_interf: G.pressInterferenceUm,
+    spline_teeth: G.splineTeeth, spline_depth: G.splineToothDepthMm,
+    poly_lobes: G.polygonLobes, poly_ecc: G.polygonEccMm,
+  };
+  for (const [id, v] of Object.entries(geoMap)) _setField(id, v);
+
+  // run settings + materials
+  _setField('project_name', payload.project_name);
+  _setField('dim_axial',    payload.axial_len);
+  _setField('sel_rotor_lam',  payload.rotor_lam);
+  _setField('sel_stator_lam', payload.stator_lam);
+  _setField('sel_hairpin',    payload.hairpin_mat);
+  _setField('sel_magnet',     payload.magnet);
+  ['n_frames','fdm_resolution','frame_resolution','field_bmax','struct_mesh_mm','struct_img_px',
+   'struct_frames','rpm_from','rpm_to','rpm_step','T_ambient'].forEach(k => _setField(k, payload[k]));
+  _setField('struct_video', payload.struct_video);
+  _setField('sim_load',     payload.load_nm);
+  _setField('sel_cooling',  payload.cooling);
+  if (payload.cycle) _setField('sel_cycle', payload.cycle);
+
+  const veh = payload.vehicle || {};
+  _setField('veh_mass', veh.mass_kg);   _setField('veh_cwA', veh.cwA_m2);  _setField('veh_cr', veh.cr);
+  _setField('veh_rwheel', veh.r_wheel_m); _setField('veh_gear', veh.gear_ratio);
+  _setField('veh_eta', veh.eta_drive);  _setField('veh_regen', veh.regen_frac);
+  const tr = payload.trailer || {};
+  _setField('trailer_mass', tr.mass_kg); _setField('trailer_axles', tr.n_axles); _setField('trailer_grade', tr.grade_pct);
+
+  const fm = payload.field_modes || [];
+  _setField('fm_current_angle', fm.includes('current_angle'));
+  _setField('fm_load_ramp',     fm.includes('load_ramp'));
+
+  // stepwise-geometry component toggles (default to the full build if absent)
+  const dflt = (v, d) => (v === undefined ? d : v);
+  _setField('gen_shaft',    dflt(G.genShaft,        true));
+  _setField('gen_rotor',    dflt(G.genRotorIron,    true));
+  _setField('gen_magnets',  dflt(G.genMagnets,      true));
+  _setField('gen_stator',   dflt(G.genStatorIron,   true));
+  _setField('gen_hairpins', dflt(G.genHairpins,     true));
+  _setField('gen_whead',    dflt(G.genWindingHeads, true));
+  _setField('gen_bear_a',   dflt(G.genBearingA,     false));
+  _setField('gen_bear_b',   dflt(G.genBearingB,     false));
+  _setField('gen_insul',    dflt(G.genInsulation,   false));
+  _setField('bearing_od',   dflt(G.bearingODmm,     0));
+  _setField('bearing_w',    dflt(G.bearingWidthMm,  14));
+  _setField('bearing_gap',  dflt(G.bearingGapMm,    5));
+  _setField('insul_thk',    dflt(G.insulationThkMm, 0.4));
+  _setField('gen_balance',  dflt(G.genBalanceBolts,    false));
+  _setField('bal_thread',   dflt(G.balanceBoltThread,  'M6'));
+  _setField('bal_circle_d', dflt(G.balanceBoltCircleD, 0));
+  _setField('bal_offset',   dflt(G.balanceBoltOffsetDeg, 0));
+  if (typeof _updateComponentVis === 'function') _updateComponentVis();
+}
+
+// Lightweight transient toast (no dependency).
+function _toast(msg) {
+  let t = document.getElementById('_toast');
+  if (!t) {
+    t = document.createElement('div'); t.id = '_toast';
+    t.style.cssText = 'position:fixed;bottom:22px;left:50%;transform:translateX(-50%);' +
+      'background:#27ae60;color:#fff;padding:10px 18px;border-radius:6px;z-index:500;' +
+      'font-size:.85rem;box-shadow:0 4px 16px rgba(0,0,0,.4);transition:opacity .3s;max-width:80vw';
+    document.body.appendChild(t);
+  }
+  t.textContent = msg; t.style.opacity = '1';
+  clearTimeout(t._tid); t._tid = setTimeout(() => { t.style.opacity = '0'; }, 4000);
+}
+
+// "Projekt aus Vorlage erstellen": load a project's inputs into the form for a new run.
+async function useAsTemplate(pid) {
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/template').then(x => x.json());
+    if (r.error) { alert('Vorlage laden fehlgeschlagen: ' + r.error); return; }
+    applyPayload(r.payload);
+    closeProjectGallery();
+    switchTab('geo');
+    const note = r.reconstructed ? ' — aus Metadaten rekonstruiert, einige Einstellungen auf Standard' : '';
+    _toast('📋 Vorlage übernommen: „' + (r.label || pid) + '"' + note + '. Parameter anpassen und Analyse starten.');
+  } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+async function startAnalysis() {
+  const btn = document.getElementById('btn_analyse');
+  btn.disabled = true;
+  btn.textContent = '⏳ Analyse läuft…';
+
+  // Switch to results tab and show progress
+  document.getElementById('tbtn-results').disabled = false;
+  switchTab('results');
+  document.getElementById('analysis-progress').classList.add('show');
+  document.getElementById('results-content').style.display   = 'none';
+  document.getElementById('progress-log').innerHTML = '';
+  document.getElementById('progress-fill').style.width = '0%';
+
+  const payload = await buildPayload();
 
   try {
     const resp = await fetch('/analyse', {
@@ -1157,6 +2997,235 @@ async function startAnalysis() {
     addLog('❌ Server nicht erreichbar: ' + e.message);
     btn.disabled = false; btn.textContent = '⚙ Analyse starten';
   }
+}
+
+// ── Selectively re-run forgotten pipeline stages on the loaded project ──────────
+async function recomputeStages() {
+  const map = {rc_field: 'field', rc_structural: 'structural',
+               rc_thermal: 'thermal', rc_drivecycle: 'drivecycle'};
+  const stages = Object.entries(map)
+    .filter(([id]) => document.getElementById(id)?.checked).map(([, v]) => v);
+  if (!stages.length) { alert('Bitte mindestens eine Stufe wählen.'); return; }
+
+  // Active project id from server state (set by a run or by loading a project)
+  let pid = null;
+  try { pid = (await fetch('/status').then(r => r.json())).project_id; } catch (e) {}
+  if (!pid) { alert('Kein Projekt geladen — erst ein Projekt laden oder eine Analyse ausführen.'); return; }
+
+  const btn = document.getElementById('btn_recompute');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '⏳ Rechne…';
+  switchTab('results');
+  document.getElementById('analysis-progress').classList.add('show');
+  document.getElementById('progress-title').textContent = 'Nachrechnen läuft…';
+  document.getElementById('progress-log').innerHTML = '';
+  document.getElementById('progress-fill').style.width = '0%';
+  try {
+    const payload = await buildPayload();
+    payload.stages = stages;
+    const resp = await fetch('/project/' + encodeURIComponent(pid) + '/recompute', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload) });
+    const j = await resp.json();
+    if (!resp.ok) { addLog('❌ ' + (j.error || 'Nachrechnen fehlgeschlagen')); return; }
+    addLog('↻ Nachrechnen gestartet: ' + (j.stages || stages).join(', '));
+    _pollTimer = setInterval(pollStatus, 1200);
+  } catch (e) {
+    addLog('❌ Server nicht erreichbar: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = old;
+  }
+}
+
+// ── Staged workflow: CAD-only preview + smoke test ──────────────────────────────
+// A reusable progress/result overlay (live log + body region + actions footer).
+function _wfModal(title) {
+  let ov = document.getElementById('wf-overlay');
+  if (ov) ov.remove();
+  ov = document.createElement('div');
+  ov.id = 'wf-overlay';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9999;'
+    + 'display:flex;align-items:center;justify-content:center;padding:24px';
+  ov.onclick = e => { if (e.target === ov) ov.remove(); };
+  ov.innerHTML = `
+    <div style="background:#26262b;border:1px solid #444;border-radius:8px;max-width:880px;
+                width:100%;max-height:88vh;display:flex;flex-direction:column;overflow:hidden">
+      <div style="padding:12px 16px;border-bottom:1px solid #3a3a3a;display:flex;
+                  justify-content:space-between;align-items:center">
+        <strong id="wf-title" style="font-size:.95rem">${escHtml(title)}</strong>
+        <button onclick="document.getElementById('wf-overlay').remove()"
+                style="background:#444;padding:5px 12px;font-size:.78rem">Schließen</button>
+      </div>
+      <div id="wf-body" style="padding:14px 16px;overflow:auto"></div>
+      <pre id="wf-log" style="margin:0;padding:10px 16px;background:#1b1b1f;color:#bcd;
+           font-size:.72rem;line-height:1.45;max-height:240px;overflow:auto;
+           border-top:1px solid #333;white-space:pre-wrap"></pre>
+      <div id="wf-actions" style="padding:10px 16px;border-top:1px solid #3a3a3a;
+           display:flex;gap:8px;flex-wrap:wrap"></div>
+    </div>`;
+  document.body.appendChild(ov);
+  return ov;
+}
+function _wfLog(lines) {
+  const el = document.getElementById('wf-log');
+  if (!el || !lines) return;
+  el.textContent = lines.join('\n');
+  el.scrollTop = el.scrollHeight;
+}
+
+async function startCadPreview() {
+  const btn = document.getElementById('btn_cad_preview');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '⏳ Baue CAD…';
+  _wfModal('🧊 CAD-Geometrie wird erzeugt…');
+  document.getElementById('wf-body').innerHTML =
+    '<div style="color:#9ab">Erzeuge nur die Geometrie (Welle · Rotor · Magnete · '
+    + 'Stator · Hairpins · aktivierte Extras) in FreeCAD — ohne Berechnung. '
+    + 'Das kann je nach Topologie ~10–90 s dauern.</div>';
+  try {
+    const payload = await buildPayload();
+    const resp = await fetch('/cad_preview', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload) });
+    if (!resp.ok) { const e = await resp.json();
+      document.getElementById('wf-body').innerHTML =
+        '<div style="color:#e88">❌ ' + escHtml(e.error || 'Start fehlgeschlagen') + '</div>';
+      return;
+    }
+    _pollWf('/cad_preview/status', _onCadDone);
+  } catch (e) {
+    document.getElementById('wf-body').innerHTML =
+      '<div style="color:#e88">❌ Server nicht erreichbar: ' + escHtml(e.message) + '</div>';
+  } finally { btn.disabled = false; btn.textContent = old; }
+}
+
+function _onCadDone(s) {
+  const ok = s.status === 'done';
+  document.getElementById('wf-title').textContent =
+    ok ? '🧊 CAD-Geometrie bereit' : '🧊 CAD-Vorschau fehlgeschlagen';
+  const r = s.result || {};
+  const ts = '?t=' + Date.now();
+  if (ok) {
+    const imgs = r.cad_images || {};
+    document.getElementById('wf-body').innerHTML = `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;font-size:.8rem;color:#cde">
+        <span>📐 ${(r.n_faces||0)} Flächen</span>
+        <span>· Volumen ≈ ${Math.round(r.volume_mm3||0).toLocaleString()} mm³</span>
+        <span>· STEP: ${r.step ? '✓' : '—'}</span>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <figure style="margin:0"><img src="/cad_image/motor_cross_section.png${ts}"
+           style="width:100%;border:1px solid #444;border-radius:5px;background:#fff"
+           onerror="this.style.opacity=.3;this.alt='Querschnitt n/a'"/>
+           <figcaption style="font-size:.72rem;color:#9ab;text-align:center">Querschnitt</figcaption></figure>
+        <figure style="margin:0"><img src="/cad_image/motor_side_view.png${ts}"
+           style="width:100%;border:1px solid #444;border-radius:5px;background:#fff"
+           onerror="this.style.opacity=.3;this.alt='Axialschnitt n/a'"/>
+           <figcaption style="font-size:.72rem;color:#9ab;text-align:center">Axialschnitt</figcaption></figure>
+      </div>
+      <div style="font-size:.72rem;color:#778;margin-top:8px">
+        2D-Schnitte sind schematisch (zeigen nicht alle Komponenten-Schalter). Für die
+        echte 3D-Geometrie inkl. Lager/Isolation „In FreeCAD öffnen".</div>`;
+    document.getElementById('wf-actions').innerHTML = `
+      <button onclick="openFreeCAD()" style="background:#2b6cb0;padding:8px 16px;font-size:.8rem">🔧 In FreeCAD öffnen (3D)</button>
+      <button onclick="downloadStep()" style="background:#445;padding:8px 16px;font-size:.8rem">⬇ STEP herunterladen</button>
+      <button onclick="document.getElementById('btn_analyse').click();document.getElementById('wf-overlay').remove();"
+              style="background:#1f7a5a;padding:8px 16px;font-size:.8rem">⚙ Echte Berechnung starten</button>`;
+  } else {
+    document.getElementById('wf-body').innerHTML =
+      '<div style="color:#e88">❌ ' + escHtml(s.error || 'Geometrie fehlgeschlagen') + '</div>';
+  }
+}
+
+async function startSmokeTest() {
+  const btn = document.getElementById('btn_smoke');
+  btn.disabled = true; const old = btn.textContent; btn.textContent = '⏳ Test läuft…';
+  _wfModal('🧪 Smoke-Test läuft…');
+  document.getElementById('wf-body').innerHTML =
+    '<div style="color:#9ab">Schneller Selbsttest der Rechenkette (Topologie, dq/MTPA, '
+    + 'FDM-Feld, Verbindung, Verformung, Skript-Erzeugung) — ohne FreeCAD, ~15 s.</div>';
+  try {
+    const resp = await fetch('/smoke_test', { method: 'POST' });
+    if (!resp.ok) { const e = await resp.json();
+      document.getElementById('wf-body').innerHTML =
+        '<div style="color:#e88">❌ ' + escHtml(e.error || 'Start fehlgeschlagen') + '</div>';
+      return;
+    }
+    _pollWf('/smoke_test/status', _onSmokeDone);
+  } catch (e) {
+    document.getElementById('wf-body').innerHTML =
+      '<div style="color:#e88">❌ Server nicht erreichbar: ' + escHtml(e.message) + '</div>';
+  } finally { btn.disabled = false; btn.textContent = old; }
+}
+
+function _onSmokeDone(s) {
+  const ok = s.status === 'done' && s.result && s.result.ok;
+  document.getElementById('wf-title').textContent = ok ? '🧪 Smoke-Test bestanden' : '🧪 Smoke-Test fehlgeschlagen';
+  const sum = (s.result && s.result.summary) || (ok ? 'OK' : 'Fehler');
+  document.getElementById('wf-body').innerHTML =
+    `<div style="font-size:.9rem;color:${ok ? '#7ec98f' : '#e88'}">${ok ? '✓' : '❌'} ${escHtml(sum)}</div>`;
+}
+
+// Generic poller for a {status,progress,log,result,error} endpoint until done/error.
+function _pollWf(url, onDone) {
+  const tick = async () => {
+    try {
+      const s = await fetch(url).then(r => r.json());
+      _wfLog(s.log);
+      if (s.status === 'done' || s.status === 'error') {
+        if (document.getElementById('wf-overlay')) onDone(s);
+        return;
+      }
+    } catch (e) { /* keep polling */ }
+    if (document.getElementById('wf-overlay')) setTimeout(tick, 1000);
+  };
+  tick();
+}
+
+// Render a single field frame (no FreeCAD/FEM/animation) and show it in an overlay.
+async function previewFrame() {
+  const btn = document.getElementById('btn_preview');
+  const old = btn.textContent;
+  const res = +(document.getElementById('preview_res')?.value || 800);
+  btn.disabled = true;
+  btn.textContent = res >= 3000 ? '⏳ Multigrid… (mehrere Minuten)'
+                  : res >= 1600 ? '⏳ Rechne (kann dauern)…'
+                  : '⏳ Rechne Frame…';
+  try {
+    const payload = await buildPayload();
+    payload.frame_resolution = res;   // preview drives both grid size and image px
+    const resp = await fetch('/preview_field', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok) { alert('Vorschau fehlgeschlagen: ' + (data.error || resp.status)); return; }
+    _showPreviewModal(data);
+  } catch(e) {
+    alert('Server nicht erreichbar: ' + e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = old;
+  }
+}
+
+function _showPreviewModal(data) {
+  let ov = document.getElementById('preview-overlay');
+  if (!ov) {
+    ov = document.createElement('div');
+    ov.id = 'preview-overlay';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9999;'
+      + 'display:flex;align-items:center;justify-content:center;flex-direction:column;gap:10px';
+    ov.onclick = e => { if (e.target === ov) ov.remove(); };
+    document.body.appendChild(ov);
+  }
+  ov.innerHTML = `
+    <img src="data:image/png;base64,${data.png_b64}"
+         style="max-width:90vw;max-height:80vh;border:1px solid #444;border-radius:6px"/>
+    <div style="color:#cde;font-family:monospace;font-size:.8rem">
+      Gitter ${data.N}² → Bild ${data.out_px || data.N} px · ${Math.round(data.rpm).toLocaleString()} U/min
+      · i_q=${data.iq} A · i_d=${data.id} A · B_gap=${data.B_gap_T} T · θ=${data.rotor_angle_deg}°
+    </div>
+    <button onclick="document.getElementById('preview-overlay').remove()"
+            style="background:#444;padding:8px 18px;font-size:.8rem">Schließen</button>`;
 }
 
 async function pollStatus() {
@@ -1182,7 +3251,7 @@ async function pollStatus() {
 
 async function loadResults() {
   const data = await fetch('/results').then(r => r.json());
-  document.getElementById('analysis-progress').style.display = 'none';
+  document.getElementById('analysis-progress').classList.remove('show');
   document.getElementById('results-content').style.display   = 'block';
 
   renderSummary(data.summary);
@@ -1191,7 +3260,8 @@ async function loadResults() {
   renderAirgap(data.em);
   renderEmCurve(data.em);
   renderStress(data.structural_fem, data.structural_sweep, data.structural_sweep_chart_b64);
-  renderDeformation(data.deformation);
+    renderConnection(data.connection);
+  renderDeformation(data.deformation, data.structural_fem);
   renderThermal(data.thermal);
   renderDriveCycle(data.drivecycle);
   renderDriveCycleExtra(data.drivecycle_vollast,   'cycle-autobahn',  'cycle-autobahn-energy',  'cycle-autobahn-stats',  'rtab-btn-cycle-autobahn',  'cycle-autobahn-thermal',  'cycle-autobahn-therm-avg',  'cycle-autobahn-therm-peak',  'cycle-autobahn-therm-warn');
@@ -1203,9 +3273,61 @@ async function loadResults() {
   document.getElementById('btn_freecad').style.display  = 'block';
   document.getElementById('btn_step').style.display     = 'block';
   document.getElementById('report_btns').style.display  = 'flex';
+  document.getElementById('tbtn-report').disabled = false;
   refreshProjectList();
 
+  try {
+    const s = await fetch('/status').then(r => r.json());
+    renderRating(s && s.project_id);
+  } catch (e) { renderRating(null); }
+
   showFrame(0);
+}
+
+// ── Ergebnis-Bewertung (gut/schlecht) → LLM-Trainingsfile ───────────────────
+let _ratingPid = null;
+
+function _ratingHighlight(label) {
+  const g = document.getElementById('rate_gut'), b = document.getElementById('rate_schlecht');
+  if (!g || !b) return;
+  g.style.outline = label === 'gut' ? '2px solid #6f6' : 'none';
+  b.style.outline = label === 'schlecht' ? '2px solid #f88' : 'none';
+}
+
+async function renderRating(pid) {
+  _ratingPid = pid || null;
+  const stat = document.getElementById('rate_status');
+  const auto = document.getElementById('rate_auto');
+  const cmt  = document.getElementById('rate_comment');
+  if (cmt) cmt.value = '';
+  _ratingHighlight(null);
+  if (auto) auto.textContent = '';
+  if (stat) stat.textContent = '';
+  if (!pid) { if (stat) stat.textContent = '(kein aktives Projekt)'; return; }
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/rating').then(x => x.json());
+    if (r.label) { _ratingHighlight(r.label); if (stat) stat.textContent = `bewertet: ${r.label}`; }
+    else if (stat) stat.textContent = 'noch nicht bewertet';
+    if (cmt && r.comment) cmt.value = r.comment;
+    if (auto && r.auto) auto.textContent =
+      `Heuristik-Vorschlag: ${r.auto.suggestion} — ${(r.auto.reasons || []).join('; ')}`;
+  } catch (e) { if (stat) stat.textContent = ''; }
+}
+
+async function setRating(label) {
+  if (!_ratingPid) { alert('Kein aktives Projekt zum Bewerten'); return; }
+  const comment = (document.getElementById('rate_comment').value || '').trim();
+  const stat = document.getElementById('rate_status');
+  stat.textContent = '⏳ speichere…';
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(_ratingPid) + '/rating',
+      { method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ label, comment }) }).then(x => x.json());
+    if (r.error) { stat.textContent = '❌ ' + r.error; return; }
+    _ratingHighlight(label);
+    stat.textContent = `✓ gespeichert: ${label}`;
+    refreshTrainingStats();
+  } catch (e) { stat.textContent = '❌ ' + e.message; }
 }
 
 async function downloadStep() {
@@ -1345,34 +3467,120 @@ function renderField(em) {
     sel.onchange = () => selectRpm(+sel.value);
   }
 
-  const sld = document.getElementById('anim-slider');
-  sld.max = Math.max(0, _framesPerRpm - 1);
-  sld.value = 0;
-
   _currentRpm = _rpmList[0] || 0;
   if (sel && _rpmList.length) sel.value = _currentRpm;
-  selectRpm(_currentRpm);
+
+  // Field-mode selector + video links (from em.field_modes / em.videos)
+  _modeMeta = {};
+  const fmSel = document.getElementById('field-mode-select');
+  const modes = em.field_modes || [{mode:'rotate', label:'Rotor-Rotation'}];
+  if (fmSel) {
+    fmSel.innerHTML = '';
+    modes.forEach(m => {
+      const bucket = _MODE_BUCKET[m.mode] || 'rotate';
+      _modeMeta[bucket] = m;
+      const opt = document.createElement('option');
+      opt.value = bucket; opt.textContent = m.label || m.mode;
+      fmSel.appendChild(opt);
+    });
+  }
+  const vids = em.videos || {};
+  const vEl = document.getElementById('field-video-links');
+  if (vEl) {
+    vEl.innerHTML = Object.keys(vids).map(b =>
+      `<a href="/project/current/video/${b}" style="color:#0cf;margin-left:8px">⬇ ${b}.mp4</a>`).join('');
+  }
+  _fieldMode = 'rotate';
+  selectFieldMode('rotate');
 }
 
-function renderDeformation(deform) {
-  if (!deform) {
-    document.getElementById('deform-img').alt = 'Keine Verformungsdaten verfügbar';
+function _deformImgUrl(file) {
+  // cache-bust so a freshly computed project's image isn't served stale
+  return '/chart/' + file + '?t=' + (window._resultsStamp || Date.now());
+}
+
+function _renderDeformStats(s) {
+  const wrap = document.getElementById('deform-table-wrap');
+  if (!wrap || !s) return;
+  const sf = (s.safety_factor == null) ? '–' : s.safety_factor.toFixed(2);
+  const sfWarn = (s.safety_factor != null && s.safety_factor < 1.0) ? ' style="color:#ff6b6b"' : '';
+  wrap.innerHTML = `
+    <div class="fem-box">
+      <div class="row"><span class="k">Drehzahl</span><span class="v">${(s.rpm||0).toLocaleString()} U/min</span></div>
+      <div class="row"><span class="k">u_max</span><span class="v">${(s.u_max_um||0).toFixed(2)} µm</span></div>
+      <div class="row"><span class="k">σ_v,max</span><span class="v">${(s.sigma_max_MPa||0).toFixed(0)} MPa</span></div>
+      <div class="row"><span class="k">Sicherheitsfaktor</span><span class="v"${sfWarn}>${sf}</span></div>
+      <div class="row"><span class="k">Überhöhung</span><span class="v">×${s.scale_factor||1}</span></div>
+    </div>`;
+}
+
+function renderDeformation(deform, fem) {
+  const tabs = document.getElementById('deform-img-tabs');
+  if (tabs) tabs.innerHTML = '';
+  const imgEl0 = document.getElementById('deform-img');
+  const hasImages = deform && ((deform.images && deform.images.length) || deform.chart_b64);
+  if (!hasImages) {
+    // FEM produced no result (e.g. CalculiX failed for this geometry) → no
+    // deformation plot. Show a clear message instead of an empty/broken image.
+    if (imgEl0) { imgEl0.removeAttribute('src'); imgEl0.alt = ''; }
+    ['deform-burst-banner','deform-video-wrap'].forEach(id => {
+      const e = document.getElementById(id); if (e) e.style.display = 'none';
+    });
+    const reason = (fem && fem.solver_status && fem.solver_status !== 'OK')
+      ? `CalculiX-Strukturlösung fehlgeschlagen (${fem.solver_status}).`
+      : 'Keine FEM-Verformungsdaten vorhanden.';
+    const wrap = document.getElementById('deform-table-wrap');
+    if (wrap) wrap.innerHTML = `<div class="fem-box" style="border-left:3px solid #c0504d">
+      <div style="color:#e0a0a0;font-size:.82rem;line-height:1.4">⚠ ${reason}<br/>
+      Verformungsbilder und Video benötigen ein gültiges CalculiX-Ergebnis.
+      Die analytische <b>Festigkeitskennlinie</b> (Tab „🏗 Festigkeit") ist davon unabhängig verfügbar.</div></div>`;
     return;
   }
-  if (deform.chart_b64) {
-    document.getElementById('deform-img').src = 'data:image/png;base64,' + deform.chart_b64;
+
+  // Burst-speed banner
+  const banner = document.getElementById('deform-burst-banner');
+  if (banner) {
+    if (deform.burst_rpm) {
+      banner.style.display = '';
+      banner.innerHTML = `<div class="fem-box" style="border-left:3px solid #ff8c00">
+        <div class="row"><span class="k">💥 Berstdrehzahl (SF→1)</span>
+        <span class="v" style="color:#ff8c00;font-weight:bold">${(+deform.burst_rpm).toLocaleString()} U/min</span></div></div>`;
+    } else { banner.style.display = 'none'; }
   }
-  const wrap = document.getElementById('deform-table-wrap');
-  if (wrap && deform.stats) {
-    const s = deform.stats;
-    wrap.innerHTML = `
-      <div class="fem-box">
-        <div class="row"><span class="k">u_max</span><span class="v">${(s.u_max_um||0).toFixed(2)} µm</span></div>
-        <div class="row"><span class="k">u_radial,max</span><span class="v">${(s.u_radial_um||0).toFixed(2)} µm</span></div>
-        <div class="row"><span class="k">Skalierungsfaktor</span><span class="v">×${s.scale_factor||1}</span></div>
-        <div class="row"><span class="k">Knoten</span><span class="v">${s.node_count||'–'}</span></div>
-        <div class="row"><span class="k">Drehzahl</span><span class="v">${(s.rpm||0).toLocaleString()} U/min</span></div>
-      </div>`;
+
+  const imgEl = document.getElementById('deform-img');
+  const images = deform.images || [];
+  if (images.length && tabs) {
+    // image-per-RPM selector; default to "max"
+    let active = images.find(i => i.tag === 'max') || images[0];
+    const setActive = (im, btn) => {
+      imgEl.src = _deformImgUrl(im.file);
+      _renderDeformStats(im.stats);
+      [...tabs.children].forEach(c => c.style.background = '#2a2a3e');
+      btn.style.background = '#3a5a8c';
+    };
+    images.forEach(im => {
+      const btn = document.createElement('button');
+      btn.className = 'rtab-btn'; btn.textContent = im.label;
+      btn.style.cssText = 'padding:5px 10px;font-size:.74rem;background:#2a2a3e';
+      btn.onclick = () => setActive(im, btn);
+      tabs.appendChild(btn);
+      if (im === active) setActive(im, btn);
+    });
+  } else if (deform.chart_b64) {
+    imgEl.src = 'data:image/png;base64,' + deform.chart_b64;
+    _renderDeformStats(deform.stats);
+  }
+
+  // Deformation ramp video
+  const vWrap = document.getElementById('deform-video-wrap');
+  if (vWrap) {
+    if (deform.video) {
+      const url = '/project/current/video/struct';
+      vWrap.style.display = '';
+      document.getElementById('deform-video').src = url;
+      document.getElementById('deform-video-dl').href = url;
+    } else { vWrap.style.display = 'none'; }
   }
 }
 
@@ -1583,6 +3791,33 @@ function renderStress(fem, sweep, chartB64) {
   }).join('');
 }
 
+function renderConnection(c) {
+  const wrap = document.getElementById('conn-wrap');
+  if (!wrap) return;
+  if (!c) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  if (c.chart_b64) document.getElementById('conn-img').src = 'data:image/png;base64,' + c.chart_b64;
+  const ucls = (c.utilization != null && c.utilization <= 1) ? 'sf-ok' : 'sf-bad';
+  const rows = [
+    row('Typ', c.note || c.type),
+    row('Nennmoment', (c.T_rated_Nm ?? '–') + ' Nm'),
+    row('Drehmomentkapazität', (c.T_capacity_Nm ?? '–') + ' Nm'),
+    row('Auslastung', `<span class="${ucls}">${c.utilization ?? '–'}</span>`),
+  ];
+  if (c.type === 'press') {
+    rows.push(row('Übermaß', (c.interference_um ?? '–') + ' µm'));
+    rows.push(row('Fugendruck', (c.p_MPa ?? '–') + ' MPa'));
+    const lcls = (c.loosening_rpm && c.loosening_rpm >= (c._rpm_max || 0)) ? 'sf-ok' : 'sf-warn';
+    rows.push(row('Lösedrehzahl', `<span class="${lcls}">${(c.loosening_rpm ?? '–')} U/min</span>`));
+  } else {
+    rows.push(row('Flächenpressung', (c.p_MPa ?? '–') + ' MPa'));
+    rows.push(row('zul. Pressung', (c.p_allow_MPa ?? '–') + ' MPa'));
+  }
+  rows.push(row('Bewertung', c.ok ? '<span class="sf-ok">in Ordnung</span>'
+                                  : '<span class="sf-bad">⚠ kritisch</span>'));
+  document.getElementById('conn-box').innerHTML = rows.join('');
+}
+
 function renderManual(m) {
   if (!m) return;
   const panel = document.getElementById('manual-panel');
@@ -1630,6 +3865,23 @@ function escHtml(s) {
     slots: 54, slotDepth: 25, slotWidthRatio: 0.5,
     p: 3, magShape: "v", magAngle: 120, magDepthRel: 0.7,
     magWidth: 45, magThick: 6, magDist: 2, airGap: 0.7,
+    magLayers: 3, magLayerGap: 8, poleArcFrac: 0.83, segPerPole: 6,
+    nAx: 1, nCirc: 1, shaftBoreD: 0, magTangLen: 0, magAngle2: 90, magAsym: 0,
+    pocketMode: "position", pocketOuterD: 178, pocketInnerD: 150,
+    magOrient: "transverse", conductorsPerSlot: 4, coilPitch: 0,
+    windingHeadFlare: 6, windingHeadStyle: "sweep",
+    shaftConnection: "press", pressInterferenceUm: 40,
+    splineTeeth: 10, splineToothDepthMm: 2, polygonLobes: 3, polygonEccMm: 2,
+    // Stepwise geometry: per-component build toggles (CAD only). Core parts on,
+    // bearings + winding-head insulation optional extras off.
+    genShaft: true, genRotorIron: true, genMagnets: true, genStatorIron: true,
+    genHairpins: true, genWindingHeads: true,
+    genBearingA: false, genBearingB: false, genInsulation: false,
+    bearingODmm: 0, bearingWidthMm: 14, bearingGapMm: 5, insulationThkMm: 0.4,
+    // Balance-disc bolts (optional): holes + bolts through the whole stack,
+    // count = pole number, symmetric (pitch-circle Ø + angular offset, thread ≥ M4).
+    genBalanceBolts: false, balanceBoltThread: "M6",
+    balanceBoltCircleD: 0, balanceBoltOffsetDeg: 0,
   };
   window.GEOM = GEOM; // expose for analysis payload
 
@@ -1662,6 +3914,7 @@ function escHtml(s) {
     bindInput("dim_stator_in",  v => { GEOM.statorID  = v; resetField(); });
     bindInput("dim_rotor_out",  v => { GEOM.rotorOD   = v; resetField(); });
     bindInput("dim_shaft",      v => { GEOM.shaftD     = v; resetField(); });
+    bindInput("dim_shaft_bore", v => { GEOM.shaftBoreD = v; resetField(); });
     bindInput("stator_slots",   v => { GEOM.slots = parseInt(v); resetField(); });
     bindInput("p_pairs", v => {
       GEOM.p = v;
@@ -1669,13 +3922,77 @@ function escHtml(s) {
       resetField();
     });
 
-    document.getElementById("mag_shape").onchange = e => { GEOM.magShape = e.target.value; resetField(); };
+    document.getElementById("mag_shape").onchange = e => {
+      GEOM.magShape = e.target.value; resetField();
+      _updateTopoVisibility(); _updatePocketMode(); _updateEffWidthDisplay();
+    };
+    document.getElementById("pocket_mode").onchange = e => {
+      GEOM.pocketMode = e.target.value; resetField(); _updatePocketMode();
+    };
+    document.getElementById("mag_orient").onchange = e => {
+      GEOM.magOrient = e.target.value; resetField();
+    };
+    bindInput("pocket_outer_d", v => { GEOM.pocketOuterD = v; resetField(); });
+    bindInput("pocket_inner_d", v => { GEOM.pocketInnerD = v; resetField(); });
     bindSlider("mag_angle", v => { GEOM.magAngle    = v; resetField(); _updateEffWidthDisplay(); }, "°");
+    bindSlider("mag_angle2", v => { GEOM.magAngle2  = v; resetField(); }, "°");
+    bindSlider("mag_asym",  v => { GEOM.magAsym     = v; resetField(); }, "°");
+    bindSlider("mag_tang_len", v => { GEOM.magTangLen = v; resetField(); }, " mm");
     bindSlider("mag_depth", v => { GEOM.magDepthRel = v / 100; resetField(); _updateEffWidthDisplay(); }, "%");
     bindSlider("mag_width", v => { GEOM.magWidth    = v; resetField(); _updateEffWidthDisplay(); }, " mm");
-    bindSlider("mag_thick", v => { GEOM.magThick    = v; resetField(); }, " mm");
+    bindSlider("mag_thick", v => { GEOM.magThick    = v; resetField(); _updateEffWidthDisplay(); }, " mm");
     bindSlider("mag_dist",  v => { GEOM.magDist     = v; resetField(); }, " mm");
+    bindSlider("mag_layer_gap", v => { GEOM.magLayerGap = v; resetField(); }, " mm");
+    bindSlider("mag_layers",    v => { GEOM.magLayers   = parseInt(v); resetField(); }, "");
+    bindSlider("pole_arc",      v => { GEOM.poleArcFrac  = v / 100; resetField(); }, "%");
+    bindSlider("seg_per_pole",  v => { GEOM.segPerPole   = parseInt(v); resetField(); }, "");
+    bindSlider("n_ax",          v => { GEOM.nAx          = parseInt(v); }, "");
+    bindSlider("n_circ",        v => { GEOM.nCirc        = parseInt(v); }, "");
+    _updateTopoVisibility(); _updatePocketMode();
     bindSlider("slot_depth",v => { GEOM.slotDepth   = v; resetField(); }, " mm");
+    bindSlider("cond_per_slot", v => { GEOM.conductorsPerSlot = parseInt(v); }, "");
+    bindSlider("coil_pitch",    v => { GEOM.coilPitch         = parseInt(v); }, "");
+    bindSlider("wh_flare",      v => { GEOM.windingHeadFlare   = v; }, " mm");
+    document.getElementById("wh_style").onchange = e => { GEOM.windingHeadStyle = e.target.value; };
+    // Wellenverbindung (Blechpaket–Welle)
+    bindSlider("press_interf",  v => { GEOM.pressInterferenceUm = v; }, " µm");
+    bindSlider("spline_teeth",  v => { GEOM.splineTeeth         = parseInt(v); }, "");
+    bindSlider("spline_depth",  v => { GEOM.splineToothDepthMm  = v; }, " mm");
+    bindSlider("poly_lobes",    v => { GEOM.polygonLobes        = parseInt(v); }, "");
+    bindSlider("poly_ecc",      v => { GEOM.polygonEccMm        = v; }, " mm");
+    document.getElementById("shaft_connection").onchange = e => {
+      GEOM.shaftConnection = e.target.value; _updateShaftConn();
+    };
+    _updateShaftConn();
+
+    // Stepwise geometry — component build toggles (CAD only, no solver reset).
+    const _chk = (id, key) => {
+      document.getElementById(id).onchange = e => {
+        GEOM[key] = e.target.checked; _updateComponentVis();
+      };
+    };
+    _chk("gen_shaft",   "genShaft");    _chk("gen_rotor",   "genRotorIron");
+    _chk("gen_magnets", "genMagnets");  _chk("gen_stator",  "genStatorIron");
+    _chk("gen_hairpins","genHairpins"); _chk("gen_whead",   "genWindingHeads");
+    _chk("gen_bear_a",  "genBearingA"); _chk("gen_bear_b",  "genBearingB");
+    _chk("gen_insul",   "genInsulation");
+    _chk("gen_balance", "genBalanceBolts");
+    bindSlider("bearing_od",  v => { GEOM.bearingODmm    = v; }, " mm");
+    bindSlider("bearing_w",   v => { GEOM.bearingWidthMm = v; }, " mm");
+    bindSlider("bearing_gap", v => { GEOM.bearingGapMm   = v; }, " mm");
+    bindSlider("insul_thk",   v => { GEOM.insulationThkMm = v; }, " mm");
+    document.getElementById("bal_thread").onchange =
+      e => { GEOM.balanceBoltThread = e.target.value; };
+    // bal_circle_d / bal_offset accept 0 and negative values (auto / versatz),
+    // so they can't use bindInput (which ignores ≤ 0).
+    const _balNum = (id, key) => {
+      const el = document.getElementById(id); if (!el) return;
+      const h = () => { const v = parseFloat(el.value); if (!isNaN(v)) GEOM[key] = v; };
+      el.oninput = h; el.onchange = h;
+    };
+    _balNum("bal_circle_d", "balanceBoltCircleD");
+    _balNum("bal_offset",   "balanceBoltOffsetDeg");
+    _updateComponentVis();
 
     bindSlider("sim_load",      v => PHYS.load      = v, " Nm");
     bindSlider("sim_id_weak",   v => PHYS.id_manual = v, " A");
@@ -1691,20 +4008,26 @@ function escHtml(s) {
     };
 
     const btnPlay = document.getElementById("btn_play_pause");
-    btnPlay.onclick = () => {
-      PHYS.isRunning = !PHYS.isRunning;
-      btnPlay.innerText = PHYS.isRunning ? "Stop" : "Start";
-      btnPlay.className = PHYS.isRunning ? "stop" : "start";
-      document.getElementById("val_status").innerText = PHYS.isRunning ? "LÄUFT" : "PAUSE";
-      document.getElementById("val_status").style.color = PHYS.isRunning ? "var(--ok)" : "var(--warn)";
+    // Keep all play/pause controls (Live-tab button + preview-overlay button +
+    // status text) in sync. Exposed globally so the overlay button — reachable
+    // from the Geometrie/Betrieb/Berechnung tabs — toggles the same state.
+    window._syncSimUI = () => {
+      const r = PHYS.isRunning;
+      if (btnPlay) { btnPlay.innerText = r ? "Stop" : "Start"; btnPlay.className = r ? "stop" : "start"; }
+      const ov = document.getElementById("ov_play");
+      if (ov) { ov.textContent = r ? "⏸ Pause" : "▶ Start"; ov.style.background = r ? "var(--err)" : "var(--ok)"; }
+      const vs = document.getElementById("val_status");
+      if (vs) { vs.innerText = r ? "LÄUFT" : "PAUSE"; vs.style.color = r ? "var(--ok)" : "var(--warn)"; }
     };
+    window.toggleSim = () => { PHYS.isRunning = !PHYS.isRunning; window._syncSimUI(); };
+    btnPlay.onclick = window.toggleSim;
     document.getElementById("btn_reset").onclick = () => {
       PHYS.omega = PHYS.angle = PHYS.id = PHYS.iq = 0;
     };
 
-    // Apply button: switch to sim tab (canvas becomes visible) + force resize + reset solver
+    // Apply button: the preview pane is already visible on the input tabs, so just
+    // force a canvas resize + reset the solver (no tab switch needed).
     document.getElementById("btn_apply").onclick = () => {
-      switchTab('sim');
       requestAnimationFrame(() => requestAnimationFrame(() => {
         resize();
         isSolverInit = false;
@@ -1713,6 +4036,9 @@ function escHtml(s) {
 
     initSolverArrays();
     requestAnimationFrame(loop);
+
+    // Eingaben automatisch sichern + (falls vorhanden) letzte Sitzung wiederherstellen.
+    if (typeof setupAutosave === 'function') setupAutosave();
   }
 
   function updateGridMode() {
@@ -1764,28 +4090,245 @@ function escHtml(s) {
     isSolverInit = true;
   }
 
-  function _updateEffWidthDisplay() {
-    const el = document.getElementById("disp_mag_width_eff");
-    if (!el || GEOM.magShape !== "v") { if (el) el.innerText = ""; return; }
-    const rPos = GEOM.shaftD/2 + (GEOM.rotorOD/2 - GEOM.shaftD/2) * GEOM.magDepthRel;
-    const hA   = (GEOM.magAngle * Math.PI / 180) / 2;
-    const maxW = _maxMagnetWidth(rPos, GEOM.magDist/2, hA, GEOM.rotorOD/2);
-    const eff  = Math.min(GEOM.magWidth, maxW);
-    if (eff < GEOM.magWidth - 0.5)
-      el.innerText = `→ ${eff.toFixed(1)} mm eff.`;
-    else
-      el.innerText = "";
+  // Show/hide topology-specific parameter rows based on the selected magShape.
+  function _updateTopoVisibility() {
+    const shape = GEOM.magShape || "v";
+    document.querySelectorAll(".topo-param").forEach(el => {
+      const topos = (el.getAttribute("data-topos") || "").split(/\s+/);
+      el.style.display = topos.includes(shape) ? "" : "none";
+    });
   }
 
-  // mirrors ema_freecad.py _max_magnet_width(): clamps arm length so the outer
+  // Pocket-by-diameter mode (V-form only): swap Position/Länge sliders for the
+  // Außen-Ø/Innen-Ø inputs. The opening angle slider stays in both modes.
+  function _updatePocketMode() {
+    const isV = (GEOM.magShape || "v") === "v";
+    const dia = isV && GEOM.pocketMode === "diameter";
+    document.querySelectorAll(".pocket-dia").forEach(el => el.style.display = dia ? "" : "none");
+    document.querySelectorAll(".pocket-pos").forEach(el => el.style.display = dia ? "none" : "");
+  }
+
+  // Show only the parameter sliders relevant to the chosen shaft connection.
+  function _updateShaftConn() {
+    const c = GEOM.shaftConnection || "press";
+    const show = (id, on) => { const e = document.getElementById(id); if (e) e.style.display = on ? "" : "none"; };
+    show("grp_press", c === "press");
+    show("grp_spline_teeth", c === "spline");
+    show("grp_spline_depth", c === "spline");
+    show("grp_poly_lobes", c === "polygon");
+    show("grp_poly_ecc", c === "polygon");
+  }
+
+  // Component toggles: reveal bearing/insulation params when enabled, and gate the
+  // winding-head + insulation options on hairpins being built (no bars → no heads).
+  function _updateComponentVis() {
+    const show = (id, on) => { const e = document.getElementById(id); if (e) e.style.display = on ? "" : "none"; };
+    show("grp_bearing", !!(GEOM.genBearingA || GEOM.genBearingB));
+    show("grp_insul",   !!GEOM.genInsulation);
+    show("grp_balance", !!GEOM.genBalanceBolts);
+    const hp = GEOM.genHairpins !== false;
+    const wh = document.getElementById("gen_whead");
+    const ins = document.getElementById("gen_insul");
+    if (wh)  { wh.disabled  = !hp; wh.parentElement.style.opacity  = hp ? "1" : ".45"; }
+    if (ins) { ins.disabled = !(hp && GEOM.genWindingHeads !== false);
+               ins.parentElement.style.opacity = ins.disabled ? ".45" : "1"; }
+  }
+
+  function _updateEffWidthDisplay() {
+    // effective magnet length for V-family (thickness-aware clamp)
+    const wel = document.getElementById("disp_mag_width_eff");
+    if (wel) {
+      const vFam = ["v","vasym","u","vv","delta","pmasynrm"].includes(GEOM.magShape);
+      if (!vFam) { wel.innerText = ""; }
+      else {
+        const rPos = GEOM.shaftD/2 + (GEOM.rotorOD/2 - GEOM.shaftD/2) * GEOM.magDepthRel;
+        const hA   = (GEOM.magAngle * Math.PI / 180) / 2;
+        const maxW = _maxMagnetWidth(rPos, GEOM.magDist/2, hA, GEOM.rotorOD/2, 2 + GEOM.magThick/2);
+        const eff  = Math.min(GEOM.magWidth, maxW);
+        wel.innerText = (eff < GEOM.magWidth - 0.5) ? `→ ${eff.toFixed(1)} mm eff.` : "";
+      }
+    }
+    // surface-magnet thickness clamp warning (spm/halbach)
+    const tel = document.getElementById("disp_mag_thick");
+    if (tel) {
+      const isSurf = ["spm","halbach"].includes(GEOM.magShape);
+      const note = tel.parentElement.querySelector(".thick-eff");
+      if (note) note.remove();
+      if (isSurf) {
+        const eff = _surfaceThickness(GEOM);
+        if (eff < GEOM.magThick - 0.05) {
+          const s = document.createElement("span");
+          s.className = "thick-eff";
+          s.style.cssText = "color:#f90;font-size:.8em;margin-left:4px";
+          s.innerText = `→ ${eff.toFixed(1)} mm (Luftspalt)`;
+          tel.parentElement.appendChild(s);
+        }
+      }
+    }
+  }
+
+  // <<MIRROR-START>> (test_topology.py extracts this block to compare against ema_topology.py)
+  // mirrors ema_topology._max_magnet_width(): clamps arm length so the outer
   // corner stays inside R_rot - 2 mm (same 2 mm iron bridge as FreeCAD)
-  function _maxMagnetWidth(rPos_mm, mDistHalf_mm, halfAngle, rRot_mm) {
+  function _maxMagnetWidth(rPos_mm, mDistHalf_mm, halfAngle, rRot_mm, bridge) {
+    if (bridge == null) bridge = 2.0;
     const a = Math.cos(halfAngle), b = Math.sin(halfAngle);
-    const R = rRot_mm - 2;
+    const R = rRot_mm - bridge;
     const p = a * rPos_mm + b * mDistHalf_mm;
     const q = rPos_mm*rPos_mm + mDistHalf_mm*mDistHalf_mm - R*R;
     const disc = p*p - q;
     return disc < 0 ? 5 : Math.max(-p + Math.sqrt(disc), 5);
+  }
+
+  // mirrors ema_topology._surface_thickness(): surface magnets occupy the outer
+  // rotor band [r_rot - t, r_rot] (inside the OD); clamp to leave an iron core.
+  function _surfaceThickness(G) {
+    const maxT = (G.rotorOD/2 - G.shaftD/2) - 2.0, req = G.magThick;
+    if (maxT <= 0.5) return Math.max(maxT, 0.5);
+    return req > maxT ? maxT : req;
+  }
+
+  // ⚠ MIRROR of ema_topology.magnet_legs() — keep both in sync.
+  // Returns pole-local magnet placement legs. Frame: x = radial outward,
+  // y = tangential. A leg starts at (rPos, offset) and extends `length` along
+  // (cos tilt, sin tilt); `thickness` is perpendicular. magMode ∈
+  // "perp"|"tangential"|"radial"; magSign flips polarity; placement ∈
+  // "interior"|"surface".
+  function magnetLegs(G) {
+    const BRIDGE = 2.0;
+    const Rrot = G.rotorOD/2, Rshaft = G.shaftD/2;
+    const Rbore = (G.shaftBoreD != null ? G.shaftBoreD : 0)/2;
+    const rPos = Rshaft + (Rrot - Rshaft) * G.magDepthRel;
+    const magH = G.magThick;
+    const shape = G.magShape || "v";
+    const dH = G.magDist/2, hA = (G.magAngle*Math.PI/180)/2;
+    const hA2 = ((G.magAngle2 != null ? G.magAngle2 : G.magAngle)*Math.PI/180)/2;
+    const dL = (G.magLayerGap != null ? G.magLayerGap : 8);
+    const tang = (G.magTangLen != null ? G.magTangLen : 0);
+    const eb = BRIDGE + magH/2;                      // thickness-aware bridge
+    const leg = (o) => Object.assign(
+      {rPos, offset:0, tilt:0, length:G.magWidth, thickness:magH,
+       magMode:"perp", magSign:1, magRot:0, placement:"interior", layer:0}, o);
+    if (shape === "v") {
+      // Diameter mode: pocket defined by inner-Ø, outer-Ø and the V angle.
+      let rPosV = rPos, w;
+      if (G.pocketMode === "diameter") {
+        rPosV = Math.sqrt(Math.max(25.0, Math.pow(G.pocketInnerD/2, 2) - dH*dH));
+        w = _maxMagnetWidth(rPosV, dH, hA, G.pocketOuterD/2, 0.0);
+      } else {
+        w = G.magWidth;
+      }
+      w = Math.min(w, _maxMagnetWidth(rPosV, dH, hA, Rrot, eb));
+      return [ leg({rPos:rPosV, offset:+dH, tilt:+hA, length:w, magSign:+1}),
+               leg({rPos:rPosV, offset:-dH, tilt:-hA, length:w, magSign:-1}) ];
+    }
+    if (shape === "vasym") {
+      // asymmetric V: the two arms open at different angles about the d-axis
+      const asym = (G.magAsym != null ? G.magAsym : 0)*Math.PI/180;
+      const haTop = Math.min(Math.max(hA + asym, 5*Math.PI/180), 85*Math.PI/180);
+      const haBot = Math.min(Math.max(hA - asym, 5*Math.PI/180), 85*Math.PI/180);
+      const wTop = Math.min(G.magWidth, _maxMagnetWidth(rPos, dH, haTop, Rrot, eb));
+      const wBot = Math.min(G.magWidth, _maxMagnetWidth(rPos, dH, haBot, Rrot, eb));
+      return [ leg({offset:+dH, tilt:+haTop, length:wTop, magSign:+1}),
+               leg({offset:-dH, tilt:-haBot, length:wBot, magSign:-1}) ];
+    }
+    if (shape === "u") {
+      const w = Math.min(G.magWidth, _maxMagnetWidth(rPos, dH, hA, Rrot, eb));
+      const barR = Math.max(rPos - magH - BRIDGE, Rbore + magH/2 + 1.0);
+      let barLen = tang > 0 ? tang : 2*dH;
+      barLen = Math.min(barLen, 2*(dH + w*Math.sin(hA)*0.5));
+      return [ leg({offset:+dH, tilt:+hA, length:w, magSign:+1}),
+               leg({offset:-dH, tilt:-hA, length:w, magSign:-1}),
+               leg({rPos:barR, offset:-barLen/2, tilt:Math.PI/2, length:barLen, magSign:+1}) ];
+    }
+    if (shape === "vv") {
+      const w0 = Math.min(G.magWidth, _maxMagnetWidth(rPos, dH, hA, Rrot, eb));
+      const r1 = rPos + dL;
+      const w1 = Math.min(G.magWidth*1.05, _maxMagnetWidth(r1, dH, hA2, Rrot, eb));
+      return [ leg({offset:+dH, tilt:+hA, length:w0, magSign:+1, layer:0}),
+               leg({offset:-dH, tilt:-hA, length:w0, magSign:-1, layer:0}),
+               leg({rPos:r1, offset:+dH, tilt:+hA2, length:w1, magSign:+1, layer:1}),
+               leg({rPos:r1, offset:-dH, tilt:-hA2, length:w1, magSign:-1, layer:1}) ];
+    }
+    if (shape === "delta") {
+      const armBridge = 2*BRIDGE + 1.5*magH;
+      const w = Math.min(G.magWidth, _maxMagnetWidth(rPos, dH, hA, Rrot, armBridge));
+      const rTip = rPos + w*Math.cos(hA), yTip = dH + w*Math.sin(hA);
+      const deckR = Math.min(rTip + magH + BRIDGE, Rrot - magH/2 - BRIDGE);
+      let deckLen = tang > 0 ? tang : 1.6*yTip;
+      const maxHalf = Math.sqrt(Math.max((Rrot-BRIDGE)**2 - (deckR+magH/2)**2, 0));
+      deckLen = Math.min(deckLen, 2*maxHalf);
+      return [ leg({offset:+dH, tilt:+hA, length:w, magSign:+1}),
+               leg({offset:-dH, tilt:-hA, length:w, magSign:-1}),
+               leg({rPos:deckR, offset:-deckLen/2, tilt:Math.PI/2, length:deckLen, magSign:+1}) ];
+    }
+    if (shape === "pmasynrm") {
+      const nL = Math.max(2, parseInt(G.magLayers || 3));
+      const mh = magH*0.5, ebp = BRIDGE + mh/2, out = [];
+      for (let k=0;k<nL;k++) {
+        let rk = rPos + (k - (nL-1)/2)*dL;
+        rk = Math.max(rk, Rshaft + mh + 2);
+        const hak = Math.max(hA - k*(8*Math.PI/180), 20*Math.PI/180);
+        const wk = Math.min(G.magWidth*(0.8+0.15*k), _maxMagnetWidth(rk, dH, hak, Rrot, ebp));
+        out.push(leg({rPos:rk, offset:+dH, tilt:+hak, length:wk, thickness:mh, magSign:+1, layer:k}));
+        out.push(leg({rPos:rk, offset:-dH, tilt:-hak, length:wk, thickness:mh, magSign:-1, layer:k}));
+      }
+      return out;
+    }
+    if (shape === "spm") {
+      const poles = G.p*2, pitch = Math.PI*G.rotorOD/poles;
+      const arc = (G.poleArcFrac != null ? G.poleArcFrac : 0.83) * pitch;
+      return [leg({rPos:Rrot, tilt:Math.PI/2, length:arc, thickness:_surfaceThickness(G), magMode:"radial", placement:"surface"})];
+    }
+    if (shape === "halbach") {
+      // seg straight flat magnets/pole (tiles tangent to OD), rotating magnetisation
+      const poles = G.p*2, pitch = Math.PI*G.rotorOD/poles;
+      const arcTotal = (G.poleArcFrac != null ? G.poleArcFrac : 0.95) * pitch;
+      const seg = Math.max(2, parseInt(G.segPerPole || 6));
+      const segAng = (arcTotal/seg)/Rrot;
+      const mh = _surfaceThickness(G);
+      const length = 2*Rrot*Math.sin(segAng/2)*0.95;
+      const rOut = Rrot - BRIDGE;
+      const dOut = Math.sqrt(Math.max(rOut*rOut - (length/2)*(length/2), 1.0));
+      const rC = dOut - mh/2, out=[];
+      for (let s=0;s<seg;s++) {
+        const ang = (s-(seg-1)/2)*segAng, tilt = ang + Math.PI/2;
+        const cx = rC*Math.cos(ang), cy = rC*Math.sin(ang);
+        const rPos2 = cx - (length/2)*Math.cos(tilt), off = cy - (length/2)*Math.sin(tilt);
+        const mrot = (s-(seg-1)/2)*(Math.PI/seg)*2;
+        out.push(leg({rPos:rPos2, offset:off, tilt:tilt, length:length,
+                      thickness:mh, magMode:"radial", magRot:mrot, placement:"surface_flat"}));
+      }
+      return out;
+    }
+    if (shape === "spoke") {
+      const rStart = Rshaft + 1.0;
+      const length = Math.max(Rrot - Rshaft - 2*BRIDGE, 5.0);
+      return [leg({rPos:rStart, tilt:0, length:length, magMode:"tangential", magSign:+1})];
+    }
+    // bar / fallback: single tangential flat magnet
+    return [leg({tilt:Math.PI/2})];
+  }
+  // <<MIRROR-END>>
+
+  // Mirror of ema_analysis._orient_factor: air-gap flux scaling when the magnet
+  // magnetisation is rotated 90° (magOrient="longitudinal"). Keeps the live field
+  // amplitude responding to the orientation toggle in the SAME direction as the FDM.
+  function _magOrientFactor(G) {
+    if (G.magOrient !== "longitudinal") return 1.0;
+    const legs = magnetLegs(G);
+    const cp = 1.0, sp = 0.0;
+    let num = 0, den = 0;
+    for (const lg of legs) {
+      const lx = Math.cos(lg.tilt), ly = Math.sin(lg.tilt);
+      let mdx, mdy;
+      if (lg.magMode === "tangential") { mdx = -sp; mdy = cp; }
+      else if (lg.magMode === "radial") { mdx = Math.cos(lg.magRot); mdy = Math.sin(lg.magRot); }
+      else { mdx = -ly; mdy = lx; }
+      den += Math.abs(mdx*cp + mdy*sp);
+      num += Math.abs((-mdy)*cp + mdx*sp);
+    }
+    return den < 1e-6 ? 1.0 : num/den;
   }
 
   function smoothMu(dist) {
@@ -1807,7 +4350,8 @@ function escHtml(s) {
         const dx = x - center, dy = y - center;
         const r  = Math.sqrt(dx*dx + dy*dy);
         const dSt = Math.max(rSI - r, r - rSO);
-        const dRo = Math.max(rSh - r, r - rRO);
+        const rBore = (GEOM.shaftBoreD > 0 ? (GEOM.shaftBoreD/2)*gs : 0);
+        const dRo = Math.max(rBore - r, r - rRO);   // iron band [bore, rotorOD] (steel shaft)
         gridMu[y*N+x] = smoothMu(Math.min(dSt, dRo));
       }
     }
@@ -1827,48 +4371,54 @@ function escHtml(s) {
         }
       }
     }
-    // Magnets – numerical curl(M) approach (same as ema_analysis.py)
+    // Magnets – numerical curl(M) approach; placement from magnetLegs()
+    // (mirror of ema_topology / ema_analysis._rasterise).
     const Mx_acc = new Float32Array(N*N);
     const My_acc = new Float32Array(N*N);
     const poles  = GEOM.p*2;
-    const mH     = GEOM.magThick*gs, mDist = (GEOM.magDist/2)*gs;
-    const rPos_mm = GEOM.shaftD/2 + (GEOM.rotorOD/2 - GEOM.shaftD/2)*GEOM.magDepthRel;
-    const hA_v   = (GEOM.magAngle*Math.PI/180)/2;
-    const magW_mm = GEOM.magShape === "v"
-      ? Math.min(GEOM.magWidth, _maxMagnetWidth(rPos_mm, GEOM.magDist/2, hA_v, GEOM.rotorOD/2))
-      : GEOM.magWidth;
-    const mW = magW_mm * gs, rPos = rPos_mm * gs;
-    const Jm_amp = 8000 / N;
+    const legs   = magnetLegs(GEOM);
+    const Jm_amp = (8000 / N) * _magOrientFactor(GEOM);   // 90°-rotation flux scaling
+    const rRO_mm = GEOM.rotorOD/2;
 
     for (let p2 = 0; p2 < poles; p2++) {
       const pA   = p2*(2*Math.PI/poles) + PHYS.angle;
       const mSign = p2%2===0 ? 1 : -1;
-      const fillMag = (px, py, w, h, ang, cDir) => {
-        const sX = px*Math.cos(pA) - py*Math.sin(pA);
-        const sY = px*Math.sin(pA) + py*Math.cos(pA);
-        // l̂ = long axis,  t̂ = perpendicular (thickness direction = magnetisation dir.)
-        const lx=Math.cos(ang+pA), ly=Math.sin(ang+pA);
-        const tx=-ly, ty=lx;
-        const Jm = Jm_amp * mSign * cDir;
-        for (let l = 0; l < w; l+=0.5) {
-          for (let t = -h/2; t < h/2; t+=0.5) {
-            const gx=center+sX+l*lx+t*tx, gy=center+sY+l*ly+t*ty;
-            const ix=Math.floor(gx), iy=Math.floor(gy);
-            if(ix>=0&&ix<N&&iy>=0&&iy<N) {
-              const idx = iy*N+ix;
-              gridMu[idx] = 1.5;
-              Mx_acc[idx] += Jm * tx;   // M = Jm · t̂
-              My_acc[idx] += Jm * ty;
+      const cpA = Math.cos(pA), spA = Math.sin(pA);
+      for (const lg of legs) {
+        const lx = Math.cos(pA+lg.tilt), ly = Math.sin(pA+lg.tilt);
+        let mdx, mdy;
+        if (lg.magMode === "tangential") { mdx = -spA; mdy = cpA; }
+        else if (lg.magMode === "radial") { const b = pA+lg.magRot; mdx = Math.cos(b); mdy = Math.sin(b); }
+        else { mdx = -ly; mdy = lx; }            // "perp"
+        // 90° re-orientation (short side N/S) — mirror of ema_analysis._rasterise
+        if (GEOM.magOrient === "longitudinal") { const _t = mdx; mdx = -mdy; mdy = _t; }
+        const Jm = Jm_amp * mSign * lg.magSign;
+        const mH = lg.thickness * gs;
+        if (lg.placement === "surface") {
+          const halfArc = (lg.length/2) / rRO_mm;
+          const ca = lg.offset / rRO_mm;
+          const r1 = rRO * gs, r0 = r1 - mH;   // outer rotor band (inside the OD)
+          for (let rad = r0; rad <= r1; rad += 0.5) {
+            for (let a = -halfArc; a <= halfArc; a += 0.012) {
+              const th = pA + ca + a;
+              const gx = center + rad*Math.cos(th), gy = center + rad*Math.sin(th);
+              const ix=Math.floor(gx), iy=Math.floor(gy);
+              if(ix>=0&&ix<N&&iy>=0&&iy<N){ const idx=iy*N+ix; gridMu[idx]=1.5; Mx_acc[idx]+=Jm*mdx; My_acc[idx]+=Jm*mdy; }
+            }
+          }
+        } else {
+          const sX = lg.rPos*gs*cpA - lg.offset*gs*spA;
+          const sY = lg.rPos*gs*spA + lg.offset*gs*cpA;
+          const tx = -ly, ty = lx;
+          const w = lg.length*gs, h = mH;
+          for (let l = 0; l < w; l+=0.5) {
+            for (let t = -h/2; t < h/2; t+=0.5) {
+              const gx=center+sX+l*lx+t*tx, gy=center+sY+l*ly+t*ty;
+              const ix=Math.floor(gx), iy=Math.floor(gy);
+              if(ix>=0&&ix<N&&iy>=0&&iy<N){ const idx=iy*N+ix; gridMu[idx]=1.5; Mx_acc[idx]+=Jm*mdx; My_acc[idx]+=Jm*mdy; }
             }
           }
         }
-      };
-      if (GEOM.magShape==="v") {
-        const hA = (GEOM.magAngle*Math.PI/180)/2;
-        fillMag(rPos, mDist, mW, mH, hA,  1);
-        fillMag(rPos,-mDist, mW, mH,-hA, -1);
-      } else {
-        fillMag(rPos, 0, mW, mH, -Math.PI/2, 1);
       }
     }
     // J_z += curl(M) = ∂My/∂x − ∂Mx/∂y  (central differences)
@@ -1971,25 +4521,66 @@ function escHtml(s) {
     ctx.fillStyle="#7f8c8d"; ctx.fill(); ctx.strokeStyle="#95a5a6"; ctx.stroke();
     ctx.beginPath(); ctx.arc(0,0,rSh,0,2*Math.PI);
     ctx.fillStyle="#222"; ctx.fill(); ctx.strokeStyle="#444"; ctx.stroke();
+    // hollow-shaft bore
+    if (GEOM.shaftBoreD > 0) {
+      const rBore=(GEOM.shaftBoreD/2)*SCALE;
+      ctx.beginPath(); ctx.arc(0,0,rBore,0,2*Math.PI);
+      ctx.fillStyle="#0d0d14"; ctx.fill(); ctx.strokeStyle="#555"; ctx.stroke();
+    }
     const poles=GEOM.p*2, step=2*Math.PI/poles;
-    const hA=(GEOM.magAngle*Math.PI/180)/2;
-    const rPos_mm=GEOM.shaftD/2+(GEOM.rotorOD/2-GEOM.shaftD/2)*GEOM.magDepthRel;
-    const magW_mm = GEOM.magShape==="v"
-      ? Math.min(GEOM.magWidth, _maxMagnetWidth(rPos_mm, GEOM.magDist/2, hA, GEOM.rotorOD/2))
-      : GEOM.magWidth;
-    const mW=magW_mm*SCALE, mH=GEOM.magThick*SCALE, mD=(GEOM.magDist/2)*SCALE;
-    const rPos=rPos_mm*SCALE;
+    const legs = magnetLegs(GEOM);
+    const rRO = (GEOM.rotorOD/2)*SCALE;
     for (let i=0;i<poles;i++) {
       ctx.save(); ctx.rotate(i*step);
-      ctx.fillStyle = i%2===0 ? "#e74c3c" : "#3498db";
-      if (GEOM.magShape==="bar") {
-        ctx.save(); ctx.translate(rPos,0); ctx.rotate(-Math.PI/2);
-        ctx.fillRect(-mW/2,-mH/2,mW,mH); ctx.restore();
-      } else {
-        ctx.save(); ctx.translate(rPos, mD); ctx.rotate(hA); ctx.fillRect(0,-mH/2,mW,mH); ctx.restore();
-        ctx.save(); ctx.translate(rPos,-mD); ctx.rotate(-hA); ctx.fillRect(0,-mH/2,mW,mH); ctx.restore();
+      const magColor = i%2===0 ? "#e74c3c" : "#3498db";
+      ctx.fillStyle = magColor;
+      for (const lg of legs) {
+        const mH = lg.thickness*SCALE;
+        if (lg.placement === "surface") {
+          const halfArc = (lg.length/2)/(GEOM.rotorOD/2);
+          const ca = lg.offset/(GEOM.rotorOD/2);
+          ctx.fillStyle = magColor;
+          ctx.beginPath();
+          ctx.arc(0,0, rRO - mH,   ca-halfArc, ca+halfArc, false);
+          ctx.arc(0,0, rRO,        ca+halfArc, ca-halfArc, true);
+          ctx.closePath(); ctx.fill();
+        } else {
+          ctx.save();
+          ctx.translate(lg.rPos*SCALE, lg.offset*SCALE);
+          ctx.rotate(lg.tilt);
+          const L = lg.length*SCALE, r = mH/2;
+          if (lg.placement === "interior") {
+            // obround pocket = magnet straight section + air end caps (flux barriers)
+            ctx.fillStyle = "#11131c";
+            ctx.fillRect(0, -r, L, mH);
+            ctx.beginPath(); ctx.arc(0, 0, r, 0, 2*Math.PI); ctx.fill();
+            ctx.beginPath(); ctx.arc(L, 0, r, 0, 2*Math.PI); ctx.fill();
+          }
+          // magnet (rectangle); surface_flat (Halbach tile) has no pocket/caps
+          ctx.fillStyle = magColor;
+          ctx.fillRect(0, -r, L, mH);
+          ctx.restore();
+        }
       }
       ctx.restore();
+    }
+    // Balance-disc bolt holes (optional): symmetric, count = poles, on a pitch
+    // circle (Ø/offset adjustable). Mirrors the FreeCAD + 2D-section geometry.
+    if (GEOM.genBalanceBolts) {
+      const TH = {M4:4,M5:5,M6:6,M8:8,M10:10,M12:12,M16:16,M20:20};
+      const nom = TH[(GEOM.balanceBoltThread||'M6')] || 6;
+      const hr  = ((nom+0.4)/2)*SCALE;
+      const pcr = (GEOM.balanceBoltCircleD>0 ? GEOM.balanceBoltCircleD/2
+                  : GEOM.shaftD/2 + (GEOM.rotorOD/2 - GEOM.shaftD/2)*0.5)*SCALE;
+      const off = (GEOM.balanceBoltOffsetDeg||0)*Math.PI/180;
+      const nb  = Math.max(2, poles);
+      for (let i=0;i<nb;i++){
+        const a = off + i*2*Math.PI/nb;
+        ctx.beginPath();
+        ctx.arc(pcr*Math.cos(a), pcr*Math.sin(a), hr, 0, 2*Math.PI);
+        ctx.fillStyle="#0d0d14"; ctx.fill();
+        ctx.strokeStyle="#aab"; ctx.lineWidth=1; ctx.stroke();
+      }
     }
   }
 

@@ -57,7 +57,7 @@ ema_app.py / ema_pipeline.py  (Streamlit)
     │    Ergebnis: rotor.FCStd, Flächenliste, Volumen
     │
     ├─ Schritt 2: EM-ANALYSE
-    │    ema_analysis.run_em_analysis()       → FDM-Solver (NumPy, 150×150 Grid)
+    │    ema_analysis.run_em_analysis()       → FDM-Solver (scipy splu, Gitter wählbar 100–800)
     │    Ergebnis: A, Bx, By, Br_gap, Bt_gap, Performance-Dict
     │
     ├─ Schritt 3: THERMIK  (nur in ema_pipeline.py)
@@ -109,11 +109,12 @@ klickt „CAD Export (Python)". Die Seite sendet ein JSON-Objekt per `fetch` an
 | `magDist` | float [mm] | Abstand der beiden V-Magnete zur Polteilungsachse |
 | `magDepthRel` | float [0–1] | Radiale Position der Magnete (0 = Welle, 1 = Außenrand) |
 
-### `bridge.py` (Flask-Server)
+### `server.py` (Flask-Backend)
 
-Empfängt das JSON, fügt einen Zeitstempel (`_ts`) hinzu und schreibt es nach
-`workspace/ema_design.json`. Die Streamlit-App pollt diese Datei und startet
-die Pipeline, sobald die Datei erscheint.
+`POST /analyse` nimmt das JSON entgegen und startet `ema_pipeline.run_pipeline`
+in einem Daemon-Thread; das Browser-UI (`ema.html`) pollt `GET /status` und holt
+am Ende `GET /results`. (Die frühere `bridge.py`/Streamlit-Variante existiert nicht
+mehr — Einstiegspunkt ist `server.py`.)
 
 ---
 
@@ -219,31 +220,26 @@ Löst die 2D-magnetostatische Gleichung:
 
 mit der Skalarvariable `A` (z-Komponente des magnetischen Vektorpotentials).
 
-**Methode:** Red-Black-SOR (Successive Over-Relaxation) mit
-Schachbrettmuster-Update für vektorisierte Verarbeitung.
+**Methode:** Ein Finite-Volumen-5-Punkt-Operator mit harmonisch gemittelten
+Flächen-ν (`_build_fv_matrix`) wird **direkt sparse faktorisiert** (`scipy splu`)
+und für die rechte Seite `J` rücksubstituiert. Das ist bei jeder Auflösung exakt
+(kein Iterations-Tuning), sodass Luftspalt und Zähne auch bei hoher Auflösung
+sauber aufgelöst werden. Der Operator hängt nur von der Permeabilitätskarte µ
+(Geometrie + Rotorwinkel) ab, **nicht** von den Strömen (die in `J` stecken) — die
+Faktorisierung wird daher per `(N, hash(µ))` gecacht und über alle Drehzahl-/
+Stromwinkel-/Lastschritte beim gleichen Rotorwinkel wiederverwendet.
 
 | Parameter | Wert | Bedeutung |
 |---|---|---|
-| Relaxationsfaktor ω | 1.4 | Über-Relaxation (> 1 beschleunigt Konvergenz) |
-| Iterationen | 120 | Feste Anzahl, kein Residuum-Abbruch |
-| Datentyp | float64 | Notwendig für Konvergenz (float32 divergiert) |
-| Randbedingung | A = 0 am Rand | Dirichlet (kein Fluss durch den Rand) |
+| Operator | FV-5-Punkt, harm. Mittel ν | symmetrisch positiv definit (interne Knoten) |
+| Faktorisierung | `scipy.sparse.linalg.splu` | exakt, einmal pro µ gecacht |
+| Hochauflösung | `pyamg` AMG (CG-beschl.) | ab N > 2500 (Speicher), Hierarchie ebenfalls gecacht |
+| Fallback | iterative Red-Black-SOR | nur falls scipy fehlt (`_solve_fdm_sor`) |
+| Datentyp | float64 | – |
+| Randbedingung | A = 0 am Rand | Dirichlet (10 % Luftrand, kein Fluss durch den Rand) |
 
-**Update-Schema pro Iteration:**
-
-```
-Für Rote Zellen:
-    nb  = A(i±1, j) + A(i, j±1)          (Nachbarn = Schwarze, unverändert)
-    tgt = (nb + μ·J) / 4
-    A[rot] += ω · (tgt - A[rot])
-
-Für Schwarze Zellen:
-    nb  = A(i±1, j) + A(i, j±1)          (Nachbarn = aktualisierte Rote)
-    tgt = (nb + μ·J) / 4
-    A[blk] += ω · (tgt - A[blk])
-
-Randpixel nach jeder Halbgruppe auf 0 setzen.
-```
+> Hinweis: Frühere Versionen nutzten Red-Black-SOR als primären Löser; diese
+> iterative Variante ist nur noch der scipy-lose Fallback.
 
 ### 5.3 Luftspaltabtastung (`_sample_airgap`)
 

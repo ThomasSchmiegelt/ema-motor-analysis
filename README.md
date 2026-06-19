@@ -1,6 +1,19 @@
 # E-Maschinen Analyse
 
-Browser-basiertes Werkzeug zur Auslegung und Analyse von Innenläufer-Permanentmagnetmotoren (IPM). Der Nutzer konfiguriert die Motor-Geometrie im Browser, dann läuft eine automatisierte Kette: FreeCAD-Geometrieerzeugung → 2D-FDM-Elektromagnetfeldberechnung → CalculiX-Strukturmechanik (Fliehkraft). Optional kann ein PDF-Bericht über ein lokales LLM (Ollama) erzeugt werden.
+Browser-basiertes Werkzeug zur Auslegung und Analyse von Innenläufer-Permanentmagnetmotoren (IPM). Der Nutzer konfiguriert die Motor-Geometrie im Browser, dann läuft eine automatisierte Kette: FreeCAD-Geometrieerzeugung → 2D-FDM-Elektromagnetfeldberechnung → CalculiX-Strukturmechanik (Fliehkraft) → thermisches Netzwerk → Fahrzyklus-Verlustintegration. Optional kann ein PDF-Bericht über ein lokales LLM (Ollama) erzeugt werden.
+
+> **Bedienung Schritt für Schritt:** siehe [NUTZUNGSANLEITUNG.md](NUTZUNGSANLEITUNG.md).
+> **Berechnungsmethodik:** siehe [EM_BERECHNUNG.md](EM_BERECHNUNG.md).
+
+## Bedienoberfläche
+
+Die Oberfläche (`ema.html`) ist ein **Workflow mit Tabs**: ① Geometrie · ② Betrieb & Material · ③ Berechnung · ▶ Live-Simulation · 📊 FEM-Ergebnisse · 📄 Bericht · ⚖ Vergleich. Rechts läuft eine **persistente Live-Vorschau** (Motorquerschnitt + Magnetfeld, mit Pause-Knopf), die Trennlinien zwischen Eingaben/Vorschau und über dem Footer sind **ziehbar**, und ein globaler **Analyse-starten-Footer** zeigt den Fortschritt. Weitere Komfortfunktionen:
+
+- **🧠 Text → Auslegung** – Anwendung in Worten beschreiben, das LLM leitet einen vollständigen, validierten Parametersatz ab (`ema_text2ema.py`).
+- **🎯 Zielwertoptimierung** – Randbedingungen + freie Parameter mit Bereichen vorgeben; ein LLM steuert eine Suche über einen schnellen Analytik-Evaluator (ohne FreeCAD/FEM), bester zulässiger Treffer → optional Voll-Lauf (`ema_optimize.py`).
+- **📂 Projekt-Browser** – Galerie aller Projekte mit Vorschau + Kennwerten, zum Ansehen/Laden.
+- **💬 Ergebnis-Chat** – Fragen zum geladenen Projekt oder zum Variantenvergleich (`ema_chat.py`).
+- **🖼 Einzelbild-Vorschau** – ein Feldbild ohne Volllauf, bis 5000 px (Multigrid-Solver).
 
 ---
 
@@ -12,8 +25,9 @@ Die Benutzeroberfläche (`ema.html`) erlaubt die vollständige parametrische Bes
 
 - **Stator:** Außen-/Innendurchmesser, Nutzahl, Nuttiefe, Blechpaketlänge
 - **Rotor:** Außendurchmesser, Wellendurchmesser, Polpaarzahl
-- **Magnettaschen:** V-förmige Magnet-Einbettung (Breite, Dicke, Öffnungswinkel) — automatisch auf die geometrisch maximale Länge beschnitten
-- **Wicklung:** Wicklungsart (Hairpin / Rundleiter), Drähte pro Nut, Füllfaktor, Windungszahl
+- **Magnettaschen:** Topologien V, Doppel-V, U, Delta, PMa-SynRM, SPM, Halbach, Speiche, Balken (Breite, Dicke, Öffnungswinkel, Position) — automatisch auf die geometrisch maximale Länge beschnitten. Für die V-Form wahlweise auch **per Durchmesser** (Außen-Ø / Innen-Ø der Tasche + Winkel) definierbar.
+- **Magnet-Orientierung:** Polung wahlweise über die lange Magnetseite (quer magnetisiert, Standard) oder um 90° gedreht über die kurze Seite — identisch in Live-Vorschau und FDM-Feldsimulation.
+- **Wicklung:** Wicklungsart (Hairpin / Rundleiter), **Leiter pro Nut** (geradzahlig 2…12) und **Spulenweite** (Nutschritte, gesehnt möglich). Die Hairpin-Wickelköpfe werden als kollisionsfreie U-Pins (radial gestaffelte Kronen) im CAD-Modell erzeugt; die Leiterzahl je Nut geht auch in Kupfervolumen/Phasenwiderstand des Thermomodells ein.
 - **Kühlung:** Natürliche Konvektion / Zwangsluft / Wassermantel / Öl-Spray
 - **Nennpunkt:** Drehzahl, Drehmoment, Phasenstrom (d/q-Komponenten)
 - **Projektname** für Archivierung
@@ -27,9 +41,9 @@ Die Benutzeroberfläche (`ema.html`) erlaubt die vollständige parametrische Bes
 
 ### 3. Elektromagnetische Feldberechnung (`ema_analysis.py`)
 
-Eigener 2D-FDM-Feldsolver auf Basis von numpy (150 × 150 Gitter):
+Eigener 2D-FDM-Feldsolver (numpy + scipy), Auflösung im UI wählbar (100–800 px, Einzelbild bis 5000 px):
 
-- Löst `∇(ν∇A) = −J` mit SOR-Iteration auf dem Querschnitt des Motors
+- Löst `∇(ν∇A) = −J` mit einer **direkten Sparse-Faktorisierung** (`scipy splu`, exakt bei jeder Auflösung, pro Geometrie gecacht); für sehr hohe Auflösung (> 2500 px) ein **CG-beschleunigter AMG-Solver** (`pyamg`). Fällt ohne scipy auf iterative SOR zurück.
 - Materialien: Eisen µ_r = 500, NdFeB µ_r = 1.05, Statorwicklung als Volumenstrom
 - Permanentmagnete als äquivalente Oberflächenströme modelliert
 - Skalierung des FDM-Ergebnisses auf physikalische Tesla-Werte via analytischer Luftspaltfeld-Formel
@@ -48,26 +62,34 @@ Stationäres Lumped-Parameter-Wärmenetzwerk (LPTN) mit 6 Knoten:
 | Sh | Welle |
 | H | Gehäuse |
 
-Kühltypen mit kalibrierten h_eff-Werten: Natürliche Konvektion, Zwangsluft, Wassermantel (h=800 W/m²K), Öl-Spray (h=2500 W/m²K).
+Kühltypen mit kalibrierten h_eff-Werten: Natürliche Konvektion, Zwangsluft, Wassermantel (h=800 W/m²K), Öl-Spray (h=2500 W/m²K). Der Luftspalt koppelt die Magnete über Konvektion **und** Strahlung an die Statorbohrung; ein Teil davon koppelt direkt an die Wicklung, sodass die Rotormagnete den Wärmeeintrag aus dem heißen Kupfer erhalten.
 
 ### 5. Fahrzyklus-Verlustintegration (`ema_drivecycle.py`)
 
-- Eingebettetes WLTP Klasse 3b-Profil (1800 s, approximiertes Geschwindigkeitsprofil mit korrekten Phasendauern, Peak- und Durchschnittsgeschwindigkeiten)
+- Eingebettetes WLTP Klasse 3b-Profil, Autobahn-Vollgas und **Anhänger-Alpenpass**
+- Anhänger ist einstellbar: **Anhängermasse (inkl. Nutzlast), Achszahl und maximale Steigung [%]** (Standard 15 %)
 - Upload eigener Zyklen als `t[s], v[km/h]`-CSV
-- Gewichtete Verlustintegration über den Betriebspunktraum
+- Verlustintegration mit transienter und stationärer Thermik je Zyklus
 
 ### 6. Strukturmechanische FEM (CalculiX)
 
 `ema_freecad.py` + `freecad_runner.py` führen eine Fliehkraftanalyse des Rotors durch:
-- FreeCAD erzeugt Gmsh-Vernetzung der Rotorgeometrie
-- CalculiX (ccx) löst die statische Spannungsanalyse
-- Ausgabe: Von-Mises-Spannungen, Verformungen, Knotenzahl
+- FreeCAD erzeugt Gmsh-Vernetzung der Rotorgeometrie; die **Netz-Auflösung ist
+  einstellbar** (`struct_mesh_mm`, 4/3/2,5/2 mm – kleiner = feiner, löst die
+  Spannungsspitzen an den Magnettaschen-Stegen besser auf)
+- CalculiX (ccx) löst die statische Spannungsanalyse **einmalig** bei Maximaldrehzahl
+- Da Verschiebung und Spannung linear mit der Fliehkraft (∝ Drehzahl²) skalieren,
+  werden daraus ohne weitere Solver-Läufe abgeleitet:
+  - **hochauflösende Verformungsbilder** (bis 5000 px) bei **Nennlast**,
+    **Maximaldrehzahl** und **Berstdrehzahl** (SF→1)
+  - ein **Verformungs-Video** (Drehzahl-Rampe 0→max, feste Überhöhung)
+- Ausgabe: Von-Mises-Spannungen, Verformungen, Sicherheitsfaktor, Berstdrehzahl, Knotenzahl
 
 ### 7. Projektverwaltung
 
 - Jede Analyse wird als eigenes Projekt unter `~/cae_projekte/<timestamp>/` gespeichert
-- Bis zu 4 Designvarianten können nebeneinander verglichen werden (Überlagerungsdiagramme)
-- Laden abgeschlossener Projekte ohne Neuberechnung
+- Bis zu 10 Designvarianten können nebeneinander verglichen werden (Überlagerungsdiagramme, Vergleichstabelle, Vergleichsbericht mit Parameter-/Einfluss-Tabellen)
+- Projekt-Browser (Galerie) und Laden abgeschlossener Projekte ohne Neuberechnung
 
 ### 8. PDF-Berichtsgenerierung (`ema_report.py`)
 
@@ -98,7 +120,7 @@ Kühltypen mit kalibrierten h_eff-Werten: Natürliche Konvektion, Zwangsluft, Wa
 | pandoc | `sudo apt install pandoc` |
 | pdflatex | `sudo apt install texlive-latex-base texlive-fonts-recommended` |
 
-Die gesamte Analyse-Pipeline (FDM-Feldsolver, Thermik, Fahrzyklus, FEM) läuft vollständig ohne LLM. Ollama wird ausschließlich zur Berichtsgenerierung (`ema_report.py`, `ema_experts.py`) aufgerufen — immer mit dem Modell `ministral-3:14b`, das im Code fest eingestellt ist.
+Die gesamte Analyse-Pipeline (FDM-Feldsolver, Thermik, Fahrzyklus, FEM) läuft vollständig ohne LLM. Ollama wird nur für die komfortbasierten Zusatzfunktionen aufgerufen — Bericht (`ema_report.py`, `ema_experts.py`), Ergebnis-Chat (`ema_chat.py`), Text→Auslegung (`ema_text2ema.py`) und die Steuerung der Zielwertoptimierung (`ema_optimize.py`) — immer mit dem Modell `ministral-3:14b`, das im Code fest eingestellt ist. Ohne Ollama bleiben alle physikalischen Berechnungen voll nutzbar.
 
 ---
 
@@ -177,10 +199,14 @@ ema_pipeline.py    Pipeline-Orchestrierung (Geometrie → EM → Thermik → FEM
 ema_freecad.py     FreeCAD-Skriptgenerierung (Rotor, Stator, FEM)
 ema_analysis.py    2D-FDM-Elektromagnet-Feldsolver (numpy)
 ema_thermal.py     Stationäres LPTN-Wärmemodell (6 Knoten)
-ema_drivecycle.py  Fahrzyklus-Verlustintegration (WLTP-3b + CSV)
-ema_compare.py     Variantenvergleich (bis zu 4 Projekte, Overlay-Charts)
-ema_report.py      LLM → Markdown → pandoc → PDF-Bericht
+ema_topology.py    Magnet-Platzierung (einzige Quelle, gespiegelt im JS von ema.html)
+ema_drivecycle.py  Fahrzyklen (WLTP-3b, Vollgas, Anhänger einstellbar, CSV)
+ema_compare.py     Variantenvergleich (bis zu 10 Projekte, Overlay-Charts)
+ema_report.py      LLM → Markdown → pandoc → PDF-Bericht (+ Vergleichsbericht)
 ema_experts.py     Agentischer Modus: mehrere LLM-Experten-Agenten
+ema_chat.py        Ergebnis-/Vergleichs-Chat (Ollama)
+ema_optimize.py    Zielwertoptimierung (LLM-gesteuert, schneller Analytik-Evaluator)
+ema_text2ema.py    Text → validierter Parametersatz (Ollama)
 freecad_runner.py  FreeCAD-Subprocess-Wrapper (headless, Output-Parsing)
 start.sh           Startskript mit Prerequisite-Prüfung
 install.sh         Einmalige Installation und Konfigurationsprüfung
@@ -195,6 +221,8 @@ requirements.txt   Python-Abhängigkeiten
 |---|---|
 | `flask` | HTTP-Server, REST-API, statisches Datei-Serving |
 | `numpy` | FDM-Feldsolver, Thermisches Netzwerk, Fahrzyklus-Verlustintegration |
+| `scipy` | direkte Sparse-Faktorisierung des FDM-Feldlösers (sonst iterative SOR) |
+| `pyamg` | iterativer AMG-Solver für sehr hohe Feldauflösung (> 2500 px); optional |
 | `matplotlib` | Charts, Feldanimation (Agg-Backend, kein Display nötig) |
 
 Alle Versionen: `requirements.txt`. Die Ollama-REST-API wird direkt über `urllib.request` aus der Python-Standardbibliothek aufgerufen. Externe Solver (FreeCAD, CalculiX, pandoc, pdflatex) werden als Subprozesse aufgerufen — keine Python-Bindings.
