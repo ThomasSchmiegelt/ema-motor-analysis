@@ -30,6 +30,7 @@ FREE_PARAMS = {
     "magWidth":    {"geom": "magWidth",    "label": "Magnet-Länge [mm]",      "lo": 3,   "hi": 300, "type": float},
     "magThick":    {"geom": "magThick",    "label": "Magnet-Dicke [mm]",      "lo": 1,   "hi": 60,  "type": float},
     "magAngle":    {"geom": "magAngle",    "label": "Öffnungswinkel [°]",     "lo": 40,  "hi": 170, "type": float},
+    "magAsym":     {"geom": "magAsym",     "label": "Asymmetrie V [°]",       "lo": -60, "hi": 60,  "type": float},
     "magDist":     {"geom": "magDist",     "label": "Steg-Abstand [mm]",      "lo": 0,   "hi": 80,  "type": float},
     "magDepthRel": {"geom": "magDepthRel", "label": "Position (Radius) [0–1]","lo": 0.3, "hi": 0.95,"type": float},
     "slotDepth":   {"geom": "slotDepth",   "label": "Nuttiefe [mm]",          "lo": 2,   "hi": 150, "type": float},

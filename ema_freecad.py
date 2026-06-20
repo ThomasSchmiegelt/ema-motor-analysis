@@ -180,6 +180,16 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
     bal_circle_d = max(0.0, float(geom.get("balanceBoltCircleD", 0)))    # 0 = auto
     bal_offset   = float(geom.get("balanceBoltOffsetDeg", 0))
 
+    # Flux barriers: optional radial AIR slots cut into the rotor iron, independently
+    # toggleable for the q-axis (between poles → cuts inter-pole leakage) and the
+    # d-axis (pole centre, between a pole's two V-arms). One slot per pole each, fully
+    # symmetric. Cut into the "Rotor" solid → the centrifugal FEM sees them too; the
+    # FDM rasteriser carves the same slots so the magnetic simulation reflects them.
+    gen_fb_q   = bool(geom.get("genFluxBarrierQ", False))
+    gen_fb_d   = bool(geom.get("genFluxBarrierD", False))
+    fb_width   = max(0.5, min(40.0, float(geom.get("fluxBarrierWidth", 3.0))))
+    fb_depth   = max(1.0, min(120.0, float(geom.get("fluxBarrierDepth", 10.0))))
+
     return f"""\
 import FreeCAD as App
 import Part
@@ -209,7 +219,29 @@ bearing_od = {bearing_od}; bearing_w = {bearing_w}; bearing_gap = {bearing_gap}
 insul_thk  = {insul_thk}
 GEN_BALANCE = {gen_balance!r}; BAL_THREAD = {bal_thread!r}
 BAL_CIRCLE_D = {bal_circle_d}; BAL_OFFSET = {bal_offset}
+GEN_FB_Q = {gen_fb_q!r}; GEN_FB_D = {gen_fb_d!r}
+FB_WIDTH = {fb_width}; FB_DEPTH = {fb_depth}
 dtheta    = 2 * math.pi / n_slots
+
+# Flux-barrier radial slots (air). q-axis = between poles (i+0.5)·pitch, d-axis =
+# pole centre i·pitch. Outer edge a bridge below the OD, depth inward. One per pole.
+def _flux_barrier_slots():
+    shapes = []
+    bridge = 2.0
+    r_out  = R_rot - bridge
+    r_in   = max(R_shaft + 1.0, r_out - FB_DEPTH)
+    depth  = max(0.5, r_out - r_in)
+    angs = []
+    if GEN_FB_D:
+        angs += [i * 2 * math.pi / poles for i in range(poles)]
+    if GEN_FB_Q:
+        angs += [(i + 0.5) * 2 * math.pi / poles for i in range(poles)]
+    for a in angs:
+        box = Part.makeBox(depth, FB_WIDTH, axial + 4,
+                           App.Vector(r_in, -FB_WIDTH / 2.0, -axial / 2 - 2))
+        m = App.Matrix(); m.rotateZ(a)
+        shapes.append(box.transformGeometry(m))
+    return shapes
 
 # Balance-bolt geometry (clearance hole + bolt circle). Count = poles, symmetric.
 _THREAD_D = {{"M4": 4.0, "M5": 5.0, "M6": 6.0, "M8": 8.0, "M10": 10.0,
@@ -315,6 +347,15 @@ if GEN_ROTOR:
                 rotor_solid = rotor_cut
             else:
                 print("WARN: balance-bolt holes produced an invalid rotor — skipped")
+    # Flux-barrier radial air slots (q-/d-axis), cut into the rotor iron.
+    if GEN_FB_Q or GEN_FB_D:
+        fb_shapes = _flux_barrier_slots()
+        if fb_shapes:
+            rotor_cut = rotor_solid.cut(Part.makeCompound(fb_shapes))
+            if rotor_cut.isValid():
+                rotor_solid = rotor_cut
+            else:
+                print("WARN: flux-barrier slots produced an invalid rotor — skipped")
     if not rotor_solid.isValid():
         raise RuntimeError("Rotor iron invalid after pocket cuts")
     _add("Rotor", rotor_solid, (0.40, 0.40, 0.46))

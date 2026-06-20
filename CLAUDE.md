@@ -294,6 +294,18 @@ circle, and the **live `drawRotor()` canvas** draws the holes too (they rotate w
 rotor) — same hole logic mirrored in three places (FreeCAD / 2D / canvas). UI: checkbox +
 thread/Ø/offset in the **Komponenten** section.
 
+**Flux barriers** (`genFluxBarrierQ` / `genFluxBarrierD`, both default off): optional radial
+AIR slots in the rotor iron, one per pole each, fully symmetric — **q-axis** (between poles,
+angle `(i+0.5)·2π/poles`, cuts inter-pole leakage) and **d-axis** (pole centre, `i·2π/poles`,
+between a pole's two V-arms), independently toggleable, shared `fluxBarrierWidth` (tangential
+mm) + `fluxBarrierDepth` (radial mm). Outer edge a 2 mm bridge below the OD, depth inward.
+Mirrored in **four** places: FreeCAD (`_flux_barrier_slots` → cut into the `Rotor` solid, so
+the centrifugal FEM sees them), the FDM rasteriser (`ema_analysis._rasterise` carves air slots
+that **rotate with `rotor_angle`** → the magnetic simulation reflects them), the 2D
+`_save_cad_images` section, and the live `drawRotor()` canvas. UI: two checkboxes +
+width/depth sliders in the **Komponenten** section (`grp_fluxbarrier`), round-trips via
+`buildPayload`/`applyPayload`.
+
 **Flux-density display scale** (`field_bmax`, default 0 = auto): UI number field (Live
 tab) → payload → `ema_pipeline._field_frame(..., b_ceiling=field_bmax)` overrides BOTH the
 physical |B| clip and the colour-scale ceiling (else `IRON_B_SAT_DISPLAY=2.1`). Honoured by

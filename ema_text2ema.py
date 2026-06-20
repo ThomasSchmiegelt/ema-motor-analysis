@@ -130,7 +130,7 @@ def derive(description: str, timeout: int = 180) -> dict:
     context = ""
     try:
         import ema_rag
-        context = ema_rag.context_for(description, "maschinen", k=4)
+        context = ema_rag.context_for(description, category=None, k=4)
     except Exception:
         context = ""
     body = json.dumps({

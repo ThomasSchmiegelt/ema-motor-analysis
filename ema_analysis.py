@@ -104,6 +104,48 @@ def _rasterise(geom: dict, N: int, rotor_angle: float = 0.0,
     if r_bore > 0:
         mu[R <= r_bore] = 1.0                       # hollow-shaft bore (air)
 
+    # Balance-disc bolt holes (optional): symmetric through-holes in the rotor iron,
+    # count = pole number, on a pitch circle (Ø/offset adjustable). They rotate WITH
+    # the rotor (rotor_angle), so the FDM field "sees" them just like the structural
+    # FEM does — modelled as air flux barriers (the steel bolt + clearance gap carry
+    # little flux at this scale). Mirrors the FreeCAD/2D/canvas hole geometry.
+    if bool(geom.get("genBalanceBolts", False)):
+        _thr_d = {"M4": 4.0, "M5": 5.0, "M6": 6.0, "M8": 8.0, "M10": 10.0,
+                  "M12": 12.0, "M16": 16.0, "M20": 20.0}
+        _bnom  = _thr_d.get(str(geom.get("balanceBoltThread", "M6")).upper(), 6.0)
+        _bhr   = ((_bnom + 0.4) / 2.0) * sc                 # clearance hole radius [px]
+        _bcd   = float(geom.get("balanceBoltCircleD", 0) or 0)
+        _bpcr  = (_bcd / 2.0 if _bcd > 0
+                  else geom["shaftD"] / 2 + (geom["rotorOD"] / 2 - geom["shaftD"] / 2) * 0.5) * sc
+        _boff  = math.radians(float(geom.get("balanceBoltOffsetDeg", 0)))
+        _nb    = max(2, int(geom["p"]) * 2)
+        for _i in range(_nb):
+            _a  = _boff + rotor_angle + _i * 2 * math.pi / _nb
+            _hx = _bpcr * math.cos(_a)
+            _hy = _bpcr * math.sin(_a)
+            mu[((X - _hx) ** 2 + (Y - _hy) ** 2) <= _bhr ** 2] = 1.0
+
+    # Flux-barrier radial slots (optional): air slots in the rotor iron, q-axis
+    # (between poles) and/or d-axis (pole centre). One per pole each, rotating WITH
+    # the rotor so the field "sees" them like the FEM/CAD. Mirrors the FreeCAD slots.
+    if bool(geom.get("genFluxBarrierQ", False)) or bool(geom.get("genFluxBarrierD", False)):
+        _poles = int(geom["p"]) * 2
+        _fbw   = max(0.5, min(40.0, float(geom.get("fluxBarrierWidth", 3.0)))) * sc
+        _fbd   = max(1.0, min(120.0, float(geom.get("fluxBarrierDepth", 10.0)))) * sc
+        _r_out = r_ro - 2.0 * sc                        # bridge below the OD
+        _r_in  = max(r_sh + 1.0 * sc, _r_out - _fbd)
+        _angs  = []
+        if bool(geom.get("genFluxBarrierD", False)):
+            _angs += [rotor_angle + i * 2 * math.pi / _poles for i in range(_poles)]
+        if bool(geom.get("genFluxBarrierQ", False)):
+            _angs += [rotor_angle + (i + 0.5) * 2 * math.pi / _poles for i in range(_poles)]
+        _Th_fb = np.arctan2(Y, X)
+        for _a in _angs:
+            _dth = np.abs(((_Th_fb - _a + math.pi) % (2 * math.pi)) - math.pi)
+            # tangential half-width w/2 → angular half-width (w/2)/r; band in radius
+            _slot = (R >= _r_in) & (R <= _r_out) & (R * _dth <= _fbw / 2.0)
+            mu[_slot] = 1.0
+
     # Stator slots (air) + winding currents (dq-modulated by rotor angle)
     n_slots    = int(geom["slots"])
     p_pairs    = int(geom["p"])

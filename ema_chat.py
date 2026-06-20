@@ -120,7 +120,7 @@ def _rag_doku(message: str) -> str:
     Best effort — works without the knowledge base / Ollama embeddings."""
     try:
         import ema_rag
-        ctx = ema_rag.context_for(message, "doku", k=4, max_chars=3000)
+        ctx = ema_rag.context_for(message, category=None, k=4, max_chars=3000)
     except Exception:
         return ""
     if not ctx:

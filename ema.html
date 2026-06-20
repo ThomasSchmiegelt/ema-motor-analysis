@@ -347,6 +347,24 @@
       </div>
     </div>
 
+    <label class="chk-row"><input type="checkbox" id="gen_fb_q"/> Flussbarriere q-Achse (Luftschlitz zwischen den Polen)</label>
+    <label class="chk-row"><input type="checkbox" id="gen_fb_d"/> Flussbarriere d-Achse (Luftschlitz in der Polmitte)</label>
+    <div id="grp_fluxbarrier" style="display:none;margin-top:6px">
+      <small style="display:block;font-size:.7rem;color:#666;margin-bottom:4px">
+        Radiale Luftschlitze im Rotorblech, je ein Schlitz pro Pol, symmetrisch. Reduzieren
+        Streufluss (q-Achse) bzw. trennen die Pol-Arme (d-Achse). Werden in 3D, 2D-Schnitt,
+        Live-Vorschau und der FDM-Simulation berücksichtigt und gehen in die Fliehkraft-FEM ein.
+      </small>
+      <div class="slider-group">
+        <div class="slider-header"><span>Schlitz-Breite</span><span id="disp_fb_width">3 mm</span></div>
+        <input type="range" id="fb_width" min="0.5" max="40" step="0.5" value="3"/>
+      </div>
+      <div class="slider-group">
+        <div class="slider-header"><span>Schlitz-Tiefe (radial)</span><span id="disp_fb_depth">10 mm</span></div>
+        <input type="range" id="fb_depth" min="1" max="120" step="1" value="10"/>
+      </div>
+    </div>
+
     <div id="grp_bearing" style="display:none;margin-top:6px">
       <div class="slider-group">
         <div class="slider-header"><span>Lager Außen-Ø (0=auto)</span><span id="disp_bearing_od">0 mm</span></div>
@@ -668,6 +686,21 @@
       <label>Drehzahl (fest)</label>
       <input type="number" id="study_rpm" value="12000" min="100" max="60000" step="100"/><span>U/min</span>
     </div>
+    <label class="chk-row" style="margin-top:4px"><input type="checkbox" id="study_field" checked/> Feldlinien-Bilder + Video (FDM)</label>
+    <div class="input-group" id="study_field_wrap">
+      <label>Feld-Frames (Anzahl)</label>
+      <input type="number" id="study_field_n" value="60" min="2" max="500" step="1"/><span>-</span>
+    </div>
+    <div class="input-group" id="study_field_res_wrap">
+      <label>Feld-Auflösung</label>
+      <select id="study_field_res" style="grid-column:2/-1">
+        <option value="200">200 px — schnell</option>
+        <option value="300" selected>300 px — Zähne aufgelöst</option>
+        <option value="400">400 px — fein</option>
+        <option value="600">600 px — sehr fein (langsam)</option>
+      </select>
+    </div>
+    <small style="display:block;font-size:.7rem;color:#666;margin:2px 0 6px">Bilder fürs Magnetfeld-Video (bis 500 für flüssige Animation wie die anderen Videos). Pro Frame wird das Feld neu gelöst — höhere Auflösung = schärfere Taschen, aber langsamer. Magnete sind rot (N) / blau (S) umrandet. Die Galerie zeigt eine Auswahl, das Video nutzt alle Frames.</small>
     <button id="btn_study" onclick="runParamStudy()" style="background:#2d7d5a;width:100%;padding:10px;font-size:.8rem">📈 Parameterstudie starten</button>
     <div id="study_progress" style="display:none;margin-top:8px">
       <div style="font-size:.75rem;color:#9aa" id="study_msg">…</div>
@@ -1430,19 +1463,17 @@
       <button onclick="closeRag()" style="margin-left:auto;background:#555;width:auto;padding:7px 16px;font-size:.8rem">✕ Schließen</button>
     </div>
     <div style="font-size:.78rem;color:#999;margin-bottom:12px">
-      Hinterlege technische/geometrische Daten. <b>Referenzmaschinen</b> fließen in „Aus
-      Beschreibung ableiten" ein, <b>Dokumentation</b> in den Chat. Suche per lokalem
-      Embedding-Modell (Ollama) — die relevantesten Ausschnitte werden automatisch
-      mitgegeben.
+      EINE gemeinsame Wissensbasis: hinterlege technische/geometrische Daten und Doku.
+      Sowohl „Aus Beschreibung ableiten" als auch der Chat durchsuchen denselben
+      Bestand (lokales Embedding-Modell via Ollama) — die relevantesten Ausschnitte
+      werden automatisch mitgegeben. Die Unterscheidung passiert nur über den jeweiligen
+      System-Prompt. Der optionale <b>Tag</b> dient nur deiner eigenen Ordnung.
     </div>
 
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-      <label style="font-size:.8rem;color:#bbb">Kategorie</label>
-      <select id="rag-cat" style="flex:0 0 auto;width:auto">
-        <option value="maschinen">Referenzmaschinen (Text→Auslegung)</option>
-        <option value="doku">Dokumentation (Chat)</option>
-      </select>
       <input id="rag-title" placeholder="Titel (optional)" style="flex:1;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:7px;border-radius:4px;font-size:.82rem"/>
+      <input id="rag-cat" placeholder="Tag (optional, z.B. Maschine/Doku)" list="rag-cat-list" style="flex:0 0 auto;width:200px;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:7px;border-radius:4px;font-size:.82rem"/>
+      <datalist id="rag-cat-list"><option value="Maschine"><option value="Doku"></datalist>
     </div>
 
     <textarea id="rag-text" rows="5" placeholder="Text einfügen — z.B. Datenblatt-Auszug, Geometrie/Kennwerte einer guten Maschine, oder eine technische Notiz/Doku."
@@ -1450,12 +1481,19 @@
     <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;align-items:center">
       <button id="rag-add-btn" onclick="ragAddText()" style="background:#5a4a7a;width:auto;padding:9px 16px;font-size:.8rem">＋ Text hinzufügen</button>
       <span style="color:#666;font-size:.78rem">oder Datei:</span>
-      <input type="file" id="rag-file" accept=".txt,.md,.csv,.pdf" style="font-size:.78rem;color:#bbb"/>
-      <button id="rag-up-btn" onclick="ragUpload()" style="background:#46688a;width:auto;padding:9px 16px;font-size:.8rem">⬆ Datei hochladen (txt/md/csv/pdf)</button>
+      <input type="file" id="rag-file" accept=".txt,.md,.csv,.pdf" multiple style="font-size:.78rem;color:#bbb"/>
+      <button id="rag-up-btn" onclick="ragUpload()" style="background:#46688a;width:auto;padding:9px 16px;font-size:.8rem">⬆ Datei(en) hochladen (txt/md/csv/pdf)</button>
       <span id="rag-msg" style="font-size:.78rem;color:#9c9"></span>
     </div>
 
-    <div style="font-size:.82rem;color:#ccc;margin:14px 0 6px;font-weight:600">Hinterlegte Dokumente</div>
+    <div style="display:flex;align-items:center;gap:10px;margin:14px 0 6px">
+      <span style="font-size:.82rem;color:#ccc;font-weight:600">Hinterlegte Dokumente</span>
+      <label style="font-size:.76rem;color:#aaa;display:flex;align-items:center;gap:4px;cursor:pointer">
+        <input type="checkbox" id="rag-sel-all" onchange="ragToggleAll(this.checked)"/> Alle
+      </label>
+      <button id="rag-del-sel" onclick="ragDeleteSelected()" disabled
+              style="margin-left:auto;background:#7a3030;width:auto;padding:6px 12px;font-size:.76rem;opacity:.5">🗑 Ausgewählte löschen</button>
+    </div>
     <div id="rag-list" style="font-size:.8rem;color:#bbb">Lade…</div>
   </div>
 </div>
@@ -2415,15 +2453,38 @@ async function refreshRagList(){
     const docs=r.documents||[];
     if(!docs.length){ box.innerHTML='<span style="color:#777">Noch keine Dokumente hinterlegt.</span>'; return; }
     box.innerHTML=docs.map(d=>{
-      const cat = d.category==='maschinen' ? '🛠 Maschine' : '📄 Doku';
+      const tag = d.category && d.category!=='allgemein' ? `🏷 ${escHtml(d.category)}` : '📄';
       return `<div style="display:flex;gap:8px;align-items:center;padding:5px 0;border-bottom:1px solid #2a2a2e">
-        <span style="flex:0 0 auto;font-size:.72rem;color:#9a9">${cat}</span>
+        <input type="checkbox" class="rag-sel" value="${d.id}" onchange="ragUpdateSelUI()" style="flex:0 0 auto"/>
+        <span style="flex:0 0 auto;font-size:.72rem;color:#9a9">${tag}</span>
         <span style="flex:1;color:#ddd">${escHtml(d.title)}</span>
         <span style="flex:0 0 auto;font-size:.72rem;color:#777">${d.n_chunks} Abschn. · ${d.created||''}</span>
         <button onclick="ragDelete('${d.id}')" style="flex:0 0 auto;background:#7a3030;width:auto;padding:3px 9px;font-size:.72rem">✕</button>
       </div>`;
     }).join('');
+    ragUpdateSelUI();
   }catch(e){ box.innerHTML='<span style="color:#e57">Fehler: '+escHtml(e.message)+'</span>'; }
+}
+function _ragSelected(){ return [...document.querySelectorAll('.rag-sel:checked')].map(c=>c.value); }
+function ragUpdateSelUI(){
+  const n=_ragSelected().length, btn=document.getElementById('rag-del-sel');
+  if(btn){ btn.disabled=!n; btn.style.opacity=n?'1':'.5';
+    btn.textContent=n?`🗑 ${n} löschen`:'🗑 Ausgewählte löschen'; }
+  const all=document.querySelectorAll('.rag-sel'), sa=document.getElementById('rag-sel-all');
+  if(sa){ sa.checked=all.length>0 && n===all.length;
+    sa.indeterminate = n>0 && n<all.length; }
+}
+function ragToggleAll(on){ document.querySelectorAll('.rag-sel').forEach(c=>c.checked=on); ragUpdateSelUI(); }
+async function ragDeleteSelected(){
+  const ids=_ragSelected();
+  if(!ids.length) return;
+  if(!confirm(`${ids.length} Dokument(e) löschen?`)) return;
+  const r=await fetch('/rag/delete',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({ids})}).then(x=>x.json());
+  const msg=document.getElementById('rag-msg');
+  msg.style.color='#9c9'; msg.textContent=`✓ ${r.n_deleted||0} gelöscht`;
+  document.getElementById('rag-sel-all').checked=false;
+  refreshRagList();
 }
 async function ragAddText(){
   const text=document.getElementById('rag-text').value.trim();
@@ -2443,19 +2504,24 @@ async function ragAddText(){
   finally{ btn.disabled=false; }
 }
 async function ragUpload(){
-  const f=document.getElementById('rag-file').files[0];
+  const files=document.getElementById('rag-file').files;
   const msg=document.getElementById('rag-msg');
-  if(!f){ alert('Bitte eine Datei wählen'); return; }
+  if(!files.length){ alert('Bitte Datei(en) wählen'); return; }
   const btn=document.getElementById('rag-up-btn'); btn.disabled=true;
-  msg.style.color='#9c9'; msg.textContent='⏳ Lese + bette ein…';
+  msg.style.color='#9c9'; msg.textContent=`⏳ Lese + bette ein (${files.length})…`;
   try{
     const fd=new FormData();
-    fd.append('file', f);
+    for(const f of files) fd.append('file', f);
     fd.append('category', document.getElementById('rag-cat').value);
     fd.append('title', document.getElementById('rag-title').value);
     const r=await fetch('/rag/upload',{method:'POST',body:fd}).then(x=>x.json());
     if(r.error){ msg.style.color='#e57'; msg.textContent='⚠ '+r.error; return; }
-    msg.textContent='✓ '+escHtml(r.title)+' ('+r.n_chunks+' Abschnitte)';
+    if(r.n_added!==undefined){
+      msg.textContent=`✓ ${r.n_added} hinzugefügt`+((r.errors&&r.errors.length)?` · ${r.errors.length} Fehler`:'');
+      if(r.errors&&r.errors.length){ msg.style.color='#e9a'; }
+    } else {
+      msg.textContent='✓ '+escHtml(r.title)+' ('+r.n_chunks+' Abschnitte)';
+    }
     document.getElementById('rag-file').value='';
     refreshRagList();
   }catch(e){ msg.style.color='#e57'; msg.textContent='Fehler: '+e.message; }
@@ -2471,7 +2537,7 @@ async function ragDelete(id){
 let _optMeta = null;
 const OPT_APPLY = {   // free-param key → form input + value transform
   magWidth:{id:'mag_width',to:v=>v}, magThick:{id:'mag_thick',to:v=>v},
-  magAngle:{id:'mag_angle',to:v=>v}, magDist:{id:'mag_dist',to:v=>v},
+  magAngle:{id:'mag_angle',to:v=>v}, magAsym:{id:'mag_asym',to:v=>v}, magDist:{id:'mag_dist',to:v=>v},
   magDepthRel:{id:'mag_depth',to:v=>Math.round(v*100)}, slotDepth:{id:'slot_depth',to:v=>v},
   p:{id:'p_pairs',to:v=>Math.round(v)}, axial:{id:'dim_axial',to:v=>v},
 };
@@ -2575,6 +2641,11 @@ async function initParamStudy() {
     .map(([k, f]) => `<option value="${k}">${escHtml(f.label)}</option>`).join('');
   sel.onchange = _studyParamChanged;
   _studyParamChanged();
+  const fc = document.getElementById('study_field');
+  if (fc) { const sync = () => { const v = fc.checked ? '' : 'none';
+      document.getElementById('study_field_wrap').style.display = v;
+      document.getElementById('study_field_res_wrap').style.display = v; };
+    fc.onchange = sync; sync(); }
 }
 function _studyParamChanged() {
   // prefill x/y from the parameter's default range
@@ -2593,6 +2664,9 @@ async function runParamStudy() {
   const hi = +document.getElementById('study_hi').value;
   const steps = +document.getElementById('study_steps').value;
   const rpm = +document.getElementById('study_rpm').value;
+  const wantField = document.getElementById('study_field').checked;
+  const field_frames = wantField ? +document.getElementById('study_field_n').value : 0;
+  const field_N = +document.getElementById('study_field_res').value;
   if (lo === hi) { alert('Bereich x..y darf nicht leer sein (x ≠ y)'); return; }
   const payload = await buildPayload();
   document.getElementById('btn_study').disabled = true;
@@ -2600,7 +2674,7 @@ async function runParamStudy() {
   document.getElementById('study_progress').style.display = 'block';
   const r = await fetch('/param_study', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ payload, param, lo, hi, steps, rpm })
+    body: JSON.stringify({ payload, param, lo, hi, steps, rpm, field_frames, field_N })
   }).then(x => x.json());
   if (r.error) { alert(r.error); document.getElementById('btn_study').disabled = false; return; }
   _pollParamStudy();
@@ -2619,11 +2693,56 @@ async function _pollParamStudy() {
   }
   if (s.result) {
     const res = s.result;
-    document.getElementById('study_result').innerHTML =
-      `<div style="font-size:.72rem;color:#888;margin-bottom:4px">${res.n_ok} ausgewertet`
-      + (res.n_fail ? `, ${res.n_fail} fehlgeschlagen` : '') + `</div>`
+    let html =
+      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">`
+      + `<span style="font-size:.72rem;color:#888">${res.n_ok} ausgewertet`
+      + (res.n_fail ? `, ${res.n_fail} fehlgeschlagen` : '') + `</span>`
+      + `<a href="/param_study/csv?t=${Date.now()}" style="margin-left:auto;background:#3a5a6a;color:#fff;text-decoration:none;border-radius:4px;padding:6px 12px;font-size:.74rem">⬇ Schritt-Werte (CSV)</a>`
+      + `<button id="btn_study_report" onclick="makeStudyReport()" style="background:#7a5a3a;width:auto;padding:6px 12px;font-size:.74rem">📄 Studienbericht (PDF)</button>`
+      + `</div>`
+      + `<div id="study_report_msg" style="font-size:.74rem;color:#9aa;margin-bottom:6px"></div>`
       + `<img src="data:image/png;base64,${res.chart_b64}" style="width:100%;border-radius:4px;cursor:zoom-in" `
       + `onclick="window.open(this.src)"/>`;
+    const imgs = res.field_images || [];
+    if (imgs.length) {
+      html += `<div class="section-h" style="margin-top:12px">Feldlinien über ${escHtml(res.label)}</div>`;
+      if (res.field_video) {
+        html += `<video src="/param_study/video?t=${Date.now()}" controls loop autoplay muted `
+              + `style="width:100%;border-radius:4px;margin-bottom:8px;background:#000"></video>`;
+      }
+      html += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px">`
+        + imgs.map(im =>
+            `<figure style="margin:0">`
+            + `<img src="data:image/png;base64,${im.b64}" style="width:100%;border-radius:3px;cursor:zoom-in" onclick="window.open(this.src)"/>`
+            + `<figcaption style="font-size:.68rem;color:#9aa;text-align:center">${escHtml(res.label)}=${(+im.value).toFixed(2)}</figcaption>`
+            + `</figure>`).join('')
+        + `</div>`;
+    }
+    document.getElementById('study_result').innerHTML = html;
+  }
+}
+async function makeStudyReport() {
+  const btn = document.getElementById('btn_study_report');
+  const msg = document.getElementById('study_report_msg');
+  if (btn) btn.disabled = true;
+  if (msg) { msg.style.color = '#9aa'; msg.textContent = '⏳ Bericht wird erstellt (LLM)…'; }
+  const r = await fetch('/param_study/report', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) }).then(x => x.json());
+  if (r.error) { if (msg) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + r.error; }
+    if (btn) btn.disabled = false; return; }
+  _pollStudyReport();
+}
+async function _pollStudyReport() {
+  const s = await fetch('/param_study/report/status').then(x => x.json());
+  const msg = document.getElementById('study_report_msg');
+  if (msg) msg.textContent = (s.log || []).slice(-1)[0] || '…';
+  if (s.status === 'running') { setTimeout(_pollStudyReport, 900); return; }
+  const btn = document.getElementById('btn_study_report');
+  if (btn) btn.disabled = false;
+  if (s.status === 'error') { if (msg) { msg.style.color = '#e57'; msg.textContent = 'Fehler: ' + (s.error || ''); } return; }
+  if (s.has_pdf && msg) {
+    msg.style.color = '#9c9';
+    msg.innerHTML = '✓ Bericht fertig — <a href="/param_study/report/download" target="_blank" style="color:#6cf">parameterstudie.pdf öffnen</a>';
   }
 }
 
@@ -2935,6 +3054,10 @@ function applyPayload(payload) {
   _setField('bal_thread',   dflt(G.balanceBoltThread,  'M6'));
   _setField('bal_circle_d', dflt(G.balanceBoltCircleD, 0));
   _setField('bal_offset',   dflt(G.balanceBoltOffsetDeg, 0));
+  _setField('gen_fb_q',     dflt(G.genFluxBarrierQ, false));
+  _setField('gen_fb_d',     dflt(G.genFluxBarrierD, false));
+  _setField('fb_width',     dflt(G.fluxBarrierWidth, 3));
+  _setField('fb_depth',     dflt(G.fluxBarrierDepth, 10));
   if (typeof _updateComponentVis === 'function') _updateComponentVis();
 }
 
@@ -3882,6 +4005,10 @@ function escHtml(s) {
     // count = pole number, symmetric (pitch-circle Ø + angular offset, thread ≥ M4).
     genBalanceBolts: false, balanceBoltThread: "M6",
     balanceBoltCircleD: 0, balanceBoltOffsetDeg: 0,
+    // Flux barriers (optional radial air slots): q-axis (between poles) + d-axis
+    // (pole centre), independently toggleable, shared width/depth [mm].
+    genFluxBarrierQ: false, genFluxBarrierD: false,
+    fluxBarrierWidth: 3, fluxBarrierDepth: 10,
   };
   window.GEOM = GEOM; // expose for analysis payload
 
@@ -3992,6 +4119,14 @@ function escHtml(s) {
     };
     _balNum("bal_circle_d", "balanceBoltCircleD");
     _balNum("bal_offset",   "balanceBoltOffsetDeg");
+    const _fbChk = (id, key) => {
+      const el = document.getElementById(id); if (!el) return;
+      el.onchange = e => { GEOM[key] = e.target.checked; resetField(); _updateComponentVis(); };
+    };
+    _fbChk("gen_fb_q", "genFluxBarrierQ");
+    _fbChk("gen_fb_d", "genFluxBarrierD");
+    bindSlider("fb_width", v => { GEOM.fluxBarrierWidth = v; resetField(); }, " mm");
+    bindSlider("fb_depth", v => { GEOM.fluxBarrierDepth = v; resetField(); }, " mm");
     _updateComponentVis();
 
     bindSlider("sim_load",      v => PHYS.load      = v, " Nm");
@@ -4126,6 +4261,7 @@ function escHtml(s) {
     show("grp_bearing", !!(GEOM.genBearingA || GEOM.genBearingB));
     show("grp_insul",   !!GEOM.genInsulation);
     show("grp_balance", !!GEOM.genBalanceBolts);
+    show("grp_fluxbarrier", !!(GEOM.genFluxBarrierQ || GEOM.genFluxBarrierD));
     const hp = GEOM.genHairpins !== false;
     const wh = document.getElementById("gen_whead");
     const ins = document.getElementById("gen_insul");
@@ -4580,6 +4716,20 @@ function escHtml(s) {
         ctx.arc(pcr*Math.cos(a), pcr*Math.sin(a), hr, 0, 2*Math.PI);
         ctx.fillStyle="#0d0d14"; ctx.fill();
         ctx.strokeStyle="#aab"; ctx.lineWidth=1; ctx.stroke();
+      }
+    }
+    // Flux-barrier radial slots (optional): q-axis between poles, d-axis pole centre.
+    if (GEOM.genFluxBarrierQ || GEOM.genFluxBarrierD) {
+      const fbw = (GEOM.fluxBarrierWidth||3)*SCALE, fbd = (GEOM.fluxBarrierDepth||10)*SCALE;
+      const rout = (GEOM.rotorOD/2 - 2)*SCALE, rin = Math.max((GEOM.shaftD/2 + 1)*SCALE, rout - fbd);
+      const angs = [];
+      if (GEOM.genFluxBarrierD) for (let i=0;i<poles;i++) angs.push(i*2*Math.PI/poles);
+      if (GEOM.genFluxBarrierQ) for (let i=0;i<poles;i++) angs.push((i+0.5)*2*Math.PI/poles);
+      ctx.fillStyle="#0d0d14"; ctx.strokeStyle="#aab"; ctx.lineWidth=1;
+      for (const a of angs){
+        ctx.save(); ctx.rotate(a);
+        ctx.beginPath(); ctx.rect(rin, -fbw/2, rout-rin, fbw); ctx.fill(); ctx.stroke();
+        ctx.restore();
       }
     }
   }

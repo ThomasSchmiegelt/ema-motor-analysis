@@ -1550,6 +1550,7 @@ def _clean_prose_keep_headings(text: str) -> str:
     """Wie _clean_prose, aber Überschriften (Experten-Abschnitte) bleiben erhalten."""
     text = _THINK_RE.sub("", text or "").strip()
     text = _strip_md_tables(text)
+    text = _strip_value_numbers(text)   # Zahlen gehören in die Tabellen, nicht in die Prosa
     return _escape_pipes(_normalize_paragraphs(text).strip())
 
 
@@ -1609,3 +1610,217 @@ def _render_chapters_pdf(chapters, out_dir, out_filename="bericht.pdf", progress
             try: os.remove(p)
             except OSError: pass
     return final
+
+
+# ── Parameterstudie-Bericht (LLM, Studiendaten als Prompt-Basis) ─────────────
+
+def _study_metric_stats(study: dict):
+    """Per-metric Start/Ende/Min/Max (+ Parameterwert bei Min/Max) + Tendenz."""
+    xs   = study.get("x", [])
+    mets = study.get("metrics", {})
+    out  = []
+    for m in study.get("metric_meta", []):
+        key, label, unit = m["key"], m["label"], m["unit"]
+        ys = mets.get(key, [])
+        pairs = [(x, y) for x, y in zip(xs, ys) if y is not None]
+        if not pairs:
+            continue
+        x0, y0 = pairs[0]
+        x1, y1 = pairs[-1]
+        ymin = min(pairs, key=lambda p: p[1])
+        ymax = max(pairs, key=lambda p: p[1])
+        rng  = abs(ymax[1] - ymin[1])
+        ref  = max(abs(ymax[1]), abs(ymin[1]), 1e-9)
+        eps = 1e-9 + 0.01 * abs(x1 - x0)
+        max_interior = x0 + eps < ymax[0] < x1 - eps
+        min_interior = x0 + eps < ymin[0] < x1 - eps
+        if rng / ref < 0.02:
+            trend = "nahezu konstant"
+        elif max_interior:
+            trend = "Maximum im Inneren (Optimum)"
+        elif min_interior:
+            trend = "Minimum im Inneren"
+        elif y1 > y0:
+            trend = "steigend"
+        else:
+            trend = "fallend"
+        out.append({"key": key, "label": label, "unit": unit,
+                    "start": y0, "ende": y1, "min": ymin[1], "argmin": ymin[0],
+                    "max": ymax[1], "argmax": ymax[0], "trend": trend,
+                    "max_interior": max_interior, "min_interior": min_interior})
+    return out
+
+
+def _study_downsample(study: dict, max_rows: int = 15):
+    """Evenly-spaced subset of the step rows: [(x, {metric_key: val})]."""
+    xs   = study.get("x", [])
+    mets = study.get("metrics", {})
+    keys = [m["key"] for m in study.get("metric_meta", [])]
+    n = len(xs)
+    if n == 0:
+        return [], keys
+    idx = (list(range(n)) if n <= max_rows
+           else sorted({round(i * (n - 1) / (max_rows - 1)) for i in range(max_rows)}))
+    rows = [(xs[i], {k: mets.get(k, [None] * n)[i] for k in keys}) for i in idx]
+    return rows, keys
+
+
+def _study_data_table(study: dict, plabel: str):
+    """Deterministic per-step value table (downsampled) — the numeric basis of the
+    evaluation, so every figure is traceable to a step."""
+    rows, keys = _study_downsample(study)
+    if not rows:
+        return ""
+    meta = {m["key"]: m for m in study.get("metric_meta", [])}
+    hdr  = [plabel] + [f"{meta[k]['label']} [{meta[k]['unit']}]" if meta[k]['unit'] else meta[k]['label']
+                       for k in keys]
+    lines = ["| " + " | ".join(_mdesc(h) for h in hdr) + " |",
+             "|" + "---|" * len(hdr)]
+    for x, vals in rows:
+        cells = [_fmt_val(x, 2)] + [_fmt_val(vals[k], 3) for k in keys]
+        lines.append("| " + " | ".join(_mdesc(c) for c in cells) + " |")
+    return "\n".join(lines)
+
+
+def _study_md_table(stats, plabel):
+    lines = [f"| Kennwert | Start | Ende | Min (bei {_mdesc(plabel)}) | Max (bei {_mdesc(plabel)}) | Tendenz |",
+             "|" + "---|" * 6]
+    for s in stats:
+        u = s["unit"]
+        lines.append(
+            f"| {_mdesc(s['label'])} "
+            f"| {_fmt_val(s['start'], 3, u)} | {_fmt_val(s['ende'], 3, u)} "
+            f"| {_fmt_val(s['min'], 3, u)} ({_fmt_val(s['argmin'], 2)}) "
+            f"| {_fmt_val(s['max'], 3, u)} ({_fmt_val(s['argmax'], 2)}) "
+            f"| {s['trend']} |")
+    return "\n".join(lines)
+
+
+def _study_prompt(study, stats, machine):
+    plabel = study.get("label", study.get("param", "?"))
+    xs = study.get("x", [])
+    rng = f"{xs[0]:g} … {xs[-1]:g}" if xs else "?"
+    facts = "\n".join(
+        f"- {s['label']}: Start {s['start']:.3g} {s['unit']}, Ende {s['ende']:.3g} {s['unit']}, "
+        f"Min {s['min']:.3g} bei {s['argmin']:g}, Max {s['max']:.3g} bei {s['argmax']:g}, {s['trend']}"
+        for s in stats)
+    # downsampled per-step series so the evaluation reflects the WHOLE curve shape,
+    # not just the endpoints/extrema (the output prose is value-free either way).
+    rows, keys = _study_downsample(study, max_rows=10)
+    kmeta = {m["key"]: m["label"] for m in study.get("metric_meta", [])}
+    series_lines = []
+    for x, vals in rows:
+        cells = ", ".join(f"{kmeta.get(k,k)}={vals[k]:.3g}" for k in keys if vals.get(k) is not None)
+        series_lines.append(f"  {plabel}={x:g}: {cells}")
+    series = "\n".join(series_lines)
+    return (
+        "Du bist ein erfahrener Auslegungsingenieur für IPM-Synchronmaschinen und schreibst "
+        "die ERLÄUTERUNG zu einer Parameterstudie auf Deutsch.\n\n"
+        f"Variierter Parameter: {plabel}, Bereich {rng}, bei fester Drehzahl "
+        f"{study.get('rpm', 0):.0f} U/min.\n\n"
+        f"MASCHINE:\n{machine}\n\n"
+        f"GEMESSENE ABHÄNGIGKEITEN (Datenbasis):\n{facts}\n\n"
+        f"SCHRITT-WERTE (Auszug, zur Beurteilung des Verlaufs):\n{series}\n\n"
+        f"{_PROSE_GUARDRAILS}\n"
+        "Schreibe Markdown mit genau diesen Abschnitten (## Überschriften):\n"
+        "1. Überblick — was die Studie zeigt (qualitativ)\n"
+        "2. Einfluss je Kennwert — erkläre kausal-physikalisch, warum der Parameter den "
+        "jeweiligen Kennwert so verändert (steigend/fallend/Optimum)\n"
+        "3. Zielkonflikte — welche Kennwerte gegenläufig sind\n"
+        "4. Empfehlung — welcher Parameterbereich für welches Ziel sinnvoll ist\n\n"
+        "REGELN: KEINE Zahlenwerte/Einheiten im Fließtext (die stehen in der Tabelle) — "
+        "beschreibe QUALITATIV (höher/niedriger, Optimum, gegenläufig). Keine eigenen "
+        "Tabellen. Beginne direkt mit `## Überblick`."
+    )
+
+
+def generate_paramstudy_report(study: dict, payload: dict, out_dir: str,
+                               model: str = DEFAULT_MODEL, progress_cb=None) -> dict:
+    """LLM report for a parameter study. The study data (per-metric trends) is the
+    basis of the prompt; numbers live in a deterministic table, the prose is
+    qualitative. Embeds the small-multiples chart + a few field-line images.
+    Returns {"pdf": path, "md": path, "model": …}."""
+    import base64
+    def _log(msg, pct=None):
+        if progress_cb: progress_cb(msg, pct)
+
+    os.makedirs(out_dir, exist_ok=True)
+    cdir = os.path.join(out_dir, "charts")
+    os.makedirs(cdir, exist_ok=True)
+
+    plabel = study.get("label", study.get("param", "?"))
+    stats  = _study_metric_stats(study)
+
+    # machine datasheet for context (reuse ema_chat helper on a meta-like dict)
+    try:
+        import ema_chat
+        machine = ema_chat._machine_datasheet({"payload": payload, **payload})
+    except Exception:
+        g = payload.get("geom", {}) or {}
+        machine = (f"Topologie {TOPOLOGY_LABELS.get(g.get('magShape','v'), g.get('magShape'))}, "
+                   f"{int(g.get('p',0))*2} Pole, {g.get('slots')} Nuten, "
+                   f"Stator-Ø {g.get('statorOD')} mm.")
+
+    _log(f"Analysiere Studiendaten ({len(stats)} Kennwerte)…", 15)
+
+    # images: chart + a few sampled field frames
+    md_imgs = []
+    if study.get("chart_b64"):
+        p = os.path.join(cdir, "study_chart.png")
+        with open(p, "wb") as f: f.write(base64.b64decode(study["chart_b64"]))
+        md_imgs.append(("charts/study_chart.png",
+                        f"Kennwerte über {plabel}"))
+    fimgs = study.get("field_images", []) or []
+    if fimgs:
+        pick = [fimgs[0], fimgs[len(fimgs)//2], fimgs[-1]] if len(fimgs) >= 3 else fimgs
+        for k, im in enumerate(pick):
+            p = os.path.join(cdir, f"study_field_{k}.png")
+            with open(p, "wb") as f: f.write(base64.b64decode(im["b64"]))
+            md_imgs.append((f"charts/study_field_{k}.png",
+                            f"Magnetfeld bei {plabel} = {im['value']:g}"))
+
+    _log(f"Frage {model} (qualitative Erläuterung)…", 35)
+    try:
+        prose = _clean_prose_keep_headings(call_ollama(_study_prompt(study, stats, machine), model=model))
+    except Exception as e:
+        _log(f"⚠ LLM nicht erreichbar ({e}) — Bericht ohne Fließtext", 50)
+        prose = ("## Überblick\n\n_Die qualitative Erläuterung konnte nicht erzeugt werden "
+                 "(LLM nicht erreichbar). Die Kennwert-Tabelle und Diagramme unten sind "
+                 "vollständig._")
+
+    xs = study.get("x", [])
+    rng = f"{xs[0]:g} … {xs[-1]:g}" if xs else "?"
+    parts = [
+        f"# Parameterstudie: {plabel}",
+        "",
+        f"**Variierter Parameter:** {plabel}  ·  **Bereich:** {rng}  ·  "
+        f"**Drehzahl (fest):** {study.get('rpm',0):.0f} U/min  ·  "
+        f"**Stützstellen:** {study.get('steps','?')}",
+        "",
+        "## Kennwert-Abhängigkeiten",
+        "",
+        _study_md_table(stats, plabel),
+        "",
+    ]
+    # chart first, then prose, then field gallery
+    if md_imgs:
+        rel, cap = md_imgs[0]
+        parts += [f"![{cap}]({rel})", ""]
+    parts += [prose, ""]
+    for rel, cap in md_imgs[1:]:
+        parts += [f"![{cap}]({rel})", ""]
+
+    # per-step value table (downsampled) — the numeric basis of the evaluation
+    data_tbl = _study_data_table(study, plabel)
+    if data_tbl:
+        parts += ["## Datentabelle (Schrittwerte, Auszug)", "",
+                  f"_Auszug der berechneten Stützstellen ({study.get('steps','?')} insgesamt); "
+                  f"die vollständigen Schrittwerte stehen als CSV-Export zur Verfügung._", "",
+                  data_tbl, ""]
+
+    md = "\n".join(parts)
+    _log("Rendere PDF (pandoc + xelatex)…", 80)
+    pdf_path = render_pdf(md, out_dir, out_filename="parameterstudie.pdf",
+                          md_filename="parameterstudie.md")
+    _log(f"✓ Bericht: {os.path.basename(pdf_path)}", 100)
+    return {"pdf": pdf_path, "md": os.path.join(out_dir, "parameterstudie.md"), "model": model}

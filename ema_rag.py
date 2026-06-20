@@ -29,7 +29,11 @@ import numpy as np
 
 OLLAMA_URL  = "http://localhost:11434"
 EMBED_MODEL = "nomic-embed-text"            # local Ollama embedding model
-CATEGORIES  = ("maschinen", "doku")
+# ONE shared knowledge base: documents are NOT split into separate pools. The two
+# consumers (text→design and chat) retrieve from the WHOLE base and differ only by
+# their system prompt. `category` survives as an OPTIONAL free-form tag for the user's
+# own organisation (and stats) — it no longer filters retrieval by default.
+DEFAULT_CATEGORY = "allgemein"
 
 RAG_ROOT  = os.path.expanduser("~/cae_projekte/_rag")
 INDEX_PATH = os.path.join(RAG_ROOT, "index.json")
@@ -133,11 +137,11 @@ def extract_text(filename: str, raw: bytes) -> str:
 
 # ── public API ───────────────────────────────────────────────────────────────
 
-def add_text(text: str, title: str, category: str, source: str = "",
+def add_text(text: str, title: str, category: str = DEFAULT_CATEGORY, source: str = "",
              progress_cb=None) -> dict:
-    """Chunk + embed a text document and append it to the store."""
-    if category not in CATEGORIES:
-        raise ValueError(f"Kategorie muss eine von {CATEGORIES} sein")
+    """Chunk + embed a text document and append it to the (single) store.
+    `category` is an optional free-form tag; it does not partition the base."""
+    category = (category or DEFAULT_CATEGORY).strip() or DEFAULT_CATEGORY
     chunks = _chunk(text)
     if not chunks:
         raise ValueError("Leerer Text — nichts zu hinterlegen")
@@ -156,7 +160,7 @@ def add_text(text: str, title: str, category: str, source: str = "",
     return {"id": doc_id, "title": title, "category": category, "n_chunks": len(chunks)}
 
 
-def add_file(filename: str, raw: bytes, category: str, title: str = "",
+def add_file(filename: str, raw: bytes, category: str = DEFAULT_CATEGORY, title: str = "",
              progress_cb=None) -> dict:
     text = extract_text(filename, raw)
     if not text.strip():
@@ -193,8 +197,10 @@ def search(query: str, category: str | None = None, k: int = 5,
     return out
 
 
-def context_for(query: str, category: str, k: int = 5, max_chars: int = 4000) -> str:
-    """Retrieved snippets formatted for injection into an LLM prompt (or '' if none)."""
+def context_for(query: str, category: str | None = None, k: int = 5,
+                max_chars: int = 4000) -> str:
+    """Retrieved snippets formatted for injection into an LLM prompt (or '' if none).
+    `category=None` (default) searches the WHOLE shared base."""
     hits = search(query, category=category, k=k)
     if not hits:
         return ""
@@ -213,18 +219,28 @@ def list_documents() -> list[dict]:
 
 
 def delete_document(doc_id: str) -> bool:
+    return delete_documents([doc_id]) > 0
+
+
+def delete_documents(ids) -> int:
+    """Delete one or many documents (and their chunks) in a single index write.
+    Returns the number of documents actually removed."""
+    ids = set(ids or [])
+    if not ids:
+        return 0
     idx = _load()
     before = len(idx["documents"])
-    idx["documents"] = [d for d in idx["documents"] if d["id"] != doc_id]
-    idx["chunks"] = [c for c in idx["chunks"] if c["doc_id"] != doc_id]
+    idx["documents"] = [d for d in idx["documents"] if d["id"] not in ids]
+    idx["chunks"] = [c for c in idx["chunks"] if c["doc_id"] not in ids]
     _save(idx)
-    return len(idx["documents"]) < before
+    return before - len(idx["documents"])
 
 
 def stats() -> dict:
     idx = _load()
-    by_cat = {c: 0 for c in CATEGORIES}
+    by_cat = {}
     for d in idx["documents"]:
-        by_cat[d["category"]] = by_cat.get(d["category"], 0) + 1
+        c = d.get("category", DEFAULT_CATEGORY)
+        by_cat[c] = by_cat.get(c, 0) + 1
     return {"n_documents": len(idx["documents"]), "n_chunks": len(idx["chunks"]),
             "by_category": by_cat, "embed_model": EMBED_MODEL}

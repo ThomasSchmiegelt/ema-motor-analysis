@@ -26,6 +26,9 @@ _opt_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error
 
 # Parameter-study state (one parameter swept at a fixed speed, fast evaluator)
 _study_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+# Field-line frames/video of the most recent parameter study (overwritten each run)
+STUDY_FIELD_DIR = os.path.join(PROJECTS_ROOT, "_paramstudy")
+os.makedirs(STUDY_FIELD_DIR, exist_ok=True)
 
 # Geometry-only CAD preview + smoke-test state (staged workflow, separate threads)
 _cad_state   = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
@@ -241,7 +244,8 @@ def param_study_start():
         return jsonify({"error": "Parameterstudie läuft bereits"}), 409
     data = request.get_json(force=True)
     _study_state.update({"status": "running", "progress": 0, "log": [],
-                         "result": None, "error": None})
+                         "result": None, "error": None,
+                         "payload": data.get("payload")})   # kept for the study report
 
     def _worker():
         import ema_paramstudy
@@ -253,7 +257,9 @@ def param_study_start():
             _study_state["result"] = ema_paramstudy.run_study(
                 data["payload"], data["param"], data["lo"], data["hi"],
                 steps=int(data.get("steps", 100)), rpm=data.get("rpm"),
-                progress_cb=cb)
+                field_frames=int(data.get("field_frames", 0)),
+                field_N=int(data.get("field_N", 300)),
+                out_dir=STUDY_FIELD_DIR, progress_cb=cb)
             _study_state["status"] = "done"
             _study_state["progress"] = 100
         except Exception as e:
@@ -276,6 +282,99 @@ def param_study_status():
         "result":   _study_state["result"],
         "error":    _study_state["error"],
     })
+
+
+@app.route("/param_study/csv")
+def param_study_csv():
+    """Per-step values of the most recent study as CSV (parameter + all metrics)."""
+    res = _study_state.get("result")
+    if not res:
+        return jsonify({"error": "keine Parameterstudie"}), 404
+    xs   = res.get("x", [])
+    mets = res.get("metrics", {})
+    meta = res.get("metric_meta", [])
+    keys = [m["key"] for m in meta]
+    header = [res.get("label", res.get("param", "param"))] + \
+             [f"{m['label']} [{m['unit']}]" if m['unit'] else m['label'] for m in meta]
+    lines = [";".join(header)]
+    for i, x in enumerate(xs):
+        row = [f"{x:g}"] + [("" if mets.get(k, [None]*len(xs))[i] is None
+                             else f"{mets[k][i]:g}") for k in keys]
+        lines.append(";".join(row))
+    csv = "\n".join(lines)
+    return Response(csv, mimetype="text/csv",
+                    headers={"Content-Disposition": "attachment; filename=parameterstudie.csv"})
+
+
+@app.route("/param_study/video")
+def param_study_video():
+    """Serve the field-line animation of the most recent parameter study (if rendered)."""
+    path = os.path.join(STUDY_FIELD_DIR, "anim.mp4")
+    if not os.path.exists(path):
+        return jsonify({"error": "kein Video"}), 404
+    return send_file(path, mimetype="video/mp4")
+
+
+# Parameter-study LLM report (study data is the basis of the prompt)
+_study_report_state = {"status": "idle", "progress": 0, "log": [],
+                       "pdf_path": None, "error": None}
+
+
+@app.route("/param_study/report", methods=["POST", "OPTIONS"])
+def param_study_report():
+    if request.method == "OPTIONS":
+        return "", 200
+    if _study_report_state["status"] == "running":
+        return jsonify({"error": "Studienbericht läuft bereits"}), 409
+    if not (_study_state.get("result")):
+        return jsonify({"error": "Keine Parameterstudie vorhanden — erst eine Studie rechnen"}), 400
+    model = (request.get_json(silent=True) or {}).get("model") or "ministral-3:14b"
+    study   = _study_state["result"]
+    payload = _study_state.get("payload") or {}
+    _study_report_state.update({"status": "running", "progress": 0, "log": [],
+                                "pdf_path": None, "error": None})
+
+    def _worker():
+        import ema_report
+        def cb(msg, pct=None):
+            _study_report_state["log"].append(msg)
+            if pct is not None:
+                _study_report_state["progress"] = int(pct)
+        try:
+            r = ema_report.generate_paramstudy_report(
+                study, payload, STUDY_FIELD_DIR, model=model, progress_cb=cb)
+            _study_report_state["pdf_path"] = r["pdf"]
+            _study_report_state["status"]   = "done"
+            _study_report_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _study_report_state["error"] = str(e)
+            _study_report_state["log"].append("⚠ " + str(e))
+            _study_report_state["status"] = "error"
+            print(traceback.format_exc())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/param_study/report/status")
+def param_study_report_status():
+    return jsonify({
+        "status":   _study_report_state["status"],
+        "progress": _study_report_state["progress"],
+        "log":      _study_report_state["log"][-40:],
+        "error":    _study_report_state["error"],
+        "has_pdf":  bool(_study_report_state.get("pdf_path") and
+                         os.path.exists(_study_report_state["pdf_path"])),
+    })
+
+
+@app.route("/param_study/report/download")
+def param_study_report_download():
+    path = _study_report_state.get("pdf_path")
+    if not path or not os.path.exists(path):
+        return jsonify({"error": "kein Bericht"}), 404
+    return send_file(path, as_attachment=True, download_name="parameterstudie.pdf")
 
 
 def _run(data):
@@ -1198,7 +1297,7 @@ def rag_add():
     d = request.get_json(force=True) or {}
     try:
         res = ema_rag.add_text(d.get("text", ""), d.get("title", ""),
-                               d.get("category", "doku"))
+                               d.get("category", "") or "allgemein")
         return jsonify({"status": "added", **res})
     except urllib.error.URLError:
         return jsonify({"error": "Ollama-Embeddings nicht erreichbar (localhost:11434)."}), 503
@@ -1208,26 +1307,47 @@ def rag_add():
 
 @app.route("/rag/upload", methods=["POST"])
 def rag_upload():
-    """Multipart file upload (txt/md/csv/pdf) + form fields category, title."""
+    """Multipart upload of ONE or MANY files (txt/md/csv/pdf) + form fields category,
+    title. With several files the per-file `title` is ignored (filename is used)."""
     import ema_rag
-    f = request.files.get("file")
-    if not f:
+    files = request.files.getlist("file")
+    files = [f for f in files if f and f.filename]
+    if not files:
         return jsonify({"error": "keine Datei"}), 400
-    category = request.form.get("category", "doku")
-    title    = request.form.get("title", "") or f.filename
-    try:
-        res = ema_rag.add_file(f.filename, f.read(), category, title=title)
-        return jsonify({"status": "added", **res})
-    except urllib.error.URLError:
-        return jsonify({"error": "Ollama-Embeddings nicht erreichbar (localhost:11434)."}), 503
-    except Exception as e:
-        return jsonify({"error": str(e)}), 400
+    category = request.form.get("category", "") or "allgemein"
+    title    = request.form.get("title", "")
+    added, errors = [], []
+    for f in files:
+        t = title if len(files) == 1 else ""
+        try:
+            added.append(ema_rag.add_file(f.filename, f.read(), category, title=t or f.filename))
+        except urllib.error.URLError:
+            return jsonify({"error": "Ollama-Embeddings nicht erreichbar (localhost:11434)."}), 503
+        except Exception as e:
+            errors.append(f"{f.filename}: {e}")
+    if not added:
+        return jsonify({"error": "; ".join(errors) or "Upload fehlgeschlagen"}), 400
+    # backward-compatible: single upload keeps the flat shape
+    if len(files) == 1 and not errors:
+        return jsonify({"status": "added", **added[0]})
+    return jsonify({"status": "added", "n_added": len(added), "added": added,
+                    "errors": errors})
 
 
 @app.route("/rag/delete/<doc_id>", methods=["POST"])
 def rag_delete(doc_id: str):
     import ema_rag
     return jsonify({"status": "deleted" if ema_rag.delete_document(doc_id) else "missing"})
+
+
+@app.route("/rag/delete", methods=["POST", "OPTIONS"])
+def rag_delete_many():
+    """Bulk delete. Body: {ids:[…]}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_rag
+    ids = (request.get_json(force=True) or {}).get("ids", [])
+    return jsonify({"status": "deleted", "n_deleted": ema_rag.delete_documents(ids)})
 
 
 @app.route("/rag/search")

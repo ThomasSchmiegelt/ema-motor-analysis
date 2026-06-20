@@ -638,11 +638,54 @@ def _field_vmax(B) -> float:
     return min(IRON_B_SAT_DISPLAY, max(1.6, 1.4 * float(np.percentile(pos, 99.9))))
 
 
+def _draw_magnet_outlines(ax, geom: dict, sc: float, ctr: float,
+                          rotor_angle: float = 0.0) -> None:
+    """Overlay each magnet's outline on a field frame, matching the rasteriser's
+    placement (ema_analysis._rasterise). Interior/flat magnets are rectangles,
+    surface magnets annular wedges; coloured red (N) / blue (S)."""
+    from matplotlib.patches import Polygon as MplPoly
+    from ema_topology import magnet_legs
+    try:
+        legs, _meta = magnet_legs(geom)
+    except Exception:
+        return
+    poles = int(geom["p"]) * 2
+    r_ro  = (geom["rotorOD"] / 2) * sc
+    for p_i in range(poles):
+        pole_ang = p_i * (2 * math.pi / poles) + rotor_angle
+        sign     = 1 if p_i % 2 == 0 else -1
+        cp, sp   = math.cos(pole_ang), math.sin(pole_ang)
+        for lg in legs:
+            is_n = (sign * lg.mag_sign) >= 0
+            col  = "#ff5a5a" if is_n else "#4db8ff"
+            if lg.placement == "surface":
+                magH = lg.thickness * sc
+                cang = pole_ang + lg.offset / (geom["rotorOD"] / 2)
+                harc = (lg.length / 2) / (geom["rotorOD"] / 2)
+                a = np.linspace(cang - harc, cang + harc, 16)
+                pts = [(ctr + r_ro * math.cos(t), ctr + r_ro * math.sin(t)) for t in a]
+                pts += [(ctr + (r_ro - magH) * math.cos(t),
+                         ctr + (r_ro - magH) * math.sin(t)) for t in a[::-1]]
+            else:
+                long_ang = pole_ang + lg.tilt
+                lx, ly = math.cos(long_ang), math.sin(long_ang)
+                sx = lg.r_pos * sc * cp - lg.offset * sc * sp
+                sy = lg.r_pos * sc * sp + lg.offset * sc * cp
+                w, h = lg.length * sc, lg.thickness * sc
+                def P(l, t):
+                    return (ctr + sx + l * lx + t * (-ly),
+                            ctr + sy + l * ly + t * lx)
+                pts = [P(0, -h / 2), P(w, -h / 2), P(w, h / 2), P(0, h / 2)]
+            ax.add_patch(MplPoly(pts, closed=True, fill=False,
+                                 edgecolor=col, lw=0.9, alpha=0.9, zorder=15))
+
+
 def _field_frame(geom: dict, rotor_angle: float, N: int = 120,
                  iq: float = 0.0, id_: float = 0.0,
                  rpm: float = 0.0, vmax_clip: float | None = None,
                  sf_ref: float | None = None, out_px: int | None = None,
-                 saturate: bool = False, b_ceiling: float | None = None) -> str:
+                 saturate: bool = False, b_ceiling: float | None = None,
+                 magnet_outlines: bool = False) -> str:
     # b_ceiling overrides the physical display clip + colour-scale ceiling so the
     # user can widen/narrow the |B| scale (field_bmax). Falls back to the steel-
     # saturation default when not set.
@@ -706,6 +749,11 @@ def _field_frame(geom: dict, rotor_angle: float, N: int = 120,
     ]:
         r_px = r_mm * sc
         ax.plot(ctr + r_px * np.cos(th), ctr + r_px * np.sin(th), col, lw=lw)
+
+    # Magnet outlines (so the magnets are visibly delineated, not just implied by the
+    # field). Same placement math as ema_analysis._rasterise; N=red / S=blue.
+    if magnet_outlines:
+        _draw_magnet_outlines(ax, geom, sc, ctr, rotor_angle)
 
     # Larger fonts on the high-resolution single-frame previews so the colour-bar
     # label / ticks / legend stay readable; compact on the small animation frames.
@@ -802,7 +850,7 @@ def render_preview_frame(data: dict) -> dict:
         # shows physical (saturated, flux-redistributed) |B|, not linear >2 T spikes.
         b_ceiling = float(data.get("field_bmax", 0) or 0)
         png = _field_frame(geom, ang, N=N, iq=iq, id_=id_, rpm=rpm, out_px=out_px,
-                           saturate=True, b_ceiling=b_ceiling)
+                           saturate=True, b_ceiling=b_ceiling, magnet_outlines=True)
         return {"png_b64": png, "B_gap_T": round(b_gap, 4),
                 "iq": round(iq, 1), "id": round(id_, 1), "rpm": rpm, "N": N,
                 "out_px": out_px, "rotor_angle_deg": round(math.degrees(ang), 1)}
@@ -1112,6 +1160,23 @@ def _save_cad_images(geom: dict, axial: float, out_root: str) -> dict:
             a = _boff + i * 2 * _m.pi / _nb
             ax.add_patch(Circle((_bpcr * _m.cos(a), _bpcr * _m.sin(a)), _bhr,
                                 fc='#0d1117', ec='#9aa', lw=0.7))
+
+    # Flux-barrier radial slots (optional): q-axis between poles, d-axis pole centre.
+    if bool(geom.get("genFluxBarrierQ", False)) or bool(geom.get("genFluxBarrierD", False)):
+        _fbw  = max(0.5, min(40.0, float(geom.get("fluxBarrierWidth", 3.0))))
+        _fbd  = max(1.0, min(120.0, float(geom.get("fluxBarrierDepth", 10.0))))
+        _rout = R_rot - 2.0
+        _rin  = max(R_shaft + 1.0, _rout - _fbd)
+        _fangs = []
+        if bool(geom.get("genFluxBarrierD", False)):
+            _fangs += [i * 2 * _m.pi / n_poles for i in range(n_poles)]
+        if bool(geom.get("genFluxBarrierQ", False)):
+            _fangs += [(i + 0.5) * 2 * _m.pi / n_poles for i in range(n_poles)]
+        for a in _fangs:
+            loc = [(_rin, -_fbw / 2), (_rout, -_fbw / 2), (_rout, _fbw / 2), (_rin, _fbw / 2)]
+            poly = [(x * _m.cos(a) - y * _m.sin(a), x * _m.sin(a) + y * _m.cos(a))
+                    for x, y in loc]
+            ax.add_patch(MplPoly(poly, closed=True, fc='#0d1117', ec='#9aa', lw=0.7))
 
     annulus(ax, R_si, R_so,  '#1e3a5f', ec='#2e5f8a', lw=0.8)
     ax.add_patch(Circle((0, 0), R_si, fill=False, ec='#333', lw=0.4, ls='--'))
@@ -1615,11 +1680,12 @@ def run_pipeline(data: dict, state: dict, frames: list,
             try:
                 _emf_N = int(min(600, max(300, frame_res * 2)))
                 _b_oc = _field_frame(geom, 0.0, N=_emf_N, iq=0.0, id_=0.0,
-                                     out_px=1500, saturate=True, b_ceiling=field_bmax)
+                                     out_px=1500, saturate=True, b_ceiling=field_bmax,
+                                     magnet_outlines=True)
                 _save_png_b64(_b_oc, os.path.join(proj, "charts", "em_field.png"))
                 _b_ld = _field_frame(geom, 0.0, N=_emf_N, iq=iq_full, id_=id_full,
                                      rpm=rpm_ref, out_px=1500, saturate=True,
-                                     b_ceiling=field_bmax)
+                                     b_ceiling=field_bmax, magnet_outlines=True)
                 _save_png_b64(_b_ld, os.path.join(proj, "charts", "em_field_load.png"))
                 _log(state, f"✓ EM-Feldbilder (Leerlauf + Last) für Bericht gerendert "
                             f"(FDM {_emf_N}²)", 74)
@@ -1647,7 +1713,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
                     for ang in angles:
                         b64 = _field_frame(geom, float(ang), N=frame_res, iq=iq, id_=id_,
                                            rpm=float(rpm), vmax_clip=vmax_ref,
-                                           b_ceiling=field_bmax)
+                                           b_ceiling=field_bmax, magnet_outlines=True)
                         _persist("rotate", sub, b64)
                         solved += 1
                         if solved % max(1, total // 15) == 0 or solved == total:
@@ -1669,7 +1735,8 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 for b in betas:
                     b64 = _field_frame(geom, 0.0, N=frame_res, iq=Is_full * math.cos(b),
                                        id_=-Is_full * math.sin(b), rpm=rpm_ref,
-                                       vmax_clip=vmax_ref, b_ceiling=field_bmax)
+                                       vmax_clip=vmax_ref, b_ceiling=field_bmax,
+                                       magnet_outlines=True)
                     _persist("react", sub, b64)
                 modes_meta.append({"mode": "current_angle", "label": "Stromwinkel (Ankerrückwirkung)",
                                    "frames": n_frames, "sweep_label": "β [°]",
@@ -1683,7 +1750,8 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 for fr in fracs:
                     b64 = _field_frame(geom, 0.0, N=frame_res, iq=fr * iq_full,
                                        id_=fr * id_full, rpm=rpm_ref,
-                                       vmax_clip=vmax_ref, b_ceiling=field_bmax)
+                                       vmax_clip=vmax_ref, b_ceiling=field_bmax,
+                                       magnet_outlines=True)
                     _persist("load", sub, b64)
                 modes_meta.append({"mode": "load_ramp", "label": "Last-Rampe",
                                    "frames": n_frames, "sweep_label": "Last [%]",
