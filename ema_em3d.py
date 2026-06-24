@@ -44,6 +44,9 @@ COIL_J_SCALE = 199.0
 # Netz feiner, vergröbert `_build_mesh_capped` die Zellgrößen automatisch und warnt — statt
 # ElmerSolver abstürzen/hängen zu lassen. Bewährt: ~28–50k Knoten lösen in ~1–2 min.
 EM3D_MAX_NODES = 55000
+# Topologien mit vergrabener Langloch-Magnettasche (Endkappen als Luft-Flussbarriere sinnvoll).
+# bar/spoke/Oberflächen/Halbach/custom haben keine solche Tasche → keine Kappen.
+POCKET_SHAPES = {"v", "vasym", "vv", "u", "delta", "pmasynrm"}
 
 
 # ── Magnetplatzierung (1:1 zur 2D-Rasterung `ema_analysis._rasterise`) ───────────
@@ -95,7 +98,29 @@ def magnet_rects(geom: dict) -> list:
             m_amp = float(sign * lg.mag_sign)
             out.append({"cx": cx, "cy": cy, "ang": ang, "length": length,
                         "thick": max(0.8, thick), "pole": p_i, "sign": m_amp,
-                        "mdx": mdx, "mdy": mdy})
+                        "mdx": mdx, "mdy": mdy, "placement": lg.placement})
+    return out
+
+
+def magnet_cap_rects(mrects: list, geom: dict) -> list:
+    """Luft-Endkappen der Magnettaschen (obround „Langloch"-Tasche) als Rechtecke —
+    spiegelt die FreeCAD-/2D-Geometrie: an JEDEM Magnetende eine halbkreisförmige Luft-
+    Flussbarriere mit Radius ≈ (Dicke+2·Spaltübermaß)/2 (hier rechteckig genähert, fürs
+    Mesh robust). Nur für INNENliegende Magnete (Surface-/Halbach-Magnete haben keine
+    Tasche). `magGapMm` = Tasche-zu-Magnet-Übermaß je Seite. Format wie `magnet_rects`."""
+    gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
+    out = []
+    for m in mrects:
+        if m.get("placement", "interior") != "interior":
+            continue
+        L = float(m["length"]); T = float(m["thick"]); ang = float(m["ang"])
+        cap_len = (T + 2.0 * gap) / 2.0               # ≈ Halbkreis-Radius der Langloch-Kappe
+        c, s = math.cos(ang), math.sin(ang)
+        for sgn in (-1.0, 1.0):                       # an beiden Magnetenden
+            d = (L / 2.0 + cap_len / 2.0) * sgn       # Kappe DIREKT hinter dem Magnetende
+            # thick = T (exakte Magnetbreite) → saubere Verlängerung ohne Eisen-Slivers.
+            out.append({"cx": m["cx"] + d * c, "cy": m["cy"] + d * s,
+                        "ang": ang, "length": cap_len, "thick": T})
     return out
 
 
@@ -230,6 +255,22 @@ def _magnet_pieces(rects: list, L: float, opts: dict):
 # ── 3D-Mesh (Gmsh OCC) ──────────────────────────────────────────────────────────
 
 def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
+    """Robuster Wrapper um ``_build_mesh_once``: die Magnettaschen-Endkappen können bei groben
+    Netzen/manchen Topologien ungültige Facetten erzeugen → dann EINMAL ohne Taschen neu bauen.
+    So heilt sich jeder Aufrufer selbst (auch die Tests, die build_mesh direkt rufen)."""
+    try:
+        return _build_mesh_once(geom, axial, opts, msh_path)
+    except Exception:
+        caps_on = (opts.get("mag_pockets", True)
+                   and str(geom.get("magShape", "")).lower() in POCKET_SHAPES)
+        if caps_on:
+            tags = _build_mesh_once(geom, axial, dict(opts, mag_pockets=False), msh_path)
+            tags["caps_dropped"] = True
+            return tags
+        raise
+
+
+def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
     """Baut das 3D-Mesh und schreibt ``msh_path`` (MSH 2.2 für ElmerGrid).
 
     3D-Primitive (Zylinder je Radius + Magnet-Extrusionen + Luft-Box) → ``occ.fragment``
@@ -316,6 +357,15 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
         bpieces, _bn, _bs = _magnet_pieces(brects, L, opts)
         bar_vol_tags = [_extrude(pc) for pc in bpieces]
 
+        # Magnettaschen-Endkappen (Luft-Übermaß der Tasche) als LUFT-Prismen an den
+        # Magnetenden — wie die Magnete mit-gestaffelt. Nur für vergrabene Taschen-Topologien
+        # (V/U/Δ…); bar/spoke/Oberflächen/custom haben keine Langloch-Tasche. Standard an.
+        _want_caps = (opts.get("mag_pockets", True)
+                      and str(geom.get("magShape", "")).lower() in POCKET_SHAPES)
+        caprects = magnet_cap_rects(rects, geom) if _want_caps else []
+        cap_pieces, _cn, _cs = _magnet_pieces(caprects, L, opts)
+        cap_vol_tags = [_extrude(pc) for pc in cap_pieces]
+
         # Statornuten als LUFT-Prismen (gerade, volle Länge) in den Statorring fragmentieren
         # → echte Zähne. Standardmäßig an (kann per opts `stator_slots=False` aus).
         srects = slot_rects(geom) if opts.get("stator_slots", True) else []
@@ -349,6 +399,7 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
             + ([(3, bore)] if bore is not None else []) \
             + [(3, t) for t in mag_vol_tags if t is not None] \
             + [(3, t) for t in bar_vol_tags if t is not None] \
+            + [(3, t) for t in cap_vol_tags if t is not None] \
             + [(3, t) for t in slot_vol_tags if t is not None] \
             + [(3, t) for t in ring_tags]
         occ.fragment(all_in, [])
@@ -357,7 +408,9 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
         # ── Magnete + Barrieren PER GEOMETRIE identifizieren (vor dem Vernetzen, für
         #    die zonale Verfeinerung brauchen wir ihre Oberflächen). Match über exakten
         #    Volumenschwerpunkt + Massengate (Eisen-Bulk viel größer, Slivers kleiner).
-        def _assign(target_pieces, avail):
+        def _assign(target_pieces, avail, dist_frac=0.5, mlo=0.3, mhi=2.6):
+            # Die kleinen Taschen-Kappen brauchen lockerere Toleranzen (dist_frac/mlo/mhi),
+            # weil sie beim Fragmentieren am Magnet/Rotorrand beschnitten werden.
             assign = {i: [] for i in range(len(target_pieces))}
             pred = [p["length"] * p["thick"] * (p["z1"] - p["z0"]) for p in target_pieces]
             taken = set()
@@ -368,8 +421,9 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
                     d = math.hypot(gx - p["cx"], gy - p["cy"]) + abs(gz - zc)
                     if d < bd:
                         bd, best = d, i
-                if (best is not None and bd < 0.5 * target_pieces[best]["length"]
-                        and 0.3 * pred[best] < vmass < 2.6 * pred[best]):
+                if (best is not None
+                        and bd < dist_frac * max(target_pieces[best]["length"], target_pieces[best]["thick"])
+                        and mlo * pred[best] < vmass < mhi * pred[best]):
                     assign[best].append(v); taken.add(v)
             return assign, taken
 
@@ -385,7 +439,10 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
         mag_assign, mag_taken = _assign(pieces, vinfo)
         bar_avail = [t for t in vinfo if t[0] not in mag_taken]
         bar_assign, bar_taken = _assign(bpieces, bar_avail)
-        slot_avail = [t for t in vinfo if t[0] not in mag_taken and t[0] not in bar_taken]
+        cap_avail = [t for t in vinfo if t[0] not in mag_taken and t[0] not in bar_taken]
+        cap_assign, cap_taken = _assign(cap_pieces, cap_avail, dist_frac=1.0, mlo=0.1, mhi=4.0)
+        _used = mag_taken | bar_taken | cap_taken
+        slot_avail = [t for t in vinfo if t[0] not in _used]
         slot_assign, slot_taken = _assign(slot_pieces, slot_avail)
 
         def _surfs_of(vols):
@@ -400,10 +457,11 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
             return s
         mag_vols = [v for vs in mag_assign.values() for v in vs]
         bar_vols = [v for vs in bar_assign.values() for v in vs]
+        cap_vols = [v for vs in cap_assign.values() for v in vs]
         slot_vols = [v for vs in slot_assign.values() for v in vs]
-        # Magnete, Flussbarrieren UND Statornuten in die Feinzone (mag_cl): die Nuten
-        # liegen am Luftspalt und prägen das Zahnfeld → genauso fein auflösen.
-        fine_surfs = _surfs_of(mag_vols) | _surfs_of(bar_vols) | _surfs_of(slot_vols)
+        # Magnete, Flussbarrieren, Taschenkappen UND Statornuten in die Feinzone (mag_cl).
+        fine_surfs = (_surfs_of(mag_vols) | _surfs_of(bar_vols)
+                      | _surfs_of(cap_vols) | _surfs_of(slot_vols))
 
         # ── Zonale Netz-Verfeinerung (einstellbar): Luftspalt+Umgebung SEHR fein
         #    (gap_cl), Magnete/Barrieren+Umgebung FEIN (mag_cl, über mag_grow auf grob
@@ -466,14 +524,15 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
         groups = {"shaft": [], "rotor": [], "stator": [], "air": [], "ring": []}
         ring_band = (r_si, r_si + float(srects[0]["length"])) if (want_rings and srects) else None
         ring_z = {}                                          # ring-Volumen → +1 (oben) / −1 (unten)
-        # Barrieren sind LUFT-Taschen im Rotor. Die Statornuten werden NICHT pauschal als
-        # „air" gebündelt, sondern unten EINZELN als Körper getaggt (damit jede Nut im
-        # Lastfall ihre eigene Stromdichte tragen kann).
+        # Barrieren + Magnettaschen-Kappen sind LUFT-Taschen im Rotor. Die Statornuten werden
+        # NICHT pauschal als „air" gebündelt, sondern unten EINZELN getaggt (Lastfall-Strom).
         for v in bar_vols:
             groups["air"].append(v)
+        for v in cap_vols:
+            groups["air"].append(v)
         for (v, gx, gy, gz, vmass) in vinfo:
-            if v in mag_taken or v in bar_taken or v in slot_taken:
-                continue                                    # Magnet/Barriere/Nut schon zugeordnet
+            if v in mag_taken or v in bar_taken or v in cap_taken or v in slot_taken:
+                continue                                    # Magnet/Barriere/Kappe/Nut schon zugeordnet
             # Ringe über einen ECHTEN Innenpunkt (Element-Schwerpunkt): konzentrische
             # Ringe haben ihren Volumenschwerpunkt auf der Achse → dort Radius untauglich.
             pr = _probe(v)
@@ -1328,11 +1387,34 @@ def render_model_preview(payload: dict, project_dir: str, progress_cb=None) -> d
 def _build_mesh_capped(geom, axial, opts, msh, log=None):
     """Baut das Mesh und vergröbert es iterativ, falls es das Solver-Knotenlimit überschreitet
     (Segfault-/Hänger-Schutz). Knotenzahl skaliert oberflächendominiert ~h^-1.85, daher dieser
-    Exponent + bis zu 3 Durchläufe. Gibt (tags, warnings) zurück."""
+    Exponent + bis zu 3 Durchläufe. Die Magnettaschen-Endkappen können bei manchen Topologien
+    ein ungültiges Netz erzeugen (überlappende Facetten) → dann automatisch ohne Taschen neu
+    bauen. Gibt (tags, warnings) zurück."""
     cap = int(opts.get("max_nodes", EM3D_MAX_NODES) or EM3D_MAX_NODES)
-    tags = build_mesh(geom, axial, opts, msh)
-    n0 = tags["n_nodes"]
     warns = []
+    state = {"no_pockets": False}
+
+    def _build(o):
+        if state["no_pockets"]:
+            o = dict(o, mag_pockets=False)
+        try:
+            return build_mesh(geom, axial, o, msh)
+        except Exception as e:
+            if o.get("mag_pockets", True):                  # einmalig: ohne Taschen retry
+                state["no_pockets"] = True
+                if log:
+                    log("⚠ Magnettaschen-Kappen erzeugten ein ungültiges Netz → baue ohne "
+                        "Taschen neu…", None)
+                warns.append("Magnettaschen-Endkappen für diese Geometrie deaktiviert "
+                             "(Netzkonflikt überlappender Facetten).")
+                return build_mesh(geom, axial, dict(o, mag_pockets=False), msh)
+            raise
+
+    tags = _build(opts)
+    if tags.get("caps_dropped"):
+        warns.append("Magnettaschen-Endkappen für diese Geometrie/Netzfeinheit deaktiviert "
+                     "(Netzkonflikt) — Magnet-/Luftspalt-Mesh feiner wählen, dann erscheinen sie.")
+    n0 = tags["n_nodes"]
     passes = 0
     while tags["n_nodes"] > cap and passes < 3:
         passes += 1
@@ -1346,7 +1428,7 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
         if log:
             log(f"⚠ Netz zu fein ({tags['n_nodes']} Knoten > {cap}) → vergröbere ×{f:.2f} "
                 "(3D-Löser-Limit)…", None)
-        tags = build_mesh(geom, axial, opts, msh)
+        tags = _build(opts)
     if passes:
         warns.append(f"Netz von {n0} auf {tags['n_nodes']} Knoten vergröbert "
                      f"(3D-Löser-Limit {cap}; für feinere Auflösung das Modell verkleinern "
