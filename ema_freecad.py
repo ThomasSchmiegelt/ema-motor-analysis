@@ -190,6 +190,14 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
     fb_width   = max(0.5, min(40.0, float(geom.get("fluxBarrierWidth", 3.0))))
     fb_depth   = max(1.0, min(120.0, float(geom.get("fluxBarrierDepth", 10.0))))
 
+    # Custom (designer) free-form barriers: list of {pts:[[x,y],…] (pole-local mm),
+    # width}. Replicated per pole, cut as air capsules into the rotor iron.
+    custom_barriers = geom.get("customBarriers") or []
+    custom_barriers_json = json.dumps(custom_barriers)
+
+    # Magnet-to-pocket clearance per side [mm] (the visible air gap around magnets).
+    mag_gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
+
     return f"""\
 import FreeCAD as App
 import Part
@@ -221,7 +229,38 @@ GEN_BALANCE = {gen_balance!r}; BAL_THREAD = {bal_thread!r}
 BAL_CIRCLE_D = {bal_circle_d}; BAL_OFFSET = {bal_offset}
 GEN_FB_Q = {gen_fb_q!r}; GEN_FB_D = {gen_fb_d!r}
 FB_WIDTH = {fb_width}; FB_DEPTH = {fb_depth}
+CUSTOM_BARRIERS = {custom_barriers_json}
+MAG_GAP = {mag_gap}
 dtheta    = 2 * math.pi / n_slots
+
+# Custom designer barriers: thick polyline (capsule) per pole, cut as air.
+def _custom_barrier_solids():
+    shapes = []
+    for p_i in range(poles):
+        pa = p_i * 2 * math.pi / poles
+        ca, sa = math.cos(pa), math.sin(pa)
+        for bar in CUSTOM_BARRIERS:
+            pts = bar.get("pts") or []
+            w = max(0.5, float(bar.get("width", 3.0)))
+            gp = [(x * ca - y * sa, x * sa + y * ca) for x, y in pts]
+            for i in range(len(gp) - 1):
+                ax, ay = gp[i]; bx, by = gp[i + 1]
+                dx, dy = bx - ax, by - ay
+                seg = math.hypot(dx, dy)
+                if seg < 1e-6:
+                    continue
+                ang = math.atan2(dy, dx)
+                box = Part.makeBox(seg, w, axial + 4, App.Vector(0, -w / 2, -axial / 2 - 2))
+                m = App.Matrix(); m.rotateZ(ang)
+                box = box.transformGeometry(m); box.translate(App.Vector(ax, ay, 0))
+                shapes.append(box)
+                # rounded joint at the inner vertex
+                cyl = Part.makeCylinder(w / 2, axial + 4, App.Vector(ax, ay, -axial / 2 - 2))
+                shapes.append(cyl)
+            if gp:
+                ex, ey = gp[-1]
+                shapes.append(Part.makeCylinder(w / 2, axial + 4, App.Vector(ex, ey, -axial / 2 - 2)))
+    return shapes
 
 # Flux-barrier radial slots (air). q-axis = between poles (i+0.5)·pitch, d-axis =
 # pole centre i·pitch. Outer edge a bridge below the OD, depth inward. One per pole.
@@ -323,11 +362,12 @@ if GEN_ROTOR:
             m = App.Matrix(); m.rotateZ(pole_ang + h_ang)
             # obround pocket (Langloch): straight box + semicircular end caps (air
             # flux barriers). Straight length = magnet length, caps add air at ends.
-            pkt = Part.makeBox(L + 0.4, T + 0.4, axial + 4,
-                               App.Vector(-(L + 0.4) / 2, -(T + 0.4) / 2, -axial / 2 - 2))
+            _pw = L + 2 * MAG_GAP; _pt = T + 2 * MAG_GAP    # pocket = magnet + gap/side
+            pkt = Part.makeBox(_pw, _pt, axial + 4,
+                               App.Vector(-_pw / 2, -_pt / 2, -axial / 2 - 2))
             pkt = pkt.transformGeometry(m); pkt.translate(App.Vector(cx, cy, 0))
             pocket_shapes.append(pkt)
-            cap_r = (T + 0.4) / 2
+            cap_r = _pt / 2
             for ex in (-L / 2, L / 2):
                 cap = Part.makeCylinder(cap_r, axial + 4, App.Vector(ex, 0, -axial / 2 - 2))
                 cap = cap.transformGeometry(m); cap.translate(App.Vector(cx, cy, 0))
@@ -356,6 +396,15 @@ if GEN_ROTOR:
                 rotor_solid = rotor_cut
             else:
                 print("WARN: flux-barrier slots produced an invalid rotor — skipped")
+    # Custom designer barriers (free-form polylines), cut as air capsules.
+    if CUSTOM_BARRIERS:
+        cb_shapes = _custom_barrier_solids()
+        if cb_shapes:
+            rotor_cut = rotor_solid.cut(Part.makeCompound(cb_shapes))
+            if rotor_cut.isValid():
+                rotor_solid = rotor_cut
+            else:
+                print("WARN: custom barriers produced an invalid rotor — skipped")
     if not rotor_solid.isValid():
         raise RuntimeError("Rotor iron invalid after pocket cuts")
     _add("Rotor", rotor_solid, (0.40, 0.40, 0.46))
@@ -402,8 +451,8 @@ if GEN_MAGNETS:
                 mm = App.Matrix(); mm.rotateZ(center_ang - arc_rad / 2)
                 mag = mag.transformGeometry(mm)
             else:
-                mag = Part.makeBox(L - 0.2, T - 0.2, axial,
-                                   App.Vector(-(L - 0.2) / 2, -(T - 0.2) / 2, -axial / 2))
+                mag = Part.makeBox(L, T, axial,
+                                   App.Vector(-L / 2, -T / 2, -axial / 2))
                 m = App.Matrix(); m.rotateZ(pole_ang + h_ang)
                 mag = mag.transformGeometry(m)
                 mag.translate(App.Vector(cx, cy, 0))

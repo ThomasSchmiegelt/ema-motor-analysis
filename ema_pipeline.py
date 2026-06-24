@@ -655,9 +655,42 @@ def _draw_magnet_outlines(ax, geom: dict, sc: float, ctr: float,
         pole_ang = p_i * (2 * math.pi / poles) + rotor_angle
         sign     = 1 if p_i % 2 == 0 else -1
         cp, sp   = math.cos(pole_ang), math.sin(pole_ang)
+        # Colour by the POLE's PHYSICAL polarity (red = N = net magnetisation pointing
+        # radially OUT, blue = S = inward), summed over all legs of the pole. This is
+        # the ONLY rule that means the same thing for every topology — pure pole-index
+        # parity gives red=S for a V-pole but red=N for SPM (the V arms magnetise
+        # inward), so red would mean different polarities in different motors. The
+        # IDENTICAL net-radial rule runs in ema.html drawRotor(), so red = the same
+        # physical pole in the canvas AND this FEM field plot. Falls back to index
+        # parity only when the net radial component vanishes (e.g. spoke = tangential).
+        net = 0.0
         for lg in legs:
-            is_n = (sign * lg.mag_sign) >= 0
-            col  = "#ff5a5a" if is_n else "#4db8ff"
+            la = pole_ang + lg.tilt
+            lx, ly = math.cos(la), math.sin(la)
+            if lg.mag_mode == "tangential":
+                mdx, mdy = -sp, cp
+            elif lg.mag_mode == "radial":
+                b = pole_ang + lg.mag_rot
+                mdx, mdy = math.cos(b), math.sin(b)
+            else:
+                mdx, mdy = -ly, lx
+            if geom.get("magOrient") == "longitudinal":
+                mdx, mdy = -mdy, mdx
+            amp = sign * lg.mag_sign
+            if lg.placement == "surface":
+                ca = pole_ang + lg.offset / (geom["rotorOD"] / 2)
+                pax, pay = math.cos(ca), math.sin(ca)
+            else:
+                sx0 = lg.r_pos * cp - lg.offset * sp
+                sy0 = lg.r_pos * sp + lg.offset * cp
+                mx = sx0 + 0.5 * lg.length * lx
+                my = sy0 + 0.5 * lg.length * ly
+                rr = math.hypot(mx, my) or 1.0
+                pax, pay = mx / rr, my / rr
+            net += amp * (mdx * pax + mdy * pay)
+        is_n = (net > 0) if abs(net) > 1e-6 else (sign >= 0)
+        col  = "#ff5a5a" if is_n else "#4db8ff"
+        for lg in legs:
             if lg.placement == "surface":
                 magH = lg.thickness * sc
                 cang = pole_ang + lg.offset / (geom["rotorOD"] / 2)
@@ -1178,6 +1211,20 @@ def _save_cad_images(geom: dict, axial: float, out_root: str) -> dict:
                     for x, y in loc]
             ax.add_patch(MplPoly(poly, closed=True, fc='#0d1117', ec='#9aa', lw=0.7))
 
+    # Custom (designer) barriers: thick polylines per pole.
+    _cbars = geom.get("customBarriers") or []
+    if _cbars:
+        for p_i in range(n_poles):
+            pa = p_i * 2 * _m.pi / n_poles
+            ca, sa = _m.cos(pa), _m.sin(pa)
+            for bar in _cbars:
+                pts = bar.get("pts") or []
+                hw  = max(0.5, float(bar.get("width", 3.0))) / 2.0
+                gp  = [(x * ca - y * sa, x * sa + y * ca) for x, y in pts]
+                xs_ = [p[0] for p in gp]; ys_ = [p[1] for p in gp]
+                ax.plot(xs_, ys_, color='#9aa', lw=1.5, solid_capstyle='round',
+                        solid_joinstyle='round')
+
     annulus(ax, R_si, R_so,  '#1e3a5f', ec='#2e5f8a', lw=0.8)
     ax.add_patch(Circle((0, 0), R_si, fill=False, ec='#333', lw=0.4, ls='--'))
 
@@ -1508,7 +1555,15 @@ def run_pipeline(data: dict, state: dict, frames: list,
     rpm_from    = float(data.get("rpm_from",    5000.0))
     rpm_to      = float(data.get("rpm_to",     20000.0))
     rpm_step    = float(data.get("rpm_step",    1000.0))
-    sweep_rpms  = _rpm_sweep_from_range(rpm_from, rpm_to, rpm_step)
+    # Explicit fixed speed points (e.g. the ranged KI designer: 1000/5000/15000/20000);
+    # falls back to the from/to/step sweep when not given. Endpoints set rpm_from/rpm_to
+    # so the FEM worst case, deformation tags and thermal design point stay consistent.
+    rpm_list    = data.get("rpm_list")
+    if isinstance(rpm_list, (list, tuple)) and len(rpm_list) >= 2:
+        sweep_rpms = sorted({int(round(float(r))) for r in rpm_list if float(r) > 0})
+        rpm_from, rpm_to = float(sweep_rpms[0]), float(sweep_rpms[-1])
+    else:
+        sweep_rpms = _rpm_sweep_from_range(rpm_from, rpm_to, rpm_step)
     rpm_fem     = rpm_to   # FEM solved at maximum speed (worst case); other speeds scaled
 
     # Structural-analysis settings (mirrors the magnetic-analysis controls)
@@ -1555,7 +1610,11 @@ def run_pipeline(data: dict, state: dict, frames: list,
                         + " (übrige Ergebnisse bleiben erhalten)", 4)
 
         # ── 1. FreeCAD geometry (full motor assembly) ─────────────────────────
-        if _do("geometry"):
+        # Importierte Geometrie (STEP-Import) NIE neu bauen: motor.FCStd existiert
+        # bereits (mit benanntem "Rotor"-Solid) — der else-Zweig nutzt sie für die
+        # Struktur-FEM, während die EM-Analyse auf den erkannten customLegs rechnet.
+        imported = bool(data.get("imported")) and os.path.exists(fcstd)
+        if _do("geometry") and not imported:
             _log(state, "⚙ Erzeuge vollständige Motorgeometrie in FreeCAD...", 4)
             code  = build_full_motor_script(geom, axial, fcstd)
             res   = run_freecad_script(code, timeout=180)
@@ -1605,7 +1664,11 @@ def run_pipeline(data: dict, state: dict, frames: list,
             if not os.path.exists(fcstd):
                 _log(state, "⚠ motor.FCStd fehlt — Struktur-FEM braucht die Geometrie; "
                             "bitte einmal die volle Berechnung ausführen", 20)
-            _log(state, "↩ Geometrie/CAD übersprungen (bestehende motor.FCStd verwendet)", 21)
+            if imported:
+                _log(state, "📥 Importierte STEP-Geometrie: motor.FCStd (Rotor) wird "
+                            "direkt für die Festigkeits-FEM verwendet", 21)
+            else:
+                _log(state, "↩ Geometrie/CAD übersprungen (bestehende motor.FCStd verwendet)", 21)
 
         # ── 2. EM field (FDM, static at angle 0) ─────────────────────────────
         # The air-gap Br/Bt profile (chart) needs the thin gap resolved, so solve at
@@ -2226,6 +2289,11 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 "cooling":    cooling,
                 "T_ambient":  T_ambient,
                 "rpm_thermal": rpm_thermal,
+                # KI-Auslegungs-Pfad: Aufgabe/Begründung/Quelle für das Trainingsfile
+                # (fehlen bei Hand-Entwürfen → "hand").
+                "design_brief":     data.get("design_brief", ""),
+                "design_rationale": data.get("design_rationale", ""),
+                "design_source":    data.get("design_source", "hand"),
                 # Full input payload for "Projekt aus Vorlage erstellen" — lets the
                 # form be repopulated exactly (minus the one-shot CSV upload).
                 "payload":    {k: v for k, v in data.items() if k != "cycle_csv"},
@@ -2241,8 +2309,14 @@ def run_pipeline(data: dict, state: dict, frames: list,
             # Nachrechnen). Soft — ein Fehler darf die Analyse nie abbrechen.
             try:
                 import ema_training
+                # Vom Nutzer korrigiertes/bestätigtes gut-schlecht-Urteil aus dem
+                # Designer (KI-Varianten-Liste) → als MANUELLES Label übernehmen
+                # (label_source="user"), sonst None (KI-Entwürfe werden in upsert
+                # heuristisch vorsortiert, Hand-Entwürfe bleiben unbewertet).
+                _dl = data.get("design_label")
+                _dl = _dl if _dl in ("gut", "schlecht") else None
                 ema_training.upsert(os.path.basename(proj), meta, results,
-                                    project_dir=proj)
+                                    label=_dl, project_dir=proj)
                 _log(state, "📚 Trainingsdatensatz aktualisiert", 99)
             except Exception as _te:
                 _log(state, f"⚠ Trainingsfile nicht geschrieben: {_te}", 99)

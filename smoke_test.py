@@ -217,20 +217,45 @@ def _training():
     os.makedirs(os.path.join(pdir, "charts"), exist_ok=True)
     img = os.path.join(pdir, "charts", "em_field.png")
     with open(img, "wb") as fh: fh.write(b"\x89PNG\r\n\x1a\n")   # fake PNG header
+    pid_ki = "_smoke_train_ki"
     try:
         T.upsert(pid, meta, results, project_dir=pdir)
         rec = T.get_record(pid)
-        assert rec and rec["label"] is None, "upsert label sollte None sein"
+        # Hand-Entwurf: unbewertet, aber Heuristik-Vorschlag mitgeschrieben
+        assert rec and rec["label"] is None, "Hand-upsert label sollte None sein"
+        assert rec["label_source"] is None, "Hand-upsert label_source sollte None sein"
+        assert rec["auto_label"] in ("gut", "schlecht"), "auto_label nicht gespeichert"
+        # einheitliches Schema: jede Zeile trägt exakt RECORD_KEYS
+        assert list(rec.keys()) == T.RECORD_KEYS, f"Schema abweichend: {list(rec.keys())}"
         assert any(i["key"] == "em_field" for i in rec.get("images", [])), "Bild nicht referenziert"
         nv = T.export_vlm()
         assert nv >= 1, "VLM-Export leer trotz Bild"
         T.set_label(pid, "gut", "ok")
-        assert T.get_record(pid)["label"] == "gut", "set_label wirkungslos"
+        r2 = T.get_record(pid)
+        assert r2["label"] == "gut" and r2["label_source"] == "user", "set_label wirkungslos"
+        # KI-Entwurf: wird direkt heuristisch vorsortiert
+        meta_ki = dict(meta, design_source="ki", design_brief="Testaufgabe")
+        T.upsert(pid_ki, meta_ki, results, project_dir=pdir)
+        rk = T.get_record(pid_ki)
+        assert rk["design_source"] == "ki", "design_source nicht ki"
+        assert rk["label"] in ("gut", "schlecht"), "KI-Entwurf nicht vorsortiert"
+        assert rk["label_source"] == "auto", "KI-Vorsortierung nicht als auto markiert"
+        assert rk["label"] == rk["auto_label"], "Vorsortier-Label != Heuristik"
+        # Designer-Korrektur: expliziter Label-Parameter gewinnt über Auto-Vorsortierung
+        T.upsert(pid_ki, meta_ki, results, label="gut", project_dir=pdir)
+        rc = T.get_record(pid_ki)
+        assert rc["label"] == "gut" and rc["label_source"] == "user", "Korrektur nicht übernommen"
+        # manuelle Bewertung bleibt beim Nachrechnen erhalten (überschreibt auto nicht)
+        T.set_label(pid_ki, "schlecht", "")
+        T.upsert(pid_ki, meta_ki, results, project_dir=pdir)
+        assert T.get_record(pid_ki)["label"] == "schlecht", "manuelle Bewertung verloren"
+        assert T.get_record(pid_ki)["label_source"] == "user", "user-Label überschrieben"
     finally:
-        T._write_all([r for r in T._read_all() if r.get("project_id") != pid])
+        drop = {pid, pid_ki}
+        T._write_all([r for r in T._read_all() if r.get("project_id") not in drop])
         T.export_vlm()
         import shutil; shutil.rmtree(pdir, ignore_errors=True)
-    return f"instr {len(instr)}c, out {len(outp)}c, auto={auto['suggestion']}, vlm ok"
+    return f"instr {len(instr)}c, out {len(outp)}c, auto={auto['suggestion']}, ki-presort ok"
 check("training-file record + images + VLM export", _training)
 
 # ── param_schema + comparative experts wiring (no Ollama call) ───────────────
@@ -256,6 +281,188 @@ def _expert_compare():
     assert hasattr(R, "_render_chapters_pdf"), "Kapitel-Renderer fehlt"
     return "6 experts, hrule-strip + pipe-escape + chapter render ok"
 check("comparative experts wiring + report hardening", _expert_compare)
+
+# ── KI-Auslegung (Designer-Pfad) — Validator/Synth/Optimizer, ohne Ollama ────────
+print("\n[ki-design]")
+def _design_ai_validate():
+    import ema_design_ai as D, ema_text2ema as T2E
+    params = T2E._validate({"rotorOD": 188.6, "shaftD": 60, "statorID": 190,
+                            "statorOD": 280, "p": 4, "magShape": "v", "slots": 48})
+    # wild LLM magnets must be clamped into the rotor (outer corner < r_rot - bridge)
+    bogus = [{"r": 95, "off": 10, "ang": 20, "len": 500, "thick": 6, "pol": 1},
+             {"r": 9999, "off": -5, "ang": 200, "len": 30, "thick": 99, "pol": -1}]
+    # barrier along the +y axis is far from the (near +x) magnets → survives, but its
+    # outer point is pulled inside the OD bridge and its width is clamped to ≤10.
+    mags, bars = D._validate_layout(bogus, [{"pts": [[5, 80], [5, 9999]], "width": 50}], params)
+    assert mags, "kein Magnet überlebte die Validierung"
+    r_rot = params["rotorOD"] / 2
+    for m in mags:
+        assert 0 <= m["off"], "Halbpol: offset muss ≥0 sein"
+        oc = math.hypot(m["r"] + m["len"] * math.cos(math.radians(m["ang"])),
+                        m["off"] + m["len"] * math.sin(math.radians(m["ang"])))
+        assert oc <= r_rot - D.TOPO.BRIDGE_MM + 1e-6, f"Magnet ragt aus dem Rotor ({oc:.1f})"
+    assert bars and len(bars[0]["pts"]) >= 2 and bars[0]["width"] <= 10
+    # a barrier running THROUGH a magnet (incl. its d-axis mirror) is dropped
+    _, bad_bars = D._validate_layout([{"r": 60, "off": 4, "ang": 25, "len": 18, "thick": 4, "pol": 1}],
+                                     [{"pts": [[60, 4], [70, 8]], "width": 3}], params)
+    assert bad_bars == [], "überlappende Flussbarriere nicht entfernt"
+    # overlapping magnets are dropped (no magnet–magnet intersection); separated kept
+    om, _ = D._validate_layout([{"r": 50, "off": 5, "ang": 20, "len": 18, "thick": 4, "pol": 1},
+                                {"r": 51, "off": 6, "ang": 22, "len": 18, "thick": 4, "pol": 1}],
+                               [], params)
+    assert len(om) == 1, f"überlappende Magnete nicht entfernt: {om}"
+    sep, _ = D._validate_layout([{"r": 40, "off": 4, "ang": 15, "len": 12, "thick": 3, "pol": 1},
+                                 {"r": 40, "off": 22, "ang": 60, "len": 12, "thick": 3, "pol": 1}],
+                                [], params)
+    assert len(sep) == 2, f"saubere Magnete fälschlich verworfen: {sep}"
+    # parametric fallback: always yields a drawable half-pole
+    syn = D._legs_to_canvas(D._params_to_geom(params))
+    assert syn, "Fallback-Synthese leer"
+    return f"{len(mags)} clamped, no-overlap ok, fallback {len(syn)} legs"
+check("design_ai validate + parametric fallback", _design_ai_validate)
+
+def _design_opt_roundtrip():
+    import ema_design_optimize as DO, ema_design_ai as D, ema_text2ema as T2E
+    params = T2E._validate({"rotorOD": 188.6, "shaftD": 60, "p": 4, "magShape": "v"})
+    mags = D._legs_to_canvas(D._params_to_geom(params))
+    vec = DO._vec_of(mags)
+    assert all(k.startswith("m0_") for k in vec), "Vektor-Schlüssel falsch"
+    m2, legs, bars = DO._apply_vec(mags, [], vec, {"rotorOD": 188.6, "shaftD": 60})
+    assert m2 and abs(m2[0]["r"] - mags[0]["r"]) < 1e-6, "Round-Trip r weicht ab"
+    # off>0 master → mirror present (2 legs), signs/tilt mirrored
+    if mags[0]["off"] >= 0.5:
+        assert len(legs) == 2 and legs[1]["offset"] == -legs[0]["offset"], "Spiegelung fehlt"
+    return f"vec {len(vec)} keys, {len(legs)} legs"
+check("design_optimize vector round-trip + mirror", _design_opt_roundtrip)
+
+def _eval_geom_custom():
+    import ema_optimize as OPT, ema_design_optimize as DO, ema_design_ai as D, ema_text2ema as T2E
+    import ema_pipeline as P
+    params = T2E._validate({"rotorOD": 188.6, "shaftD": 60, "statorID": 190,
+                            "statorOD": 280, "p": 4, "magShape": "v", "slots": 48})
+    g = D._params_to_geom(params)
+    g.update({"statorID": params["statorID"], "statorOD": params["statorOD"],
+              "conductorsPerSlot": 4, "slotWidthRatio": 0.5})
+    g["magShape"] = "custom"
+    g["customLegs"] = DO._mirror_legs(D._legs_to_canvas(D._params_to_geom(params)))
+    g["customBarriers"] = []
+    mats = (P.LAMINATES["m270_35a"], P.LAMINATES["m270_35a"],
+            P.HAIRPIN_MATS["cu_etp"], P.MAGNETS["ndfeb_n42"])
+    op = {"rpm_thermal": 12000, "rpm_base": 5000, "load_nm": 80}
+    m = OPT._eval_geom(g, 80.0, mats, op, "water", 25,
+                       [2400, 4200, 6000, 7800, 9600, 10800, 12000], N=120)
+    assert "error" not in m, f"eval error: {m.get('error')}"
+    assert m["B_gap"] > 0.2, f"B_gap zu klein ({m['B_gap']})"
+    return f"custom B_gap={m['B_gap']} Kt={m['Kt']}"
+check("_eval_geom on custom geometry", _eval_geom_custom)
+
+def _param_study_custom():
+    import ema_paramstudy as PS, ema_design_ai as D, ema_design_optimize as DO, ema_text2ema as T2E
+    params = T2E._validate({"rotorOD": 188.6, "shaftD": 60, "statorID": 190,
+                            "statorOD": 280, "p": 4, "magShape": "v", "slots": 48})
+    geom = D._params_to_geom(params)
+    geom.update({"statorID": params["statorID"], "statorOD": params["statorOD"],
+                 "conductorsPerSlot": 4, "slotWidthRatio": 0.5, "magShape": "custom",
+                 "customLegs": DO._mirror_legs(D._legs_to_canvas(D._params_to_geom(params))),
+                 "customBarriers": []})
+    payload = {"geom": geom, "axial_len": 120, "rotor_lam": "m270_35a",
+               "stator_lam": "m270_35a", "hairpin_mat": "cu_etp", "magnet": "ndfeb_n42",
+               "cooling": "water", "rpm_from": 5000, "rpm_to": 12000, "load_nm": 80}
+    res = PS.run_study(payload, "airgap", 0.3, 2.0, steps=3, rpm=10000)
+    bg = [b for b in res["metrics"]["B_gap"] if b is not None]
+    assert res["n_ok"] == 3 and len(bg) == 3, "Studie auf custom-Geometrie fehlgeschlagen"
+    assert bg[0] > bg[-1], "größerer Luftspalt müsste B_gap senken"
+    return f"custom sweep B_gap {bg[0]}→{bg[-1]}"
+check("param study honours custom geometry", _param_study_custom)
+
+def _design_quality_gate():
+    import ema_design_ai as D, ema_text2ema as T2E
+    params = T2E._validate({"rotorOD": 188.6, "shaftD": 60, "statorID": 190,
+                            "statorOD": 280, "p": 4, "magShape": "v", "slots": 48})
+    variant = {"params": params,
+               "magnets": D._legs_to_canvas(D._params_to_geom(params)),
+               "barriers": [], "begruendung": "", "fallback": False}
+    q = D._quick_eval(variant)
+    assert q["verdict"] in ("gut", "schlecht", None), "Qualitäts-Urteil kaputt"
+    # Regenerations-Schleife: erst „schlecht", dann „gut" → genau 1 ersetzt, V1 gut
+    import ema_design_ai as DD
+    calls = {"n": 0}
+    bad = {"params": params, "magnets": [], "barriers": [], "begruendung": "b", "fallback": True}
+    good = {"params": params, "magnets": variant["magnets"], "barriers": [],
+            "begruendung": "g", "fallback": False}
+    orig_gen, orig_eval = DD._gen_one, DD._quick_eval
+    DD._gen_one = lambda *a, **k: (good if calls.update(n=calls["n"] + 1) or calls["n"] >= 2 else bad)
+    DD._quick_eval = lambda v: {"verdict": ("gut" if v is good else "schlecht"),
+                                "reasons": ["test"], "metrics": {"B_gap": 1.0}}
+    try:
+        res = DD.design_variants("Testmotor", n=1, max_regen=2)
+    finally:
+        DD._gen_one, DD._quick_eval = orig_gen, orig_eval
+    assert res["regenerated"] == 1, f"erwartete 1 Ersetzung, war {res['regenerated']}"
+    assert res["variants"][0]["quality"]["verdict"] == "gut", "schlechte Variante nicht ersetzt"
+    assert len(res["rejected"]) == 1, "verworfener Entwurf nicht erfasst"
+    return f"verdict={q['verdict']}, regen-gate ok"
+check("design quality pre-sort + regenerate-if-bad", _design_quality_gate)
+
+def _ranged_design():
+    import ema_design_ai as D
+    rg = {"statorOD": [150, 160], "axialLen": [80, 90], "shaftD": [30, 35],
+          "airgap": [1.0, 2.5]}
+    # sampling within ranges incl. the user air-gap band (clamped to 0.5..3)
+    for _ in range(20):
+        d = D._sample_dims(rg)
+        assert 150 <= d["statorOD"] <= 160 and 80 <= d["axialLen"] <= 90, d
+        assert 30 <= d["shaftD"] <= 35 and 1.0 <= d["airgap"] <= 2.5, d
+    # air gap is clamped to the allowed 0.5..3 band even if the user over-/undershoots
+    for _ in range(20):
+        d = D._sample_dims({"airgap": [0.1, 9.0]})
+        assert 0.5 <= d["airgap"] <= 3.0, d
+    # dims forced + statorID/rotorOD derived from the chosen air gap, magnets re-clamped
+    v = {"params": {"statorOD": 999, "rotorOD": 140, "shaftD": 99, "p": 4, "slots": 48,
+                    "magnet": "N42", "cooling": "water"},
+         "magnets": [{"r": 35, "off": 4, "ang": 25, "len": 12, "thick": 4, "pol": 1}],
+         "barriers": []}
+    D._apply_ranged_dims(v, {"statorOD": 155.0, "axialLen": 85.0, "shaftD": 32.0, "airgap": 1.2})
+    p = v["params"]
+    assert (p["statorOD"], p["axialLen"], p["shaftD"]) == (155.0, 85.0, 32.0), p
+    assert abs((p["statorID"] - p["rotorOD"]) / 2 - 1.2) < 1e-6, p
+    assert p["rpm_from"] == 1000 and p["rpm_to"] == 20000 and v["magnets"], p
+    # a REAL stator wall is reserved (bore ≤ STATOR_SPLIT·OD) + slot depth fits the wall
+    wall = p["statorOD"] / 2 - p["statorID"] / 2
+    assert p["statorID"] / 2 <= D.STATOR_SPLIT * p["statorOD"] / 2 + 1e-6, p
+    assert 4 <= p["slotDepth"] <= wall - 3 + 1e-6, p
+    # end-to-end with mocked LLM: fixed rpm_list + per-variant brief
+    orig = D._one_variant
+    D._one_variant = lambda *a, **k: {
+        "params": D.T2E._validate({"p": 4, "slots": 48, "rotorOD": 150}),
+        "magnets": [{"r": 50, "off": 4, "ang": 25, "len": 18, "thick": 4, "pol": 1}],
+        "barriers": [], "begruendung": "t", "fallback": False}
+    try:
+        res = D.design_variants_ranged(rg, n=2, max_regen=0)
+    finally:
+        D._one_variant = orig
+    assert len(res["variants"]) == 2 and res["rpm_list"] == [1000, 5000, 15000, 20000], res
+    assert all(x.get("design_brief") for x in res["variants"]), "per-variant brief fehlt"
+    # optional brief is prepended to each variant's design task
+    assert D._ranged_brief({"statorOD":150,"axialLen":80,"shaftD":30,"airgap":1.0},
+                           "Traktion XY").startswith("ANWENDUNG: Traktion XY"), "Brief nicht vorangestellt"
+    # barriers are clamped to the HALF pole (y≥0)
+    _, hb = D._validate_layout([], [{"pts": [[40, -8], [50, -3]], "width": 2}],
+                               {"rotorOD": 180, "shaftD": 40})
+    assert hb and all(p[1] >= 0 for p in hb[0]["pts"]), f"Barriere nicht auf halben Pol geklemmt: {hb}"
+    return f"dims forced, brief prepended, half-pole barriers, rpm_list {res['rpm_list']}"
+check("ranged/random design generation", _ranged_design)
+
+def _training_brief():
+    import ema_training as TR
+    meta = {"design_brief": "120 kW Traktionsmotor, 16000 U/min", "design_source": "ki",
+            "geom": {"rotorOD": 188.6}, "materials": {}}
+    instr = TR.build_instruction(meta)
+    assert "120 kW Traktionsmotor" in instr, "Brief fehlt in der Instruction"
+    rec_src = (meta.get("design_source"))
+    assert rec_src == "ki"
+    return "brief in instruction + design_source"
+check("training instruction carries design brief", _training_brief)
 
 print("\n" + "=" * 50)
 print(f"RESULT: {PASS} passed, {FAIL} failed")

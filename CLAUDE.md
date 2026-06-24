@@ -81,7 +81,12 @@ nachziehen"): POST `{stages:[…], …current form payload}` runs only the chose
 into the project's saved `results.json`, and reuses `_state`/`/status`/`/results` like
 `/analyse` (preloads existing frames first via `_reload_frames_from_disk`),
 `/project/<id>/template` (input payload for "Projekt aus Vorlage erstellen"),
-`/project/<id>/report`, `/compare?ids=A,B,C,D`, `/project/<id>/delete`. All
+`/project/<id>/report`, `/compare?ids=A,B,C,D`, `/project/<id>/delete`,
+`/design_ai` (+ `/design_ai/status`, `_design_state`) — KI entwirft komplette Designs,
+and `/design_optimize` (+ `/design_optimize/status`, `_design_opt_state`) — per-magnet
+optimisation of a drawn design (see `ema_design_ai.py` / `ema_design_optimize.py`),
+plus the value-free RAG-markdown report routes `/project/<id>/report/rag_md` (download)
+and `/project/<id>/report/rag_md/add` (POST → knowledge base). All
 file-serving routes guard against path traversal via `_safe_name()`.
 
 ### The pipeline (`ema_pipeline.run_pipeline`)
@@ -175,6 +180,74 @@ Output is assembled into a `results` dict and persisted to
 `<project_dir>/results.json` + `meta.json`. Charts are stored both inline (base64
 in `results`) and as files under `charts/`.
 
+### Canvas Designer (`ema.html` tab `designer`)
+
+Free-form rotor designer: a standalone tab where the user enters the main dimensions
+(statorOD, rotorOD, shaftD, air gap → statorID, stack length, poles, slots,
+conductors/slot) and **draws ONE half-pole** on a dedicated `#designCanvas` — straight
+magnets (drag a line = position+length+tilt, thickness from a field, N/S polarity
+toggle, mouse + synced list) and free-form **flux barriers** (click a polyline, width
+field). The half-pole is **mirrored across the d-axis** and the pipeline patterns it
+over all poles with **alternating polarity**. `dsnBuild()` compiles the master into a
+**full pole** of `customLegs` (master + d-axis mirror) + `customBarriers`, spreads them
+over the current `GEOM`/form payload as `magShape:"custom"`, and runs the normal
+analysis via the shared `_runAnalysisPayload(payload)`. JS lives in the
+`// Designer-Tab` block (all `dsn*` functions top-level); `switchTab('designer')` calls
+`dsnActivate()`. No JS↔Python topology mirror needed — the canvas emits the legs
+directly. **Pole-local frame**: x=radial out, y=tangential, master d-axis = +x.
+`dsnBuild()`'s payload builder is factored into **`_dsnBuildPayload()`** (also tags
+`design_brief`/`design_rationale`/`design_source` when an AI design is active) and the
+mirror loop now **dedups** coincident legs. **It force-disables the parametric
+`genFluxBarrierQ/D` flux barriers AND `genBalanceBolts`** from the Geometrie tab — a
+custom/Designer geometry draws its own rotor air slots as `customBarriers`, so the
+Geometrie-tab toggles must not bleed in and add a second, unrelated set of slots/holes.
+Other Geometrie-tab settings (material, cooling, shaft connection, bearings) are still
+inherited.
+
+**KI-gestützte Auslegung (paralleler Pfad, im Designer-Tab).** ONE generator
+("🤖 KI entwerfen", `dsnAiGenerate` → `POST /design_ai_ranged`) plus per-magnet
+optimisation + a per-design parameter study. All build on the same canvas/`dsnBuild`
+plumbing — see `ema_design_ai.py` / `ema_design_optimize.py` in the file map:
+- **🤖 KI entwerfen** (`dsnAiGenerate` → `POST /design_ai_ranged`): the single design
+  generator. The user gives an **optional brief** + **von–bis ranges** for **statorOD /
+  Länge / Welle-Ø / air gap** (air gap clamped to **0.5–3 mm** via `AIRGAP_RANGE`) +
+  variant count `#dsn_ai_n` (1–99). Per variant those four dims are randomly sampled and
+  **hard-forced** (`_apply_ranged_dims`: statorID/rotorOD derived from the chosen gap,
+  **bore capped at `STATOR_SPLIT`·OD ≈0.68 so a real stator wall remains for slots + winding
+  copper — not a bare sleeve — with `slotDepth` derived from that wall**, magnets re-clamped);
+  the LLM fills material/poles/slots + draws a **half-pole**
+  magnets/barriers layout, the brief (if any) is prepended to each variant's design task.
+  Calculation runs at the **fixed speeds 1000/5000/15000/20000 1/min** —
+  `design_variants_ranged` returns `rpm_list`, the UI stashes it in `_dsnRangedRpm`, and
+  `_dsnBuildPayload` forwards it as `payload.rpm_list` (run_pipeline honours an explicit
+  `rpm_list` over the from/to/step sweep). `applyDesignToCanvas` loads a variant onto the
+  designer form + `DESIGN`; `dsnRunAllVariants` runs them sequentially through `/analyse`
+  and pre-selects them in the compare picker. (`design_variants(brief,…)` / `POST /design_ai`
+  still exist as the brief-only path but the UI now always uses the ranged generator.)
+  Each variant carries a fast **`quality`** verdict (gut/schlecht, `_quick_eval`); the list
+  shows 👍/👎 badges + **per-variant 👍/👎 correction buttons** (`dsnSetVariantVerdict` →
+  `v.userVerdict`, toggle back to auto). `_dsnVerdict` = user override else auto. The active
+  variant is tracked in `_dsnActiveVariant`; `_dsnBuildPayload` attaches the corrected verdict
+  as **`payload.design_label`** → `run_pipeline` → `ema_training.upsert(label=…)` (manual
+  `label_source="user"`, overrides the pre-sort). **👎 variants are NOT computed:** in
+  `dsnRunAllVariants` any variant whose effective verdict (`_dsnVerdict`) is `schlecht` is
+  **skipped** from the `/analyse` runs and instead posted to **`POST /training/design_rejected`**
+  ({payload, quick-eval metrics}) → `ema_training.upsert(label="schlecht")` with a synthetic
+  `ki_abgelehnt_*` id (no pipeline run), so a thumbs-down design still lands in the training set
+  as schlecht without burning a full solve.
+- **🎯 Magnete fein-optimieren** (`dsnOptimize` → `POST /design_optimize`): per-magnet
+  optimisation of the drawn coordinates; the best layout is drawn back onto the canvas.
+  Metric/goal/constraint dropdowns come from `/optimize/meta` (`dsnLoadOptMeta`).
+- **📈 Parameterstudie für diesen Entwurf** (`dsnParamStudy`): runs `ema_paramstudy` on
+  the drawn geometry (`_studyDesignPayload` override + `_CUSTOM_STUDY_PARAMS` filter).
+
+Every AI run lands in the training dataset (`design_source:"ki"`, brief in the
+instruction). The LLM emits a **half-pole** (y≥0); the d-axis mirror stays in
+`dsnBuild`/`_mirror_legs`, never in the model output. **Half-pole is enforced everywhere:**
+hand-drawing clamps `_evMM` to y≥0 (can't draw below the d-axis), and `_validate_layout`
+forces magnet offsets ≥0 AND clamps every barrier point to y≥0 — so master geometry always
+stays in the upper half and the mirror produces the full pole cleanly.
+
 ### Magnet topology system (`ema_topology.py`)
 
 The rotor magnet arrangement is a **single source of truth**: `magnet_legs(geom)`
@@ -183,7 +256,10 @@ pole-local frame (x=radial out, y=tangential): `r_pos, offset, tilt, length,
 thickness, mag_mode ("perp"|"tangential"|"radial"), mag_sign, mag_rot,
 placement ("interior"|"surface"), layer`. Supported `magShape` codes: `v, vasym
 (asymmetric V — per-arm opening via `magAsym`°, 0 ⇒ symmetric `v`), vv, u,
-delta, pmasynrm, spm, halbach, spoke, bar`. `MotorTopoMeta` carries analytical
+delta, pmasynrm, spm, halbach, spoke, bar, custom` (`custom` = legs supplied
+explicitly via `geom["customLegs"]` from the Canvas Designer; free-form barriers via
+`geom["customBarriers"]` carved in FreeCAD + the FDM raster + the 2D section).
+`MotorTopoMeta` carries analytical
 hints (`n_legs_per_pole, eta_hint, flux_focusing, reluctance_dominated,
 is_surface, salient_xi_hint`) so `ema_analysis._analytical_Bgap` /
 `estimate_saliency` branch on the topology without string checks.
@@ -228,6 +304,86 @@ FDM amplitude (and the analytical Kt/EMK that share `B_gap`) react to the toggle
 The **same factor is mirrored as `_magOrientFactor(GEOM)` in `ema.html`** and
 multiplied into the live magnet amplitude `Jm_amp`, so the live preview scales in
 the SAME direction as the FDM (verified equal py↔js for every topology).
+
+### Echte 3D-Magnetfeldberechnung (Elmer FEM) — `ema_em3d.py` / `elmer_runner.py`
+
+Eigenständiger On-Demand-Pfad **neben** dem 2D-FDM (der 2D-Löser bleibt unangetastet und
+dient als Vergleichsanker). Liefert, was 2D nicht kann: **Endeffekte/finite Länge**,
+**Schrägung (Skew)**, eine echte 3D-Feldlösung (VTU) und einen **2D-vs-3D-Vergleich**.
+
+Ablauf (`ema_em3d.run_em3d`): `build_mesh` (Gmsh-OCC: konzentrische Zylinder je Radius +
+Magnete als `addThruSections`-Loft aus `magnet_rects(geom)` — gespiegelt zur 2D-Rasterung
+`ema_analysis._rasterise` — mit Skew = um `skew_deg` gedrehtem oberen Querschnitt; +
+Luftspalt-Ring + axiale Luftkappen + Luftbox → `occ.fragment` → **Physical-Volumes per
+Schwerpunkt/Radius/z getaggt**, Magnet-Match über exakten `getCenterOfMass` + Massengate,
+weil konzentrische Ringe ihren Volumenschwerpunkt AUF der Achse haben; Luftspalt per
+MathEval-Hintergrundfeld verfeinert) → `ElmerGrid 14 2` (MSH→Elmer-Mesh, `elmer_runner`)
+→ `write_sif` (Magnetostatik: `WhitneyAVSolver` + `MagnetoDynamicsCalcFields` + VTU +
+SaveScalars; Eisen μr=500 linear, Magnet μr=1.05 + per-Magnet `Body Force Magnetization`
+= Br/μ0·Richtung, BC außen A×n=0) → `ElmerSolver` → `parse_results` (VTU via **vtk**:
+Luftspalt-Br(θ) bei mehreren z → Endeffekt-Kurve, |B|-Schnitt z=L/2, Arkkio-Moment; +
+`run_em_analysis`-2D-Vergleich). Server: `/em3d` (503 wenn `elmer_runner.ELMER_OK` falsch),
+`/em3d/status`, `/em3d/vtu`, `/em3d/preview` (3D-Modell-Render OHNE Elmer, nur Gmsh+vtk),
+`/em3d/paraview` (startet die ParaView-GUI auf der VTU via `paraview --data=`, wie
+`/open_freecad`), `/em3d/vtp` (schlanke .vtp = Festkörper-Oberfläche + |B| via
+`export_browser_vtp`) + `/vendor/<name>` (lokal eingebettete Libs). UI: Tab **🧲 3D-Feld**
+mit **eingebettetem vtk.js-Browser-Viewer** (`openBrowser3d`, lädt `/vendor/vtk.js` lazy,
+rendert die .vtp nach |B| eingefärbt — offline, kein ParaView nötig) + ParaView-Knopf.
+**Geometriequelle wählbar** (`#e3_geomsrc` + `adoptEm3dGeom`/`_em3dGeom`): Geometrie-Tab
+(`buildPayload`, parametrisch) ODER Designer/importierte STEP (`_dsnBuildPayload`,
+`magShape:"custom"`+`customLegs` — `build_mesh`/`magnet_rects` über `magnet_legs` honoriert
+custom). „📥 Geometrie übernehmen" snapshottet + zeigt eine Zusammenfassung; beim Tab-Öffnen
+auto-übernommen. **Parametrische Reinheit (Bugfix):** `buildPayload` erzwingt `magShape`
+aus dem Dropdown und **löscht `customLegs`/`customBarriers`** — sonst sickern aus einer
+früheren Designer-Sitzung via localStorage in `GEOM` zurückgebliebene custom-Magnete in
+die parametrische 3D-Übernahme („nur Durchmesser übernommen, Magnete ignoriert"). **Gestaffelte
+Schrägung / Step-Skew** (`skew_segments` K + `skew_step_deg`, opts → `_magnet_pieces`): jeder
+Magnet wird in K axiale Prismen geschnitten, Segment k um `k·step` um die Wellenachse gedreht
+(Position, Achse UND Magnetisierung); das Rotoreisen bleibt rotationssymmetrischer Vollzylinder.
+Kontinuierlicher `skew_deg`-Twist bleibt der Fall K<2. Das Magnet-Tagging matcht jetzt über
+(gx,gy,**gz**) + Segmenthöhen-Massengate. **Flussbarrieren im 3D-Mesh** (`barrier_rects` —
+parametrisch `genFluxBarrierQ/D` radiale Schlitze + Designer `customBarriers` Polylinien,
+gespiegelt zur 2D-`_rasterise`-Logik): als **Luft-Prismen** (μr=1) mit derselben Staffelung
+gebaut, in den Rotor gefragmentet und als `air` getaggt (COM+Massengate, 2-Pass: Magnete zuerst,
+Barrieren aus dem Rest). **Statornuten im 3D-Mesh** (`slot_rects`, default an via
+`opts.stator_slots`): `slots` **gerade** (nicht mit-rotierende) Luft-Prismen über die volle
+Länge (`_extrude_straight`), zentriert auf `s·2π/slots`, halbe Winkelbreite `(2π/slots)/4`, Band
+`[r_si, r_si+slotDepth]` — gespiegelt zur 2D-`_rasterise`-Nutung; in den Statorring gefragmentet →
+echte Zähne, als `air` getaggt (3-Pass: Magnete→Barrieren→Nuten). Der Fluss bündelt sich dadurch in
+den Zähnen (im 3D-Feld/Schnittbild sichtbar). **Zonale Netz-Verfeinerung (einstellbar):** ① Luftspalt+Umgebung *sehr
+fein* (`gap_cl`, MathEval-Gauß-Band), ② Magnete+Barrieren+Umgebung *fein* (`mag_cl`, Distance→
+Threshold auf ihren Oberflächen, Saumbreite `mag_grow`), ③ Rest *grob* (`mesh_cl`) — per gmsh
+`Min`-Feld kombiniert; `_magnet_pieces` wird für Barrieren wiederverwendet (mdx/mdy/sign via
+`.get`). UI: Felder „Magnet-/Barrieren-Mesh", „Übergangszone" + Zonen-Übersicht-Karte. **3D-Feld-Tab UI**: breiteneinheitliche `.e3-card`-
+Stapelung (wie FEM-Ergebnisse), **FEM-Einstellungen mit `<details>`-Erklärungen** (fachlich +
+laienverständlich + Wirkung auf Genauigkeit/Rechenzeit), Staffelungs-Felder. **Browser-Viewer
+Schnittebene** (`_e3SetClip`/`_e3FlipClip`, vtk.js `vtkPlane` + `mapper.addClippingPlane` +
+**`mapper.modified()`** — ohne das rendert vtk.js die Clip-Änderung NICHT neu, der Schnitt schien
+„kaputt") — Achse X/Y/Z + Positions-Slider + Seitenwechsel, „in den Motor schauen". **Feldfarbe
+im Browser-Viewer** (`_e3ApplyColor`): robuster Bereich übers 2./98.-Perzentil (`_e3Percentiles`)
+statt min/max + **log-Toggle** + **|B|max-Slider** — sonst klebt das moderate Statorfeld (~0,3–0,8 T
+Leerlauf) ganz unten in der Skala; das matplotlib-Schnittbild `_slice_image` nutzt analog
+`PowerNorm(γ=0.5)` (Wurzelskala). **Netz sichtbar machen:** statisches **Netz-Querschnittsbild**
+(`_mesh_slice_image` — schneidet die gmsh-.vtk MIT Luft bei z=L/2, `tripcolor` nach √Fläche
+hell=fein → zonale Auflösung sichtbar, Bildschlüssel `em3d_mesh_slice`) + interaktiver **🕸 Netz**-
+Toggle im Browser-Viewer (`_e3ToggleMesh`, `actor.setEdgeVisibility` — Oberflächen-Netz der
+Festkörper; das Luftspalt-Volumennetz nur im Querschnittsbild, da die .vtp keine Luft enthält). **Geometriequelle NICHT klebrig:** beim Öffnen des 3D-Tabs wird
+NICHT automatisch auf „Designer" umgeschaltet (das blendete den Geometrie-Tab dauerhaft aus →
+„Geometrie ändert sich nicht"); Standard ist der Geometrie-Tab, `_e3SrcUserSet` merkt die bewusste
+Dropdown-Wahl. `/em3d/vtp`-Fetch ist cache-gebustet. **Bericht-Integration:**
+`run_em3d` mergt eine schlanke 3D-Zusammenfassung (`_persist_em3d_summary`) in `results.json`
+(`results["em3d"]`, Bilder liegen in `charts/em3d_*.png`); `ema_report.build_context` zieht
+`em3d`+Bilder, `_single_md_tables` baut die 2D-vs-3D-Tabelle (B_gap, Endeffekt Rand/Mitte,
+Staffelung), `_prompt_for` ergänzt §8 (qualitativ) und `_ensure_em3d_section` garantiert den
+bebilderten 3D-Abschnitt auch ohne LLM-Mithilfe — Standard- + agentischer Einzelbericht. **v1-Scope:**
+lineare Materialien, Open-Circuit (Magnete); Lastfall/Spulen + BH-Kurve sind Folgeschritte. **Prerequisite:**
+Elmer (`sudo apt install elmerfem-csc` via PPA `elmer-csc-ubuntu/elmer-csc-ppa`) + die
+Python-Pakete `gmsh`/`vtk` (in `requirements.txt`). Mesh/sif sind ohne Elmer test- und
+baubar (`test_em3d.py`). **Gotchas (alle gelöst, beim Ändern beachten):** `gmsh.initialize(
+interruptible=False)` — sonst „signal only works in main thread" im Flask-Worker; Elmer-
+Body-IDs **konsekutiv ab 1** (sonst „Body 1 missing"); Solver 1 = **Direct/MUMPS** (Iterativ
+stagniert); Elmer-Ausgabepfade **relativ** zum cwd; gmsh-VTK `CellEntityIds` = **Physical-
+IDs** (nicht Entity-Tags) für die 3D-Render-Klassifikation.
 
 **Stator hairpin end-windings** (`ema_freecad.build_full_motor_script`, block "5.
 HAIRPIN CONDUCTORS"): `conductorsPerSlot` (clamped even 2..12) radial conductor
@@ -549,12 +705,16 @@ dict passed to the FEM script.
 | `ema_compare.py` | Multi-project comparison overlays |
 | `ema_report.py` | LLM → Markdown → pandoc → pdflatex PDF report (standard + agentic modes). Embeds project images via `[BILD:key]` placeholders → `insert_images` (`build_context` `pairs`); the EM section features the FDM field maps `em_field` (Leerlauf) + `em_field_load` (Last) rendered by the pipeline's field stage to `charts/em_field*.png`, plus `airgap`/`em_curve`. Unknown keys (legacy projects without an image) are stripped cleanly; for an old project, re-run the **field** stage (Stufen nachrechnen) to generate them. **Formatting:** the prompt asks for LaTeX math (`$…$` inline, single-line `$$…$$` display — `_normalize_paragraphs` treats `$$` lines as structural so they aren't merged); `render_pdf` injects `_report_header.tex` (`ragged2e` document-wide → left-aligned, fixes the "1–2 words per line" justified-stretch around long unit/formula tokens; `float`+`[H]` to pin figures); `_strip_md_tables` is applied to standard + agentic output too (local models emit malformed centered pipe-tables). **NO numeric values in the prose** (the local model routinely mis-assigns them → nonsense): the standard + agentic single-project reports inject a comprehensive deterministic `[TABELLE:kennwerte]` (`_single_md_tables`, grouped by domain) right after the summary, the prompt demands QUALITATIVE prose + symbolic-only formulas, and `_strip_value_numbers` removes any straggler number+unit token (keeps the unit, inserts `…`; material codes like `M270-35A`/`N52` are protected). `_strip_value_numbers` also runs inside `_clean_prose` so the comparison/agentic comparative prose is value-free too |
 | `ema_chat.py` | Ollama Q&A over results/comparison (`chat_results`/`chat_compare`); compacts results JSON (strips base64/frames). Each project-scope chat is grounded on a per-project **`_machine_datasheet(meta)`** (topology/dims/winding/magnets/materials/operating point, built from `meta.json` — `results.json` holds only outputs, so the server loads `meta.json` from `project_dir` and passes it to `chat_results`). Served by `POST /chat` (`scope:"project"\|"compare"`); UI is the floating `💬 Chat` widget in `ema.html`. **RAG:** `_rag_doku(message)` injects retrieved `doku`-category snippets from `ema_rag` into both system prompts (best-effort) |
-| `ema_optimize.py` | LLM-steered target-value optimisation. `evaluate_fast` scores a candidate WITHOUT FreeCAD/FEM (EM at low N + analytical Kt/torque + steady LPTN thermal + analytical struct sweep + analytical mass, ~0.5 s). `optimize(spec)` seeds + lets `ministral-3` propose batches over `FREE_PARAMS`, deterministic clamp + feasibility/fitness pick the best feasible design. Served by `POST /optimize` (threaded, `_opt_state`) + `GET /optimize/status` + `GET /optimize/meta`; UI is the `🎯 Zielwertoptimierung` modal (Berechnung tab / `#optimize`). "Übernehmen" applies the best params to the form for a final full pipeline run |
-| `ema_paramstudy.py` | **Parameterstudie bei fester Drehzahl**: `run_study(payload, param, lo, hi, steps=100, rpm)` sweeps ONE `ema_optimize.FREE_PARAMS` parameter x→y in N steps at a fixed speed and plots EVERY result metric over the parameter (small-multiples grid). Reuses `ema_optimize.evaluate_fast` (FreeCAD/FEM-free, geometry varied per step), so 100 points cost ~50 s. Served by `POST /param_study` (threaded, `_study_state`) + `GET /param_study/status`; UI is the **„📈 Parameterstudie"** panel (Berechnung tab) — parameter dropdown filled from `/optimize/meta` |
+| `ema_optimize.py` | LLM-steered target-value optimisation. `evaluate_fast` scores a candidate WITHOUT FreeCAD/FEM (EM at low N + analytical Kt/torque + steady LPTN thermal + analytical struct sweep + analytical mass, ~0.5 s). Its inner geom→metrics core is factored into **`_eval_geom(geom, axial, mats, op, …)`** (works for ANY `magShape` incl. `"custom"`); `evaluate_fast` = `_apply_params` (parametric `FREE_PARAMS`) then `_eval_geom`. The per-magnet optimiser (`ema_design_optimize`) reuses `_eval_geom`/`_fitness`/`_violation`/`_ollama_chat`/`_extract_array`. `optimize(spec)` seeds + lets `ministral-3` propose batches over `FREE_PARAMS`, deterministic clamp + feasibility/fitness pick the best feasible design. Served by `POST /optimize` (threaded, `_opt_state`) + `GET /optimize/status` + `GET /optimize/meta`; UI is the `🎯 Zielwertoptimierung` modal (Berechnung tab / `#optimize`). "Übernehmen" applies the best params to the form for a final full pipeline run |
+| `ema_paramstudy.py` | **Parameterstudie bei fester Drehzahl**: `run_study(payload, param, lo, hi, steps=100, rpm)` sweeps ONE `ema_optimize.FREE_PARAMS` parameter x→y in N steps at a fixed speed and plots EVERY result metric over the parameter (small-multiples grid). Reuses `ema_optimize.evaluate_fast` (FreeCAD/FEM-free, geometry varied per step), so 100 points cost ~50 s. Served by `POST /param_study` (threaded, `_study_state`) + `GET /param_study/status`; UI is the **„📈 Parameterstudie"** panel (Berechnung tab) — parameter dropdown filled from `/optimize/meta`. **Custom (Designer/KI) designs:** `run_study` honours `geom.customLegs` (they ride through `evaluate_fast` unchanged), so the Designer-Tab button **„📈 Parameterstudie für diesen Entwurf"** (`dsnParamStudy`) runs the same study on the drawn geometry; the UI then restricts the dropdown to the geometry-effective params (`_CUSTOM_STUDY_PARAMS` = axial/airgap/slotDepth/p/magGap — magnet-shape params are no-ops on freehand magnets) and shows a banner (`_studyDesignPayload`, reset via `dsnClearStudyDesign`) |
+| `ema_design_ai.py` (KI-Auslegung) | **KI entwirft komplette Maschinen aus einer Beschreibung** (Designer-Pfad). `design_variants(brief, n=3, model)` → list of full designs: parametric scalars (via `ema_text2ema.SCHEMA`+`_validate`) **plus** a freehand HALF-pole `magnets`/`barriers` layout in canvas format (`{r,off,ang,len,thick,pol}` / `{pts,width}`, pol-local mm) **plus** `begruendung`. RAG-grounded on `maschinen` references (`ema_rag.context_for`). **Robustness:** the local LLM call uses Ollama **`format:"json"`** (otherwise the combined schema's JSON is frequently broken — decimal commas, comments) + a lenient `_extract_obj` (strips `//`/`/* */` comments + trailing commas). `_validate_layout` clamps every magnet inside the rotor (true fit-length via the quadratic, NO 5 mm floor — magnets that cannot fit are dropped), **keeps everything in the half pole** (magnet offset ≥0, barrier points clamped to y≥0), **drops magnets that overlap an already-kept magnet** (`_obb_overlap` SAT on the rotated rectangles, `_MAG_MAG_CLEAR` gap — any count is fine, 1 pole-sized or many small, just no intersection; the d-axis mirror is deliberately NOT checked so a V/U arm may sit next to its own reflection) and **drops flux barriers that overlap a magnet** (`_polyline_hits_magnet` samples each slot polyline against every magnet AND its d-axis mirror, clearance `BARRIER_MAGNET_CLEARANCE_MM` + half the slot width — a barrier carved through a PM is nonsense geometry; the LLM prompt also forbids it); if the freehand layout is empty/unusable, `_legs_to_canvas(_params_to_geom(params))` synthesises a valid half-pole from the parametric topology (`magnet_legs`) so a drawable design ALWAYS results (`fallback:true`). **Qualitäts-Vorsortierung + Regenerierung:** jeder Entwurf wird sofort FreeCAD/FEM-frei bewertet (`_quick_eval` → `ema_optimize._eval_geom` auf der gespiegelten Custom-Geometrie + dieselbe Heuristik wie `ema_training.auto_label` → `verdict` gut/schlecht); fällt er **„schlecht"** aus, generiert `design_variants` mit gezieltem Mängel-Feedback einen neuen (bis `max_regen`=2 Nachversuche je Slot, `_gen_one` mit Parametrik-Fallback), nimmt den besten Versuch (`_quality_score`: gut>unbekannt>schlecht, dann B_gap) in `variants` (mit `quality`-Urteil) und sammelt die verworfenen in `rejected`. Return: `{variants, rejected, regenerated, rag_used, model}`. The per-slot generate→presort→regenerate loop is factored into **`_gen_slot(... post_fn=None)`**. **Bereichs-/Zufalls-Entwurf (the UI's only generator now):** `design_variants_ranged(ranges, n, …, brief="")` samples statorOD/axialLen/shaftD **and the air gap** from the user's von–bis ranges per variant (air gap clamped to `AIRGAP_RANGE`=0.5–3 mm), prepends the optional `brief` to each variant's task, **hard-forces** the dims via `_apply_ranged_dims` (statorID/rotorOD derived from the gap, **bore capped at `STATOR_SPLIT`·OD so the stator keeps a real wall for slots+back-iron instead of becoming a sleeve**, `slotDepth` set from that wall, magnets re-clamped) while the LLM fills the rest + draws magnets/barriers, and pins the eval to the fixed speeds `RANGED_RPM_LIST=[1000,5000,15000,20000]` (returned as `rpm_list`). Served by `POST /design_ai` (Body `{brief,n,model?,max_regen?}`) + `POST /design_ai_ranged` (Body `{ranges,n,model?,max_regen?}`), both threaded on `_design_state` + `GET /design_ai/status` |
+| `ema_design_optimize.py` (Per-Magnet-Optimierung) | **Fine-optimises the DRAWN magnet coordinates** of a custom design (vs `ema_optimize` which varies global parametric fields). Vector = per master-leg `{r,off,ang,len,thick}` + barrier widths, bounds from rotor geometry. `_apply_vec` rebuilds master magnets → `ema_design_ai._validate_layout` (re-clamps) → `_mirror_legs`/`_mirror_barriers` (d-axis mirror, identical to `dsnBuild`, with **dedup** of coincident legs) → `magShape:"custom"` geom → `ema_optimize._eval_geom`. Pole symmetry preserved (only the master half-pole is perturbed, mirror regenerated per candidate). `optimize_custom(spec)` reuses the `ema_optimize` loop/fitness/LLM-propose. Served by `POST /design_optimize` (threaded, `_design_opt_state`) + `GET /design_optimize/status`; result's `best_magnets` drawn back onto the canvas |
 | `ema_rag.py` | **Lokale Wissensbasis (RAG)** unter `~/cae_projekte/_rag/index.json`. EINE Basis, pro Dokument eine **Kategorie** `maschinen` (Referenzmaschinen → `ema_text2ema.derive`) oder `doku` (Doku → `ema_chat`). Embeddings über Ollama `/api/embeddings` (`nomic-embed-text`), Chunking ~900 Zeichen/150 Überlappung, Retrieval = Cosine (numpy). `add_text`/`add_file` (txt/md/csv direkt, **PDF via `pypdf`**), `search(query, category, k)`, `context_for(query, category)` (Prompt-Injektion), `list_documents`/`delete_document`/`stats`. Beide Konsumenten injizieren **best-effort** (ohne Ollama/Embeddings läuft alles weiter ohne Kontext). Server: `/rag/list`, `/rag/add`, `/rag/upload`, `/rag/delete/<id>`, `/rag/search`; UI: **„📚 Wissensbasis"**-Modal (Geometrie-Tab / `#rag`) |
 | `ema_text2ema.py` | Text → parameter set. `derive(description)` asks `ministral-3` to fill the `SCHEMA` fields, then `_validate` clamps every value to its range/enum and enforces radial ordering (statorOD>statorID>rotorOD>shaftD>shaftBoreD, ~0.7 mm air gap, slots≈6·p) so the result always loads. Served by `POST /text2ema`; UI is the `🧠 Text → Auslegung` modal (Geometrie tab / `#text2ema`) → "In Formular übernehmen". **RAG:** retrieves `maschinen`-category reference machines from `ema_rag` and injects them into the prompt (returns `rag_used`); no web yet |
 | `ema_experts.py` | Agentic report mode: parallel per-section LLM expert agents. `run_expert_agents` (6 experts on ONE project) + `run_expert_agents_compare`/`assemble_expert_section_compare` (the SAME 6 experts judge ALL variants **comparatively** with Vor-/Nachteile je Variante — used by the agentic comparison report) |
-| `ema_training.py` | Fortlaufendes **LLM-Trainingsfile** (`~/cae_projekte/_training/dataset_sft.jsonl`, instruction/input/output JSONL). `run_pipeline` ruft nach dem Speichern `ema_training.upsert(project_id, meta, results)` auf (label=null) — **upsert per project_id** (kein Duplikat beim Nachrechnen). `instruction` = `ema_chat._machine_datasheet(meta)` (Geometrie+Material), `output` = Kennwert-Text aus `results["summary"]`. `set_label(pid, "gut"/"schlecht", comment)` setzt das Label (vom Ergebnis-Tab); `auto_label` ist nur ein Heuristik-Vorschlag. **Bilder:** jede SFT-Zeile führt `images:[{key,title,path}]` mit (projekt-relative Pfade in `~/cae_projekte`, NICHT base64 — `IMAGE_PAIRS` spiegelt `ema_report.build_context` pairs, nur deterministische Charts, keine Animations-Frames). `export_vlm()` erzeugt zusätzlich `dataset_vlm.jsonl` (EIN Eintrag je Bild im messages/content-Format mit absolutem Bildpfad, fürs Vision-Finetuning) — wird nach jedem `upsert`/`set_label` mitgeführt. Endpoints `POST /training/vlm/export`, `GET /training/vlm/download` |
+| `ema_training.py` | Fortlaufendes **LLM-Trainingsfile** (`~/cae_projekte/_training/dataset_sft.jsonl`, instruction/input/output JSONL). `run_pipeline` ruft nach dem Speichern `ema_training.upsert(project_id, meta, results)` auf (label=null) — **upsert per project_id** (kein Duplikat beim Nachrechnen). `instruction` = `ema_chat._machine_datasheet(meta)` (Geometrie+Material); für **KI-Entwürfe** stellt `build_instruction` die natürliche-Sprache-Aufgabe (`meta["design_brief"]`, durchgereicht aus dem `/analyse`-Payload) voran → echte „Beschreibung→Entwurf→Kennwerte"-SFT-Paare; jede Zeile trägt `design_source` ("ki"/"hand"). `output` = Kennwert-Text aus `results["summary"]`. **Einheitliches Schema:** jede Zeile trägt exakt `RECORD_KEYS` (project_id/timestamp/design_source/instruction/input/output/label/label_source/auto_label/auto_reasons/comment/rated_at/metrics/images); `_write_all` zieht beim Schreiben **jede** Zeile über `_normalize` auf dieses Schema (Altzeilen werden so beim nächsten Schreibvorgang migriert). **Vorsortierung:** `auto_label`/`auto_reasons` (Heuristik) werden **immer** mitgeschrieben; **KI-Entwürfe** (`design_source=="ki"`) werden direkt mit dem Heuristik-Label vorsortiert (`label_source="auto"`), Hand-Entwürfe bleiben `label=null`. `set_label(pid, "gut"/"schlecht", comment)` setzt das Label manuell (`label_source="user"`, vom Ergebnis-Tab) und bleibt beim Nachrechnen erhalten (überschreibt die Auto-Vorsortierung). `stats()` zählt zusätzlich `n_user_rated`/`n_auto_rated`/`n_ki`. **Bilder:** jede SFT-Zeile führt `images:[{key,title,path}]` mit (projekt-relative Pfade in `~/cae_projekte`, NICHT base64 — `IMAGE_PAIRS` spiegelt `ema_report.build_context` pairs, nur deterministische Charts, keine Animations-Frames). `export_vlm()` erzeugt zusätzlich `dataset_vlm.jsonl` (EIN Eintrag je Bild im messages/content-Format mit absolutem Bildpfad, fürs Vision-Finetuning) — wird nach jedem `upsert`/`set_label` mitgeführt. Endpoints `POST /training/vlm/export`, `GET /training/vlm/download` |
+| `ema_step_import.py` | **STEP-Import eines fertigen Motors**: liest per FreeCAD alle Solids (`extract_solids_script`), klassifiziert FreeCAD-frei (`classify_solids` über radiale Bänder + Volumen-Cluster + Rotationssymmetrie), leitet Maße/Polzahl ab (`derive_geom`, `_gap_cluster_count` für Pole/Nuten) + erkennt Magnete via OBB-Fit (`detect_magnets`, pol-lokale Halbpol-Magnete im Canvas-Format) und schreibt `motor.FCStd` mit benanntem `"Rotor"` (`assemble_fcstd_script`) → die bestehende Struktur-FEM rechnet darauf, EM auf den `customLegs`. `run_import` → applyDesignToCanvas-Form. Server: `/import_step`+`/import_step/status`; UI-Tab **📥 STEP-Import** → lädt in den Designer (Bestätigung), dann `/analyse` mit `imported:true` (run_pipeline überspringt den Geometrie-Build). Makro `step_import.FCMacro`. Tests: `test_step_import.py` |
+| `ema_em3d.py` / `elmer_runner.py` | **Echte 3D-Magnetfeldberechnung (Elmer FEM)** — s. Architektur-Abschnitt. `build_mesh` (Gmsh-OCC), `write_sif` (Elmer-Magnetostatik), `parse_results` (vtk-VTU + 2D-Vergleich), `run_em3d` (Orchestrator). `elmer_runner` = Subprozess-Wrapper (`ElmerGrid`/`ElmerSolver`, `ELMER_OK`). Server `/em3d`(+`/status`,`/vtu`), UI-Tab **🧲 3D-Feld**. Tests `test_em3d.py` (Mesh/sif ohne Elmer) |
 
 ## Reference docs (read these for domain detail before changing physics)
 

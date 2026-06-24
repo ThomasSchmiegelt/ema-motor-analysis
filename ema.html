@@ -63,6 +63,27 @@
     .btn-group{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
     .sep{margin:4px 0;border:none;border-top:1px solid #333}
 
+    /* ── 3D-Feld tab: uniformly-sized stacked cards (like FEM-Ergebnisse) ──── */
+    .e3-wrap{max-width:1080px;margin:0 auto;padding:14px 16px 70px}
+    .e3-card{background:#16161c;border:1px solid #2e2e36;border-radius:7px;
+             padding:14px 16px;margin-bottom:14px}
+    .e3-card .section-title{margin-bottom:6px}
+    .e3-set{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));
+            gap:10px 22px;margin-top:6px}
+    .e3-field{border:1px solid #2a2a32;border-radius:6px;padding:9px 11px;background:#1b1b22}
+    .e3-field .row{display:flex;align-items:center;gap:8px;justify-content:space-between}
+    .e3-field .row label{font-size:.85rem;font-weight:600;color:#cdd;flex:1}
+    .e3-field .row input{width:84px}
+    .e3-field .row .unit{color:#889;font-size:.78rem;width:34px}
+    .e3-help{margin-top:7px;font-size:.76rem;color:#9aa;line-height:1.5}
+    .e3-help summary{cursor:pointer;color:#6ab0c8;font-weight:600;list-style:none;user-select:none}
+    .e3-help summary::-webkit-details-marker{display:none}
+    .e3-help summary::before{content:"ℹ️ ";}
+    .e3-help[open] summary::before{content:"▾ ";}
+    .e3-help .l{color:#7fb;font-weight:600}
+    .e3-help .x{color:#e9b06a;font-weight:600}
+    .e3-help p{margin:5px 0 0}
+
     /* ── Tab bar (lives inside the top bar) ───────────────────────────────── */
     .tab-bar{display:flex;flex-wrap:wrap;flex:1}
     .tab-btn{background:none;border:none;color:#888;padding:12px 15px;cursor:pointer;
@@ -176,6 +197,9 @@
     <button class="tab-btn"        id="tbtn-betrieb" onclick="switchTab('betrieb')">② Betrieb &amp; Material</button>
     <button class="tab-btn"        id="tbtn-calc"    onclick="switchTab('calc')">③ Berechnung</button>
     <button class="tab-btn"        id="tbtn-live"    onclick="switchTab('live')">▶ Live-Simulation</button>
+    <button class="tab-btn"        id="tbtn-designer" onclick="switchTab('designer')">🎨 Designer</button>
+    <button class="tab-btn"        id="tbtn-import"  onclick="switchTab('import')">📥 STEP-Import</button>
+    <button class="tab-btn"        id="tbtn-em3d"    onclick="switchTab('em3d')">🧲 3D-Feld</button>
     <button class="tab-btn"        id="tbtn-results" onclick="switchTab('results')" disabled>📊 FEM-Ergebnisse</button>
     <button class="tab-btn"        id="tbtn-report"  onclick="switchTab('report')" disabled>📄 Bericht</button>
     <button class="tab-btn"        id="tbtn-compare" onclick="switchTab('compare')">⚖ Vergleich</button>
@@ -457,6 +481,10 @@
       <div class="slider-header"><span>Magnet Dicke</span><span id="disp_mag_thick">6 mm</span></div>
       <input type="range" id="mag_thick" min="1" max="80" step="0.5" value="6"/>
     </div>
+    <div class="slider-group">
+      <div class="slider-header"><span>Magnet-Luftspalt (Tasche/Seite)</span><span id="disp_mag_gap">0.1 mm</span></div>
+      <input type="range" id="mag_gap" min="0.05" max="0.3" step="0.01" value="0.1"/>
+    </div>
     <div class="slider-group topo-param" data-topos="u delta">
       <div class="slider-header"><span>Tangentialmagnet Länge (0=auto)</span><span id="disp_mag_tang_len">0 mm</span></div>
       <input type="range" id="mag_tang_len" min="0" max="200" step="1" value="0"/>
@@ -517,8 +545,13 @@
       <input type="range" id="sim_id_weak" min="0" max="800" step="10" value="0"/>
     </div>
     <div class="slider-group">
-      <div class="slider-header"><span>Geschwindigkeit</span><span id="disp_speed">1.0x</span></div>
+      <div class="slider-header"><span>Geschwindigkeit (Darstellung)</span><span id="disp_speed">1.0x</span></div>
       <input type="range" id="sim_timescale" min="0.05" max="2.0" step="0.05" value="1.0"/>
+    </div>
+    <div class="slider-group">
+      <div class="slider-header"><span>Drehzahl-Sollwert (0 = frei)</span><span id="disp_rpm_set">frei</span></div>
+      <input type="range" id="sim_rpm_set" min="0" max="24000" step="250" value="0"/>
+      <div style="font-size:.7rem;color:#666;margin-top:3px">Gibt die Drehzahl direkt vor (statt Drehmoment-Hochlauf). Die Feldschwächung (i_d) stellt sich automatisch ein. Bei hoher Drehzahl „Ultra Slow" aktivieren oder „Geschwindigkeit" niedrig stellen, damit die Drehung sichtbar bleibt.</div>
     </div>
     <div class="input-group">
       <label>Feld-Auflösung</label>
@@ -666,6 +699,12 @@
       den Einfluss auf alle Kennwerte (z.B. Öffnungswinkel auf Drehmoment). Schnelle
       Analytik (kein FreeCAD/FEM) — die Geometrie wird je Schritt mitgeführt.
     </div>
+    <div id="study_design_banner" style="display:none;background:#243a2e;border:1px solid #2e7d32;border-radius:5px;padding:7px 10px;font-size:.74rem;color:#bfe;margin-bottom:8px">
+      📐 Studie für den <b>Designer-/KI-Entwurf</b> (frei gezeichnete Geometrie). Nur
+      geometrie­wirksame Parameter sind wählbar (Magnet-Form-Parameter wirken nicht auf
+      gezeichnete Magnete).
+      <a href="#" onclick="dsnClearStudyDesign();return false" style="color:#9cf;margin-left:6px">✕ auf Formular-Auslegung zurücksetzen</a>
+    </div>
     <div class="input-group">
       <label>Parameter</label>
       <select id="study_param" style="grid-column:2/-1"></select>
@@ -713,6 +752,333 @@
 
   </div><!-- /panel-grid -->
 </div><!-- /panel-calc -->
+
+<!-- ════════ TAB: Designer (Canvas) ════════ -->
+<div class="tab-panel" id="panel-designer">
+  <div style="display:flex;gap:12px;height:calc(100vh - 120px);min-height:380px">
+    <!-- Controls -->
+    <div style="flex:0 0 320px;overflow-y:auto;padding-right:6px">
+      <div class="section">
+        <div class="section-title">Abmessungen</div>
+        <div class="input-group"><label>Stator Außen-Ø</label><input type="number" id="dsn_statorOD" value="280" min="10" max="3000" step="1"><span>mm</span></div>
+        <div class="input-group"><label>Rotor-Ø</label><input type="number" id="dsn_rotorOD" value="188.6" min="5" max="2970" step="0.1"><span>mm</span></div>
+        <div class="input-group"><label>Wellen-Ø</label><input type="number" id="dsn_shaftD" value="60" min="2" max="2000" step="0.5"><span>mm</span></div>
+        <div class="input-group"><label>Luftspalt</label><input type="number" id="dsn_airgap" value="0.7" min="0.1" max="20" step="0.1"><span>mm</span></div>
+        <div class="input-group"><label>Blechpaketlänge</label><input type="number" id="dsn_axial" value="120" min="5" max="3000" step="1"><span>mm</span></div>
+        <div class="input-group"><label>Polzahl</label><input type="number" id="dsn_poles" value="6" min="2" max="80" step="2"><span>-</span></div>
+        <div class="input-group"><label>Nuten</label><input type="number" id="dsn_slots" value="54" min="3" max="240" step="3"><span>-</span></div>
+        <div class="input-group"><label>Leiter / Nut</label><input type="number" id="dsn_cps" value="4" min="2" max="12" step="2"><span>-</span></div>
+        <small style="display:block;font-size:.7rem;color:#666">Stator-Innen-Ø = Rotor-Ø + 2·Luftspalt (automatisch).</small>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Werkzeug</div>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:6px">
+          <button id="dsn_tool_sel" class="dsn-tool" onclick="dsnSetTool('select')" style="flex:1;background:#3a6;font-size:.74rem;padding:7px">▭ Auswahl</button>
+          <button id="dsn_tool_mag" class="dsn-tool" onclick="dsnSetTool('magnet')" style="flex:1;background:#444;font-size:.74rem;padding:7px">🧲 Magnet</button>
+          <button id="dsn_tool_bar" class="dsn-tool" onclick="dsnSetTool('barrier')" style="flex:1;background:#444;font-size:.74rem;padding:7px">〰 Barriere</button>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;font-size:.76rem;margin-bottom:4px">
+          <label>Magnet-Dicke</label><input type="number" id="dsn_magthick" value="6" min="1" max="80" step="0.5" style="width:60px"><span>mm</span>
+          <label style="margin-left:6px">Polung</label>
+          <button id="dsn_pol" onclick="dsnTogglePol()" style="width:auto;padding:4px 10px;background:#c0392b;font-size:.74rem">N (+)</button>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;font-size:.76rem;margin-top:4px">
+          <label>Magnet-Luftspalt</label><input type="number" id="dsn_maggap" value="0.1" min="0.05" max="0.3" step="0.01" style="width:60px"><span>mm</span>
+          <label style="margin-left:6px">Barriere-Breite</label><input type="number" id="dsn_barwidth" value="3" min="0.5" max="40" step="0.5" style="width:60px"><span>mm</span>
+        </div>
+        <small style="display:block;font-size:.7rem;color:#666;margin-top:5px">
+          Magnet: Linie aufziehen (Innen→Außen) = Lage+Länge+Winkel, Dicke aus Feld.
+          Barriere: Punkte klicken, Doppelklick/Enter beendet. Du zeichnest EINEN halben
+          Pol; er wird an der d-Achse gespiegelt und über alle Pole gemustert (Polung alterniert).
+        </small>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Magnete <span id="dsn_mag_count" style="color:#888;font-weight:400"></span></div>
+        <div id="dsn_mag_list" style="font-size:.74rem;color:#bbb">—</div>
+      </div>
+      <div class="section">
+        <div class="section-title">Barrieren <span id="dsn_bar_count" style="color:#888;font-weight:400"></span></div>
+        <div id="dsn_bar_list" style="font-size:.74rem;color:#bbb">—</div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">🤖 KI entwerfen</div>
+        <small style="display:block;font-size:.7rem;color:#789;margin-bottom:6px">
+          Beschreibe optional die Anwendung <b>und</b> gib die Hauptmaße als <b>von–bis</b>-Bereiche
+          vor (inkl. Luftspalt 0,5–3 mm). Pro Variante werden Maße + Luftspalt zufällig daraus
+          gezogen; die KI füllt Polzahl/Material und zeichnet Magnete + Flussbarrieren (nur halber
+          Pol). Gerechnet wird an festen Drehzahlen 1000/5000/15000/20000 1/min. Jeder Lauf landet
+          im LLM-Trainingsdatensatz.
+        </small>
+        <div style="display:flex;gap:6px;align-items:center;font-size:.76rem;margin-bottom:8px">
+          <label><b>Varianten</b> (1–99)</label>
+          <input type="number" id="dsn_ai_n" value="3" min="1" max="99" step="1" style="width:60px">
+        </div>
+        <label style="font-size:.73rem;color:#bcd">Beschreibung (optional)</label>
+        <textarea id="dsn_ai_brief" rows="2" placeholder="z.B. Traktionsmotor, hohe Effizienz, wassergekühlt" style="width:100%;font-size:.76rem;box-sizing:border-box;resize:vertical;margin-top:3px"></textarea>
+        <div style="display:grid;grid-template-columns:auto 1fr auto 1fr;gap:5px 6px;align-items:center;font-size:.73rem;margin-top:7px">
+          <label>Stator-Ø [mm]</label><input type="number" id="dsn_rg_sod_lo" value="120" step="1" style="width:100%;box-sizing:border-box">
+          <span style="text-align:center">bis</span><input type="number" id="dsn_rg_sod_hi" value="220" step="1" style="width:100%;box-sizing:border-box">
+          <label>Länge [mm]</label><input type="number" id="dsn_rg_len_lo" value="60" step="1" style="width:100%;box-sizing:border-box">
+          <span style="text-align:center">bis</span><input type="number" id="dsn_rg_len_hi" value="160" step="1" style="width:100%;box-sizing:border-box">
+          <label>Welle-Ø [mm]</label><input type="number" id="dsn_rg_shd_lo" value="25" step="1" style="width:100%;box-sizing:border-box">
+          <span style="text-align:center">bis</span><input type="number" id="dsn_rg_shd_hi" value="55" step="1" style="width:100%;box-sizing:border-box">
+          <label>Luftspalt [mm]</label><input type="number" id="dsn_rg_gap_lo" value="0.5" min="0.5" max="3" step="0.1" style="width:100%;box-sizing:border-box">
+          <span style="text-align:center">bis</span><input type="number" id="dsn_rg_gap_hi" value="3" min="0.5" max="3" step="0.1" style="width:100%;box-sizing:border-box">
+        </div>
+        <button id="dsn_ai_btn" onclick="dsnAiGenerate()" style="width:100%;background:#6a4caf;font-size:.78rem;padding:8px;margin-top:6px">✨ KI entwerfen</button>
+
+        <div id="dsn_ai_status" style="font-size:.73rem;color:#9aa;margin-top:6px"></div>
+        <div id="dsn_ai_variants" style="margin-top:6px"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">🎯 Magnete fein-optimieren</div>
+        <small style="display:block;font-size:.7rem;color:#789;margin-bottom:6px">
+          Perturbiert die gezeichneten Magnet-Koordinaten (LLM-gesteuert, FEM-frei) auf ein
+          Ziel hin. Das beste Layout wird zurück auf den Canvas gezeichnet.
+        </small>
+        <div style="display:flex;gap:5px;align-items:center;font-size:.74rem;flex-wrap:wrap">
+          <select id="dsn_opt_metric" style="flex:1;font-size:.74rem"></select>
+          <select id="dsn_opt_goal" style="font-size:.74rem">
+            <option value="max">maximieren</option>
+            <option value="min">minimieren</option>
+            <option value="target">Zielwert</option>
+          </select>
+          <input type="number" id="dsn_opt_target" placeholder="Ziel" style="width:60px;display:none">
+        </div>
+        <div style="display:flex;gap:5px;align-items:center;font-size:.74rem;margin-top:5px;flex-wrap:wrap">
+          <span style="color:#789">Randbed.:</span>
+          <select id="dsn_opt_cmetric" style="font-size:.73rem"><option value="">—</option></select>
+          <select id="dsn_opt_cop" style="font-size:.73rem"><option value="<=">≤</option><option value=">=">≥</option></select>
+          <input type="number" id="dsn_opt_cval" placeholder="Wert" style="width:60px">
+          <label style="margin-left:auto">Iter.</label><input type="number" id="dsn_opt_iter" value="20" min="6" max="60" step="2" style="width:50px">
+        </div>
+        <button id="dsn_opt_btn" onclick="dsnOptimize()" style="background:#b8732f;font-size:.78rem;padding:8px;width:100%;margin-top:6px">🎯 Magnete optimieren</button>
+        <div id="dsn_opt_status" style="font-size:.73rem;color:#9aa;margin-top:6px"></div>
+        <button onclick="dsnParamStudy()" style="background:#2d7d5a;font-size:.76rem;padding:8px;width:100%;margin-top:8px">📈 Parameterstudie für diesen Entwurf</button>
+        <small style="display:block;font-size:.7rem;color:#789;margin-top:4px">Variiert einen geometrie­wirksamen Parameter (Länge, Luftspalt, Nuttiefe, Polzahl) über fester Drehzahl — schnelle Analytik, die gezeichneten Magnete bleiben erhalten.</small>
+      </div>
+
+      <div class="section" style="padding:10px 15px">
+        <button onclick="dsnClear()" style="background:#7a3030;font-size:.76rem;padding:8px;width:100%;margin-bottom:6px">🗑 Alles löschen</button>
+        <button onclick="dsnBuild()" style="background:#27ae60;font-size:.82rem;padding:11px;width:100%">⚙ CAD + Berechnung erzeugen</button>
+        <div id="dsn_build_msg" style="font-size:.74rem;color:#9aa;margin-top:6px"></div>
+      </div>
+    </div>
+
+    <!-- Canvas -->
+    <div style="flex:1;min-width:0;position:relative;background:#0d0d14;border-radius:6px">
+      <canvas id="designCanvas" style="width:100%;height:100%;display:block;cursor:crosshair"></canvas>
+      <div style="position:absolute;top:8px;left:10px;font-size:.72rem;color:#789;pointer-events:none">
+        Halbpol-Designer · graue Sektor = Bearbeitungsbereich · Vorschau gespiegelt + gemustert
+      </div>
+    </div>
+  </div>
+</div><!-- /panel-designer -->
+
+<!-- ════════ TAB: STEP-Import ════════ -->
+<div class="tab-panel" id="panel-import">
+  <div class="section" style="max-width:760px">
+    <div class="section-title">📥 E-Motor aus STEP importieren</div>
+    <p style="font-size:.82rem;color:#9aa;line-height:1.5">
+      Lade die STEP-Datei eines kompletten Motors (Stator + Rotor + Wicklung) hoch. Das Tool
+      erkennt automatisch die <b>Magnetlage</b>, leitet die Hauptmaße ab und schreibt eine
+      <code>motor.FCStd</code> mit benanntem Rotor. Die erkannten Magnete werden in den
+      <b>Designer</b> geladen — dort prüfst/korrigierst du sie und startest dann die
+      <b>Festigkeits-</b> und <b>elektromagnetische Analyse</b> über den Designer-Knopf
+      „⚙ CAD + Berechnung erzeugen".
+    </p>
+    <div class="input-group" style="margin-top:10px">
+      <label>STEP-Datei</label>
+      <input type="file" id="import-file" accept=".step,.stp"
+             style="flex:1;background:#16161a;border:1px solid #3e3e42;border-radius:4px;padding:6px;color:#ddd"/>
+    </div>
+    <button id="import-btn" onclick="startStepImport()" style="margin-top:8px">📥 STEP importieren &amp; analysieren</button>
+    <div id="import-msg" style="margin-top:10px;font-size:.82rem"></div>
+    <pre id="import-log" style="margin-top:8px;max-height:240px;overflow:auto;background:#0d0d14;border:1px solid #2a2a30;border-radius:4px;padding:8px;font-size:.72rem;color:#9c9;white-space:pre-wrap;display:none"></pre>
+    <div style="margin-top:14px;padding:10px;background:#1a1a22;border:1px solid #33333a;border-radius:6px;font-size:.74rem;color:#889;line-height:1.5">
+      <b>Hinweise &amp; Grenzen:</b> Die Erkennung ist heuristisch (darum der Bestätigungsschritt
+      im Designer). Die Motorachse wird als <b>Z</b> angenommen. Flussbarrieren (Luftschlitze
+      im Rotor) werden in dieser Version nicht automatisch erkannt. Werkstoffe, Magnet-Br,
+      Wicklung und Betriebspunkt stehen nicht in der Geometrie — bitte in den Tabs
+      „Geometrie"/„Betrieb &amp; Material" setzen.
+    </div>
+  </div>
+</div><!-- /panel-import -->
+
+<!-- ════════ TAB: 3D-Feld (Elmer) ════════ -->
+<div class="tab-panel" id="panel-em3d">
+ <div class="e3-wrap">
+
+  <div class="e3-card">
+    <div class="section-title">🧲 Echte 3D-Magnetfeldberechnung (Elmer FEM)</div>
+    <p style="font-size:.82rem;color:#9aa;line-height:1.5;margin:0">
+      Der 2D-Feldlöser nimmt unendliche Länge an. Dieser Pfad baut ein <b>echtes 3D-Modell</b>
+      (Gmsh-Mesh → Elmer-Magnetostatik) der <b>gewählten Geometrie</b> und liefert
+      <b>Endeffekte/finite Länge</b>, <b>Schrägung &amp; gestaffelte Staffelung (Step-Skew)</b>,
+      eine echte 3D-Feldlösung (im Browser ansehen + VTU für ParaView) und einen
+      <b>Vergleich gegen 2D</b>. Rechenintensiv (Minuten).
+    </p>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">📐 Geometriequelle</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <select id="e3_geomsrc" onchange="_e3SrcUserSet=true; adoptEm3dGeom()" style="max-width:330px">
+        <option value="geo">Geometrie-Tab (parametrisch)</option>
+        <option value="designer">Designer / importierte STEP (gezeichnete Magnete)</option>
+      </select>
+      <button onclick="adoptEm3dGeom()" style="background:#3a5a6a;width:auto;padding:8px 14px">📥 Geometrie übernehmen</button>
+    </div>
+    <div id="e3_geomsummary" style="margin-top:9px;font-size:.78rem;color:#9aa"></div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">⚙️ FEM-Einstellungen</div>
+    <p style="font-size:.78rem;color:#889;margin:0 0 4px">
+      Jede Einstellung mit Erklärung (<span style="color:#6ab0c8">ℹ️ aufklappen</span>) — fachlich,
+      laienverständlich und mit ihrer Wirkung auf <span class="x" style="color:#e9b06a">Genauigkeit &amp; Rechenzeit</span>.
+    </p>
+    <div class="e3-set">
+
+      <div class="e3-field">
+        <div class="row"><label>Schrägung (kontinuierlich)</label>
+          <input type="number" id="e3_skew" value="0" min="0" max="30" step="0.5"><span class="unit">°</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Kontinuierliche, lineare Verdrehung des oberen Querschnitts gegenüber dem
+          unteren über die Paketlänge. Mindert Nut-/Rastmoment und Oberwellen der Luftspaltinduktion.</p>
+          <p><span class="l">Laienverständlich:</span> Der Magnetstapel wird über die Länge leicht
+          „verdrillt", damit der Motor runder und leiser läuft.</p>
+          <p><span class="x">Wirkung:</span> Glättet das Drehmoment, senkt minimal Grundwelle/Kt.
+          Rechenzeit praktisch unverändert. 0° = aus.</p></details>
+      </div>
+
+      <div class="e3-field">
+        <div class="row"><label>Staffelung — Segmente</label>
+          <input type="number" id="e3_segs" value="1" min="1" max="12" step="1"><span class="unit">×</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Diskrete (gestaffelte) Schrägung / Step-Skew: das Blechpaket wird in K gleich
+          lange axiale Abschnitte unterteilt, die treppenförmig gegeneinander um die Wellenachse verdreht
+          sind. Magnete drehen sich mit ihrem Abschnitt mit. Übliche Fertigungsvariante statt durchgehender Schrägung.</p>
+          <p><span class="l">Laienverständlich:</span> Statt durchgehend verdrillt wird der Stapel in K Scheiben
+          geschnitten, jede ein Stück weiter gedreht — wie eine gewendelte Treppe (z. B. 200&nbsp;mm in 5 Scheiben).</p>
+          <p><span class="x">Wirkung:</span> Mehr Segmente = feinere Treppe (näher an kontinuierlich),
+          aber mehr Mesh-Körper → spürbar längere Rechenzeit. K=1 = keine Staffelung.</p></details>
+      </div>
+
+      <div class="e3-field">
+        <div class="row"><label>Staffelung — Versatz je Segment</label>
+          <input type="number" id="e3_stepdeg" value="0" min="0" max="15" step="0.5"><span class="unit">°</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Verdrehwinkel zwischen benachbarten Segmenten um die Wellenachse.
+          Gesamtversatz = (K−1)·Versatz. Wird oft auf eine Nutteilung (360°/Nutenzahl) abgestimmt.</p>
+          <p><span class="l">Laienverständlich:</span> Um wie viel Grad jede Scheibe gegenüber der
+          vorherigen gedreht ist (z. B. 5°).</p>
+          <p><span class="x">Wirkung:</span> Größerer Versatz glättet stärker, senkt aber auch die
+          nutzbare Grundwelle/Kt. 0° = keine Staffelung (auch bei K&gt;1).</p></details>
+      </div>
+
+      <div class="e3-field">
+        <div class="row"><label>Mesh-Grobgröße</label>
+          <input type="number" id="e3_meshcl" value="12" min="3" max="40" step="1"><span class="unit">mm</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Maximale Tetraeder-Kantenlänge (<code>CharacteristicLengthMax</code>) außerhalb
+          des verfeinerten Luftspalts. Steuert die globale Diskretisierung.</p>
+          <p><span class="l">Laienverständlich:</span> Wie fein das Bauteil in kleine Rechen-Bausteine
+          (Tetraeder) zerlegt wird. Kleiner = feineres Netz.</p>
+          <p><span class="x">Wirkung:</span> Kleiner = genauer, aber stark mehr Knoten (≈ 1/Größe³) →
+          deutlich längere Rechenzeit &amp; RAM. Größer = schnell, aber gröber.</p></details>
+      </div>
+
+      <div class="e3-field">
+        <div class="row"><label>Luftspalt-Mesh (sehr fein)</label>
+          <input type="number" id="e3_gapcl" value="1.5" min="0.3" max="6" step="0.1"><span class="unit">mm</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Element-Zielgröße der <b>feinsten Zone</b> — Luftspalt + Umgebung
+          (MathEval-Gauß-Band um den Spaltradius). Der Luftspalt trägt den größten Feldgradienten;
+          zu grob ⇒ unbrauchbares Moment / Br(θ).</p>
+          <p><span class="l">Laienverständlich:</span> Wie fein die dünne Luftschicht zwischen Rotor und
+          Stator vernetzt wird — der wichtigste, daher feinste Bereich.</p>
+          <p><span class="x">Wirkung:</span> Feiner = genaueres Luftspaltfeld/Moment, aber mehr Elemente.
+          Faustregel: ≲ halbe Luftspaltbreite.</p></details>
+      </div>
+
+      <div class="e3-field">
+        <div class="row"><label>Magnet-/Barrieren-Mesh (fein)</label>
+          <input type="number" id="e3_magcl" value="0" min="0" max="20" step="0.5"><span class="unit">mm</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Element-Zielgröße der <b>mittleren Zone</b> — Magnete und Flussbarrieren
+          (+ Umgebung), per Distance→Threshold-Feld an deren Oberflächen. Diese Regionen tragen starke
+          Feldkrümmung (Pol-/Streufluss). 0 = automatisch (≈ halbe Grobgröße).</p>
+          <p><span class="l">Laienverständlich:</span> Wie fein direkt an den Magneten und den
+          Luftschlitzen (Flussbarrieren) vernetzt wird — feiner als der Rest, aber gröber als der Luftspalt.</p>
+          <p><span class="x">Wirkung:</span> Feiner = genauere Magnet-/Barrierenfelder, aber mehr Elemente
+          rund um jeden Magneten/Schlitz → längere Rechenzeit. Voraussetzung Barrieren: q-/d-Barrieren bzw.
+          gezeichnete Barrieren in der Geometrie aktiviert.</p></details>
+      </div>
+
+      <div class="e3-field">
+        <div class="row"><label>Übergangszone (fein → grob)</label>
+          <input type="number" id="e3_maggrow" value="0" min="0" max="40" step="1"><span class="unit">mm</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Distanz, über die die Elementgröße von „fein" (an Magnet/Barriere) linear
+          auf „grob" (mesh_cl) anwächst (Threshold <code>DistMax</code>). 0 = automatisch (≈ 3× Luftspalt).</p>
+          <p><span class="l">Laienverständlich:</span> Wie schnell das Netz von fein auf grob übergeht,
+          wenn man sich von den Magneten/Barrieren entfernt — größer = sanfterer, breiterer feiner Saum.</p>
+          <p><span class="x">Wirkung:</span> Größer = mehr feine Elemente in der Umgebung → genauer,
+          aber langsamer. Klein = nur direkt an der Oberfläche fein.</p></details>
+      </div>
+
+      <div class="e3-field" style="background:#13212a;border-color:#27424f">
+        <div class="row"><label style="flex:none">🪜 Zonen-Übersicht</label></div>
+        <div class="e3-help" style="margin-top:4px">
+          <p>① <b>Luftspalt + Umgebung</b> → <i>sehr fein</i> (Luftspalt-Mesh)<br>
+          ② <b>Magnete &amp; Flussbarrieren + Umgebung</b> → <i>fein</i> (Magnet-/Barrieren-Mesh,
+          Saumbreite = Übergangszone)<br>
+          ③ <b>restliches Eisen / Luftbox</b> → <i>grob</i> (Mesh-Grobgröße)</p>
+          <p><span class="x">Faustregel:</span> sehr fein ≲ ½·Luftspalt, fein ≈ ½·grob. Alle drei
+          frei einstellbar; die Felder werden per <code>Min</code> kombiniert.</p>
+        </div>
+      </div>
+
+      <div class="e3-field">
+        <div class="row"><label>Luftbox-Faktor</label>
+          <input type="number" id="e3_box" value="1.4" min="1.1" max="3" step="0.1"><span class="unit">×OD</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Radius der umgebenden Luft-(Rand-)Box als Vielfaches des Stator-Außen-Ø.
+          Die Fernfeld-Randbedingung A×n=0 muss weit genug entfernt sein, um Streufeld nicht abzuschneiden.</p>
+          <p><span class="l">Laienverständlich:</span> Wie viel „Luft" rund um den Motor mitgerechnet wird,
+          damit das Feld nach außen natürlich auslaufen kann.</p>
+          <p><span class="x">Wirkung:</span> Größer = physikalisch sauberer (Streufluss), aber mehr
+          Luft-Elemente → langsamer. 1,3–1,6× reicht meist.</p></details>
+      </div>
+
+    </div>
+  </div>
+
+  <div class="e3-card">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button id="e3_pbtn" onclick="startEm3dPreview()" style="background:#3a4a6a">🧊 3D-Modell ansehen (ohne Elmer)</button>
+      <button id="e3_btn" onclick="startEm3d()">🧲 3D-Feld berechnen (Elmer)</button>
+    </div>
+    <div id="e3_msg" style="margin-top:10px;font-size:.82rem"></div>
+    <pre id="e3_log" style="margin-top:8px;max-height:220px;overflow:auto;background:#0d0d14;border:1px solid #2a2a30;border-radius:4px;padding:8px;font-size:.72rem;color:#9c9;white-space:pre-wrap;display:none"></pre>
+  </div>
+
+  <div id="e3_results"></div>
+
+  <div class="e3-card" style="background:#1a1a22;border-color:#33333a;font-size:.74rem;color:#889;line-height:1.5">
+    <b>Voraussetzung:</b> Elmer FEM (<code>ElmerSolver</code>/<code>ElmerGrid</code>) muss installiert sein
+    (<code>sudo apt install elmerfem-csc</code> via PPA <code>elmer-csc-ubuntu/elmer-csc-ppa</code>).
+    Fehlt es, meldet der Server einen Installationshinweis. v1: lineare Materialien, Open-Circuit
+    (Magnete) — Lastfall/BH-Kurve folgen.
+  </div>
+
+ </div>
+</div><!-- /panel-em3d -->
 
 <!-- ════════ TAB: Betrieb & Material ════════ -->
 <div class="tab-panel" id="panel-betrieb">
@@ -926,6 +1292,17 @@
       <div style="background:#222;height:6px;border-radius:3px;margin-top:5px;overflow:hidden">
         <div id="report_bar" style="background:#7d3cff;height:100%;width:0%;transition:width .3s"></div>
       </div>
+    </div>
+    <div id="report_rag" style="display:none;margin-top:16px;padding-top:12px;border-top:1px solid #333">
+      <div style="font-size:.78rem;color:#aaa;line-height:1.5;margin-bottom:8px">
+        📚 <b>Wertfreie RAG-Fassung</b> — derselbe Bericht als allgemein gehaltenes
+        Markdown ohne konkrete Zahlenwerte, gedacht für die Wissensbasis.
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button id="btn_rag_dl" style="background:#3a6a4a;font-size:.76rem;padding:8px 12px">⬇ Markdown herunterladen</button>
+        <button id="btn_rag_add" style="background:#3a5a7a;font-size:.76rem;padding:8px 12px">➕ In Wissensbasis aufnehmen</button>
+      </div>
+      <div id="report_rag_msg" style="font-size:.74rem;color:#888;margin-top:7px"></div>
     </div>
   </div>
 </div><!-- /panel-report -->
@@ -1573,11 +1950,12 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['geo','betrieb','calc','live','results','report','compare'];
+const TABS = ['geo','betrieb','calc','live','designer','import','em3d','results','report','compare'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
+  designer:'panel-designer', import:'panel-import', em3d:'panel-em3d',
   results:'tab-results', report:'panel-report', compare:'tab-compare'
 };
 
@@ -1599,7 +1977,22 @@ function switchTab(name) {
     if (typeof resize === 'function') resize();
   }));
   if (name === 'calc' && typeof initParamStudy === 'function') initParamStudy();
+  if (name === 'designer' && typeof dsnActivate === 'function')
+    requestAnimationFrame(() => requestAnimationFrame(dsnActivate));
   if (name === 'compare') { refreshComparePicker(); renderVariantList(); refreshVariantSets(); refreshTrainingStats(); }
+  if (name === 'em3d' && typeof adoptEm3dGeom === 'function') {
+    // Beim Öffnen die aktuelle Geometrie der gewählten Quelle übernehmen + Zusammenfassung zeigen.
+    const src = document.getElementById('e3_geomsrc');
+    if (src && (window._activeTab === 'em3d')) {
+      // WICHTIG: die Quelle NICHT automatisch auf „Designer" umschalten, nur weil im
+      // Designer-Tab (evtl. aus einer früheren Aktion) noch gezeichnete Magnete liegen.
+      // Das hat den Geometrie-Tab dauerhaft ausgeblendet („Geometrie ändert sich gar
+      // nicht"). Standard bleibt der Geometrie-Tab; auf „Designer" stellt der Nutzer
+      // bewusst per Dropdown um (_e3SrcUserSet merkt sich diese explizite Wahl).
+      if (!_e3SrcUserSet) src.value = 'geo';
+      adoptEm3dGeom();
+    }
+  }
   if (history.replaceState) history.replaceState(null, '', '#' + name);
 }
 
@@ -2109,7 +2502,7 @@ async function refreshTrainingStats() {
   try {
     const s = await fetch('/training/stats').then(x => x.json());
     const el = document.getElementById('training-stats');
-    if (el) el.textContent = `— ${s.n_total} Datensätze (👍 ${s.n_gut} · 👎 ${s.n_schlecht} · offen ${s.n_unbewertet}) · ${s.n_images || 0} Bilder → ${s.n_vlm || 0} VLM-Einträge`;
+    if (el) el.textContent = `— ${s.n_total} Datensätze (👍 ${s.n_gut} · 👎 ${s.n_schlecht} · offen ${s.n_unbewertet}) · bewertet: ${s.n_user_rated || 0} manuell / ${s.n_auto_rated || 0} KI-vorsortiert · ${s.n_images || 0} Bilder → ${s.n_vlm || 0} VLM-Einträge`;
     const dl = document.getElementById('training-dl');
     if (dl) dl.style.opacity = s.exists ? '1' : '0.4';
     const dlv = document.getElementById('training-dl-vlm');
@@ -2633,12 +3026,25 @@ function applyOptBest(params, andRun) {
 }
 
 // ── Parameterstudie (ein Parameter über fester Drehzahl) ─────────────────────
+// Geometrie-Parameter, die auch bei frei gezeichneten (custom) Designs wirken — die
+// Magnet-Form-Parameter (magWidth/magAngle/…) verändern nur parametrische Topologien.
+const _CUSTOM_STUDY_PARAMS = ['axial', 'airgap', 'slotDepth', 'p', 'magGap'];
+let _studyDesignPayload = null;     // non-null ⇒ Studie läuft auf dem Designer-Entwurf
+
+function _populateStudyParams() {
+  const sel = document.getElementById('study_param');
+  if (!sel || !_optMeta) return;
+  const entries = Object.entries(_optMeta.free_params)
+    .filter(([k]) => !_studyDesignPayload || _CUSTOM_STUDY_PARAMS.includes(k));
+  sel.innerHTML = entries.map(([k, f]) => `<option value="${k}">${escHtml(f.label)}</option>`).join('');
+  _studyParamChanged();
+}
+
 async function initParamStudy() {
   const sel = document.getElementById('study_param');
   if (!sel || sel.options.length) return;            // already populated
   if (!_optMeta) _optMeta = await fetch('/optimize/meta').then(r => r.json());
-  sel.innerHTML = Object.entries(_optMeta.free_params)
-    .map(([k, f]) => `<option value="${k}">${escHtml(f.label)}</option>`).join('');
+  _populateStudyParams();
   sel.onchange = _studyParamChanged;
   _studyParamChanged();
   const fc = document.getElementById('study_field');
@@ -2668,7 +3074,8 @@ async function runParamStudy() {
   const field_frames = wantField ? +document.getElementById('study_field_n').value : 0;
   const field_N = +document.getElementById('study_field_res').value;
   if (lo === hi) { alert('Bereich x..y darf nicht leer sein (x ≠ y)'); return; }
-  const payload = await buildPayload();
+  // Studie auf dem Designer-/KI-Entwurf (custom-Geometrie) ODER der Formular-Auslegung
+  const payload = _studyDesignPayload || await buildPayload();
   document.getElementById('btn_study').disabled = true;
   document.getElementById('study_result').innerHTML = '';
   document.getElementById('study_progress').style.display = 'block';
@@ -2744,6 +3151,944 @@ async function _pollStudyReport() {
     msg.style.color = '#9c9';
     msg.innerHTML = '✓ Bericht fertig — <a href="/param_study/report/download" target="_blank" style="color:#6cf">parameterstudie.pdf öffnen</a>';
   }
+}
+
+// ── Designer-Tab (Canvas) ────────────────────────────────────────────────────
+// DESIGN holds ONE half-pole master in pole-local mm (x=radial out, y=tangential).
+// On build it is mirrored across the d-axis → full pole → magShape="custom" legs +
+// custom barriers; the pipeline replicates per pole with alternating polarity.
+const DESIGN = { magnets: [], barriers: [] };
+let _dsnTool = 'select', _dsnPol = 1, _dsnCanvas = null, _dsnCtx = null;
+let _dsnDrag = null, _dsnBar = null, _dsnSel = null, _dsnInit = false;
+const _dsnView = { cx: 0, cy: 0, scale: 1 };
+
+function dsnDims() {
+  const g = id => +document.getElementById(id).value;
+  const rotorOD = g('dsn_rotorOD'), airgap = g('dsn_airgap');
+  return { statorOD: g('dsn_statorOD'), rotorOD, shaftD: g('dsn_shaftD'),
+           statorID: rotorOD + 2 * airgap, airgap, axial: g('dsn_axial'),
+           poles: Math.max(2, Math.round(g('dsn_poles') / 2) * 2),
+           slots: g('dsn_slots'), cps: g('dsn_cps') };
+}
+function dsnSetTool(t) {
+  _dsnTool = t; _dsnBar = null; _dsnDrag = null;
+  for (const [k, id] of [['select','dsn_tool_sel'],['magnet','dsn_tool_mag'],['barrier','dsn_tool_bar']]) {
+    const b = document.getElementById(id); if (b) b.style.background = (k === t) ? '#3a6' : '#444';
+  }
+  _dsnCanvas.style.cursor = t === 'select' ? 'default' : 'crosshair';
+  dsnDraw();
+}
+function dsnTogglePol() {
+  _dsnPol = -_dsnPol;
+  const b = document.getElementById('dsn_pol');
+  b.textContent = _dsnPol > 0 ? 'N (+)' : 'S (−)';
+  b.style.background = _dsnPol > 0 ? '#c0392b' : '#2c5d8a';
+}
+function _mm2s(x, y) { return [_dsnView.cx + x * _dsnView.scale, _dsnView.cy - y * _dsnView.scale]; }
+function _s2mm(sx, sy) { return [(sx - _dsnView.cx) / _dsnView.scale, -(sy - _dsnView.cy) / _dsnView.scale]; }
+function _rot(pa, x, y) { const c = Math.cos(pa), s = Math.sin(pa); return [x * c - y * s, x * s + y * c]; }
+
+function dsnActivate() {
+  _dsnCanvas = document.getElementById('designCanvas');
+  if (!_dsnCanvas) return;
+  _dsnCtx = _dsnCanvas.getContext('2d');
+  if (!_dsnInit) {
+    _dsnInit = true;
+    ['dsn_statorOD','dsn_rotorOD','dsn_shaftD','dsn_airgap','dsn_axial','dsn_poles','dsn_slots','dsn_cps']
+      .forEach(i => document.getElementById(i).addEventListener('input', dsnResize));
+    _dsnCanvas.addEventListener('mousedown', dsnMouseDown);
+    _dsnCanvas.addEventListener('mousemove', dsnMouseMove);
+    window.addEventListener('mouseup', dsnMouseUp);
+    _dsnCanvas.addEventListener('dblclick', () => { if (_dsnBar) dsnFinishBar(); });
+    window.addEventListener('keydown', e => {
+      if (window._activeTab !== 'designer') return;
+      if (e.key === 'Enter' && _dsnBar) dsnFinishBar();
+      else if (e.key === 'Escape') { _dsnBar = null; _dsnDrag = null; dsnDraw(); }
+      else if ((e.key === 'Delete' || e.key === 'Backspace') && _dsnSel != null) {
+        DESIGN.magnets.splice(_dsnSel, 1); _dsnSel = null; dsnSync();
+      }
+    });
+  }
+  dsnResize(); dsnSync();
+  dsnLoadOptMeta();
+}
+function dsnResize() {
+  if (!_dsnCanvas) return;
+  const r = _dsnCanvas.getBoundingClientRect();
+  _dsnCanvas.width = Math.max(100, r.width); _dsnCanvas.height = Math.max(100, r.height);
+  const d = dsnDims(), R = d.statorOD / 2 * 1.12;
+  _dsnView.scale = Math.min(_dsnCanvas.width, _dsnCanvas.height) / (2 * R);
+  _dsnView.cx = _dsnCanvas.width / 2; _dsnView.cy = _dsnCanvas.height / 2;
+  dsnDraw();
+}
+// Event→mm; y wird auf ≥0 geklemmt, damit IMMER nur im halben Rotorpol (obere Hälfte,
+// d-Achse = x-Achse) gezeichnet wird — die andere Hälfte entsteht durch Spiegelung.
+function _evMM(e) { const r = _dsnCanvas.getBoundingClientRect(); const p = _s2mm(e.clientX - r.left, e.clientY - r.top); return [p[0], Math.max(0, p[1])]; }
+
+function dsnMouseDown(e) {
+  const [x, y] = _evMM(e);
+  if (_dsnTool === 'magnet') { _dsnDrag = { x0: x, y0: y, x1: x, y1: y }; }
+  else if (_dsnTool === 'barrier') {
+    if (!_dsnBar) _dsnBar = { pts: [[x, y]], width: +document.getElementById('dsn_barwidth').value };
+    else _dsnBar.pts.push([x, y]);
+    dsnDraw();
+  } else { // select: pick a master magnet
+    _dsnSel = null;
+    for (let i = DESIGN.magnets.length - 1; i >= 0; i--) {
+      if (_dsnHitMag(DESIGN.magnets[i], x, y)) { _dsnSel = i; break; }
+    }
+    dsnSync();
+  }
+}
+function dsnMouseMove(e) {
+  if (_dsnTool === 'magnet' && _dsnDrag) { const [x, y] = _evMM(e); _dsnDrag.x1 = x; _dsnDrag.y1 = y; dsnDraw(); }
+  else if (_dsnTool === 'barrier' && _dsnBar) { const [x, y] = _evMM(e); _dsnBar.hover = [x, y]; dsnDraw(); }
+}
+function dsnMouseUp() {
+  if (_dsnTool === 'magnet' && _dsnDrag) {
+    const dx = _dsnDrag.x1 - _dsnDrag.x0, dy = _dsnDrag.y1 - _dsnDrag.y0;
+    const len = Math.hypot(dx, dy);
+    if (len >= 2) {
+      DESIGN.magnets.push({ r: _dsnDrag.x0, off: _dsnDrag.y0,
+        ang: Math.atan2(dy, dx) * 180 / Math.PI, len,
+        thick: +document.getElementById('dsn_magthick').value, pol: _dsnPol });
+      _importedActive = false;   // hand-gezeichnet ⇒ nicht mehr die importierte Geometrie
+      dsnSync();
+    }
+    _dsnDrag = null; dsnDraw();
+  }
+}
+function dsnFinishBar() {
+  if (_dsnBar && _dsnBar.pts.length >= 2) { delete _dsnBar.hover; DESIGN.barriers.push(_dsnBar); }
+  _dsnBar = null; dsnSync();
+}
+function _dsnHitMag(m, x, y) {
+  const a = m.ang * Math.PI / 180, c = Math.cos(a), s = Math.sin(a);
+  const lx = (x - m.r) * c + (y - m.off) * s;      // along axis
+  const tx = -(x - m.r) * s + (y - m.off) * c;      // perpendicular
+  return lx >= -1 && lx <= m.len + 1 && Math.abs(tx) <= m.thick / 2 + 1;
+}
+
+function _dsnMagCorners(m, pa) {
+  const a = (m.ang) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), h = m.thick / 2;
+  const P = (l, t) => _rot(pa, m.r + l * c - t * s, m.off + l * s + t * c);
+  return [P(0, -h), P(m.len, -h), P(m.len, h), P(0, h)];
+}
+function _dsnFillPoly(corners, fill, stroke, lw) {
+  _dsnCtx.beginPath();
+  corners.forEach(([x, y], i) => { const [sx, sy] = _mm2s(x, y); i ? _dsnCtx.lineTo(sx, sy) : _dsnCtx.moveTo(sx, sy); });
+  _dsnCtx.closePath();
+  if (fill) { _dsnCtx.fillStyle = fill; _dsnCtx.fill(); }
+  if (stroke) { _dsnCtx.strokeStyle = stroke; _dsnCtx.lineWidth = lw || 1; _dsnCtx.stroke(); }
+}
+function _dsnDrawBar(pts, pa, col, w) {
+  _dsnCtx.beginPath();
+  pts.forEach(([x, y], i) => { const [rx, ry] = _rot(pa, x, y); const [sx, sy] = _mm2s(rx, ry); i ? _dsnCtx.lineTo(sx, sy) : _dsnCtx.moveTo(sx, sy); });
+  _dsnCtx.strokeStyle = col; _dsnCtx.lineWidth = Math.max(2, w * _dsnView.scale);
+  _dsnCtx.lineCap = 'round'; _dsnCtx.lineJoin = 'round'; _dsnCtx.stroke(); _dsnCtx.lineCap = 'butt';
+}
+function dsnDraw() {
+  if (!_dsnCtx) return;
+  const d = dsnDims(), W = _dsnCanvas.width, H = _dsnCanvas.height;
+  _dsnCtx.clearRect(0, 0, W, H);
+  const circle = (r, fill, stroke) => {
+    _dsnCtx.beginPath(); const [cx, cy] = [_dsnView.cx, _dsnView.cy];
+    _dsnCtx.arc(cx, cy, r * _dsnView.scale, 0, 2 * Math.PI);
+    if (fill) { _dsnCtx.fillStyle = fill; _dsnCtx.fill(); }
+    if (stroke) { _dsnCtx.strokeStyle = stroke; _dsnCtx.lineWidth = 1; _dsnCtx.stroke(); }
+  };
+  circle(d.statorOD / 2, '#15151f', '#2e5f8a');
+  circle(d.statorID / 2, null, '#33415a');
+  circle(d.rotorOD / 2, '#1b2330', '#4a5568');
+  circle(d.shaftD / 2, '#0d0d14', '#555');
+  // editing wedge (master half-pole: 0 → +π/poles)
+  const half = Math.PI / d.poles;
+  _dsnCtx.beginPath(); _dsnCtx.moveTo(_dsnView.cx, _dsnView.cy);
+  _dsnCtx.arc(_dsnView.cx, _dsnView.cy, d.rotorOD / 2 * _dsnView.scale, 0, -half, true);
+  _dsnCtx.closePath(); _dsnCtx.fillStyle = 'rgba(120,150,180,0.10)'; _dsnCtx.fill();
+  // patterned preview: all poles, master + mirror, alternating polarity
+  for (let p = 0; p < d.poles; p++) {
+    const pa = p * 2 * Math.PI / d.poles, ps = (p % 2 === 0) ? 1 : -1;
+    const master = (p === 0);
+    for (let mi = 0; mi < DESIGN.magnets.length; mi++) {
+      const m = DESIGN.magnets[mi];
+      const disp = m.pol * ps;
+      const col = disp > 0 ? '#e74c3c' : '#3498db';
+      // master
+      _dsnFillPoly(_dsnMagCorners(m, pa), master ? col : col + 'cc',
+                   master && mi === _dsnSel ? '#ffd34d' : '#0008', master && mi === _dsnSel ? 2 : 0.5);
+      // mirror across d-axis (skip if on axis)
+      if (!(Math.abs(m.off) < 0.5 && Math.abs(m.ang) < 2)) {
+        const mm = { r: m.r, off: -m.off, ang: -m.ang, len: m.len, thick: m.thick };
+        _dsnFillPoly(_dsnMagCorners(mm, pa), col + 'cc', '#0008', 0.5);
+      }
+    }
+    for (const b of DESIGN.barriers) {
+      _dsnDrawBar(b.pts, pa, '#cbd5e1', b.width);
+      _dsnDrawBar(b.pts.map(([x, y]) => [x, -y]), pa, '#cbd5e1', b.width);
+    }
+  }
+  // in-progress drag/barrier
+  if (_dsnDrag) {
+    const [s0x, s0y] = _mm2s(_dsnDrag.x0, _dsnDrag.y0), [s1x, s1y] = _mm2s(_dsnDrag.x1, _dsnDrag.y1);
+    _dsnCtx.beginPath(); _dsnCtx.moveTo(s0x, s0y); _dsnCtx.lineTo(s1x, s1y);
+    _dsnCtx.strokeStyle = _dsnPol > 0 ? '#e74c3c' : '#3498db'; _dsnCtx.lineWidth = 2; _dsnCtx.stroke();
+  }
+  if (_dsnBar) {
+    const pts = _dsnBar.hover ? _dsnBar.pts.concat([_dsnBar.hover]) : _dsnBar.pts;
+    _dsnDrawBar(pts, 0, '#ffd34d', _dsnBar.width);
+  }
+}
+function dsnSync() {
+  const ml = document.getElementById('dsn_mag_list'), bl = document.getElementById('dsn_bar_list');
+  document.getElementById('dsn_mag_count').textContent = `(${DESIGN.magnets.length})`;
+  document.getElementById('dsn_bar_count').textContent = `(${DESIGN.barriers.length})`;
+  ml.innerHTML = DESIGN.magnets.length ? DESIGN.magnets.map((m, i) =>
+    `<div style="display:flex;gap:5px;align-items:center;padding:2px 0;${i === _dsnSel ? 'background:#2a2f3a;border-radius:3px' : ''}">
+       <span style="color:${m.pol > 0 ? '#e74c3c' : '#3498db'}">${m.pol > 0 ? 'N' : 'S'}</span>
+       <span style="flex:1">r=${m.r.toFixed(0)} off=${m.off.toFixed(0)} ${m.ang.toFixed(0)}° L=${m.len.toFixed(0)} t=${m.thick}</span>
+       <button onclick="DESIGN.magnets.splice(${i},1);_dsnSel=null;dsnSync()" style="background:#7a3030;width:auto;padding:1px 7px;font-size:.7rem">✕</button>
+     </div>`).join('') : '<span style="color:#777">Keine Magnete. Werkzeug „Magnet" wählen und im grauen Sektor aufziehen.</span>';
+  bl.innerHTML = DESIGN.barriers.length ? DESIGN.barriers.map((b, i) =>
+    `<div style="display:flex;gap:5px;align-items:center;padding:2px 0">
+       <span style="flex:1">〰 ${b.pts.length} Punkte · ${b.width} mm</span>
+       <button onclick="DESIGN.barriers.splice(${i},1);dsnSync()" style="background:#7a3030;width:auto;padding:1px 7px;font-size:.7rem">✕</button>
+     </div>`).join('') : '<span style="color:#777">Keine Barrieren.</span>';
+  dsnDraw();
+}
+function dsnClear() {
+  if (!confirm('Designer leeren?')) return;
+  DESIGN.magnets = []; DESIGN.barriers = []; _dsnSel = null; _dsnBar = null;
+  _importedActive = false;   // hand-geleerte Geometrie ist nicht mehr der STEP-Import
+  dsnSync();
+}
+// Build the full /analyse payload from the current canvas design (no run).
+// Shared by dsnBuild (manual run), the KI batch run and the magnet optimiser.
+async function _dsnBuildPayload() {
+  const d = dsnDims();
+  // half-pole → full pole (master + mirror across d-axis); dedup coincident legs
+  const legs = [], onAxis = m => Math.abs(m.off) < 0.5 && Math.abs(m.ang) < 2;
+  const _seen = new Set();
+  const _addLeg = (r, off, ang, len, thick, sign) => {
+    const k = `${r.toFixed(1)}|${off.toFixed(1)}|${ang.toFixed(1)}|${len.toFixed(1)}`;
+    if (_seen.has(k)) return; _seen.add(k);
+    legs.push({ r_pos: r, offset: off, tilt_deg: ang, length: len, thickness: thick, mag_sign: sign });
+  };
+  for (const m of DESIGN.magnets) {
+    _addLeg(m.r, m.off, m.ang, m.len, m.thick, m.pol);
+    if (!onAxis(m)) _addLeg(m.r, -m.off, -m.ang, m.len, m.thick, m.pol);
+  }
+  const bars = [];
+  for (const b of DESIGN.barriers) {
+    bars.push({ pts: b.pts, width: b.width });
+    bars.push({ pts: b.pts.map(([x, y]) => [x, -y]), width: b.width });
+  }
+  // reuse the form's run settings/materials, override geometry with the design
+  const payload = await buildPayload();
+  // Fit the slot depth into the actual stator wall so the stator gets real slots +
+  // copper (not a bare sleeve): keep ≥3 mm back iron, otherwise shrink the depth.
+  const _wall = Math.max(0, (d.statorOD - d.statorID) / 2);
+  const _slotDepth = Math.max(4, Math.min(GEOM.slotDepth || 25, 0.6 * _wall, _wall - 3));
+  payload.geom = { ...GEOM, statorOD: d.statorOD, statorID: d.statorID, rotorOD: d.rotorOD,
+    shaftD: d.shaftD, p: d.poles / 2, slots: d.slots, conductorsPerSlot: d.cps,
+    slotDepth: +_slotDepth.toFixed(1),
+    magGapMm: +document.getElementById('dsn_maggap').value,
+    // The designer draws its rotor air slots as customBarriers — the parametric
+    // q/d flux-barrier toggles AND the balance-bolt holes from the Geometrie tab
+    // must NOT bleed into a custom design (they'd add unrelated slots/holes on top
+    // of the drawn geometry).
+    genFluxBarrierQ: false, genFluxBarrierD: false, genBalanceBolts: false,
+    magShape: 'custom', customLegs: legs, customBarriers: bars, axialLen: d.axial };
+  payload.axial_len = d.axial;
+  payload.project_name = document.getElementById('project_name')?.value || 'Designer';
+  // KI-Auslegung: Aufgabe/Begründung/Quelle ins Trainingsfile durchreichen.
+  // Beim Bereichs-Entwurf trägt jede Variante ihren eigenen (gezogenen) Brief.
+  const _av = _dsnAiVariants[_dsnActiveVariant];
+  payload.design_brief     = (_av && _av.design_brief) || _dsnAiBrief || '';
+  payload.design_rationale = _dsnAiRationale || '';
+  payload.design_source    = payload.design_brief ? 'ki' : 'hand';
+  // Bereichs-Entwurf: an festen Drehzahlen rechnen (überschreibt den von/bis-Sweep)
+  if (Array.isArray(_dsnRangedRpm) && _dsnRangedRpm.length >= 2) {
+    payload.rpm_list = _dsnRangedRpm;
+    payload.rpm_from = _dsnRangedRpm[0];
+    payload.rpm_to   = _dsnRangedRpm[_dsnRangedRpm.length - 1];
+  }
+  // vom Nutzer korrigiertes gut/schlecht-Urteil der aktiven KI-Variante
+  // → wird als manuelles Label im Trainingsfile gespeichert (überschreibt die Auto-Sortierung)
+  if (_av && _av.userVerdict) payload.design_label = _av.userVerdict;
+  // STEP-Import: motor.FCStd existiert schon (mit benanntem Rotor) — run_pipeline soll
+  // die Geometrie NICHT neu bauen, sondern die importierte für die Festigkeits-FEM nutzen.
+  if (_importedActive) {
+    payload.imported = true;
+    payload.project_name = document.getElementById('project_name')?.value || 'STEP-Import';
+    if (_importedProjectId) payload.project_id = _importedProjectId;
+  }
+  return payload;
+}
+
+async function dsnBuild() {
+  const msg = document.getElementById('dsn_build_msg');
+  if (!DESIGN.magnets.length) { msg.style.color = '#e57'; msg.textContent = '⚠ Mindestens einen Magnet zeichnen.'; return; }
+  const payload = await _dsnBuildPayload();
+  msg.style.color = '#9c9'; msg.textContent = '⏳ Starte Analyse…';
+  _runAnalysisPayload(payload);
+}
+
+// ── KI-Entwurf (Designer-Pfad) ─────────────────────────────────────────────────
+let _dsnAiVariants = [], _dsnAiBrief = '', _dsnAiRationale = '', _dsnActiveVariant = -1;
+// Beim Bereichs-Entwurf gerechnete feste Drehzahlen (sonst null → normaler Sweep)
+let _dsnRangedRpm = null;
+
+// Map a design's params onto the designer form (dims) + main form (material/op),
+// set the canvas half-pole, redraw. dsnBuild() then reads all of it.
+function applyDesignToCanvas(design) {
+  // Standardmäßig KEINE importierte Geometrie (AI-Variante/Vorlage). Der STEP-Import
+  // setzt _importedActive in _onImportDone explizit NACH diesem Aufruf wieder true.
+  _importedActive = false;
+  const p = design.params || {};
+  const set = (id, v) => { const e = document.getElementById(id); if (e && v != null) { e.value = v; e.dispatchEvent(new Event('input', {bubbles:true})); e.dispatchEvent(new Event('change', {bubbles:true})); } };
+  // designer dimensions
+  set('dsn_statorOD', p.statorOD); set('dsn_rotorOD', p.rotorOD); set('dsn_shaftD', p.shaftD);
+  if (p.statorID != null && p.rotorOD != null) set('dsn_airgap', Math.max(0.1, Math.round((p.statorID - p.rotorOD) / 2 * 100) / 100));
+  set('dsn_axial', p.axialLen);
+  if (p.p != null) set('dsn_poles', p.p * 2);
+  set('dsn_slots', p.slots);
+  // material + operating point live in the main form; dsnBuild()/buildPayload() reads them
+  set('sel_rotor_lam', p.rotor_lam); set('sel_stator_lam', p.stator_lam);
+  set('sel_hairpin', p.hairpin_mat); set('sel_magnet', p.magnet); set('sel_cooling', p.cooling);
+  set('sim_load', p.load_nm); set('rpm_from', p.rpm_from); set('rpm_to', p.rpm_to);
+  // canvas geometry (half-pole master)
+  DESIGN.magnets = (design.magnets || []).map(m => ({ r: m.r, off: m.off, ang: m.ang, len: m.len, thick: m.thick, pol: m.pol }));
+  DESIGN.barriers = (design.barriers || []).map(b => ({ pts: b.pts.map(pt => [pt[0], pt[1]]), width: b.width }));
+  _dsnAiRationale = design.begruendung || '';
+  if (typeof dsnDraw === 'function') dsnDraw();
+  if (typeof dsnSync === 'function') dsnSync();
+}
+
+// ── STEP-Import: erkennt Magnetlage, lädt sie in den Designer ───────────────────
+let _importedActive = false;       // true ⇒ _dsnBuildPayload markiert imported (Geometrie nicht neu bauen)
+let _importedProjectId = null;     // Projekt mit der importierten motor.FCStd (Rotor)
+
+async function startStepImport() {
+  const fileEl = document.getElementById('import-file');
+  const msg = document.getElementById('import-msg');
+  const logEl = document.getElementById('import-log');
+  const btn = document.getElementById('import-btn');
+  if (!fileEl.files.length) { msg.style.color = '#e57'; msg.textContent = '⚠ Bitte eine STEP-Datei wählen.'; return; }
+  btn.disabled = true; msg.style.color = '#9c9'; msg.textContent = '⏳ Lade hoch & erkenne Magnetlage…';
+  logEl.style.display = 'block'; logEl.textContent = '';
+  try {
+    const fd = new FormData();
+    fd.append('file', fileEl.files[0]);
+    const r = await fetch('/import_step', { method: 'POST', body: fd }).then(x => x.json());
+    if (r.error) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + r.error; btn.disabled = false; return; }
+    _importedProjectId = r.project_id || null;
+    _pollImport();
+  } catch (e) {
+    msg.style.color = '#e57'; msg.textContent = 'Fehler: ' + e.message; btn.disabled = false;
+  }
+}
+
+async function _pollImport() {
+  const msg = document.getElementById('import-msg');
+  const logEl = document.getElementById('import-log');
+  const btn = document.getElementById('import-btn');
+  try {
+    const s = await fetch('/import_step/status').then(x => x.json());
+    if (Array.isArray(s.log)) logEl.textContent = s.log.join('\n');
+    logEl.scrollTop = logEl.scrollHeight;
+    if (s.status === 'done') { _onImportDone(s); btn.disabled = false; return; }
+    if (s.status === 'error') { msg.style.color = '#e57'; msg.textContent = '⚠ ' + (s.error || 'Import fehlgeschlagen'); btn.disabled = false; return; }
+  } catch (e) { /* weiter pollen */ }
+  setTimeout(_pollImport, 1000);
+}
+
+function _onImportDone(s) {
+  const res = s.result;
+  const msg = document.getElementById('import-msg');
+  if (!res) { msg.style.color = '#e57'; msg.textContent = '⚠ Kein Ergebnis vom Import.'; return; }
+  _importedActive = true;
+  _importedProjectId = res.project_id || _importedProjectId;
+  // erkannte Geometrie + Magnete in den Designer laden (params-Form von applyDesignToCanvas)
+  applyDesignToCanvas({ params: res.params || {}, magnets: res.magnets || [],
+                        barriers: res.barriers || [], begruendung: res.begruendung || '' });
+  const warns = (res.warnings || []).map(w => '⚠ ' + w).join('\n');
+  msg.style.color = '#6c6';
+  msg.innerHTML = `✓ Import erkannt: ${res.n_magnet_bodies || 0} Magnetkörper · ${res.poles || '?'} Pole. `
+    + `Jetzt im <b>Designer</b> prüfen/korrigieren und „⚙ CAD + Berechnung erzeugen" starten.`
+    + (warns ? `<pre style="color:#e9a;margin-top:6px;white-space:pre-wrap;font-size:.72rem">${warns}</pre>` : '');
+  switchTab('designer');
+}
+
+// ── 3D-Feld (Elmer) ────────────────────────────────────────────────────────────
+// Übernommene Geometrie (Snapshot) für den 3D-Lauf. Quelle: Geometrie-Tab (parametrisch)
+// oder Designer/Import (gezeichnete/erkannte Magnete via customLegs).
+let _em3dGeomPayload = null;
+// Merkt sich, ob der Nutzer die 3D-Geometriequelle bewusst per Dropdown gewählt hat.
+// Solange false, wird beim Öffnen des 3D-Tabs immer der Geometrie-Tab als Quelle genutzt
+// (verhindert das stille, klebrige Umschalten auf „Designer").
+let _e3SrcUserSet = false;
+
+async function _em3dBuildGeomPayload() {
+  const src = document.getElementById('e3_geomsrc')?.value || 'geo';
+  if (src === 'designer') {
+    if (!DESIGN.magnets || !DESIGN.magnets.length)
+      throw new Error('Keine gezeichneten/importierten Magnete im Designer-Tab vorhanden.');
+    return await _dsnBuildPayload();
+  }
+  return await buildPayload();
+}
+
+function _em3dGeomSummaryHtml(p) {
+  const g = p.geom || {}, axial = p.axial_len || g.axialLen;
+  const designer = (document.getElementById('e3_geomsrc')?.value === 'designer');
+  const srcLbl = designer ? 'Designer / Import (custom)' : 'Geometrie-Tab (parametrisch)';
+  const magLbl = g.magShape === 'custom'
+    ? `custom (${(g.customLegs || []).length} Legs/Pol)` : (g.magShape || '—');
+  const nbar = (() => {
+    let n = 0;
+    if (g.genFluxBarrierQ) n += (g.p || 0) * 2;
+    if (g.genFluxBarrierD) n += (g.p || 0) * 2;
+    n += ((g.customBarriers || []).length) * (g.p || 0) * 2;
+    return n;
+  })();
+  return `<div style="color:#6c6">✓ Übernommen — Quelle: <b>${srcLbl}</b></div>`
+    + `<div style="margin-top:3px">Stator-Ø ${g.statorOD} · Rotor-Ø ${g.rotorOD} · Welle-Ø ${g.shaftD} · `
+    + `Luftspalt ${(((g.statorID||0)-(g.rotorOD||0))/2).toFixed(2)} mm · ${(g.p||0)*2} Pole · `
+    + `${g.slots} Nuten · Magnet: ${magLbl}${nbar ? ` · ${nbar} Flussbarrieren` : ''} · Länge ${axial} mm</div>`
+    + `<div style="color:#6a8;margin-top:3px">Die aktuelle Geometrie wird bei JEDEM 3D-Lauf automatisch frisch übernommen.</div>`;
+}
+
+async function adoptEm3dGeom() {
+  const sum = document.getElementById('e3_geomsummary');
+  if (!sum) return;
+  try {
+    _em3dGeomPayload = await _em3dBuildGeomPayload();
+    sum.innerHTML = _em3dGeomSummaryHtml(_em3dGeomPayload);
+  } catch (e) {
+    _em3dGeomPayload = null;
+    sum.innerHTML = '<span style="color:#e57">⚠ ' + escHtml(e.message) + '</span>';
+  }
+}
+
+// Liefert die für den 3D-Lauf zu verwendende Geometrie. WICHTIG: IMMER frisch aus der
+// aktuell gewählten Quelle (Geometrie-Tab/Designer) bauen — NICHT den eingefrorenen
+// Snapshot wiederverwenden. Sonst würde nach dem ersten „übernehmen" jede spätere
+// Magnet-/Geometrieänderung ignoriert („nur einmal übernommen"). Aktualisiert dabei
+// auch die Zusammenfassung, damit Anzeige und Lauf garantiert übereinstimmen.
+async function _em3dGeom() {
+  await adoptEm3dGeom();                       // rebuild snapshot + refresh summary
+  if (!_em3dGeomPayload)
+    throw new Error('Keine gültige Geometrie übernommen (siehe Hinweis bei der Geometriequelle).');
+  return JSON.parse(JSON.stringify(_em3dGeomPayload));
+}
+
+// FEM-Einstellungen (inkl. Schrägung + gestaffelte Staffelung) in den Payload schreiben.
+function _em3dApplyOpts(payload) {
+  const g = id => +document.getElementById(id).value;
+  payload.skew_deg      = g('e3_skew');
+  payload.skew_segments = Math.max(1, Math.round(g('e3_segs')));
+  payload.skew_step_deg = g('e3_stepdeg');
+  payload.mesh_cl       = g('e3_meshcl');
+  payload.gap_cl        = g('e3_gapcl');
+  payload.mag_cl        = g('e3_magcl');     // 0 = auto (≈ halbe Grobgröße)
+  payload.mag_grow      = g('e3_maggrow');   // 0 = auto (≈ 3× Luftspalt)
+  payload.airbox_factor = g('e3_box');
+}
+
+async function startEm3d() {
+  const msg = document.getElementById('e3_msg');
+  const logEl = document.getElementById('e3_log');
+  const btn = document.getElementById('e3_btn');
+  btn.disabled = true; msg.style.color = '#9c9'; msg.textContent = '⏳ Starte 3D-Berechnung…';
+  logEl.style.display = 'block'; logEl.textContent = '';
+  document.getElementById('e3_results').innerHTML = '';
+  try {
+    const payload = await _em3dGeom();
+    _em3dApplyOpts(payload);
+    const r = await fetch('/em3d', { method: 'POST', headers: {'Content-Type':'application/json'},
+                                     body: JSON.stringify(payload) });
+    if (r.status === 503) {
+      const j = await r.json(); msg.style.color = '#e57';
+      msg.innerHTML = '⚠ ' + escHtml(j.error || 'Elmer fehlt').replace(/\n/g,'<br>');
+      btn.disabled = false; return;
+    }
+    if (!r.ok) { const j = await r.json().catch(()=>({})); msg.style.color='#e57';
+      msg.textContent = '⚠ ' + (j.error || r.status); btn.disabled = false; return; }
+    _pollEm3d();
+  } catch (e) { msg.style.color='#e57'; msg.textContent = 'Fehler: ' + e.message; btn.disabled = false; }
+}
+
+async function startEm3dPreview() {
+  const msg = document.getElementById('e3_msg');
+  const logEl = document.getElementById('e3_log');
+  const btn = document.getElementById('e3_pbtn');
+  btn.disabled = true; msg.style.color = '#9c9'; msg.textContent = '⏳ Baue 3D-Modell…';
+  logEl.style.display = 'block'; logEl.textContent = '';
+  document.getElementById('e3_results').innerHTML = '';
+  try {
+    const payload = await _em3dGeom();
+    _em3dApplyOpts(payload);
+    const r = await fetch('/em3d/preview', { method: 'POST', headers: {'Content-Type':'application/json'},
+                                             body: JSON.stringify(payload) });
+    if (!r.ok) { const j = await r.json().catch(()=>({})); msg.style.color='#e57';
+      msg.textContent = '⚠ ' + (j.error || r.status); btn.disabled = false; return; }
+    _pollEm3d(true);
+  } catch (e) { msg.style.color='#e57'; msg.textContent = 'Fehler: ' + e.message; btn.disabled = false; }
+}
+
+async function _pollEm3d(isPreview) {
+  const msg = document.getElementById('e3_msg');
+  const logEl = document.getElementById('e3_log');
+  const enable = () => { const a=document.getElementById('e3_btn'), b=document.getElementById('e3_pbtn');
+                         if(a)a.disabled=false; if(b)b.disabled=false; };
+  try {
+    const s = await fetch('/em3d/status').then(x => x.json());
+    if (Array.isArray(s.log)) { logEl.textContent = s.log.join('\n'); logEl.scrollTop = logEl.scrollHeight; }
+    if (s.status === 'done') { _renderEm3d(s.result); enable(); return; }
+    if (s.status === 'error') { msg.style.color='#e57'; msg.textContent = '⚠ ' + (s.error || 'Fehlgeschlagen'); enable(); return; }
+  } catch (e) {}
+  setTimeout(() => _pollEm3d(isPreview), 1500);
+}
+
+function _renderEm3d(res) {
+  const msg = document.getElementById('e3_msg');
+  const box = document.getElementById('e3_results');
+  if (!res) { msg.textContent = '⚠ Kein Ergebnis.'; return; }
+  msg.style.color = '#6c6';
+  const c = res.compare_2d || {};
+  if (res.preview) {
+    msg.innerHTML = `✓ 3D-Modell · ${res.mesh ? res.mesh.n_nodes+' Knoten, '+res.mesh.n_magnets+' Magnete' : ''}`;
+  } else {
+    msg.innerHTML = `✓ 3D-Feld fertig · ${res.mesh ? res.mesh.n_nodes+' Knoten' : ''} · `
+      + (res.b_gap_mid_peak!=null ? `B_gap 3D(Mitte)=${res.b_gap_mid_peak} T` : '')
+      + (c.B_gap_2D!=null ? ` vs 2D-FDM=${c.B_gap_2D} T` : '');
+  }
+  let h = '';
+  if (c.B_gap_2D != null) {
+    h += `<table style="font-size:.8rem;border-collapse:collapse;margin:6px 0">
+      <tr><th style="text-align:left;padding:3px 10px">Kennwert</th><th style="padding:3px 10px">2D-FDM</th><th style="padding:3px 10px">3D-Elmer</th></tr>
+      <tr><td style="padding:3px 10px">B_gap [T]</td><td style="text-align:center">${c.B_gap_2D}</td><td style="text-align:center">${c.B_gap_3D_mid}</td></tr>
+      </table>`;
+  }
+  (res.images || []).forEach(im => {
+    h += `<div style="margin:8px 0"><div style="font-size:.76rem;color:#9aa">${escHtml(im.title)}</div>`
+       + `<img src="${im.b64}" style="max-width:100%;border:1px solid #333;border-radius:4px"/></div>`;
+  });
+  if (res.vtu_path) {
+    h += `<div style="margin-top:8px;display:flex;gap:14px;align-items:center;flex-wrap:wrap">`
+       + (res.vtp_path ? `<button onclick="openBrowser3d()" style="background:#2e6a4a;width:auto;padding:6px 12px">🧊 Im Browser ansehen (3D)</button>` : '')
+       + `<button onclick="openParaview()" style="background:#3a4a6a;width:auto;padding:6px 12px">📊 In ParaView öffnen</button>`
+       + `<a href="/em3d/vtu" style="color:#7ad">⬇ VTU herunterladen</a></div>`;
+    if (res.vtp_path) {
+      h += `<div id="e3_clipbar" style="margin-top:10px;display:none;align-items:center;gap:12px;flex-wrap:wrap;`
+         + `background:#16161c;border:1px solid #2e2e36;border-radius:6px;padding:8px 11px;font-size:.78rem;color:#bcd">`
+         + `<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="e3_clip_on" onchange="_e3SetClip()" style="width:auto"> ✂️ Schnittebene</label>`
+         + `<label style="display:flex;gap:5px;align-items:center">Achse `
+         + `<select id="e3_clip_axis" onchange="_e3SetClip()" style="width:auto;padding:3px"><option value="x">X</option><option value="y" selected>Y</option><option value="z">Z (axial)</option></select></label>`
+         + `<label style="display:flex;gap:6px;align-items:center;flex:1;min-width:140px">Position `
+         + `<input type="range" id="e3_clip_pos" min="0" max="1000" value="500" oninput="_e3SetClip()" style="flex:1"></label>`
+         + `<button onclick="_e3FlipClip()" style="width:auto;padding:4px 10px;background:#3a4a6a">↔ Seite</button>`
+         + `<label style="display:flex;gap:6px;align-items:center;cursor:pointer;border-left:1px solid #2e2e36;padding-left:12px"><input type="checkbox" id="e3_mesh_on" onchange="_e3ToggleMesh()" style="width:auto"> 🕸 Netz</label>`
+         + `<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="e3_logscale" checked onchange="_e3ApplyColor()" style="width:auto"> 📈 log |B|</label>`
+         + `<label style="display:flex;gap:5px;align-items:center;flex:1;min-width:130px" title="Obergrenze der Farbskala">|B|max `
+         + `<input type="range" id="e3_vmax" min="5" max="100" value="100" oninput="_e3ApplyColor()" style="flex:1"></label>`
+         + `</div>`;
+      h += `<div id="e3_viewer3d" style="margin-top:8px;width:100%;height:480px;background:#0d0d12;`
+         + `border:1px solid #333;border-radius:6px;display:none;position:relative"></div>`;
+    }
+  }
+  (res.warnings || []).forEach(w => { h += `<div style="color:#e9a;font-size:.74rem">⚠ ${escHtml(w)}</div>`; });
+  box.innerHTML = h;
+}
+
+// ── Eingebetteter 3D-Viewer (vtk.js, lokal eingebettet) ─────────────────────────
+let _vtkLoading = null;
+function _loadVtkJs() {
+  if (window.vtk) return Promise.resolve();
+  if (_vtkLoading) return _vtkLoading;
+  _vtkLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = '/vendor/vtk.js';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('vtk.js konnte nicht geladen werden'));
+    document.head.appendChild(s);
+  });
+  return _vtkLoading;
+}
+
+let _e3rw = null;
+let _e3clip = null;
+async function openBrowser3d() {
+  const div = document.getElementById('e3_viewer3d');
+  if (!div) return;
+  div.style.display = 'block';
+  div.innerHTML = '<div style="padding:14px;color:#9aa;font-size:.82rem">⏳ Lade 3D-Viewer…</div>';
+  try {
+    await _loadVtkJs();
+    const buf = await fetch('/em3d/vtp?t=' + Date.now(), { cache: 'no-store' })
+      .then(r => { if (!r.ok) throw new Error('VTP nicht verfügbar'); return r.arrayBuffer(); });
+    div.innerHTML = '';
+    const reader = vtk.IO.XML.vtkXMLPolyDataReader.newInstance();
+    reader.parseAsArrayBuffer(buf);
+    const pd = reader.getOutputData(0);
+    const arr = pd.getPointData().getArrayByName('Bmag');
+    // Robuste Skala: das 2./98. Perzentil statt min/max — Eckenspitzen am Magneten
+    // bestimmen sonst die Obergrenze, sodass das moderate Statorfeld kaum Farbe bekommt.
+    const dataRange = arr ? _e3Percentiles(arr.getData(), 0.02, 0.98) : [0, 1];
+    const ctf = vtk.Rendering.Core.vtkColorTransferFunction.newInstance();
+    const mapper = vtk.Rendering.Core.vtkMapper.newInstance();
+    mapper.setInputData(pd);
+    mapper.setLookupTable(ctf);
+    mapper.setScalarModeToUsePointFieldData();
+    mapper.setColorByArrayName('Bmag');
+    mapper.setInterpolateScalarsBeforeMapping(true);
+    const actor = vtk.Rendering.Core.vtkActor.newInstance();
+    actor.setMapper(mapper);
+    // Schnittebene (Clipping) für „in den Motor schauen" — Bounds für den Positions-Slider.
+    const plane = vtk.Common.DataModel.vtkPlane.newInstance();
+    _e3clip = { mapper, plane, bounds: pd.getBounds(), flip: 1, ctf, dataRange, actor };
+    _e3ApplyColor();   // baut ctf + Legende aus log-Toggle + vmax-Slider
+    if (_e3rw) { try { _e3rw.delete(); } catch (e) {} }
+    _e3rw = vtk.Rendering.Misc.vtkGenericRenderWindow.newInstance({ background: [0.05, 0.05, 0.07] });
+    _e3rw.setContainer(div);
+    _e3rw.getRenderer().addActor(actor);
+    _e3rw.getRenderer().resetCamera();
+    // leichte Iso-Perspektive statt frontal
+    try {
+      const cam = _e3rw.getRenderer().getActiveCamera();
+      cam.azimuth(35); cam.elevation(-25);
+      _e3rw.getRenderer().resetCameraClippingRange();
+    } catch (e) {}
+    _e3rw.resize();
+    _e3rw.getRenderWindow().render();
+    // Hinweis + Farbskala als HTML-Overlay (vtkScalarBarActor ist im UMD-Build nicht enthalten)
+    const tip = document.createElement('div');
+    tip.style.cssText = 'position:absolute;top:6px;left:10px;font-size:.7rem;color:#789;pointer-events:none';
+    tip.textContent = 'ziehen = drehen · Rad = zoomen';
+    div.appendChild(tip);
+    const leg = document.createElement('div');
+    leg.id = 'e3_legend';
+    leg.style.cssText = 'position:absolute;top:6px;right:10px;font-size:.66rem;color:#cdd;pointer-events:none;text-align:center';
+    div.appendChild(leg);
+    if (_e3clip) _e3clip.legEl = leg;
+    // Schnittebenen-Bedienleiste einblenden + Slider neutralisieren.
+    const bar = document.getElementById('e3_clipbar');
+    if (bar) { bar.style.display = 'flex';
+      const on = document.getElementById('e3_clip_on'); if (on) on.checked = false;
+      const pos = document.getElementById('e3_clip_pos'); if (pos) pos.value = 500;
+      if (_e3clip) _e3clip.flip = 1;
+    }
+    _e3ApplyColor();   // Legende mit dem aktuellen Bereich füllen
+  } catch (e) {
+    div.innerHTML = '<div style="padding:14px;color:#e57;font-size:.82rem">⚠ ' + escHtml(e.message)
+      + '. Alternativ „📊 In ParaView öffnen" nutzen.</div>';
+  }
+}
+
+// Robuste Perzentil-Grenzen einer (typisierten) Werteliste — ohne die ganze Kopie zu
+// sortieren wäre genauer, aber die Oberflächen-Punktzahl ist klein genug.
+function _e3Percentiles(data, pLo, pHi) {
+  const a = Array.prototype.slice.call(data).filter(v => isFinite(v)).sort((x, y) => x - y);
+  if (!a.length) return [0, 1];
+  const q = f => a[Math.min(a.length - 1, Math.max(0, Math.round(f * (a.length - 1))))];
+  let lo = q(pLo), hi = q(pHi);
+  if (!(hi > lo)) hi = lo + 1e-6;
+  return [lo, hi];
+}
+
+// Farbskala (Blau→Grün→Rot) neu aufbauen aus log-Toggle + |B|max-Slider und die
+// HTML-Legende aktualisieren. Log spreizt die kleinen/mittleren Feldwerte (Statorjoch),
+// die neben den Magnet-/Luftspaltspitzen sonst alle ganz unten in der Skala kleben.
+function _e3ApplyColor() {
+  if (!_e3clip || !_e3clip.ctf) return;
+  const ctf = _e3clip.ctf;
+  const [dlo, dhi] = _e3clip.dataRange || [0, 1];
+  const log = document.getElementById('e3_logscale')?.checked;
+  const vfrac = (+document.getElementById('e3_vmax')?.value || 100) / 100;
+  const hi = Math.max(dlo + 1e-6, dlo + (dhi - dlo) * vfrac);
+  const lo = Math.max(log ? Math.max(hi * 1e-3, 1e-4) : 0, dlo);
+  ctf.removeAllPoints();
+  const stops = [[0, 0, 0, 1], [0.5, 0, 1, 0], [1, 1, 0, 0]];   // blau→grün→rot
+  for (const [f, r, g, bl] of stops) {
+    const x = log ? lo * Math.pow(hi / lo, f) : lo + (hi - lo) * f;
+    ctf.addRGBPoint(x, r, g, bl);
+  }
+  _e3clip.mapper.setScalarRange(lo, hi);
+  try { _e3clip.mapper.modified(); } catch (e) {}
+  if (_e3rw) _e3rw.getRenderWindow().render();
+  const leg = _e3clip.legEl;
+  if (leg) {
+    const mid = log ? Math.sqrt(lo * hi) : (lo + hi) / 2;
+    leg.innerHTML = `<div>|B| [T]${log ? ' (log)' : ''}</div>`
+      + `<div style="display:flex;gap:4px;justify-content:center;margin-top:3px">`
+      + `<div style="display:flex;flex-direction:column;justify-content:space-between;height:120px">`
+      + `<span>${hi.toFixed(2)}</span><span>${mid.toFixed(2)}</span><span>${lo.toFixed(2)}</span></div>`
+      + `<div style="width:16px;height:120px;border:1px solid #555;background:linear-gradient(to top,#00f,#0f0,#f00)"></div></div>`;
+  }
+}
+
+// Drahtgitter (Netz-Kanten) auf den Festkörper-Oberflächen ein-/ausblenden — zeigt die
+// Oberflächen-Netzdichte (am Luftspalt/an den Magneten feiner). Das volumetrische Luftspalt-
+// Feinnetz selbst sieht man am besten im „Netz-Querschnitt"-Bild (enthält die Luft).
+function _e3ToggleMesh() {
+  if (!_e3clip || !_e3clip.actor || !_e3rw) return;
+  const on = document.getElementById('e3_mesh_on')?.checked;
+  const prop = _e3clip.actor.getProperty();
+  prop.setEdgeVisibility(!!on);
+  prop.setEdgeColor(0.85, 0.88, 0.95);
+  prop.setLineWidth(1);
+  _e3rw.getRenderWindow().render();
+}
+
+// Schnittebene aus der Bedienleiste auf den Mapper anwenden.
+function _e3SetClip() {
+  if (!_e3clip || !_e3rw) return;
+  const on = document.getElementById('e3_clip_on')?.checked;
+  const mapper = _e3clip.mapper, plane = _e3clip.plane, b = _e3clip.bounds;
+  mapper.removeAllClippingPlanes();
+  if (on) {
+    const axis = document.getElementById('e3_clip_axis')?.value || 'y';
+    const t = (+document.getElementById('e3_clip_pos')?.value || 500) / 1000;
+    const idx = axis === 'x' ? 0 : axis === 'z' ? 2 : 1;
+    const lo = b[idx * 2], hi = b[idx * 2 + 1];
+    const o = [(b[0] + b[1]) / 2, (b[2] + b[3]) / 2, (b[4] + b[5]) / 2];
+    o[idx] = lo + t * (hi - lo);
+    const n = [0, 0, 0]; n[idx] = _e3clip.flip;
+    plane.setOrigin(o[0], o[1], o[2]);
+    plane.setNormal(n[0], n[1], n[2]);
+    mapper.addClippingPlane(plane);
+  }
+  try { mapper.modified(); } catch (e) {}
+  _e3rw.getRenderWindow().render();
+}
+
+function _e3FlipClip() {
+  if (!_e3clip) return;
+  _e3clip.flip = -_e3clip.flip;
+  const on = document.getElementById('e3_clip_on');
+  if (on && !on.checked) on.checked = true;
+  _e3SetClip();
+}
+
+async function openParaview() {
+  try {
+    const r = await fetch('/em3d/paraview').then(x => x.json());
+    if (r.error) { alert((r.need_install ? '' : 'Fehler: ') + r.error); return; }
+    _toast('📊 ParaView wird geöffnet…');
+  } catch (e) { alert('ParaView konnte nicht gestartet werden: ' + e.message); }
+}
+
+// effektives Urteil einer Variante: Nutzer-Korrektur hat Vorrang vor der Auto-Heuristik
+function _dsnVerdict(v) { return v.userVerdict || (v.quality || {}).verdict || null; }
+
+function _dsnRenderVariants() {
+  const box = document.getElementById('dsn_ai_variants');
+  if (!_dsnAiVariants.length) { box.innerHTML = ''; return; }
+  let h = '<div style="font-size:.74rem;color:#9aa;margin:4px 0">Varianten (Klick lädt auf Canvas · 👍/👎 = Urteil korrigieren):</div>';
+  _dsnAiVariants.forEach((v, i) => {
+    const p = v.params || {};
+    const fb = v.fallback ? ' ⚙' : '';
+    const verdict = _dsnVerdict(v);
+    const mark = v.userVerdict ? '✎' : '';   // korrigiert?
+    const badge = verdict === 'gut' ? ` <span style="color:#6c6">👍${mark}</span>`
+                : verdict === 'schlecht' ? ` <span style="color:#e87">👎${mark}</span>` : '';
+    const bg = (v.quality && v.quality.metrics && v.quality.metrics.B_gap) ? ` · B≈${v.quality.metrics.B_gap} T` : '';
+    const act = (i === _dsnActiveVariant) ? 'outline:1px solid #6a4caf;' : '';
+    const gB = (c) => `background:${verdict===c ? (c==='gut'?'#2e7d4f':'#a23b3b') : '#3a3f4a'};font-size:.72rem;padding:4px 7px;border:none;cursor:pointer`;
+    h += `<div style="display:flex;gap:3px;margin-bottom:4px;align-items:stretch">`
+       + `<button onclick="dsnLoadVariant(${i})" title="auf Canvas laden" style="flex:1;text-align:left;background:#2a2f3a;${act}font-size:.72rem;padding:6px 8px">`
+       + `V${i+1}${fb}${badge}: ${p.magShape||'?'}, ⌀${p.rotorOD||'?'} mm, ${(p.p||0)*2} Pole, ${(v.magnets||[]).length} Magnete${bg}</button>`
+       + `<button onclick="dsnSetVariantVerdict(${i},'gut')" title="als gut markieren" style="${gB('gut')}">👍</button>`
+       + `<button onclick="dsnSetVariantVerdict(${i},'schlecht')" title="als schlecht markieren" style="${gB('schlecht')}">👎</button>`
+       + `</div>`;
+  });
+  h += `<button onclick="dsnRunAllVariants()" style="width:100%;background:#2e7d32;font-size:.76rem;padding:8px;margin-top:2px">▶ Alle rechnen & vergleichen</button>`;
+  box.innerHTML = h;
+}
+
+// Nutzer korrigiert das gut/schlecht-Urteil einer Variante (Toggle: nochmal klicken = zurück auf Auto)
+function dsnSetVariantVerdict(i, label) {
+  const v = _dsnAiVariants[i]; if (!v) return;
+  v.userVerdict = (v.userVerdict === label) ? null : label;
+  _dsnRenderVariants();
+}
+
+function dsnLoadVariant(i) {
+  const v = _dsnAiVariants[i]; if (!v) return;
+  _dsnActiveVariant = i;
+  applyDesignToCanvas(v);
+  _dsnRenderVariants();
+  const st = document.getElementById('dsn_ai_status');
+  st.innerHTML = `✓ Variante ${i+1} geladen.` + (v.begruendung ? ` <span style="color:#789">${v.begruendung}</span>` : '');
+}
+
+// ✨ KI entwerfen: optionale Beschreibung + von–bis-Bereiche (inkl. Luftspalt 0,5–3 mm).
+// Pro Variante werden Maße/Luftspalt zufällig gezogen + erzwungen, die KI füllt den Rest
+// und zeichnet Magnete/Barrieren (nur halber Pol). Rechnung an festen Drehzahlen.
+async function dsnAiGenerate() {
+  const brief = document.getElementById('dsn_ai_brief').value.trim();
+  const st  = document.getElementById('dsn_ai_status');
+  const btn = document.getElementById('dsn_ai_btn');
+  const num = id => +document.getElementById(id).value;
+  const ranges = {
+    statorOD: [num('dsn_rg_sod_lo'), num('dsn_rg_sod_hi')],
+    axialLen: [num('dsn_rg_len_lo'), num('dsn_rg_len_hi')],
+    shaftD:   [num('dsn_rg_shd_lo'), num('dsn_rg_shd_hi')],
+    airgap:   [num('dsn_rg_gap_lo'), num('dsn_rg_gap_hi')],
+  };
+  for (const [k, r] of Object.entries(ranges)) {
+    if (!(r[0] > 0) || !(r[1] > 0)) { st.style.color = '#e57'; st.textContent = `⚠ Bereich für ${k} unvollständig.`; return; }
+  }
+  const n = Math.max(1, Math.min(99, num('dsn_ai_n') || 3));
+  btn.disabled = true; st.style.color = '#9aa'; st.textContent = '⏳ KI entwirft…';
+  try {
+    const r = await fetch('/design_ai_ranged', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ brief, ranges, n }) });
+    if (!r.ok) { const e = await r.json(); st.style.color = '#e57'; st.textContent = '❌ ' + (e.error||'Start fehlgeschlagen'); btn.disabled = false; return; }
+  } catch (e) { st.style.color = '#e57'; st.textContent = '❌ Server nicht erreichbar'; btn.disabled = false; return; }
+  const poll = setInterval(async () => {
+    let s; try { s = await fetch('/design_ai/status').then(x => x.json()); } catch (e) { return; }
+    const last = (s.log||[]).slice(-1)[0] || '…';
+    if (s.status === 'running') { st.textContent = '⏳ ' + last; return; }
+    clearInterval(poll); btn.disabled = false;
+    if (s.status === 'error') { st.style.color = '#e57'; st.textContent = '❌ ' + (s.error||'Fehler'); return; }
+    const res = s.result || {};
+    _dsnAiVariants = res.variants || [];
+    _dsnActiveVariant = -1;
+    _dsnAiBrief = brief;                  // Fallback; je-Variante-Brief steckt in design_brief
+    _dsnRangedRpm = (Array.isArray(res.rpm_list) && res.rpm_list.length >= 2) ? res.rpm_list : [1000,5000,15000,20000];
+    st.style.color = '#9c9';
+    const regen = res.regenerated ? `, ${res.regenerated} schlechte ersetzt` : '';
+    const spd = _dsnRangedRpm.join('/');
+    st.textContent = `✓ ${_dsnAiVariants.length} Varianten` + (res.rag_used ? ' (mit Wissensbasis)' : '') + regen + ` — Rechnung @ ${spd} 1/min — V1 geladen.`;
+    _dsnRenderVariants();
+    if (_dsnAiVariants.length) dsnLoadVariant(0);
+  }, 1200);
+}
+
+async function dsnRunAllVariants() {
+  if (!_dsnAiVariants.length) return;
+  document.getElementById('tbtn-results').disabled = false;
+  switchTab('results');
+  document.getElementById('analysis-progress').classList.add('show');
+  document.getElementById('results-content').style.display = 'none';
+  const ranIds = [];
+  let skipped = 0;
+  for (let i = 0; i < _dsnAiVariants.length; i++) {
+    document.getElementById('progress-title').textContent = `⚙ KI-Variante ${i+1}/${_dsnAiVariants.length}`;
+    try {
+      _dsnActiveVariant = i;                       // damit das korrigierte Urteil mitgeht
+      applyDesignToCanvas(_dsnAiVariants[i]);
+      const payload = await _dsnBuildPayload();
+      payload.project_name = `KI-V${i+1}`;
+      // 👎: nicht rechnen, aber als „schlecht" ins Trainingsfile (mit Schnell-Kennwerten)
+      if (_dsnVerdict(_dsnAiVariants[i]) === 'schlecht') {
+        addLog(`👎 Variante ${i+1} übersprungen → als schlecht ins Trainingsfile`);
+        try {
+          await fetch('/training/design_rejected', { method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ payload, metrics: (_dsnAiVariants[i].quality||{}).metrics || {},
+                                   project_name: payload.project_name }) });
+        } catch (e) { addLog('⚠ V'+(i+1)+' nicht gespeichert: '+e.message); }
+        skipped++;
+        continue;
+      }
+      const resp = await fetch('/analyse', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+      if (!resp.ok) { addLog('❌ Variante ' + (i+1) + ' Start fehlgeschlagen'); continue; }
+      const s = await _pollUntilDone();
+      const cur = await fetch('/status').then(r => r.json());
+      if (cur.project_id) ranIds.push(cur.project_id);
+      if (s === 'error') addLog('❌ Variante ' + (i+1) + ' fehlgeschlagen');
+    } catch (e) { addLog('❌ V' + (i+1) + ': ' + e.message); }
+  }
+  if (skipped) addLog(`ℹ ${skipped} mit 👎 bewertete Variante(n) nur als schlecht gespeichert, nicht gerechnet.`);
+  switchTab('compare');
+  await refreshComparePicker();
+  ranIds.forEach(id => { const cb = document.querySelector(`.cmp-checkbox[value="${id}"]`); if (cb) cb.checked = true; });
+  updateCompareCount();
+  refreshTrainingStats();
+}
+
+// ── Per-Magnet-Fein-Optimierung ────────────────────────────────────────────────
+let _dsnOptMetaLoaded = false;
+async function dsnLoadOptMeta() {
+  if (_dsnOptMetaLoaded) return;
+  try {
+    const meta = await fetch('/optimize/meta').then(x => x.json());
+    const mSel = document.getElementById('dsn_opt_metric');
+    const cSel = document.getElementById('dsn_opt_cmetric');
+    let opts = '';
+    for (const [k, v] of Object.entries(meta.metrics || {})) opts += `<option value="${k}">${v.label}</option>`;
+    mSel.innerHTML = opts;
+    cSel.innerHTML = '<option value="">—</option>' + opts;
+    document.getElementById('dsn_opt_goal').addEventListener('change', e => {
+      document.getElementById('dsn_opt_target').style.display = e.target.value === 'target' ? '' : 'none';
+    });
+    _dsnOptMetaLoaded = true;
+  } catch (e) { /* offline */ }
+}
+
+async function dsnOptimize() {
+  const st = document.getElementById('dsn_opt_status');
+  const btn = document.getElementById('dsn_opt_btn');
+  if (!DESIGN.magnets.length) { st.style.color = '#e57'; st.textContent = '⚠ Erst Magnete zeichnen/entwerfen.'; return; }
+  const metric = document.getElementById('dsn_opt_metric').value;
+  const goal   = document.getElementById('dsn_opt_goal').value;
+  const objective = { metric, goal };
+  if (goal === 'target') objective.target = +document.getElementById('dsn_opt_target').value;
+  const constraints = [];
+  const cm = document.getElementById('dsn_opt_cmetric').value;
+  if (cm) constraints.push({ metric: cm, op: document.getElementById('dsn_opt_cop').value, value: +document.getElementById('dsn_opt_cval').value });
+  const iterations = +document.getElementById('dsn_opt_iter').value || 20;
+  const base_payload = await _dsnBuildPayload();
+  const spec = { base_payload, magnets: DESIGN.magnets, barriers: DESIGN.barriers, objective, constraints, iterations };
+  btn.disabled = true; st.style.color = '#9aa'; st.textContent = '⏳ Optimierung gestartet…';
+  try {
+    const r = await fetch('/design_optimize', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify(spec) });
+    if (!r.ok) { const e = await r.json(); st.style.color = '#e57'; st.textContent = '❌ ' + (e.error||'Start fehlgeschlagen'); btn.disabled = false; return; }
+  } catch (e) { st.style.color = '#e57'; st.textContent = '❌ Server nicht erreichbar'; btn.disabled = false; return; }
+  const poll = setInterval(async () => {
+    let s; try { s = await fetch('/design_optimize/status').then(x => x.json()); } catch (e) { return; }
+    const last = (s.log||[]).slice(-1)[0] || '…';
+    if (s.status === 'running') { st.textContent = '⏳ ' + last; return; }
+    clearInterval(poll); btn.disabled = false;
+    if (s.status === 'error') { st.style.color = '#e57'; st.textContent = '❌ ' + (s.error||'Fehler'); return; }
+    const res = s.result || {};
+    if (res.best_magnets && res.best_magnets.length) {
+      DESIGN.magnets = res.best_magnets.map(m => ({ r:m.r, off:m.off, ang:m.ang, len:m.len, thick:m.thick, pol:m.pol }));
+      if (typeof dsnDraw === 'function') dsnDraw();
+      if (typeof dsnSync === 'function') dsnSync();
+    }
+    const bm = res.best_metrics || {}, base = res.base_metrics || {};
+    const mv = bm[metric], bv = base[metric];
+    st.style.color = '#9c9';
+    st.innerHTML = `✓ Optimiert (${res.n_evaluated} Bewertungen). ${metric}: ${bv ?? '—'} → <b>${mv ?? '—'}</b>`
+                 + (res.best_feasible ? '' : ' <span style="color:#e7a">(Randbed. verletzt)</span>')
+                 + '. Bestes Layout auf den Canvas gezeichnet.';
+  }, 1200);
+}
+
+// ── Parameterstudie für den Designer-/KI-Entwurf ────────────────────────────────
+function _syncStudyDesignBanner() {
+  const b = document.getElementById('study_design_banner');
+  if (b) b.style.display = _studyDesignPayload ? 'block' : 'none';
+}
+async function dsnParamStudy() {
+  const msg = document.getElementById('dsn_build_msg');
+  if (!DESIGN.magnets.length) { msg.style.color = '#e57'; msg.textContent = '⚠ Erst Magnete zeichnen/entwerfen.'; return; }
+  _studyDesignPayload = await _dsnBuildPayload();        // Snapshot der gezeichneten Geometrie
+  switchTab('calc');                                     // ruft initParamStudy()
+  if (!_optMeta) _optMeta = await fetch('/optimize/meta').then(r => r.json());
+  _populateStudyParams();                               // auf custom-wirksame Parameter beschränken
+  if (typeof _studyDesignPayload.rpm_to === 'number') document.getElementById('study_rpm').value = _studyDesignPayload.rpm_to;
+  _syncStudyDesignBanner();
+  const panel = document.getElementById('study_design_banner');
+  if (panel && panel.scrollIntoView) panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+function dsnClearStudyDesign() {
+  _studyDesignPayload = null;
+  _populateStudyParams();
+  _syncStudyDesignBanner();
 }
 
 // ── Ergebnis-Chat (Ollama) ───────────────────────────────────────────────────
@@ -2962,6 +4307,17 @@ async function buildPayload() {
   if (document.getElementById('fm_load_ramp')?.checked)     fmodes.push('load_ramp');
   payload.field_modes = fmodes;
   payload.geom.axialLen = payload.axial_len;
+  // Parametrische Reinheit: der Geometrie-Tab ist IMMER parametrisch. magShape kommt
+  // ausschließlich aus dem Dropdown, und etwaige aus einer früheren Designer-/KI-/STEP-
+  // Sitzung in GEOM zurückgebliebene custom-Magnete (über die localStorage-Wiederher-
+  // stellung) dürfen NICHT in eine parametrische Berechnung durchsickern — sonst würde
+  // z. B. die 3D-Übernahme stale gezeichnete Magnete statt der eingestellten Topologie
+  // verwenden. Der Designer-Pfad (_dsnBuildPayload) setzt magShape/customLegs danach
+  // bewusst wieder.
+  const _msEl = document.getElementById('mag_shape');
+  if (_msEl) payload.geom.magShape = _msEl.value;
+  delete payload.geom.customLegs;
+  delete payload.geom.customBarriers;
   return payload;
 }
 
@@ -3001,6 +4357,7 @@ function applyPayload(payload) {
     pocket_outer_d: G.pocketOuterD, pocket_inner_d: G.pocketInnerD,
     mag_angle: G.magAngle, mag_angle2: G.magAngle2, mag_asym: G.magAsym, mag_tang_len: G.magTangLen,
     mag_depth: pct(G.magDepthRel), mag_width: G.magWidth, mag_thick: G.magThick,
+    mag_gap: G.magGapMm,
     mag_dist: G.magDist, mag_layer_gap: G.magLayerGap, mag_layers: G.magLayers,
     pole_arc: pct(G.poleArcFrac), seg_per_pole: G.segPerPole, n_ax: G.nAx, n_circ: G.nCirc,
     slot_depth: G.slotDepth, cond_per_slot: G.conductorsPerSlot, coil_pitch: G.coilPitch,
@@ -3089,6 +4446,11 @@ async function useAsTemplate(pid) {
 }
 
 async function startAnalysis() {
+  const payload = await buildPayload();
+  return _runAnalysisPayload(payload);
+}
+
+async function _runAnalysisPayload(payload) {
   const btn = document.getElementById('btn_analyse');
   btn.disabled = true;
   btn.textContent = '⏳ Analyse läuft…';
@@ -3100,8 +4462,6 @@ async function startAnalysis() {
   document.getElementById('results-content').style.display   = 'none';
   document.getElementById('progress-log').innerHTML = '';
   document.getElementById('progress-fill').style.width = '0%';
-
-  const payload = await buildPayload();
 
   try {
     const resp = await fetch('/analyse', {
@@ -3204,7 +4564,10 @@ async function startCadPreview() {
     + 'Stator · Hairpins · aktivierte Extras) in FreeCAD — ohne Berechnung. '
     + 'Das kann je nach Topologie ~10–90 s dauern.</div>';
   try {
-    const payload = await buildPayload();
+    // Im Designer-Tab die GEZEICHNETE Geometrie bauen (custom legs/barriers),
+    // nicht die Form aus dem Geometrie-Tab.
+    const useDesign = (window._activeTab === 'designer') && DESIGN.magnets.length;
+    const payload = useDesign ? await _dsnBuildPayload() : await buildPayload();
     const resp = await fetch('/cad_preview', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload) });
@@ -3429,7 +4792,12 @@ async function renderRating(pid) {
   if (!pid) { if (stat) stat.textContent = '(kein aktives Projekt)'; return; }
   try {
     const r = await fetch('/project/' + encodeURIComponent(pid) + '/rating').then(x => x.json());
-    if (r.label) { _ratingHighlight(r.label); if (stat) stat.textContent = `bewertet: ${r.label}`; }
+    if (r.label) {
+      _ratingHighlight(r.label);
+      if (stat) stat.textContent = (r.label_source === 'auto')
+        ? `vorsortiert (Heuristik): ${r.label} — zum Bestätigen/Ändern klicken`
+        : `bewertet: ${r.label}`;
+    }
     else if (stat) stat.textContent = 'noch nicht bewertet';
     if (cmt && r.comment) cmt.value = r.comment;
     if (auto && r.auto) auto.textContent =
@@ -3487,6 +4855,8 @@ async function generateReport(mode = 'standard') {
   box.style.display = 'block';
   msg.textContent = 'gestartet…';
   bar.style.width = '0%';
+  const ragBox = document.getElementById('report_rag');
+  if (ragBox) ragBox.style.display = 'none';
 
   try {
     const r = await fetch('/project/' + encodeURIComponent(pid) + '/report',
@@ -3526,6 +4896,7 @@ async function generateReport(mode = 'standard') {
           window.location = '/project/' + pid + '/report/download?mode=' + mode;
         };
         msg.innerHTML = `✓ Fertig — Klick auf den Button startet den Download.`;
+        if (st.has_rag_md) showReportRag(pid);
       } else if (st.status === 'error') {
         clearInterval(_reportPoll);
         msg.textContent = '❌ Fehler — siehe Server-Log';
@@ -3535,6 +4906,43 @@ async function generateReport(mode = 'standard') {
       }
     } catch (e) { /* server busy */ }
   }, 1500);
+}
+
+// Wertfreie RAG-Markdown-Aktionen (nach fertigem Bericht eingeblendet)
+function showReportRag(pid) {
+  const box = document.getElementById('report_rag');
+  const msg = document.getElementById('report_rag_msg');
+  const dl  = document.getElementById('btn_rag_dl');
+  const add = document.getElementById('btn_rag_add');
+  if (!box) return;
+  box.style.display = 'block';
+  msg.textContent = '';
+  add.disabled = false; add.style.background = '#3a5a7a';
+  add.textContent = '➕ In Wissensbasis aufnehmen';
+  dl.onclick = () => {
+    window.location = '/project/' + encodeURIComponent(pid) + '/report/rag_md';
+  };
+  add.onclick = async () => {
+    add.disabled = true; add.textContent = '⏳ wird eingebettet…';
+    msg.textContent = 'Einbettung über Ollama (nomic-embed-text)…';
+    try {
+      const r = await fetch('/project/' + encodeURIComponent(pid) + '/report/rag_md/add',
+                            { method: 'POST' });
+      const j = await r.json();
+      if (r.ok) {
+        add.textContent = '✓ aufgenommen';
+        add.style.background = '#27ae60';
+        msg.textContent = '✓ In Wissensbasis (Doku) aufgenommen' +
+          (j.n_chunks ? ` — ${j.n_chunks} Abschnitte.` : '.');
+      } else {
+        add.disabled = false; add.textContent = '➕ In Wissensbasis aufnehmen';
+        msg.textContent = '❌ ' + (j.error || 'Fehler');
+      }
+    } catch (e) {
+      add.disabled = false; add.textContent = '➕ In Wissensbasis aufnehmen';
+      msg.textContent = '❌ Server nicht erreichbar';
+    }
+  };
 }
 
 // ── Render helpers ─────────────────────────────────────────────────────────────
@@ -3989,7 +5397,7 @@ function escHtml(s) {
     p: 3, magShape: "v", magAngle: 120, magDepthRel: 0.7,
     magWidth: 45, magThick: 6, magDist: 2, airGap: 0.7,
     magLayers: 3, magLayerGap: 8, poleArcFrac: 0.83, segPerPole: 6,
-    nAx: 1, nCirc: 1, shaftBoreD: 0, magTangLen: 0, magAngle2: 90, magAsym: 0,
+    nAx: 1, nCirc: 1, shaftBoreD: 0, magTangLen: 0, magAngle2: 90, magAsym: 0, magGapMm: 0.1,
     pocketMode: "position", pocketOuterD: 178, pocketInnerD: 150,
     magOrient: "transverse", conductorsPerSlot: 4, coilPitch: 0,
     windingHeadFlare: 6, windingHeadStyle: "sweep",
@@ -4015,7 +5423,7 @@ function escHtml(s) {
   const PHYS = {
     isRunning: true, ultraSlow: false,
     omega: 0, angle: 0, iq: 0, id: 0, torque: 0,
-    load: 5, voltage: 800, id_manual: 0, timeScale: 1.0,
+    load: 5, voltage: 800, id_manual: 0, timeScale: 1.0, rpmSet: 0,
     Rs: 0.02, Ld: 0.0003, Lq: 0.0008, Psi: 0.09, J: 0.1,
   };
 
@@ -4068,6 +5476,7 @@ function escHtml(s) {
     bindSlider("mag_depth", v => { GEOM.magDepthRel = v / 100; resetField(); _updateEffWidthDisplay(); }, "%");
     bindSlider("mag_width", v => { GEOM.magWidth    = v; resetField(); _updateEffWidthDisplay(); }, " mm");
     bindSlider("mag_thick", v => { GEOM.magThick    = v; resetField(); _updateEffWidthDisplay(); }, " mm");
+    bindSlider("mag_gap",   v => { GEOM.magGapMm    = v; }, " mm");
     bindSlider("mag_dist",  v => { GEOM.magDist     = v; resetField(); }, " mm");
     bindSlider("mag_layer_gap", v => { GEOM.magLayerGap = v; resetField(); }, " mm");
     bindSlider("mag_layers",    v => { GEOM.magLayers   = parseInt(v); resetField(); }, "");
@@ -4132,6 +5541,13 @@ function escHtml(s) {
     bindSlider("sim_load",      v => PHYS.load      = v, " Nm");
     bindSlider("sim_id_weak",   v => PHYS.id_manual = v, " A");
     bindSlider("sim_timescale", v => PHYS.timeScale  = v, "x");
+    const _rpmSetEl = document.getElementById("sim_rpm_set");
+    if (_rpmSetEl) _rpmSetEl.oninput = () => {
+      const v = parseFloat(_rpmSetEl.value) || 0;
+      PHYS.rpmSet = v;
+      const d = document.getElementById("disp_rpm_set");
+      if (d) d.innerText = v > 0 ? v.toLocaleString("de-DE") + " U/min" : "frei";
+    };
 
     document.getElementById("grid_res").onchange = e => {
       GRID_SIZE_STD = parseInt(e.target.value);
@@ -4491,6 +5907,63 @@ function escHtml(s) {
         gridMu[y*N+x] = smoothMu(Math.min(dSt, dRo));
       }
     }
+    // Low-permeability AIR carved into the rotor iron so the variable-µ solver lets
+    // the flux refract AROUND it (µr≈1 vs. µr=500). Mirror of ema_analysis._rasterise:
+    // balance-bolt holes, flux-barrier slots (q/d) and custom (designer) barriers —
+    // all rotate WITH the rotor (PHYS.angle). The hollow-shaft bore is already air
+    // (handled in the iron-ring loop above via rBore); the surroundings are air by
+    // default (gridMu initialised to 1).
+    {
+      const P2 = GEOM.p*2, a0 = PHYS.angle;
+      if (GEOM.genBalanceBolts) {
+        const TH={M4:4,M5:5,M6:6,M8:8,M10:10,M12:12,M16:16,M20:20};
+        const nom=TH[GEOM.balanceBoltThread||'M6']||6, hr=((nom+0.4)/2)*gs;
+        const pcr=(GEOM.balanceBoltCircleD>0?GEOM.balanceBoltCircleD/2
+                  :GEOM.shaftD/2+(GEOM.rotorOD/2-GEOM.shaftD/2)*0.5)*gs;
+        const off=(GEOM.balanceBoltOffsetDeg||0)*Math.PI/180, nb=Math.max(2,P2), ri=Math.ceil(hr);
+        for(let bi=0;bi<nb;bi++){
+          const a=off+a0+bi*2*Math.PI/nb, hx=center+pcr*Math.cos(a), hy=center+pcr*Math.sin(a);
+          for(let yy=-ri;yy<=ri;yy++)for(let xx=-ri;xx<=ri;xx++){
+            if(xx*xx+yy*yy<=hr*hr){const ix=Math.floor(hx+xx),iy=Math.floor(hy+yy);
+              if(ix>=0&&ix<N&&iy>=0&&iy<N)gridMu[iy*N+ix]=1;}
+          }
+        }
+      }
+      if (GEOM.genFluxBarrierQ || GEOM.genFluxBarrierD) {
+        const fbw=Math.max(0.5,Math.min(40,GEOM.fluxBarrierWidth||3))*gs;
+        const fbd=Math.max(1,Math.min(120,GEOM.fluxBarrierDepth||10))*gs;
+        const rout=rRO-2*gs, rin=Math.max(rSh+1*gs, rout-fbd), angs=[];
+        if(GEOM.genFluxBarrierD)for(let i=0;i<P2;i++)angs.push(a0+i*2*Math.PI/P2);
+        if(GEOM.genFluxBarrierQ)for(let i=0;i<P2;i++)angs.push(a0+(i+0.5)*2*Math.PI/P2);
+        for(const a of angs){
+          const ca=Math.cos(a),sa=Math.sin(a);
+          for(let rr=rin;rr<=rout;rr+=0.5)for(let w=-fbw/2;w<=fbw/2;w+=0.5){
+            const ix=Math.floor(center+rr*ca - w*sa), iy=Math.floor(center+rr*sa + w*ca);
+            if(ix>=0&&ix<N&&iy>=0&&iy<N)gridMu[iy*N+ix]=1;
+          }
+        }
+      }
+      const cbars=GEOM.customBarriers||[];
+      for(let p=0;p<(cbars.length?P2:0);p++){
+        const pa=p*2*Math.PI/P2+a0, cpa=Math.cos(pa), spa=Math.sin(pa);
+        for(const bar of cbars){
+          const pts=bar.pts||[], hw=Math.max(0.5,(bar.width||3))/2*gs;
+          const gp=pts.map(q=>[(q[0]*cpa-q[1]*spa)*gs,(q[0]*spa+q[1]*cpa)*gs]);
+          for(let s=0;s<gp.length-1;s++){
+            const ax=gp[s][0],ay=gp[s][1],dx=gp[s+1][0]-ax,dy=gp[s+1][1]-ay,ll=dx*dx+dy*dy;
+            if(ll<1e-6)continue;
+            const mnx=Math.floor(center+Math.min(ax,ax+dx)-hw),mxx=Math.ceil(center+Math.max(ax,ax+dx)+hw);
+            const mny=Math.floor(center+Math.min(ay,ay+dy)-hw),mxy=Math.ceil(center+Math.max(ay,ay+dy)+hw);
+            for(let iy=Math.max(0,mny);iy<=Math.min(N-1,mxy);iy++)for(let ix=Math.max(0,mnx);ix<=Math.min(N-1,mxx);ix++){
+              const Xc=ix-center,Yc=iy-center;
+              let t=((Xc-ax)*dx+(Yc-ay)*dy)/ll; t=t<0?0:(t>1?1:t);
+              const cx=ax+t*dx,cy=ay+t*dy;
+              if((Xc-cx)*(Xc-cx)+(Yc-cy)*(Yc-cy)<=hw*hw)gridMu[iy*N+ix]=1;
+            }
+          }
+        }
+      }
+    }
     const slots = GEOM.slots, step = 2*Math.PI/slots, sw = step * GEOM.slotWidthRatio;
     for (let s = 0; s < slots; s++) {
       const ang = s*step, elAng = ang*GEOM.p;
@@ -4513,7 +5986,11 @@ function escHtml(s) {
     const My_acc = new Float32Array(N*N);
     const poles  = GEOM.p*2;
     const legs   = magnetLegs(GEOM);
-    const Jm_amp = (8000 / N) * _magOrientFactor(GEOM);   // 90°-rotation flux scaling
+    // ×4 restores the amplitude lost when the magnet rasterisation switched from
+    // sub-pixel accumulation (the old l+=0.5/t+=0.5 loops hit each pixel ~2×2 times)
+    // to a clean one-contribution-per-pixel mask — without it the magnet flux is ~4×
+    // too weak vs. the stator and field lines no longer cross the magnets perpendicular.
+    const Jm_amp = (8000 / N) * 4 * _magOrientFactor(GEOM);   // 90°-rotation flux scaling
     const rRO_mm = GEOM.rotorOD/2;
 
     for (let p2 = 0; p2 < poles; p2++) {
@@ -4530,29 +6007,43 @@ function escHtml(s) {
         if (GEOM.magOrient === "longitudinal") { const _t = mdx; mdx = -mdy; mdy = _t; }
         const Jm = Jm_amp * mSign * lg.magSign;
         const mH = lg.thickness * gs;
+        // Clean per-pixel top-hat (mirror of ema_analysis._rasterise's boolean
+        // mask): visit each pixel of the magnet's bounding box ONCE and test the
+        // inside predicate, so Mx/My accumulate exactly one contribution per pixel.
+        // The old sub-pixel stepping (l+=0.5,t+=0.5) hit interior pixels ~4× and
+        // ragged edge pixels fewer times — that sampling-density bumpiness, run
+        // through curl(M), injected spurious equivalent currents that showed up as
+        // tight, strange flux loops around every magnet.
         if (lg.placement === "surface") {
+          const centerAng = pA + lg.offset / rRO_mm;
           const halfArc = (lg.length/2) / rRO_mm;
-          const ca = lg.offset / rRO_mm;
-          const r1 = rRO * gs, r0 = r1 - mH;   // outer rotor band (inside the OD)
-          for (let rad = r0; rad <= r1; rad += 0.5) {
-            for (let a = -halfArc; a <= halfArc; a += 0.012) {
-              const th = pA + ca + a;
-              const gx = center + rad*Math.cos(th), gy = center + rad*Math.sin(th);
-              const ix=Math.floor(gx), iy=Math.floor(gy);
-              if(ix>=0&&ix<N&&iy>=0&&iy<N){ const idx=iy*N+ix; gridMu[idx]=1.5; Mx_acc[idx]+=Jm*mdx; My_acc[idx]+=Jm*mdy; }
-            }
+          const r1 = rRO, r0 = r1 - mH;   // outer rotor band (rRO already in grid units)
+          const ri = Math.ceil(r1);
+          const yA=Math.max(0,Math.floor(center-ri)), yB=Math.min(N-1,Math.ceil(center+ri));
+          const xA=Math.max(0,Math.floor(center-ri)), xB=Math.min(N-1,Math.ceil(center+ri));
+          for(let iy=yA;iy<=yB;iy++)for(let ix=xA;ix<=xB;ix++){
+            const ddx=ix-center, ddy=iy-center, rr=Math.sqrt(ddx*ddx+ddy*ddy);
+            if(rr<r0||rr>r1)continue;
+            let d=Math.atan2(ddy,ddx)-centerAng+Math.PI;
+            d-=2*Math.PI*Math.floor(d/(2*Math.PI));
+            if(Math.abs(d-Math.PI)<=halfArc){ const idx=iy*N+ix; gridMu[idx]=1.5; Mx_acc[idx]+=Jm*mdx; My_acc[idx]+=Jm*mdy; }
           }
         } else {
-          const sX = lg.rPos*gs*cpA - lg.offset*gs*spA;
-          const sY = lg.rPos*gs*spA + lg.offset*gs*cpA;
+          const sX = center + lg.rPos*gs*cpA - lg.offset*gs*spA;
+          const sY = center + lg.rPos*gs*spA + lg.offset*gs*cpA;
           const tx = -ly, ty = lx;
           const w = lg.length*gs, h = mH;
-          for (let l = 0; l < w; l+=0.5) {
-            for (let t = -h/2; t < h/2; t+=0.5) {
-              const gx=center+sX+l*lx+t*tx, gy=center+sY+l*ly+t*ty;
-              const ix=Math.floor(gx), iy=Math.floor(gy);
-              if(ix>=0&&ix<N&&iy>=0&&iy<N){ const idx=iy*N+ix; gridMu[idx]=1.5; Mx_acc[idx]+=Jm*mdx; My_acc[idx]+=Jm*mdy; }
-            }
+          let minX=1e9,maxX=-1e9,minY=1e9,maxY=-1e9;   // rotated-rect bounding box
+          for(const lv of [0,w])for(const tv of [-h/2,h/2]){
+            const cx=sX+lv*lx+tv*tx, cy=sY+lv*ly+tv*ty;
+            if(cx<minX)minX=cx; if(cx>maxX)maxX=cx; if(cy<minY)minY=cy; if(cy>maxY)maxY=cy;
+          }
+          const xA=Math.max(0,Math.floor(minX)-1), xB=Math.min(N-1,Math.ceil(maxX)+1);
+          const yA=Math.max(0,Math.floor(minY)-1), yB=Math.min(N-1,Math.ceil(maxY)+1);
+          for(let iy=yA;iy<=yB;iy++)for(let ix=xA;ix<=xB;ix++){
+            const ddx=ix-sX, ddy=iy-sY;
+            const lc=ddx*lx+ddy*ly, tc=ddx*tx+ddy*ty;
+            if(lc>=0 && lc<=w && Math.abs(tc)<=h/2){ const idx=iy*N+ix; gridMu[idx]=1.5; Mx_acc[idx]+=Jm*mdx; My_acc[idx]+=Jm*mdy; }
           }
         }
       }
@@ -4568,12 +6059,24 @@ function escHtml(s) {
   }
 
   function solveField() {
-    const N = GRID_SIZE, iter = PHYS.ultraSlow ? 80 : 30;
+    // Variable-permeability operator ∇·(ν∇A) = −J with harmonic-mean face ν (ν=1/µ),
+    // mirroring the Python FDM (ema_analysis._build_fv_matrix). THIS is what makes the
+    // field REFRACT around low-permeability AIR — the flux barriers, the hollow-shaft
+    // bore, the magnet pockets and the surrounding air all carry µr≈1 vs. µr=500 iron,
+    // so flux avoids them and concentrates in the iron. The old constant Laplacian only
+    // scaled the source by µ and ignored the air's reluctance entirely. In a uniform
+    // region the amplitude is preserved: Σf = 4/µ ⇒ J/Σf = µ·J/4 (= the old µ·J·0.25).
+    const N = GRID_SIZE, iter = PHYS.ultraSlow ? 100 : 40;
     for (let k=0;k<iter;k++) {
       for (let y=1;y<N-1;y++) for (let x=1;x<N-1;x++) {
         const i = y*N+x;
-        const nb = gridA[i-1]+gridA[i+1]+gridA[i-N]+gridA[i+N];
-        const tgt = (nb + gridMu[i]*gridJ[i])*0.25;
+        const nuC = 1.0/gridMu[i];
+        const nuE = 1.0/gridMu[i+1], nuW = 1.0/gridMu[i-1];
+        const nuN = 1.0/gridMu[i+N], nuS = 1.0/gridMu[i-N];
+        const fE = 2*nuC*nuE/(nuC+nuE), fW = 2*nuC*nuW/(nuC+nuW);
+        const fN = 2*nuC*nuN/(nuC+nuN), fS = 2*nuC*nuS/(nuC+nuS);
+        const sumF = fE+fW+fN+fS;
+        const tgt = (fE*gridA[i+1]+fW*gridA[i-1]+fN*gridA[i+N]+fS*gridA[i-N] + gridJ[i]) / sumF;
         gridA[i] += 1.4*(tgt - gridA[i]);
       }
     }
@@ -4584,6 +6087,10 @@ function escHtml(s) {
     const dt = PHYS.ultraSlow ? 0.000005 : dt_base*PHYS.timeScale;
     if (isNaN(PHYS.omega)) PHYS.omega = 0;
     GEOM.airGap = Math.max(0.1, (GEOM.statorID - GEOM.rotorOD)/2);
+    // Direct speed setpoint: pin the rotor to the chosen rpm BEFORE the current
+    // update so field weakening (i_d) reflects it — instead of the torque-driven
+    // run-up. Same 9.55 (≈30/π) factor as the rpm display so the value matches.
+    if (PHYS.rpmSet > 0) PHYS.omega = PHYS.rpmSet / 9.55;
     const tiq = Math.min((PHYS.load+20)*1.5, 800);
     let tid = -0.4*tiq;
     if (Math.abs(PHYS.omega*9.55) > 5000) tid -= (Math.abs(PHYS.omega*9.55)-5000)*0.1;
@@ -4591,10 +6098,12 @@ function escHtml(s) {
     PHYS.iq += (tiq - PHYS.iq)*0.1;
     PHYS.id += (tid - PHYS.id)*0.1;
     PHYS.torque = 1.5*GEOM.p*(PHYS.Psi*PHYS.iq + (PHYS.Ld-PHYS.Lq)*PHYS.id*PHYS.iq);
-    const T_net = PHYS.torque - Math.sign(PHYS.omega)*PHYS.load - (0.01+Math.abs(PHYS.omega)*0.00001)*PHYS.omega;
-    PHYS.omega += (T_net/PHYS.J)*dt;
-    const mxW = 30000/9.55;
-    PHYS.omega = Math.max(-mxW, Math.min(mxW, PHYS.omega));
+    if (PHYS.rpmSet <= 0) {   // free run-up only when no setpoint is given
+      const T_net = PHYS.torque - Math.sign(PHYS.omega)*PHYS.load - (0.01+Math.abs(PHYS.omega)*0.00001)*PHYS.omega;
+      PHYS.omega += (T_net/PHYS.J)*dt;
+      const mxW = 30000/9.55;
+      PHYS.omega = Math.max(-mxW, Math.min(mxW, PHYS.omega));
+    }
     PHYS.angle += PHYS.omega*dt;
   }
 
@@ -4668,7 +6177,32 @@ function escHtml(s) {
     const rRO = (GEOM.rotorOD/2)*SCALE;
     for (let i=0;i<poles;i++) {
       ctx.save(); ctx.rotate(i*step);
-      const magColor = i%2===0 ? "#e74c3c" : "#3498db";
+      // Colour by the pole's PHYSICAL polarity (red = N = net magnetisation pointing
+      // radially OUT). IDENTICAL net-radial rule to ema_pipeline._draw_magnet_outlines,
+      // so red means the same physical pole here AND in the FEM field plot. Pure i%2
+      // parity is ambiguous (red=S for a V-pole, red=N for SPM). Index fallback only
+      // when the net radial component vanishes (spoke = tangential magnetisation).
+      const _sgn = i%2===0 ? 1 : -1, _cpA = Math.cos(i*step), _spA = Math.sin(i*step);
+      let _net = 0;
+      for (const lg of legs) {
+        const _la = i*step + lg.tilt, _lx = Math.cos(_la), _ly = Math.sin(_la);
+        let _mdx, _mdy;
+        if (lg.magMode === "tangential") { _mdx=-_spA; _mdy=_cpA; }
+        else if (lg.magMode === "radial") { const _b=i*step+lg.magRot; _mdx=Math.cos(_b); _mdy=Math.sin(_b); }
+        else { _mdx=-_ly; _mdy=_lx; }
+        if (GEOM.magOrient === "longitudinal") { const _t=_mdx; _mdx=-_mdy; _mdy=_t; }
+        const _amp = _sgn * lg.magSign;
+        let _pax, _pay;
+        if (lg.placement === "surface") { const _ca=i*step+lg.offset/(GEOM.rotorOD/2); _pax=Math.cos(_ca); _pay=Math.sin(_ca); }
+        else {
+          const _sx=lg.rPos*_cpA - lg.offset*_spA, _sy=lg.rPos*_spA + lg.offset*_cpA;
+          const _mx=_sx+0.5*lg.length*_lx, _my=_sy+0.5*lg.length*_ly, _rr=Math.hypot(_mx,_my)||1;
+          _pax=_mx/_rr; _pay=_my/_rr;
+        }
+        _net += _amp*(_mdx*_pax + _mdy*_pay);
+      }
+      const _isN = Math.abs(_net) > 1e-6 ? _net > 0 : (i%2===0);
+      const magColor = _isN ? "#e74c3c" : "#3498db";
       ctx.fillStyle = magColor;
       for (const lg of legs) {
         const mH = lg.thickness*SCALE;

@@ -36,6 +36,8 @@ FREE_PARAMS = {
     "slotDepth":   {"geom": "slotDepth",   "label": "Nuttiefe [mm]",          "lo": 2,   "hi": 150, "type": float},
     "p":           {"geom": "p",           "label": "Polpaare",               "lo": 1,   "hi": 40,  "type": int},
     "axial":       {"special": "axial",    "label": "Blechpaketlänge [mm]",   "lo": 5,   "hi": 600, "type": float},
+    "airgap":      {"special": "airgap",   "label": "Luftspalt Stator-Rotor [mm]", "lo": 0.1, "hi": 3.0, "type": float},
+    "magGap":      {"geom": "magGapMm",    "label": "Magnet-Luftspalt [mm]",  "lo": 0.05,"hi": 0.3, "type": float},
 }
 
 # Metrics the evaluator produces (objective / constraints pick from these)
@@ -83,15 +85,23 @@ def _apply_params(base_geom, base_axial, params):
             continue
         if spec.get("special") == "axial":
             axial = float(v)
+        elif spec.get("special") == "airgap":
+            # stator-rotor air gap drives the stator bore: statorID = rotorOD + 2·gap
+            geom["statorID"] = float(geom["rotorOD"]) + 2.0 * float(v)
         else:
             geom[spec["geom"]] = spec["type"](v)
     return geom, axial
 
 
-def evaluate_fast(base_geom, base_axial, params, mats, op,
-                  cooling, T_amb, sweep_rpms, N=140):
-    """FreeCAD/FEM-free metric evaluation for one candidate parameter set."""
-    geom, axial = _apply_params(base_geom, base_axial, params)
+def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
+    """FreeCAD/FEM-free metric evaluation for an ALREADY-built geometry dict.
+
+    This is the shared evaluation core: EM field at low resolution → analytical
+    Kt/torque, steady-state LPTN thermal, analytical mass + structural sweep.
+    ``evaluate_fast`` (parametric search) and the per-magnet layout optimiser
+    (``ema_design_optimize``) both call this so the metrics stay identical. Works
+    for any ``magShape`` incl. ``"custom"`` (the custom legs/barriers in ``geom``
+    are honoured by ``run_em_analysis`` unchanged)."""
     mat, st_mat, hp_mat, mag = mats
     _Br, _mu = ema_analysis.Br_NdFeB, ema_analysis.MU_R_MAG
     ema_analysis.Br_NdFeB, ema_analysis.MU_R_MAG = mag["Br"], mag["mu_r"]
@@ -126,6 +136,13 @@ def evaluate_fast(base_geom, base_axial, params, mats, op,
         return {"error": str(e)[:160]}
     finally:
         ema_analysis.Br_NdFeB, ema_analysis.MU_R_MAG = _Br, _mu
+
+
+def evaluate_fast(base_geom, base_axial, params, mats, op,
+                  cooling, T_amb, sweep_rpms, N=140):
+    """FreeCAD/FEM-free metric evaluation for one candidate parameter set."""
+    geom, axial = _apply_params(base_geom, base_axial, params)
+    return _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=N)
 
 
 # ── feasibility + fitness ────────────────────────────────────────────────────

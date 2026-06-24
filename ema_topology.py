@@ -69,6 +69,7 @@ TOPOLOGY_LABELS = {
     "spm":      "SPM radial (Oberfläche)",
     "halbach":  "Halbach-Array (Oberfläche)",
     "spoke":    "Speichen-Typ (Flusskonzentration)",
+    "custom":   "Designer (frei gezeichnet)",
 }
 
 
@@ -351,6 +352,35 @@ def _build_spoke(geom: dict):
 
 # Registry. Unknown codes fall back to the flat bar (matches the historical
 # `else` branch in the consumers).
+def _build_custom(geom: dict):
+    """Free-form designer topology: the magnets are supplied explicitly as
+    ``geom["customLegs"]`` — a list of ONE pole's straight magnets in the pole-local
+    frame (x=radial out, y=tangential), already mirrored across the d-axis by the
+    canvas designer. Each item: {r_pos, offset, tilt_deg, length, thickness,
+    mag_sign, mag_mode?}. The per-pole replication + polarity alternation is done by
+    the consumers (FreeCAD / FDM), exactly as for the parametric topologies."""
+    legs = []
+    for it in (geom.get("customLegs") or []):
+        try:
+            legs.append(Leg(
+                r_pos=float(it["r_pos"]),
+                offset=float(it.get("offset", 0.0)),
+                tilt=math.radians(float(it.get("tilt_deg", 0.0))),
+                length=float(it["length"]),
+                thickness=float(it["thickness"]),
+                mag_mode=str(it.get("mag_mode", "perp")),
+                mag_sign=int(it.get("mag_sign", 1)),
+                placement="interior",
+                layer=int(it.get("layer", 0)),
+            ))
+        except (KeyError, TypeError, ValueError):
+            continue
+    meta = MotorTopoMeta(
+        code="custom", label=TOPOLOGY_LABELS.get("custom", "Designer (frei)"),
+        n_legs_per_pole=max(1, len(legs)), is_surface=False, eta_hint=1.0)
+    return legs, meta
+
+
 _BUILDERS = {
     "v":        _build_v,
     "vasym":    _build_vasym,
@@ -362,6 +392,7 @@ _BUILDERS = {
     "spm":      _build_spm,
     "halbach":  _build_halbach,
     "spoke":    _build_spoke,
+    "custom":   _build_custom,
 }
 
 

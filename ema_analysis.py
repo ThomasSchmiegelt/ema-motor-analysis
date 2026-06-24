@@ -146,6 +146,30 @@ def _rasterise(geom: dict, N: int, rotor_angle: float = 0.0,
             _slot = (R >= _r_in) & (R <= _r_out) & (R * _dth <= _fbw / 2.0)
             mu[_slot] = 1.0
 
+    # Custom (designer) flux barriers: free-form polylines in the pole-local frame,
+    # replicated per pole + rotating with the rotor. Each barrier = a thick polyline
+    # (capsule), carved as air. Mirrors the FreeCAD custom-barrier solids.
+    _cbars = geom.get("customBarriers") or []
+    if _cbars:
+        _poles_c = int(geom["p"]) * 2
+        for _p in range(_poles_c):
+            _pa = _p * 2 * math.pi / _poles_c + rotor_angle
+            _ca, _sa = math.cos(_pa), math.sin(_pa)
+            for _bar in _cbars:
+                _pts = _bar.get("pts") or []
+                _w   = max(0.5, float(_bar.get("width", 3.0))) * sc / 2.0   # half-width px
+                _gp  = [((px * _ca - py * _sa) * sc, (px * _sa + py * _ca) * sc)
+                        for px, py in _pts]
+                for _i in range(len(_gp) - 1):
+                    _ax, _ay = _gp[_i]; _bx, _by = _gp[_i + 1]
+                    _dx, _dy = _bx - _ax, _by - _ay
+                    _ll = _dx * _dx + _dy * _dy
+                    if _ll < 1e-9:
+                        continue
+                    _t = np.clip(((X - _ax) * _dx + (Y - _ay) * _dy) / _ll, 0.0, 1.0)
+                    _cx = _ax + _t * _dx; _cy = _ay + _t * _dy
+                    mu[((X - _cx) ** 2 + (Y - _cy) ** 2) <= _w * _w] = 1.0
+
     # Stator slots (air) + winding currents (dq-modulated by rotor angle)
     n_slots    = int(geom["slots"])
     p_pairs    = int(geom["p"])

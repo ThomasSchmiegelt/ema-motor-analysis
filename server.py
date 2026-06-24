@@ -24,6 +24,11 @@ _report_state = {"status": "idle", "progress": 0, "log": [],
 # Target-value optimisation state (LLM-steered fast search)
 _opt_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
 
+# KI-Auslegung (Designer): LLM entwirft komplette Maschinen (Maße + gezeichnete Geometrie)
+_design_state     = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+# Per-Magnet-Fein-Optimierung eines gezeichneten Custom-Designs
+_design_opt_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+
 # Parameter-study state (one parameter swept at a fixed speed, fast evaluator)
 _study_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
 # Field-line frames/video of the most recent parameter study (overwritten each run)
@@ -33,6 +38,13 @@ os.makedirs(STUDY_FIELD_DIR, exist_ok=True)
 # Geometry-only CAD preview + smoke-test state (staged workflow, separate threads)
 _cad_state   = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
 _smoke_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+
+# STEP-Import: erkennt Magnetlage aus einer hochgeladenen Motor-STEP, schreibt
+# motor.FCStd (Rotor benannt) und liefert die erkannte Geometrie an den Designer.
+_import_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+
+# Echte 3D-Magnetfeldberechnung (Elmer FEM): On-Demand-Job neben dem 2D-Pfad.
+_em3d_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
 
 
 # ── Static ────────────────────────────────────────────────────────────────────
@@ -102,6 +114,215 @@ def _run_cad_preview(data):
 def cad_preview_status():
     return jsonify({k: _cad_state[k]
                     for k in ("status", "progress", "log", "result", "error")})
+
+
+# ── STEP-Import: Magnet-Erkennung + Festigkeits-/EM-Analyse eines fertigen Motors ─
+
+@app.route("/import_step", methods=["POST", "OPTIONS"])
+def import_step():
+    """Multipart-Upload einer Motor-STEP. Legt ein Projekt an, speichert die STEP,
+    erkennt im Hintergrund die Magnetlage + Maße und schreibt motor.FCStd (mit
+    benanntem "Rotor"). Das Ergebnis (applyDesignToCanvas-Form) wird über
+    /import_step/status abgeholt; der Nutzer bestätigt es im Designer und rechnet
+    dann wie gewohnt über /analyse (Payload mit imported=true)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if _import_state["status"] == "running":
+        return jsonify({"error": "Import läuft bereits"}), 409
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"error": "keine Datei"}), 400
+    if not f.filename.lower().endswith((".step", ".stp")):
+        return jsonify({"error": "Bitte eine STEP-Datei (.step/.stp) hochladen"}), 400
+
+    from ema_pipeline import create_project_dir
+    proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, "import")
+    step_path = os.path.join(proj_dir, "import.step")
+    f.save(step_path)
+    _state["project_dir"] = proj_dir   # so /open_freecad + /download_step work
+    _state["project_id"]  = proj_id
+
+    _import_state.update({"status": "running", "progress": 0, "log": [],
+                          "result": None, "error": None})
+
+    def _worker():
+        import ema_step_import
+        def cb(msg, pct=None):
+            _import_state["log"].append(msg)
+            if pct is not None:
+                _import_state["progress"] = int(pct)
+        try:
+            res = ema_step_import.run_import(step_path, proj_dir, progress_cb=cb)
+            res["project_id"] = proj_id
+            _import_state["result"]   = res
+            _import_state["status"]   = "done"
+            _import_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _import_state["error"] = str(e)
+            _import_state["log"].append("⚠ " + str(e))
+            _import_state["log"].append(traceback.format_exc()[:500])
+            _import_state["status"] = "error"
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+@app.route("/import_step/status")
+def import_step_status():
+    return jsonify({k: _import_state[k]
+                    for k in ("status", "progress", "log", "result", "error")})
+
+
+# ── Echte 3D-Magnetfeldberechnung (Elmer FEM) ───────────────────────────────────
+
+@app.route("/em3d", methods=["POST", "OPTIONS"])
+def em3d_start():
+    """Startet die 3D-Magnetostatik (Gmsh-Mesh → Elmer). Body = normaler Analyse-
+    Payload (geom + axial_len) + 3D-Optionen (skew_deg, mesh_cl, gap_cl, airbox_factor).
+    503 wenn Elmer fehlt."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import elmer_runner
+    if not elmer_runner.ELMER_OK:
+        return jsonify({"error": elmer_runner.INSTALL_HINT, "need_install": True}), 503
+    if _em3d_state["status"] == "running":
+        return jsonify({"error": "3D-Berechnung läuft bereits"}), 409
+    data = request.get_json(force=True) or {}
+
+    from ema_pipeline import create_project_dir
+    pd = _state.get("project_dir")
+    if pd and os.path.isdir(pd):
+        proj_dir, proj_id = pd, _state.get("project_id")
+    else:
+        proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, data.get("project_name") or "em3d")
+        _state["project_dir"], _state["project_id"] = proj_dir, proj_id
+
+    _em3d_state.update({"status": "running", "progress": 0, "log": [],
+                        "result": None, "error": None})
+
+    def _worker():
+        import ema_em3d
+        def cb(msg, pct=None):
+            _em3d_state["log"].append(msg)
+            if pct is not None:
+                _em3d_state["progress"] = int(pct)
+        try:
+            res = ema_em3d.run_em3d(data, proj_dir, progress_cb=cb)
+            res["project_id"] = proj_id
+            _em3d_state["result"]   = res
+            _em3d_state["status"]   = "done"
+            _em3d_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _em3d_state["error"] = str(e)
+            _em3d_state["log"].append("⚠ " + str(e))
+            _em3d_state["log"].append(traceback.format_exc()[:600])
+            _em3d_state["status"] = "error"
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+@app.route("/em3d/status")
+def em3d_status():
+    return jsonify({k: _em3d_state[k]
+                    for k in ("status", "progress", "log", "result", "error")})
+
+
+@app.route("/em3d/preview", methods=["POST", "OPTIONS"])
+def em3d_preview():
+    """Schnelle 3D-MODELL-Vorschau (Gmsh-Mesh → vtk-Render), OHNE Elmer. Teilt sich
+    Status/Anzeige mit /em3d (``_em3d_state``)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if _em3d_state["status"] == "running":
+        return jsonify({"error": "3D-Job läuft bereits"}), 409
+    data = request.get_json(force=True) or {}
+    from ema_pipeline import create_project_dir
+    pd = _state.get("project_dir")
+    if pd and os.path.isdir(pd):
+        proj_dir, proj_id = pd, _state.get("project_id")
+    else:
+        proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, data.get("project_name") or "em3d")
+        _state["project_dir"], _state["project_id"] = proj_dir, proj_id
+    _em3d_state.update({"status": "running", "progress": 0, "log": [],
+                        "result": None, "error": None})
+
+    def _worker():
+        import ema_em3d
+        def cb(msg, pct=None):
+            _em3d_state["log"].append(msg)
+            if pct is not None:
+                _em3d_state["progress"] = int(pct)
+        try:
+            res = ema_em3d.render_model_preview(data, proj_dir, progress_cb=cb)
+            res["project_id"] = proj_id
+            _em3d_state.update({"result": res, "status": "done", "progress": 100})
+        except Exception as e:
+            import traceback
+            _em3d_state["error"] = str(e)
+            _em3d_state["log"].append("⚠ " + str(e))
+            _em3d_state["log"].append(traceback.format_exc()[:600])
+            _em3d_state["status"] = "error"
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+@app.route("/em3d/vtu")
+def em3d_vtu():
+    """Lädt die VTU-Ergebnisdatei (ParaView) des letzten 3D-Laufs herunter."""
+    res = _em3d_state.get("result") or {}
+    vtu = res.get("vtu_path")
+    if not vtu or not os.path.exists(vtu):
+        return jsonify({"error": "keine VTU vorhanden"}), 404
+    return send_file(vtu, as_attachment=True, download_name="motor_3d_feld.vtu")
+
+
+@app.route("/em3d/vtp")
+def em3d_vtp():
+    """Serviert die schlanke .vtp (Festkörper-Oberfläche, |B|) für den eingebetteten
+    vtk.js-Browser-Viewer."""
+    res = _em3d_state.get("result") or {}
+    vtp = res.get("vtp_path")
+    if not vtp or not os.path.exists(vtp):
+        return jsonify({"error": "keine VTP vorhanden"}), 404
+    return send_file(vtp, mimetype="application/octet-stream")
+
+
+@app.route("/vendor/<path:name>")
+def vendor_file(name):
+    """Lokal eingebettete JS-Bibliotheken (z. B. vtk.js für den 3D-Browser-Viewer)."""
+    if not _safe_name(name):
+        return jsonify({"error": "ungültiger Name"}), 403
+    vdir = os.path.join(os.path.dirname(__file__), "vendor")
+    if not os.path.exists(os.path.join(vdir, name)):
+        return jsonify({"error": "nicht gefunden"}), 404
+    return send_from_directory(vdir, name)
+
+
+@app.route("/em3d/paraview")
+def em3d_paraview():
+    """Öffnet die VTU des letzten 3D-Laufs direkt in der ParaView-GUI (wie „🔧 FreeCAD"
+    das FCStd öffnet). Lädt die Datei, färbt nach |B| und passt die Kamera an."""
+    import subprocess, shutil
+    res = _em3d_state.get("result") or {}
+    vtu = res.get("vtu_path")
+    if not vtu or not os.path.exists(vtu):
+        return jsonify({"error": "Keine 3D-Ergebnisdatei — erst 3D-Feld berechnen"}), 404
+    pv = shutil.which("paraview")
+    if not pv:
+        return jsonify({"error": "ParaView nicht gefunden. Installation: sudo apt install paraview",
+                        "need_install": True}), 503
+    # --data lädt die VTU direkt als Quelle (robust über alle ParaView-Builds; das
+    # Einfärben nach |B| ist dann ein Klick auf „magnetic flux density"/„Apply").
+    try:
+        subprocess.Popen([pv, "--data=" + vtu],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception as e:
+        return jsonify({"error": f"ParaView starten fehlgeschlagen: {e}"}), 500
+    return jsonify({"status": "launched", "file": vtu})
 
 
 @app.route("/smoke_test", methods=["POST", "OPTIONS"])
@@ -232,6 +453,143 @@ def optimize_meta():
               "int": v["type"] is int}
           for k, v in ema_optimize.FREE_PARAMS.items()}
     return jsonify({"free_params": fp, "metrics": ema_optimize.METRICS})
+
+
+@app.route("/design_ai", methods=["POST", "OPTIONS"])
+def design_ai_start():
+    """KI entwirft komplette Maschinen aus einer Beschreibung (Designer-Pfad).
+    Body = {brief, n, model?, max_regen?}. Jeder Entwurf wird FreeCAD/FEM-frei
+    vorsortiert; „schlechte" werden bis ``max_regen`` mal neu generiert. Returns
+    variants (mit ``quality``-Urteil) + rejected/regenerated."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if _design_state["status"] == "running":
+        return jsonify({"error": "KI-Entwurf läuft bereits"}), 409
+    body  = request.get_json(force=True) or {}
+    brief = body.get("brief", "") or body.get("description", "")
+    n     = int(body.get("n", 3))
+    max_regen = int(body.get("max_regen", 2))
+    model = body.get("model") or "ministral-3:14b"
+    _design_state.update({"status": "running", "progress": 0, "log": [],
+                          "result": None, "error": None})
+
+    def _worker():
+        import ema_design_ai
+        def cb(msg, pct=None):
+            _design_state["log"].append(msg)
+            if pct is not None:
+                _design_state["progress"] = int(pct)
+        try:
+            _design_state["result"] = ema_design_ai.design_variants(
+                brief, n=n, model=model, max_regen=max_regen, progress_cb=cb)
+            _design_state["status"] = "done"
+            _design_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _design_state["error"] = str(e)
+            _design_state["log"].append("⚠ " + str(e))
+            _design_state["status"] = "error"
+            print(traceback.format_exc())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/design_ai_ranged", methods=["POST", "OPTIONS"])
+def design_ai_ranged_start():
+    """Bereichs-/Zufalls-Entwurf (Designer-Pfad). Body = {ranges, n, model?, max_regen?}
+    mit ranges = {statorOD:[lo,hi], axialLen:[lo,hi], shaftD:[lo,hi]} (Luftspalt fest
+    0,5–2 mm). Pro Variante werden die Maße zufällig gezogen + erzwungen, das LLM
+    zeichnet Magnete/Barrieren. Gerechnet wird an festen Drehzahlen (result.rpm_list).
+    Teilt sich Status/Polling mit ``/design_ai`` (``_design_state``)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if _design_state["status"] == "running":
+        return jsonify({"error": "KI-Entwurf läuft bereits"}), 409
+    body   = request.get_json(force=True) or {}
+    ranges = body.get("ranges") or {}
+    brief  = body.get("brief", "") or ""
+    n      = int(body.get("n", 3))
+    max_regen = int(body.get("max_regen", 2))
+    model  = body.get("model") or "ministral-3:14b"
+    _design_state.update({"status": "running", "progress": 0, "log": [],
+                          "result": None, "error": None})
+
+    def _worker():
+        import ema_design_ai
+        def cb(msg, pct=None):
+            _design_state["log"].append(msg)
+            if pct is not None:
+                _design_state["progress"] = int(pct)
+        try:
+            _design_state["result"] = ema_design_ai.design_variants_ranged(
+                ranges, n=n, model=model, max_regen=max_regen, progress_cb=cb, brief=brief)
+            _design_state["status"] = "done"
+            _design_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _design_state["error"] = str(e)
+            _design_state["log"].append("⚠ " + str(e))
+            _design_state["status"] = "error"
+            print(traceback.format_exc())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/design_ai/status")
+def design_ai_status():
+    return jsonify({
+        "status":   _design_state["status"],
+        "progress": _design_state["progress"],
+        "log":      _design_state["log"][-40:],
+        "result":   _design_state["result"],
+        "error":    _design_state["error"],
+    })
+
+
+@app.route("/design_optimize", methods=["POST", "OPTIONS"])
+def design_optimize_start():
+    """Per-Magnet-Fein-Optimierung eines gezeichneten Custom-Designs.
+    Body = {base_payload, magnets, barriers, objective, constraints, iterations, batch}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if _design_opt_state["status"] == "running":
+        return jsonify({"error": "Magnet-Optimierung läuft bereits"}), 409
+    spec = request.get_json(force=True)
+    _design_opt_state.update({"status": "running", "progress": 0, "log": [],
+                              "result": None, "error": None})
+
+    def _worker():
+        import ema_design_optimize
+        def cb(msg, pct=None):
+            _design_opt_state["log"].append(msg)
+            if pct is not None:
+                _design_opt_state["progress"] = int(pct)
+        try:
+            _design_opt_state["result"] = ema_design_optimize.optimize_custom(spec, progress_cb=cb)
+            _design_opt_state["status"] = "done"
+            _design_opt_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _design_opt_state["error"] = str(e)
+            _design_opt_state["log"].append("⚠ " + str(e))
+            _design_opt_state["status"] = "error"
+            print(traceback.format_exc())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/design_optimize/status")
+def design_optimize_status():
+    return jsonify({
+        "status":   _design_opt_state["status"],
+        "progress": _design_opt_state["progress"],
+        "log":      _design_opt_state["log"][-40:],
+        "result":   _design_opt_state["result"],
+        "error":    _design_opt_state["error"],
+    })
 
 
 @app.route("/param_study", methods=["POST", "OPTIONS"])
@@ -380,7 +738,17 @@ def param_study_report_download():
 def _run(data):
     from ema_pipeline import run_pipeline, create_project_dir
     try:
-        proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, data.get("project_name", ""))
+        # STEP-Import: das vom Import angelegte Projekt (mit der erkannten motor.FCStd,
+        # benanntem "Rotor") WIEDERVERWENDEN statt ein leeres neues anzulegen — sonst
+        # fände run_pipeline die importierte Geometrie nicht und würde sie parametrisch
+        # neu bauen. Nur akzeptiert, wenn der Ordner + die motor.FCStd existieren.
+        reuse_id = data.get("project_id") if data.get("imported") else None
+        reuse_dir = (os.path.join(PROJECTS_ROOT, reuse_id)
+                     if reuse_id and _safe_name(reuse_id) else None)
+        if reuse_dir and os.path.exists(os.path.join(reuse_dir, "motor.FCStd")):
+            proj_dir, proj_id = reuse_dir, reuse_id
+        else:
+            proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, data.get("project_name", ""))
         _state["project_dir"] = proj_dir
         _state["project_id"]  = proj_id
         run_pipeline(data, _state, _frames, WORKSPACE, proj_dir)
@@ -1005,6 +1373,7 @@ def make_report(pid: str):
                 from ema_report import generate_report
                 r = generate_report(proj, model=model, progress_cb=_cb)
             _report_state["pdf_path"] = r["pdf"]
+            _report_state["rag_md_path"] = r.get("rag_md")
             # "Immer nur der letzte Bericht": drop the other-mode PDF so exactly one
             # report stays in the project (and thus a single entry in the gallery).
             _keep = os.path.basename(r["pdf"])
@@ -1034,6 +1403,8 @@ def report_status():
         "project_id": _report_state.get("project_id"),
         "has_pdf":    bool(_report_state.get("pdf_path") and
                             os.path.exists(_report_state["pdf_path"])),
+        "has_rag_md": bool(_report_state.get("rag_md_path") and
+                            os.path.exists(_report_state["rag_md_path"])),
     })
 
 
@@ -1058,6 +1429,36 @@ def download_report(pid: str):
         else:
             return jsonify({"error": "Bericht noch nicht erzeugt"}), 404
     return send_file(pdf, as_attachment=True, download_name=f"{pid}_{fname}")
+
+
+@app.route("/project/<pid>/report/rag_md")
+def download_report_rag_md(pid: str):
+    """Download the value-free RAG markdown (bericht_rag.md) of a project."""
+    if not _safe_name(pid):
+        return "", 403
+    path = os.path.join(PROJECTS_ROOT, pid, "bericht_rag.md")
+    if not os.path.exists(path):
+        return jsonify({"error": "RAG-Markdown noch nicht erzeugt"}), 404
+    return send_file(path, as_attachment=True, download_name=f"{pid}_bericht_rag.md")
+
+
+@app.route("/project/<pid>/report/rag_md/add", methods=["POST"])
+def add_report_rag_md(pid: str):
+    """Add the project's value-free RAG markdown to the knowledge base (category 'doku')."""
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    path = os.path.join(PROJECTS_ROOT, pid, "bericht_rag.md")
+    if not os.path.exists(path):
+        return jsonify({"error": "RAG-Markdown noch nicht erzeugt"}), 404
+    try:
+        with open(path, encoding="utf-8") as f:
+            text = f.read()
+        import ema_rag
+        res = ema_rag.add_text(text, title=f"Auslegungsbericht {pid}",
+                               category="doku")
+        return jsonify({"status": "added", **(res if isinstance(res, dict) else {})})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/compare")
@@ -1442,7 +1843,10 @@ def project_rating(pid: str):
         except Exception:
             pass
         return jsonify({"label": rec.get("label"), "comment": rec.get("comment", ""),
-                        "exists": True, "auto": ema_training.auto_label(results, meta)})
+                        "exists": True, "label_source": rec.get("label_source"),
+                        "auto_label": rec.get("auto_label"),
+                        "design_source": rec.get("design_source"),
+                        "auto": ema_training.auto_label(results, meta)})
 
     body = request.get_json(silent=True) or {}
     label = body.get("label")            # "gut" | "schlecht" | null
@@ -1462,6 +1866,43 @@ def project_rating(pid: str):
             return jsonify({"error": f"Projektdaten nicht ladbar: {e}"}), 404
     return jsonify({"status": "saved", "label": rec.get("label"),
                     "comment": rec.get("comment", "")})
+
+
+@app.route("/training/design_rejected", methods=["POST"])
+def training_design_rejected():
+    """Schreibt eine vom Nutzer mit 👎 bewertete (NICHT gerechnete) KI-Variante als
+    „schlecht" ins Trainingsfile. Body = {payload, metrics, project_name?}: payload ist
+    der volle `_dsnBuildPayload()`-Body (Geometrie/Material/Brief), metrics die schnellen
+    FreeCAD/FEM-freien Kennwerte aus der Vorab-Bewertung. Es wird nichts gerechnet."""
+    import ema_training, datetime, random
+    body = request.get_json(force=True) or {}
+    payload = body.get("payload") or {}
+    m = body.get("metrics") or {}
+    meta = {
+        "design_source": "ki",
+        "design_brief":  payload.get("design_brief", ""),
+        "payload":       payload,
+        "materials": {"rotor": payload.get("rotor_lam"), "stator": payload.get("stator_lam"),
+                      "hairpin": payload.get("hairpin_mat"), "magnet": payload.get("magnet")},
+        "rpm_range":     f"{payload.get('rpm_from')}–{payload.get('rpm_to')} U/min",
+        "cooling":       payload.get("cooling"),
+        "T_ambient":     payload.get("T_ambient"),
+        "label":         body.get("project_name") or "KI-Variante (abgelehnt)",
+    }
+    # Schnell-Kennwerte (_eval_geom) → summary-Schema fürs Trainingsfile
+    summary = {
+        "B_gap_T":      m.get("B_gap"),       "Kt_Nm_per_A":  m.get("Kt"),
+        "T_maxwell_Nm": m.get("T_maxwell"),   "max_safe_rpm": m.get("max_safe_rpm"),
+        "mass_g":       m.get("mass_g"),      "P_total_W":    m.get("P_total"),
+        "T_winding_C":  m.get("T_winding"),   "T_magnet_C":   m.get("T_magnet"),
+        "cooling":      payload.get("cooling"),
+    }
+    results = {"summary": {k: v for k, v in summary.items() if v is not None}}
+    pid = "ki_abgelehnt_" + datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f") \
+          + f"_{random.randint(100, 999)}"
+    rec = ema_training.upsert(pid, meta, results, label="schlecht",
+                              comment="Vom Nutzer mit 👎 verworfen (nicht gerechnet).")
+    return jsonify({"status": "ok", "project_id": pid, "label": rec.get("label")})
 
 
 @app.route("/training/stats")

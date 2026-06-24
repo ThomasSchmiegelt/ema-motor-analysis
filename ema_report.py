@@ -48,6 +48,13 @@ def build_context(project_dir: str) -> dict:
         ("deformation",   "charts/deformation.png",              "FEM-Verformung"),
         ("thermal",       "charts/thermal.png",                  "Thermische Analyse (LPTN)"),
         ("drivecycle",    "charts/drivecycle.png",               "Fahrzyklus-Auswertung"),
+        # Echte 3D-Magnetfeldberechnung (Elmer) — nur vorhanden, wenn ein 3D-Lauf lief.
+        ("em3d_model_iso",   "charts/em3d_model_iso.png",   "3D-Modell (Isometrie, aufgeschnitten)"),
+        ("em3d_model_axial", "charts/em3d_model_axial.png", "Magnet-/Polanordnung (Blick entlang der Achse)"),
+        ("em3d_field3d",     "charts/em3d_field3d.png",     "3D-Feld |B| (aufgeschnitten)"),
+        ("em3d_slice_mid",   "charts/em3d_slice_mid.png",   "|B|-Schnitt in der Paketmitte (z = L/2)"),
+        ("em3d_endeffect",   "charts/em3d_endeffect.png",   "Endeffekt: axialer Verlauf der Luftspaltinduktion B(z)"),
+        ("em3d_airgap_2d3d", "charts/em3d_airgap_2d3d.png", "Luftspaltinduktion: 2D-FDM vs. 3D-Elmer"),
     ]
     for key, rel, title in pairs:
         full = os.path.join(project_dir, rel)
@@ -184,6 +191,32 @@ def build_context(project_dir: str) -> dict:
                 "risiko":        dm.get("risk"),
             },
         }
+
+    # Echte 3D-Magnetfeldberechnung (Elmer) — falls für dieses Projekt durchgeführt.
+    e3 = results.get("em3d") or {}
+    if e3:
+        cmp3 = e3.get("compare_2d") or {}
+        bz = e3.get("b_gap_axial") or []
+        endeff = None
+        if bz and max(bz) > 0:
+            endeff = round(min(bz) / max(bz), 3)         # Stirnseite/Mitte
+        mz = e3.get("mesh_zones") or {}
+        ctx["em3d"] = {
+            "B_gap_3D_mid_T":  e3.get("b_gap_mid_peak"),
+            "B_gap_2D_FDM_T":  cmp3.get("B_gap_2D"),
+            "B_gap_3D_cmp_T":  cmp3.get("B_gap_3D_mid"),
+            "endeffekt_rand_zu_mitte": endeff,
+            "skew_deg":        e3.get("skew_deg"),
+            "skew_segments":   e3.get("skew_segments"),
+            "skew_step_deg":   e3.get("skew_step_deg"),
+            "mesh_knoten":     (e3.get("mesh") or {}).get("n_nodes"),
+            "n_barrieren":     (e3.get("mesh") or {}).get("n_barriers"),
+            "zone_luftspalt":  mz.get("gap_cl"),
+            "zone_magnet":     mz.get("mag_cl"),
+            "zone_grob":       mz.get("mesh_cl"),
+            "axial_mm":        e3.get("axial_mm"),
+            "warnungen":       e3.get("warnings", []),
+        }
     return ctx
 
 
@@ -212,6 +245,20 @@ def _prompt_for(ctx: dict) -> str:
         )
     vollast_img   = "[BILD:drivecycle_vollast]"   if "drivecycle_vollast"   in available else ""
     anhaenger_img = "[BILD:drivecycle_anhaenger]" if "drivecycle_anhaenger" in available else ""
+
+    has_3d = bool(ctx.get("em3d"))
+    if has_3d:
+        drei_d_section = (
+            "8. **3D-Magnetfeldvalidierung (Elmer FEM)** — Vergleich der echten 3D-Feldlösung "
+            "mit dem 2D-FDM-Schnittmodell: Bedeutung der finiten Paketlänge und der Endeffekte "
+            "(axiale Feldabnahme zu den Stirnseiten), Plausibilität von B_gap 3D vs. 2D, und – "
+            "falls vorhanden – die Wirkung der Schrägung bzw. der gestaffelten Staffelung "
+            "(Step-Skew) auf Rastmoment/Oberwellen. Qualitativ, ohne Zahlen.")
+        drei_d_img = ("- Abschnitt 8 3D-Validierung:        [BILD:em3d_field3d]  und  "
+                      "[BILD:em3d_endeffect]  und  [BILD:em3d_airgap_2d3d]  und  [BILD:em3d_model_iso]\n")
+    else:
+        drei_d_section = ""
+        drei_d_img = ""
 
     return f"""Du bist ein erfahrener E-Maschinen-Auslegungsingenieur und schreibst einen technischen Auslegungsbericht auf Deutsch.
 
@@ -242,6 +289,7 @@ Schreibe einen strukturierten, sachlichen Bericht in Markdown mit genau diesen A
 5. **Thermisches Verhalten** — Kühlung, Endtemperaturen, Gesamtverluste, ggf. Warnungen; falls `em_erweitert.demag` vorhanden: Demagnetisierungs-Reserve bei Magnettemperatur (Risiko ja/nein)
 {fahrzyklus_section}
 7. **Empfehlungen** — 3–5 konkrete Verbesserungsvorschläge basierend auf den Zahlen (inkl. Topologie-/Segmentierungs-Eignung)
+{drei_d_section}
 
 BEBILDERUNG: Füge Platzhalter `[BILD:KEY]` an sinnvollen Stellen im Fließtext ein.
 Verfügbare Bild-KEYs: {available}
@@ -252,6 +300,7 @@ Zuordnung (strikt einhalten — kein Bild in Abschnitt 1 Zusammenfassung):
 - Abschnitt 4 Festigkeit:             [BILD:structural]  und ggf. [BILD:deformation]
 - Abschnitt 5 Thermik:                [BILD:thermal]
 - Abschnitt 6 Fahrzyklus:             [BILD:drivecycle]{(f"  und  {vollast_img}") if vollast_img else ""}{(f"  und  {anhaenger_img}") if anhaenger_img else ""}
+{drei_d_img}
 
 FORMATIERUNGSREGELN (unbedingt einhalten):
 - Schreibe echten Fließtext in Absätzen. Kein Zeilenumbruch mitten im Satz.
@@ -371,6 +420,49 @@ def _ensure_em_images(md: str, img_map: dict) -> str:
     return md + "\n" + block        # fallback: appendix (old behaviour)
 
 
+_EM3D_KEYS = ("em3d_field3d", "em3d_endeffect", "em3d_airgap_2d3d",
+              "em3d_slice_mid", "em3d_model_iso", "em3d_model_axial")
+
+
+def _ensure_em3d_section(md: str, ctx: dict) -> str:
+    """Garantiert einen eigenen, bebilderten 3D-Abschnitt. Erkennt ein vom LLM bereits
+    geschriebenes 3D-Kapitel (Überschrift mit „3D" / „Elmer") bzw. gesetzte em3d-Bild-
+    Platzhalter; fehlt beides, wird ein deterministischer Abschnitt mit allen verfügbaren
+    3D-Bildern angehängt (qualitativer Einleitungstext, Zahlen stehen in der Kennwerttabelle)."""
+    if not ctx.get("em3d"):
+        return md
+    img_map = ctx.get("_img_map", {})
+    avail = [k for k in _EM3D_KEYS if k in img_map]
+    if not avail:
+        return md
+    has_heading = bool(re.search(r"(?im)^#{1,3}\s.*(3d|elmer)", md))
+    has_ph = any(re.search(rf"\[BILD\s*:\s*{k}\s*\]", md, re.I) for k in _EM3D_KEYS)
+    if has_heading or has_ph:
+        return md
+    e3 = ctx["em3d"]
+    staffel = ((e3.get("skew_segments") or 1) >= 2 and (e3.get("skew_step_deg") or 0))
+    skew = (e3.get("skew_deg") or 0) > 0
+    extra = ""
+    if staffel:
+        extra = (" Die gestaffelte Staffelung (Step-Skew) des Blechpakets ist im 3D-Modell "
+                 "berücksichtigt und glättet das Rastmoment und die Oberwellen der "
+                 "Luftspaltinduktion.")
+    elif skew:
+        extra = (" Die kontinuierliche Schrägung ist im 3D-Modell berücksichtigt und "
+                 "mindert Rastmoment und Oberwellen.")
+    intro = (
+        "Das 2D-FDM-Schnittmodell nimmt eine unendlich lange Maschine an. Die echte "
+        "3D-Magnetostatik (Elmer FEM) erfasst dagegen die finite Paketlänge und die "
+        "Endeffekte: zu den Stirnseiten hin nimmt die Luftspaltinduktion ab, weil sich "
+        "der Fluss dort dreidimensional über die Stirnflächen schließt. Der Vergleich "
+        "der mittigen Luftspaltinduktion zwischen 2D und 3D ordnet die Genauigkeit des "
+        "schnellen 2D-Modells ein; die Abweichung bleibt qualitativ plausibel."
+        + extra + " Die quantitativen Werte stehen in der Kennwerttabelle.")
+    block = ["\n\n## 3D-Magnetfeldvalidierung (Elmer FEM)\n", intro]
+    block += [f"[BILD:{k}]" for k in avail]
+    return md.rstrip() + "\n" + "\n".join(block) + "\n"
+
+
 def insert_images(md: str, img_map: dict) -> str:
     """Replace [BILD:key] with ![title](path) for each known key.
     Also strips backticks the LLM tends to add around the placeholder, and
@@ -470,6 +562,23 @@ def render_pdf(md: str, project_dir: str, out_filename: str = "bericht.pdf",
 
 # ── Top-level ────────────────────────────────────────────────────────────────
 
+def _write_rag_markdown(project_dir: str, prose_vf: str, ctx: dict, _log=None) -> str | None:
+    """Write the value-free RAG markdown (bericht_rag.md) next to the report.
+    Best-effort — a failure here never breaks the PDF report."""
+    try:
+        rag_md = to_rag_markdown(prose_vf, ctx)
+        path = os.path.join(project_dir, "bericht_rag.md")
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(rag_md)
+        if _log:
+            _log("✓ RAG-Markdown (wertfrei) erzeugt: bericht_rag.md", None)
+        return path
+    except Exception as e:                                  # pragma: no cover
+        if _log:
+            _log(f"⚠ RAG-Markdown fehlgeschlagen: {e}", None)
+        return None
+
+
 def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
                      progress_cb=None) -> dict:
     """Build context → call LLM → post-process → render PDF.
@@ -490,17 +599,21 @@ def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
     _log("Bilder einfügen…", 75)
     md_raw   = _strip_md_tables(md_raw)   # local models emit malformed centered tables
     md_raw   = _strip_value_numbers(md_raw)   # Zahlen nur in der Tabelle, nicht im Fließtext
+    _prose_vf = md_raw                     # value-free prose snapshot (for the RAG markdown)
     md_raw   = _ensure_em_images(md_raw, ctx["_img_map"])  # EM field maps into §3
+    md_raw   = _ensure_em3d_section(md_raw, ctx)           # eigener 3D-Abschnitt + Bilder
     md_final = insert_images(md_raw, ctx["_img_map"])
     md_final = insert_tables(md_final, {"kennwerte": _single_md_tables(ctx)})
 
     _log("Rendere PDF (pandoc + xelatex)…", 85)
     pdf_path = render_pdf(md_final, project_dir)
+    rag_md_path = _write_rag_markdown(project_dir, _prose_vf, ctx, _log)
     _log(f"✓ Bericht: {os.path.basename(pdf_path)}", 100)
 
     return {
         "pdf":     pdf_path,
         "md":      os.path.join(project_dir, "bericht.md"),
+        "rag_md":  rag_md_path,
         "model":   model,
         "n_chars": len(md_final),
     }
@@ -552,7 +665,9 @@ def generate_report_agentic(
     _log("Bilder einfügen…", 74)
     md_main = _strip_md_tables(md_main)   # drop malformed centered LLM tables
     md_main = _strip_value_numbers(md_main)   # Zahlen nur in der Tabelle, nicht im Fließtext
+    _prose_vf = md_main                    # value-free prose snapshot (for the RAG markdown)
     md_main = _ensure_em_images(md_main, ctx["_img_map"])  # EM field maps into §3
+    md_main = _ensure_em3d_section(md_main, ctx)           # eigener 3D-Abschnitt + Bilder
     md_main = insert_images(md_main, ctx["_img_map"])
     md_main = insert_tables(md_main, {"kennwerte": _single_md_tables(ctx)})
 
@@ -562,11 +677,13 @@ def generate_report_agentic(
 
     _log("Rendere PDF (pandoc + xelatex)…", 85)
     pdf_path = render_pdf(md_final, project_dir, out_filename="bericht_agentisch.pdf")
+    rag_md_path = _write_rag_markdown(project_dir, _prose_vf, ctx, _log)
     _log(f"✓ Agentischer Bericht: {os.path.basename(pdf_path)}", 100)
 
     return {
         "pdf":            pdf_path,
         "md":             os.path.join(project_dir, "bericht.md"),
+        "rag_md":         rag_md_path,
         "model":          model,
         "expert_model":   emodel,
         "n_chars":        len(md_final),
@@ -821,6 +938,76 @@ def _strip_value_numbers(md: str) -> str:
     return "\n".join(out)
 
 
+_IMG_MD_RE = re.compile(r"!\[[^\]]*\]\([^)]*\)")
+# A line that, after stripping, holds only punctuation / list bullets / ellipses —
+# i.e. carries no information once the values were removed.
+_EMPTY_INFO_RE = re.compile(r"^[\s.,;:–\-•*…()/]*$")
+# The "… <unit>" remnants that _strip_value_numbers leaves behind — for the RAG text
+# we drop the unit too so no value reference survives at all.
+_RAG_VAL_RE = re.compile(r"…\s*(?:" + _U_SAFE + r"|" + _U_AMBIG + r")?")
+
+
+def to_rag_markdown(prose_md: str, ctx: dict | None = None) -> str:
+    """Distil a finished report's prose into a VALUE-FREE, table-/figure-free
+    Markdown for a RAG knowledge base.
+
+    Keeps the qualitative, transferable statements (structure, operating
+    principles, design trade-offs) plus the heading outline; removes every concrete
+    numeric value, all tables, all figures and the [BILD:]/[TABELLE:] placeholders.
+    Material grades and topology names are categories (not numbers) and are kept on
+    purpose — they make the text retrievable and generalisable. No LLM call: this is
+    a pure transform of the already value-stripped report prose."""
+    md = _strip_md_tables(prose_md)          # pipe tables + horizontal rules
+    md = _IMG_MD_RE.sub("", md)              # raw ![alt](path) image refs
+    # Replace the placeholders with a newline (NOT ""): the regexes eat the
+    # surrounding blank lines, so "" would glue a heading onto the previous text.
+    md = _BILD_RE.sub("\n", md)              # [BILD:key] placeholders
+    md = _TAB_RE.sub("\n", md)              # [TABELLE:key] placeholders
+    md = _strip_value_numbers(md)            # number+unit → "… <unit>" (safety net)
+    md = _RAG_VAL_RE.sub("", md)             # drop the "… <unit>" remnants entirely
+
+    _PREP = r"(?:von|bei|auf|um|mit|ca\.?|etwa|rund|circa)"
+    cleaned = []
+    for line in md.split("\n"):
+        s = line.rstrip()
+        is_head = s.lstrip().startswith("#")
+        if s and not is_head and _EMPTY_INFO_RE.match(s):
+            continue                         # drop "- …" / ": …" value-only remnants
+        # collapse any leftover bare "…" mid-sentence, then tidy whitespace/punctuation
+        s = re.sub(r"\s*…\s*", " ", s)
+        # a removed value leaves a dangling preposition ("Drehmoment von bei …"):
+        # drop a preposition immediately followed by another preposition…
+        s = re.sub(r"\b" + _PREP + r"\s+(?=" + _PREP + r"\b)", "", s)
+        # …or one left hanging right before punctuation / end of sentence.
+        s = re.sub(r"\b" + _PREP + r"\s*([.,;:]|$)", r"\1", s)
+        s = re.sub(r"\s{2,}", " ", s)
+        s = re.sub(r"\s+([.,;:!?])", r"\1", s)
+        # a bullet reduced to a bare label ("- Kennwert:") carries no info anymore
+        if not is_head and re.match(r"^[\s>*+-]*\S.*:\s*$", s) and "—" not in s:
+            continue
+        # keep blank lines around a heading so Markdown renders it as a heading
+        if is_head and cleaned and cleaned[-1] != "":
+            cleaned.append("")
+        cleaned.append(s.rstrip())
+        if is_head:
+            cleaned.append("")
+    body = re.sub(r"\n{3,}", "\n\n", "\n".join(cleaned)).strip()
+
+    title, descr = "Auslegungsbericht (allgemein)", []
+    if ctx:
+        g = ctx.get("geometry") or {}; th = ctx.get("thermal") or {}; mt = ctx.get("materials") or {}
+        if g.get("magTopologie"): descr.append(str(g["magTopologie"]))
+        if th.get("cooling"):     descr.append(f"Kühlung: {th['cooling']}")
+        if mt.get("magnet"):      descr.append(f"Magnet: {mt['magnet']}")
+        if descr:
+            title = "Auslegungsbericht – " + ", ".join(descr)
+    intro = ("> Wertfreie, allgemein gehaltene Fassung eines IPM-Motor-Auslegungsberichts "
+             "für die Wissensbasis (RAG). Konkrete Zahlenwerte sind bewusst entfernt; der "
+             "Text beschreibt qualitativ Aufbau, Wirkprinzipien und Auslegungs"
+             "zusammenhänge dieser Maschinenkonfiguration.")
+    return f"# {title}\n\n{intro}\n\n{body}\n"
+
+
 def _single_md_tables(ctx: dict) -> str:
     """Comprehensive, deterministic parameter+result table for the single-project
     report. ALL numeric values of the report live here (the prose stays qualitative
@@ -910,6 +1097,25 @@ def _single_md_tables(ctx: dict) -> str:
             ("Antriebswirkungsgrad", dc.get("eta_drive"), "", 3),
             ("Rekuperationsanteil",  dc.get("regen_share"), "", 3),
             ("v_max",            dc.get("v_max_kmh"),     "km/h", 0),
+        ]))
+    e3 = ctx.get("em3d", {}) or {}
+    if e3:
+        staffel = None
+        if (e3.get("skew_segments") or 1) >= 2 and (e3.get("skew_step_deg") or 0):
+            staffel = f"{e3.get('skew_segments')} Segmente à {e3.get('skew_step_deg')}°"
+        zonen = None
+        if e3.get("zone_luftspalt"):
+            zonen = (f"{e3.get('zone_luftspalt'):.2f} / {e3.get('zone_magnet'):.2f} / "
+                     f"{e3.get('zone_grob'):.1f} mm (Spalt/Magnet/grob)")
+        blocks.append(_tbl("3D-Magnetfeldberechnung (Elmer FEM)", [
+            ("B_gap 3D (Paketmitte)",      e3.get("B_gap_3D_mid_T"), "T", 3),
+            ("B_gap 2D-FDM (Vergleich)",   e3.get("B_gap_2D_FDM_T"), "T", 3),
+            ("Endeffekt B(Stirn)/B(Mitte)", e3.get("endeffekt_rand_zu_mitte"), "", 3),
+            ("Schrägung (kontinuierlich)", e3.get("skew_deg"),     "°", 1),
+            ("Gestaffelte Staffelung",     staffel,                "", None),
+            ("Flussbarrieren (3D-Modell)", e3.get("n_barrieren"),  "", None),
+            ("Netz-Zonen (fein→grob)",     zonen,                  "", None),
+            ("Netzknoten (3D)",            e3.get("mesh_knoten"),  "", None),
         ]))
     return "\n".join(b for b in blocks if b).strip()
 

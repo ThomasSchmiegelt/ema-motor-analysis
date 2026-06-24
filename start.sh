@@ -39,6 +39,14 @@ else
     echo "[--] Ollama nicht erreichbar ($OLLAMA_URL) — pipeline läuft ohne LLM-Zusammenfassung"
 fi
 
+# Check Elmer (optional — nur für den 3D-Magnetfeld-Tab)
+if command -v ElmerSolver >/dev/null 2>&1 && command -v ElmerGrid >/dev/null 2>&1; then
+    echo "[OK] Elmer:      $(command -v ElmerSolver) (3D-Feld verfügbar)"
+else
+    echo "[--] Elmer nicht gefunden — 3D-Feld-Tab deaktiviert"
+    echo "     Installation: sudo add-apt-repository -y ppa:elmer-csc-ubuntu/elmer-csc-ppa && sudo apt install -y elmerfem-csc"
+fi
+
 echo ""
 
 # Setup / update venv
