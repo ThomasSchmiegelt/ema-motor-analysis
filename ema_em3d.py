@@ -44,9 +44,6 @@ COIL_J_SCALE = 199.0
 # Netz feiner, vergröbert `_build_mesh_capped` die Zellgrößen automatisch und warnt — statt
 # ElmerSolver abstürzen/hängen zu lassen. Bewährt: ~28–50k Knoten lösen in ~1–2 min.
 EM3D_MAX_NODES = 55000
-# Topologien mit vergrabener Langloch-Magnettasche (Endkappen als Luft-Flussbarriere sinnvoll).
-# bar/spoke/Oberflächen/Halbach/custom haben keine solche Tasche → keine Kappen.
-POCKET_SHAPES = {"v", "vasym", "vv", "u", "delta", "pmasynrm"}
 
 
 # ── Magnetplatzierung (1:1 zur 2D-Rasterung `ema_analysis._rasterise`) ───────────
@@ -99,28 +96,6 @@ def magnet_rects(geom: dict) -> list:
             out.append({"cx": cx, "cy": cy, "ang": ang, "length": length,
                         "thick": max(0.8, thick), "pole": p_i, "sign": m_amp,
                         "mdx": mdx, "mdy": mdy, "placement": lg.placement})
-    return out
-
-
-def magnet_cap_rects(mrects: list, geom: dict) -> list:
-    """Luft-Endkappen der Magnettaschen (obround „Langloch"-Tasche) als Rechtecke —
-    spiegelt die FreeCAD-/2D-Geometrie: an JEDEM Magnetende eine halbkreisförmige Luft-
-    Flussbarriere mit Radius ≈ (Dicke+2·Spaltübermaß)/2 (hier rechteckig genähert, fürs
-    Mesh robust). Nur für INNENliegende Magnete (Surface-/Halbach-Magnete haben keine
-    Tasche). `magGapMm` = Tasche-zu-Magnet-Übermaß je Seite. Format wie `magnet_rects`."""
-    gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
-    out = []
-    for m in mrects:
-        if m.get("placement", "interior") != "interior":
-            continue
-        L = float(m["length"]); T = float(m["thick"]); ang = float(m["ang"])
-        cap_len = (T + 2.0 * gap) / 2.0               # ≈ Halbkreis-Radius der Langloch-Kappe
-        c, s = math.cos(ang), math.sin(ang)
-        for sgn in (-1.0, 1.0):                       # an beiden Magnetenden
-            d = (L / 2.0 + cap_len / 2.0) * sgn       # Kappe DIREKT hinter dem Magnetende
-            # thick = T (exakte Magnetbreite) → saubere Verlängerung ohne Eisen-Slivers.
-            out.append({"cx": m["cx"] + d * c, "cy": m["cy"] + d * s,
-                        "ang": ang, "length": cap_len, "thick": T})
     return out
 
 
@@ -261,9 +236,7 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
     try:
         return _build_mesh_once(geom, axial, opts, msh_path)
     except Exception:
-        caps_on = (opts.get("mag_pockets", True)
-                   and str(geom.get("magShape", "")).lower() in POCKET_SHAPES)
-        if caps_on:
+        if opts.get("mag_pockets", True):              # Taschen-Kappen als Fehlerquelle ausschließen
             tags = _build_mesh_once(geom, axial, dict(opts, mag_pockets=False), msh_path)
             tags["caps_dropped"] = True
             return tags
@@ -287,6 +260,7 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
     r_rot = geom["rotorOD"] / 2.0
     r_si = geom["statorID"] / 2.0
     r_so = geom["statorOD"] / 2.0
+    poles = int(geom["p"]) * 2
     skew = math.radians(float(opts.get("skew_deg", 0.0)))
     box_f = float(opts.get("airbox_factor", 1.4))
     R_box = box_f * r_so
@@ -338,6 +312,28 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             vol = [d for d in sec if d[0] == 3]
             return vol[0][1] if vol else None
 
+        # Halbkreis-Endkappe der Magnettasche (obround Langloch) als LOFT eines Halbscheiben-
+        # Polygons — loft-basiert wie die Magnete → gmsh verträgt die deckungsgleiche Stirnfläche
+        # (ein Bool'scher Schnitt erzeugt hier dagegen PLC-Fehler). Flache Seite = Magnetende.
+        def _cap_loop(ex, ey, z, ang, sgn, r, narc=7):
+            ox, oy = sgn * math.cos(ang), sgn * math.sin(ang)     # auswärts (vom Magnet weg)
+            px, py = -math.sin(ang), math.cos(ang)                # quer (Magnetbreite)
+            pts = []
+            for k in range(narc + 1):
+                th = -math.pi / 2 + math.pi * k / narc            # −90°..+90° → Halbkreis
+                a = r * math.cos(th); b = r * math.sin(th)
+                pts.append(occ.addPoint(ex + a * ox + b * px, ey + a * oy + b * py, z))
+            ls = [occ.addLine(pts[k], pts[k + 1]) for k in range(len(pts) - 1)]
+            ls.append(occ.addLine(pts[-1], pts[0]))               # flache Seite schließen
+            return occ.addCurveLoop(ls)
+
+        def _extrude_cap(ex, ey, ang, sgn, r, z0, z1):
+            w0 = _cap_loop(ex, ey, z0, ang, sgn, r)
+            w1 = _cap_loop(ex, ey, z1, ang, sgn, r)
+            sec = occ.addThruSections([w0, w1], -1, True, True)
+            vol = [d for d in sec if d[0] == 3]
+            return vol[0][1] if vol else None
+
         # Gerades Vollprisma 0..L (für Statornuten: die rotieren NICHT mit dem Rotor mit).
         def _extrude_straight(pc):
             w0 = _rect_loop(pc["cx"], pc["cy"], 0.0, pc["ang"], pc["length"], pc["thick"])
@@ -357,14 +353,51 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         bpieces, _bn, _bs = _magnet_pieces(brects, L, opts)
         bar_vol_tags = [_extrude(pc) for pc in bpieces]
 
-        # Magnettaschen-Endkappen (Luft-Übermaß der Tasche) als LUFT-Prismen an den
-        # Magnetenden — wie die Magnete mit-gestaffelt. Nur für vergrabene Taschen-Topologien
-        # (V/U/Δ…); bar/spoke/Oberflächen/custom haben keine Langloch-Tasche. Standard an.
-        _want_caps = (opts.get("mag_pockets", True)
-                      and str(geom.get("magShape", "")).lower() in POCKET_SHAPES)
-        caprects = magnet_cap_rects(rects, geom) if _want_caps else []
-        cap_pieces, _cn, _cs = _magnet_pieces(caprects, L, opts)
-        cap_vol_tags = [_extrude(pc) for pc in cap_pieces]
+        # Magnettaschen als obround „Langloch" (wie Geometrie-Tab/FreeCAD): halbkreisförmige
+        # Luft-Endkappe pro Magnetende. Zylinder (Radius (Dicke+2·magGapMm)/2) am Magnetende,
+        # vom Magnetprisma abgeschnitten → reiner Halbkreis (echte Rundung, kein Eisen-Sliver).
+        # Gilt für ALLE vergrabenen (interior) Magnetkonfigurationen; Oberflächen-/Halbach-
+        # Magnete haben keine Tasche. Standard an (`mag_pockets`).
+        cap_vol_tags = []
+        cap_pieces = []
+        if opts.get("mag_pockets", True):
+            _gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
+            for _i, _pc in enumerate(pieces):
+                _mt = mag_vol_tags[_i]
+                if _mt is None or rects[_pc["mag_idx"]].get("placement", "interior") != "interior":
+                    continue
+                _Lp = _pc["length"]; _Tp = _pc["thick"]; _ang = _pc["ang"]
+                _z0 = _pc["z0"]; _z1 = _pc["z1"]; _rc = (_Tp + 2.0 * _gap) / 2.0
+                _c, _s = math.cos(_ang), math.sin(_ang)
+                _din = min(0.6, 0.25 * _Lp)            # Kappe etwas IN den Magnet schieben →
+                for _sg in (-1.0, 1.0):                # keine deckungsgleiche Fläche (PLC-robust)
+                    _ex = _pc["cx"] + _sg * (_Lp / 2.0 - _din) * _c
+                    _ey = _pc["cy"] + _sg * (_Lp / 2.0 - _din) * _s
+                    _cv = _extrude_cap(_ex, _ey, _ang, _sg, _rc, _z0, _z1)
+                    if _cv is not None:
+                        cap_vol_tags.append(_cv)
+                    _off = 0.424 * _rc                    # Schwerpunkt des Halbkreises ans Ende
+                    cap_pieces.append({"cx": _ex + _sg * _off * _c, "cy": _ey + _sg * _off * _s,
+                                       "length": _rc, "thick": _Tp, "z0": _z0, "z1": _z1})
+
+        # Verschraubungs-/Wuchtbolzen: Durchgangslöcher (Luft) durch den Rotor an der
+        # Teilkreis-Position (Anzahl = Polzahl), wie FreeCAD. Nur wenn `genBalanceBolts`.
+        bolt_tags = []
+        bolt_pieces = []
+        if bool(geom.get("genBalanceBolts", False)):
+            _TH = {"M4": 4., "M5": 5., "M6": 6., "M8": 8., "M10": 10., "M12": 12.,
+                   "M16": 16., "M20": 20.}
+            _bhr = (_TH.get(str(geom.get("balanceBoltThread", "M6")), 6.0) + 0.4) / 2.0
+            _nb = max(2, poles)
+            _bcd = float(geom.get("balanceBoltCircleD", 0) or 0)
+            _bpcr = _bcd / 2.0 if _bcd > 0 else r_shaft + (r_rot - r_shaft) * 0.5
+            _boff = math.radians(float(geom.get("balanceBoltOffsetDeg", 0) or 0))
+            for _k in range(_nb):
+                _a = _boff + _k * 2 * math.pi / _nb
+                _bx, _by = _bpcr * math.cos(_a), _bpcr * math.sin(_a)
+                bolt_tags.append(occ.addCylinder(_bx, _by, 0, 0, 0, L, _bhr))
+                bolt_pieces.append({"cx": _bx, "cy": _by, "length": 2 * _bhr,
+                                    "thick": 2 * _bhr, "z0": 0.0, "z1": L})
 
         # Statornuten als LUFT-Prismen (gerade, volle Länge) in den Statorring fragmentieren
         # → echte Zähne. Standardmäßig an (kann per opts `stator_slots=False` aus).
@@ -400,6 +433,7 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             + [(3, t) for t in mag_vol_tags if t is not None] \
             + [(3, t) for t in bar_vol_tags if t is not None] \
             + [(3, t) for t in cap_vol_tags if t is not None] \
+            + [(3, t) for t in bolt_tags if t is not None] \
             + [(3, t) for t in slot_vol_tags if t is not None] \
             + [(3, t) for t in ring_tags]
         occ.fragment(all_in, [])
@@ -441,7 +475,9 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         bar_assign, bar_taken = _assign(bpieces, bar_avail)
         cap_avail = [t for t in vinfo if t[0] not in mag_taken and t[0] not in bar_taken]
         cap_assign, cap_taken = _assign(cap_pieces, cap_avail, dist_frac=1.0, mlo=0.1, mhi=4.0)
-        _used = mag_taken | bar_taken | cap_taken
+        bolt_avail = [t for t in vinfo if t[0] not in (mag_taken | bar_taken | cap_taken)]
+        bolt_assign, bolt_taken = _assign(bolt_pieces, bolt_avail, dist_frac=1.0, mlo=0.1, mhi=4.0)
+        _used = mag_taken | bar_taken | cap_taken | bolt_taken
         slot_avail = [t for t in vinfo if t[0] not in _used]
         slot_assign, slot_taken = _assign(slot_pieces, slot_avail)
 
@@ -458,10 +494,11 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         mag_vols = [v for vs in mag_assign.values() for v in vs]
         bar_vols = [v for vs in bar_assign.values() for v in vs]
         cap_vols = [v for vs in cap_assign.values() for v in vs]
+        bolt_vols = [v for vs in bolt_assign.values() for v in vs]
         slot_vols = [v for vs in slot_assign.values() for v in vs]
-        # Magnete, Flussbarrieren, Taschenkappen UND Statornuten in die Feinzone (mag_cl).
-        fine_surfs = (_surfs_of(mag_vols) | _surfs_of(bar_vols)
-                      | _surfs_of(cap_vols) | _surfs_of(slot_vols))
+        # Magnete, Flussbarrieren, Taschenkappen, Bolzenlöcher UND Statornuten in die Feinzone.
+        fine_surfs = (_surfs_of(mag_vols) | _surfs_of(bar_vols) | _surfs_of(cap_vols)
+                      | _surfs_of(bolt_vols) | _surfs_of(slot_vols))
 
         # ── Zonale Netz-Verfeinerung (einstellbar): Luftspalt+Umgebung SEHR fein
         #    (gap_cl), Magnete/Barrieren+Umgebung FEIN (mag_cl, über mag_grow auf grob
@@ -470,6 +507,13 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         gap_cl = float(opts.get("gap_cl", 0.0)) or max(0.35, gap * 0.6)
         mag_cl = float(opts.get("mag_cl", 0.0)) or max(gap_cl, mesh_cl * 0.5)
         mag_grow = float(opts.get("mag_grow", 0.0)) or max(2.0, 3.0 * gap)
+        # Die kleinen Langloch-Endkappen (Radius ~Magnetdicke/2) brauchen ein Netz nicht viel
+        # gröber als ihr Radius, sonst PLC-Fehler (Kappe < Zellgröße) → Selbstheilung wirft sie
+        # weg. Sanfte Deckelung, die die Knoten nicht explodieren lässt (kein Konflikt mit dem
+        # Knoten-Cap: greift nur, wenn mag_cl ohnehin gröber als die Kappe wäre).
+        if cap_pieces:
+            _rc_min = min((p["thick"] for p in cap_pieces), default=4.0) / 2.0
+            mag_cl = max(gap_cl, min(mag_cl, 1.3 * _rc_min))
         fld = gmsh.model.mesh.field
         fields = []
         # Luftspalt: MathEval-Gauß-Band um r_mid.
@@ -530,9 +574,11 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             groups["air"].append(v)
         for v in cap_vols:
             groups["air"].append(v)
+        for v in bolt_vols:
+            groups["air"].append(v)                         # Bolzen-Durchgangslöcher (Luft)
         for (v, gx, gy, gz, vmass) in vinfo:
-            if v in mag_taken or v in bar_taken or v in cap_taken or v in slot_taken:
-                continue                                    # Magnet/Barriere/Kappe/Nut schon zugeordnet
+            if v in (mag_taken | bar_taken | cap_taken | bolt_taken | slot_taken):
+                continue                                    # Magnet/Barriere/Kappe/Bolzen/Nut schon zugeordnet
             # Ringe über einen ECHTEN Innenpunkt (Element-Schwerpunkt): konzentrische
             # Ringe haben ihren Volumenschwerpunkt auf der Achse → dort Radius untauglich.
             pr = _probe(v)
