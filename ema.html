@@ -984,15 +984,16 @@
           <p><span class="x">Wirkung:</span> Nur Betriebspunkt (Ströme), keine Rechenzeit-Änderung.</p></details>
       </div>
       <div class="e3-field" id="e3_coilcurr_field" style="display:none">
-        <div class="row"><label>3D-Ströme einprägen (exp.)</label>
-          <input type="checkbox" id="e3_coilcurr" style="width:auto"></div>
+        <div class="row"><label>3D-Lastfeld (Statorströme)</label>
+          <input type="checkbox" id="e3_coilcurr" checked style="width:auto"></div>
         <details class="e3-help"><summary>Erklärung</summary>
-          <p><b>Fachlich:</b> Prägt die Nut-Stromdichten als echte 3D-Quelle ein (Jfix). <b>Nur belastbar
-          mit geschlossenen Wickelköpfen</b> — ohne Stirnverbindung schließt der Strom nicht und das Feld
-          divergiert. Daher experimentell (Standard aus).</p>
-          <p><span class="l">Laienverständlich:</span> Versucht, das echte Lastfeld zu rechnen — noch
-          nicht zuverlässig, weil die Spulenenden im Modell fehlen.</p>
-          <p><span class="x">Wirkung:</span> Kann unphysikalische Felder liefern; nur zum Experimentieren.</p></details>
+          <p><b>Fachlich:</b> Prägt die Nut-Stromdichten als 3D-Quelle ein; zwei Stirnring-Leiter
+          (oben/unten) tragen den azimutalen Rückführstrom, damit sich der Strom in der endlichen
+          Länge schließt (sonst divergiert das Feld). Höhe aufs analytische 2D-Ankerfeld kalibriert.</p>
+          <p><span class="l">Laienverständlich:</span> Schaltet das echte Lastfeld ein — man sieht, wie
+          der Statorstrom das Magnetfeld verschiebt (Ankerrückwirkung).</p>
+          <p><span class="x">Wirkung:</span> Vereinfacht (Grundwelle, lineares Eisen). Aus = nur das
+          Magnetfeld (Leerlauf) wird gezeigt, der Betriebspunkt bleibt erhalten.</p></details>
       </div>
     </div>
     <div id="e3_oppoint" style="margin-top:6px;font-size:.78rem;color:#9aa"></div>
@@ -3773,8 +3774,8 @@ function _renderEm3d(res) {
        + `<b>⚡ Betriebspunkt:</b> ${op.rpm} 1/min · ${op.load_nm} Nm → `
        + `i_q = ${op.iq_A} A · i_d = ${op.id_A} A · |I| = ${op.is_peak_A} A (Spitze)`
        + `<div style="color:#9a8;margin-top:3px">3D-Feld: `
-       + (op.field_loaded ? 'Lastfeld mit Statorströmen (experimentell)'
-                          : 'Magnetfeld (Leerlauf) — die echte 3D-Ankerrückwirkung mit Wickelköpfen folgt; die Ströme oben sind der berechnete Betriebspunkt.')
+       + (op.field_loaded ? 'Lastfeld mit Statorströmen + Stirnring-Schließung (vereinfacht: Grundwelle, lineares Eisen)'
+                          : 'Magnetfeld (Leerlauf) — die Ströme oben sind der berechnete Betriebspunkt.')
        + `</div></div>`;
   }
   if (c.B_gap_2D != null) {

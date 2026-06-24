@@ -378,13 +378,16 @@ Staffelung), `_prompt_for` ergänzt §8 (qualitativ) und `_ensure_em3d_section` 
 bebilderten 3D-Abschnitt auch ohne LLM-Mithilfe — Standard- + agentischer Einzelbericht. **Betriebspunkt (Drehzahl + Last):** UI-Karte „⚡ Betriebspunkt" (rpm + Last + Anregung +
 Lastprofile Leerlauf/Teillast/Nennlast/Volllast/Feldschwächung). `write_sif` berechnet bei
 `excitation=loaded` IMMER den Betriebspunkt (dq-Ströme via `estimate_dq_currents`,
-`tags["operating_point"]`) und zeigt i_q/i_d an. Die ECHTE 3D-Stromeinprägung
-(`coil_currents=True`, je Nut axiale Stromdichte + Jfix) ist **experimentell (Standard AUS)**:
-offene Nutstäbe ohne Wickelkopf-Schließung lassen das Vektorpotential explodieren (B~10⁴ T) →
-das Default-3D-Lastfeld bleibt das Magnetfeld (Leerlauf), nur der Betriebspunkt/die Ströme werden
-ausgewiesen. Die Nuten sind dafür schon EINZELN als Körper getaggt (`tags["coils"]`). **v1-Scope:**
-lineare Materialien, 3D-FELD Open-Circuit (Magnete); echtes 3D-Lastfeld (geschlossene Wickelköpfe)
-+ BH-Kurve sind Folgeschritte. **Prerequisite:**
+`tags["operating_point"]`) und zeigt i_q/i_d an. **3D-Lastfeld (Ankerrückwirkung)** ist umgesetzt
+(`coil_currents`, Standard AN): je Nut eine axiale Stromdichte (CD3) + zwei **Stirnring-Leiter**
+(`tags["coil_rings"]`, Luft-Annuli am Nut-Radiusband an z∈[−t,0]/[L,L+t]) mit azimutalem
+Rückführstrom (CD1/CD2 via Elmer-MATC), Nut+Ring aus DEMSELBEN `C0` → ∇·J≈0 → der Strom schließt
+sich in der endlichen Länge (sonst explodiert das Feld auf B~10⁴ T). `Fix Input Current Density=
+True`+`Jfix=0`-BC putzt die Restdivergenz; **`COIL_J_SCALE≈199`** kalibriert die Höhe aufs
+analytische `_analytical_Barm` (mm↔m-Einheitenfaktor, ~geometrieunabhängig). Verifiziert: B_gap
+skaliert mit Last (0.18 T Leerlauf → 1.9 T@50 Nm → 3.5 T@150 Nm). Abschaltbar (dann Leerlauffeld +
+Betriebspunkt). **v1-Scope:** lineare Materialien, Lastfeld vereinfacht (Grundwelle, lin. Eisen);
+BH-Kurve + verteilte echte Wicklung sind Folgeschritte. **Prerequisite:**
 Elmer (`sudo apt install elmerfem-csc` via PPA `elmer-csc-ubuntu/elmer-csc-ppa`) + die
 Python-Pakete `gmsh`/`vtk` (in `requirements.txt`). Mesh/sif sind ohne Elmer test- und
 baubar (`test_em3d.py`). **Gotchas (alle gelöst, beim Ändern beachten):** `gmsh.initialize(

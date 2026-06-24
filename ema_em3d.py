@@ -33,6 +33,12 @@ import ema_topology as TOPO
 MU0 = 1.2566370614e-6           # Vakuumpermeabilität [H/m]
 MU_R_IRON = 500.0               # lineares Eisen (wie 2D), BH-Kurve = Folgeschritt
 MU_R_MAG = 1.05
+# Skala der eingeprägten Nut-/Ring-Stromdichte (experimenteller 3D-Lastfall). Nut und Ring
+# nutzen DENSELBEN C0, damit sich der Strom schließt; dieser Faktor regelt nur die absolute
+# Höhe. Empirisch so kalibriert, dass das 3D-Luftspalt-Ankerfeld dem analytischen 2D-Wert
+# `_analytical_Barm` entspricht (dominiert vom geometrieunabhängigen mm↔m-Einheitenfaktor;
+# für andere Maschinen daher näherungsweise gültig — Lastfeld bleibt experimentell).
+COIL_J_SCALE = 199.0
 
 
 # ── Magnetplatzierung (1:1 zur 2D-Rasterung `ema_analysis._rasterise`) ───────────
@@ -305,11 +311,34 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
         slot_pieces = [{**r, "z0": 0.0, "z1": L} for r in srects]
         slot_vol_tags = [_extrude_straight(pc) for pc in slot_pieces]
 
+        # Stirnring-Leiter (Wickelkopf, vereinfacht): zwei Luft-Ringe AM Nut-Radiusband direkt
+        # an den Stirnseiten (z∈[−t,0] und [L,L+t]). Sie verbinden die Nutstäbe → der
+        # eingeprägte Nutstrom kann sich azimutal schließen (Σ axial = 0). Nur im Lastfall mit
+        # Stromeinprägung gebaut. „Einfach": nur EIN Stromweg muss durch.
+        want_rings = (bool(opts.get("coil_currents", True))
+                      and str(opts.get("excitation", "open_circuit")) == "loaded"
+                      and bool(srects))
+        ring_tags = []
+        _ring_t = 0.0
+        if want_rings:
+            slot_d = float(srects[0]["length"])
+            t_ring = max(2.0, min(0.30 * cap, 0.6 * slot_d, 12.0))
+            _ring_t = t_ring
+            r_in_ring, r_out_ring = r_si, r_si + slot_d
+            for z0r in (-t_ring, L):                       # unten + oben
+                ro = occ.addCylinder(0, 0, z0r, 0, 0, t_ring, r_out_ring)
+                ri = occ.addCylinder(0, 0, z0r, 0, 0, t_ring, r_in_ring)
+                cutres, _ = occ.cut([(3, ro)], [(3, ri)])
+                for (d, t) in cutres:
+                    if d == 3:
+                        ring_tags.append(t)
+
         occ.synchronize()
         all_in = [(3, shaft), (3, rotor), (3, statI), (3, statO), (3, box)] \
             + [(3, t) for t in mag_vol_tags if t is not None] \
             + [(3, t) for t in bar_vol_tags if t is not None] \
-            + [(3, t) for t in slot_vol_tags if t is not None]
+            + [(3, t) for t in slot_vol_tags if t is not None] \
+            + [(3, t) for t in ring_tags]
         occ.fragment(all_in, [])
         occ.synchronize()
 
@@ -422,7 +451,9 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
             except Exception:
                 return None
 
-        groups = {"shaft": [], "rotor": [], "stator": [], "air": []}
+        groups = {"shaft": [], "rotor": [], "stator": [], "air": [], "ring": []}
+        ring_band = (r_si, r_si + float(srects[0]["length"])) if (want_rings and srects) else None
+        ring_z = {}                                          # ring-Volumen → +1 (oben) / −1 (unten)
         # Barrieren sind LUFT-Taschen im Rotor. Die Statornuten werden NICHT pauschal als
         # „air" gebündelt, sondern unten EINZELN als Körper getaggt (damit jede Nut im
         # Lastfall ihre eigene Stromdichte tragen kann).
@@ -439,7 +470,11 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
             cx, cy, cz = pr
             rc = math.hypot(cx, cy)
             if cz < -1e-6 or cz > L + 1e-6:
-                groups["air"].append(v)                     # axiale Luft-Kappen
+                # Stirnring-Leiter? (Nut-Radiusband außerhalb des Pakets) — sonst Luft-Kappe.
+                if ring_band and ring_band[0] - 0.5 <= rc <= ring_band[1] + 0.5:
+                    groups["ring"].append(v); ring_z[v] = 1 if cz > L else -1
+                else:
+                    groups["air"].append(v)                 # axiale Luft-Kappen
             elif rc <= r_shaft:
                 groups["shaft"].append(v)
             elif rc < r_rot:
@@ -492,8 +527,19 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
                                   "length": sp["length"], "thick": sp["thick"]})
             for v in slot_assign[i]:
                 vol_class[v] = "coil"
+        # Stirnring-Leiter (oben/unten) je als eigener Körper (Material Luft; im Lastfall
+        # azimutale Rückführ-Stromdichte). z_sign = +1 oben (z>L) / −1 unten (z<0).
+        tags["coil_rings"] = []
+        for zs, label in ((1, "ringtop"), (-1, "ringbot")):
+            rv = [v for v in groups["ring"] if ring_z.get(v) == zs]
+            if rv:
+                phys = _phys(3, rv, label)
+                tags["coil_rings"].append({"name": label, "phys": phys, "z_sign": zs})
+                for v in rv:
+                    vol_class[v] = "coil"
         tags["vol_class"] = vol_class
         tags["mag_pol"] = mag_pol
+        tags["ring_t"] = _ring_t
 
         # Außenrand (Box-Mantel + axiale Stirnflächen) als Physical-Surface für die BC.
         bxf = []
@@ -546,19 +592,18 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
     # werden von Elmer mit "./" verkettet → kaputter, geschachtelter Pfad.
     os.makedirs(os.path.join(work_dir, "results"), exist_ok=True)
 
-    # ── Betriebspunkt + (optionaler) Lastfall mit Statorströmen ─────────────────────
-    # `excitation=loaded` berechnet IMMER den Betriebspunkt (dq-Ströme aus rpm+Last, gleiche
-    # Logik wie 2D) und zeigt ihn an. Die ECHTE 3D-Stromeinprägung (`coil_currents=True`,
-    # experimentell, Standard AUS) prägt je Nut eine axiale Stromdichte ein
-    # (i_slot = i_d·cos(elAng) − i_q·sin(elAng), J_z = n_Leiter·i_slot/A_Nut, ΣJ=0). Sie ist
-    # nur belastbar mit GESCHLOSSENEN Spulen (Wickelköpfe): ohne Stirnverbindung können die
-    # offenen Nutstäbe den Strom nicht schließen → das Vektorpotential explodiert (B~10⁴ T).
-    # Bis die Wickelkopf-Geometrie steht, bleibt das 3D-FELD im Lastfall das Magnetfeld
-    # (Leerlauf), während der Betriebspunkt/die Ströme dennoch ausgewiesen werden.
+    # ── Betriebspunkt + Lastfall mit Statorströmen (Ankerrückwirkung) ───────────────
+    # `excitation=loaded` berechnet den Betriebspunkt (dq-Ströme aus rpm+Last, wie 2D) und
+    # prägt — sofern `coil_currents` (Standard AN) — je Nut eine axiale Stromdichte ein
+    # (i_slot = i_d·cos(elAng) − i_q·sin(elAng), J_z = C0·i_slot). Damit sich der Strom in der
+    # endlichen Länge SCHLIESST, tragen zwei Stirnring-Leiter (oben/unten, `tags["coil_rings"]`)
+    # den azimutalen Rückführstrom — sonst explodiert das Vektorpotential (B~10⁴ T). Nut und
+    # Ring leiten aus DEMSELBEN C0 ab (Mesh-Einheiten) → ∇·J≈0; `COIL_J_SCALE` kalibriert die
+    # absolute Höhe aufs analytische 2D-Ankerfeld. Vereinfacht (Grundwelle, lineares Eisen).
     coils = tags.get("coils", [])
     op_loaded = str(opts.get("excitation", "open_circuit")) == "loaded"
-    inject = op_loaded and bool(coils) and bool(opts.get("coil_currents", False))
-    slot_J, iq, id_ = {}, 0.0, 0.0
+    inject = op_loaded and bool(coils) and bool(opts.get("coil_currents", True))
+    slot_J, iq, id_, ring_info = {}, 0.0, 0.0, None
     if op_loaded:
         import ema_analysis
         rpm = float(opts.get("rpm", 0.0) or 0.0)
@@ -571,15 +616,20 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
             n_slots = max(int(geom.get("slots", len(coils)) or len(coils)), 1)
             p_pairs = int(geom.get("p", 1))
             n_cond = max(int(geom.get("conductorsPerSlot", 2) or 2), 1)
+            # Nut UND Ring in KONSISTENTEN Mesh-Einheiten (mm) aus EINEM C0 ableiten → der
+            # axiale Nutstrom schließt sich exakt über den azimutalen Ringstrom (∇·J≈0).
+            A_slot = max(float(coils[0]["thick"]) * float(coils[0]["length"]), 1e-6)  # mm²
+            C0 = COIL_J_SCALE * n_cond / A_slot
             for c in coils:
-                elAng = c["s"] * (2 * math.pi / n_slots) * p_pairs
-                i_slot = id_ * math.cos(elAng) - iq * math.sin(elAng)        # Spitzen-Nutstrom [A]
-                A_slot = max((c["thick"] * 1e-3) * (c["length"] * 1e-3), 1e-9)  # m²
-                slot_J[c["phys"]] = (n_cond * i_slot) / A_slot                  # A/m² (axial)
+                th = c["s"] * (2 * math.pi / n_slots) * p_pairs
+                slot_J[c["phys"]] = C0 * (id_ * math.cos(th) - iq * math.sin(th))    # axial
             if slot_J:                                   # Σ exakt 0 erzwingen (Jfix-fähig)
                 mean = sum(slot_J.values()) / len(slot_J)
                 for k in slot_J:
                     slot_J[k] -= mean
+            t_ring = max(float(tags.get("ring_t", 0.0)), 1e-6)
+            ring_info = {"K": C0 / (t_ring * max(p_pairs, 1)), "p": p_pairs,
+                         "id": id_, "iq": iq}
     loaded = inject and bool(slot_J)
     tags["operating_point"] = {"excitation": "loaded" if op_loaded else "open_circuit",
                                "field_loaded": loaded,
@@ -687,6 +737,22 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
             bf += 1
         else:
             S.append(f'Body {c["phys"]}\n  Name = "{c["name"]}"\n  Equation = 1\n  Material = 2\nEnd\n')
+
+    # Stirnring-Leiter: azimutale Rückführ-Stromdichte (schließt den Nutstrom).
+    # J_θ = z_sign·K·(i_d·sin(pθ)+i_q·cos(pθ)), θ=atan2(y,x); CD1=−y·J_θ, CD2=+x·J_θ.
+    for r in tags.get("coil_rings", []):
+        if loaded and ring_info:
+            arg = f'{ring_info["p"]}*atan2(tx(1),tx(0))'
+            amp = (f'{r["z_sign"] * ring_info["K"]:.8e}*'
+                   f'({ring_info["id"]:.6e}*sin({arg})+{ring_info["iq"]:.6e}*cos({arg}))')
+            S.append(f'Body {r["phys"]}\n  Name = "{r["name"]}"\n  Equation = 1\n'
+                     f'  Material = 2\n  Body Force = {bf}\nEnd\n')
+            S.append(f'Body Force {bf}\n'
+                     f'  Current Density 1 = Variable Coordinate\n    Real MATC "-tx(1)*{amp}"\n'
+                     f'  Current Density 2 = Variable Coordinate\n    Real MATC "tx(0)*{amp}"\nEnd\n')
+            bf += 1
+        else:
+            S.append(f'Body {r["phys"]}\n  Name = "{r["name"]}"\n  Equation = 1\n  Material = 2\nEnd\n')
 
     # Außenrand: A×n = 0 (Fluss parallel zur weit entfernten Box). Im Lastfall MUSS hier
     # zusätzlich das Jfix-Potential gepinnt werden (`Jfix = 0`) — sonst ist der Pegel des
@@ -1284,9 +1350,9 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
     if op.get("excitation") == "loaded":
         _log(f"   Betriebspunkt: {op['rpm']:.0f} 1/min, {op['load_nm']:.0f} Nm → "
              f"i_q={op['iq_A']} A, i_d={op['id_A']} A (Spitze {op['is_peak_A']} A)", 47)
-        _log("   3D-Feld: " + ("Lastfeld mit Statorströmen (experimentell)"
+        _log("   3D-Feld: " + ("Lastfeld mit Statorströmen + Stirnring-Schließung (vereinfacht)"
                                if op.get("field_loaded")
-                               else "Magnetfeld (Leerlauf) — Wickelkopf-Schließung folgt"), 48)
+                               else "Magnetfeld (Leerlauf)"), 48)
     else:
         _log("   Anregung: Leerlauf (nur Magnete)", 47)
 
@@ -1308,12 +1374,11 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
     res["operating_point"] = op
     if op.get("excitation") == "loaded" and op.get("field_loaded"):
         res["torque_note"] = (f"Lastfall {op['rpm']:.0f} 1/min / {op['load_nm']:.0f} Nm "
-                              f"(i_q={op['iq_A']} A, i_d={op['id_A']} A) — Arkkio-Moment "
-                              "aus Maxwell-Spannung im Luftspalt (experimentell)")
+                              f"(i_q={op['iq_A']} A, i_d={op['id_A']} A) — Statorströme mit "
+                              "Stirnring-Schließung; Feld vereinfacht (Grundwelle, lin. Eisen)")
     elif op.get("excitation") == "loaded":
         res["torque_note"] = (f"Betriebspunkt {op['rpm']:.0f} 1/min / {op['load_nm']:.0f} Nm: "
-                              f"i_q={op['iq_A']} A, i_d={op['id_A']} A. 3D-Feld = Leerlauf "
-                              "(Magnete) ⇒ Netto-Moment ≈ 0; 3D-Lastfeld (Wickelköpfe) folgt")
+                              f"i_q={op['iq_A']} A, i_d={op['id_A']} A. 3D-Feld = Leerlauf (Magnete)")
 
     # 3D-Ergebnis in results.json des Projekts mergen, damit der Gesamtbericht den
     # 3D-Teil mit aufnehmen kann (Bilder liegen bereits unter charts/). base64 wird
