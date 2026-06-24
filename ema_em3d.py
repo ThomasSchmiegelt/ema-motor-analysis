@@ -423,10 +423,10 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
                 return None
 
         groups = {"shaft": [], "rotor": [], "stator": [], "air": []}
-        # Barrieren + Statornuten sind LUFT-Taschen (im Rotor bzw. im Statorring).
+        # Barrieren sind LUFT-Taschen im Rotor. Die Statornuten werden NICHT pauschal als
+        # „air" gebündelt, sondern unten EINZELN als Körper getaggt (damit jede Nut im
+        # Lastfall ihre eigene Stromdichte tragen kann).
         for v in bar_vols:
-            groups["air"].append(v)
-        for v in slot_vols:
             groups["air"].append(v)
         for (v, gx, gy, gz, vmass) in vinfo:
             if v in mag_taken or v in bar_taken or v in slot_taken:
@@ -480,6 +480,18 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
             for v in mag_assign[i]:
                 vol_class[v] = "magnet"
                 mag_pol[v] = 1 if m["sign"] > 0 else -1
+        # Statornuten als EINZELNE Körper (Material Luft; im Lastfall Träger der
+        # Stromdichte). Slot-Stück i ⇒ Nut-Index s=i (slot_rects baut s in Reihenfolge).
+        for i, sp in enumerate(slot_pieces):
+            if not slot_assign[i]:
+                continue
+            nm = f"slot_{i}"
+            phys = _phys(3, slot_assign[i], nm)
+            tags["coils"].append({"name": nm, "phys": phys, "s": i,
+                                  "cx": sp["cx"], "cy": sp["cy"],
+                                  "length": sp["length"], "thick": sp["thick"]})
+            for v in slot_assign[i]:
+                vol_class[v] = "coil"
         tags["vol_class"] = vol_class
         tags["mag_pol"] = mag_pol
 
@@ -534,6 +546,48 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
     # werden von Elmer mit "./" verkettet → kaputter, geschachtelter Pfad.
     os.makedirs(os.path.join(work_dir, "results"), exist_ok=True)
 
+    # ── Betriebspunkt + (optionaler) Lastfall mit Statorströmen ─────────────────────
+    # `excitation=loaded` berechnet IMMER den Betriebspunkt (dq-Ströme aus rpm+Last, gleiche
+    # Logik wie 2D) und zeigt ihn an. Die ECHTE 3D-Stromeinprägung (`coil_currents=True`,
+    # experimentell, Standard AUS) prägt je Nut eine axiale Stromdichte ein
+    # (i_slot = i_d·cos(elAng) − i_q·sin(elAng), J_z = n_Leiter·i_slot/A_Nut, ΣJ=0). Sie ist
+    # nur belastbar mit GESCHLOSSENEN Spulen (Wickelköpfe): ohne Stirnverbindung können die
+    # offenen Nutstäbe den Strom nicht schließen → das Vektorpotential explodiert (B~10⁴ T).
+    # Bis die Wickelkopf-Geometrie steht, bleibt das 3D-FELD im Lastfall das Magnetfeld
+    # (Leerlauf), während der Betriebspunkt/die Ströme dennoch ausgewiesen werden.
+    coils = tags.get("coils", [])
+    op_loaded = str(opts.get("excitation", "open_circuit")) == "loaded"
+    inject = op_loaded and bool(coils) and bool(opts.get("coil_currents", False))
+    slot_J, iq, id_ = {}, 0.0, 0.0
+    if op_loaded:
+        import ema_analysis
+        rpm = float(opts.get("rpm", 0.0) or 0.0)
+        load_nm = float(opts.get("load_nm", 0.0) or 0.0)
+        try:
+            iq, id_ = ema_analysis.estimate_dq_currents(geom, rpm, load_nm)
+        except Exception:
+            iq, id_ = 0.0, 0.0
+        if inject:
+            n_slots = max(int(geom.get("slots", len(coils)) or len(coils)), 1)
+            p_pairs = int(geom.get("p", 1))
+            n_cond = max(int(geom.get("conductorsPerSlot", 2) or 2), 1)
+            for c in coils:
+                elAng = c["s"] * (2 * math.pi / n_slots) * p_pairs
+                i_slot = id_ * math.cos(elAng) - iq * math.sin(elAng)        # Spitzen-Nutstrom [A]
+                A_slot = max((c["thick"] * 1e-3) * (c["length"] * 1e-3), 1e-9)  # m²
+                slot_J[c["phys"]] = (n_cond * i_slot) / A_slot                  # A/m² (axial)
+            if slot_J:                                   # Σ exakt 0 erzwingen (Jfix-fähig)
+                mean = sum(slot_J.values()) / len(slot_J)
+                for k in slot_J:
+                    slot_J[k] -= mean
+    loaded = inject and bool(slot_J)
+    tags["operating_point"] = {"excitation": "loaded" if op_loaded else "open_circuit",
+                               "field_loaded": loaded,
+                               "rpm": float(opts.get("rpm", 0.0) or 0.0),
+                               "load_nm": float(opts.get("load_nm", 0.0) or 0.0),
+                               "iq_A": round(iq, 1), "id_A": round(id_, 1),
+                               "is_peak_A": round(math.hypot(iq, id_), 1)}
+
     S = []
     S.append(f'Header\n  Mesh DB "." "{mesh_name}"\nEnd\n')
     S.append("Simulation\n"
@@ -563,7 +617,7 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
              '  Equation = "MgDyn"\n'
              '  Procedure = "MagnetoDynamics" "WhitneyAVSolver"\n'
              '  Variable = "AV"\n'
-             '  Fix Input Current Density = False\n'
+             '  Fix Input Current Density = ' + ('True' if loaded else 'False') + '\n'
              '  Use Tree Gauge = Logical True\n'
              + lin1 +
              '  Nonlinear System Max Iterations = 1\nEnd\n')
@@ -624,10 +678,25 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
                  f'  Magnetization 3 = Real 0.0\nEnd\n')
         bf += 1
 
-    # Außenrand: A×n = 0 (Fluss parallel zur weit entfernten Box).
+    # Statornuten: Material Luft; im Lastfall axiale Stromdichte (Ankerrückwirkung).
+    for c in coils:
+        if loaded and c["phys"] in slot_J:
+            S.append(f'Body {c["phys"]}\n  Name = "{c["name"]}"\n  Equation = 1\n'
+                     f'  Material = 2\n  Body Force = {bf}\nEnd\n')
+            S.append(f'Body Force {bf}\n  Current Density 3 = Real {slot_J[c["phys"]]:.6e}\nEnd\n')
+            bf += 1
+        else:
+            S.append(f'Body {c["phys"]}\n  Name = "{c["name"]}"\n  Equation = 1\n  Material = 2\nEnd\n')
+
+    # Außenrand: A×n = 0 (Fluss parallel zur weit entfernten Box). Im Lastfall MUSS hier
+    # zusätzlich das Jfix-Potential gepinnt werden (`Jfix = 0`) — sonst ist der Pegel des
+    # Stromdichte-Fix-Solvers unbestimmt („No Dirichlet conditions to define Jfix level"),
+    # die Stromdichte wird NICHT divergenzfrei gemacht und das Vektorpotential explodiert
+    # (B_gap ~10000 T statt ~1 T, CalcFields divergiert).
     if "boundary" in tags:
+        jfix_bc = "  Jfix = Real 0\n" if loaded else ""
         S.append(f'Boundary Condition 1\n  Target Boundaries(1) = {tags["boundary"]}\n'
-                 '  AV {e} = Real 0\n  AV = Real 0\nEnd\n')
+                 '  AV {e} = Real 0\n  AV = Real 0\n' + jfix_bc + 'End\n')
 
     sif_path = os.path.join(work_dir, "case.sif")
     with open(sif_path, "w") as f:
@@ -1185,7 +1254,8 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
                   or geom.get("axialLen") or 120.0)
     opts = {k: payload[k] for k in ("skew_deg", "skew_segments", "skew_step_deg",
                                     "mesh_cl", "gap_cl", "mag_cl", "mag_grow",
-                                    "airbox_factor", "n2d")
+                                    "airbox_factor", "n2d", "rpm", "load_nm",
+                                    "excitation", "coil_currents")
             if k in payload}
 
     work = os.path.join(project_dir, "em3d")
@@ -1210,6 +1280,15 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
 
     _log("📝 Schreibe Elmer-Solverdatei (.sif)…", 45)
     write_sif(geom, opts, tags, work, mesh_name="mesh")
+    op = tags.get("operating_point", {})
+    if op.get("excitation") == "loaded":
+        _log(f"   Betriebspunkt: {op['rpm']:.0f} 1/min, {op['load_nm']:.0f} Nm → "
+             f"i_q={op['iq_A']} A, i_d={op['id_A']} A (Spitze {op['is_peak_A']} A)", 47)
+        _log("   3D-Feld: " + ("Lastfeld mit Statorströmen (experimentell)"
+                               if op.get("field_loaded")
+                               else "Magnetfeld (Leerlauf) — Wickelkopf-Schließung folgt"), 48)
+    else:
+        _log("   Anregung: Leerlauf (nur Magnete)", 47)
 
     _log("🧲 ElmerSolver: 3D-Magnetostatik…", 50)
     rs = ER.run_elmersolver(os.path.join(work, "case.sif"), work)
@@ -1226,6 +1305,15 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
     res["skew_deg"] = float(opts.get("skew_deg", 0.0) or 0.0)
     res["skew_segments"] = int(tags.get("skew_segments", 1))
     res["skew_step_deg"] = float(tags.get("skew_step_deg", 0.0))
+    res["operating_point"] = op
+    if op.get("excitation") == "loaded" and op.get("field_loaded"):
+        res["torque_note"] = (f"Lastfall {op['rpm']:.0f} 1/min / {op['load_nm']:.0f} Nm "
+                              f"(i_q={op['iq_A']} A, i_d={op['id_A']} A) — Arkkio-Moment "
+                              "aus Maxwell-Spannung im Luftspalt (experimentell)")
+    elif op.get("excitation") == "loaded":
+        res["torque_note"] = (f"Betriebspunkt {op['rpm']:.0f} 1/min / {op['load_nm']:.0f} Nm: "
+                              f"i_q={op['iq_A']} A, i_d={op['id_A']} A. 3D-Feld = Leerlauf "
+                              "(Magnete) ⇒ Netto-Moment ≈ 0; 3D-Lastfeld (Wickelköpfe) folgt")
 
     # 3D-Ergebnis in results.json des Projekts mergen, damit der Gesamtbericht den
     # 3D-Teil mit aufnehmen kann (Bilder liegen bereits unter charts/). base64 wird
@@ -1252,6 +1340,7 @@ def _persist_em3d_summary(project_dir: str, res: dict):
             data = {}
     summary = {k: res.get(k) for k in (
         "b_gap_mid_peak", "b_gap_axial", "z_axial", "torque_arkkio_Nm",
+        "torque_Nm", "torque_note", "operating_point",
         "compare_2d", "mesh", "mesh_zones", "axial_mm", "skew_deg",
         "skew_segments", "skew_step_deg", "warnings")}
     # Bild-Schlüssel+Titel (Dateien liegen in charts/) für den Bericht.

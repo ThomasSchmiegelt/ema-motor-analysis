@@ -937,6 +937,68 @@
   </div>
 
   <div class="e3-card">
+    <div class="section-title">⚡ Betriebspunkt (Drehzahl &amp; Last)</div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <label style="font-size:.82rem;color:#bcd">Profil</label>
+      <select id="e3_preset" onchange="_e3ApplyPreset()" style="max-width:280px">
+        <option value="leerlauf">Leerlauf (nur Magnete)</option>
+        <option value="teillast">Teillast (mittlere Drehzahl)</option>
+        <option value="nennlast">Nennlast (Nenndrehzahl)</option>
+        <option value="volllast">Volllast / Anfahren (niedrige Drehzahl)</option>
+        <option value="feldschwaechung">Feldschwächung (hohe Drehzahl)</option>
+        <option value="custom">Benutzerdefiniert</option>
+      </select>
+    </div>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Anregung</label>
+          <select id="e3_excitation" onchange="_e3MarkCustom();_updateExcitationVis()" style="width:auto;padding:4px">
+            <option value="open_circuit">Leerlauf (nur Magnete)</option>
+            <option value="loaded">Lastfall (mit Statorströmen)</option>
+          </select></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Leerlauf = nur Permanentmagnet-Erregung (Open-Circuit). Lastfall =
+          zusätzlich die aus Drehzahl &amp; Last geschätzten dq-Statorströme (MTPA inkl. Feldschwächung)
+          als Betriebspunkt.</p>
+          <p><span class="l">Laienverständlich:</span> „Leerlauf" = Motor dreht stromlos mit, „Lastfall"
+          = Motor liefert das eingestellte Moment bei der Drehzahl.</p>
+          <p><span class="x">Wirkung:</span> Der Lastfall weist die nötigen Ströme (i_q/i_d) aus. Das
+          bebilderte 3D-Feld zeigt derzeit das Magnetfeld; die echte 3D-Ankerrückwirkung (Wickelköpfe)
+          ist als Experimentier-Schalter unten verfügbar.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Drehzahl</label>
+          <input type="number" id="e3_rpm" value="3000" min="0" max="60000" step="100" oninput="_e3MarkCustom()"><span class="unit">1/min</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Bestimmt zusammen mit der Last die Feldschwächung: oberhalb der
+          Basisdrehzahl wird ein negativer d-Strom zur Spannungsbegrenzung addiert.</p>
+          <p><span class="l">Laienverständlich:</span> Wie schnell sich der Motor dreht.</p>
+          <p><span class="x">Wirkung:</span> Nur Betriebspunkt (Ströme), keine Rechenzeit-Änderung.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Lastmoment</label>
+          <input type="number" id="e3_load" value="150" min="0" max="5000" step="10" oninput="_e3MarkCustom()"><span class="unit">Nm</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Gefordertes Wellenmoment → q-Strom (MTPA: i_q plus reluktanzwirksamer i_d).</p>
+          <p><span class="l">Laienverständlich:</span> Wie stark der Motor „zieht".</p>
+          <p><span class="x">Wirkung:</span> Nur Betriebspunkt (Ströme), keine Rechenzeit-Änderung.</p></details>
+      </div>
+      <div class="e3-field" id="e3_coilcurr_field" style="display:none">
+        <div class="row"><label>3D-Ströme einprägen (exp.)</label>
+          <input type="checkbox" id="e3_coilcurr" style="width:auto"></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Prägt die Nut-Stromdichten als echte 3D-Quelle ein (Jfix). <b>Nur belastbar
+          mit geschlossenen Wickelköpfen</b> — ohne Stirnverbindung schließt der Strom nicht und das Feld
+          divergiert. Daher experimentell (Standard aus).</p>
+          <p><span class="l">Laienverständlich:</span> Versucht, das echte Lastfeld zu rechnen — noch
+          nicht zuverlässig, weil die Spulenenden im Modell fehlen.</p>
+          <p><span class="x">Wirkung:</span> Kann unphysikalische Felder liefern; nur zum Experimentieren.</p></details>
+      </div>
+    </div>
+    <div id="e3_oppoint" style="margin-top:6px;font-size:.78rem;color:#9aa"></div>
+  </div>
+
+  <div class="e3-card">
     <div class="section-title">⚙️ FEM-Einstellungen</div>
     <p style="font-size:.78rem;color:#889;margin:0 0 4px">
       Jede Einstellung mit Erklärung (<span style="color:#6ab0c8">ℹ️ aufklappen</span>) — fachlich,
@@ -3594,6 +3656,46 @@ function _em3dApplyOpts(payload) {
   payload.mag_cl        = g('e3_magcl');     // 0 = auto (≈ halbe Grobgröße)
   payload.mag_grow      = g('e3_maggrow');   // 0 = auto (≈ 3× Luftspalt)
   payload.airbox_factor = g('e3_box');
+  // Betriebspunkt: Anregung + Drehzahl + Last (+ experimentelle 3D-Stromeinprägung).
+  payload.excitation   = document.getElementById('e3_excitation').value;
+  payload.rpm          = g('e3_rpm');
+  payload.load_nm      = g('e3_load');
+  payload.coil_currents = !!document.getElementById('e3_coilcurr')?.checked;
+}
+
+// Lastprofile: füllen Anregung + Drehzahl + Last mit typischen Werten. Drehzahl/Last
+// orientieren sich, wenn vorhanden, an der adoptierten Geometrie (rpm_to/load_nm).
+function _e3ApplyPreset() {
+  const pr = document.getElementById('e3_preset').value;
+  if (pr === 'custom') return;
+  const g = (_em3dGeomPayload) || {};
+  const rpmTo = +g.rpm_to || 8000;
+  const loadN = +g.load_nm || 150;
+  const set = (exc, rpm, load) => {
+    document.getElementById('e3_excitation').value = exc;
+    document.getElementById('e3_rpm').value = Math.round(rpm);
+    document.getElementById('e3_load').value = Math.round(load);
+  };
+  if (pr === 'leerlauf')            set('open_circuit', rpmTo * 0.5, 0);
+  else if (pr === 'teillast')       set('loaded', rpmTo * 0.5, loadN * 0.5);
+  else if (pr === 'nennlast')       set('loaded', rpmTo * 0.6, loadN);
+  else if (pr === 'volllast')       set('loaded', Math.max(300, rpmTo * 0.08), loadN * 1.5);
+  else if (pr === 'feldschwaechung') set('loaded', rpmTo, loadN * 0.6);
+  _updateExcitationVis();
+}
+
+// Manuelle Änderung → Profil auf „Benutzerdefiniert".
+function _e3MarkCustom() {
+  const sel = document.getElementById('e3_preset');
+  if (sel && sel.value !== 'custom') sel.value = 'custom';
+  _updateExcitationVis();
+}
+
+// Den experimentellen 3D-Strom-Schalter nur im Lastfall zeigen.
+function _updateExcitationVis() {
+  const loaded = document.getElementById('e3_excitation')?.value === 'loaded';
+  const f = document.getElementById('e3_coilcurr_field');
+  if (f) f.style.display = loaded ? '' : 'none';
 }
 
 async function startEm3d() {
@@ -3665,6 +3767,16 @@ function _renderEm3d(res) {
       + (c.B_gap_2D!=null ? ` vs 2D-FDM=${c.B_gap_2D} T` : '');
   }
   let h = '';
+  const op = res.operating_point;
+  if (op && op.excitation === 'loaded') {
+    h += `<div style="background:#16161c;border:1px solid #2e2e36;border-radius:6px;padding:8px 11px;margin:6px 0;font-size:.8rem;color:#bcd">`
+       + `<b>⚡ Betriebspunkt:</b> ${op.rpm} 1/min · ${op.load_nm} Nm → `
+       + `i_q = ${op.iq_A} A · i_d = ${op.id_A} A · |I| = ${op.is_peak_A} A (Spitze)`
+       + `<div style="color:#9a8;margin-top:3px">3D-Feld: `
+       + (op.field_loaded ? 'Lastfeld mit Statorströmen (experimentell)'
+                          : 'Magnetfeld (Leerlauf) — die echte 3D-Ankerrückwirkung mit Wickelköpfen folgt; die Ströme oben sind der berechnete Betriebspunkt.')
+       + `</div></div>`;
+  }
   if (c.B_gap_2D != null) {
     h += `<table style="font-size:.8rem;border-collapse:collapse;margin:6px 0">
       <tr><th style="text-align:left;padding:3px 10px">Kennwert</th><th style="padding:3px 10px">2D-FDM</th><th style="padding:3px 10px">3D-Elmer</th></tr>

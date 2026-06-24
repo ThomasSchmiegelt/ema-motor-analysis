@@ -375,8 +375,16 @@ Dropdown-Wahl. `/em3d/vtp`-Fetch ist cache-gebustet. **Bericht-Integration:**
 (`results["em3d"]`, Bilder liegen in `charts/em3d_*.png`); `ema_report.build_context` zieht
 `em3d`+Bilder, `_single_md_tables` baut die 2D-vs-3D-Tabelle (B_gap, Endeffekt Rand/Mitte,
 Staffelung), `_prompt_for` ergänzt §8 (qualitativ) und `_ensure_em3d_section` garantiert den
-bebilderten 3D-Abschnitt auch ohne LLM-Mithilfe — Standard- + agentischer Einzelbericht. **v1-Scope:**
-lineare Materialien, Open-Circuit (Magnete); Lastfall/Spulen + BH-Kurve sind Folgeschritte. **Prerequisite:**
+bebilderten 3D-Abschnitt auch ohne LLM-Mithilfe — Standard- + agentischer Einzelbericht. **Betriebspunkt (Drehzahl + Last):** UI-Karte „⚡ Betriebspunkt" (rpm + Last + Anregung +
+Lastprofile Leerlauf/Teillast/Nennlast/Volllast/Feldschwächung). `write_sif` berechnet bei
+`excitation=loaded` IMMER den Betriebspunkt (dq-Ströme via `estimate_dq_currents`,
+`tags["operating_point"]`) und zeigt i_q/i_d an. Die ECHTE 3D-Stromeinprägung
+(`coil_currents=True`, je Nut axiale Stromdichte + Jfix) ist **experimentell (Standard AUS)**:
+offene Nutstäbe ohne Wickelkopf-Schließung lassen das Vektorpotential explodieren (B~10⁴ T) →
+das Default-3D-Lastfeld bleibt das Magnetfeld (Leerlauf), nur der Betriebspunkt/die Ströme werden
+ausgewiesen. Die Nuten sind dafür schon EINZELN als Körper getaggt (`tags["coils"]`). **v1-Scope:**
+lineare Materialien, 3D-FELD Open-Circuit (Magnete); echtes 3D-Lastfeld (geschlossene Wickelköpfe)
++ BH-Kurve sind Folgeschritte. **Prerequisite:**
 Elmer (`sudo apt install elmerfem-csc` via PPA `elmer-csc-ubuntu/elmer-csc-ppa`) + die
 Python-Pakete `gmsh`/`vtk` (in `requirements.txt`). Mesh/sif sind ohne Elmer test- und
 baubar (`test_em3d.py`). **Gotchas (alle gelöst, beim Ändern beachten):** `gmsh.initialize(
