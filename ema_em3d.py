@@ -240,6 +240,9 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
 
     L = float(axial)
     r_shaft = geom["shaftD"] / 2.0
+    r_bore = max(float(geom.get("shaftBoreD", 0.0) or 0.0) / 2.0, 0.0)   # Hohlwelle (0=voll)
+    if r_bore >= r_shaft - 0.5:                                          # zu groß ⇒ ignorieren
+        r_bore = 0.0
     r_rot = geom["rotorOD"] / 2.0
     r_si = geom["statorID"] / 2.0
     r_so = geom["statorOD"] / 2.0
@@ -263,6 +266,9 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
         statI = occ.addCylinder(0, 0, 0, 0, 0, L, r_si)
         statO = occ.addCylinder(0, 0, 0, 0, 0, L, r_so)
         box = occ.addCylinder(0, 0, -cap, 0, 0, L + 2 * cap, R_box)
+        # Hohlwelle: Bohrzylinder mit in die Welle fragmentieren → Innenraum wird LUFT
+        # (per Radius klassifiziert). r_bore=0 ⇒ Vollwelle (kein Zusatzzylinder).
+        bore = occ.addCylinder(0, 0, 0, 0, 0, L, r_bore) if r_bore > 0 else None
 
         # Magnete als Loft zwischen unterem und (um den Skew-Winkel gedrehtem) oberem
         # Querschnitt-Rechteck. OCC kennt kein twist → addThruSections; Skew=0 ⇒ Prisma.
@@ -340,6 +346,7 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
 
         occ.synchronize()
         all_in = [(3, shaft), (3, rotor), (3, statI), (3, statO), (3, box)] \
+            + ([(3, bore)] if bore is not None else []) \
             + [(3, t) for t in mag_vol_tags if t is not None] \
             + [(3, t) for t in bar_vol_tags if t is not None] \
             + [(3, t) for t in slot_vol_tags if t is not None] \
@@ -480,6 +487,8 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
                     groups["ring"].append(v); ring_z[v] = 1 if cz > L else -1
                 else:
                     groups["air"].append(v)                 # axiale Luft-Kappen
+            elif r_bore > 0 and rc < r_bore:
+                groups["air"].append(v)                     # Hohlwellen-Bohrung (Luft)
             elif rc <= r_shaft:
                 groups["shaft"].append(v)
             elif rc < r_rot:
@@ -492,7 +501,7 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
                 groups["air"].append(v)                     # radiale Luft
 
         tags = {"bodies": {}, "magnets": [], "coils": [], "L": L,
-                "dims": {"r_shaft": r_shaft, "r_rot": r_rot, "r_si": r_si,
+                "dims": {"r_shaft": r_shaft, "r_bore": r_bore, "r_rot": r_rot, "r_si": r_si,
                          "r_so": r_so, "R_box": R_box, "cap": cap}}
         # Elmer erwartet Körper-IDs konsekutiv ab 1 (sonst „Body 1 missing"); die
         # Bauteile zuerst (Volumen-Body-IDs 1..N), die Außenrand-Surface danach.
@@ -993,7 +1002,10 @@ def _slice_image(grid, bname, z0, dims, save_fn):
     tpc = ax.tricontourf(pts[:, 0], pts[:, 1], np.clip(bmag, 0, vmax),
                          levels=40, cmap="magma", norm=norm)
     ax.set_aspect("equal"); ax.set_title("|B| [T] — Schnitt z=L/2 (Wurzelskala)", color="#ddd")
-    for r in (dims["r_rot"], dims["r_si"], dims["r_so"]):
+    rings = [dims["r_rot"], dims["r_si"], dims["r_so"]]
+    if dims.get("r_bore", 0) > 0:
+        rings.append(dims["r_bore"])                        # Hohlwellen-Bohrung
+    for r in rings:
         ax.add_patch(plt.Circle((0, 0), r, fill=False, color="#888", lw=0.6))
     ax.set_xlim(-dims["r_so"] * 1.05, dims["r_so"] * 1.05)
     ax.set_ylim(-dims["r_so"] * 1.05, dims["r_so"] * 1.05)
@@ -1037,7 +1049,10 @@ def _mesh_slice_image(tags, z0, save_bytes):
     ax.triplot(triang, color="#0c0c0c", lw=0.12, alpha=0.55)
     ax.set_aspect("equal"); ax.set_title("Netz-Querschnitt z=L/2 (hell = fein)", color="#ddd")
     dims = tags["dims"]
-    for r in (dims["r_rot"], dims["r_si"], dims["r_so"]):
+    rings = [dims["r_rot"], dims["r_si"], dims["r_so"]]
+    if dims.get("r_bore", 0) > 0:
+        rings.append(dims["r_bore"])
+    for r in rings:
         ax.add_patch(plt.Circle((0, 0), r, fill=False, color="#bbb", lw=0.5, alpha=0.5))
     ax.set_xlim(-dims["r_so"] * 1.05, dims["r_so"] * 1.05)
     ax.set_ylim(-dims["r_so"] * 1.05, dims["r_so"] * 1.05)
