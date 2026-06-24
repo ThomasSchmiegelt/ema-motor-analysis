@@ -39,6 +39,11 @@ MU_R_MAG = 1.05
 # `_analytical_Barm` entspricht (dominiert vom geometrieunabhängigen mm↔m-Einheitenfaktor;
 # für andere Maschinen daher näherungsweise gültig — Lastfeld bleibt experimentell).
 COIL_J_SCALE = 199.0
+# Obergrenze der 3D-Netzknoten. Das kantenbasierte curl-curl-System (MUMPS direkt) wird auf
+# diesem Rechner oberhalb ~60k Knoten zu langsam/instabil (Segfault bzw. >8 min). Wird das
+# Netz feiner, vergröbert `_build_mesh_capped` die Zellgrößen automatisch und warnt — statt
+# ElmerSolver abstürzen/hängen zu lassen. Bewährt: ~28–50k Knoten lösen in ~1–2 min.
+EM3D_MAX_NODES = 55000
 
 
 # ── Magnetplatzierung (1:1 zur 2D-Rasterung `ema_analysis._rasterise`) ───────────
@@ -663,12 +668,21 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
                 '  Linear System Max Iterations = 8000\n'
                 '  Linear System Convergence Tolerance = 1.0e-7\n'
                 '  Linear System Residual Output = 100\n')
+    # Jfix (Stromdichte-Bereinigung, nur Lastfall): der Hilfslöser stagniert sonst auf
+    # feinen Netzen („Too many iterations") und bricht ab. ILU1 + viele Iterationen +
+    # NICHT abbrechen (Teil-Fix reicht), eigener `Jfix:`-Namensraum.
+    jfix_cfg = ('  Jfix: Linear System Iterative Method = BiCGStabL\n'
+                '  Jfix: Linear System Max Iterations = 10000\n'
+                '  Jfix: Linear System Convergence Tolerance = 1.0e-6\n'
+                '  Jfix: Linear System Preconditioning = ILU1\n'
+                '  Jfix: Linear System Abort Not Converged = False\n') if loaded else ''
     S.append('Solver 1\n'
              '  Equation = "MgDyn"\n'
              '  Procedure = "MagnetoDynamics" "WhitneyAVSolver"\n'
              '  Variable = "AV"\n'
              '  Fix Input Current Density = ' + ('True' if loaded else 'False') + '\n'
              '  Use Tree Gauge = Logical True\n'
+             + jfix_cfg
              + lin1 +
              '  Nonlinear System Max Iterations = 1\nEnd\n')
     # Solver 2: Felder B/H/Energie aus A.
@@ -754,15 +768,12 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
         else:
             S.append(f'Body {r["phys"]}\n  Name = "{r["name"]}"\n  Equation = 1\n  Material = 2\nEnd\n')
 
-    # Außenrand: A×n = 0 (Fluss parallel zur weit entfernten Box). Im Lastfall MUSS hier
-    # zusätzlich das Jfix-Potential gepinnt werden (`Jfix = 0`) — sonst ist der Pegel des
-    # Stromdichte-Fix-Solvers unbestimmt („No Dirichlet conditions to define Jfix level"),
-    # die Stromdichte wird NICHT divergenzfrei gemacht und das Vektorpotential explodiert
-    # (B_gap ~10000 T statt ~1 T, CalcFields divergiert).
+    # Außenrand: A×n = 0 (Fluss parallel zur weit entfernten Box). Der Jfix-Pegel wird NICHT
+    # über eine BC gepinnt (das Keyword existiert nicht) — der Hilfslöser löst das konsistente
+    # (ΣJ=0) Neumann-System iterativ; ILU1 + Nicht-Abbruch (s. Solver 1) machen ihn robust.
     if "boundary" in tags:
-        jfix_bc = "  Jfix = Real 0\n" if loaded else ""
         S.append(f'Boundary Condition 1\n  Target Boundaries(1) = {tags["boundary"]}\n'
-                 '  AV {e} = Real 0\n  AV = Real 0\n' + jfix_bc + 'End\n')
+                 '  AV {e} = Real 0\n  AV = Real 0\nEnd\n')
 
     sif_path = os.path.join(work_dir, "case.sif")
     with open(sif_path, "w") as f:
@@ -1279,7 +1290,7 @@ def render_model_preview(payload: dict, project_dir: str, progress_cb=None) -> d
             if k in payload}
     work = os.path.join(project_dir, "em3d"); os.makedirs(work, exist_ok=True)
     _log("🔧 Baue 3D-Mesh (Gmsh)…", 15)
-    tags = build_mesh(geom, axial, opts, os.path.join(work, "motor3d.msh"))
+    tags, _ = _build_mesh_capped(geom, axial, opts, os.path.join(work, "motor3d.msh"), log=_log)
     _log(f"✓ Mesh: {tags['n_nodes']} Knoten, {tags['n_magnets']} Magnete", 70)
     _log("🎨 Rendere 3D-Modellansichten…", 80)
     saver = _charts_saver(project_dir)
@@ -1297,6 +1308,35 @@ def render_model_preview(payload: dict, project_dir: str, progress_cb=None) -> d
                      "bodies": tags["n_bodies"]},
             "warnings": ["Nur 3D-Geometrie (ohne Feld). Für das berechnete |B|-Feld "
                          "Elmer installieren und '3D-Feld berechnen' nutzen."]}
+
+
+def _build_mesh_capped(geom, axial, opts, msh, log=None):
+    """Baut das Mesh und vergröbert es iterativ, falls es das Solver-Knotenlimit überschreitet
+    (Segfault-/Hänger-Schutz). Knotenzahl skaliert oberflächendominiert ~h^-1.85, daher dieser
+    Exponent + bis zu 3 Durchläufe. Gibt (tags, warnings) zurück."""
+    cap = int(opts.get("max_nodes", EM3D_MAX_NODES) or EM3D_MAX_NODES)
+    tags = build_mesh(geom, axial, opts, msh)
+    n0 = tags["n_nodes"]
+    warns = []
+    passes = 0
+    while tags["n_nodes"] > cap and passes < 3:
+        passes += 1
+        mz = tags.get("mesh_zones", {})
+        f = (tags["n_nodes"] / cap) ** (1.0 / 1.85) * 1.06
+        opts = dict(opts,
+                    gap_cl=float(mz.get("gap_cl", 0.0)) * f,
+                    mag_cl=float(mz.get("mag_cl", 0.0)) * f,
+                    mesh_cl=float(mz.get("mesh_cl", 0.0)) * f,
+                    mag_grow=float(mz.get("mag_grow", 0.0)))
+        if log:
+            log(f"⚠ Netz zu fein ({tags['n_nodes']} Knoten > {cap}) → vergröbere ×{f:.2f} "
+                "(3D-Löser-Limit)…", None)
+        tags = build_mesh(geom, axial, opts, msh)
+    if passes:
+        warns.append(f"Netz von {n0} auf {tags['n_nodes']} Knoten vergröbert "
+                     f"(3D-Löser-Limit {cap}; für feinere Auflösung das Modell verkleinern "
+                     "oder Luftspalt-/Magnet-Mesh-Werte erhöhen).")
+    return tags, warns
 
 
 # ── Orchestrator ─────────────────────────────────────────────────────────────────
@@ -1329,7 +1369,7 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
     msh = os.path.join(work, "motor3d.msh")
 
     _log("🔧 Baue 3D-Mesh (Gmsh)…", 8)
-    tags = build_mesh(geom, axial, opts, msh)
+    tags, _mesh_warns = _build_mesh_capped(geom, axial, opts, msh, log=_log)
     mz = tags.get("mesh_zones", {})
     _log(f"✓ Mesh: {tags['n_nodes']} Knoten, {tags['n_magnets']} Magnete, "
          f"{tags.get('n_barriers', 0)} Flussbarrieren, {tags.get('n_slots', 0)} Statornuten, "
@@ -1372,6 +1412,8 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
     res["skew_segments"] = int(tags.get("skew_segments", 1))
     res["skew_step_deg"] = float(tags.get("skew_step_deg", 0.0))
     res["operating_point"] = op
+    if _mesh_warns:
+        res.setdefault("warnings", []).extend(_mesh_warns)
     if op.get("excitation") == "loaded" and op.get("field_loaded"):
         res["torque_note"] = (f"Lastfall {op['rpm']:.0f} 1/min / {op['load_nm']:.0f} Nm "
                               f"(i_q={op['iq_A']} A, i_d={op['id_A']} A) — Statorströme mit "
