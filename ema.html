@@ -3664,24 +3664,36 @@ function _em3dApplyOpts(payload) {
   payload.coil_currents = !!document.getElementById('e3_coilcurr')?.checked;
 }
 
-// Lastprofile: füllen Anregung + Drehzahl + Last mit typischen Werten. Drehzahl/Last
-// orientieren sich, wenn vorhanden, an der adoptierten Geometrie (rpm_to/load_nm).
+// Geschätztes Nenn-Drehmoment aus der Maschinengröße (Tangentialspannungs-Auslegung):
+// T ≈ σ·(π/2)·D_rotor²·L_stack, σ ≈ 25 kPa typische Dauer-Tangentialspannung. Unabhängig
+// vom (oft kleinen) load_nm-Formularfeld → liefert realistische Profil-Lasten je Maschine.
+function _e3RatedTorque(g) {
+  const geom = g.geom || {};
+  const D = (+geom.rotorOD || 180) / 1000;                       // m
+  const L = (+g.axial_len || +geom.axialLen || 80) / 1000;       // m
+  const sigma = 25000;                                           // N/m²
+  return Math.max(1, sigma * (Math.PI / 2) * D * D * L);         // Nm
+}
+
+// Lastprofile: füllen Anregung + Drehzahl + Last mit typischen Werten. Die Last leitet sich
+// aus dem geschätzten Nennmoment der Maschine ab (nicht aus dem load_nm-Feld), die Drehzahl
+// aus dem Drehzahlbereich (rpm_to).
 function _e3ApplyPreset() {
   const pr = document.getElementById('e3_preset').value;
   if (pr === 'custom') return;
   const g = (_em3dGeomPayload) || {};
   const rpmTo = +g.rpm_to || 8000;
-  const loadN = +g.load_nm || 150;
+  const Tn = _e3RatedTorque(g);                                  // Nennmoment-Schätzung
   const set = (exc, rpm, load) => {
     document.getElementById('e3_excitation').value = exc;
     document.getElementById('e3_rpm').value = Math.round(rpm);
     document.getElementById('e3_load').value = Math.round(load);
   };
   if (pr === 'leerlauf')            set('open_circuit', rpmTo * 0.5, 0);
-  else if (pr === 'teillast')       set('loaded', rpmTo * 0.5, loadN * 0.5);
-  else if (pr === 'nennlast')       set('loaded', rpmTo * 0.6, loadN);
-  else if (pr === 'volllast')       set('loaded', Math.max(300, rpmTo * 0.08), loadN * 1.5);
-  else if (pr === 'feldschwaechung') set('loaded', rpmTo, loadN * 0.6);
+  else if (pr === 'teillast')       set('loaded', rpmTo * 0.5, Tn * 0.4);
+  else if (pr === 'nennlast')       set('loaded', rpmTo * 0.6, Tn);
+  else if (pr === 'volllast')       set('loaded', Math.max(300, rpmTo * 0.10), Tn * 1.8);
+  else if (pr === 'feldschwaechung') set('loaded', rpmTo, Tn * 0.55);
   _updateExcitationVis();
 }
 
