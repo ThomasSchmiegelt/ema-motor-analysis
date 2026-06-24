@@ -360,7 +360,9 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
         mag_vols = [v for vs in mag_assign.values() for v in vs]
         bar_vols = [v for vs in bar_assign.values() for v in vs]
         slot_vols = [v for vs in slot_assign.values() for v in vs]
-        fine_surfs = _surfs_of(mag_vols) | _surfs_of(bar_vols)
+        # Magnete, Flussbarrieren UND Statornuten in die Feinzone (mag_cl): die Nuten
+        # liegen am Luftspalt und prägen das Zahnfeld → genauso fein auflösen.
+        fine_surfs = _surfs_of(mag_vols) | _surfs_of(bar_vols) | _surfs_of(slot_vols)
 
         # ── Zonale Netz-Verfeinerung (einstellbar): Luftspalt+Umgebung SEHR fein
         #    (gap_cl), Magnete/Barrieren+Umgebung FEIN (mag_cl, über mag_grow auf grob
@@ -379,7 +381,7 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
         fld.setString(f_gap, "F",
                       f"{gap_cl}+{max(0.0, mesh_cl-gap_cl)}*(1-exp(-{u}*{u}))")
         fields.append(f_gap)
-        # Magnete + Barrieren: Distance→Threshold (fein nah, grob ab mag_grow).
+        # Magnete + Barrieren + Statornuten: Distance→Threshold (fein nah, grob ab mag_grow).
         if fine_surfs:
             f_dist = fld.add("Distance")
             fld.setNumbers(f_dist, "SurfacesList", [float(s) for s in fine_surfs])
@@ -1197,7 +1199,7 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
          f"{tags.get('n_barriers', 0)} Flussbarrieren, {tags.get('n_slots', 0)} Statornuten, "
          f"Körper {tags['n_bodies']}", 28)
     if mz:
-        _log(f"   Zonen: Luftspalt {mz['gap_cl']:.2f} / Magnet+Barriere {mz['mag_cl']:.2f} "
+        _log(f"   Zonen: Luftspalt {mz['gap_cl']:.2f} / Magnet+Barriere+Nut {mz['mag_cl']:.2f} "
              f"(Saum {mz['mag_grow']:.1f}) / grob {mz['mesh_cl']:.1f} mm", 30)
 
     _log("🔁 ElmerGrid: MSH → Elmer-Mesh…", 38)
