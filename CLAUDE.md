@@ -325,7 +325,31 @@ MathEval-Hintergrundfeld verfeinert) → `ElmerGrid 14 2` (MSH→Elmer-Mesh, `el
 SaveScalars; Eisen μr=500 linear, Magnet μr=1.05 + per-Magnet `Body Force Magnetization`
 = Br/μ0·Richtung, BC außen A×n=0) → `ElmerSolver` → `parse_results` (VTU via **vtk**:
 Luftspalt-Br(θ) bei mehreren z → Endeffekt-Kurve, |B|-Schnitt z=L/2, Arkkio-Moment; +
-`run_em_analysis`-2D-Vergleich). Server: `/em3d` (503 wenn `elmer_runner.ELMER_OK` falsch),
+`run_em_analysis`-2D-Vergleich).
+
+**Hexaeder-Netz (opt-in, `opts["hex_mesh"]` / UI `e3_hex_mesh`, `_build_hex_mesh_once`):**
+strukturiertes **Hex-/Prismen**-Netz statt der Tetraeder — 2D-Querschnitt-OCC-Fragment
+(konzentrische Scheiben + Magnete + Statornuten + Flussbarrieren), zu Vierecken
+rekombiniert (`Mesh.RecombineAll`) + axial extrudiert (`occ.extrude(...,recombine=True)`).
+**Gerade** = eine Extrusion 0..L; **Staffelung** (`skew_segments` K≥2, kontinuierlicher
+`skew_deg` wird in eine feine Staffelung übersetzt) = ALLE K Rotationen der Magnete/
+Barrieren in den GEMEINSAMEN 2D-Querschnitt geschnitten + in K konformen Slabs extrudiert
+(jede Schicht teilt dasselbe Basis-Netz → voll konform), pro Slab wird das aktive Magnet-
+Segment geometrisch klassifiziert (Schwerpunkt, um −φ_k rückgedreht) und mit der um φ_k
+gedrehten Magnetisierung getaggt. Der Luftspalt wird über wenige radial ausgerichtete
+Schichten mit einem Bruchteil der Tet-Freiheitsgrade aufgelöst (Speicher-/Genauigkeits-
+gewinn). **Elmer braucht auf Hex/Prisma zwingend die Piola-Transformation** der Kantenbasis
+(`write_sif` setzt `Use Piola Transform` NUR bei `tags["mesh_kind"]=="hex"`) — und dann
+KEIN Tree-Gauge (unverträglich) und KEIN Direkt-/MUMPS-Löser (nur „lowest order edge basis"
+auf Simplizes). Das ungeeichte curl-curl-System ist symmetrisch **positiv-semidefinit** mit
+konsistenter RHS (Magnetquelle = curl von M) → **CG + ILU0** (BiCGStabL bricht mit NaN ab;
+verifiziert: korrektes 4-Pol-IPM-Feld). **v1-Scope-Grenzen:** KEINE Obround-Magnettaschen
+(0,1–0,3 mm Klebespalt bleibt Tet) und KEIN eingeprägtes Lastfeld (Stirnring-Leiter) —
+`build_mesh` fällt bei Lastfeld-Einprägung (`excitation=loaded`+`coil_currents`) automatisch
+auf Tet zurück (`tags["hex_fallback"]`), ebenso bei Hex-Bau-Fehler. Der Selbstheil-/Knoten-
+Cap-Monitor (`_build_mesh_capped`) greift auch im Hex-Modus (die Zellgrößen-Skalierung wirkt
+gleich). Test: `test_em3d.py` `test_hex_mesh_and_piola_sif`/`test_hex_staffelung_segments`/
+`test_hex_loaded_falls_back_to_tet` (ohne Elmer). Server: `/em3d` (503 wenn `elmer_runner.ELMER_OK` falsch),
 `/em3d/status`, `/em3d/vtu`, `/em3d/preview` (3D-Modell-Render OHNE Elmer, nur Gmsh+vtk),
 `/em3d/paraview` (startet die ParaView-GUI auf der VTU via `paraview --data=`, wie
 `/open_freecad`), `/em3d/vtp` (schlanke .vtp = Festkörper-Oberfläche + |B| via
@@ -420,8 +444,13 @@ Iso = Standardperspektive) und ruft `resetCamera()` für die Abstands-/Zoom-Anpa
 Flusslinien. **Feldfarbe
 im Browser-Viewer** (`_e3ApplyColor`): robuster Bereich übers 2./98.-Perzentil (`_e3Percentiles`)
 statt min/max + **log-Toggle** + **|B|max-Slider** — sonst klebt das moderate Statorfeld (~0,3–0,8 T
-Leerlauf) ganz unten in der Skala; das matplotlib-Schnittbild `_slice_image` nutzt analog
-`PowerNorm(γ=0.5)` (Wurzelskala). **Netz sichtbar machen:** statisches **Netz-Querschnittsbild**
+Leerlauf) ganz unten in der Skala; das matplotlib-Schnittbild `_slice_image`
+(Ergebnisbild `em3d_slice_mid`) zeigt den z=L/2-Schnitt jetzt in **Sättigungsfarben**:
+Skala ans Sättigungsknie `B_SAT_DISPLAY_3D`≈2 T gekoppelt (`vmax=1,25·b_sat`, turbo-
+Colormap blau→grün≈Knie→rot=gesättigt) + **grüne Sättigungskontur** bei `b_sat` +
+Knie-Marke in der Farbleiste — identisch zur Logik des Lastprofil-Videos, so zeigt der
+statische Schnitt direkt, WO das (linear gerechnete) Eisen sättigen würde (qualitativ).
+**Netz sichtbar machen:** statisches **Netz-Querschnittsbild**
 (`_mesh_slice_image` — schneidet die gmsh-.vtk MIT Luft bei z=L/2, `tripcolor` nach √Fläche
 hell=fein → zonale Auflösung sichtbar, Bildschlüssel `em3d_mesh_slice`) + interaktiver **🕸 Netz**-
 Toggle im Browser-Viewer (`_e3ToggleMesh`, `actor.setEdgeVisibility` — Oberflächen-Netz der

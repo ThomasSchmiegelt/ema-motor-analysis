@@ -600,6 +600,7 @@ On-Demand-Job (der 2D-Pfad bleibt unverändert).
 | Parameter | Beschreibung |
 |---|---|
 | **Schrägung (Skew)** | Rotorschrägung in ° über die Paketlänge (0 = gerade) — reduziert Rastmoment/Oberwellen |
+| **🧱 Hexaeder-Netz (strukturiert)** | Opt-in: baut ein strukturiertes Hexaeder-/Prismen-Netz (2D-Querschnitt + axiale Extrusion) statt Tetraedern. Löst den Luftspalt mit weniger Freiheitsgraden auf → weniger RAM, oft schärferes Feld. Gerader **und** gestaffelter Fall. **Grenzen (v1):** keine Magnet-Luft-Taschen und kein eingeprägtes Lastfeld → bei aktivem Lastfeld automatischer Rückfall auf Tetraeder. Ideal für die Leerlauf-/Feldvisualisierung. Nutzt Elmers Piola-Transformation + iterativen Löser (kann bei feinen Netzen etwas länger dauern) |
 | **Mesh-Grobgröße** | Gmsh-Elementgröße außen in mm (größer = schneller, gröber) |
 | **Luftspalt-Mesh** | Feinere Elementgröße im Luftspalt in mm (dort wird das Feld/Moment ausgewertet) |
 | **Luftbox-Faktor** | Größe der umgebenden Luftbox (× Stator-OD) für die Außenrandbedingung |
@@ -610,8 +611,10 @@ On-Demand-Job (der 2D-Pfad bleibt unverändert).
   **3D-Schnittmodell** (Magnete rot = N / blau = S, Rotor-/Stator-Eisen) + die
   Stirnseiten-Ansicht der Polanordnung. Braucht **kein Elmer**, nur Gmsh/vtk.
 - **🧲 3D-Feld berechnen (Elmer)** — voller Lauf: Gmsh-Mesh → Elmer-Magnetostatik →
-  Auswertung. Ergebnis: **3D-|B|-Schnittbild** (aufgeschnitten, nach Feldstärke gefärbt),
-  die **Endeffekt-Kurve** (Luftspalt-|B_r| über der axialen Position — Maximum in der
+  Auswertung. Ergebnis: **3D-|B|-Sättigungs-Schnittbild** (aufgeschnitten, in
+  Sättigungsfarben eingefärbt — Skala ans Sättigungsknie ≈2 T gekoppelt, grüne
+  Sättigungsgrenze, so ist direkt sichtbar wo das Eisen sättigen würde), die
+  **Endeffekt-Kurve** (Luftspalt-|B_r| über der axialen Position — Maximum in der
   Mitte, Abfall zu den Stirnseiten), der **2D-vs-3D-Vergleich** des Luftspaltfelds und
   eine Kennwert-Tabelle.
 

@@ -266,7 +266,27 @@ class _Em3dAborted(RuntimeError):
 def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
     """Robuster Wrapper um ``_build_mesh_once``: die Magnettaschen können bei groben
     Netzen/manchen Topologien ungültige Facetten erzeugen → dann EINMAL ohne Taschen neu bauen.
-    So heilt sich jeder Aufrufer selbst (auch die Tests, die build_mesh direkt rufen)."""
+    So heilt sich jeder Aufrufer selbst (auch die Tests, die build_mesh direkt rufen).
+
+    **Hexaeder-Modus (opt-in, ``opts["hex_mesh"]``):** strukturiertes Hex-/Prismen-Netz
+    über ``_build_hex_mesh_once`` (2D-Querschnitt + axiale Extrusion) — für den geraden
+    UND den gestaffelten Fall. Da der Hex-Pfad (v1) kein eingeprägtes Lastfeld
+    (Stirnring-Leiter) kann, wird bei aktiver Spulenstrom-Einprägung automatisch auf das
+    Tet-Netz zurückgefallen (Leerlauf-/Feldvisualisierung bleibt Hex). Schlägt der
+    Hex-Bau fehl, ebenfalls Tet-Fallback."""
+    if opts.get("hex_mesh"):
+        want_load = (str(opts.get("excitation", "open_circuit")) == "loaded"
+                     and bool(opts.get("coil_currents", True)))
+        if want_load:
+            tags = _build_mesh_once(geom, axial, opts, msh_path)   # Lastfeld ⇒ Tet
+            tags["hex_fallback"] = "loaded_field_needs_tet"
+            return tags
+        try:
+            return _build_hex_mesh_once(geom, axial, opts, msh_path)
+        except Exception as e:
+            tags = _build_mesh_once(geom, axial, opts, msh_path)   # Hex-Bau fehlgeschlagen ⇒ Tet
+            tags["hex_fallback"] = f"hex_build_failed: {type(e).__name__}"
+            return tags
     try:
         return _build_mesh_once(geom, axial, opts, msh_path)
     except _DegenerateMeshError:
@@ -870,6 +890,280 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         gmsh.finalize()
 
 
+def _build_hex_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
+    """Baut ein **Hexaeder-/Prismen-Netz** (opt-in) statt der Tetraeder von
+    ``_build_mesh_once`` — strukturiert über **2D-Querschnitt + axiale Extrusion**.
+
+    Ansatz: der Motor-Querschnitt (konzentrische Ringe + Magnete + Statornuten +
+    Flussbarrieren) wird EINMAL als 2D-OCC-Fragment gebaut, zu Vierecken rekombiniert
+    und axial in Schichten extrudiert (``recombine=True`` ⇒ Hexaeder/Prismen). Der
+    Luftspalt wird so über wenige radial ausgerichtete Schichten mit einem Bruchteil
+    der Freiheitsgrade eines Tet-Netzes aufgelöst — der eigentliche Speicher-/
+    Genauigkeitsgewinn.
+
+    - **Gerade** (kein Skew/Staffelung): EINE Extrusion 0..L, Magnete exakt in den
+      Querschnitt geschnitten.
+    - **Staffelung** (``skew_segments`` K≥2, bzw. kontinuierlicher ``skew_deg`` →
+      feine Staffelung): K axiale Slabs, ALLE Rotationen der Magnete/Barrieren in den
+      gemeinsamen 2D-Querschnitt geschnitten ⇒ jede Schicht teilt DASSELBE Basis-Netz
+      (voll konform), und pro Slab wird das jeweils aktive Magnet-/Barrieren-Segment
+      geometrisch (Schwerpunkt, um −φ_k rückgedreht) klassifiziert.
+
+    **v1-Scope-Grenzen (bewusst, ggü. dem Tet-Pfad):** KEINE Obround-Luft-Taschen um
+    die Magnete (der 0,1–0,3 mm Klebespalt bleibt dem Tet-Pfad vorbehalten — im
+    strukturierten Hex-Netz wäre er nur mit sehr feiner Auflösung darstellbar), und
+    KEINE Stirnring-Leiter/Spulenstrom-Einprägung (Lastfeld) — Hex ist der
+    Leerlauf-/Feldvisualisierungs-Pfad. Der Aufrufer (``build_mesh``) fällt bei
+    Lastfeld-Bedarf auf Tet zurück. Elmer braucht auf Hex/Prisma die Piola-
+    Transformation (``write_sif`` setzt sie via ``tags["mesh_kind"]=="hex"``).
+
+    Returns dieselbe ``tags``-Struktur wie ``_build_mesh_once`` (+ ``mesh_kind``).
+    """
+    import gmsh
+
+    L = float(axial)
+    r_shaft = geom["shaftD"] / 2.0
+    r_bore = max(float(geom.get("shaftBoreD", 0.0) or 0.0) / 2.0, 0.0)
+    if r_bore >= r_shaft - 0.5:
+        r_bore = 0.0
+    r_rot = geom["rotorOD"] / 2.0
+    r_si = geom["statorID"] / 2.0
+    r_so = geom["statorOD"] / 2.0
+    box_f = float(opts.get("airbox_factor", 1.4))
+    R_box = box_f * r_so
+    cap = float(opts.get("cap_frac", 0.35)) * L
+    mesh_cl = float(opts.get("mesh_cl", 0.0)) or max(2.0, r_so / 18.0)
+    gap = max(0.3, (r_si - r_rot))
+    gap_cl = float(opts.get("gap_cl", 0.0)) or max(0.35, gap * 0.6)
+    mag_cl = float(opts.get("mag_cl", 0.0)) or max(gap_cl, mesh_cl * 0.5)
+
+    # Skew/Staffelung → K Slabs. Kontinuierlicher Skew wird (wie im Tet-Pfad) in eine
+    # feine Staffelung um die Wellenachse übersetzt (Extrusion ist je Slab gerade).
+    skew = math.radians(float(opts.get("skew_deg", 0.0)))
+    K = max(1, int(opts.get("skew_segments", 1) or 1))
+    step = math.radians(float(opts.get("skew_step_deg", 0.0) or 0.0))
+    if K < 2 and abs(math.degrees(skew)) > 1e-6:
+        K = max(3, min(12, int(math.ceil(abs(math.degrees(skew)) / 3.0))))
+        step = skew / K
+    if K < 2:
+        step = 0.0
+
+    rects = magnet_rects(geom)
+    brects = barrier_rects(geom)
+    srects = slot_rects(geom)
+
+    def _in_rect(px, py, m, eps=1e-6):
+        c, s = math.cos(m["ang"]), math.sin(m["ang"])
+        ux = (px - m["cx"]) * c + (py - m["cy"]) * s
+        uy = -(px - m["cx"]) * s + (py - m["cy"]) * c
+        return abs(ux) <= m["length"] / 2.0 + eps and abs(uy) <= m["thick"] / 2.0 + eps
+
+    gmsh.initialize(interruptible=False)
+    try:
+        gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.model.add("motor3d_hex")
+        occ = gmsh.model.occ
+
+        # ── 2D-Querschnitt (z=0): konzentrische Scheiben + Magnete (alle K Rotationen) +
+        #    Barrieren (alle K Rotationen) + Nuten (ohne Rotation) → ein Fragment.
+        disks = []
+        for R in (R_box, r_so, r_si, r_rot, r_shaft) + ((r_bore,) if r_bore > 0 else ()):
+            disks.append((2, occ.addDisk(0, 0, 0, R, R)))
+
+        def _rect2d(cx, cy, ang, Lm, Tm):
+            c, s = math.cos(ang), math.sin(ang)
+            pts = []
+            for ux, uy in ((-Lm / 2, -Tm / 2), (Lm / 2, -Tm / 2),
+                           (Lm / 2, Tm / 2), (-Lm / 2, Tm / 2)):
+                pts.append(occ.addPoint(cx + ux * c - uy * s, cy + ux * s + uy * c, 0))
+            ls = [occ.addLine(pts[k], pts[(k + 1) % 4]) for k in range(4)]
+            return (2, occ.addPlaneSurface([occ.addCurveLoop(ls)]))
+
+        cut_surfs = []
+        rots = [k * step for k in range(K)] if K >= 2 else [0.0]
+        for phi in rots:
+            c, s = math.cos(phi), math.sin(phi)
+            for m in rects:
+                cut_surfs.append(_rect2d(m["cx"] * c - m["cy"] * s,
+                                         m["cx"] * s + m["cy"] * c,
+                                         m["ang"] + phi, m["length"], m["thick"]))
+            for b in brects:
+                cut_surfs.append(_rect2d(b["cx"] * c - b["cy"] * s,
+                                         b["cx"] * s + b["cy"] * c,
+                                         b["ang"] + phi, b["length"], b["thick"]))
+        for sl in srects:                                    # Nuten drehen NICHT mit
+            cut_surfs.append(_rect2d(sl["cx"], sl["cy"], sl["ang"], sl["length"], sl["thick"]))
+
+        alls = disks + cut_surfs
+        occ.fragment([alls[0]], alls[1:])
+        occ.synchronize()
+        base = [(2, t) for (d, t) in gmsh.model.getEntities(2)]
+
+        # Zu Vierecken rekombinieren (⇒ Hexaeder bei der Extrusion; sonst Prismen).
+        gmsh.option.setNumber("Mesh.RecombineAll", 1)
+        gmsh.option.setNumber("Mesh.Algorithm", 8)           # Frontal-Delaunay for Quads
+
+        # ── Axiale Extrusion: Cap unten (Luft) · K Motor-Slabs · Cap oben (Luft).
+        seg_h = L / K
+        nz_seg = max(1, int(round(seg_h / max(mesh_cl, 0.5))))
+        nz_cap = max(2, int(round(cap / max(mesh_cl * 1.3, 0.5))))
+
+        def _extrude_up(base_dt, dz, nz):
+            occ.extrude(base_dt, 0, 0, dz, numElements=[max(1, nz)], recombine=True)
+            occ.synchronize()
+
+        def _tops_at(z):
+            out = []
+            for (d, t) in gmsh.model.getEntities(2):
+                _cx, _cy, _cz = occ.getCenterOfMass(2, t)
+                if abs(_cz - z) < 1e-4:
+                    out.append((2, t))
+            return out
+
+        cur = base
+        for k in range(K):
+            _extrude_up(cur, seg_h, nz_seg)
+            cur = _tops_at((k + 1) * seg_h)
+        _extrude_up(cur, cap, nz_cap)                        # Cap oben
+        _extrude_up(base, -cap, nz_cap)                      # Cap unten
+        occ.synchronize()
+
+        # Zonale 2D-Verfeinerung (Luftspalt sehr fein, Magnete/Nuten fein).
+        fld = gmsh.model.mesh.field
+        rmid = (r_rot + r_si) / 2.0
+        wgap = max(1.0, gap * 1.5)
+        u = f"((sqrt(x*x+y*y)-{rmid})/{wgap})"
+        f_gap = fld.add("MathEval")
+        fld.setString(f_gap, "F", f"{gap_cl}+{max(0.0, mesh_cl-gap_cl)}*(1-exp(-{u}*{u}))")
+        fld.setAsBackgroundMesh(f_gap)
+        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+        gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+        gmsh.option.setNumber("Mesh.MeshSizeMin", min(gap_cl, mag_cl))
+        gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_cl)
+        gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+        gmsh.model.mesh.generate(3)
+
+        # ── Klassifikation je Volumen über den Element-Schwerpunkt (radius + z + Slab-Rotation).
+        def _probe(v):
+            _t, etags, enodes = gmsh.model.mesh.getElements(3, v)
+            if not etags or len(etags[0]) == 0:
+                return None
+            nn = enodes[0][:8]                               # Hex: 8 Knoten (Prisma: 6, reicht auch)
+            cs = [gmsh.model.mesh.getNode(int(n))[0] for n in nn]
+            return (sum(c[0] for c in cs) / len(cs),
+                    sum(c[1] for c in cs) / len(cs),
+                    sum(c[2] for c in cs) / len(cs))
+
+        groups = {"shaft": [], "rotor": [], "stator": [], "air": []}
+        mag_groups = {}                                      # (mi,k) → {vols, mdx, mdy, sign, pole}
+        for (_d, v) in gmsh.model.getEntities(3):
+            pr = _probe(v)
+            if pr is None:
+                continue
+            cx, cy, cz = pr
+            rc = math.hypot(cx, cy)
+            if cz < -1e-6 or cz > L + 1e-6:
+                groups["air"].append(v); continue            # axiale Luft-Kappen
+            k = min(K - 1, max(0, int(cz / seg_h))) if K >= 2 else 0
+            phi = k * step
+            cph, sph = math.cos(phi), math.sin(phi)
+            ux = cx * cph + cy * sph                         # (cx,cy) um −φ zurückdrehen
+            uy = -cx * sph + cy * cph
+            if r_bore > 0 and rc < r_bore:
+                groups["air"].append(v)
+            elif rc <= r_shaft:
+                groups["shaft"].append(v)
+            elif rc < r_rot:
+                mi = next((i for i, m in enumerate(rects) if _in_rect(ux, uy, m)), None)
+                if mi is not None:
+                    m = rects[mi]
+                    g = mag_groups.setdefault((mi, k), {
+                        "vols": [], "mdx": m["mdx"] * cph - m["mdy"] * sph,
+                        "mdy": m["mdx"] * sph + m["mdy"] * cph,
+                        "sign": m.get("sign", 0.0), "pole": m.get("pole", 0)})
+                    g["vols"].append(v)
+                elif any(_in_rect(ux, uy, b) for b in brects):
+                    groups["air"].append(v)                  # Flussbarriere (Luft)
+                else:
+                    groups["rotor"].append(v)
+            elif rc < r_si:
+                groups["air"].append(v)                      # Luftspalt
+            elif rc < r_so:
+                if any(_in_rect(cx, cy, sl) for sl in srects):
+                    groups["air"].append(v)                  # Statornut (Luft) — dreht nicht mit
+                else:
+                    groups["stator"].append(v)
+            else:
+                groups["air"].append(v)                      # radiale Luft
+
+        tags = {"bodies": {}, "magnets": [], "coils": [], "coil_rings": [], "L": L,
+                "mesh_kind": "hex",
+                "dims": {"r_shaft": r_shaft, "r_bore": r_bore, "r_rot": r_rot, "r_si": r_si,
+                         "r_so": r_so, "R_box": R_box, "cap": cap}}
+        pid = [1]
+
+        def _phys(dim, ents, name):
+            g = gmsh.model.addPhysicalGroup(dim, ents, pid[0]); pid[0] += 1
+            gmsh.model.setPhysicalName(dim, g, name)
+            return g
+
+        vol_class, mag_pol = {}, {}
+        for name in ("shaft", "rotor", "stator", "air"):
+            if groups[name]:
+                tags["bodies"][name] = _phys(3, groups[name], name)
+            for v in groups[name]:
+                vol_class[v] = name
+        for (mi, k), g in sorted(mag_groups.items()):
+            if not g["vols"]:
+                continue
+            nm = f"magnet_{mi}_{k}"
+            phys = _phys(3, g["vols"], nm)
+            tags["magnets"].append({"name": nm, "phys": phys, "mdx": g["mdx"],
+                                    "mdy": g["mdy"], "sign": g["sign"], "pole": g["pole"]})
+            for v in g["vols"]:
+                vol_class[v] = "magnet"
+                mag_pol[v] = 1 if g["sign"] > 0 else -1
+        tags["vol_class"] = vol_class
+        tags["mag_pol"] = mag_pol
+        tags["ring_t"] = 0.0
+
+        # Außenrand (Box-Mantel + Stirnflächen) als Physical-Surface für die BC.
+        bxf = []
+        for (_d, f) in gmsh.model.getEntities(2):
+            fx, fy, fz = occ.getCenterOfMass(2, f)
+            if math.hypot(fx, fy) > R_box - 1e-3 or fz < -cap + 1e-3 or fz > L + cap - 1e-3:
+                bxf.append(f)
+        if bxf:
+            tags["boundary"] = _phys(2, bxf, "outer")
+
+        gmsh.write(msh_path)
+        vtk_path = msh_path.rsplit(".", 1)[0] + ".vtk"
+        try:
+            gmsh.write(vtk_path)
+            tags["vtk_mesh"] = vtk_path
+        except Exception:
+            pass
+        # Anteil echter Hexaeder (Typ 5) / Prismen (Typ 6) fürs Log/UI.
+        etypes, etags2, _ = gmsh.model.mesh.getElements(3)
+        n_hex = sum(len(etags2[i]) for i, t in enumerate(etypes) if t == 5)
+        n_pri = sum(len(etags2[i]) for i, t in enumerate(etypes) if t == 6)
+        n_tet = sum(len(etags2[i]) for i, t in enumerate(etypes) if t == 4)
+        tags["n_nodes"] = len(gmsh.model.mesh.getNodes()[0])
+        tags["n_magnets"] = len(tags["magnets"])
+        tags["n_barriers"] = len(brects)
+        tags["n_slots"] = len(srects)
+        tags["n_bodies"] = {k: len(v) for k, v in groups.items()}
+        tags["skew_segments"] = K
+        tags["skew_step_deg"] = math.degrees(step)
+        tags["hex_counts"] = {"hex": n_hex, "prism": n_pri, "tet": n_tet}
+        tags["mesh_zones"] = {"gap_cl": gap_cl, "mag_cl": mag_cl, "mesh_cl": mesh_cl,
+                              "mag_grow": float(opts.get("mag_grow", 0.0) or 0.0)}
+        tags["pocket_clear_mm"] = 0.0
+        return tags
+    finally:
+        gmsh.finalize()
+
+
 # ── Elmer-Solver-Input (.sif) ────────────────────────────────────────────────────
 
 def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
@@ -949,8 +1243,26 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
     # Solver 1: Vektorpotential (Kantenelemente), magnetostatisch.
     # Direkter Löser (MUMPS) für das curl-curl-Kantenelement-System: für kleine/mittlere
     # 3D-Modelle robust (das iterative BiCGStabL stagniert ohne aufwändige Vorkonditionierung).
-    direct = bool(opts.get("direct", True))
-    if direct:
+    # AUSNAHME Hex/Prisma (Piola): der Direkt-Löser (mit Tree-Gauge) geht in Elmer NUR mit der
+    # niedrigst-ordnigen Kantenbasis auf Simplizes — die Piola-Basis auf Hex/Prisma zählt nicht
+    # dazu („Direct solver … only possible with the lowest order edge basis"). Daher im Hex-Modus
+    # zwingend den ITERATIVEN Löser (BiCGStabL+ILU) nehmen.
+    is_hex = tags.get("mesh_kind") == "hex"
+    direct = bool(opts.get("direct", True)) and not is_hex
+    if is_hex:
+        # Hex/Piola OHNE Tree-Gauge: das curl-curl-Kantensystem ist symmetrisch
+        # positiv-SEMI-definit (Gradienten-Nullraum) mit KONSISTENTER rechter Seite
+        # (Magnetquelle = curl der Magnetisierung ⇒ im Bildraum). BiCGStabL bricht daran
+        # ab (NaN „Breakdown"); CG bleibt bei x0=0 im zur Nullraum orthogonalen Krylov-
+        # Unterraum und konvergiert gegen die minimum-norm-Lösung. Daher CG + ILU0.
+        lin1 = ('  Linear System Solver = Iterative\n'
+                '  Linear System Iterative Method = CG\n'
+                '  Linear System Preconditioning = ILU0\n'
+                '  Linear System Max Iterations = 8000\n'
+                '  Linear System Convergence Tolerance = 1.0e-7\n'
+                '  Linear System Residual Output = 100\n'
+                '  Linear System Abort Not Converged = False\n')
+    elif direct:
         lin1 = ('  Linear System Solver = Direct\n'
                 '  Linear System Direct Method = MUMPS\n')
     else:
@@ -974,12 +1286,21 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
                 '  Jfix: Linear System Convergence Tolerance = 1.0e-6\n'
                 '  Jfix: Linear System Preconditioning = ILU1\n'
                 '  Jfix: Linear System Abort Not Converged = False\n') if loaded else ''
+    # Piola-Transformation: curl-konforme Kantenelemente niedrigster Ordnung brauchen sie
+    # auf NICHT-simpliziellen Elementen (Hexaeder/Prismen), sonst wird das Feld falsch. Auf
+    # reinen Tetraeder-Netzen ist sie nicht nötig (daher nur im Hex-Modus gesetzt). WICHTIG:
+    # Elmers WhitneyAVSolver verträgt „Use Tree Gauge" NICHT zusammen mit der Piola-Transform
+    # („Tree Gauge cannot be used in conjunction with Piola transformation") → im Hex-Modus
+    # das Tree-Gauge weglassen (die Piola-Kantenbasis bringt ihre eigene Eichung mit).
+    gauge = '' if is_hex else '  Use Tree Gauge = Logical True\n'
+    piola = '  Use Piola Transform = Logical True\n' if is_hex else ''
     S.append('Solver 1\n'
              '  Equation = "MgDyn"\n'
              '  Procedure = "MagnetoDynamics" "WhitneyAVSolver"\n'
              '  Variable = "AV"\n'
              '  Fix Input Current Density = ' + ('True' if loaded else 'False') + '\n'
-             '  Use Tree Gauge = Logical True\n'
+             + gauge
+             + piola
              + jfix_cfg
              + lin1 +
              '  Nonlinear System Max Iterations = 1\nEnd\n')
@@ -1311,8 +1632,16 @@ def _style_dark(ax):
     ax.tick_params(colors="#bbb"); ax.xaxis.label.set_color("#ccc"); ax.yaxis.label.set_color("#ccc")
 
 
-def _slice_image(grid, bname, z0, dims, save_fn):
-    """|B|-Heatmap auf der Ebene z=z0 (vtkCutter → matplotlib tricontourf)."""
+def _slice_image(grid, bname, z0, dims, save_fn, b_sat=None):
+    """Sättigungs-Schnitt auf der Ebene z=z0 (vtkCutter → matplotlib tricontourf).
+
+    Färbt |B| in **Sättigungsfarben**: die Skala ist ans Sättigungsknie ``b_sat``
+    (Standard ``B_SAT_DISPLAY_3D``≈2 T) gekoppelt statt an ein reines |B|-Perzentil,
+    eine grüne Kontur markiert die Sättigungsgrenze, und die Farbtabelle (turbo)
+    liest sich thermisch: blau=niedrig → grün≈Knie → rot=gesättigt. So zeigt der
+    Schnitt direkt, WO das (linear gerechnete) Eisen in die Sättigung ginge — genau
+    wie das Lastprofil-Video, nur als statisches Ergebnisbild. Qualitativ (lineares
+    3D-Eisen, kein echtes BH-Limit)."""
     import vtk
     from vtk.util import numpy_support as ns
     import matplotlib.pyplot as plt
@@ -1322,25 +1651,35 @@ def _slice_image(grid, bname, z0, dims, save_fn):
     pts = ns.vtk_to_numpy(poly.GetPoints().GetData())
     B = ns.vtk_to_numpy(poly.GetPointData().GetArray(bname)).reshape(-1, 3)
     bmag = np.linalg.norm(B, axis=1)
-    import matplotlib.colors as mcolors
-    # Perzeptiv-/Wurzelskala (PowerNorm γ=0.5 ≈ logartig, verträgt B=0): das moderate
-    # Statorfeld (~0,3–0,8 T) ist sonst neben den starken Magnet-/Luftspaltspitzen kaum
-    # sichtbar. vmax robust über das 99. Perzentil (Eckenspitzen nicht skalenbestimmend).
-    vmax = float(np.nanpercentile(bmag, 99)) if bmag.size else 2.0
-    vmax = max(0.3, min(vmax, 2.4))
-    norm = mcolors.PowerNorm(gamma=0.5, vmin=0.0, vmax=vmax)
+    bs = float(b_sat if b_sat is not None else B_SAT_DISPLAY_3D)
+    # Skala ans Sättigungsknie koppeln: vmax = 1,25·b_sat → das Knie liegt bei ~0,8
+    # der turbo-Skala (gelb-grün), alles darüber schlägt nach rot um = gesättigt.
+    vmax = 1.25 * bs
     fig, ax = plt.subplots(figsize=(5.4, 5.0), facecolor="#0d0d0d")
     tpc = ax.tricontourf(pts[:, 0], pts[:, 1], np.clip(bmag, 0, vmax),
-                         levels=40, cmap="magma", norm=norm)
-    ax.set_aspect("equal"); ax.set_title("|B| [T] — Schnitt z=L/2 (Wurzelskala)", color="#ddd")
+                         levels=40, cmap="turbo", vmin=0.0, vmax=vmax)
+    # Sättigungsgrenze als grüne Kontur (identisch zum Lastprofil-Video).
+    try:
+        ax.tricontour(pts[:, 0], pts[:, 1], bmag, levels=[bs],
+                      colors="#39ff14", linewidths=1.1)
+    except Exception:
+        pass
+    ax.set_aspect("equal")
+    ax.set_title("|B| [T] — Sättigungs-Schnitt z=L/2\ngrün = Sättigungsgrenze %.1f T (qualitativ)"
+                 % bs, color="#ddd", fontsize=10)
     rings = [dims["r_rot"], dims["r_si"], dims["r_so"]]
     if dims.get("r_bore", 0) > 0:
         rings.append(dims["r_bore"])                        # Hohlwellen-Bohrung
     for r in rings:
-        ax.add_patch(plt.Circle((0, 0), r, fill=False, color="#888", lw=0.6))
+        ax.add_patch(plt.Circle((0, 0), r, fill=False, color="#ccc", lw=0.6))
     ax.set_xlim(-dims["r_so"] * 1.05, dims["r_so"] * 1.05)
     ax.set_ylim(-dims["r_so"] * 1.05, dims["r_so"] * 1.05)
-    fig.colorbar(tpc, ax=ax, shrink=0.8)
+    cb = fig.colorbar(tpc, ax=ax, shrink=0.8)
+    cb.set_label("|B| [T]", color="#ccc")
+    try:
+        cb.ax.axhline(bs / vmax, color="#39ff14", lw=1.4)   # Knie-Marke in der Farbleiste
+    except Exception:
+        pass
     _style_dark(ax)
     return save_fn(fig, "em3d_slice_mid.png")
 
@@ -1870,7 +2209,7 @@ def render_model_preview(payload: dict, project_dir: str, progress_cb=None) -> d
     axial = float(payload.get("axial_len") or geom.get("axialLen") or 120.0)
     opts = {k: payload[k] for k in ("skew_deg", "skew_segments", "skew_step_deg",
                                     "mesh_cl", "gap_cl", "mag_cl", "mag_grow",
-                                    "airbox_factor")
+                                    "airbox_factor", "hex_mesh")
             if k in payload}
     work = os.path.join(project_dir, "em3d"); os.makedirs(work, exist_ok=True)
     _log("🔧 Baue 3D-Mesh (Gmsh)…", 15)
@@ -2078,7 +2417,7 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
 _EM3D_OPT_KEYS = ("skew_deg", "skew_segments", "skew_step_deg",
                   "mesh_cl", "gap_cl", "mag_cl", "mag_grow", "mag_clear_mm",
                   "airbox_factor", "n2d", "rpm", "load_nm",
-                  "excitation", "coil_currents", "target_nodes")
+                  "excitation", "coil_currents", "target_nodes", "hex_mesh")
 
 
 def _em3d_opts(payload: dict) -> dict:
@@ -2120,7 +2459,13 @@ def _prep_mesh(geom, axial, opts, work, log):
         f"Körper {tags['n_bodies']}", 28)
     if mz:
         log(f"   Zonen: Luftspalt {mz['gap_cl']:.2f} / Magnet+Barriere+Nut {mz['mag_cl']:.2f} "
-            f"(Saum {mz['mag_grow']:.1f}) / grob {mz['mesh_cl']:.1f} mm", 30)
+            f"(Saum {mz.get('mag_grow', 0.0):.1f}) / grob {mz['mesh_cl']:.1f} mm", 30)
+    if tags.get("mesh_kind") == "hex":
+        hc = tags.get("hex_counts", {})
+        log(f"   🧱 Hexaeder-Netz: {hc.get('hex', 0)} Hexaeder + {hc.get('prism', 0)} Prismen "
+            f"(Piola-Transform aktiv)", 32)
+    elif tags.get("hex_fallback"):
+        log(f"   ⚠ Hexaeder-Modus nicht möglich ({tags['hex_fallback']}) → Tetraeder-Netz", 32)
     log("🔁 ElmerGrid: MSH → Elmer-Mesh…", 38)
     rg = ER.run_elmergrid(msh, os.path.join(work, "mesh"))
     if not rg["ok"]:

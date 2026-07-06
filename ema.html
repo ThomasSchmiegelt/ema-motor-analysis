@@ -1284,6 +1284,26 @@
         </details>
       </div>
 
+      <div class="e3-field" style="background:#141f2a;border-color:#2c4a5e">
+        <div class="row" style="align-items:center">
+          <label style="flex:none"><input type="checkbox" id="e3_hex_mesh"
+            style="width:auto;margin-right:6px">🧱 Hexaeder-Netz (strukturiert)</label>
+        </div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Baut das Netz als strukturierte <b>Hexaeder/Prismen</b> (2D-Querschnitt
+          zu Vierecken rekombiniert + axial extrudiert) statt als unstrukturierte Tetraeder. Der
+          Luftspalt wird über wenige radial ausgerichtete Schichten mit einem <b>Bruchteil der
+          Freiheitsgrade</b> aufgelöst → weniger RAM, oft schärferes Feld im Spalt. Elmer nutzt
+          dafür die Piola-Transformation der Kantenelemente. Funktioniert für den <b>geraden</b> und
+          den <b>gestaffelten</b> Fall (kontinuierlicher Skew wird in eine feine Staffelung übersetzt).</p>
+          <p><span class="l">Laienverständlich:</span> „Ziegelstein"-Netz statt Tetraeder — regelmäßiger,
+          speichersparender, besonders gut für den dünnen Luftspalt.</p>
+          <p><span class="x">Grenzen (v1):</span> KEINE Magnet-Luft-Taschen (0,1–0,3 mm Klebespalt bleibt
+          dem Tet-Netz) und KEIN eingeprägtes Lastfeld (Spulenströme) — bei aktivem Lastfeld wird
+          automatisch auf Tetraeder zurückgefallen. Ideal für die <b>Leerlauf-/Feldvisualisierung</b>.</p>
+        </details>
+      </div>
+
       <div class="e3-field">
         <div class="row"><label>Mesh-Grobgröße</label>
           <input type="number" id="e3_meshcl" value="12" min="3" max="40" step="1"><span class="unit">mm</span></div>
@@ -4416,6 +4436,8 @@ function _em3dApplyOpts(payload) {
   payload.rpm          = g('e3_rpm');
   payload.load_nm      = g('e3_load');
   payload.coil_currents = !!document.getElementById('e3_coilcurr')?.checked;
+  // Hexaeder-Netz (strukturiert) statt Tetraeder — opt-in, Leerlauf-/Feldvisualisierung.
+  payload.hex_mesh = !!document.getElementById('e3_hex_mesh')?.checked;
 }
 
 // ── 3D-Lauf speichern / aufrufen ────────────────────────────────────────────────
@@ -4430,6 +4452,7 @@ let _e3LoadedGeom = null;
 function _e3BuildConfig() {
   const cfg = { sweep: JSON.parse(JSON.stringify(_e3Sweep || [])), detail_index: _e3DetailIdx,
                 coil_currents: !!document.getElementById('e3_coilcurr')?.checked,
+                hex_mesh: !!document.getElementById('e3_hex_mesh')?.checked,
                 geom_payload: _em3dGeomPayload };
   _E3_CFG_FIELDS.forEach(id => { const el = document.getElementById(id); if (el) cfg[id] = el.value; });
   const to = document.getElementById('e3_target_on'); if (to) cfg.e3_target_on = to.checked;
@@ -4446,6 +4469,7 @@ function _e3ApplyConfig(cfg) {
   if (to && cfg.e3_target_on !== undefined) to.checked = !!cfg.e3_target_on;
   if (typeof _e3TargetSync === 'function') _e3TargetSync();
   const cc = document.getElementById('e3_coilcurr'); if (cc) cc.checked = !!cfg.coil_currents;
+  const hx = document.getElementById('e3_hex_mesh'); if (hx) hx.checked = !!cfg.hex_mesh;
   if (Array.isArray(cfg.sweep)) { _e3Sweep = JSON.parse(JSON.stringify(cfg.sweep)); }
   if (cfg.detail_index != null) _e3DetailIdx = cfg.detail_index;
   if (typeof _e3RenderSweepTable === 'function') _e3RenderSweepTable();

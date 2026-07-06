@@ -84,6 +84,58 @@ def test_sif_generation():
     print(f"✓ sif: WhitneyAVSolver + CalcFields + {tags['n_magnets']} Magnetisierungen + BC")
 
 
+def test_hex_mesh_and_piola_sif():
+    # Opt-in-Hexaeder-Netz (strukturiert, 2D-Querschnitt + axiale Extrusion): das Netz muss
+    # überwiegend aus Hexaedern/Prismen (nicht Tetraedern) bestehen, die Magnete korrekt
+    # taggen, und die .sif MUSS die Piola-Transformation setzen + Tree-Gauge/Direkt-Löser
+    # weglassen (Elmer verträgt beides nicht mit Piola). Gerader Fall.
+    msh = os.path.join(tempfile.mkdtemp(), "hx.msh")
+    work = os.path.dirname(msh)
+    g = _geom("v")
+    tags = E3.build_mesh(g, 120.0, {"hex_mesh": True, "mesh_cl": 10.0, "gap_cl": 1.6}, msh)
+    assert tags.get("mesh_kind") == "hex", "kein Hex-Netz gebaut"
+    hc = tags.get("hex_counts", {})
+    assert hc.get("hex", 0) + hc.get("prism", 0) > 5 * hc.get("tet", 0), f"zu viele Tets: {hc}"
+    assert tags["n_magnets"] == 16, f"Magnete {tags['n_magnets']} ≠ 16"
+    for name in ("shaft", "rotor", "stator", "air"):
+        assert name in tags["bodies"], f"Körper {name} fehlt"
+    sif = E3.write_sif(g, {"hex_mesh": True}, tags, work, "mesh")
+    txt = open(sif).read()
+    assert "Use Piola Transform = Logical True" in txt, "Piola-Transform fehlt im Hex-.sif"
+    assert "Use Tree Gauge" not in txt, "Tree-Gauge darf mit Piola NICHT gesetzt sein"
+    assert "Linear System Solver = Iterative" in txt, "Hex/Piola braucht den iterativen Löser"
+    assert txt.count("Magnetization 1 =") == tags["n_magnets"]
+    print(f"✓ hex: {hc.get('hex',0)} Hexaeder + {hc.get('prism',0)} Prismen, "
+          f"{tags['n_magnets']} Magnete, Piola-.sif iterativ")
+
+
+def test_hex_staffelung_segments():
+    # Hexaeder + Staffelung: der gemeinsame 2D-Querschnitt wird mit ALLEN K Rotationen der
+    # Magnete geschnitten und in K konformen Slabs extrudiert → die Magnetstücke sind ein
+    # Vielfaches der Basis-Magnete (je Segment eigene, gedrehte Magnetisierung).
+    msh = os.path.join(tempfile.mkdtemp(), "hxs.msh")
+    g = _geom("v")
+    tags = E3.build_mesh(g, 120.0, {"hex_mesh": True, "mesh_cl": 10.0,
+                                    "skew_segments": 3, "skew_step_deg": 5.0}, msh)
+    assert tags.get("mesh_kind") == "hex"
+    assert tags["skew_segments"] == 3
+    assert tags["n_magnets"] == 16 * 3, f"erwartet 48 Magnetstücke, ist {tags['n_magnets']}"
+    print(f"✓ hex-staffelung: {tags['skew_segments']} Segmente, {tags['n_magnets']} Magnetstücke")
+
+
+def test_hex_loaded_falls_back_to_tet():
+    # Der Hex-Pfad (v1) kann kein eingeprägtes Lastfeld (Stirnring-Leiter) → bei aktivem
+    # Lastfeld MUSS build_mesh automatisch auf das Tetraeder-Netz zurückfallen.
+    msh = os.path.join(tempfile.mkdtemp(), "hxl.msh")
+    g = _geom("v")
+    tags = E3.build_mesh(g, 120.0, {"hex_mesh": True, "mesh_cl": 13.0,
+                                    "excitation": "loaded", "coil_currents": True,
+                                    "rpm": 3000, "load_nm": 80}, msh)
+    assert tags.get("mesh_kind") != "hex", "Lastfeld hätte auf Tet zurückfallen müssen"
+    assert tags.get("hex_fallback") == "loaded_field_needs_tet"
+    print("✓ hex-fallback: Lastfeld → Tetraeder-Netz (wie erwartet)")
+
+
 def test_sweep_per_point_sif():
     # Sweep-Kern (run_em3d_sweep): das Mesh wird EINMAL gebaut, dann je Betriebspunkt nur
     # write_sif neu — verschiedene rpm/Last ⇒ verschiedene dq-Ströme/operating_point auf
@@ -148,6 +200,9 @@ def main():
     test_mesh_tagging()
     test_skew_twists_magnets()
     test_sif_generation()
+    test_hex_mesh_and_piola_sif()
+    test_hex_staffelung_segments()
+    test_hex_loaded_falls_back_to_tet()
     test_sweep_per_point_sif()
     test_streamlines_export()
     print("\nALLE EM3D-MESH-TESTS BESTANDEN ✅  (Elmer-Solve separat, sobald installiert)")
