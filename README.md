@@ -1,18 +1,25 @@
 # E-Maschinen Analyse
 
-Browser-basiertes Werkzeug zur Auslegung und Analyse von Innenläufer-Permanentmagnetmotoren (IPM). Der Nutzer konfiguriert die Motor-Geometrie im Browser, dann läuft eine automatisierte Kette: FreeCAD-Geometrieerzeugung → 2D-FDM-Elektromagnetfeldberechnung → CalculiX-Strukturmechanik (Fliehkraft) → thermisches Netzwerk → Fahrzyklus-Verlustintegration. Optional kann ein PDF-Bericht über ein lokales LLM (Ollama) erzeugt werden.
+Browser-basiertes Werkzeug zur Auslegung und Analyse von Innenläufer-Permanentmagnetmotoren (IPM). Der Nutzer konfiguriert die Motor-Geometrie im Browser (parametrisch oder frei gezeichnet), dann läuft eine automatisierte Kette: FreeCAD-Geometrieerzeugung → 2D-FDM-Elektromagnetfeldberechnung → CalculiX-Strukturmechanik (Fliehkraft) → thermisches Netzwerk → Fahrzyklus-Verlustintegration. Optional ergänzen eine **echte 3D-Magnetfeldberechnung** (Elmer FEM) und ein PDF-Bericht über ein lokales LLM (Ollama) die Auslegung.
 
 > **Bedienung Schritt für Schritt:** siehe [NUTZUNGSANLEITUNG.md](NUTZUNGSANLEITUNG.md).
 > **Berechnungsmethodik:** siehe [EM_BERECHNUNG.md](EM_BERECHNUNG.md).
+> **Methodenvergleich (vs. Abaqus / Ansys Motor-CAD):** siehe [BERECHNUNGSMETHODEN_VERGLEICH.md](BERECHNUNGSMETHODEN_VERGLEICH.md).
 
 ## Bedienoberfläche
 
-Die Oberfläche (`ema.html`) ist ein **Workflow mit Tabs**: ① Geometrie · ② Betrieb & Material · ③ Berechnung · ▶ Live-Simulation · 📊 FEM-Ergebnisse · 📄 Bericht · ⚖ Vergleich. Rechts läuft eine **persistente Live-Vorschau** (Motorquerschnitt + Magnetfeld, mit Pause-Knopf), die Trennlinien zwischen Eingaben/Vorschau und über dem Footer sind **ziehbar**, und ein globaler **Analyse-starten-Footer** zeigt den Fortschritt. Weitere Komfortfunktionen:
+Die Oberfläche (`ema.html`) ist ein **Workflow mit Tabs**: ① Projekt · ② Geometrie · ③ Betrieb & Material · ④ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · 🧲 3D-Feld · 📊 FEM-Ergebnisse · ⚖ Vergleich. **Tab ① Projekt** ist der zentrale Einstiegspunkt: Projekt anlegen/öffnen, organisatorische Angaben + Notizen, projektspezifische Wissens-Dokumente, PDF-Bericht und gespeicherte 3D-Läufe laufen dort zusammen (es gibt keinen separaten „Bericht"-Tab mehr). Rechts läuft eine **persistente Live-Vorschau** (Motorquerschnitt + Magnetfeld, mit Pause-Knopf), die Trennlinien zwischen Eingaben/Vorschau und über dem Footer sind **ziehbar**, und ein globaler **Analyse-starten-Footer** zeigt den Fortschritt. Weitere Komfortfunktionen:
 
-- **🧠 Text → Auslegung** – Anwendung in Worten beschreiben, das LLM leitet einen vollständigen, validierten Parametersatz ab (`ema_text2ema.py`).
-- **🎯 Zielwertoptimierung** – Randbedingungen + freie Parameter mit Bereichen vorgeben; ein LLM steuert eine Suche über einen schnellen Analytik-Evaluator (ohne FreeCAD/FEM), bester zulässiger Treffer → optional Voll-Lauf (`ema_optimize.py`).
-- **📂 Projekt-Browser** – Galerie aller Projekte mit Vorschau + Kennwerten, zum Ansehen/Laden.
-- **💬 Ergebnis-Chat** – Fragen zum geladenen Projekt oder zum Variantenvergleich (`ema_chat.py`).
+- **🧠 Text → Auslegung** – Anwendung in Worten beschreiben, das LLM leitet einen vollständigen, validierten Parametersatz ab (`ema_text2ema.py`), optional gestützt auf Referenzmaschinen aus der lokalen Wissensbasis (RAG).
+- **🎨 Designer + 🤖 KI entwerfen** – freies Zeichnen einer Rotor-Halbpol-Geometrie (Magnete + Flussbarrieren) auf einer Canvas, oder ein LLM entwirft komplette Maschinen aus einer Beschreibung + Bereichsvorgaben (Statorbohrung, Länge, Welle, Luftspalt) samt automatischer Qualitäts-Vorsortierung und Regenerierung schlechter Entwürfe (`ema_design_ai.py`).
+- **🎯 Zielwertoptimierung** – Randbedingungen + freie Parameter mit Bereichen vorgeben; ein LLM steuert eine Suche über einen schnellen Analytik-Evaluator (ohne FreeCAD/FEM), bester zulässiger Treffer → optional Voll-Lauf (`ema_optimize.py`). Für gezeichnete Designer-Entwürfe gibt es eine **Magnet-Feinoptimierung** der Einzelkoordinaten (`ema_design_optimize.py`).
+- **📈 Parameterstudie** – variiert einen Parameter über N Schritte bei fester Drehzahl und plottet den Einfluss auf alle Kennwerte (`ema_paramstudy.py`); funktioniert auch auf frei gezeichneten Designer-Geometrien.
+- **🧲 3D-Feld (Elmer FEM)** – echte 3D-Magnetfeldberechnung neben dem 2D-FDM-Solver: Endeffekte, Schrägung/Staffelung, Drehzahl-/Lastsweeps, Lastprofil-Video, ROI-Verfeinerung und ein symmetrie-basierter Ein-Pol-Schnellmodus, mit eingebettetem Browser-3D-Viewer (`ema_em3d.py`, siehe unten).
+- **📥 STEP-Import** – fertigen Motor aus einer STEP-Datei importieren; automatische Klassifikation der Bauteile und Magnet-Erkennung (`ema_step_import.py`).
+- **📂 Projekt-Browser** – Galerie aller Projekte mit Vorschau + Kennwerten, inkl. Klonen, Bundle-Export/-Import und Status-/Verlaufs-Badges aus der Projektakte.
+- **🗂 Projektakte** – jedes Projekt führt eine KI-lesbare Verlaufsakte (`project.json`): Status, Tags, Notizen, Evolutionsstufen mit Eingabe-Diffs, Verknüpfungen zu Vergleichsprojekten, projektspezifische Wissensbasis + Anhänge (`ema_projekt.py`).
+- **🎓 LLM-Trainingsdatensatz** – jede Berechnung wird automatisch als SFT-Trainingsbeispiel (Text) + VLM-Manifest (Bilder) abgelegt, inkl. automatischer und manueller gut/schlecht-Bewertung (`ema_training.py`).
+- **💬 Ergebnis-Chat** – Fragen zum geladenen Projekt oder zum Variantenvergleich, gestützt auf ein automatisches Maschinen-Datenblatt + RAG-Kontext (`ema_chat.py`).
 - **🖼 Einzelbild-Vorschau** – ein Feldbild ohne Volllauf, bis 5000 px (Multigrid-Solver).
 
 ---
@@ -21,25 +28,27 @@ Die Oberfläche (`ema.html`) ist ein **Workflow mit Tabs**: ① Geometrie · ②
 
 ### 1. Geometrie-Konfiguration (Browser)
 
-Die Benutzeroberfläche (`ema.html`) erlaubt die vollständige parametrische Beschreibung des Motors:
+Die Benutzeroberfläche (`ema.html`) erlaubt die vollständige parametrische Beschreibung des Motors — **oder** das freie Zeichnen im Designer-Tab:
 
 - **Stator:** Außen-/Innendurchmesser, Nutzahl, Nuttiefe, Blechpaketlänge
-- **Rotor:** Außendurchmesser, Wellendurchmesser, Polpaarzahl
-- **Magnettaschen:** Topologien V, Doppel-V, U, Delta, PMa-SynRM, SPM, Halbach, Speiche, Balken (Breite, Dicke, Öffnungswinkel, Position) — automatisch auf die geometrisch maximale Länge beschnitten. Für die V-Form wahlweise auch **per Durchmesser** (Außen-Ø / Innen-Ø der Tasche + Winkel) definierbar.
+- **Rotor:** Außendurchmesser, Wellendurchmesser, Polpaarzahl, optional Hohlwelle
+- **Magnettaschen:** Topologien V, asymmetrisches V, Doppel-V, U, Delta, PMa-SynRM, SPM, Halbach, Speiche, Balken, **oder frei gezeichnet** (Custom/Designer-Pfad) (Breite, Dicke, Öffnungswinkel, Position) — automatisch auf die geometrisch maximale Länge beschnitten. Für die V-Form wahlweise auch **per Durchmesser** (Außen-Ø / Innen-Ø der Tasche + Winkel) definierbar.
 - **Magnet-Orientierung:** Polung wahlweise über die lange Magnetseite (quer magnetisiert, Standard) oder um 90° gedreht über die kurze Seite — identisch in Live-Vorschau und FDM-Feldsimulation.
-- **Wicklung:** Wicklungsart (Hairpin / Rundleiter), **Leiter pro Nut** (geradzahlig 2…12) und **Spulenweite** (Nutschritte, gesehnt möglich). Die Hairpin-Wickelköpfe werden als kollisionsfreie U-Pins (radial gestaffelte Kronen) im CAD-Modell erzeugt; die Leiterzahl je Nut geht auch in Kupfervolumen/Phasenwiderstand des Thermomodells ein.
+- **Wicklung:** Wicklungsart (Hairpin / Rundleiter), **Leiter pro Nut** (geradzahlig 2…12) und **Spulenweite** (Nutschritte, gesehnt möglich). Die Hairpin-Wickelköpfe werden als kollisionsfreie, **durchgezogen-glatte Zugkörper-Sweeps** im CAD-Modell erzeugt — nahtloser Übergang in die Nutstäbe, und auf der Schweißseite mit dem realen Halb-Spulenweiten-Twist + geradem, achsparallelem Fahnen-Ende; die Leiterzahl je Nut geht auch in Kupfervolumen/Phasenwiderstand des Thermomodells ein.
+- **Wellenverbindung:** Presssitz (Querpressverband), Keilwelle oder Polygonprofil (P3G) — Welle und Rotorbohrung passen zueinander, analytisch bewertet (Fugenpressung/Flankenpressung, Drehmomentkapazität, Lösedrehzahl).
+- **Bauteil-Stufenbau:** einzelne Komponenten (Welle, Rotor-/Statoreisen, Magnete, Hairpins, Wickelköpfe, Lager, Isolationspapier, Wuchtscheiben-Bolzen, Flussbarrieren q-/d-Achse) unabhängig ein-/ausschaltbar für einen schrittweisen CAD-Aufbau.
 - **Kühlung:** Natürliche Konvektion / Zwangsluft / Wassermantel / Öl-Spray
 - **Nennpunkt:** Drehzahl, Drehmoment, Phasenstrom (d/q-Komponenten)
-- **Projektname** für Archivierung
+- **Projektname, Tags, Notizen** für Archivierung und Nachvollziehbarkeit
 
 ### 2. FEM-Geometrieerzeugung (FreeCAD)
 
 `ema_freecad.py` generiert und führt FreeCAD-Python-Skripte headless aus:
-- Stator-Ring, Rotorkern, V-förmige Magnettaschen via booleschen Operationen
+- Stator-Ring, Rotorkern, Magnettaschen aller Topologien via booleschen Operationen, Hairpin-Nutstäbe + glatte Wickelkopf-Sweeps, Welle mit gewähltem Verbindungsprofil
 - Speicherung als `.FCStd` und STEP-Export
 - Renderings (isometrisch, Draufsicht) als PNG für den Bericht
 
-### 3. Elektromagnetische Feldberechnung (`ema_analysis.py`)
+### 3. Elektromagnetische Feldberechnung — 2D (`ema_analysis.py`)
 
 Eigener 2D-FDM-Feldsolver (numpy + scipy), Auflösung im UI wählbar (100–800 px, Einzelbild bis 5000 px):
 
@@ -47,9 +56,34 @@ Eigener 2D-FDM-Feldsolver (numpy + scipy), Auflösung im UI wählbar (100–800 
 - Materialien: Eisen µ_r = 500, NdFeB µ_r = 1.05, Statorwicklung als Volumenstrom
 - Permanentmagnete als äquivalente Oberflächenströme modelliert
 - Skalierung des FDM-Ergebnisses auf physikalische Tesla-Werte via analytischer Luftspaltfeld-Formel
-- Berechnet: B_gap, Flussverkettung, Gegen-EMK, Drehmoment (Ld/Lq-Salienz), Ummagnetisierungsverluste, Stromwärmeverluste, Wirkungsgrad
+- Berechnet: B_gap, Flussverkettung, Gegen-EMK, Drehmoment (Ld/Lq-Salienz, MTPA), Ummagnetisierungsverluste, Stromwärmeverluste, Wirkungsgrad
 
-### 4. Thermisches Modell (`ema_thermal.py`)
+### 4. Elektromagnetische Feldberechnung — echtes 3D-FEM (Elmer) (`ema_em3d.py` / `elmer_runner.py`)
+
+Eigenständiger On-Demand-Pfad neben dem 2D-FDM-Solver (der 2D-Löser bleibt als Vergleichsanker unangetastet), für alles, was 2D nicht kann:
+
+- **Gmsh-OCC-Vernetzung** der vollen 3D-Geometrie (konzentrische Zylinder, Magnete als Lofts, Luftspalt- und Luftkappen), zonale Netzverfeinerung (Luftspalt sehr fein, Magnete/Barrieren/Nuten fein, Rest grob), Ziel-Knoten-Regler und ein **selbstheilender Netzbau-Monitor**, der bei Mesh-Problemen automatisch eine Mitigationsleiter durchspielt
+- **Elmer-Magnetostatik** (`WhitneyAVSolver` + Kantenelemente, MUMPS-Direktlöser); echte finite Baulänge → **Endeffekte** und **Schrägung/Staffelung** werden sichtbar; optionale Ankerrückwirkung (Spulenströme über Nut- + Stirnring-Leiter) beim Betriebspunkt
+- **Magnettaschen als echte Langlöcher** (Obround) mit einstellbarem 0,1–0,3 mm Klebespalt rundum — auch bei Skew/Staffelung, über eine pro Magnet fusionierte, gestufte Luftkanal-Geometrie
+- **Drehzahl-/Lastsweeps** (ein Netz, mehrere Betriebspunkte) inkl. Lastprofil-Video (Sättigungs-Schnittbild + Feldlinien über einen synthetischen Fahrzyklus)
+- **ROI-Verfeinerung** (lokal feineres Netz + voller Re-Solve im markierten Bereich) und ein **symmetrie-basierter Ein-Pol-Schnellmodus** (anti-periodisches Submodell, zum vollen Motor gespiegelt) für höhere Auflösung bei kürzerer Rechenzeit
+- **Eingebetteter Browser-3D-Viewer** (vtk.js, offline, ohne ParaView nötig): |B|-Oberfläche, Feldlinien, Schnittebene, Standardansichten, Netz-Anzeige, Vollbild — sowie ein Play-Controller für Drehzahl-/Lastrampen
+- Ergebnisse (Kennwerte + 2D-vs-3D-Vergleich) fließen automatisch in den PDF-Bericht ein; 3D-Läufe lassen sich projektgebunden speichern und ohne Neurechnen wieder laden
+
+Benötigt Elmer (`elmerfem-csc`) + die Python-Pakete `gmsh`/`vtk` — optional, die gesamte übrige Pipeline läuft ohne.
+
+### 5. Canvas-Designer & KI-gestützte Auslegung (`ema_design_ai.py` / `ema_design_optimize.py`)
+
+Neben der parametrischen Geometrie gibt es einen freien Zeichenpfad:
+
+- **Canvas-Designer:** ein Halbpol wird frei gezeichnet (Magnete per Drag, Flussbarrieren als Polylinien), automatisch d-Achsen-gespiegelt und über alle Pole mit alternierender Polung gemustert.
+- **🤖 KI entwerfen:** ein LLM entwirft komplette Maschinen aus einer optionalen Beschreibung + Von-Bis-Bereichen für Statorbohrung, Länge, Wellendurchmesser und Luftspalt — inklusive Material/Polzahl/Nutzahl und einer frei gezeichneten Magnet-/Barrieren-Halbpol-Geometrie. Jeder Entwurf wird sofort FreeCAD-/FEM-frei bewertet (gut/schlecht) und bei Bedarf automatisch mit gezieltem Feedback neu generiert.
+- **🎯 Magnete fein-optimieren:** Feinoptimierung der gezeichneten Magnet-Einzelkoordinaten (Position, Länge, Dicke, Winkel) gegen ein wählbares Ziel/Constraint.
+- **📈 Parameterstudie für diesen Entwurf:** Parametervariation auf der gezeichneten Geometrie.
+
+Jeder KI-Lauf landet automatisch im LLM-Trainingsdatensatz (Beschreibung → Entwurf → Kennwerte).
+
+### 6. Thermisches Modell (`ema_thermal.py`)
 
 Stationäres Lumped-Parameter-Wärmenetzwerk (LPTN) mit 6 Knoten:
 
@@ -64,39 +98,47 @@ Stationäres Lumped-Parameter-Wärmenetzwerk (LPTN) mit 6 Knoten:
 
 Kühltypen mit kalibrierten h_eff-Werten: Natürliche Konvektion, Zwangsluft, Wassermantel (h=800 W/m²K), Öl-Spray (h=2500 W/m²K). Der Luftspalt koppelt die Magnete über Konvektion **und** Strahlung an die Statorbohrung; ein Teil davon koppelt direkt an die Wicklung, sodass die Rotormagnete den Wärmeeintrag aus dem heißen Kupfer erhalten.
 
-### 5. Fahrzyklus-Verlustintegration (`ema_drivecycle.py`)
+### 7. Fahrzyklus-Verlustintegration (`ema_drivecycle.py`)
 
 - Eingebettetes WLTP Klasse 3b-Profil, Autobahn-Vollgas und **Anhänger-Alpenpass**
 - Anhänger ist einstellbar: **Anhängermasse (inkl. Nutzlast), Achszahl und maximale Steigung [%]** (Standard 15 %)
 - Upload eigener Zyklen als `t[s], v[km/h]`-CSV
 - Verlustintegration mit transienter und stationärer Thermik je Zyklus
 
-### 6. Strukturmechanische FEM (CalculiX)
+### 8. Strukturmechanische FEM (CalculiX)
 
 `ema_freecad.py` + `freecad_runner.py` führen eine Fliehkraftanalyse des Rotors durch:
 - FreeCAD erzeugt Gmsh-Vernetzung der Rotorgeometrie; die **Netz-Auflösung ist
   einstellbar** (`struct_mesh_mm`, 4/3/2,5/2 mm – kleiner = feiner, löst die
   Spannungsspitzen an den Magnettaschen-Stegen besser auf)
-- CalculiX (ccx) löst die statische Spannungsanalyse **einmalig** bei Maximaldrehzahl
+- CalculiX (ccx) löst die statische Spannungsanalyse **einmalig** bei Maximaldrehzahl, mit einer **Robustheits-Leiter** (Mesh-Qualitätsflags + Größen-Retry), die auch bei dünnen Eisenstegen in aggressiven Multi-Layer-Topologien zuverlässig ein auswertbares Ergebnis liefert
 - Da Verschiebung und Spannung linear mit der Fliehkraft (∝ Drehzahl²) skalieren,
   werden daraus ohne weitere Solver-Läufe abgeleitet:
   - **hochauflösende Verformungsbilder** (bis 5000 px) bei **Nennlast**,
     **Maximaldrehzahl** und **Berstdrehzahl** (SF→1)
   - ein **Verformungs-Video** (Drehzahl-Rampe 0→max, feste Überhöhung)
+- Schlägt die FEM trotz der Robustheits-Leiter fehl, greift ein **analytischer Lamé-Fallback** (rotationssymmetrische Scheibe), damit die Verformung immer dargestellt wird
 - Ausgabe: Von-Mises-Spannungen, Verformungen, Sicherheitsfaktor, Berstdrehzahl, Knotenzahl
 
-### 7. Projektverwaltung
+### 9. Projektverwaltung & Projektakte
 
-- Jede Analyse wird als eigenes Projekt unter `~/cae_projekte/<timestamp>/` gespeichert
+- Jede Analyse wird als eigenes Projekt unter `~/cae_projekte/<timestamp>/` gespeichert, mit einer **KI-lesbaren Projektakte** (`project.json`): Status, Tags, Notizen, Evolutionsverlauf mit Eingabe-Diffs, Verknüpfungen zu Vergleichsprojekten, Anhänge und projektspezifische Wissensbasis.
+- Projekte lassen sich **klonen** (mit Abstammung) und als `.emaproj`-Bundle exportieren/importieren.
 - Bis zu 10 Designvarianten können nebeneinander verglichen werden (Überlagerungsdiagramme, Vergleichstabelle, Vergleichsbericht mit Parameter-/Einfluss-Tabellen)
 - Projekt-Browser (Galerie) und Laden abgeschlossener Projekte ohne Neuberechnung
 
-### 8. PDF-Berichtsgenerierung (`ema_report.py`)
+### 10. Wissensbasis (RAG) & LLM-Trainingsdatensatz
+
+- Eine lokale, embeddingbasierte Wissensbasis (Ollama `nomic-embed-text`) existiert **global** (Referenzmaschinen + Dokumentation, speist Text→Auslegung, KI entwerfen und den Chat) **und projektspezifisch** (`ema_rag.py`).
+- Jede Berechnung wird automatisch als Trainingsbeispiel für ein SFT-Finetuning (Text) und ein VLM-Finetuning (Bilder) abgelegt, mit automatischer Heuristik-Vorsortierung und manueller gut/schlecht-Bewertung (`ema_training.py`).
+
+### 11. PDF-Berichtsgenerierung (`ema_report.py`)
 
 - LLM (Ollama) generiert deutschen technischen Bericht aus `results.json`
 - Markdown-Ausgabe mit `[BILD:<key>]`-Platzhaltern → automatisch durch erzeugte Charts ersetzt
 - Konvertierung: `pandoc` + `pdflatex` → `bericht.pdf`
 - Agentischer Modus: mehrere Experten-LLM-Agenten schreiben Teilkapitel parallel (`ema_experts.py`)
+- Bindet — sofern vorhanden — die 3D-Feldberechnung (Elmer) mit eigenem Abschnitt + 2D-vs-3D-Kennwerttabelle ein
 
 ---
 
@@ -111,16 +153,24 @@ Kühltypen mit kalibrierten h_eff-Werten: Natürliche Konvektion, Zwangsluft, Wa
 | CalculiX (ccx) | 2.21+ | im FreeCAD-Pixi-Environment enthalten |
 | [pixi](https://pixi.sh) | beliebig | zum Aufruf von FreeCAD mit korrekter Umgebung |
 
-### Optional (nur für PDF-Berichte)
+### Optional (nur für PDF-Berichte, Chat, Text→Auslegung, KI-Auslegung, Optimierung)
 
 | Werkzeug | Hinweis |
 |---|---|
 | [Ollama](https://ollama.com) | lokal laufend auf `localhost:11434` |
 | `ministral-3:14b` | `ollama pull ministral-3:14b` |
+| `nomic-embed-text` | `ollama pull nomic-embed-text` — für die Wissensbasis (RAG) |
 | pandoc | `sudo apt install pandoc` |
 | pdflatex | `sudo apt install texlive-latex-base texlive-fonts-recommended` |
 
-Die gesamte Analyse-Pipeline (FDM-Feldsolver, Thermik, Fahrzyklus, FEM) läuft vollständig ohne LLM. Ollama wird nur für die komfortbasierten Zusatzfunktionen aufgerufen — Bericht (`ema_report.py`, `ema_experts.py`), Ergebnis-Chat (`ema_chat.py`), Text→Auslegung (`ema_text2ema.py`) und die Steuerung der Zielwertoptimierung (`ema_optimize.py`) — immer mit dem Modell `ministral-3:14b`, das im Code fest eingestellt ist. Ohne Ollama bleiben alle physikalischen Berechnungen voll nutzbar.
+### Optional (nur für die echte 3D-Magnetfeldberechnung)
+
+| Werkzeug | Hinweis |
+|---|---|
+| Elmer FEM | `sudo add-apt-repository -y ppa:elmer-csc-ubuntu/elmer-csc-ppa && sudo apt install -y elmerfem-csc` |
+| `gmsh`, `vtk` | Python-Pakete, in `requirements.txt` enthalten |
+
+Die gesamte Analyse-Pipeline (FDM-Feldsolver, Thermik, Fahrzyklus, FEM) läuft vollständig ohne LLM, RAG oder Elmer. Ollama wird nur für die komfortbasierten Zusatzfunktionen aufgerufen — Bericht (`ema_report.py`, `ema_experts.py`), Ergebnis-Chat (`ema_chat.py`), Text→Auslegung (`ema_text2ema.py`), KI-Auslegung/Optimierung (`ema_design_ai.py`, `ema_design_optimize.py`, `ema_optimize.py`) und die Wissensbasis (`ema_rag.py`) — immer mit dem Modell `ministral-3:14b` (bzw. `nomic-embed-text` für Embeddings), im Code fest eingestellt. Ohne Ollama bleiben alle physikalischen Berechnungen voll nutzbar. Ohne Elmer läuft alles außer dem Tab „🧲 3D-Feld" normal (die 3D-Modell-Vorschau ohne Feldlösung funktioniert auch ohne Elmer).
 
 ---
 
@@ -147,7 +197,7 @@ Erwartete Pfade nach dem Build:
 
 ## Pfade anpassen
 
-Alle hardcodierten Pfade befinden sich an **zwei Stellen**:
+Alle hardcodierten Pfade befinden sich an **drei Stellen**:
 
 ### `start.sh` (Zeilen 5–7)
 ```bash
@@ -164,9 +214,13 @@ FREECADCMD_BIN = os.path.join(FREECAD_ROOT, "build/release/bin/FreeCADCmd")
 CCX_CMD = os.path.join(FREECAD_ROOT, ".pixi/envs/default/bin/ccx")
 ```
 
-`server.py` liest `FREECAD_ROOT` ebenfalls aus (Zeile 147) — mit demselben `~/freecad_1.1_quellcode`-Standardwert.
+### `server.py` (Zeilen 9, 147)
+```python
+PROJECTS_ROOT = os.path.expanduser("~/cae_projekte")
+FREECAD_ROOT  = os.path.expanduser("~/freecad_1.1_quellcode")
+```
 
-Projektausgaben landen unter `~/cae_projekte/` (konfigurierbar in `server.py`, Zeile 9: `PROJECTS_ROOT`).
+Projektausgaben landen unter `~/cae_projekte/` (`PROJECTS_ROOT`).
 
 ---
 
@@ -190,27 +244,51 @@ Der Server startet auf **http://localhost:5000** und öffnet den Browser automat
 
 ---
 
+## Tests
+
+```bash
+python smoke_test.py      # ~15 s, kein FreeCAD nötig: Importe, Topologie, dq/MTPA,
+                           # FDM + Sättigung, Verformung, Skripterzeugung, KI-Auslegungspfad
+python smoke_test.py --cad  # zusätzlich ein echter FreeCAD-Build + Rotor-FEM (Minuten)
+python test_topology.py   # Magnetgeometrie + JS↔Python-Spiegel (magnetLegs), braucht node
+python test_em3d.py       # 3D-Elmer-Mesh/SIF/Feldlinien-Export ohne Elmer, End-to-End mit Elmer
+```
+
+`smoke_test.py` nach jeder Backend-Änderung ausführen.
+
+---
+
 ## Projektstruktur
 
 ```
-server.py          Flask-Backend — REST-API + statisches Datei-Serving
-ema.html           Browser-UI (Vanilla JS, kein Build-Schritt nötig)
-ema_pipeline.py    Pipeline-Orchestrierung (Geometrie → EM → Thermik → FEM)
-ema_freecad.py     FreeCAD-Skriptgenerierung (Rotor, Stator, FEM)
-ema_analysis.py    2D-FDM-Elektromagnet-Feldsolver (numpy)
-ema_thermal.py     Stationäres LPTN-Wärmemodell (6 Knoten)
-ema_topology.py    Magnet-Platzierung (einzige Quelle, gespiegelt im JS von ema.html)
-ema_drivecycle.py  Fahrzyklen (WLTP-3b, Vollgas, Anhänger einstellbar, CSV)
-ema_compare.py     Variantenvergleich (bis zu 10 Projekte, Overlay-Charts)
-ema_report.py      LLM → Markdown → pandoc → PDF-Bericht (+ Vergleichsbericht)
-ema_experts.py     Agentischer Modus: mehrere LLM-Experten-Agenten
-ema_chat.py        Ergebnis-/Vergleichs-Chat (Ollama)
-ema_optimize.py    Zielwertoptimierung (LLM-gesteuert, schneller Analytik-Evaluator)
-ema_text2ema.py    Text → validierter Parametersatz (Ollama)
-freecad_runner.py  FreeCAD-Subprocess-Wrapper (headless, Output-Parsing)
-start.sh           Startskript mit Prerequisite-Prüfung
-install.sh         Einmalige Installation und Konfigurationsprüfung
-requirements.txt   Python-Abhängigkeiten
+server.py               Flask-Backend — REST-API + statisches Datei-Serving
+ema.html                Browser-UI (Vanilla JS, kein Build-Schritt nötig)
+ema_pipeline.py         Pipeline-Orchestrierung (Geometrie → EM → Thermik → FEM)
+ema_freecad.py          FreeCAD-Skriptgenerierung (Rotor, Stator, Hairpins, FEM)
+ema_analysis.py         2D-FDM-Elektromagnet-Feldsolver (numpy)
+ema_thermal.py          Stationäres LPTN-Wärmemodell (6 Knoten)
+ema_topology.py         Magnet-Platzierung (einzige Quelle, gespiegelt im JS von ema.html)
+ema_drivecycle.py       Fahrzyklen (WLTP-3b, Vollgas, Anhänger einstellbar, CSV)
+ema_compare.py          Variantenvergleich (bis zu 10 Projekte, Overlay-Charts)
+ema_report.py           LLM → Markdown → pandoc → PDF-Bericht (+ Vergleichsbericht)
+ema_experts.py          Agentischer Modus: mehrere LLM-Experten-Agenten
+ema_chat.py             Ergebnis-/Vergleichs-Chat (Ollama)
+ema_optimize.py         Zielwertoptimierung (LLM-gesteuert, schneller Analytik-Evaluator)
+ema_paramstudy.py       Parameterstudie bei fester Drehzahl (parametrisch + Designer-Entwürfe)
+ema_text2ema.py         Text → validierter Parametersatz (Ollama, RAG-gestützt)
+ema_design_ai.py        KI-gestützte Komplettauslegung (Designer-Pfad, RAG-gestützt)
+ema_design_optimize.py  Per-Magnet-Feinoptimierung eines gezeichneten Entwurfs
+ema_step_import.py      STEP-Import eines fertigen Motors (Klassifikation + Magnet-Erkennung)
+ema_em3d.py             Echte 3D-Magnetfeldberechnung (Elmer FEM): Mesh, SIF, Sweeps, Sektor/ROI
+elmer_runner.py         Elmer-Subprozess-Wrapper (ElmerGrid/ElmerSolver)
+ema_projekt.py          Projektakte (project.json) — Status/Verlauf/Verknüpfungen/RAG/Anhänge
+ema_rag.py              Lokale Wissensbasis (RAG), global + pro Projekt
+ema_training.py         Fortlaufendes LLM-Trainingsfile (SFT + VLM)
+freecad_runner.py       FreeCAD-Subprocess-Wrapper (headless, Output-Parsing)
+em3d_perf_check.py      Performance-/RAM-Kalibrierung der 3D-Elmer-Vernetzung (Standalone-CLI)
+start.sh                Startskript mit Prerequisite-Prüfung
+install.sh              Einmalige Installation und Konfigurationsprüfung
+requirements.txt        Python-Abhängigkeiten
 ```
 
 ---
@@ -224,12 +302,14 @@ requirements.txt   Python-Abhängigkeiten
 | `scipy` | direkte Sparse-Faktorisierung des FDM-Feldlösers (sonst iterative SOR) |
 | `pyamg` | iterativer AMG-Solver für sehr hohe Feldauflösung (> 2500 px); optional |
 | `matplotlib` | Charts, Feldanimation (Agg-Backend, kein Display nötig) |
+| `gmsh` | 3D-Vernetzung für die echte Elmer-Feldberechnung; optional |
+| `vtk` | Lesen/Schreiben der 3D-Feldergebnisse (VTU/VTP), Browser-Viewer-Export; optional |
+| `pypdf` | PDF-Extraktion für die Wissensbasis (RAG); optional |
 
-Alle Versionen: `requirements.txt`. Die Ollama-REST-API wird direkt über `urllib.request` aus der Python-Standardbibliothek aufgerufen. Externe Solver (FreeCAD, CalculiX, pandoc, pdflatex) werden als Subprozesse aufgerufen — keine Python-Bindings.
+Alle Versionen: `requirements.txt`. Die Ollama-REST-API wird direkt über `urllib.request` aus der Python-Standardbibliothek aufgerufen. Externe Solver (FreeCAD, CalculiX, Elmer, pandoc, pdflatex) werden als Subprozesse aufgerufen — keine Python-Bindings.
 
 ---
 
 ## Lizenz
 
 MIT — siehe [LICENSE](LICENSE).
-# ema-motor-analysis

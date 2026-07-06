@@ -95,7 +95,9 @@ def _machine_datasheet(meta: dict) -> str:
     poles = int(g("p", 0)) * 2 if g("p") is not None else "?"
     topo  = R.TOPOLOGY_LABELS.get(g("magShape", "v"), g("magShape"))
     axial = payload.get("axial_len") or meta.get("axial_len") or g("axialLen")
-    return "\n".join([
+    notes = str(meta.get("notes") or "").strip()
+    notes_line = [f"- Projektnotizen: {notes}"] if notes else []
+    return "\n".join(notes_line + [
         "MASCHINEN-DATENBLATT (Auslegungsparameter GENAU DIESES Projekts — als verbindliche Spezifikation behandeln):",
         f"- Bezeichnung: {meta.get('label', '?')}",
         f"- Topologie: {topo} (magShape={g('magShape')})  |  Pole: {poles} (p={g('p')})  |  Nutzahl: {g('slots')}",
@@ -115,12 +117,16 @@ def _machine_datasheet(meta: dict) -> str:
     ])
 
 
-def _rag_doku(message: str) -> str:
-    """Retrieved documentation snippets (category 'doku') for the question, or ''.
+def _rag_doku(message: str, project_dir: str | None = None) -> str:
+    """Retrieved documentation snippets for the question, or ''. When ``project_dir`` is
+    given, the project's OWN store is queried first then merged with the global base.
     Best effort — works without the knowledge base / Ollama embeddings."""
     try:
         import ema_rag
-        ctx = ema_rag.context_for(message, category=None, k=4, max_chars=3000)
+        if project_dir:
+            ctx = ema_rag.context_for_project(message, project_dir, k=4, max_chars=3000)
+        else:
+            ctx = ema_rag.context_for(message, category=None, k=4, max_chars=3000)
     except Exception:
         return ""
     if not ctx:
@@ -129,8 +135,10 @@ def _rag_doku(message: str) -> str:
             "und nenne die Quelle):\n\n" + ctx + "\n\n")
 
 
-def chat_results(message: str, history, results: dict, meta: dict | None = None) -> str:
-    """Q&A about a single loaded project's results, grounded on its parameter datasheet."""
+def chat_results(message: str, history, results: dict, meta: dict | None = None,
+                 project_dir: str | None = None) -> str:
+    """Q&A about a single loaded project's results, grounded on its parameter datasheet.
+    ``project_dir`` enables per-project RAG retrieval (own store + global base)."""
     meta = meta or {}
     datasheet = _machine_datasheet(meta)
     geom = (meta.get("payload") or {}).get("geom") or meta.get("geom") \
@@ -148,7 +156,7 @@ def chat_results(message: str, history, results: dict, meta: dict | None = None)
         "Du bist ein erfahrener Auslegungsingenieur für IPM-Synchronmaschinen und "
         "beantwortest Fragen zu EINEM analysierten Motor.\n\n"
         + (datasheet + "\n\n" if datasheet else "")
-        + _rag_doku(message)
+        + _rag_doku(message, project_dir)
         + "BERECHNUNGSERGEBNISSE dieses Motors als JSON:\n\n"
         f"{ctx}\n\n"
         "Antworte präzise auf Deutsch und stütze jede Aussage auf konkrete Zahlen aus dem "

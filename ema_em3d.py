@@ -22,6 +22,7 @@ für Anregung + 2D-Vergleich), `ema_pipeline.MAGNETS/LAMINATES` (Br/μr).
 Der 2D-Pfad bleibt unangetastet; dies ist ein eigenständiger On-Demand-Job.
 """
 
+import hashlib
 import math
 import os
 import json
@@ -39,11 +40,32 @@ MU_R_MAG = 1.05
 # `_analytical_Barm` entspricht (dominiert vom geometrieunabhängigen mm↔m-Einheitenfaktor;
 # für andere Maschinen daher näherungsweise gültig — Lastfeld bleibt experimentell).
 COIL_J_SCALE = 199.0
-# Obergrenze der 3D-Netzknoten. Das kantenbasierte curl-curl-System (MUMPS direkt) wird auf
-# diesem Rechner oberhalb ~60k Knoten zu langsam/instabil (Segfault bzw. >8 min). Wird das
-# Netz feiner, vergröbert `_build_mesh_capped` die Zellgrößen automatisch und warnt — statt
-# ElmerSolver abstürzen/hängen zu lassen. Bewährt: ~28–50k Knoten lösen in ~1–2 min.
+# Standard-Obergrenze der 3D-Netzknoten (Auto-Pfad ohne ausdrückliches Ziel). Das kantenbasierte
+# curl-curl-System (MUMPS direkt) skaliert im RAM ~linear mit den Knoten, aber der MUMPS-Fill-in
+# lässt den Bedarf leicht superlinear wachsen. Gemessen auf dieser Workstation (31 GiB RAM,
+# `em3d_perf_check.py`, 8-polig/48-Nut V-Motor, Leerlauf):
+#     Knoten     Solve      Peak-RAM     kB/Knoten
+#      38.8k       24 s      2.3 GiB        59
+#      64.1k       44 s      4.3 GiB        67
+#     124.6k       91 s      9.7 GiB        78
+#     162.9k      145 s     13.0 GiB        80
+#     209.2k      195 s     17.9 GiB        90
+#     277.3k      259 s     25.2 GiB        95   ← RAM-Stop bei 80 % (extrapoliert Deckel ~345k)
+# → 55000 Knoten sind bewusst KONSERVATIV (≈3,5 GiB, ≈35 s) — schnell + immer stabil, NICHT
+#   RAM-limitiert. Wer feiner will, gibt über den UI-Regler ein `target_nodes` bis EM3D_NODE_CEILING
+#   vor. Wird das Netz feiner als das Ziel/den Cap, vergröbert `_build_mesh_capped` die Zellgrößen
+#   automatisch (Segfault-/OOM-Schutz) und protokolliert das in `mesh_build.log`.
 EM3D_MAX_NODES = 55000
+# Harte Obergrenze für die vom Nutzer wählbare Ziel-Knotenzahl (UI-Regler 10k–300k). Oberhalb ~345k
+# reicht der RAM dieser Maschine für den MUMPS-Direktlöser nicht mehr (OOM) — 300k lässt Sicherheit.
+EM3D_NODE_CEILING = 300000
+
+# In-Process-Cache des fertig gebauten 3D-Netzes je em3d-Arbeitsverzeichnis. Das Mesh hängt
+# NUR an Geometrie + netzrelevanten Optionen (NICHT an rpm/load_nm) — ändert der Nutzer beim
+# nächsten Einzellauf nur den Betriebspunkt, wird das Netz nicht neu gebaut, sondern
+# wiederverwendet (nur der Löser läuft neu). Schlüssel = Arbeitsverzeichnis → {key, tags}.
+# Prozess-lokal (Neustart ⇒ erster Lauf baut neu) und gegen fehlende Mesh-Dateien abgesichert.
+_MESH_CACHE = {}
 
 
 # ── Magnetplatzierung (1:1 zur 2D-Rasterung `ema_analysis._rasterise`) ───────────
@@ -229,14 +251,28 @@ def _magnet_pieces(rects: list, L: float, opts: dict):
 
 # ── 3D-Mesh (Gmsh OCC) ──────────────────────────────────────────────────────────
 
+class _DegenerateMeshError(RuntimeError):
+    """Das Netz wurde gebaut, enthält aber entartete Tetraeder (Sliver), auf denen der Elmer-
+    Löser still scheitern würde. Getrennter Typ, damit ``build_mesh`` NICHT die (hier hilfreichen)
+    Luft-Taschen abschaltet, sondern direkt an den Selbstheil-Monitor (Netzqualität/-dichte) übergibt."""
+
+
+class _Em3dAborted(RuntimeError):
+    """Der laufende ElmerSolver wurde vom Nutzer abgebrochen (``elmer_runner.abort_current``).
+    Eigener Typ, damit der Sweep-Loop den Abbruch von einem echten Löser-Fehler unterscheidet
+    und das bis dahin gerechnete Teilergebnis behält."""
+
+
 def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
-    """Robuster Wrapper um ``_build_mesh_once``: die Magnettaschen-Endkappen können bei groben
+    """Robuster Wrapper um ``_build_mesh_once``: die Magnettaschen können bei groben
     Netzen/manchen Topologien ungültige Facetten erzeugen → dann EINMAL ohne Taschen neu bauen.
     So heilt sich jeder Aufrufer selbst (auch die Tests, die build_mesh direkt rufen)."""
     try:
         return _build_mesh_once(geom, axial, opts, msh_path)
+    except _DegenerateMeshError:
+        raise                                          # Taschen helfen → nicht abschalten, ab an die Leiter
     except Exception:
-        if opts.get("mag_pockets", True):              # Taschen-Kappen als Fehlerquelle ausschließen
+        if opts.get("mag_pockets", True):              # Taschen als Fehlerquelle ausschließen
             tags = _build_mesh_once(geom, axial, dict(opts, mag_pockets=False), msh_path)
             tags["caps_dropped"] = True
             return tags
@@ -312,27 +348,30 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             vol = [d for d in sec if d[0] == 3]
             return vol[0][1] if vol else None
 
-        # Halbkreis-Endkappe der Magnettasche (obround Langloch) als LOFT eines Halbscheiben-
-        # Polygons — loft-basiert wie die Magnete → gmsh verträgt die deckungsgleiche Stirnfläche
-        # (ein Bool'scher Schnitt erzeugt hier dagegen PLC-Fehler). Flache Seite = Magnetende.
-        def _cap_loop(ex, ey, z, ang, sgn, r, narc=7):
-            ox, oy = sgn * math.cos(ang), sgn * math.sin(ang)     # auswärts (vom Magnet weg)
-            px, py = -math.sin(ang), math.cos(ang)                # quer (Magnetbreite)
+        # Obround/Langloch-Querschnitt (Rechteck Lm×Tm + zwei Halbkreis-Enden, Radius Tm/2+clr,
+        # Flanken um clr aufgeweitet) als geschlossene Kurvenschleife auf Höhe z, um `ang` gedreht
+        # und nach (cx,cy) verschoben — für die Magnet-Luft-Tasche (Klebespalt clr rundum). Zwei
+        # solche Loops → Loft (addThruSections) ergibt die Tasche; kein Bool'scher Schnitt (PLC-robust).
+        def _obround_loop(cx, cy, z, ang, Lm, Tm, clr, narc=7):
+            cs, sn = math.cos(ang), math.sin(ang)
+            rc = Tm / 2.0 + clr                                   # Halbkreis-Radius (Endkappe)
+            hl = Lm / 2.0                                         # halbe Gerade (Kappenzentren ±hl)
+
+            def _P(u, v):                                         # lokal (u längs, v quer) → global
+                return occ.addPoint(cx + u * cs - v * sn, cy + u * sn + v * cs, z)
             pts = []
-            for k in range(narc + 1):
-                th = -math.pi / 2 + math.pi * k / narc            # −90°..+90° → Halbkreis
-                a = r * math.cos(th); b = r * math.sin(th)
-                pts.append(occ.addPoint(ex + a * ox + b * px, ey + a * oy + b * py, z))
-            ls = [occ.addLine(pts[k], pts[k + 1]) for k in range(len(pts) - 1)]
-            ls.append(occ.addLine(pts[-1], pts[0]))               # flache Seite schließen
+            for k in range(narc + 1):                            # rechte Kappe: Zentrum (+hl,0), −90°..+90°
+                th = -math.pi / 2 + math.pi * k / narc
+                pts.append(_P(hl + rc * math.cos(th), rc * math.sin(th)))
+            for k in range(narc + 1):                            # linke Kappe: Zentrum (−hl,0), +90°..+270°
+                th = math.pi / 2 + math.pi * k / narc
+                pts.append(_P(-hl + rc * math.cos(th), rc * math.sin(th)))
+            ls = [occ.addLine(pts[k], pts[(k + 1) % len(pts)]) for k in range(len(pts))]
             return occ.addCurveLoop(ls)
 
-        def _extrude_cap(ex, ey, ang, sgn, r, z0, z1):
-            w0 = _cap_loop(ex, ey, z0, ang, sgn, r)
-            w1 = _cap_loop(ex, ey, z1, ang, sgn, r)
-            sec = occ.addThruSections([w0, w1], -1, True, True)
-            vol = [d for d in sec if d[0] == 3]
-            return vol[0][1] if vol else None
+        def _obround_pocket(loops):
+            sec = occ.addThruSections(loops, -1, True, True)      # makeSolid, ruled
+            return [t for (d, t) in sec if d == 3]
 
         # Gerades Vollprisma 0..L (für Statornuten: die rotieren NICHT mit dem Rotor mit).
         def _extrude_straight(pc):
@@ -343,42 +382,109 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             return vol[0][1] if vol else None
 
         rects = magnet_rects(geom)
+        # KONTINUIERLICHER SKEW → FEINE STAFFELUNG, sobald Magnettaschen aktiv sind. Ein um den
+        # EIGENEN Schwerpunkt tordiertes Magnet+Tasche-Paar ist nicht robust netzbar (die tordierte
+        # dünne Schale bringt mesh.generate zum Scheitern; getestet). Als K gerade, um die WELLENACHSE
+        # verdrehte Segmente (echte Staffelung) sind je für sich netzbar UND physikalisch korrekter
+        # (reale Schrägung dreht den Querschnitt um die Wellenachse, nicht um den Magnetschwerpunkt).
+        # K so fein, dass die Stufe ≤ 2° bleibt. Ohne Taschen bleibt der kontinuierliche Twist.
+        _opts_eff = opts
+        if (opts.get("mag_pockets", True) and int(opts.get("skew_segments", 1) or 1) < 2
+                and abs(math.degrees(skew)) > 1e-6):
+            _K = max(3, min(12, int(math.ceil(abs(math.degrees(skew)) / 3.0))))
+            _opts_eff = dict(opts, skew_segments=_K, skew_step_deg=math.degrees(skew) / _K,
+                             skew_deg=0.0)
+            skew = 0.0                                     # Magnet-Extrude nutzt jetzt die Segmentebenen
         # Gestaffelte Schrägung: jeden Magneten in K verdrehte axiale Prismen schneiden.
-        pieces, n_seg, _seg_step = _magnet_pieces(rects, L, opts)
+        pieces, n_seg, _seg_step = _magnet_pieces(rects, L, _opts_eff)
         mag_vol_tags = [_extrude(pc) for pc in pieces]
 
         # Flussbarrieren (parametrisch q/d + custom) als LUFT-Prismen, mit der gleichen
         # Staffelung (rotieren mit dem Blechpaket). Werden in den Rotor gefragmentet.
         brects = barrier_rects(geom)
-        bpieces, _bn, _bs = _magnet_pieces(brects, L, opts)
+        bpieces, _bn, _bs = _magnet_pieces(brects, L, _opts_eff)
         bar_vol_tags = [_extrude(pc) for pc in bpieces]
 
-        # Magnettaschen als obround „Langloch" (wie Geometrie-Tab/FreeCAD): halbkreisförmige
-        # Luft-Endkappe pro Magnetende. Zylinder (Radius (Dicke+2·magGapMm)/2) am Magnetende,
-        # vom Magnetprisma abgeschnitten → reiner Halbkreis (echte Rundung, kein Eisen-Sliver).
-        # Gilt für ALLE vergrabenen (interior) Magnetkonfigurationen; Oberflächen-/Halbach-
-        # Magnete haben keine Tasche. Standard an (`mag_pockets`).
+        # Magnettaschen: EIN einheitliches Luft-LANGLOCH (obround: Rechteck + zwei Halbkreis-Enden)
+        # um jeden vergrabenen Magneten, mit dem ECHTEN Geometrie-Tab-Klebespalt `clr` (magGapMm,
+        # 0,1–0,3 mm) rundum — in ALLEN Fällen (gerade, Staffelung, Skew). Zwei Baufälle:
+        #   • GERADE: EIN obround-Prisma über 0..L (Langloch mit Spalt rundum).
+        #   • STAFFELUNG (n_seg≥2 — echte Staffel ODER der aus kontinuierlichem Skew übersetzte Fall):
+        #     K GESTUFTE obround-Prismen, eins je Segment k, über die Länge versetzt (Winkel ang+k·step,
+        #     Zentrum um die Wellenachse gedreht) — und dann PER MAGNET zu EINEM zusammenhängenden
+        #     Luftkanal `occ.fuse`t. Magnetsegment + Tasche teilen exakt den Stufenwinkel → perfekter
+        #     Sitz mit echtem Spalt.
+        # **Warum fusen (wichtig, nicht rückgängig machen):** K SEPARATE gestufte Taschen lassen
+        # zwischen den verdreht gestapelten Prismen dünne EISEN-Slivers stehen → entartete Tets →
+        # `mesh.generate` scheitert / explodiert (>400 k Knoten). Deshalb wurde der Spalt früher
+        # netzbarkeitshalber auf ~0,55·Twist-Versatz ANGEHOBEN (der Magnet füllte dann optisch das
+        # Langloch, kein sichtbarer Luftspalt — genau die Nutzer-Beanstandung). Der Fuse zu EINEM
+        # Kanal je Magnet beseitigt die Eisen-Slivers → der ECHTE 0,1–0,3-mm-Spalt ist netzbar
+        # (verifiziert: 16 Kanäle, 5 Segmente, minSICN ~7e-3, ~76 k Knoten). Das Netz löst den dünnen
+        # Spalt über `Mesh.MeshSizeMin ≈ 0,8·clr` auf (s. u.); der Knoten-Cap vergröbert nur das Fernfeld.
+        # Nur vergrabene (interior) Magnete; Oberflächen-/Halbach-Magnete haben keine Tasche.
+        # (Alt-Variablennamen cap_* bleiben → Luft-/Feinzonen-/Zuordnungslogik greift unverändert.)
         cap_vol_tags = []
         cap_pieces = []
+        _pocket_clr = 0.0
+        _pocket_clr_geom = 0.0
+        _staffel = n_seg >= 2 and abs(_seg_step) > 1e-9   # echte Staffel ODER aus Skew übersetzt
         if opts.get("mag_pockets", True):
-            _gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
-            for _i, _pc in enumerate(pieces):
-                _mt = mag_vol_tags[_i]
-                if _mt is None or rects[_pc["mag_idx"]].get("placement", "interior") != "interior":
+            clr = min(0.3, max(0.1, float(geom.get("magGapMm", 0.1) or 0.1)))   # Geometrie-Tab-Klebespalt
+            if float(opts.get("mag_clear_mm", 0.0) or 0.0) > 0:
+                clr = float(opts["mag_clear_mm"])                                # optionaler Override
+            _pocket_clr_geom = clr
+            _pocket_clr = clr                                                    # KEIN Anheben mehr
+
+            def _shell_pred(Lm, Tm, dz):                 # erwartete Luft-Schalenmasse (Tasche − Magnet)
+                rc = Tm / 2.0 + clr
+                pocket = Lm * (Tm + 2 * clr) + math.pi * rc * rc                 # Stadion-Querschnitt
+                return max(0.0, pocket - Lm * Tm) * dz
+
+            def _pocket_prism(cx, cy, ang, z0, z1, Lm, Tm):
+                l0 = _obround_loop(cx, cy, z0, ang, Lm, Tm, clr)
+                l1 = _obround_loop(cx, cy, z1, ang, Lm, Tm, clr)
+                return [(3, _t) for _t in _obround_pocket([l0, l1])]
+
+            for _r in rects:
+                if _r.get("placement", "interior") != "interior":
                     continue
-                _Lp = _pc["length"]; _Tp = _pc["thick"]; _ang = _pc["ang"]
-                _z0 = _pc["z0"]; _z1 = _pc["z1"]; _rc = (_Tp + 2.0 * _gap) / 2.0
-                _c, _s = math.cos(_ang), math.sin(_ang)
-                _din = min(0.6, 0.25 * _Lp)            # Kappe etwas IN den Magnet schieben →
-                for _sg in (-1.0, 1.0):                # keine deckungsgleiche Fläche (PLC-robust)
-                    _ex = _pc["cx"] + _sg * (_Lp / 2.0 - _din) * _c
-                    _ey = _pc["cy"] + _sg * (_Lp / 2.0 - _din) * _s
-                    _cv = _extrude_cap(_ex, _ey, _ang, _sg, _rc, _z0, _z1)
-                    if _cv is not None:
-                        cap_vol_tags.append(_cv)
-                    _off = 0.424 * _rc                    # Schwerpunkt des Halbkreises ans Ende
-                    cap_pieces.append({"cx": _ex + _sg * _off * _c, "cy": _ey + _sg * _off * _s,
-                                       "length": _rc, "thick": _Tp, "z0": _z0, "z1": _z1})
+                _Lm, _Tm, _a0 = _r["length"], _r["thick"], _r["ang"]
+                try:
+                    if _staffel:                          # gestufte obround-Prismen je Segment, dann fusen
+                        # (kontinuierlicher Skew wurde oben in eine feine Staffelung übersetzt.)
+                        segs, cxs, cys = [], [], []
+                        _dz = L / n_seg
+                        _eps = _dz * 0.02                 # winzige z-Überlappung → benachbarte Segmente fusen sauber
+                        for k in range(n_seg):
+                            phi = k * _seg_step
+                            _c, _s = math.cos(phi), math.sin(phi)
+                            gx = _r["cx"] * _c - _r["cy"] * _s
+                            gy = _r["cx"] * _s + _r["cy"] * _c
+                            segs += _pocket_prism(gx, gy, _a0 + phi, max(0.0, k * _dz - _eps),
+                                                  min(L, (k + 1) * _dz + _eps), _Lm, _Tm)
+                            cxs.append(gx); cys.append(gy)
+                        if not segs:
+                            continue
+                        if len(segs) > 1:                 # zu EINEM Luftkanal je Magnet vereinen (keine Eisen-Slivers)
+                            fused, _ = occ.fuse([segs[0]], segs[1:])
+                            chan = [t for (d, t) in fused if d == 3]
+                        else:
+                            chan = [t for (d, t) in segs]
+                        cap_vol_tags += chan
+                        cap_pieces.append({"cx": sum(cxs) / len(cxs), "cy": sum(cys) / len(cys),
+                                           "length": _Lm + 2 * clr, "thick": _Tm + 2 * clr,
+                                           "z0": 0.0, "z1": L,
+                                           "vol_pred": _shell_pred(_Lm, _Tm, L)})
+                    else:                                  # gerade: EIN obround-Prisma
+                        prism = _pocket_prism(_r["cx"], _r["cy"], _a0, 0.0, L, _Lm, _Tm)
+                        cap_vol_tags += [t for (d, t) in prism]
+                        cap_pieces.append({"cx": _r["cx"], "cy": _r["cy"],
+                                           "length": _Lm + 2 * clr, "thick": _Tm + 2 * clr,
+                                           "z0": 0.0, "z1": L,
+                                           "vol_pred": _shell_pred(_Lm, _Tm, L)})
+                except Exception:
+                    pass
 
         # Verschraubungs-/Wuchtbolzen: Durchgangslöcher (Luft) durch den Rotor an der
         # Teilkreis-Position (Anzahl = Polzahl), wie FreeCAD. Nur wenn `genBalanceBolts`.
@@ -446,7 +552,11 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             # Die kleinen Taschen-Kappen brauchen lockerere Toleranzen (dist_frac/mlo/mhi),
             # weil sie beim Fragmentieren am Magnet/Rotorrand beschnitten werden.
             assign = {i: [] for i in range(len(target_pieces))}
-            pred = [p["length"] * p["thick"] * (p["z1"] - p["z0"]) for p in target_pieces]
+            # Erwartetes Volumen: für die dünnen Taschen-Luftschalen die explizite Schalenmasse
+            # (vol_pred, ≈ Tasche − Magnet), sonst die volle Box — sonst überschätzt die Box die
+            # 0,1–0,3-mm-Schale massiv und das Massengate würde die Tasche verwerfen.
+            pred = [p.get("vol_pred", p["length"] * p["thick"] * (p["z1"] - p["z0"]))
+                    for p in target_pieces]
             taken = set()
             for (v, gx, gy, gz, vmass) in avail:
                 best, bd = None, 1e18
@@ -496,9 +606,16 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         cap_vols = [v for vs in cap_assign.values() for v in vs]
         bolt_vols = [v for vs in bolt_assign.values() for v in vs]
         slot_vols = [v for vs in slot_assign.values() for v in vs]
-        # Magnete, Flussbarrieren, Taschenkappen, Bolzenlöcher UND Statornuten in die Feinzone.
-        fine_surfs = (_surfs_of(mag_vols) | _surfs_of(bar_vols) | _surfs_of(cap_vols)
-                      | _surfs_of(bolt_vols) | _surfs_of(slot_vols))
+        # Flussbarrieren, Bolzenlöcher, Statornuten in die Feinzone (mag_cl). Magnete + Magnet-
+        # Taschen NUR wenn KEINE Taschen aktiv: bei aktiven Taschen grenzen Magnet- und Taschen-
+        # Oberfläche an den dünnen 0,1–0,3-mm-Klebespalt — ein mm-Ziel (mag_cl) dort ist geometrie-
+        # widersprüchlich („Could not recover boundary mesh"); der Spalt wird stattdessen über
+        # `Mesh.MeshSizeMin ≈ 0,8·clr` + den natürlichen Größengradienten aufgelöst (verifiziert:
+        # so meshen die gefusten Kanäle sauber; ein festes Feinband auf ALLEN Magnetflächen sprengt
+        # dagegen die Knotenzahl / hängt).
+        fine_surfs = (_surfs_of(bar_vols) | _surfs_of(bolt_vols) | _surfs_of(slot_vols))
+        if not (opts.get("mag_pockets", True) and _pocket_clr > 0):
+            fine_surfs |= _surfs_of(mag_vols)
 
         # ── Zonale Netz-Verfeinerung (einstellbar): Luftspalt+Umgebung SEHR fein
         #    (gap_cl), Magnete/Barrieren+Umgebung FEIN (mag_cl, über mag_grow auf grob
@@ -507,13 +624,6 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         gap_cl = float(opts.get("gap_cl", 0.0)) or max(0.35, gap * 0.6)
         mag_cl = float(opts.get("mag_cl", 0.0)) or max(gap_cl, mesh_cl * 0.5)
         mag_grow = float(opts.get("mag_grow", 0.0)) or max(2.0, 3.0 * gap)
-        # Die kleinen Langloch-Endkappen (Radius ~Magnetdicke/2) brauchen ein Netz nicht viel
-        # gröber als ihr Radius, sonst PLC-Fehler (Kappe < Zellgröße) → Selbstheilung wirft sie
-        # weg. Sanfte Deckelung, die die Knoten nicht explodieren lässt (kein Konflikt mit dem
-        # Knoten-Cap: greift nur, wenn mag_cl ohnehin gröber als die Kappe wäre).
-        if cap_pieces:
-            _rc_min = min((p["thick"] for p in cap_pieces), default=4.0) / 2.0
-            mag_cl = max(gap_cl, min(mag_cl, 1.3 * _rc_min))
         fld = gmsh.model.mesh.field
         fields = []
         # Luftspalt: MathEval-Gauß-Band um r_mid.
@@ -535,6 +645,24 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             fld.setNumber(f_thr, "DistMin", 0.0)
             fld.setNumber(f_thr, "DistMax", mag_grow)
             fields.append(f_thr)
+        # Verfeinerungsgebiet (ROI): lokale Box im VOLLmodell feiner vernetzen, danach der
+        # NORMALE volle Re-Solve (kein Submodell, keine BC-Übertragung) → physikalisch exakt.
+        # gmsh-Box-Feld: VIn fein im Quader, VOut grob außen, weicher Saum (Thickness). roi_cl
+        # leitet sich aus gap_cl/mag_cl ab → skaliert beim Knoten-Cap-Vergröbern automatisch mit.
+        roi = opts.get("roi_box")
+        roi_rf = float(opts.get("roi_refine", 0.0) or 0.0)
+        roi_cl = 0.0
+        if roi and roi_rf > 1.0:
+            base_fine = min(gap_cl, mag_cl)
+            roi_cl = max(0.12, base_fine / roi_rf)
+            f_box = fld.add("Box")
+            fld.setNumber(f_box, "VIn", roi_cl)
+            fld.setNumber(f_box, "VOut", mesh_cl)
+            fld.setNumber(f_box, "XMin", float(roi["xmin"])); fld.setNumber(f_box, "XMax", float(roi["xmax"]))
+            fld.setNumber(f_box, "YMin", float(roi["ymin"])); fld.setNumber(f_box, "YMax", float(roi["ymax"]))
+            fld.setNumber(f_box, "ZMin", float(roi["zmin"])); fld.setNumber(f_box, "ZMax", float(roi["zmax"]))
+            fld.setNumber(f_box, "Thickness", max(1.0, base_fine * 3.0))
+            fields.append(f_box)
         if len(fields) > 1:
             f_min = fld.add("Min")
             fld.setNumbers(f_min, "FieldsList", [float(f) for f in fields])
@@ -543,11 +671,53 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             fld.setAsBackgroundMesh(fields[0])
         gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
         gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
-        gmsh.option.setNumber("Mesh.MeshSizeMin", min(gap_cl, mag_cl))
+        # MeshSizeMin muss den dünnen Magnet-Klebespalt (clr, 0,1–0,3 mm) auflösen dürfen — sonst
+        # überbrücken zu grobe Zellen den Spalt (Slivers/Fehlschlag). Als Boden ~0,8·clr, damit der
+        # ECHTE Spalt in allen Fällen (auch Staffel/Skew, jetzt gefuste Kanäle) ≥1 Zelle quer bekommt.
+        _msmin = min(gap_cl, mag_cl, roi_cl) if roi_cl else min(gap_cl, mag_cl)
+        if _pocket_clr > 0:
+            _msmin = min(_msmin, 0.8 * _pocket_clr)
+        gmsh.option.setNumber("Mesh.MeshSizeMin", _msmin)
         gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_cl)
+
+        # Netzqualität (erste Stufe des Selbstheil-Monitors, mesh_robust=True): robusteres 2D-
+        # Verfahren (Frontal-Delaunay) + kräftigere Tetraeder-Optimierung. Ändert das Modell
+        # NICHT (keine Feature entfernt), nur wie gmsh vernetzt/glättet — hilft gegen schlecht
+        # geformte/überlappende Facetten an engen Stellen (Magnetkanten/Nut/Luftspalt).
+        if opts.get("mesh_robust"):
+            gmsh.option.setNumber("Mesh.Algorithm", 6)          # Frontal-Delaunay (robust)
+            gmsh.option.setNumber("Mesh.Optimize", 1)
+            gmsh.option.setNumber("Mesh.OptimizeThreshold", 0.4)
 
         gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
         gmsh.model.mesh.generate(3)
+
+        # Entartete Tetraeder (Sliver, ~0 Volumen / invertiert) killen den Elmer-Löser STILL:
+        # der Netzbau läuft durch, aber CalcFields wirft „LUDecomp: Matrix is singular" bzw. der
+        # Jfix-Hilfslöser divergiert. Daher hier die Netzqualität prüfen und einen zu schlechten
+        # Wert wie einen BAU-Fehler behandeln → der Selbstheil-Monitor (_build_mesh_capped)
+        # greift und probiert Mitigationen (robustere Vernetzung → feiner → … → Staffelung aus).
+        # Schwelle bewusst niedrig (nur wirklich entartete Elemente), damit gesunde Staffel-Netze
+        # (min. minSICN ~1e-3) NICHT fälschlich die Leiter auslösen und Skew wegoptimiert wird.
+        if not opts.get("allow_degenerate"):
+            try:
+                _q_thresh = float(opts.get("degenerate_sicn", 2.0e-4))
+                _e3d, _etg, _ = gmsh.model.mesh.getElements(3)
+                _at = [int(t) for arr in _etg for t in arr]
+                if _at:
+                    _qs = gmsh.model.mesh.getElementQualities(_at, "minSICN")
+                    _nbad = sum(1 for q in _qs if q <= _q_thresh)
+                    # Toleranz: einzelne Ausreißer sind unkritisch; erst eine RELEVANTE Zahl
+                    # entarteter Tets (bzw. echt invertierte) macht den Löser singulär.
+                    _ninv = sum(1 for q in _qs if q <= 0.0)
+                    if _ninv > 0 or _nbad > max(20, 0.0005 * len(_at)):
+                        raise _DegenerateMeshError(
+                            f"{_nbad} entartete Tetraeder (minSICN≤{_q_thresh:g}, davon {_ninv} "
+                            f"invertiert) — Sliver, Elmer würde still scheitern")
+            except _DegenerateMeshError:
+                raise
+            except Exception:
+                pass                                     # Qualitätsabfrage best-effort
 
         # Klassifikation per Element-Schwerpunkt (echter Innenpunkt): konzentrische
         # Ringe haben ihren Volumen-Schwerpunkt AUF der Achse → Radius dort untauglich.
@@ -685,7 +855,16 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         tags["skew_segments"] = n_seg
         tags["skew_step_deg"] = math.degrees(_seg_step)
         tags["mesh_zones"] = {"gap_cl": gap_cl, "mag_cl": mag_cl,
-                              "mesh_cl": mesh_cl, "mag_grow": mag_grow}
+                              "mesh_cl": mesh_cl, "mag_grow": mag_grow,
+                              "pocket_clear": round(_pocket_clr, 2)}
+        tags["pocket_clear_mm"] = round(_pocket_clr, 2)
+        tags["pocket_clear_geom_mm"] = round(_pocket_clr_geom, 2)
+        # Der Klebespalt entspricht jetzt in ALLEN Fällen dem Geometrie-Tab (gefuste Kanäle statt
+        # angehobener Spalt) → nie mehr angehoben. Feld bleibt fürs UI/Log erhalten (immer False).
+        tags["pocket_clear_raised"] = bool(_pocket_clr > _pocket_clr_geom + 1e-3)
+        if roi_cl:
+            tags["mesh_zones"]["roi_cl"] = roi_cl
+            tags["roi_box"] = roi
         return tags
     finally:
         gmsh.finalize()
@@ -782,9 +961,14 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
                 '  Linear System Max Iterations = 8000\n'
                 '  Linear System Convergence Tolerance = 1.0e-7\n'
                 '  Linear System Residual Output = 100\n')
-    # Jfix (Stromdichte-Bereinigung, nur Lastfall): der Hilfslöser stagniert sonst auf
-    # feinen Netzen („Too many iterations") und bricht ab. ILU1 + viele Iterationen +
-    # NICHT abbrechen (Teil-Fix reicht), eigener `Jfix:`-Namensraum.
+    # Jfix (Stromdichte-Bereinigung, nur Lastfall): reines (ΣJ=0-)Neumann-Poisson für ∇·J. Auf
+    # GESUNDEN Netzen ist es konsistent und der iterative BiCGStabL konvergiert (~219 Iter, ILU1,
+    # Nicht-Abbruch). Die vom Nutzer beobachtete DIVERGENZ („System diverged over maximum
+    # tolerance") entstand NICHT hier, sondern am kaputten Staffel-Netz (Eisen-Slivers → ∇·J
+    # diskret inkonsistent) — das fängt jetzt der Netz-Entartungs-Wächter oben ab, BEVOR gelöst
+    # wird. Daher bewusst KEIN Direkt-Löser (MUMPS scheitert am singulären Neumann-System) und
+    # KEIN `Jfix=0`-BC-Pin (in diesem Elmer ein unlistetes/wirkungsloses Keyword, s. Projekt-
+    # historie) — der bewährte iterative Weg bleibt.
     jfix_cfg = ('  Jfix: Linear System Iterative Method = BiCGStabL\n'
                 '  Jfix: Linear System Max Iterations = 10000\n'
                 '  Jfix: Linear System Convergence Tolerance = 1.0e-6\n'
@@ -883,8 +1067,8 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
             S.append(f'Body {r["phys"]}\n  Name = "{r["name"]}"\n  Equation = 1\n  Material = 2\nEnd\n')
 
     # Außenrand: A×n = 0 (Fluss parallel zur weit entfernten Box). Der Jfix-Pegel wird NICHT
-    # über eine BC gepinnt (das Keyword existiert nicht) — der Hilfslöser löst das konsistente
-    # (ΣJ=0) Neumann-System iterativ; ILU1 + Nicht-Abbruch (s. Solver 1) machen ihn robust.
+    # gepinnt (`Jfix=0` ist in diesem Elmer ein unlistetes Keyword) — das konsistente ΣJ=0-
+    # Neumann-System löst iterativ auch ohne Pinning, solange das Netz gesund ist (Wächter oben).
     if "boundary" in tags:
         S.append(f'Boundary Condition 1\n  Target Boundaries(1) = {tags["boundary"]}\n'
                  '  AV {e} = Real 0\n  AV = Real 0\nEnd\n')
@@ -944,6 +1128,62 @@ def _probe(grid, pts, array_name):
     return ns.vtk_to_numpy(arr).reshape(-1, 3)
 
 
+def _gap_field_metrics(grid, bname, tags) -> dict:
+    """Tastet das Luftspaltfeld B(θ,z) ab → B_gap(Mitte), Endeffekt-Kurve über z und
+    Arkkio-Moment. Gibt die Skalar-Kennwerte zurück PLUS (mit ``_``-Präfix) die Profil-
+    Arrays ``_th``/``_br_mid``/``_z_levels_arr``, die ``parse_results`` für die Charts
+    weiterverwendet. Geteilt zwischen dem vollen Einzellauf und dem schlanken Sweep-Pfad."""
+    dims = tags["dims"]; L = tags["L"]
+    r_mid = 0.5 * (dims["r_rot"] + dims["r_si"])
+    n_th = 240
+    th = np.linspace(0, 2 * np.pi, n_th, endpoint=False)
+    # z-Ebenen für die Endeffekt-Kurve (0 = Stirnseite, L/2 = Mitte).
+    z_levels = np.linspace(0.0, L, 11)
+    br_by_z, bt_by_z = [], []
+    for z in z_levels:
+        pts = np.c_[r_mid * np.cos(th), r_mid * np.sin(th), np.full(n_th, z)]
+        B = _probe(grid, pts, bname)
+        br = B[:, 0] * np.cos(th) + B[:, 1] * np.sin(th)        # radial
+        bt = -B[:, 0] * np.sin(th) + B[:, 1] * np.cos(th)       # tangential
+        br_by_z.append(br); bt_by_z.append(bt)
+    br_by_z = np.array(br_by_z); bt_by_z = np.array(bt_by_z)
+    mid = len(z_levels) // 2
+    br_mid = br_by_z[mid]
+    # Moment (Arkkio-Näherung): T = (L·r²/μ0) · mean_z ∮ Br·Bθ dθ. v1 ist OPEN-CIRCUIT
+    # (nur Magnete) → das Netto-Moment ist physikalisch ~0; der Wert ist am groben Netz
+    # verrauscht und nur informativ. Das echte Lastmoment kommt mit den Spulenströmen.
+    _trap = getattr(np, "trapezoid", None) or np.trapz   # NumPy 2.x: trapz → trapezoid
+    arkkio = float(np.mean([_trap(br_by_z[i] * bt_by_z[i], th) for i in range(len(z_levels))]))
+    return {
+        "b_gap_mid_peak": round(float(np.max(np.abs(br_mid))), 3),
+        "b_gap_axial": [round(float(np.max(np.abs(b))), 3) for b in br_by_z],
+        "z_levels": [round(float(z), 1) for z in z_levels],
+        "torque_Nm": round((L * 1e-3) * (r_mid * 1e-3) ** 2 / MU0 * arkkio, 2),
+        "torque_note": "Leerlauf (nur Magnete) ⇒ Netto-Moment ≈ 0; Lastfall folgt",
+        "_th": th, "_br_mid": br_mid, "_z_levels_arr": z_levels,
+    }
+
+
+def _gap_metrics_only(work_dir: str, geom: dict, opts: dict, tags: dict) -> dict:
+    """Schlanke Kennwerte (B_gap, Endeffekt, Moment) aus der VTU — OHNE Charts/VTU/VTP-
+    Export. Für die Sweep-Betriebspunkte, die NICHT der Detailpunkt sind."""
+    res = {"warnings": []}
+    vtu = _find_vtu(work_dir)
+    if not vtu:
+        res["warnings"].append("Keine VTU-Ausgabe von Elmer gefunden.")
+        return res
+    grid = _read_grid(vtu)
+    bname = _b_array_name(grid)
+    if not bname:
+        res["warnings"].append("Kein B-Feld in der VTU.")
+        return res
+    m = _gap_field_metrics(grid, bname, tags)
+    for k in ("_th", "_br_mid", "_z_levels_arr"):
+        m.pop(k, None)
+    res.update(m)
+    return res
+
+
 def parse_results(work_dir: str, geom: dict, opts: dict, tags: dict,
                   project_dir: str) -> dict:
     """VTU → Luftspalt-B(θ,z), Endeffekt-Kurve, Schnittbild, Moment (Arkkio) +
@@ -954,7 +1194,6 @@ def parse_results(work_dir: str, geom: dict, opts: dict, tags: dict,
     import base64, io
 
     dims = tags["dims"]; L = tags["L"]
-    r_mid = 0.5 * (dims["r_rot"] + dims["r_si"])
     res = {"skew_deg": float(opts.get("skew_deg", 0.0)), "warnings": []}
 
     vtu = _find_vtu(work_dir)
@@ -968,32 +1207,11 @@ def parse_results(work_dir: str, geom: dict, opts: dict, tags: dict,
         res["warnings"].append("Kein B-Feld in der VTU.")
         return res
 
-    n_th = 240
-    th = np.linspace(0, 2 * np.pi, n_th, endpoint=False)
-    # z-Ebenen für die Endeffekt-Kurve (0 = Stirnseite, L/2 = Mitte).
-    z_levels = np.linspace(0.0, L, 11)
-    br_by_z, bt_by_z = [], []
-    for z in z_levels:
-        pts = np.c_[r_mid * np.cos(th), r_mid * np.sin(th), np.full(n_th, z)]
-        B = _probe(grid, pts, bname)
-        br = B[:, 0] * np.cos(th) + B[:, 1] * np.sin(th)        # radial
-        bt = -B[:, 0] * np.sin(th) + B[:, 1] * np.cos(th)       # tangential
-        br_by_z.append(br); bt_by_z.append(bt)
-    br_by_z = np.array(br_by_z); bt_by_z = np.array(bt_by_z)
-
-    mid = len(z_levels) // 2
-    br_mid, bt_mid = br_by_z[mid], bt_by_z[mid]
-    res["b_gap_mid_peak"] = round(float(np.max(np.abs(br_mid))), 3)
-    res["b_gap_axial"] = [round(float(np.max(np.abs(b))), 3) for b in br_by_z]
-    res["z_levels"] = [round(float(z), 1) for z in z_levels]
-
-    # Moment (Arkkio-Näherung): T = (L·r²/μ0) · mean_z ∮ Br·Bθ dθ. v1 ist OPEN-CIRCUIT
-    # (nur Magnete) → das Netto-Moment ist physikalisch ~0; der Wert ist am groben Netz
-    # verrauscht und nur informativ. Das echte Lastmoment kommt mit den Spulenströmen.
-    _trap = getattr(np, "trapezoid", None) or np.trapz   # NumPy 2.x: trapz → trapezoid
-    arkkio = float(np.mean([_trap(br_by_z[i] * bt_by_z[i], th) for i in range(len(z_levels))]))
-    res["torque_Nm"] = round((L * 1e-3) * (r_mid * 1e-3) ** 2 / MU0 * arkkio, 2)
-    res["torque_note"] = "Leerlauf (nur Magnete) ⇒ Netto-Moment ≈ 0; Lastfall folgt"
+    # Luftspalt-B(θ,z) → B_gap(Mitte), Endeffekt-Kurve, Arkkio-Moment (geteilt mit dem
+    # schlanken Sweep-Pfad; gibt zusätzlich die Profil-Arrays für die Charts zurück).
+    m = _gap_field_metrics(grid, bname, tags)
+    th = m.pop("_th"); br_mid = m.pop("_br_mid"); z_levels = m.pop("_z_levels_arr")
+    res.update(m)
 
     charts = os.path.join(project_dir, "charts")
     os.makedirs(charts, exist_ok=True)
@@ -1074,6 +1292,14 @@ def parse_results(work_dir: str, geom: dict, opts: dict, tags: dict,
     except Exception as e:
         res["warnings"].append(f"Browser-Viewer-Export fehlgeschlagen: {e}")
 
+    # Feldlinien (.vtp Polylinien) für den Browser-Viewer.
+    try:
+        lines = os.path.join(os.path.dirname(vtu), "browser_lines.vtp")
+        export_browser_streamlines(grid, bname, tags, lines)
+        res["lines_path"] = lines
+    except Exception as e:
+        res["warnings"].append(f"Feldlinien-Export fehlgeschlagen: {e}")
+
     res["images"] = images
     return res
 
@@ -1117,6 +1343,140 @@ def _slice_image(grid, bname, z0, dims, save_fn):
     fig.colorbar(tpc, ax=ax, shrink=0.8)
     _style_dark(ax)
     return save_fn(fig, "em3d_slice_mid.png")
+
+
+# Sättigungsknie fürs Video (lineares 3D-Eisen ⇒ qualitativ: markiert, WO das Eisen in die
+# Sättigung ginge, und wie diese Zone mit der Last wächst — kein echtes BH-Limit).
+B_SAT_DISPLAY_3D = 2.0
+
+
+def _video_frame(grid, bname, dims, meta, out_png):
+    """EIN Video-Frame für das dynamische Lastprofil: |B|-Sättigungs-Querschnitt (z=L/2) +
+    Feldlinien in der Ebene + Kennwert-Panel (rpm/Last/i_q/i_d/|I|/B_gap/Moment + Phase) +
+    normierte Zeitleiste mit Marker am aktuellen Betriebspunkt. Zeigt in EINEM Bild die
+    Dynamik von Statorströmen, Sättigung und Feldlinien über den Lastzyklus."""
+    import vtk
+    from vtk.util import numpy_support as ns
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import matplotlib.colors as mcolors
+    import matplotlib.tri as mtri
+
+    z0 = meta["L"] / 2.0
+    plane = vtk.vtkPlane(); plane.SetOrigin(0, 0, z0); plane.SetNormal(0, 0, 1)
+    cut = vtk.vtkCutter(); cut.SetCutFunction(plane); cut.SetInputData(grid); cut.Update()
+    poly = cut.GetOutput()
+    pts = ns.vtk_to_numpy(poly.GetPoints().GetData())
+    B = ns.vtk_to_numpy(poly.GetPointData().GetArray(bname)).reshape(-1, 3)
+    x, y = pts[:, 0], pts[:, 1]
+    bmag = np.linalg.norm(B, axis=1)
+    r_so = dims["r_so"]; b_sat = meta.get("b_sat", B_SAT_DISPLAY_3D)
+
+    fig = plt.figure(figsize=(9.2, 6.3), facecolor="#0d0d0d")
+    gs = fig.add_gridspec(2, 2, width_ratios=[3.0, 1.15], height_ratios=[3.0, 1.05],
+                          hspace=0.30, wspace=0.10)
+    ax = fig.add_subplot(gs[0, 0]); axp = fig.add_subplot(gs[0, 1]); axt = fig.add_subplot(gs[1, :])
+
+    # |B|-Heatmap (Wurzelskala) + Sättigungskontur (grün) + Feldlinien in der Ebene.
+    vmax = max(b_sat, min(float(np.nanpercentile(bmag, 99)) if bmag.size else b_sat, 2.4))
+    norm = mcolors.PowerNorm(gamma=0.5, vmin=0.0, vmax=vmax)
+    ax.tricontourf(x, y, np.clip(bmag, 0, vmax), levels=40, cmap="magma", norm=norm)
+    try:
+        ax.tricontour(x, y, bmag, levels=[b_sat], colors="#39ff14", linewidths=1.0)
+    except Exception:
+        pass
+    try:
+        tri = mtri.Triangulation(x, y)
+        gi = np.linspace(-r_so, r_so, 60)
+        GX, GY = np.meshgrid(gi, gi)
+        fx = mtri.LinearTriInterpolator(tri, B[:, 0]); fy = mtri.LinearTriInterpolator(tri, B[:, 1])
+        U = np.asarray(fx(GX, GY)); V = np.asarray(fy(GX, GY))
+        m = (GX ** 2 + GY ** 2) > (0.995 * r_so) ** 2
+        U = np.ma.array(U, mask=m); V = np.ma.array(V, mask=m)
+        ax.streamplot(gi, gi, U, V, color="#cfe3ff", density=1.1, linewidth=0.5, arrowsize=0.6)
+    except Exception:
+        pass
+    for r in [dims["r_rot"], dims["r_si"], dims["r_so"]] + ([dims["r_bore"]] if dims.get("r_bore", 0) > 0 else []):
+        ax.add_patch(plt.Circle((0, 0), r, fill=False, color="#888", lw=0.6))
+    ax.set_xlim(-r_so * 1.05, r_so * 1.05); ax.set_ylim(-r_so * 1.05, r_so * 1.05)
+    ax.set_aspect("equal"); ax.set_xticks([]); ax.set_yticks([])
+    ax.set_title("|B| Schnitt z=L/2 · Feldlinien · grün = Sättigungsgrenze (qualitativ)",
+                 color="#ddd", fontsize=9)
+
+    # Kennwert-Panel.
+    axp.axis("off")
+    def _fmt(v, f):
+        return (f % v) if v is not None else "—"
+    rows = [
+        (f"Punkt {meta['idx'] + 1}/{meta['n']}", "#9ecbff", 12),
+        (meta.get("phase") or "", "#ffd479", 11),
+        ("", None, 5),
+        (f"Drehzahl  {meta['rpm']:.0f} 1/min", "#dddddd", 10),
+        (f"Last      {meta['load']:.0f} Nm", "#dddddd", 10),
+        ("", None, 3),
+        (f"i_q  {_fmt(meta.get('iq'), '%.0f')} A", "#7fd1b9", 10),
+        (f"i_d  {_fmt(meta.get('id'), '%.0f')} A", "#f2a1a1", 10),
+        (f"|I|  {_fmt(meta.get('is_peak'), '%.0f')} A", "#dddddd", 10),
+        ("", None, 3),
+        (f"B_gap  {_fmt(meta.get('b_gap'), '%.2f')} T", "#ffd479", 10),
+        (f"Moment {_fmt(meta.get('torque'), '%.0f')} Nm", "#dddddd", 10),
+    ]
+    yy = 0.98
+    for txt, col, sz in rows:
+        if txt:
+            axp.text(0.02, yy, txt, color=col, fontsize=sz, weight="bold", va="top",
+                     family="monospace", transform=axp.transAxes)
+        yy -= 0.058 + sz / 240.0
+
+    # Normierte Zeitleiste (rpm/Last/i_q/i_d) mit Marker am aktuellen Punkt.
+    idx = np.arange(meta["n"])
+    def _norm(a):
+        a = np.array(a, float); s = max(np.nanmax(np.abs(a)), 1.0); return a / s * 100.0
+    axt.plot(idx, _norm(meta["prof_rpm"]), "-", color="#4fc3f7", lw=1.3, label="Drehzahl")
+    axt.plot(idx, _norm(meta["prof_load"]), "-", color="#ffd479", lw=1.3, label="Last")
+    axt.plot(idx, _norm(meta["prof_iq"]), "-", color="#7fd1b9", lw=1.1, label="i_q")
+    axt.plot(idx, _norm(meta["prof_id"]), "-", color="#f2a1a1", lw=1.1, label="i_d")
+    axt.axvline(meta["idx"], color="#ffffff", lw=1.4, alpha=0.85)
+    axt.set_xlim(0, max(meta["n"] - 1, 1)); axt.set_ylim(-108, 108)
+    axt.set_ylabel("% v. Max", fontsize=8)
+    axt.set_title("Lastprofil (normiert) — Marker = aktueller Punkt", color="#bbb", fontsize=9)
+    axt.legend(loc="upper right", fontsize=7, ncol=4, facecolor="#151515",
+               labelcolor="#ccc", framealpha=0.5)
+    _style_dark(ax); _style_dark(axt)
+    fig.savefig(out_png, dpi=110, facecolor="#0d0d0d"); plt.close(fig)
+    return out_png
+
+
+def _video_frame_fail(meta, out_png):
+    """Platzhalter-Frame für einen fehlgeschlagenen Betriebspunkt — hält die Framefolge
+    lückenlos (ffmpeg braucht fortlaufende frame_%04d.png)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(9.2, 6.3), facecolor="#0d0d0d")
+    ax.axis("off")
+    ax.text(0.5, 0.5, f"Punkt {meta['idx'] + 1}/{meta['n']}\n{meta['rpm']:.0f} 1/min · "
+            f"{meta['load']:.0f} Nm\n(fehlgeschlagen)", color="#e57", ha="center", va="center",
+            fontsize=14, family="monospace")
+    fig.savefig(out_png, dpi=110, facecolor="#0d0d0d"); plt.close(fig)
+    return out_png
+
+
+def _encode_video(frames_dir, fps=6):
+    """frame_%04d.png in frames_dir → anim.mp4 via ffmpeg (wie ema_pipeline._make_video)."""
+    import subprocess
+    out = os.path.join(frames_dir, "anim.mp4")
+    try:
+        r = subprocess.run(
+            ["ffmpeg", "-y", "-framerate", str(fps),
+             "-i", os.path.join(frames_dir, "frame_%04d.png"),
+             "-c:v", "libx264", "-pix_fmt", "yuv420p",
+             "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", out],
+            capture_output=True, text=True, timeout=240)
+        return out if (r.returncode == 0 and os.path.exists(out)) else None
+    except Exception:
+        return None
 
 
 def _mesh_slice_image(tags, z0, save_bytes):
@@ -1252,13 +1612,40 @@ def _grab(rw, save_fn, name):
     return save_fn(data, name)
 
 
+def _classify_grid_gids(grid, tags):
+    """Wie ``_classified_grid``, aber aus den **GeometryIds** einer Elmer-VTU (Body-Physical-IDs)
+    statt der gmsh-.vtk-CellEntityIds — für den zum vollen Motor gespiegelten Sektor (der die
+    Mesh-.vtk nicht patternt, aber die VTU mit GeometryIds trägt). Fügt das Zell-Skalar „cls" an."""
+    import vtk
+    from vtk.util import numpy_support as ns
+    gid = grid.GetCellData().GetArray("GeometryIds")
+    if gid is None:
+        return None
+    ent = ns.vtk_to_numpy(gid)
+    p2c = {}
+    for name, pid in tags["bodies"].items():
+        if name in _CLS:
+            p2c[pid] = _CLS[name]
+    for m in tags["magnets"]:
+        p2c[m["phys"]] = 3.0 if m["sign"] > 0 else 4.0
+    cls = np.array([p2c.get(int(e), -1.0) for e in ent], dtype=float)
+    arr = ns.numpy_to_vtk(cls); arr.SetName("cls")
+    grid.GetCellData().AddArray(arr); grid.GetCellData().SetActiveScalars("cls")
+    return grid
+
+
 def render_geometry_3d(tags, save_fn):
     """Echte 3D-Ansicht des Modells: Eisen halbtransparent, Magnete opak (N rot / S blau).
     Liefert eine Liste {key,title,b64}. Braucht ``tags['vtk_mesh']``."""
     if not tags.get("vtk_mesh") or not os.path.exists(tags["vtk_mesh"]):
         return []
-    full = _classified_grid(tags)
-    L = tags["L"]; R = tags["dims"]["r_so"]
+    return _render_geometry_views(_classified_grid(tags), tags["L"], tags["dims"]["r_so"], save_fn)
+
+
+def _render_geometry_views(full, L, R, save_fn):
+    """Die eigentlichen Geometrie-Ansichten (Cutaway-Iso + Stirnseite) aus einem schon nach „cls"
+    klassifizierten Gitter — geteilt von ``render_geometry_3d`` (Vollmodell, gmsh-.vtk) und dem
+    Sektor (gespiegeltes VTU, GeometryIds)."""
     out = []
 
     # 1) Cutaway-Iso: oben aufgeschnitten, opake Bauteile → Pollage klar im 3D-Schnitt.
@@ -1358,14 +1745,19 @@ def export_browser_vtp(grid, bname, tags, out_path):
     pdp.AddArray(ba); pdp.SetActiveScalars("Bmag")
     poly.GetCellData().Initialize()
 
-    # Punkte als float32 (sonst schreibt VTK 8-Byte-Doubles → der vtk.js-Reader
-    # verrechnet sich an der 8-Byte-Ausrichtung: „Float64Array offset multiple of 8").
+    _write_vtp(poly, out_path)
+    return out_path
+
+
+def _write_vtp(poly, out_path):
+    """Schreibt ein vtkPolyData im exakt vom vtk.js-XMLPolyDataReader lesbaren Format:
+    Punkte als float32, Binär (base64-inline), UNkomprimiert, **32-Bit-Header**.
+    (ASCII parst der Reader nicht; 64-Bit-Header + Kompression brechen ihn; 8-Byte-
+    Doubles verrechnet er an der Ausrichtung: „Float64Array offset multiple of 8".)"""
+    import vtk
+    from vtk.util import numpy_support as ns
     pts32 = ns.vtk_to_numpy(poly.GetPoints().GetData()).astype(np.float32)
     vp = vtk.vtkPoints(); vp.SetData(ns.numpy_to_vtk(pts32)); poly.SetPoints(vp)
-
-    # Binär (base64-inline), UNkomprimiert, **32-Bit-Header** — genau das Format, das
-    # der vtk.js-XMLPolyDataReader im Browser liest (ASCII parst er nicht; 64-Bit-Header
-    # + Kompression brechen ihn).
     w = vtk.vtkXMLPolyDataWriter(); w.SetFileName(out_path); w.SetInputData(poly)
     w.SetDataModeToBinary()
     try:
@@ -1380,6 +1772,78 @@ def export_browser_vtp(grid, bname, tags, out_path):
     except Exception:
         pass
     w.Write()
+    return out_path
+
+
+def export_browser_streamlines(grid, bname, tags, out_path):
+    """Tracet Magnetfeldlinien (B-Vektor) durch das Volumennetz und schreibt sie als
+    schlanke Polylinien-.vtp (eingefärbt nach |B|) für den vtk.js-Browser-Viewer.
+
+    Seeds: ein Punkteraster im Band Welle→Stator-OD, verteilt über MEHRERE axiale Ebenen
+    (nicht nur z=L/2), sodass die Flusspfade den 3D-Körper füllen und Endeffekte/Skew
+    sichtbar werden. Streamlines werden serverseitig getraced (das große Volumennetz bleibt
+    auf dem Server), nur die dünnen Linien gehen in den Browser."""
+    import vtk
+    from vtk.util import numpy_support as ns
+
+    # B-Vektorfeld als aktive Vektoren setzen (StreamTracer integriert das aktive Feld).
+    grid.GetPointData().SetActiveVectors(bname)
+
+    dims = tags["dims"]; L = float(tags["L"])
+    r_so = float(dims["r_so"]); r_sh = float(dims.get("r_shaft", 0.0) or 0.0)
+    r_in = max(r_sh + 0.1 * r_so, 0.15 * r_so)   # innen knapp über der Welle starten
+    r_out = 0.98 * r_so                           # außen knapp im Statoreisen enden
+
+    # Seed-Raster: konzentrische Ringe × Winkel × MEHRERE axiale Ebenen — geometrieunabhängig
+    # über die Radien skaliert. Über mehrere z-Ebenen (im aktiven Stack, ohne die Luftkappen),
+    # damit die Feldlinien den 3D-Körper füllen statt in einer Ebene zu kleben. Bewusst eher
+    # DICHT exportiert (kleine Datei, Linien sind schlank), weil der Browser-Slider die Linien
+    # nur clientseitig AUSDÜNNT — die hier erzeugte Anzahl ist die Obergrenze („viele").
+    n_rings, n_ang, n_z = 7, 36, 12
+    z_lo, z_hi = 0.03 * L, 0.97 * L               # über die (nahezu) volle Stapellänge verteilt
+    seeds = vtk.vtkPoints()
+    for iz in range(n_z):
+        z = z_lo + (z_hi - z_lo) * iz / max(n_z - 1, 1) if n_z > 1 else L / 2.0
+        for ir in range(n_rings):
+            r = r_in + (r_out - r_in) * ir / max(n_rings - 1, 1)
+            for ia in range(n_ang):
+                a = 2.0 * np.pi * ia / n_ang
+                seeds.InsertNextPoint(r * np.cos(a), r * np.sin(a), z)
+    seed_pd = vtk.vtkPolyData(); seed_pd.SetPoints(seeds)
+
+    tracer = vtk.vtkStreamTracer()
+    tracer.SetInputData(grid)
+    tracer.SetSourceData(seed_pd)
+    tracer.SetIntegrationDirectionToBoth()
+    tracer.SetIntegratorTypeToRungeKutta4()              # nicht-adaptiv: robust, auch bei homogenen Feldern
+    # Schrittweite in LÄNGE (mm), an die Maschinengröße gekoppelt — der adaptive RK45 in
+    # CELL_LENGTH-Einheiten brach hier sofort ab (0 Linien trotz vorhandenem Feld).
+    tracer.SetIntegrationStepUnit(vtk.vtkStreamTracer.LENGTH_UNIT)
+    tracer.SetInitialIntegrationStep(0.03 * r_so)
+    tracer.SetMinimumIntegrationStep(0.01 * r_so)
+    tracer.SetMaximumIntegrationStep(0.08 * r_so)
+    tracer.SetMaximumPropagation(6.0 * r_so)             # einige OD weit verfolgen
+    tracer.SetMaximumNumberOfSteps(2000)
+    tracer.SetTerminalSpeed(1e-12)
+    tracer.SetComputeVorticity(False)
+    tracer.Update()
+    poly = tracer.GetOutput()
+
+    # |B| je Linienpunkt als einziges Skalar behalten, Rest verwerfen → kleine Datei.
+    pdp = poly.GetPointData()
+    barr = pdp.GetArray(bname)
+    if barr is not None:
+        B = ns.vtk_to_numpy(barr).reshape(-1, 3)
+        bmag = np.linalg.norm(B, axis=1).astype(np.float32)
+    else:
+        bmag = np.zeros(poly.GetNumberOfPoints(), dtype=np.float32)
+    for nm in [pdp.GetArrayName(i) for i in range(pdp.GetNumberOfArrays())]:
+        pdp.RemoveArray(nm)
+    ba = ns.numpy_to_vtk(bmag); ba.SetName("Bmag")
+    pdp.AddArray(ba); pdp.SetActiveScalars("Bmag")
+    poly.GetCellData().Initialize()
+
+    _write_vtp(poly, out_path)
     return out_path
 
 
@@ -1430,59 +1894,321 @@ def render_model_preview(payload: dict, project_dir: str, progress_cb=None) -> d
                          "Elmer installieren und '3D-Feld berechnen' nutzen."]}
 
 
+def _seed_cl(geom, opts):
+    """Explizite Zellgrößen (gap/mag/mesh/grow, mm) — nutzt gesetzte (>0) Werte, füllt den Rest
+    mit denselben Auto-Regeln wie ``_build_mesh_once``. So sind die cl-Werte für das Skalieren
+    (Ziel-/Fehler-Mitigation) IMMER konkret, auch beim allerersten Versuch (0 = auto)."""
+    r_so = geom["statorOD"] / 2.0
+    gap = max(0.1, (geom["statorID"] - geom["rotorOD"]) / 2.0)
+    mesh_cl = float(opts.get("mesh_cl", 0.0)) or max(2.0, r_so / 18.0)
+    gap_cl = float(opts.get("gap_cl", 0.0)) or max(0.35, gap * 0.6)
+    mag_cl = float(opts.get("mag_cl", 0.0)) or max(gap_cl, mesh_cl * 0.5)
+    mag_grow = float(opts.get("mag_grow", 0.0)) or max(2.0, 3.0 * gap)
+    return gap_cl, mag_cl, mesh_cl, mag_grow
+
+
+def _mesh_logger(msh, log=None):
+    """Öffnet ein Mesh-Build-Logfile neben ``msh`` (``mesh_build.log``) und gibt eine Schreib-
+    Funktion zurück, die JEDE Zeile mit Zeitstempel ins File schreibt UND (best-effort) an den
+    optionalen UI-``log``-Callback spiegelt. Das File ist der Nachweis des Selbstheil-Monitors."""
+    import datetime
+    try:
+        path = os.path.join(os.path.dirname(os.path.abspath(msh)) or ".", "mesh_build.log")
+        fh = open(path, "a", encoding="utf-8")
+    except Exception:
+        fh, path = None, None
+
+    def w(msg, ui=False, pct=None):
+        line = f"[{datetime.datetime.now().strftime('%H:%M:%S')}] {msg}"
+        if fh:
+            try:
+                fh.write(line + "\n"); fh.flush()
+            except Exception:
+                pass
+        if ui and log:
+            log(msg, pct)
+    return w, path
+
+
+# Selbstheil-Monitor: geordnete Mitigationsleiter für einen fehlgeschlagenen Netzbau (überlappende
+# Facetten / ungültige Tetraeder). Jede Stufe bekommt (opts, seed_cl) und liefert (label, neue_opts).
+# Reihenfolge nach Nutzer-Wunsch: ZUERST an der NETZQUALITÄT drehen (Vernetzungsverfahren,
+# Zellgrößen feiner/gröber, Zonen-Verhältnisse) — das ändert das Modell NICHT — und erst als
+# LETZTES Modell-Features (Magnettaschen, Skew, Nuten) entfernen. So bleibt maximale Modelltreue.
+def _mesh_mitigations():
+    def m_quality(o, cl):
+        return ("Netzqualität erhöhen (robustes Verfahren + Tetraeder-Optimierung)",
+                dict(o, mesh_robust=True))
+
+    def m_coarsen_fine(o, cl):
+        g, m, me, gr = cl
+        return ("Luftspalt-/Magnet-Mesh ×1.5 vergröbern",
+                dict(o, gap_cl=g * 1.5, mag_cl=m * 1.5, mesh_cl=me, mag_grow=gr))
+
+    def m_ratio(o, cl):
+        g, m, me, gr = cl
+        # Zonen-VERHÄLTNISSE angleichen: den Größensprung zwischen Luftspalt/Magnet und grobem
+        # Netz sanfter machen (mag_cl näher an gap_cl, breitere Übergangszone) — weniger
+        # Konflikte durch steile Zellgrößen-Gradienten, ohne pauschal zu vergröbern.
+        return ("Zonen-Verhältnisse angleichen (sanfterer Größenübergang)",
+                dict(o, gap_cl=g, mag_cl=max(g, (g + m) * 0.5), mesh_cl=me, mag_grow=gr * 1.6))
+
+    def m_coarsen_all(o, cl):
+        g, m, me, gr = cl
+        return ("Gesamtnetz ×1.8 vergröbern",
+                dict(o, gap_cl=g * 1.8, mag_cl=m * 1.8, mesh_cl=me * 1.8, mag_grow=gr))
+
+    def m_no_pockets(o, cl):
+        return "Magnettaschen-Endkappen deaktivieren", dict(o, mag_pockets=False)
+
+    def m_no_skew(o, cl):
+        return ("Staffelung/Skew ausschalten (Prismen-Verdrehung als Konfliktquelle)",
+                dict(o, skew_deg=0.0, skew_segments=1, skew_step_deg=0.0))
+
+    def m_no_slots(o, cl):
+        return "Statornuten aus dem Mesh nehmen", dict(o, stator_slots=False)
+
+    # Netzqualität/-dichte/-verhältnisse zuerst, Modell-Features zuletzt.
+    return [m_quality, m_coarsen_fine, m_ratio, m_coarsen_all, m_no_pockets, m_no_skew, m_no_slots]
+
+
 def _build_mesh_capped(geom, axial, opts, msh, log=None):
-    """Baut das Mesh und vergröbert es iterativ, falls es das Solver-Knotenlimit überschreitet
-    (Segfault-/Hänger-Schutz). Knotenzahl skaliert oberflächendominiert ~h^-1.85, daher dieser
-    Exponent + bis zu 3 Durchläufe. Die Magnettaschen-Endkappen können bei manchen Topologien
-    ein ungültiges Netz erzeugen (überlappende Facetten) → dann automatisch ohne Taschen neu
-    bauen. Gibt (tags, warnings) zurück."""
-    cap = int(opts.get("max_nodes", EM3D_MAX_NODES) or EM3D_MAX_NODES)
+    """Selbstheilender, ziel-gesteuerter 3D-Netzbau mit Logfile (``mesh_build.log`` neben ``msh``).
+
+    Zwei verschränkte Aufgaben, protokolliert Schritt für Schritt:
+
+    * **Ziel-Knotenzahl / Cap** — ist ``opts['target_nodes']`` gesetzt (UI-Regler, geklemmt auf
+      10k…``EM3D_NODE_CEILING``), wird die Knotenzahl BEIDSEITIG angesteuert: zu grob ⇒ Zellgrößen
+      verfeinern, zu fein ⇒ vergröbern (Skalierung ~Knoten∝h^-1.85, Toleranzband ±18 %). Ohne Ziel
+      gilt der klassische Cap ``max_nodes``/``EM3D_MAX_NODES`` (nur vergröbern — Segfault-/OOM-Schutz).
+    * **Selbstheil-Monitor** — schlägt ``build_mesh`` fehl (überlappende Facetten / ungültige Tets),
+      spielt der Monitor selbständig eine Mitigationsleiter durch (Taschen aus → feine Zonen gröber →
+      Skew aus → Nuten aus → alles gröber) und baut mit neuen Parametern neu, bis es klappt oder die
+      Leiter erschöpft ist. Jeder Versuch (Parameter + Ergebnis/Fehler) landet im Logfile.
+
+    Gibt ``(tags, warnings)`` zurück."""
+    wl, logpath = _mesh_logger(msh, log)
     warns = []
-    state = {"no_pockets": False}
 
-    def _build(o):
-        if state["no_pockets"]:
-            o = dict(o, mag_pockets=False)
+    tn = opts.get("target_nodes")
+    if tn:
+        target = int(max(10000, min(EM3D_NODE_CEILING, float(tn))))
+        cap = int(target * 1.18)
+    else:
+        target = None
+        cap = int(opts.get("max_nodes", EM3D_MAX_NODES) or EM3D_MAX_NODES)
+
+    # cl explizit machen (nie 0/auto) → Skalierung immer definiert.
+    g0, m0, me0, gr0 = _seed_cl(geom, opts)
+    cur = dict(opts, gap_cl=g0, mag_cl=m0, mesh_cl=me0, mag_grow=gr0)
+
+    wl(f"=== Netzbau: Topologie={geom.get('magShape','?')} p={geom.get('p','?')} "
+       f"slots={geom.get('slots','?')} L={axial:.0f}mm | "
+       f"Ziel-Knoten={target if target else '—'} Cap={cap} | "
+       f"cl start gap={g0:.3f} mag={m0:.2f} grob={me0:.2f} saum={gr0:.1f}")
+
+    mitigations = _mesh_mitigations()
+    mit_i = 0                      # nächster Mitigationsschritt bei Fehler
+    scale_passes = 0               # Ziel-/Cap-Nachführungen
+    max_attempts = 10
+
+    tags = None
+    for attempt in range(1, max_attempts + 1):
         try:
-            return build_mesh(geom, axial, o, msh)
+            wl(f"Versuch {attempt}: gap={cur.get('gap_cl',0):.3f} mag={cur.get('mag_cl',0):.2f} "
+               f"grob={cur.get('mesh_cl',0):.2f} pockets={cur.get('mag_pockets',True)} "
+               f"slots={cur.get('stator_slots',True)} skew={cur.get('skew_deg',0)}°")
+            tags = build_mesh(geom, axial, cur, msh)
         except Exception as e:
-            if o.get("mag_pockets", True):                  # einmalig: ohne Taschen retry
-                state["no_pockets"] = True
-                if log:
-                    log("⚠ Magnettaschen-Kappen erzeugten ein ungültiges Netz → baue ohne "
-                        "Taschen neu…", None)
-                warns.append("Magnettaschen-Endkappen für diese Geometrie deaktiviert "
-                             "(Netzkonflikt überlappender Facetten).")
-                return build_mesh(geom, axial, dict(o, mag_pockets=False), msh)
-            raise
+            wl(f"  ✗ FEHLER: {type(e).__name__}: {str(e)[:180]}")
+            if mit_i >= len(mitigations):
+                wl("  ⚠ Mitigationsleiter erschöpft — Netzbau bleibt fehlgeschlagen.")
+                if logpath:
+                    warns.append(f"Netzbau trotz Selbstheilung fehlgeschlagen — Details: {logpath}")
+                raise
+            label, cur = mitigations[mit_i](cur, _seed_cl(geom, cur))
+            mit_i += 1
+            wl(f"  → Selbstheil-Monitor greift ein: {label}", ui=True)
+            warns.append(f"Netzbau geheilt: {label} (überlappende Facetten).")
+            continue
 
-    tags = _build(opts)
-    if tags.get("caps_dropped"):
-        warns.append("Magnettaschen-Endkappen für diese Geometrie/Netzfeinheit deaktiviert "
-                     "(Netzkonflikt) — Magnet-/Luftspalt-Mesh feiner wählen, dann erscheinen sie.")
-    n0 = tags["n_nodes"]
-    passes = 0
-    while tags["n_nodes"] > cap and passes < 3:
-        passes += 1
-        mz = tags.get("mesh_zones", {})
-        f = (tags["n_nodes"] / cap) ** (1.0 / 1.85) * 1.06
-        opts = dict(opts,
-                    gap_cl=float(mz.get("gap_cl", 0.0)) * f,
-                    mag_cl=float(mz.get("mag_cl", 0.0)) * f,
-                    mesh_cl=float(mz.get("mesh_cl", 0.0)) * f,
-                    mag_grow=float(mz.get("mag_grow", 0.0)))
-        if log:
-            log(f"⚠ Netz zu fein ({tags['n_nodes']} Knoten > {cap}) → vergröbere ×{f:.2f} "
-                "(3D-Löser-Limit)…", None)
-        tags = _build(opts)
-    if passes:
-        warns.append(f"Netz von {n0} auf {tags['n_nodes']} Knoten vergröbert "
-                     f"(3D-Löser-Limit {cap}; für feinere Auflösung das Modell verkleinern "
-                     "oder Luftspalt-/Magnet-Mesh-Werte erhöhen).")
+        n = tags["n_nodes"]
+        wl(f"  ✓ {n} Knoten, {tags.get('n_magnets','?')} Magnete, "
+           f"{tags.get('n_slots',0)} Nuten, {tags.get('n_barriers',0)} Barrieren")
+        if tags.get("caps_dropped"):
+            warns.append("Magnettaschen-Endkappen für diese Geometrie/Netzfeinheit deaktiviert "
+                         "(Netzkonflikt) — Magnet-/Luftspalt-Mesh feiner wählen, dann erscheinen sie.")
+
+        # --- Ziel-/Cap-Nachführung ---
+        too_fine = n > cap
+        too_coarse = bool(target) and n < 0.82 * target
+        if (too_fine or too_coarse) and scale_passes < 4:
+            scale_passes += 1
+            ref = target if target else cap
+            f = (n / ref) ** (1.0 / 1.85)
+            if too_fine and not target:
+                f *= 1.06                                # Cap-Fall: sicher drunter landen
+            mz = tags.get("mesh_zones", {})
+            cur = dict(cur,
+                       gap_cl=float(mz.get("gap_cl", cur["gap_cl"])) * f,
+                       mag_cl=float(mz.get("mag_cl", cur["mag_cl"])) * f,
+                       mesh_cl=float(mz.get("mesh_cl", cur["mesh_cl"])) * f,
+                       mag_grow=float(mz.get("mag_grow", cur["mag_grow"])))
+            verb = "vergröbere" if f > 1 else "verfeinere"
+            wl(f"  → {verb} ×{f:.3f} (Ist {n} → Ziel {ref})",
+               ui=True)
+            continue
+
+        break                                            # akzeptiert
+
+    if scale_passes and target:
+        warns.append(f"Netz auf {tags['n_nodes']} Knoten angesteuert (Ziel {target}).")
+    elif scale_passes:
+        warns.append(f"Netz auf {tags['n_nodes']} Knoten vergröbert (3D-Löser-Limit {cap}; "
+                     "für feinere Auflösung Ziel-Knoten erhöhen oder Modell verkleinern).")
+    wl(f"=== fertig: {tags['n_nodes']} Knoten nach {attempt} Versuch(en) ===")
+    if logpath:
+        tags["mesh_log"] = logpath
     return tags, warns
 
 
 # ── Orchestrator ─────────────────────────────────────────────────────────────────
+
+# Payload-Schlüssel, die als 3D-Optionen an Mesh + sif weitergereicht werden.
+_EM3D_OPT_KEYS = ("skew_deg", "skew_segments", "skew_step_deg",
+                  "mesh_cl", "gap_cl", "mag_cl", "mag_grow", "mag_clear_mm",
+                  "airbox_factor", "n2d", "rpm", "load_nm",
+                  "excitation", "coil_currents", "target_nodes")
+
+
+def _em3d_opts(payload: dict) -> dict:
+    return {k: payload[k] for k in _EM3D_OPT_KEYS if k in payload}
+
+
+def _mesh_key(geom, axial, opts):
+    """Hash über alles, was die NETZform bestimmt: Geometrie + Baulänge + netzrelevante Optionen.
+    ``rpm``/``load_nm`` sind bewusst AUSGENOMMEN (sie ändern nur die .sif/dq-Ströme, nicht das
+    Netz) — ``excitation``/``coil_currents`` bleiben drin, weil sie die Stirnring-Luftannuli im
+    Netz schalten. Gleicher Hash ⇒ identisches Netz ⇒ Wiederverwendung."""
+    mesh_opts = {k: v for k, v in opts.items() if k not in ("rpm", "load_nm")}
+    blob = json.dumps({"geom": geom, "axial": axial, "opts": mesh_opts},
+                      sort_keys=True, default=str)
+    return hashlib.sha1(blob.encode("utf-8")).hexdigest()
+
+
+def _prep_mesh(geom, axial, opts, work, log):
+    """Baut das 3D-Mesh (rein geometrieabhängig, liest NIE rpm/load) und führt ElmerGrid aus.
+    **Mesh-Cache:** ist im selben Arbeitsverzeichnis schon ein Netz mit identischem
+    ``_mesh_key`` gebaut (und liegen die Dateien noch), wird es WIEDERVERWENDET — beim Ändern
+    von nur Drehzahl/Last läuft dann nur der Löser neu. Über mehrere Betriebspunkte hinweg
+    ohnehin einmal gebaut. Returns (tags, warns)."""
+    import elmer_runner as ER
+    msh = os.path.join(work, "motor3d.msh")
+    key = _mesh_key(geom, axial, opts)
+    cached = _MESH_CACHE.get(work)
+    if (cached and cached.get("key") == key
+            and os.path.isdir(os.path.join(work, "mesh")) and os.path.exists(msh)):
+        t = cached["tags"]
+        log(f"♻ Mesh wiederverwendet (Geometrie unverändert) — {t['n_nodes']} Knoten, "
+            "nur der Löser läuft neu.", 28)
+        return t, []
+    log("🔧 Baue 3D-Mesh (Gmsh)…", 8)
+    tags, mesh_warns = _build_mesh_capped(geom, axial, opts, msh, log=log)
+    mz = tags.get("mesh_zones", {})
+    log(f"✓ Mesh: {tags['n_nodes']} Knoten, {tags['n_magnets']} Magnete, "
+        f"{tags.get('n_barriers', 0)} Flussbarrieren, {tags.get('n_slots', 0)} Statornuten, "
+        f"Körper {tags['n_bodies']}", 28)
+    if mz:
+        log(f"   Zonen: Luftspalt {mz['gap_cl']:.2f} / Magnet+Barriere+Nut {mz['mag_cl']:.2f} "
+            f"(Saum {mz['mag_grow']:.1f}) / grob {mz['mesh_cl']:.1f} mm", 30)
+    log("🔁 ElmerGrid: MSH → Elmer-Mesh…", 38)
+    rg = ER.run_elmergrid(msh, os.path.join(work, "mesh"))
+    if not rg["ok"]:
+        raise RuntimeError("ElmerGrid fehlgeschlagen: " + (rg.get("stderr") or rg.get("error", ""))[:300])
+    _MESH_CACHE[work] = {"key": key, "tags": tags}       # für den nächsten Lauf mit gleicher Geometrie
+    return tags, mesh_warns
+
+
+def _export_browser_point(work_dir, tags, stub, res):
+    """Schreibt für EINEN Sweep-Punkt eine schlanke Browser-.vtp (`<stub>.vtp`) + die
+    Feldlinien (`<stub>_lines.vtp`) aus der gerade gelösten VTU und hängt die Pfade an
+    ``res``. Eindeutiger Dateiname je Punkt, weil alle Punkte dieselbe ``case.vtu``
+    überschreiben."""
+    vtu = _find_vtu(work_dir)
+    if not vtu:
+        return
+    grid = _read_grid(vtu)
+    bname = _b_array_name(grid)
+    if not bname:
+        return
+    vtp = stub + ".vtp"
+    export_browser_vtp(grid, bname, tags, vtp)
+    res["vtp_path"] = vtp
+    lines = stub + "_lines.vtp"
+    export_browser_streamlines(grid, bname, tags, lines)
+    res["lines_path"] = lines
+
+
+def _solve_point(geom, opts, tags, work, project_dir, log, full, pct=None, browser_stub=None):
+    """Löst GENAU einen Betriebspunkt auf dem schon vorhandenen Mesh: schreibt die .sif für
+    ``opts`` (rpm/load/excitation → dq-Ströme), ruft ElmerSolver, wertet aus.
+    ``full=True`` → volle Auswertung (``parse_results``: Charts + VTU + VTP), sonst nur
+    schlanke Kennwerte (``_gap_metrics_only``). ``browser_stub`` (Sweep) → zusätzlich eine
+    schlanke Browser-.vtp + Feldlinien je Punkt unter eindeutigem Namen. Returns (res, op)."""
+    import elmer_runner as ER
+    log("📝 Schreibe Elmer-Solverdatei (.sif)…", pct)
+    write_sif(geom, opts, tags, work, mesh_name="mesh")
+    op = dict(tags.get("operating_point", {}))
+    if op.get("excitation") == "loaded":
+        log(f"   Betriebspunkt: {op['rpm']:.0f} 1/min, {op['load_nm']:.0f} Nm → "
+            f"i_q={op['iq_A']} A, i_d={op['id_A']} A (Spitze {op['is_peak_A']} A)", None)
+        log("   3D-Feld: " + ("Lastfeld mit Statorströmen + Stirnring-Schließung (vereinfacht)"
+                              if op.get("field_loaded") else "Magnetfeld (Leerlauf)"), None)
+    else:
+        log("   Anregung: Leerlauf (nur Magnete)", None)
+    log("🧲 ElmerSolver: 3D-Magnetostatik…", None)
+    rs = ER.run_elmersolver(os.path.join(work, "case.sif"), work)
+    if rs.get("aborted"):
+        raise _Em3dAborted("ElmerSolver abgebrochen")
+    if not rs["ok"]:
+        raise RuntimeError("ElmerSolver fehlgeschlagen: " + (rs.get("stderr") or rs.get("error", ""))[:300]
+                           + "\n" + (rs.get("stdout", "")[-400:]))
+    res = parse_results(work, geom, opts, tags, project_dir) if full \
+        else _gap_metrics_only(work, geom, opts, tags)
+    if browser_stub:
+        try:
+            _export_browser_point(work, tags, browser_stub, res)
+        except Exception as e:
+            res.setdefault("warnings", []).append(f"Browser-Export Punkt fehlgeschlagen: {e}")
+    return res, op
+
+
+def _decorate_res(res, tags, opts, axial, op, mesh_warns):
+    """Hängt Mesh-/Geometrie-/Betriebspunkt-Metadaten + Last-Momentnotiz an ein Einzelpunkt-
+    Ergebnis (geteilt von ``run_em3d`` und dem Sweep-Detailpunkt)."""
+    res["mesh"] = {"n_nodes": tags["n_nodes"], "n_magnets": tags["n_magnets"],
+                   "n_barriers": tags.get("n_barriers", 0), "bodies": tags["n_bodies"]}
+    if opts.get("target_nodes"):
+        res["mesh"]["target_nodes"] = int(opts["target_nodes"])
+    if tags.get("mesh_log"):
+        res["mesh"]["log"] = tags["mesh_log"]
+    res["mesh_zones"] = tags.get("mesh_zones", {})
+    res["axial_mm"] = axial
+    res["skew_deg"] = float(opts.get("skew_deg", 0.0) or 0.0)
+    res["skew_segments"] = int(tags.get("skew_segments", 1))
+    res["skew_step_deg"] = float(tags.get("skew_step_deg", 0.0))
+    res["operating_point"] = op
+    if mesh_warns:
+        res.setdefault("warnings", []).extend(mesh_warns)
+    if op.get("excitation") == "loaded" and op.get("field_loaded"):
+        res["torque_note"] = (f"Lastfall {op['rpm']:.0f} 1/min / {op['load_nm']:.0f} Nm "
+                              f"(i_q={op['iq_A']} A, i_d={op['id_A']} A) — Statorströme mit "
+                              "Stirnring-Schließung; Feld vereinfacht (Grundwelle, lin. Eisen)")
+    elif op.get("excitation") == "loaded":
+        res["torque_note"] = (f"Betriebspunkt {op['rpm']:.0f} 1/min / {op['load_nm']:.0f} Nm: "
+                              f"i_q={op['iq_A']} A, i_d={op['id_A']} A. 3D-Feld = Leerlauf (Magnete)")
+    return res
+
 
 def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
     """Voller 3D-Lauf: Mesh → ElmerGrid → sif → ElmerSolver → Auswertung.
@@ -1501,69 +2227,15 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
     geom = payload.get("geom", payload)
     axial = float(payload.get("axial_len") or payload.get("axialLen")
                   or geom.get("axialLen") or 120.0)
-    opts = {k: payload[k] for k in ("skew_deg", "skew_segments", "skew_step_deg",
-                                    "mesh_cl", "gap_cl", "mag_cl", "mag_grow",
-                                    "airbox_factor", "n2d", "rpm", "load_nm",
-                                    "excitation", "coil_currents")
-            if k in payload}
+    opts = _em3d_opts(payload)
 
     work = os.path.join(project_dir, "em3d")
     os.makedirs(work, exist_ok=True)
-    msh = os.path.join(work, "motor3d.msh")
 
-    _log("🔧 Baue 3D-Mesh (Gmsh)…", 8)
-    tags, _mesh_warns = _build_mesh_capped(geom, axial, opts, msh, log=_log)
-    mz = tags.get("mesh_zones", {})
-    _log(f"✓ Mesh: {tags['n_nodes']} Knoten, {tags['n_magnets']} Magnete, "
-         f"{tags.get('n_barriers', 0)} Flussbarrieren, {tags.get('n_slots', 0)} Statornuten, "
-         f"Körper {tags['n_bodies']}", 28)
-    if mz:
-        _log(f"   Zonen: Luftspalt {mz['gap_cl']:.2f} / Magnet+Barriere+Nut {mz['mag_cl']:.2f} "
-             f"(Saum {mz['mag_grow']:.1f}) / grob {mz['mesh_cl']:.1f} mm", 30)
-
-    _log("🔁 ElmerGrid: MSH → Elmer-Mesh…", 38)
-    mesh_dir = os.path.join(work, "mesh")
-    rg = ER.run_elmergrid(msh, mesh_dir)
-    if not rg["ok"]:
-        raise RuntimeError("ElmerGrid fehlgeschlagen: " + (rg.get("stderr") or rg.get("error", ""))[:300])
-
-    _log("📝 Schreibe Elmer-Solverdatei (.sif)…", 45)
-    write_sif(geom, opts, tags, work, mesh_name="mesh")
-    op = tags.get("operating_point", {})
-    if op.get("excitation") == "loaded":
-        _log(f"   Betriebspunkt: {op['rpm']:.0f} 1/min, {op['load_nm']:.0f} Nm → "
-             f"i_q={op['iq_A']} A, i_d={op['id_A']} A (Spitze {op['is_peak_A']} A)", 47)
-        _log("   3D-Feld: " + ("Lastfeld mit Statorströmen + Stirnring-Schließung (vereinfacht)"
-                               if op.get("field_loaded")
-                               else "Magnetfeld (Leerlauf)"), 48)
-    else:
-        _log("   Anregung: Leerlauf (nur Magnete)", 47)
-
-    _log("🧲 ElmerSolver: 3D-Magnetostatik…", 50)
-    rs = ER.run_elmersolver(os.path.join(work, "case.sif"), work)
-    if not rs["ok"]:
-        raise RuntimeError("ElmerSolver fehlgeschlagen: " + (rs.get("stderr") or rs.get("error", ""))[:300]
-                           + "\n" + (rs.get("stdout", "")[-400:]))
-
+    tags, mesh_warns = _prep_mesh(geom, axial, opts, work, _log)
+    res, op = _solve_point(geom, opts, tags, work, project_dir, _log, full=True, pct=45)
     _log("📊 Werte Felder aus + vergleiche mit 2D…", 85)
-    res = parse_results(work, geom, opts, tags, project_dir)
-    res["mesh"] = {"n_nodes": tags["n_nodes"], "n_magnets": tags["n_magnets"],
-                   "n_barriers": tags.get("n_barriers", 0), "bodies": tags["n_bodies"]}
-    res["mesh_zones"] = tags.get("mesh_zones", {})
-    res["axial_mm"] = axial
-    res["skew_deg"] = float(opts.get("skew_deg", 0.0) or 0.0)
-    res["skew_segments"] = int(tags.get("skew_segments", 1))
-    res["skew_step_deg"] = float(tags.get("skew_step_deg", 0.0))
-    res["operating_point"] = op
-    if _mesh_warns:
-        res.setdefault("warnings", []).extend(_mesh_warns)
-    if op.get("excitation") == "loaded" and op.get("field_loaded"):
-        res["torque_note"] = (f"Lastfall {op['rpm']:.0f} 1/min / {op['load_nm']:.0f} Nm "
-                              f"(i_q={op['iq_A']} A, i_d={op['id_A']} A) — Statorströme mit "
-                              "Stirnring-Schließung; Feld vereinfacht (Grundwelle, lin. Eisen)")
-    elif op.get("excitation") == "loaded":
-        res["torque_note"] = (f"Betriebspunkt {op['rpm']:.0f} 1/min / {op['load_nm']:.0f} Nm: "
-                              f"i_q={op['iq_A']} A, i_d={op['id_A']} A. 3D-Feld = Leerlauf (Magnete)")
+    _decorate_res(res, tags, opts, axial, op, mesh_warns)
 
     # 3D-Ergebnis in results.json des Projekts mergen, damit der Gesamtbericht den
     # 3D-Teil mit aufnehmen kann (Bilder liegen bereits unter charts/). base64 wird
@@ -1575,6 +2247,356 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
 
     _log("✓ 3D-Feldberechnung fertig", 100)
     return res
+
+
+def run_em3d_sweep(payload: dict, project_dir: str, progress_cb=None, cancel_cb=None) -> dict:
+    """Betriebspunkt-Sweep (Drehzahlband mit wechselnden Lasten): baut das Mesh EINMAL und
+    löst dieselbe 3D-Magnetostatik für jeden Punkt aus ``payload["sweep"]`` (Liste
+    ``{rpm, load_nm, excitation}``). Liefert schlanke Kennwerte je Punkt + Verlaufskurven über
+    die Drehzahl; das volle 3D-Feld (Charts/VTU/VTP/Viewer) nur für den ``detail_index``-Punkt.
+
+    ``cancel_cb`` (optional): wird zwischen den Punkten abgefragt; liefert es True, bricht der
+    Sweep ab und behält das bis dahin gerechnete **Teilergebnis** (Zeilen + Verlaufskurven +
+    ggf. Detailfeld), markiert es ``aborted`` und persistiert es normal — der Nutzer kann es
+    speichern/ansehen und sauber neu starten.
+
+    Stufe 1: KEINE echte Transiente — jeder Punkt ist eine eigene statische Lösung (lineare
+    Materialien, Lastfeld als Grundwelle wie im Einzellauf)."""
+    import elmer_runner as ER
+
+    def _log(msg, pct=None):
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    def _cancelled():
+        return bool(cancel_cb and cancel_cb())
+
+    if not ER.ELMER_OK:
+        raise RuntimeError(ER.INSTALL_HINT)
+
+    geom = payload.get("geom", payload)
+    axial = float(payload.get("axial_len") or payload.get("axialLen")
+                  or geom.get("axialLen") or 120.0)
+    base_opts = _em3d_opts(payload)
+
+    points = payload.get("sweep") or []
+    if not points:
+        raise RuntimeError("Kein Betriebspunkt im Sweep (payload['sweep'] ist leer).")
+    n = len(points)
+    detail_index = int(payload.get("detail_index", n - 1))
+    detail_index = max(0, min(detail_index, n - 1))
+
+    work = os.path.join(project_dir, "em3d")
+    os.makedirs(work, exist_ok=True)
+
+    tags, mesh_warns = _prep_mesh(geom, axial, base_opts, work, _log)
+    _log(f"🌡 Drehzahlband: {n} Betriebspunkte (Mesh nur einmal gebaut), "
+         f"Detailpunkt #{detail_index + 1} mit vollem 3D-Feld", 40)
+
+    # Dynamisches Lastprofil-Video: je Betriebspunkt ein Querschnitts-Frame (|B|-Sättigung +
+    # Feldlinien + Kennwert-Panel + Zeitleiste) → anim.mp4. Die Zeitleiste braucht die GEPLANTEN
+    # Profil-Verläufe (rpm/Last fix aus den Punkten; i_q/i_d analytisch vorab, deterministisch
+    # wie im Löser) — der aktuelle B_gap/Moment kommt je Frame aus der Lösung.
+    make_video = bool(payload.get("make_video"))
+    frames_dir = os.path.join(project_dir, "frames_em3d")
+    prof = None
+    if make_video:
+        import ema_analysis
+        if os.path.isdir(frames_dir):
+            for f in os.listdir(frames_dir):
+                if f.endswith((".png", ".mp4")):
+                    try: os.remove(os.path.join(frames_dir, f))
+                    except Exception: pass
+        os.makedirs(frames_dir, exist_ok=True)
+        p_rpm, p_load, p_iq, p_id = [], [], [], []
+        for pt in points:
+            pt = pt or {}
+            r_ = float(pt.get("rpm", 0.0) or 0.0); l_ = float(pt.get("load_nm", 0.0) or 0.0)
+            p_rpm.append(r_); p_load.append(l_)
+            try:
+                iqv, idv = ema_analysis.estimate_dq_currents(geom, r_, l_) if l_ != 0 else (0.0, 0.0)
+            except Exception:
+                iqv, idv = 0.0, 0.0
+            p_iq.append(iqv); p_id.append(idv)
+        prof = {"prof_rpm": p_rpm, "prof_load": p_load, "prof_iq": p_iq, "prof_id": p_id,
+                "phases": [(pt or {}).get("phase", "") for pt in points]}
+
+    def _emit_frame(i, rows_i, ok):
+        """Rendert frame_{i:04d}.png aus der aktuell in work/ liegenden VTU (vor dem nächsten Solve)."""
+        if not make_video:
+            return
+        out_png = os.path.join(frames_dir, f"frame_{i:04d}.png")
+        meta = {"idx": i, "n": n, "L": float(tags["L"]),
+                "rpm": prof["prof_rpm"][i], "load": prof["prof_load"][i],
+                "iq": prof["prof_iq"][i], "id": prof["prof_id"][i],
+                "is_peak": (rows_i or {}).get("is_peak_A"),
+                "b_gap": (rows_i or {}).get("b_gap_mid_peak"),
+                "torque": (rows_i or {}).get("torque_Nm"),
+                "phase": prof["phases"][i], "b_sat": B_SAT_DISPLAY_3D,
+                "prof_rpm": prof["prof_rpm"], "prof_load": prof["prof_load"],
+                "prof_iq": prof["prof_iq"], "prof_id": prof["prof_id"]}
+        try:
+            vtu = _find_vtu(work) if ok else None
+            if vtu:
+                grid = _read_grid(vtu); bname = _b_array_name(grid)
+                if bname:
+                    _video_frame(grid, bname, tags["dims"], meta, out_png); return
+            _video_frame_fail(meta, out_png)
+        except Exception as e:
+            try: _video_frame_fail(meta, out_png)
+            except Exception: pass
+            _log(f"⚠ Video-Frame {i + 1} fehlgeschlagen: {e}", None)
+
+    # Reihenfolge: alle Nicht-Detailpunkte zuerst, der Detailpunkt ZULETZT — so gehören die
+    # im work/ verbleibenden VTU/Charts/VTP zum Detailpunkt (die /em3d/vtu|vtp|paraview-Routen
+    # servieren genau diese Dateipfade).
+    order = [i for i in range(n) if i != detail_index] + [detail_index]
+
+    rows = [None] * n
+    warnings = list(mesh_warns)
+    detail_res = None
+    aborted = False
+    for k, i in enumerate(order):
+        if _cancelled():                         # Abbruch VOR dem nächsten Solve
+            aborted = True
+            _log("⛔ Abbruch — beende mit dem bis hier gerechneten Teilergebnis.", None)
+            break
+        pt = points[i] or {}
+        rpm = float(pt.get("rpm", 0.0) or 0.0)
+        load_nm = float(pt.get("load_nm", 0.0) or 0.0)
+        exc = pt.get("excitation") or ("loaded" if load_nm > 0 else "open_circuit")
+        opts = dict(base_opts, rpm=rpm, load_nm=load_nm, excitation=exc)
+        is_detail = (i == detail_index)
+        pct = 40 + int(55.0 * k / max(n, 1))
+        _log(f"▶ Punkt {k + 1}/{n}: {rpm:.0f} 1/min, {load_nm:.0f} Nm ({exc})"
+             + (" — Detailpunkt (volles Feld)" if is_detail else ""), pct)
+        try:
+            res, op = _solve_point(geom, opts, tags, work, project_dir, _log,
+                                   full=is_detail, pct=None,
+                                   browser_stub=os.path.join(work, f"browser_{i}"))
+        except _Em3dAborted:                     # Solve mitten im Punkt gekillt → Teilergebnis
+            aborted = True
+            _log("⛔ Punkt abgebrochen — beende mit dem Teilergebnis.", None)
+            break
+        except Exception as e:
+            if _cancelled():                     # Abbruch löste den Fehler aus → kein „Fehlpunkt"
+                aborted = True
+                _log("⛔ Abgebrochen — beende mit dem Teilergebnis.", None)
+                break
+            warnings.append(f"Punkt {k + 1}/{n} ({rpm:.0f} 1/min, {load_nm:.0f} Nm) "
+                            f"fehlgeschlagen: {e}")
+            _log(f"⚠ Punkt {k + 1}/{n} fehlgeschlagen: {e}", None)
+            rows[i] = {"rpm": rpm, "load_nm": load_nm, "excitation": exc,
+                       "iq_A": None, "id_A": None, "is_peak_A": None,
+                       "b_gap_mid_peak": None, "torque_Nm": None, "ok": False}
+            _emit_frame(i, rows[i], ok=False)
+            continue
+        rows[i] = {"rpm": rpm, "load_nm": load_nm, "excitation": exc,
+                   "iq_A": op.get("iq_A"), "id_A": op.get("id_A"),
+                   "is_peak_A": op.get("is_peak_A"),
+                   "b_gap_mid_peak": res.get("b_gap_mid_peak"),
+                   "torque_Nm": res.get("torque_Nm"), "ok": True,
+                   "vtp_path": res.get("vtp_path"), "lines_path": res.get("lines_path")}
+        warnings.extend(res.get("warnings", []) or [])
+        # Frame JETZT rendern — die case.vtu dieses Punkts wird beim nächsten Solve überschrieben.
+        _emit_frame(i, rows[i], ok=True)
+        if is_detail:
+            _decorate_res(res, tags, opts, axial, op, mesh_warns)
+            detail_res = res
+
+    n_done = sum(1 for r in rows if r and r.get("ok"))
+    if aborted:
+        warnings.append(f"⛔ Abgebrochen — Teilergebnis mit {n_done} gerechneten Punkt(en) "
+                        f"(von {n}). Verlaufskurven aus den fertigen Punkten; volles 3D-Feld nur, "
+                        f"falls der Detailpunkt schon dran war.")
+    _log("📈 Erzeuge Verlaufskurven über die Drehzahl…", 96)
+    sweep_images = _sweep_charts(rows, project_dir)
+
+    video_ok = False
+    if make_video and not aborted:               # unvollständige Frames → kein Video beim Abbruch
+        _log("🎬 Kodiere Lastprofil-Video (ffmpeg)…", 98)
+        vid = _encode_video(frames_dir, fps=int(payload.get("video_fps", 6) or 6))
+        video_ok = bool(vid)
+        if not video_ok:
+            warnings.append("Lastprofil-Video: ffmpeg fehlt oder Kodierung fehlgeschlagen "
+                            "(Einzel-Frames liegen in frames_em3d/).")
+
+    out = {
+        "sweep": rows,
+        "sweep_images": sweep_images,
+        "sweep_vtp": [(rows[i] or {}).get("vtp_path") for i in range(n)],
+        "sweep_lines": [(rows[i] or {}).get("lines_path") for i in range(n)],
+        "detail": detail_res,
+        "detail_index": detail_index,
+        "axial_mm": axial,
+        "video": video_ok,
+        "mesh": {"n_nodes": tags["n_nodes"], "n_magnets": tags["n_magnets"],
+                 "n_barriers": tags.get("n_barriers", 0), "bodies": tags["n_bodies"]},
+        "mesh_zones": tags.get("mesh_zones", {}),
+        "warnings": warnings,
+        "aborted": aborted,
+        "n_done": n_done,
+    }
+    # results.json: Sweep-Zeilen + (über den Detailpunkt) die normale em3d-Zusammenfassung.
+    try:
+        _persist_em3d_sweep(project_dir, out)
+        if detail_res:
+            _persist_em3d_summary(project_dir, detail_res)
+    except Exception as e:
+        out["warnings"].append(f"results.json-Merge fehlgeschlagen: {e}")
+
+    _log("✓ Drehzahlband-Berechnung fertig", 100)
+    return out
+
+
+# ── ROI-Verfeinerung: Bereich besonderen Interesses höher auflösen ───────────────
+# Der Nutzer markiert nach einem Grob-Lauf einen Quader (ROI). Statt eines echten
+# Submodells mit BC-Übertragung (in diesem Elmer-Build nicht robust: ein auf der
+# geschlossenen Box vorgegebenes, abgetastetes Motor-B-Feld erzeugt an den 12 Box-
+# kanten widersprüchliche Kanten-A-Randwerte → Lösung explodiert, s. memory
+# project_em3d_submodel_bc) wird das VOLLE Modell mit einer lokal feineren Box neu
+# vernetzt und KOMPLETT neu gelöst (normaler Außenrand A×n=0). Das ist physikalisch
+# exakt — im ROI sogar genauer als ein Submodell, weil es gar keinen BC-Transferfehler
+# gibt — und kostet nur einen weiteren vollen Solve. Reuse von _prep_mesh/_solve_point/
+# _decorate_res; das ROI-Box-Feld sitzt im Gmsh-Mesh-Builder (_build_mesh_once).
+
+
+def run_em3d_refine(payload: dict, project_dir: str, progress_cb=None) -> dict:
+    """ROI-Verfeinerung: volles Modell mit lokal feinerem Quader neu rechnen. ``payload`` =
+    normaler 3D-Payload (geom + axial + Opts) + ``roi_box`` (xmin..zmax mm) + ``refine_factor``.
+    KEINE BC-Übertragung — voller Re-Solve mit dem normalen Außenrand. Returns das übliche
+    Ergebnis-Dict (gleicher Viewer-/Render-Pfad wie ``run_em3d``)."""
+    import elmer_runner as ER
+
+    def _log(msg, pct=None):
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    if not ER.ELMER_OK:
+        raise RuntimeError(ER.INSTALL_HINT)
+
+    geom = payload.get("geom", payload)
+    axial = float(payload.get("axial_len") or payload.get("axialLen")
+                  or geom.get("axialLen") or 120.0)
+    roi = payload.get("roi_box") or payload.get("roi")
+    if not roi:
+        raise ValueError("Kein Verfeinerungsgebiet (roi_box) angegeben")
+    rf = float(payload.get("refine_factor", 3.0) or 3.0)
+
+    opts = _em3d_opts(payload)
+    opts["roi_box"] = {k: float(roi[k]) for k in ("xmin", "xmax", "ymin", "ymax", "zmin", "zmax")}
+    opts["roi_refine"] = rf
+
+    work = os.path.join(project_dir, "em3d")          # gleicher Pfad → /em3d/vtu|vtp|paraview
+    os.makedirs(work, exist_ok=True)
+
+    _log(f"🔍 Verfeinerungsgebiet: lokale Box ×{rf:.1f}, volles Modell wird neu vernetzt…", 6)
+    tags, mesh_warns = _prep_mesh(geom, axial, opts, work, _log)
+    res, op = _solve_point(geom, opts, tags, work, project_dir, _log, full=True, pct=45)
+    _log("📊 Werte Felder aus + vergleiche mit 2D…", 85)
+    _decorate_res(res, tags, opts, axial, op, mesh_warns)
+    res["source"] = "refine"
+    res["roi"] = opts["roi_box"]
+    res["refine_factor"] = rf
+
+    try:
+        _persist_em3d_summary(project_dir, res)
+    except Exception as e:
+        res.setdefault("warnings", []).append(f"results.json-Merge fehlgeschlagen: {e}")
+
+    _log("✓ Verfeinerte 3D-Berechnung fertig", 100)
+    return res
+
+
+def _sweep_charts(rows, project_dir):
+    """Verlaufsdiagramme über die Drehzahl (B_gap, Moment, i_q/i_d) für die berechneten
+    Sweep-Punkte. Schreibt PNGs nach ``charts/em3d_sweep_*.png`` (Datei + base64)."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import base64, io
+
+    ok = [r for r in rows if r and r.get("ok")]
+    if not ok:
+        return []
+    ok = sorted(ok, key=lambda r: r["rpm"])
+    rpm = [r["rpm"] for r in ok]
+
+    charts = os.path.join(project_dir, "charts")
+    os.makedirs(charts, exist_ok=True)
+
+    def _save(fig, name):
+        buf = io.BytesIO()
+        fig.savefig(buf, format="png", dpi=110, bbox_inches="tight", facecolor="#0d0d0d")
+        plt.close(fig)
+        data = buf.getvalue()
+        with open(os.path.join(charts, name), "wb") as f:
+            f.write(data)
+        return "data:image/png;base64," + base64.b64encode(data).decode()
+
+    images = []
+
+    def _vals(key):
+        return [(r.get(key) if r.get(key) is not None else float("nan")) for r in ok]
+
+    # B_gap (Mitte) über Drehzahl.
+    fig, ax = plt.subplots(figsize=(6.2, 3.4), facecolor="#0d0d0d")
+    ax.plot(rpm, _vals("b_gap_mid_peak"), "o-", color="#4fc3f7", lw=1.4)
+    ax.set_xlabel("Drehzahl [1/min]"); ax.set_ylabel("B_gap (Mitte) [T]")
+    ax.set_title("Luftspaltfeld über dem Drehzahlband", color="#ddd")
+    ax.grid(alpha=.2); _style_dark(ax)
+    images.append({"key": "em3d_sweep_bgap", "title": "B_gap über Drehzahl",
+                   "b64": _save(fig, "em3d_sweep_bgap.png")})
+
+    # Moment (Arkkio) über Drehzahl.
+    fig, ax = plt.subplots(figsize=(6.2, 3.4), facecolor="#0d0d0d")
+    ax.plot(rpm, _vals("torque_Nm"), "o-", color="#ff7043", lw=1.4)
+    ax.set_xlabel("Drehzahl [1/min]"); ax.set_ylabel("Moment (Arkkio) [Nm]")
+    ax.set_title("Moment über dem Drehzahlband", color="#ddd")
+    ax.grid(alpha=.2); _style_dark(ax)
+    images.append({"key": "em3d_sweep_torque", "title": "Moment über Drehzahl",
+                   "b64": _save(fig, "em3d_sweep_torque.png")})
+
+    # Statorströme i_q / i_d über Drehzahl (nur sinnvoll, wenn Lastpunkte dabei sind).
+    if any(r.get("iq_A") is not None for r in ok):
+        fig, ax = plt.subplots(figsize=(6.2, 3.4), facecolor="#0d0d0d")
+        ax.plot(rpm, _vals("iq_A"), "o-", color="#81c784", lw=1.4, label="i_q")
+        ax.plot(rpm, _vals("id_A"), "s-", color="#ba68c8", lw=1.4, label="i_d")
+        ax.set_xlabel("Drehzahl [1/min]"); ax.set_ylabel("Strom [A]")
+        ax.set_title("Statorströme über dem Drehzahlband", color="#ddd")
+        ax.legend(fontsize=8); ax.grid(alpha=.2); _style_dark(ax)
+        images.append({"key": "em3d_sweep_currents", "title": "i_q/i_d über Drehzahl",
+                       "b64": _save(fig, "em3d_sweep_currents.png")})
+    return images
+
+
+def _persist_em3d_sweep(project_dir: str, out: dict):
+    """Speichert die Sweep-Zeilen + Bild-Keys in ``results.json`` (Schlüssel ``em3d_sweep``),
+    ohne base64 (die Charts liegen als Dateien in charts/)."""
+    rj = os.path.join(project_dir, "results.json")
+    data = {}
+    if os.path.isfile(rj):
+        try:
+            with open(rj) as f:
+                data = json.load(f)
+        except Exception:
+            data = {}
+    # Transiente work/-VTP-Pfade NICHT in results.json schreiben (nur zur Laufzeit im
+    # Server-State relevant) → results.json schlank halten.
+    rows = [{k: v for k, v in (r or {}).items() if k not in ("vtp_path", "lines_path")}
+            for r in out.get("sweep", [])]
+    data["em3d_sweep"] = {
+        "rows": rows,
+        "detail_index": out.get("detail_index"),
+        "axial_mm": out.get("axial_mm"),
+        "mesh": out.get("mesh"),
+        "mesh_zones": out.get("mesh_zones"),
+        "warnings": out.get("warnings", []),
+        "images": [{"key": im.get("key"), "title": im.get("title")}
+                   for im in (out.get("sweep_images") or []) if im.get("key")],
+    }
+    with open(rj, "w") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
 
 
 def _persist_em3d_summary(project_dir: str, res: dict):
@@ -1599,3 +2621,568 @@ def _persist_em3d_summary(project_dir: str, res: dict):
     data["em3d"] = summary
     with open(rj, "w") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+# ── Ein-Pol-Sektor (Symmetrie-Submodell) ─────────────────────────────────────────
+# „Zweite Stufe": EINE Pol-Teilung wird als eigenständiges, FEINERES Modell gerechnet und
+# über die Maschinensymmetrie zum vollen Motor gespiegelt. Die beiden Winkel-Schnittflächen
+# sind ANTI-PERIODISCH gekoppelt (PMSM: Feld kehrt je Pol-Teilung das Vorzeichen um) — das ist
+# durch die Symmetrie EXAKT, KEIN Feldtransfer nötig (im Gegensatz zum gescheiterten Box-
+# Submodell). Empirisch validiert (Spike): Elmers generische `Periodic BC` + `Rotate` +
+# `Scale=-1` + `Use Lagrange Coefficient` bindet die WhitneyAV-Kanten-DOF korrekt
+# (Anti-Periodizität ~9 % im Eisen, kein Aufblasen). Außenränder = echtes `A×n=0` wie das
+# Vollmodell. Weil die Domäne nur 1/(2p) groß ist, lässt sie sich bei gleicher Rechenzeit viel
+# feiner vernetzen → „höher aufgelöst". Enthält Welle/Hohlwelle, Magnete (+ Taschen), Statornuten
+# UND Flussbarrieren (Features als volle Prismen, per occ.intersect an den Keil geschnitten →
+# q-Achsen-Features dürfen die Periodikfläche kreuzen). Das gespiegelte Voll-Feld bekommt dieselben
+# 3D-Ansichten wie `run_em3d` (Bauteile + aufgeschnittenes |B|, über GeometryIds klassifiziert).
+# v1-Scope: Leerlauf (nur Magnete), KEIN Skew/Spulenströme (das bleibt dem Vollmodell `run_em3d`).
+
+
+def _build_sector_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
+    """Baut das Mesh EINER Pol-Teilung (Welle + Rotoreisen + 1 Pol Magnete + Luftspalt +
+    Statoreisen mit Nuten + **Flussbarrieren** + Luft), Pol mittig, anti-periodische
+    Winkelflächen (Tags 901/902) + echter Außenrand `A×n=0` (Tag 900).
+
+    Magnete/Nuten/Barrieren werden als VOLLE Prismen gebaut und per ``occ.intersect`` an die
+    Keil-Domäne (``c_box``) geschnitten — so dürfen q-Achsen-Barrieren/Nuten die Periodikfläche
+    KREUZEN (halbe Features an den Rändern, von der Periodizität ergänzt). Klassifikation über die
+    Fragment-Map (welches Output-Volumen kam aus welchem Feature). **Gestufte Verfeinerung**:
+    Luftspalt sehr fein (gap_cl), Magnete+Barrieren+Nuten fein mit Distanz-Auslauf (mag_cl→mesh_cl
+    über mag_grow), Rest grob (mesh_cl) — per gmsh ``Min``-Feld. Returns ``tags`` analog
+    ``_build_mesh_once`` + ``master_pid``/``slave_pid``/``outer_pid``/``alpha``/``PC``/``poles``."""
+    import gmsh
+
+    L = float(axial)
+    r_shaft = geom["shaftD"] / 2.0
+    r_bore = max(float(geom.get("shaftBoreD", 0.0) or 0.0) / 2.0, 0.0)   # Hohlwelle (0=voll)
+    if r_bore >= r_shaft - 0.5:
+        r_bore = 0.0
+    r_rot = geom["rotorOD"] / 2.0
+    r_si = geom["statorID"] / 2.0
+    r_so = geom["statorOD"] / 2.0
+    poles = int(geom["p"]) * 2
+    alpha = 2 * math.pi / poles
+    PC = alpha / 2.0                                     # Pol mittig
+    box_f = float(opts.get("airbox_factor", 1.4)); R_box = box_f * r_so
+    cap = float(opts.get("cap_frac", 0.35)) * L
+    mesh_cl = float(opts.get("mesh_cl", 0.0)) or max(1.0, r_so / 26.0)
+    gap = max(0.3, r_si - r_rot)
+    gap_cl = float(opts.get("gap_cl", 0.0)) or max(0.25, gap * 0.5)
+    mag_cl = float(opts.get("mag_cl", 0.0)) or max(gap_cl, mesh_cl * 0.5)
+    mag_grow = float(opts.get("mag_grow", 0.0)) or max(2.0, 3.0 * gap)
+
+    cosP, sinP = math.cos(PC), math.sin(PC)
+
+    def _rot(cx, cy):
+        return cx * cosP - cy * sinP, cx * sinP + cy * cosP
+
+    def _keep(cx, cy, margin):
+        a = math.atan2(cy, cx)
+        return -margin <= a <= alpha + margin
+
+    # Magnete EINER Pol-Teilung (Pol 0), in die Sektor-Mitte PC gedreht.
+    mags = []
+    for m in magnet_rects(geom):
+        if m.get("pole", 0) != 0:
+            continue
+        cx, cy = _rot(m["cx"], m["cy"]); mdx, mdy = _rot(m["mdx"], m["mdy"])
+        mags.append({"cx": cx, "cy": cy, "ang": m["ang"] + PC, "length": m["length"],
+                     "thick": max(0.8, m["thick"]), "sign": m["sign"], "mdx": mdx, "mdy": mdy})
+    # Nuten + Barrieren um die Sektor-Mitte (inkl. Rand-Straddler — Clipping schneidet sie sauber).
+    n_slots = int(geom.get("slots", 0) or 0)
+    dth = (2 * math.pi / n_slots) if n_slots > 0 else alpha
+    slots = []
+    for s in slot_rects(geom):
+        cx, cy = _rot(s["cx"], s["cy"])
+        if _keep(cx, cy, 0.5 * dth):
+            slots.append({"cx": cx, "cy": cy, "ang": s["ang"] + PC,
+                          "length": s["length"], "thick": s["thick"]})
+    bars = []
+    for bd in barrier_rects(geom):
+        cx, cy = _rot(bd["cx"], bd["cy"])
+        if _keep(cx, cy, 0.5 * alpha):
+            bars.append({"cx": cx, "cy": cy, "ang": bd["ang"] + PC,
+                         "length": bd["length"], "thick": bd["thick"]})
+
+    gmsh.initialize(interruptible=False)
+    try:
+        gmsh.option.setNumber("General.Terminal", 0)
+        gmsh.model.add("sector3d")
+        occ = gmsh.model.occ
+
+        c_shaft = occ.addCylinder(0, 0, 0, 0, 0, L, r_shaft, angle=alpha)
+        c_rot = occ.addCylinder(0, 0, 0, 0, 0, L, r_rot, angle=alpha)
+        c_si = occ.addCylinder(0, 0, 0, 0, 0, L, r_si, angle=alpha)
+        c_so = occ.addCylinder(0, 0, 0, 0, 0, L, r_so, angle=alpha)
+        c_box = occ.addCylinder(0, 0, -cap, 0, 0, L + 2 * cap, R_box, angle=alpha)
+        c_bore = occ.addCylinder(0, 0, 0, 0, 0, L, r_bore, angle=alpha) if r_bore > 0 else None
+
+        def _prism(cx, cy, ang, length, thick):
+            hl, ht = length / 2.0, thick / 2.0
+            ca, sa = math.cos(ang), math.sin(ang)
+            pts = []
+            for ex, ey in ((-hl, -ht), (hl, -ht), (hl, ht), (-hl, ht)):
+                pts.append(occ.addPoint(cx + ex * ca - ey * sa, cy + ex * sa + ey * ca, 0))
+            ls = [occ.addLine(pts[i], pts[(i + 1) % 4]) for i in range(4)]
+            sf = occ.addPlaneSurface([occ.addCurveLoop(ls)])
+            return [e[1] for e in occ.extrude([(2, sf)], 0, 0, L) if e[0] == 3][0]
+
+        # Features bauen + an die Keil-Domäne c_box schneiden (Tool behalten → c_box bleibt).
+        feat = []                                        # (tag, kind, meta)
+        for spec, kind in ([(m, "magnet") for m in mags]
+                           + [(s, "air") for s in slots] + [(b, "air") for b in bars]):
+            t = _prism(spec["cx"], spec["cy"], spec["ang"], spec["length"], spec["thick"])
+            out, _ = occ.intersect([(3, t)], [(3, c_box)], removeObject=True, removeTool=False)
+            for d, tt in out:
+                if d == 3:
+                    feat.append((tt, kind, spec))
+        occ.synchronize()
+
+        objs = [(3, c_shaft)]
+        fixed = [(3, c_rot), (3, c_si), (3, c_so), (3, c_box)]
+        if c_bore is not None:
+            fixed.append((3, c_bore))                    # Hohlwellen-Bohrung mitfragmenten
+        tools = fixed + [(3, t) for t, _, _ in feat]
+        _ov, ovv = occ.fragment(objs, tools)
+        occ.synchronize()
+        nfix = 1 + len(fixed)                            # objs(1) + feste Zylinder; Features ab hier
+        feat_vols = {}                                   # vol-tag → (kind, meta, feat_index)
+        for j, (_t, kind, meta) in enumerate(feat):
+            for (d, tt) in ovv[nfix + j]:
+                if d == 3:
+                    feat_vols[tt] = (kind, meta, j)
+        vols = [t for d, t in gmsh.model.getEntities(3)]
+
+        def _com(v):
+            x, y, z = occ.getCenterOfMass(3, v); return x, y, z, math.hypot(x, y)
+
+        groups = {"shaft": [], "rotor": [], "stator": [], "air": []}
+        mag_groups = {}                                  # feat_index → [vols] (ein Magnetkörper)
+        for v in vols:
+            if v in feat_vols:
+                kind, meta, j = feat_vols[v]
+                if kind == "magnet":
+                    mag_groups.setdefault(j, {"vols": [], "meta": meta})["vols"].append(v)
+                else:
+                    groups["air"].append(v)
+                continue
+            x, y, z, r = _com(v)
+            if z < -1e-6 or z > L + 1e-6 or r > r_so + 0.5:
+                groups["air"].append(v)
+            elif r_bore > 0 and r < r_bore:
+                groups["air"].append(v)                  # Hohlwellen-Bohrung (Luft)
+            elif r < r_shaft:
+                groups["shaft"].append(v)
+            elif r < r_rot:
+                groups["rotor"].append(v)
+            elif r < r_si:
+                groups["air"].append(v)                  # Luftspalt
+            else:
+                groups["stator"].append(v)
+
+        tags = {"bodies": {}, "magnets": [], "coils": [], "L": L,
+                "dims": {"r_shaft": r_shaft, "r_bore": r_bore, "r_rot": r_rot, "r_si": r_si,
+                         "r_so": r_so, "R_box": R_box, "cap": cap}}
+        bid = 1
+        for name in ("shaft", "rotor", "stator", "air"):
+            if groups[name]:
+                gmsh.model.addPhysicalGroup(3, groups[name], bid); tags["bodies"][name] = bid; bid += 1
+        for j, g in mag_groups.items():
+            m = g["meta"]
+            gmsh.model.addPhysicalGroup(3, g["vols"], bid)
+            tags["magnets"].append({"name": f"magnet_{j}", "phys": bid, "mdx": m["mdx"],
+                                    "mdy": m["mdy"], "sign": m["sign"], "pole": 0})
+            bid += 1
+
+        # Feinflächen (Magnete + Barrieren + Nuten) für die gestufte Verfeinerung.
+        fine_surfs = set()
+        for v in feat_vols:
+            for d, s in gmsh.model.getBoundary([(3, v)], oriented=False):
+                if d == 2:
+                    fine_surfs.add(abs(s))
+
+        # Randflächen: Winkelflächen θ=0 (Master) / θ=α (Slave) + Außenrand. Mehrere Flächen je
+        # Seite (von Features zerschnitten) → Master↔Slave nach (r,z) des Schwerpunkts paaren.
+        # SELEKTION über die SENKRECHTE ABSTAND zur jeweiligen Halbebene (NICHT über den Winkel —
+        # ein Winkel-Toleranzfenster fängt schräge Feature-Seitenflächen mit ⇒ unpaarige Ränder).
+        nsx, nsy = -math.sin(alpha), math.cos(alpha)     # Normale der Slave-Halbebene (θ=α) in xy
+        master, slave, outer = [], [], []
+        TOL = 0.4
+        for d, sfc in gmsh.model.getEntities(2):
+            x, y, z = occ.getCenterOfMass(2, sfc)
+            rr = math.hypot(x, y)
+            if abs(y) < TOL and x > TOL:                 # θ=0-Halbebene (y=0, x>0)
+                master.append(sfc)
+            elif abs(nsx * x + nsy * y) < TOL and (x * math.cos(alpha) + y * math.sin(alpha)) > TOL:
+                slave.append(sfc)                        # θ=α-Halbebene (Senkrechtabstand ≈ 0)
+            elif rr > R_box - 1.0 or z < -cap + 0.5 or z > L + cap - 0.5:
+                outer.append(sfc)
+
+        def _skey(sfc):
+            x, y, z = occ.getCenterOfMass(2, sfc); return (round(math.hypot(x, y), 2), round(z, 2))
+        master_s = sorted(master, key=_skey); slave_s = sorted(slave, key=_skey)
+        ca, sa = math.cos(alpha), math.sin(alpha)
+        aff = [ca, -sa, 0, 0,  sa, ca, 0, 0,  0, 0, 1, 0,  0, 0, 0, 1]
+        if master_s and len(master_s) == len(slave_s):
+            try:
+                gmsh.model.mesh.setPeriodic(2, slave_s, master_s, aff)
+            except Exception as e:
+                tags.setdefault("warnings", []).append(f"setPeriodic: {e}")
+        else:
+            tags.setdefault("warnings", []).append(
+                f"Periodikflächen unpaarig (Master {len(master_s)} / Slave {len(slave_s)})")
+        gmsh.model.addPhysicalGroup(2, outer, 900); tags["outer_pid"] = 900
+        gmsh.model.addPhysicalGroup(2, master, 901); tags["master_pid"] = 901
+        gmsh.model.addPhysicalGroup(2, slave, 902); tags["slave_pid"] = 902
+
+        # Gestufte Verfeinerung: ① Luftspalt SEHR fein (Gauß-Band gap_cl), ② Magnete/Barrieren/
+        # Nuten FEIN mit Distanz-Auslauf (mag_cl→mesh_cl über mag_grow), ③ Rest grob (mesh_cl).
+        fld = gmsh.model.mesh.field
+        fields = []
+        rmid = (r_rot + r_si) / 2.0; wgap = max(1.0, gap * 1.5)
+        u = f"((sqrt(x*x+y*y)-{rmid})/{wgap})"
+        fg = fld.add("MathEval")
+        fld.setString(fg, "F", f"{gap_cl}+{max(0.0, mesh_cl-gap_cl)}*(1-exp(-{u}*{u}))")
+        fields.append(fg)
+        if fine_surfs:
+            fdist = fld.add("Distance")
+            fld.setNumbers(fdist, "SurfacesList", [float(s) for s in fine_surfs])
+            fthr = fld.add("Threshold")
+            fld.setNumber(fthr, "InField", fdist)
+            fld.setNumber(fthr, "SizeMin", mag_cl)
+            fld.setNumber(fthr, "SizeMax", mesh_cl)
+            fld.setNumber(fthr, "DistMin", 0.0)
+            fld.setNumber(fthr, "DistMax", mag_grow)
+            fields.append(fthr)
+        if len(fields) > 1:
+            fmin = fld.add("Min")
+            fld.setNumbers(fmin, "FieldsList", [float(f) for f in fields])
+            fld.setAsBackgroundMesh(fmin)
+        else:
+            fld.setAsBackgroundMesh(fields[0])
+        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+        gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+        gmsh.option.setNumber("Mesh.MeshSizeMin", min(gap_cl, mag_cl))
+        gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_cl)
+        gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
+        gmsh.model.mesh.generate(3)
+        gmsh.write(msh_path)
+
+        tags["n_nodes"] = len(gmsh.model.mesh.getNodes()[0])
+        tags["n_magnets"] = len(tags["magnets"])
+        tags["n_slots"] = len(slots)
+        tags["n_barriers"] = len(bars)
+        tags["n_bodies"] = {k: len(v) for k, v in groups.items()}
+        tags["alpha"] = alpha; tags["PC"] = PC; tags["poles"] = poles
+        tags["mesh_zones"] = {"gap_cl": gap_cl, "mag_cl": mag_cl, "mesh_cl": mesh_cl,
+                              "mag_grow": mag_grow}
+        return tags
+    finally:
+        gmsh.finalize()
+
+
+def write_sector_sif(geom: dict, tags: dict, work_dir: str, opts: dict, mesh_name: str = "mesh") -> str:
+    """``case.sif`` für den Ein-Pol-Sektor: Magnete als Innenquellen, anti-periodische
+    Winkelflächen (`Periodic BC` + `Rotate` + `Scale=-1` + Lagrange), Außenrand `A×n=0`.
+    KEINE Coordinate Scaling (mm wie das Vollmodell; Magnetostatik ist skaleninvariant)."""
+    from ema_pipeline import MAGNETS
+    mag = MAGNETS.get(geom.get("magnet", "ndfeb_n35"), MAGNETS["ndfeb_n35"])
+    Hc = float(mag["Br"]) / MU0
+    os.makedirs(os.path.join(work_dir, "results"), exist_ok=True)
+    surf_pids = sorted([tags["outer_pid"], tags["master_pid"], tags["slave_pid"]])
+    o_id = surf_pids.index(tags["outer_pid"]) + 1
+    m_id = surf_pids.index(tags["master_pid"]) + 1
+    s_id = surf_pids.index(tags["slave_pid"]) + 1
+    alpha_deg = math.degrees(tags["alpha"])
+    S = [f'Header\n  Mesh DB "." "{mesh_name}"\nEnd\n',
+         "Simulation\n  Max Output Level = 4\n  Coordinate System = Cartesian\n"
+         "  Simulation Type = Steady State\n  Steady State Max Iterations = 1\nEnd\n",
+         f"Constants\n  Permeability of Vacuum = {MU0}\nEnd\n",
+         'Solver 1\n  Equation = "MgDyn"\n  Procedure = "MagnetoDynamics" "WhitneyAVSolver"\n'
+         '  Variable = "AV"\n  Use Tree Gauge = Logical True\n'
+         '  Linear System Solver = Direct\n  Linear System Direct Method = MUMPS\n'
+         '  Nonlinear System Max Iterations = 1\nEnd\n',
+         'Solver 2\n  Equation = "MgDynCalc"\n  Procedure = "MagnetoDynamics" "MagnetoDynamicsCalcFields"\n'
+         '  Potential Variable = "AV"\n  Calculate Magnetic Flux Density = True\n'
+         '  Linear System Solver = Iterative\n  Linear System Iterative Method = CG\n'
+         '  Linear System Preconditioning = ILU0\n  Linear System Max Iterations = 5000\n'
+         '  Linear System Convergence Tolerance = 1.0e-8\nEnd\n',
+         'Solver 3\n  Equation = "ResultOutput"\n  Procedure = "ResultOutputSolve" "ResultOutputSolver"\n'
+         '  Output File Name = "case"\n  Output Directory = "results"\n  Vtu Format = Logical True\n'
+         '  Save Geometry Ids = Logical True\nEnd\n',
+         "Equation 1\n  Active Solvers(2) = 1 2\nEnd\n",
+         f'Material 1\n  Name = "iron"\n  Relative Permeability = {MU_R_IRON}\nEnd\n',
+         'Material 2\n  Name = "air"\n  Relative Permeability = 1.0\nEnd\n',
+         f'Material 3\n  Name = "magnet"\n  Relative Permeability = {MU_R_MAG}\nEnd\n']
+    b = tags["bodies"]
+    for name in ("shaft", "rotor", "stator"):
+        if name in b:
+            S.append(f'Body {b[name]}\n  Name = "{name}"\n  Equation = 1\n  Material = 1\nEnd\n')
+    if "air" in b:
+        S.append(f'Body {b["air"]}\n  Name = "air"\n  Equation = 1\n  Material = 2\nEnd\n')
+    bf = 1
+    for m in tags["magnets"]:
+        mx = Hc * m["sign"] * m["mdx"]; my = Hc * m["sign"] * m["mdy"]
+        S.append(f'Body {m["phys"]}\n  Name = "{m["name"]}"\n  Equation = 1\n'
+                 f'  Material = 3\n  Body Force = {bf}\nEnd\n')
+        S.append(f'Body Force {bf}\n  Magnetization 1 = Real {mx:.6e}\n'
+                 f'  Magnetization 2 = Real {my:.6e}\n  Magnetization 3 = Real 0.0\nEnd\n')
+        bf += 1
+    # Außenrand: A×n=0 (Kanten + nodal), wie das Vollmodell.
+    S.append(f'Boundary Condition {o_id}\n  Target Boundaries(1) = {o_id}\n'
+             '  AV {e} = Real 0\n  AV = Real 0\nEnd\n')
+    # Anti-periodische Winkelflächen: Slave = −(Master um α gedreht).
+    S.append(f'Boundary Condition {s_id}\n  Target Boundaries(1) = {s_id}\n'
+             f'  Periodic BC = {m_id}\n  Periodic BC Rotate(3) = 0 0 {alpha_deg:.10f}\n'
+             '  Periodic BC Scale = Real -1.0\n  Periodic BC Use Lagrange Coefficient = Logical True\nEnd\n')
+    sif = os.path.join(work_dir, "case.sif")
+    open(sif, "w").write("\n".join(S))
+    return sif
+
+
+def _pattern_full_motor(sgrid, tags):
+    """Spiegelt das Ein-Pol-Feld über die Symmetrie zum VOLLEN Motor: 2p Kopien, je um k·α um
+    die Achse gedreht, B-Vektor mitgedreht und anti-periodisch mit (−1)^k vorzeichengewendet.
+    GeometryIds (Body-Ids) bleiben je Kopie erhalten → der Browser-Export maskiert weiter sauber.
+    Sektor-VTU ist in mm (keine Coordinate Scaling) → keine Skalierung nötig."""
+    import vtk
+    from vtk.util import numpy_support as ns
+    bname = _b_array_name(sgrid)
+    B0 = ns.vtk_to_numpy(sgrid.GetPointData().GetArray(bname)).reshape(-1, 3)
+    alpha = tags["alpha"]; poles = tags["poles"]
+    app = vtk.vtkAppendFilter(); app.MergePointsOff()
+    keep = []
+    for k in range(poles):
+        ang = k * alpha; c, s = math.cos(ang), math.sin(ang)
+        tf = vtk.vtkTransform(); tf.RotateZ(math.degrees(ang))
+        tfil = vtk.vtkTransformFilter(); tfil.SetTransform(tf); tfil.SetInputData(sgrid); tfil.Update()
+        g = vtk.vtkUnstructuredGrid(); g.DeepCopy(tfil.GetOutput())
+        Br = np.empty_like(B0)
+        Br[:, 0] = c * B0[:, 0] - s * B0[:, 1]
+        Br[:, 1] = s * B0[:, 0] + c * B0[:, 1]
+        Br[:, 2] = B0[:, 2]
+        if k % 2:
+            Br = -Br
+        g.GetPointData().RemoveArray(bname)
+        arr = ns.numpy_to_vtk(np.ascontiguousarray(Br)); arr.SetName(bname)
+        g.GetPointData().AddArray(arr); g.GetPointData().SetActiveVectors(bname)
+        keep.append(g); app.AddInputData(g)
+    app.Update()
+    return app.GetOutput()
+
+
+def _sector_results(work, geom, tags, project_dir, opts):
+    """Wertet den Sektor-Solve aus: spiegelt zum vollen Motor, Luftspalt-Kennwerte + Endeffekt +
+    Schnittbild + Browser-VTP/Feldlinien (alles am vollen Motor), 2D-Vergleich, |B|-Statistik."""
+    import base64, vtk
+    from vtk.util import numpy_support as ns
+    res = {"source": "sector", "warnings": [], "axial_mm": tags["L"], "poles": tags["poles"],
+           "mesh": {"n_nodes": tags["n_nodes"], "n_magnets": tags["n_magnets"],
+                    "n_barriers": tags.get("n_barriers", 0), "n_slots": tags.get("n_slots", 0),
+                    "bodies": tags["n_bodies"]},
+           "mesh_zones": tags.get("mesh_zones", {}), "images": []}
+    vtu = _find_vtu(work)
+    if not vtu:
+        res["warnings"].append("Sektor: keine VTU-Ausgabe von Elmer."); return res
+    sgrid = _read_grid(vtu); bname = _b_array_name(sgrid)
+    if not bname:
+        res["warnings"].append("Sektor: kein B-Feld in der VTU."); return res
+
+    # Validierung: Anti-Periodizität (Master θ=0 ↔ Slave θ=α, erwartet B_slave=−R_α·B_master).
+    # Gemessen im STATORJOCH (glattes, starkes Eisen ÜBER den Nuten) über mehrere Radien × z —
+    # NICHT im Luftspalt/Nutband/Magnetbereich (dort verrauscht die grobe Abtastung den Wert auf
+    # >100 %, obwohl die BC im starken Eisen ~5–7 % trifft). MEDIAN = robust gegen Ausreißer.
+    try:
+        d = tags["dims"]; al = tags["alpha"]; L = tags["L"]
+        ca, sa = math.cos(al), math.sin(al)
+        sd = min(float(geom.get("slotDepth", 0) or 0), max(1.0, (d["r_so"] - d["r_si"]) - 1.0))
+        slot_out = d["r_si"] + sd
+        rlo, rhi = slot_out + 1.5, d["r_so"] - 1.5
+        if rhi - rlo < 2.0:                                   # dünnes Joch → Rotoreisen-Außenband
+            rlo, rhi = 0.6 * d["r_rot"], 0.85 * d["r_rot"]
+        errs = []
+        for r in np.linspace(rlo, rhi, 5):
+            for z in (0.35 * L, 0.5 * L, 0.65 * L):
+                Bm = _probe(sgrid, np.array([[r, 0.0, z]]), bname)[0]
+                Bs = _probe(sgrid, np.array([[r * ca, r * sa, z]]), bname)[0]
+                Rm = np.array([ca * Bm[0] - sa * Bm[1], sa * Bm[0] + ca * Bm[1], Bm[2]])
+                if np.linalg.norm(Bm) > 0.05:
+                    errs.append(np.linalg.norm(Bs + Rm) / np.linalg.norm(Rm))
+        if errs:
+            res["antiperiodic_err"] = round(float(np.median(errs)), 3)
+    except Exception as e:
+        res["warnings"].append(f"Anti-Periodizitäts-Check: {e}")
+
+    # Zum vollen Motor spiegeln; ab hier alles am vollen Feld.
+    full = _pattern_full_motor(sgrid, tags)
+    fvtu = os.path.join(work, "results", "sector_full.vtu")
+    w = vtk.vtkXMLUnstructuredGridWriter(); w.SetFileName(fvtu); w.SetInputData(full)
+    w.SetDataModeToBinary(); w.Write()
+    res["vtu_path"] = fvtu
+
+    try:
+        Bv = ns.vtk_to_numpy(full.GetPointData().GetArray(bname)).reshape(-1, 3)
+        mg = np.linalg.norm(Bv, axis=1)
+        res["b_stats"] = {"min": round(float(mg.min()), 4), "max": round(float(mg.max()), 4),
+                          "mean": round(float(mg.mean()), 4)}
+    except Exception as e:
+        res["warnings"].append(f"Statistik: {e}")
+
+    m = _gap_field_metrics(full, bname, tags)
+    th = m.pop("_th"); br_mid = m.pop("_br_mid"); z_levels = m.pop("_z_levels_arr")
+    res.update(m)
+
+    charts = os.path.join(project_dir, "charts"); os.makedirs(charts, exist_ok=True)
+    import matplotlib; matplotlib.use("Agg")
+    import matplotlib.pyplot as plt, io
+
+    def _savefig(fig, name):
+        buf = io.BytesIO(); fig.savefig(buf, format="png", dpi=110, bbox_inches="tight", facecolor="#0d0d0d")
+        plt.close(fig)
+        with open(os.path.join(charts, name), "wb") as f:
+            f.write(buf.getvalue())
+        return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+
+    def _savebytes(data, name):
+        with open(os.path.join(charts, name), "wb") as f:
+            f.write(data)
+        return "data:image/png;base64," + base64.b64encode(data).decode()
+
+    # 2D-Vergleich (FDM) — wie parse_results.
+    try:
+        import ema_analysis
+        em2d = ema_analysis.run_em_analysis(geom, N=int(opts.get("n2d", 360)), rotor_angle=0.0)
+        br2d = np.asarray(em2d["Br_gap"]); th2d = np.linspace(0, 2 * np.pi, len(br2d), endpoint=False)
+        res["compare_2d"] = {"B_gap_2D": round(float(np.max(np.abs(br2d))), 3),
+                             "B_gap_3D_mid": res.get("b_gap_mid_peak")}
+        fig, ax = plt.subplots(figsize=(6.2, 3.4), facecolor="#0d0d0d")
+        ax.plot(np.degrees(th2d), br2d, label="2D-FDM (∞ lang)", color="#4fc3f7", lw=1.4)
+        ax.plot(np.degrees(th), br_mid, label="3D Sektor (z=L/2)", color="#ff7043", lw=1.4)
+        ax.set_xlabel("Umfangswinkel θ [°]"); ax.set_ylabel("B_r Luftspalt [T]")
+        ax.set_title("Luftspalt-Radialfeld: 2D vs 3D-Sektor", color="#ddd")
+        ax.legend(fontsize=8); ax.grid(alpha=.2); _style_dark(ax)
+        res["images"].append({"key": "em3d_airgap_2d3d", "title": "Luftspalt 2D vs 3D",
+                              "b64": _savefig(fig, "em3d_airgap_2d3d.png")})
+    except Exception as e:
+        res["warnings"].append(f"2D-Vergleich: {e}")
+
+    # Endeffekt + |B|-Schnitt + Browser-Export (alles am vollen Motor).
+    try:
+        fig, ax = plt.subplots(figsize=(6.2, 3.4), facecolor="#0d0d0d")
+        ax.plot(z_levels, res["b_gap_axial"], "o-", color="#81c784", lw=1.4)
+        ax.set_xlabel("axiale Position z [mm]"); ax.set_ylabel("Peak |B_r| [T]")
+        ax.set_title("Endeffekt: Luftspaltfeld über der Paketlänge", color="#ddd")
+        ax.grid(alpha=.2); _style_dark(ax)
+        res["images"].append({"key": "em3d_endeffect", "title": "Endeffekt B(z)",
+                              "b64": _savefig(fig, "em3d_endeffect.png")})
+    except Exception as e:
+        res["warnings"].append(f"Endeffekt-Chart: {e}")
+    try:
+        res["images"].append({"key": "em3d_slice_mid", "title": "|B| Schnitt z=L/2",
+                              "b64": _slice_image(full, bname, tags["L"] / 2.0, tags["dims"], _savefig)})
+    except Exception as e:
+        res["warnings"].append(f"Schnittbild: {e}")
+    # Echte 3D-Ansichten des VOLLEN (gespiegelten) Motors — wie das Vollmodell, damit Welle,
+    # Magnete, Nuten/Zähne, Magnettaschen und Luftspalt sichtbar werden (über die GeometryIds
+    # klassifiziert; das Sektor-VTU trägt sie, ein Mesh-.vtk wird nicht gepatternt).
+    try:
+        cls_full = _classify_grid_gids(full, tags)
+        if cls_full is not None:
+            res["images"] = (_render_geometry_views(cls_full, tags["L"], tags["dims"]["r_so"],
+                                                    _savebytes) + res["images"])
+    except Exception as e:
+        res["warnings"].append(f"3D-Geometrie-Ansicht: {e}")
+    try:
+        res["images"].append(render_field_3d(full, bname, tags, _savebytes))
+    except Exception as e:
+        res["warnings"].append(f"3D-Feld-Ansicht: {e}")
+    try:
+        vtp = os.path.join(work, "sector_browser.vtp")
+        export_browser_vtp(full, bname, tags, vtp); res["vtp_path"] = vtp
+        lines = os.path.join(work, "sector_browser_lines.vtp")
+        export_browser_streamlines(full, bname, tags, lines); res["lines_path"] = lines
+    except Exception as e:
+        res["warnings"].append(f"Browser-Export: {e}")
+    return res
+
+
+def run_em3d_sector(payload: dict, project_dir: str, progress_cb=None) -> dict:
+    """Ein-Pol-Sektor mit Anti-Periodizität, zum vollen Motor gespiegelt. ``payload`` = normaler
+    3D-Payload (geom + axial + Opts). Robustes, schnelles, FEINES Symmetrie-Submodell (Leerlauf).
+    Returns das übliche Ergebnis-Dict (gleicher Viewer-/Render-Pfad wie ``run_em3d``)."""
+    import elmer_runner as ER
+
+    def _log(msg, pct=None):
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    if not ER.ELMER_OK:
+        raise RuntimeError(ER.INSTALL_HINT)
+    geom = payload.get("geom", payload)
+    axial = float(payload.get("axial_len") or payload.get("axialLen") or geom.get("axialLen") or 120.0)
+    opts = _em3d_opts(payload)
+    work = os.path.join(project_dir, "em3d"); os.makedirs(work, exist_ok=True)
+
+    _log("🔁 Baue Ein-Pol-Sektor (Symmetrie, fein)…", 8)
+    msh = os.path.join(work, "sector.msh")
+    # Knoten-KONTINGENT (einstellbar): das Tortenstück ist nur 1/(2p) des Modells → so fein wie
+    # gewünscht. ``node_budget_pct`` (10–100 %, 100 % = EM3D_MAX_NODES) skaliert das Ziel; die
+    # Zielsuche verfeinert/vergröbert (n ~ h^-1.85 → Skalenfaktor (n/Ziel)^(1/1.85) auf alle
+    # Zonengrößen gap/mag/mesh, damit die Abstufungen Luftspalt < Magnet/Barriere < grob bleiben).
+    pct = float(payload.get("node_budget_pct") or opts.get("node_budget_pct") or 100.0)
+    pct = min(100.0, max(10.0, pct))
+    cap = int(EM3D_MAX_NODES * pct / 100.0)
+    res_budget_pct = pct
+    target = int(cap * 0.9)                               # etwas Luft unter dem Kontingent
+    _log(f"   Knoten-Kontingent {pct:.0f} % → Ziel ~{target} Knoten (Tortenstück)", None)
+    o = dict(opts); tags = None
+    for attempt in range(4):
+        tags = _build_sector_mesh(geom, axial, o, msh)
+        n = tags["n_nodes"]
+        if 0.6 * cap <= n <= cap:                         # im Zielband → fertig
+            break
+        if n > cap or (n < 0.6 * cap and attempt < 3):    # zu fein ODER unausgereizt → nachregeln
+            f = (n / target) ** (1.0 / 1.85)
+            f = min(2.2, max(0.55, f))                    # pro Schritt begrenzen
+            mz = tags["mesh_zones"]
+            o = dict(o, mesh_cl=mz["mesh_cl"] * f, gap_cl=mz["gap_cl"] * f,
+                     mag_cl=mz["mag_cl"] * f, mag_grow=mz["mag_grow"])
+            _log(f"   Sektor-Netz {n} Knoten → Zielband ~{target} (Zonengrößen ×{f:.2f})…", None)
+            if n > cap:
+                continue
+            # unter dem Ziel: einmal verfeinern, dann das Ergebnis nehmen (nicht überschießen).
+            tags = _build_sector_mesh(geom, axial, o, msh)
+            if tags["n_nodes"] > cap:                     # überschossen → zurück auf groberes Netz
+                tags = _build_sector_mesh(geom, axial, dict(o, mesh_cl=o["mesh_cl"] / f * 1.15,
+                                                            gap_cl=o["gap_cl"] / f * 1.15,
+                                                            mag_cl=o["mag_cl"] / f * 1.15), msh)
+            break
+    mz = tags["mesh_zones"]
+    _log(f"✓ Sektor (Tortenstück): {tags['n_nodes']} Knoten, {tags['n_magnets']} Magnete, "
+         f"{tags['n_slots']} Nuten, {tags['n_barriers']} Barrieren (1 von {tags['poles']} Polen); "
+         f"Zonen Luftspalt {mz['gap_cl']:.2f} / Magnet+Barriere+Nut {mz['mag_cl']:.2f} / grob "
+         f"{mz['mesh_cl']:.2f} mm", 32)
+    rg = ER.run_elmergrid(msh, os.path.join(work, "mesh"))
+    if not rg["ok"]:
+        raise RuntimeError("ElmerGrid (Sektor): " + (rg.get("stderr") or rg.get("error", ""))[:300])
+    write_sector_sif(geom, tags, work, opts, mesh_name="mesh")
+    _log("🧲 ElmerSolver: feine Pol-Magnetostatik (anti-periodisch)…", 50)
+    rs = ER.run_elmersolver(os.path.join(work, "case.sif"), work)
+    if not rs["ok"]:
+        raise RuntimeError("ElmerSolver (Sektor): " + (rs.get("stderr") or rs.get("error", ""))[:300]
+                           + "\n" + (rs.get("stdout", "")[-400:]))
+    _log("🪞 Spiegele Pol → voller Motor + werte aus…", 84)
+    res = _sector_results(work, geom, tags, project_dir, opts)
+    res["axial_mm"] = axial
+    res["node_budget_pct"] = round(res_budget_pct, 0)
+    res["node_budget_max"] = EM3D_MAX_NODES
+    if res.get("antiperiodic_err") is not None:
+        _log(f"   Anti-Periodizität im Eisen: {res['antiperiodic_err']*100:.1f}% "
+             "(0 = exakt; Rest = Netzgröße)", None)
+    try:
+        _persist_em3d_summary(project_dir, res)
+    except Exception as e:
+        res.setdefault("warnings", []).append(f"results.json-Merge: {e}")
+    _log("✓ Sektor-Berechnung fertig (voller Motor gespiegelt)", 100)
+    return res

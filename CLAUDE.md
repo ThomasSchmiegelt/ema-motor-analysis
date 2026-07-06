@@ -70,6 +70,9 @@ work never blocks the request.
 Key endpoints: `/analyse`, `/status`, `/results`, `/field/<n>` (animation frame),
 `/cad_image/<name>`, `/chart/<name>`, `/open_freecad` (launches GUI FreeCAD on the
 saved doc), `/export_step` + `/download_step`, `/projects`, `/project/<id>/load`,
+`/project/<id>/activate` — **lightweight active-project select** (sets `_state["project_dir"]`/
+`project_id` WITHOUT loading results/frames; returns `has_results`; Tab ①'s `pjSetActive` POSTs it
+so report + em3d target the active project),
 `/cad_preview` (+ `/cad_preview/status`) — **staged-workflow** geometry-only build
 (`ema_pipeline.build_cad_preview`: FreeCAD geometry + STEP + 2D images, NO analysis;
 sets `_state["project_dir"]` so `/open_freecad`/`/download_step` work; own `_cad_state`
@@ -341,7 +344,41 @@ Schrägung / Step-Skew** (`skew_segments` K + `skew_step_deg`, opts → `_magnet
 Magnet wird in K axiale Prismen geschnitten, Segment k um `k·step` um die Wellenachse gedreht
 (Position, Achse UND Magnetisierung); das Rotoreisen bleibt rotationssymmetrischer Vollzylinder.
 Kontinuierlicher `skew_deg`-Twist bleibt der Fall K<2. Das Magnet-Tagging matcht jetzt über
-(gx,gy,**gz**) + Segmenthöhen-Massengate. **Flussbarrieren im 3D-Mesh** (`barrier_rects` —
+(gx,gy,**gz**) + Segmenthöhen-Massengate. **Magnet-Luft-Tasche (Langloch/obround, `mag_pockets`,
+Standard an):** jeder vergrabene Magnet sitzt in einem **obround-Luft-Langloch** (Rechteck + zwei
+Halbkreis-Enden, `_obround_loop`+`_obround_pocket`), das den Magnet mit `clr` Spalt rundum umschließt
+(Querschnitt folgt exakt der Magnet-Geometrie, nur um `clr` größer). Zwei Baufälle: ① **GERADE**
+→ EIN obround-Prisma über 0..L, Spalt = echter Geometrie-Tab-Klebespalt `magGapMm` (0,1–0,3 mm); die
+Schale ist ein sauberes Prisma und selbst bei 0,1 mm netzbar (verifiziert). ② **STAFFELUNG** (`n_seg≥2`)
+→ **K gestufte** obround-Prismen, eins je Segment, über die Länge versetzt (Winkel `ang+k·step`, Zentrum
+um die Wellenachse gedreht) — und dann **PER MAGNET zu EINEM zusammenhängenden Luftkanal `occ.fuse`t**
+(winzige z-Überlappung der Segmente). Magnetsegment + Tasche teilen exakt den Stufenwinkel → perfekter Sitz.
+**Der kontinuierliche Skew (`skew_deg`) wird bei aktiven Taschen in eine feine Staffelung um die Wellenachse
+ÜBERSETZT** (`_opts_eff`, K=⌈skew°/3⌉ Segmente) — ein um den EIGENEN Schwerpunkt tordiertes Magnet+Tasche-
+Paar ist NICHT robust netzbar (die tordierte dünne Schale bringt `mesh.generate` zum Scheitern/Hänger;
+ausgiebig getestet), gerade Segmente um die Wellenachse dagegen schon UND das ist physikalisch korrekter.
+Damit ① **echter, sichtbarer Klebespalt `magGapMm` (0,1–0,3 mm) in ALLEN Fällen** (Flanke berührt nie
+Eisen — der Magnet ist ein Rechteck, das satt im Langloch sitzt), ② Tasche schrägt/staffelt mit, ③ die
+Eisen-Slivers zwischen den Segmenten liegen in Luft → löserstabil. **Warum der Fuse (wichtig — nicht rück-
+gängig machen):** K SEPARATE gestufte Taschen lassen zwischen den verdreht gestapelten Prismen dünne
+EISEN-Slivers stehen → entartete Tets → `mesh.generate` scheitert/explodiert (>400 k Knoten). Früher wurde
+der Spalt deshalb netzbarkeitshalber auf ~0,55·Twist-Versatz ANGEHOBEN (der Magnet füllte dann optisch das
+Langloch, **kein sichtbarer Luftspalt** — genau die Nutzer-Beanstandung). Der Fuse zu EINEM Kanal je Magnet
+beseitigt die Eisen-Slivers → der ECHTE Spalt ist netzbar (verifiziert: 16 Kanäle, 5 Segmente, minSICN ~7e-3,
+~60 k Knoten, kein Anheben). **Netzauflösung des dünnen Spalts (kritisch):** (a) die Magnet-/Taschen-
+Oberflächen gehören bei aktiven Taschen NICHT ins grobe `mag_cl`-Feld (ein mm-Ziel im 0,2-mm-Spalt ist
+geometriewidersprüchlich → „Could not recover boundary mesh"); (b) ein FESTES feines Saumband auf ALLEN
+Magnetflächen sprengt die Knotenzahl/hängt. Stattdessen löst **`Mesh.MeshSizeMin ≈ 0,8·clr`** (Boden) plus
+der natürliche Größengradient den Spalt auf — der Knoten-Cap vergröbert nur das Fernfeld, der Boden hält
+den Spalt bei ≥1 Zelle. `tags["pocket_clear_mm"]` = `["pocket_clear_geom_mm"]` (immer der Geometrie-Tab-
+Spalt), `["pocket_clear_raised"]` jetzt **immer False**. Die dünne Luftschale passiert das Massengate über
+eine **explizite Schalenmasse** (`cap_pieces["vol_pred"]` ≈ Tasche−Magnet). **Netz-
+Entartungs-Wächter (`_DegenerateMeshError`):** nach `mesh.generate(3)` prüft `_build_mesh_once` die
+Tet-Qualität (`getElementQualities` minSICN) und wirft bei entarteten Slivers (minSICN≤`degenerate_sicn`
+= 2e-4 über Toleranz, oder invertiert) — der Elmer-Löser scheitert daran sonst STILL. `build_mesh`
+reicht diesen Typ direkt an den Selbstheil-Monitor weiter (Taschen NICHT abschalten, die helfen ja),
+der Netzqualität/-dichte hochzieht (…→ Skew aus als letztes). `allow_degenerate`/`degenerate_sicn`
+justierbar. **Flussbarrieren im 3D-Mesh** (`barrier_rects` —
 parametrisch `genFluxBarrierQ/D` radiale Schlitze + Designer `customBarriers` Polylinien,
 gespiegelt zur 2D-`_rasterise`-Logik): als **Luft-Prismen** (μr=1) mit derselben Staffelung
 gebaut, in den Rotor gefragmentet und als `air` getaggt (COM+Massengate, 2-Pass: Magnete zuerst,
@@ -354,12 +391,33 @@ den Zähnen (im 3D-Feld/Schnittbild sichtbar). **Zonale Netz-Verfeinerung (einst
 fein* (`gap_cl`, MathEval-Gauß-Band), ② Magnete+Barrieren+Umgebung *fein* (`mag_cl`, Distance→
 Threshold auf ihren Oberflächen, Saumbreite `mag_grow`), ③ Rest *grob* (`mesh_cl`) — per gmsh
 `Min`-Feld kombiniert; `_magnet_pieces` wird für Barrieren wiederverwendet (mdx/mdy/sign via
-`.get`). UI: Felder „Magnet-/Barrieren-Mesh", „Übergangszone" + Zonen-Übersicht-Karte. **3D-Feld-Tab UI**: breiteneinheitliche `.e3-card`-
+`.get`). UI: Felder „Magnet-/Barrieren-Mesh", „Übergangszone" + Zonen-Übersicht-Karte. **Ziel-Knoten-Regler
+(`target_nodes`, UI `e3_target_on`/`e3_target_nodes` 10k–300k):** überschreibt den konservativen Auto-Cap;
+`_build_mesh_capped` steuert die Knotenzahl BEIDSEITIG an (zu grob ⇒ Zellgrößen ×f<1 verfeinern, zu fein ⇒
+×f>1 vergröbern, f=(n/ziel)^(1/1.85), Toleranzband ±18 %, ≤4 Skalier-Pässe), Zonen-Verhältnisse bleiben.
+Geklemmt 10000…`EM3D_NODE_CEILING`=300000 (= gemessener RAM-Deckel dieser 31-GiB-Maschine, `em3d_perf_check.py`:
+Peak-RAM ~linear+Fill-in, 55k≈3,5 GiB, 277k≈25 GiB → OOM ~345k; der 55k-Auto-Cap ist bewusst konservativ, NIE
+RAM-limitiert). **Selbstheilender Netzbau-Monitor (`_build_mesh_capped` + `_mesh_mitigations`):** schlägt
+`build_mesh` fehl (überlappende Facetten / ungültige Tets), spielt der Monitor selbständig eine Mitigationsleiter
+durch. **Reihenfolge: ZUERST Netzqualität/-dichte/-verhältnisse (ändert das Modell NICHT), erst als LETZTES
+Modell-Features entfernen** — Netzqualität erhöhen (`mesh_robust`: gmsh Frontal-Delaunay + Tetraeder-Optimierung
+`Mesh.Optimize`/`OptimizeThreshold`) → Luftspalt-/Magnet-Mesh ×1,5 vergröbern → Zonen-Verhältnisse angleichen
+(`mag_cl`→`gap_cl`-nah, Saumzone `mag_grow` ×1,6, sanfterer Größengradient) → Gesamtnetz ×1,8 → Magnettaschen-Kappen
+aus → Skew/Staffelung aus → Statornuten aus — und baut mit neuen Parametern neu, bis es klappt oder die Leiter
+erschöpft ist. **Logfile `mesh_build.log`** (`_mesh_logger`,
+im `em3d/`-Ordner des Projekts) protokolliert JEDEN Versuch (Parameter + Knoten/Fehler + Monitor-Entscheidung) mit
+Zeitstempel; Pfad in `res["mesh"]["log"]`. `_seed_cl` macht die cl-Werte vor dem ersten Bau explizit (nie 0/auto)
+→ Skalierung immer definiert. Test: schneller Unit-Test via gefälschtem `build_mesh` (Targeting/Heilung/Logfile
+in ms). **3D-Feld-Tab UI**: breiteneinheitliche `.e3-card`-
 Stapelung (wie FEM-Ergebnisse), **FEM-Einstellungen mit `<details>`-Erklärungen** (fachlich +
 laienverständlich + Wirkung auf Genauigkeit/Rechenzeit), Staffelungs-Felder. **Browser-Viewer
 Schnittebene** (`_e3SetClip`/`_e3FlipClip`, vtk.js `vtkPlane` + `mapper.addClippingPlane` +
 **`mapper.modified()`** — ohne das rendert vtk.js die Clip-Änderung NICHT neu, der Schnitt schien
-„kaputt") — Achse X/Y/Z + Positions-Slider + Seitenwechsel, „in den Motor schauen". **Feldfarbe
+„kaputt") — Achse X/Y/Z + Positions-Slider + Seitenwechsel, „in den Motor schauen". **Standard-Ansichten
+im Browser-Viewer** (`_e3SetView('xy'|'xz'|'yz'|'iso')`, Knopfgruppe „Ansicht" in der Viewer-Bedienleiste):
+setzt Blickrichtung + View-Up der Kamera (Z = Motorachse; XY = Stirnseite/Querschnitt, XZ/YZ = Längsschnitt,
+Iso = Standardperspektive) und ruft `resetCamera()` für die Abstands-/Zoom-Anpassung — gilt für Feld UND
+Flusslinien. **Feldfarbe
 im Browser-Viewer** (`_e3ApplyColor`): robuster Bereich übers 2./98.-Perzentil (`_e3Percentiles`)
 statt min/max + **log-Toggle** + **|B|max-Slider** — sonst klebt das moderate Statorfeld (~0,3–0,8 T
 Leerlauf) ganz unten in der Skala; das matplotlib-Schnittbild `_slice_image` nutzt analog
@@ -367,7 +425,46 @@ Leerlauf) ganz unten in der Skala; das matplotlib-Schnittbild `_slice_image` nut
 (`_mesh_slice_image` — schneidet die gmsh-.vtk MIT Luft bei z=L/2, `tripcolor` nach √Fläche
 hell=fein → zonale Auflösung sichtbar, Bildschlüssel `em3d_mesh_slice`) + interaktiver **🕸 Netz**-
 Toggle im Browser-Viewer (`_e3ToggleMesh`, `actor.setEdgeVisibility` — Oberflächen-Netz der
-Festkörper; das Luftspalt-Volumennetz nur im Querschnittsbild, da die .vtp keine Luft enthält). **Geometriequelle NICHT klebrig:** beim Öffnen des 3D-Tabs wird
+Festkörper; das Luftspalt-Volumennetz nur im Querschnittsbild, da die .vtp keine Luft enthält).
+**Magnetfeldlinien im Browser-Viewer** (`🧵 Feldlinien`-Toggle, `_e3ToggleLines`): serverseitig
+aus dem vollen Volumennetz (B-Vektor) getracet (`export_browser_streamlines` — `vtkStreamTracer`
+RK4 + `LENGTH_UNIT`-Schritt skaliert an `dims["r_so"]`, Seed-Raster Welle→Stator-OD verteilt über
+**viele axiale Ebenen über die volle Länge** (`n_z=12`, z∈[0,03·L … 0,97·L] im Eisenstapel, NICHT nur
+z=L/2 bzw. 3 Ebenen → die Linien füllen den ganzen 3D-Körper über die Bauteillänge statt in wenigen
+Ebenen zu kleben, Endeffekt/Skew sichtbar); der adaptive RK45 in
+CELL_LENGTH-Einheiten lieferte 0 Linien) und als schlanke
+Polylinien-.vtp (nur `Bmag`, float32/UInt32 wie `export_browser_vtp` — beide nutzen `_write_vtp`)
+über `/em3d/streamlines` geladen; im Viewer mit DERSELBEN `ctf`/`scalarRange` wie die Oberfläche
+eingefärbt (folgt log/|B|max). **Liniendichte einstellbar** (`Dichte`-Slider `e3_line_density` /
+`_e3ApplyLineDensity`): serverseitig wird bewusst DICHT exportiert (`n_rings,n_ang=9,48`, die
+Obergrenze „viele"), der Slider dünnt clientseitig jede k-te Polylinie aus (`getLines().getData()`
+→ Teilmenge, Punkte+Bmag unverändert) — sofort, ohne Server-Round-Trip, für Einzellauf UND jeden
+Sweep-Punkt. Sind die Feldlinien an, wird die |B|-Oberfläche **transparent**
+(`_e3SurfaceOpacity` → `setOpacity(0.18)`, Renderer mit Depth-Peeling), damit die Linien im Inneren
+sichtbar sind. **Einzelne Lastfälle/Drehzahlen im Browser-Viewer (Sweep):** `run_em3d_sweep`
+exportiert pro Betriebspunkt eine eigene schlanke .vtp + Feldlinien (`_solve_point(browser_stub=…)`
+→ `_export_browser_point`, eindeutige `browser_<i>.vtp`, da alle Punkte dieselbe `case.vtu`
+überschreiben); `out["sweep_vtp"]`/`sweep_lines` (Index→Pfad). `/em3d/vtp` + `/em3d/streamlines`
+nehmen `?i=<index>` (`_em3d_point_path`, sonst Detail-/Einzelpfad); ein **Lastfall-`<select>` direkt
+in der Viewer-Bedienleiste** (`e3_speed_wrap`/`_e3PopulateSpeedSelect`, gespeist aus `_e3SweepPoints`)
+schaltet zwischen allen Betriebspunkten um (`openBrowser3d(idx)` setzt `_e3ViewIdx`, lädt Oberfläche
++ Feldlinien des Punkts neu). **Dynamische Darstellung über Drehzahl/Last (Player im Browser-Viewer):**
+die Sweep-Punkte lassen sich flüssig **abspielen** statt nur per Dropdown durchzuklicken —
+`_e3PopulateSpeedSelect` baut in `e3_speed_wrap` neben dem Dropdown eine **Player-Leiste** (▶/⏸
+`_e3PlayToggle`, Scrub-Slider `_e3Scrub`, Tempo 0.5/1/2× `_e3PlaySetTempo`, Loop, „Skala fixieren",
+Live-Readout `#e3_play_lbl`). Der Timer (`_e3PlayTick`) tauscht pro Frame nur die Punkt-Daten
+(`_e3ShowPointData` → `mapper.setInputData` **ohne** Kamera-Reset), gespeist aus dem **VTP-Cache**
+`_e3PdCache`/`_e3LinesCache` (`_e3GetPointPd`/`_e3GetLinesPd`, beim ersten Viewer-Öffnen per
+`_e3PreloadSweep` vorgeladen) — daher ist der Punktwechsel sofort/ruckelfrei statt Render-Fenster-
+Neuaufbau. Feldlinien animieren mit (`_e3SetLinesForIdx`), „Skala fixieren" (default an) hält die
+Farbskala fest, damit das Feldwachstum über Last/Drehzahl vergleichbar bleibt. `openBrowser3d(idx,
+swap=true)` ist der Schnellpfad (`_e3ViewerLive`), ohne `swap` der volle Erstaufbau. Die Punktliste
+befüllt man gezielt als **Drehzahl-Rampe** (`_e3RampSpeed`, feste Last) oder **Last-Rampe**
+(`_e3RampLoad`, feste Drehzahl, 0→Last-bis) in der Sweep-Karte → getrennt „über Drehzahl" bzw.
+„über Last" abspielbar. `_e3PlayStop` (bei neuem Lauf / neuem Render / Tab-Wechsel) stoppt den Timer
++ leert die Caches; Einzelläufe (`_e3SweepPoints=null`) zeigen keinen Player. **Reines Frontend**
+(alle Punkt-VTPs + `/em3d/vtp?i=`/`/em3d/streamlines?i=` existieren schon).
+Transiente `work/`-Pfade werden NICHT in `results.json` geschrieben. **Geometriequelle NICHT klebrig:** beim Öffnen des 3D-Tabs wird
 NICHT automatisch auf „Designer" umgeschaltet (das blendete den Geometrie-Tab dauerhaft aus →
 „Geometrie ändert sich nicht"); Standard ist der Geometrie-Tab, `_e3SrcUserSet` merkt die bewusste
 Dropdown-Wahl. `/em3d/vtp`-Fetch ist cache-gebustet. **Bericht-Integration:**
@@ -383,11 +480,118 @@ Lastprofile Leerlauf/Teillast/Nennlast/Volllast/Feldschwächung). `write_sif` be
 (`tags["coil_rings"]`, Luft-Annuli am Nut-Radiusband an z∈[−t,0]/[L,L+t]) mit azimutalem
 Rückführstrom (CD1/CD2 via Elmer-MATC), Nut+Ring aus DEMSELBEN `C0` → ∇·J≈0 → der Strom schließt
 sich in der endlichen Länge (sonst explodiert das Feld auf B~10⁴ T). `Fix Input Current Density=
-True`+`Jfix=0`-BC putzt die Restdivergenz; **`COIL_J_SCALE≈199`** kalibriert die Höhe aufs
+True` reinigt die Restdivergenz über den **iterativen Jfix-Hilfslöser** (BiCGStabL+ILU1, kein
+Direkt-Löser, KEIN `Jfix=0`-Pin — beides scheitert am singulären Neumann-System bzw. ist ein
+unlistetes Keyword). Das konsistente ΣJ=0-System konvergiert iterativ, SOLANGE das Netz gesund ist.
+Die vom Nutzer beobachtete **Jfix-Divergenz** („System diverged") kam vom kaputten **Staffel-Netz**
+(Eisen-Slivers → ∇·J diskret inkonsistent), NICHT vom Löser — das fängt jetzt der Netz-Entartungs-
+Wächter (s. o.) + die Luft-Tasche ab, bevor gelöst wird. **`COIL_J_SCALE≈199`** kalibriert die Höhe aufs
 analytische `_analytical_Barm` (mm↔m-Einheitenfaktor, ~geometrieunabhängig). Verifiziert: B_gap
 skaliert mit Last (0.18 T Leerlauf → 1.9 T@50 Nm → 3.5 T@150 Nm). Abschaltbar (dann Leerlauffeld +
 Betriebspunkt). **v1-Scope:** lineare Materialien, Lastfeld vereinfacht (Grundwelle, lin. Eisen);
-BH-Kurve + verteilte echte Wicklung sind Folgeschritte. **Prerequisite:**
+BH-Kurve + verteilte echte Wicklung sind Folgeschritte. **Drehzahlband / Betriebspunkt-Sweep
+(`run_em3d_sweep`, Stufe 1 — KEINE echte Transiente):** mehrere Betriebspunkte
+(`payload["sweep"]` = Liste `{rpm, load_nm, excitation}`) als je eigene statische 3D-Magnetostatik.
+Schlüssel-Hebel: `build_mesh`/`_build_mesh_capped` lesen NIE rpm/load → das Mesh wird **einmal**
+gebaut (`_prep_mesh`: Gmsh + ElmerGrid), pro Punkt läuft nur `write_sif` (neue dq-Ströme) +
+`ElmerSolver` (`_solve_point`). **Mesh-Cache für Einzelläufe (`_MESH_CACHE`/`_mesh_key`):** dasselbe
+Prinzip greift auch requestübergreifend — `_prep_mesh` merkt sich je em3d-Arbeitsverzeichnis das
+gebaute Netz unter einem Hash aus **Geometrie + Baulänge + netzrelevanten Optionen** (`_mesh_key`,
+**ohne** rpm/load_nm, ABER **mit** excitation/coil_currents, weil die die Stirnring-Luftannuli im
+Netz schalten). Ändert der Nutzer beim nächsten Einzellauf nur Drehzahl/Last, wird das Netz
+**wiederverwendet** (nur der Löser läuft neu, Log „♻ Mesh wiederverwendet"); Geometrieänderung oder
+fehlende Mesh-Dateien ⇒ Neubau. Prozess-lokal (Neustart ⇒ erster Lauf baut neu). Gilt für
+`run_em3d`/`run_em3d_sweep`/`run_em3d_refine` (die ROI-`Box` ist Teil des Keys → korrekt Neubau);
+der Sektor-Pfad baut über `_build_sector_mesh` und ist nicht betroffen. `run_em3d` ist dafür in `_prep_mesh`/`_solve_point`/`_decorate_res`
+zerlegt (Einzellauf unverändert); die Luftspalt-Metriken stecken im geteilten `_gap_field_metrics`
+(volle Auswertung `parse_results` ↔ schlank `_gap_metrics_only`). Pro Punkt nur schlanke Kennwerte
+(B_gap, Moment, i_q/i_d) + Verlaufskurven über die Drehzahl (`_sweep_charts` → `charts/em3d_sweep_*`);
+das **volle 3D-Feld** (VTU/VTP/Viewer/Bilder) nur für den **Detailpunkt** (`detail_index`, default
+letzter Punkt — wird ZULETZT gelöst, damit die im `work/` verbleibenden Dateien zu ihm gehören).
+Persistenz `results["em3d_sweep"]` (`_persist_em3d_sweep`) + der Detailpunkt zusätzlich über
+`_persist_em3d_summary` nach `results["em3d"]`. Server: **`POST /em3d_sweep`** (Klon von `/em3d`,
+teilt `_em3d_state` + `/em3d/status|vtu|vtp|paraview`; VTU/VTP zeigen auf den Detailpunkt). UI:
+Karte **„🌡 Drehzahlband / Lastsweep"** im 3D-Feld-Tab (editierbare Punkt-Tabelle `_e3Sweep` +
+Detail-Radio, „aus Profilen füllen" via `_e3ApplyPreset`/`_e3RatedTorque`, „rpm-Band anhängen";
+`startEm3dSweep` → `_pollEm3d` verzweigt bei `result.sweep` auf `_renderEm3dSweep`, das die
+Sweep-Tabelle+Kurven in `#e3_sweep_results` rendert und den Detailpunkt über das vorhandene
+`_renderEm3d` zeigt). Test: `test_sweep_per_point_sif` (Mesh einmal, zwei `write_sif` → verschiedene
+dq-Ströme, ohne Elmer). **Dynamisches Lastprofil-Video (`payload["make_video"]`):** eine synthetische
+Fahrzyklus-Punktliste (JS `_e3LoadProfile`, 20–50 Punkte: Anfahren→Beschleunigung→Nennbetrieb→
+Feldschwächung→Boost→Auslauf; erzwingt Anregung „loaded"+Spulenströme, damit das Netz die
+Stirnringe hat) wird als Sweep gerechnet und pro Betriebspunkt zu EINEM Querschnitts-Frame gerendert:
+`_video_frame` (|B|-Sättigungs-Schnitt z=L/2 via `vtkCutter`+`tricontourf` PowerNorm, **grüne
+Sättigungskontur** bei `B_SAT_DISPLAY_3D`=2 T — lineares Eisen ⇒ qualitativ, „wo es sättigen würde",
+Zone wächst mit Last, + **Feldlinien in der Ebene** via `LinearTriInterpolator`→`streamplot` +
+Kennwert-Panel rpm/Last/i_q/i_d/|I|/B_gap/Moment/Phase + **normierte Zeitleiste** mit Marker am
+aktuellen Punkt). Frame JETZT (vor dem nächsten Solve, der `case.vtu` überschreibt) über den
+`_emit_frame`-Helfer aus der aktuellen VTU; Frames heißen `frame_{i:04d}.png` in PROFIL-Reihenfolge
+(fehlgeschlagene Punkte → `_video_frame_fail`-Platzhalter, damit ffmpeg lückenlos bleibt) →
+`_encode_video` (ffmpeg, `frames_em3d/anim.mp4`). Zeitleiste nutzt die GEPLANTEN Verläufe (rpm/Last
+aus den Punkten, i_q/i_d analytisch vorab via `estimate_dq_currents` — deterministisch wie der Löser).
+`out["video"]` (bool) → `_renderEm3dSweep` zeigt einen `<video>`-Player + Download; Server serviert die
+MP4 über `GET /project/<id>/video/em3d` (Modus `em3d`→`frames_em3d` in `video_subdirs`, neben
+`struct`/den Feld-Modi). UI: Karte-Zeile **„🎬 Lastprofil-Video erzeugen"** (+ Punkte-Feld 20–50) in
+der Drehzahlband-Karte; `_e3MakeVideo` schaltet nur der Profil-Knopf ein (alle anderen Bauer setzen
+ihn zurück). Test: Frame-Renderer + `_encode_video` laufen ohne Elmer auf einem synthetischen Gitter. **3D-Lauf speichern/laden (PROJEKT-gebundener Store):** ein fertiger 3D-Lauf
+(Config + Kennwerte + VTU/VTP-Feld) wird unter `<aktives Projekt>/em3d_runs/<id>/` abgelegt
+(`config.json`/`result.json` + kopierte Feld-Dateien, Pfade auf den Store gemappt) und ohne
+Neurechnen im Viewer wieder geöffnet — `_em3d_runs_root()` liefert die Store-Wurzel des aktiven
+Projekts (`None` ⇒ die Routen verweigern/liefern leer, „erst Projekt wählen"; den globalen
+`_em3d_runs`-Store gibt es nicht mehr). Generell binden ALLE em3d-Handler den Lauf via
+`_em3d_project_dir(data)` (ehrt `project_id` wie `/analyse`s reuse_id, sonst aktives `_state`-Projekt,
+sonst frisches `…_em3d`) ans Projekt → VTU/VTP landen in `<projekt>/em3d/`. Server: `POST /em3d/save`
+(liest `_em3d_state["result"]`, `_em3d_copy_run_files` kopiert VTU/VTP/Feldlinien + Sweep-Punkte),
+`GET /em3d/saved` (Liste), `GET /em3d/saved/<id>` (setzt `_em3d_state["result"]` → die bestehenden
+`/em3d/vtp|vtu|streamlines|paraview` bedienen den Lauf), `POST /em3d/saved/<id>/delete`; alle
+`_safe_name`-geschützt. UI-Karte **„🧲 Gespeicherte 3D-Läufe" jetzt auf Tab ① Projekt**
+(`_e3BuildConfig`/`_e3ApplyConfig`/`_e3SaveRun`/`_e3LoadRun`/`_e3RefreshSavedList`, von `pjSetActive`
+mit aufgefrischt).
+**ROI-Verfeinerung (Bereich höher auflösen)** — `run_em3d_refine` (`POST /em3d/submodel`, teilt
+`_em3d_state`): nach einem Lauf markiert der Nutzer interaktiv im vtk.js-Viewer einen Quader
+(`_e3Roi`, gelbe `vtkCubeSource`-Drahtbox + 6 Zahlenfelder als Quelle der Wahrheit); das **volle
+Modell** wird mit einem lokal feineren Gmsh-**`Box`-Feld** im Quader (`opts["roi_box"]`/`roi_refine`
+in `_build_mesh_once`, `roi_cl=min(gap_cl,mag_cl)/refine_factor`, via `Min` kombiniert) **komplett
+neu** gelöst (normaler Außenrand A×n=0) — reuse `_prep_mesh`/`_solve_point`/`_decorate_res`,
+`res["source"]="refine"`. **KEIN echtes Submodell mit BC-Übertragung:** ein auf der geschlossenen
+ROI-Box vorgegebenes, abgetastetes Motor-B-Feld (`Magnetic Flux Density i` → Elmers `DirichletAfromB`)
+erzeugt an den 12 Boxkanten widersprüchliche Kanten-A-Randwerte und explodiert (≈1100 T) — nur auf
+glatten Feldern (homogen/Dipol) validierbar, nicht auf einem realen Motorrand mit Nuten/Zähnen/
+Magnetkanten (s. memory `project_em3d_submodel_bc`). Der volle Re-Solve ist im ROI sogar genauer
+(kein BC-Transferfehler), kostet aber einen weiteren Solve. Test: `test_em3d_submodel.py`
+(`test_roi_box_refines_mesh` ohne Elmer: Box-Feld → mehr Knoten + `mesh_zones["roi_cl"]`;
+`test_refine_full_resolve` mit Elmer: |B| physikalisch + stimmt im ROI mit dem Grob-Lauf überein).
+**Ein-Pol-Sektor (Symmetrie-Submodell, „2. Stufe")** — `run_em3d_sector` (`POST /em3d/sector`,
+teilt `_em3d_state`, UI-Knopf **„🔁 Schnelle Pol-Berechnung (Symmetrie)"**): rechnet EINE
+Pol-Teilung (`_build_sector_mesh`: Sektor-Zylinder via `addCylinder(angle=α)`, **Magnete + Nuten +
+Flussbarrieren** aus `magnet_rects`/`slot_rects`/`barrier_rects` in die Sektor-Mitte gedreht, als VOLLE
+Prismen gebaut und per `occ.intersect` an die Keil-Domäne geschnitten — so dürfen q-Achsen-
+Barrieren/Nuten die Periodikfläche kreuzen, Klassifikation über die **Fragment-Map**;
+Periodikflächen-Selektion über **Senkrechtabstand** zur Halbebene, Master↔Slave nach (r,z) gepaart;
+**gestufte Verfeinerung** Luftspalt(`gap_cl`)→Magnet/Barriere/Nut(`mag_cl`, Distanz-Auslauf
+`mag_grow`)→grob(`mesh_cl`) via `Min`-Feld; das Tortenstück wird in `run_em3d_sector` per Zielsuche
+bis ~`EM3D_MAX_NODES` **ausgereizt**) und spiegelt sie über die
+Maschinensymmetrie zum vollen Motor (`_pattern_full_motor`: 2p Kopien, je um k·α gedreht, B-Vektor
+mitgedreht + anti-periodisch `(−1)^k`, GeometryIds erhalten). Die beiden Winkel-Schnittflächen sind
+**anti-periodisch** gekoppelt (Elmer `Periodic BC` + `Rotate` + `Scale=-1` + `Use Lagrange
+Coefficient` — bindet die WhitneyAV-**Kanten-DOF** korrekt, validiert ~10 % Anti-Periodizität im
+glatten Joch, KEIN Aufblasen), Außenrand `A×n=0` wie das Vollmodell — **kein Feldtransfer** nötig
+(im Gegensatz zum gescheiterten Box-Submodell). Weil die Domäne nur 1/(2p) groß ist, wird sie
+**feiner** vernetzt → „höher aufgelöst" bei kürzerer Rechenzeit. `write_sector_sif` schreibt **OHNE
+Coordinate Scaling** (mm wie das Vollmodell; Magnetostatik ist skaleninvariant). `_sector_results`
+spiegelt → volle-Motor-VTU/VTP/Feldlinien + Luftspalt-Kennwerte (`_gap_field_metrics`) + Endeffekt +
+2D-Vergleich + Anti-Periodizitäts-Kennwert (`antiperiodic_err`, **Median im Statorjoch** — im
+Luftspalt/Nutband geben die Proben >100 % Rauschen trotz korrekter BC) + die **vollen 3D-Ansichten**
+des gespiegelten Motors (`render_geometry_3d`-Logik via `_render_geometry_views` + `render_field_3d`,
+Klassifikation über die VTU-**GeometryIds** mit `_classify_grid_gids` statt der gmsh-.vtk — Welle,
+Magnete, Nuten/Zähne, Magnettaschen, Luftspalt sichtbar). **Einstellbares Knoten-Kontingent**
+(`node_budget_pct` 10–100 %, 100 % = `EM3D_MAX_NODES`) regelt per Zielsuche, wie fein das Tortenstück
+wird. **v1-Scope:** Leerlauf (nur Magnete) + Magnete (+ Taschen) + Statornuten + **Flussbarrieren** +
+**Hohlwelle**; KEIN Skew/Spulenströme (das bleibt `run_em3d`). Erfordert `slots % poles == 0` (sonst
+nur näherungsweise). Test:
+`test_sector_mesh_and_sif` (ohne Elmer: Periodik+Außenrand-BC, Nuten/Pol) + `test_sector_full_resolve`
+(mit Elmer: physikalisch, Anti-Periodizität < 15 %, voller Motor gespiegelt).
+**Prerequisite:**
 Elmer (`sudo apt install elmerfem-csc` via PPA `elmer-csc-ubuntu/elmer-csc-ppa`) + die
 Python-Pakete `gmsh`/`vtk` (in `requirements.txt`). Mesh/sif sind ohne Elmer test- und
 baubar (`test_em3d.py`). **Gotchas (alle gelöst, beim Ändern beachten):** `gmsh.initialize(
@@ -403,16 +607,42 @@ in slot steps, 0=auto=`round(slots/poles)`, chordable). Collision-freedom rests 
 the crown's **radial split**: the "go" arm rises on the inner lane radius, the
 "return" arm descends on the outer lane radius with a radial step at the apex, so
 crossing arms are never at the same radius+z. The **winding head (crown)** is built
-by `_crown_swept` as ONE smooth lofted solid ("Zugkörper", `Part.makeLoft(sections,
-solid=True, ruled=True)`) through oriented rect sections (the `_bar` frame keeps the
-cross-section flat), flaring **radially outward** by `windingHeadFlare` mm — much
-better than the old box-chevron `_crown` (kept as fallback). **Use `ruled=True`**: a
-smooth (`ruled=False`) loft balloons between sections and collides with neighbours
-(OVERLAP went 0→270); ruled hugs the box envelope → collision-free. `windingHeadStyle:
-"box"` forces the old chevron; any loft failure also falls back to it.
-`build_full_motor_script(..., winding_debug=True)` emits each physical pin as its own
-`Pin_NNN` object for the identity-aware pairwise-`common().Volume` collision check
-(must stay OVERLAP=0). `conductorsPerSlot` also drives
+by `_crown_swept` as a smooth SOLID sweep ("Zugkörper") through oriented rect
+sections (`_crown_frame`/`_crown_rect` keep the cross-section flat), flaring
+**radially outward** by `windingHeadFlare` mm. The path is **C¹-smooth by design**:
+a **vertical slot exit at BOTH ends** (θ-easing with s′=0 at the path ends + flare
+blended to slope 0 below the bend, start/end sections embedded 1.2 mm into the own
+leg → seamless leg↔crown junction), straight chevron arms (constant slope keeps the
+2H/pitch z-gap of tangential neighbours), a parabolic apex cap, and the r0→r1 radial
+hand-over as a smoothstep inside the apex window `w_apex = min(0.18,0.28/pitch)·(1−e_bend)`
+— the (1−e) factor matters: θ-easing compresses the mid region, so an unscaled
+t-window maps to a WIDER θ-window and collided with the innermost arm crossing at
+θ-fraction `0.5 − 1/(2·pitch)`. On the arms the flare is LINEAR in the height
+profile h (pure function of h → identical on both arms at equal z → the r1−r0
+crossing gap is preserved; a steeper h² flare measurably worsened the crossing
+grazes). **The sweep is 5 SEPARATE smooth lofts** (bend|arm|apex|arm|bend, split at
+the C² breaks, shared boundary sections → tangent-continuous invisible seams): ONE
+global smooth loft RINGS — the B-spline interpolates all sections globally and the
+end-bend curvature made the surface oscillate ±0.2–0.4 mm along the whole arm,
+eating the 0.8 mm lane gaps (overlap 14→300 mm³). Per-segment analytic volume gates
+(path length × cross-section, 0.6–1.6×) catch ballooning; fallback: one ruled loft →
+box chevron `_crown`. The **weld side** (`_tab`) models the real hairpin twist: every
+leg end leaves the slot vertically (embedded), bends into a sloped tangential ramp
+twisting it by **half a coil pitch** (ALL lanes the same direction; ramp height
+`H_w = crown_H` ⇒ ramp slope = crown-arm slope ⇒ same 2H/pitch z-gap between slot
+neighbours; parallel ramps in a lane never cross), then runs **straight parallel to
+the motor axis** as the weld tip. After the y/2 twist the go leg of pin(s) (lane 2j)
+and the return leg of pin(s−pitch) (lane 2j+1) — both slot s — end side by side at
+θ = s+y/2; over the last ramp quarter the pair converges radially (even lane out,
+odd lane in, smoothstep) to a 0.12 mm light gap, so the welded pair visibly meets
+without boolean overlap (verified: overlap totals unchanged vs crowns-only). Same
+segmented smooth-loft build (bend|ramp|bend|tip), fallbacks ruled loft → `_tab_box`
+(the old angled box). `windingHeadStyle:"box"` forces box crown + box tabs. `build_full_motor_script(..., winding_debug=True)` emits each physical pin
+as its own `Pin_NNN` object for the identity-aware pairwise-`common().Volume`
+collision check. NOTE the sweep style grazes neighbours by tiny slivers — measured
+totals (all pins): s48/c4 11.6 mm³ (old ruled baseline 14.0), s36/c2 0.0, chorded
+pitch5 63.3 (baseline 88.1); treat that as the baseline, not zero — the box style is
+the strictly collision-free reference. `conductorsPerSlot` also drives
 `ema_thermal._conductors_per_slot` (copper volume + `R_phase`).
 
 **Shaft–laminated-core connection** (`geom["shaftConnection"]`: `press` (default,
@@ -705,7 +935,7 @@ dict passed to the FEM script.
 | File | Role |
 |---|---|
 | `server.py` | Flask backend: serves `ema.html`, REST API, threaded job state, FreeCAD GUI/STEP launching |
-| `ema.html` | Single-file vanilla-JS browser UI (no build). Workflow-tab layout: a top tab bar (`switchTab`, tabs `geo/betrieb/calc/live/results/report/compare`, `#hash` deep-linkable) over `#workspace` = `#panel-area` (active panel) + draggable `#vsplit` + persistent `#preview-pane` (live `#simCanvas`, hidden on results/report/compare) + draggable `#hsplit` + `#footer` (staged-workflow buttons `#btn_cad_preview` (🧊 CAD ansehen → `startCadPreview`) · `#btn_smoke` (🧪 Smoke-Test → `startSmokeTest`) · `#btn_analyse` (⚙ Echte Berechnung), all sharing the `_wfModal`/`_pollWf` overlay helpers for the first two, plus `#analysis-progress`; drag `#hsplit` taller to reveal the full `#progress-log`). Inputs grouped into `.tab-panel`s; `results`/`report` tabs gated `disabled` until an analysis finishes. `#vsplit`/`#hsplit` (`initSplitters`) resize preview width / footer height and call the canvas `resize()` live. The preview overlay has a pause button (`#ov_play` → global `toggleSim`/`_syncSimUI`, mirrors the Live-tab `#btn_play_pause`) so rotation can be stopped from any input tab |
+| `ema.html` | Single-file vanilla-JS browser UI (no build). Workflow-tab layout: a top tab bar (`switchTab`, tabs `projekt/geo/betrieb/calc/live/designer/import/em3d/results/compare`, `#hash` deep-linkable; **there is no `report` tab — the Bericht moved into Tab ①**). The **entry tab is `① Projekt`** (`panel-projekt`, the default landing tab) — **the central project hub** for everything project-scoped. Top row: create a project (`pjCreate` → `POST /project/new`, lays down the dir + `project.json` immediately, `status:"neu"`, `origin:"manual"`) · open existing ones (`pjRefreshList` from `/projects?detail=1`, **Galerie ⤢** = `openProjectGallery`). When a project is active (`#pj-active-wrap` shown), the cards are grouped under `.pj-group-h` headers: **📋 Projektdaten & Notizen** (Organisation/status/tags/notes → `/project/<id>/meta` + evolution/lineage; Projekt-Dokumente = per-project RAG via `/project/<id>/rag/add` + attachments via `/project/<id>/attachments`) · **📄 Auswertung & Bericht** (the **PDF-Bericht card** `#pj-report-card` with `#btn_report`/`#btn_report_agentic` → `generateReport(mode)` + `#report_status`/`#report_rag`; the **gespeicherte 3D-Läufe** card `#e3_save_name`/`#e3_saved_list` → `_e3SaveRun`/`_e3LoadRun`/`_e3DeleteSaved`, project-scoped under `<projekt>/em3d_runs/`) · collapsed `<details>` **🧰 Globale Werkzeuge & Daten** (global Wissensbasis `openRag` + LLM-Trainingsdaten `refreshTrainingStats`/`#training-stats`). **Active-project plumbing:** `window._activeProject` is the client truth; **`pjSetActive` also POSTs `/project/<id>/activate`** (lightweight — sets server `_state["project_dir"]`/`project_id` WITHOUT loading results) so report + em3d (which read `_state`) target the chosen project, then refreshes the report card (`pjUpdateReportCard`), the saved-3D list, and the training stats. `buildPayload()`/`_dsnBuildPayload()` attach `payload.project_id = _activeProject.id`, and `/analyse`'s `_run` (+ all em3d handlers via `_em3d_project_dir`) reuse that dir (generalised `reuse_id`) so every calculation/3D-run writes **into** the active project. `loadProjectById` calls `pjSetActive` too. `generateReport` prefers `_activeProject.id` (falls back to `/status`). The Tab-3 (Betrieb) project-management block was removed; `#project_name`/`#project_load` survive as hidden elements only to keep variant/param-table/applyPayload JS wired. The results-tab `🗂 Projektakte` `<details>` panel (`renderAkte`) still mirrors the same project contextually. The rest of the layout sits over `#workspace` = `#panel-area` (active panel) + draggable `#vsplit` + persistent `#preview-pane` (live `#simCanvas`, hidden on results/compare) + draggable `#hsplit` + `#footer` (staged-workflow buttons `#btn_cad_preview` (🧊 CAD ansehen → `startCadPreview`) · `#btn_smoke` (🧪 Smoke-Test → `startSmokeTest`) · `#btn_analyse` (⚙ Echte Berechnung), all sharing the `_wfModal`/`_pollWf` overlay helpers for the first two, plus `#analysis-progress`; drag `#hsplit` taller to reveal the full `#progress-log`). Inputs grouped into `.tab-panel`s; the `results` tab is gated `disabled` until an analysis finishes. `#vsplit`/`#hsplit` (`initSplitters`) resize preview width / footer height and call the canvas `resize()` live. The preview overlay has a pause button (`#ov_play` → global `toggleSim`/`_syncSimUI`, mirrors the Live-tab `#btn_play_pause`) so rotation can be stopped from any input tab. **Globales Speichern** (`#btn-global-save` in der Topbar + `#save-modal`): EIN Speicherknopf öffnet ein Vorschau-/Auswahl-Fenster (`openSaveModal`/`saveModalCommit`/`_buildSaveItems`), das **kontextabhängig** alles Speicherbare als abwählbare Positionen listet — **Projektdaten & Notizen** (`/project/<id>/meta`, liest `pj_*` bzw. bei passendem `akte-body.pid` die `akte_*`-Felder und schreibt beim Speichern in BEIDE zurück), **Bewertung** (`/project/<id>/rating`, gut/schlecht-Select), **3D-Feld-Lauf** (`/em3d/save`, sichtbar via `window._e3HasResult`, gesetzt in `_renderEm3d`/`_renderEm3dSweep`), **Varianten-Set** (`/variants/save`, wenn `variants.length`). Jede Zeile zeigt eine Vorschau + Häkchen (+ optional Name/Bewertung), Commit speichert alle angehakten nacheinander mit ✓/❌ je Zeile. Die alten Einzel-Speicherknöpfe (Projektdaten/Akte/3D-Lauf/Varianten) zeigen jetzt alle auf `openSaveModal()`; `pjSaveMeta`/`saveAkteMeta`/`_e3SaveRun`/`saveVariantSet` bleiben als Funktionen bestehen, die Buttons rufen aber das Modal |
 | `ema_pipeline.py` | Pipeline orchestrator (`run_pipeline`) + material tables + all chart builders |
 | `ema_topology.py` | Single source of truth for rotor magnet placement (`magnet_legs`, `Leg`, topology labels) — consumed by `ema_freecad` + `ema_analysis`; mirrored by JS `magnetLegs` in `ema.html` |
 | `ema_freecad.py` | FreeCAD script generators (rotor, full motor, rotor FEM); interior pockets + surface arc magnets from `magnet_legs`; parametric hairpin end-windings (`conductorsPerSlot`/`coilPitch`, collision-free radial-split crowns) |
@@ -714,18 +944,20 @@ dict passed to the FEM script.
 | `ema_thermal.py` | 6-node lumped-parameter thermal network (steady + transient + per-cycle) |
 | `ema_drivecycle.py` | Drive cycles (WLTP-3b, full-load, trailer, CSV) + drivetrain + energy integration. Trailer is user-parametric: `trailer_mountain_cycle(max_grade_pct)` (steepest uphill = that grade %, slope arrays stored in **degrees**) + `trailer_vehicle(base, trailer_mass_kg, n_axles)`; the `/analyse` payload carries `trailer:{mass_kg,n_axles,grade_pct}` |
 | `ema_compare.py` | Multi-project comparison overlays |
-| `ema_report.py` | LLM → Markdown → pandoc → pdflatex PDF report (standard + agentic modes). Embeds project images via `[BILD:key]` placeholders → `insert_images` (`build_context` `pairs`); the EM section features the FDM field maps `em_field` (Leerlauf) + `em_field_load` (Last) rendered by the pipeline's field stage to `charts/em_field*.png`, plus `airgap`/`em_curve`. Unknown keys (legacy projects without an image) are stripped cleanly; for an old project, re-run the **field** stage (Stufen nachrechnen) to generate them. **Formatting:** the prompt asks for LaTeX math (`$…$` inline, single-line `$$…$$` display — `_normalize_paragraphs` treats `$$` lines as structural so they aren't merged); `render_pdf` injects `_report_header.tex` (`ragged2e` document-wide → left-aligned, fixes the "1–2 words per line" justified-stretch around long unit/formula tokens; `float`+`[H]` to pin figures); `_strip_md_tables` is applied to standard + agentic output too (local models emit malformed centered pipe-tables). **NO numeric values in the prose** (the local model routinely mis-assigns them → nonsense): the standard + agentic single-project reports inject a comprehensive deterministic `[TABELLE:kennwerte]` (`_single_md_tables`, grouped by domain) right after the summary, the prompt demands QUALITATIVE prose + symbolic-only formulas, and `_strip_value_numbers` removes any straggler number+unit token (keeps the unit, inserts `…`; material codes like `M270-35A`/`N52` are protected). `_strip_value_numbers` also runs inside `_clean_prose` so the comparison/agentic comparative prose is value-free too |
+| `ema_report.py` | LLM → Markdown → pandoc → pdflatex PDF report (standard + agentic modes). Embeds project images via `[BILD:key]` placeholders → `insert_images` (`build_context` `pairs`); the EM section features the FDM field maps `em_field` (Leerlauf) + `em_field_load` (Last) rendered by the pipeline's field stage to `charts/em_field*.png`, plus `airgap`/`em_curve`. Unknown keys (legacy projects without an image) are stripped cleanly; for an old project, re-run the **field** stage (Stufen nachrechnen) to generate them. **Formatting:** the prompt asks for LaTeX math (`$…$` inline, single-line `$$…$$` display — `_normalize_paragraphs` treats `$$` lines as structural so they aren't merged); `render_pdf` injects `_report_header.tex` (`ragged2e` document-wide → left-aligned, fixes the "1–2 words per line" justified-stretch around long unit/formula tokens; `float`+`[H]` to pin figures); `_strip_md_tables` is applied to standard + agentic output too (local models emit malformed centered pipe-tables). **NO numeric values in the prose** (the local model routinely mis-assigns them → nonsense): the standard + agentic single-project reports inject a comprehensive deterministic `[TABELLE:kennwerte]` (`_single_md_tables`, grouped by domain) right after the summary, the prompt demands QUALITATIVE prose + symbolic-only formulas, and `_strip_value_numbers` removes any straggler number+unit token (keeps the unit, inserts `…`; material codes like `M270-35A`/`N52` are protected). `_strip_value_numbers` also runs inside `_clean_prose` so the comparison/agentic comparative prose is value-free too. **3D-Feld in BEIDEN Einzelberichten:** when `results["em3d"]` exists, both `generate_report` and `generate_report_agentic` call `_ensure_em3d_section` (own bebilderter „3D-Magnetfeldvalidierung (Elmer FEM)"-Abschnitt + `em3d_*` images) and `_single_md_tables` adds the 2D-vs-3D table — so a 3D run on the active project always surfaces in the PDF (the old `…_em3d`-subproject split that hid it is gone now that em3d is project-bound) |
 | `ema_chat.py` | Ollama Q&A over results/comparison (`chat_results`/`chat_compare`); compacts results JSON (strips base64/frames). Each project-scope chat is grounded on a per-project **`_machine_datasheet(meta)`** (topology/dims/winding/magnets/materials/operating point, built from `meta.json` — `results.json` holds only outputs, so the server loads `meta.json` from `project_dir` and passes it to `chat_results`). Served by `POST /chat` (`scope:"project"\|"compare"`); UI is the floating `💬 Chat` widget in `ema.html`. **RAG:** `_rag_doku(message)` injects retrieved `doku`-category snippets from `ema_rag` into both system prompts (best-effort) |
 | `ema_optimize.py` | LLM-steered target-value optimisation. `evaluate_fast` scores a candidate WITHOUT FreeCAD/FEM (EM at low N + analytical Kt/torque + steady LPTN thermal + analytical struct sweep + analytical mass, ~0.5 s). Its inner geom→metrics core is factored into **`_eval_geom(geom, axial, mats, op, …)`** (works for ANY `magShape` incl. `"custom"`); `evaluate_fast` = `_apply_params` (parametric `FREE_PARAMS`) then `_eval_geom`. The per-magnet optimiser (`ema_design_optimize`) reuses `_eval_geom`/`_fitness`/`_violation`/`_ollama_chat`/`_extract_array`. `optimize(spec)` seeds + lets `ministral-3` propose batches over `FREE_PARAMS`, deterministic clamp + feasibility/fitness pick the best feasible design. Served by `POST /optimize` (threaded, `_opt_state`) + `GET /optimize/status` + `GET /optimize/meta`; UI is the `🎯 Zielwertoptimierung` modal (Berechnung tab / `#optimize`). "Übernehmen" applies the best params to the form for a final full pipeline run |
 | `ema_paramstudy.py` | **Parameterstudie bei fester Drehzahl**: `run_study(payload, param, lo, hi, steps=100, rpm)` sweeps ONE `ema_optimize.FREE_PARAMS` parameter x→y in N steps at a fixed speed and plots EVERY result metric over the parameter (small-multiples grid). Reuses `ema_optimize.evaluate_fast` (FreeCAD/FEM-free, geometry varied per step), so 100 points cost ~50 s. Served by `POST /param_study` (threaded, `_study_state`) + `GET /param_study/status`; UI is the **„📈 Parameterstudie"** panel (Berechnung tab) — parameter dropdown filled from `/optimize/meta`. **Custom (Designer/KI) designs:** `run_study` honours `geom.customLegs` (they ride through `evaluate_fast` unchanged), so the Designer-Tab button **„📈 Parameterstudie für diesen Entwurf"** (`dsnParamStudy`) runs the same study on the drawn geometry; the UI then restricts the dropdown to the geometry-effective params (`_CUSTOM_STUDY_PARAMS` = axial/airgap/slotDepth/p/magGap — magnet-shape params are no-ops on freehand magnets) and shows a banner (`_studyDesignPayload`, reset via `dsnClearStudyDesign`) |
 | `ema_design_ai.py` (KI-Auslegung) | **KI entwirft komplette Maschinen aus einer Beschreibung** (Designer-Pfad). `design_variants(brief, n=3, model)` → list of full designs: parametric scalars (via `ema_text2ema.SCHEMA`+`_validate`) **plus** a freehand HALF-pole `magnets`/`barriers` layout in canvas format (`{r,off,ang,len,thick,pol}` / `{pts,width}`, pol-local mm) **plus** `begruendung`. RAG-grounded on `maschinen` references (`ema_rag.context_for`). **Robustness:** the local LLM call uses Ollama **`format:"json"`** (otherwise the combined schema's JSON is frequently broken — decimal commas, comments) + a lenient `_extract_obj` (strips `//`/`/* */` comments + trailing commas). `_validate_layout` clamps every magnet inside the rotor (true fit-length via the quadratic, NO 5 mm floor — magnets that cannot fit are dropped), **keeps everything in the half pole** (magnet offset ≥0, barrier points clamped to y≥0), **drops magnets that overlap an already-kept magnet** (`_obb_overlap` SAT on the rotated rectangles, `_MAG_MAG_CLEAR` gap — any count is fine, 1 pole-sized or many small, just no intersection; the d-axis mirror is deliberately NOT checked so a V/U arm may sit next to its own reflection) and **drops flux barriers that overlap a magnet** (`_polyline_hits_magnet` samples each slot polyline against every magnet AND its d-axis mirror, clearance `BARRIER_MAGNET_CLEARANCE_MM` + half the slot width — a barrier carved through a PM is nonsense geometry; the LLM prompt also forbids it); if the freehand layout is empty/unusable, `_legs_to_canvas(_params_to_geom(params))` synthesises a valid half-pole from the parametric topology (`magnet_legs`) so a drawable design ALWAYS results (`fallback:true`). **Qualitäts-Vorsortierung + Regenerierung:** jeder Entwurf wird sofort FreeCAD/FEM-frei bewertet (`_quick_eval` → `ema_optimize._eval_geom` auf der gespiegelten Custom-Geometrie + dieselbe Heuristik wie `ema_training.auto_label` → `verdict` gut/schlecht); fällt er **„schlecht"** aus, generiert `design_variants` mit gezieltem Mängel-Feedback einen neuen (bis `max_regen`=2 Nachversuche je Slot, `_gen_one` mit Parametrik-Fallback), nimmt den besten Versuch (`_quality_score`: gut>unbekannt>schlecht, dann B_gap) in `variants` (mit `quality`-Urteil) und sammelt die verworfenen in `rejected`. Return: `{variants, rejected, regenerated, rag_used, model}`. The per-slot generate→presort→regenerate loop is factored into **`_gen_slot(... post_fn=None)`**. **Bereichs-/Zufalls-Entwurf (the UI's only generator now):** `design_variants_ranged(ranges, n, …, brief="")` samples statorOD/axialLen/shaftD **and the air gap** from the user's von–bis ranges per variant (air gap clamped to `AIRGAP_RANGE`=0.5–3 mm), prepends the optional `brief` to each variant's task, **hard-forces** the dims via `_apply_ranged_dims` (statorID/rotorOD derived from the gap, **bore capped at `STATOR_SPLIT`·OD so the stator keeps a real wall for slots+back-iron instead of becoming a sleeve**, `slotDepth` set from that wall, magnets re-clamped) while the LLM fills the rest + draws magnets/barriers, and pins the eval to the fixed speeds `RANGED_RPM_LIST=[1000,5000,15000,20000]` (returned as `rpm_list`). Served by `POST /design_ai` (Body `{brief,n,model?,max_regen?}`) + `POST /design_ai_ranged` (Body `{ranges,n,model?,max_regen?}`), both threaded on `_design_state` + `GET /design_ai/status` |
 | `ema_design_optimize.py` (Per-Magnet-Optimierung) | **Fine-optimises the DRAWN magnet coordinates** of a custom design (vs `ema_optimize` which varies global parametric fields). Vector = per master-leg `{r,off,ang,len,thick}` + barrier widths, bounds from rotor geometry. `_apply_vec` rebuilds master magnets → `ema_design_ai._validate_layout` (re-clamps) → `_mirror_legs`/`_mirror_barriers` (d-axis mirror, identical to `dsnBuild`, with **dedup** of coincident legs) → `magShape:"custom"` geom → `ema_optimize._eval_geom`. Pole symmetry preserved (only the master half-pole is perturbed, mirror regenerated per candidate). `optimize_custom(spec)` reuses the `ema_optimize` loop/fitness/LLM-propose. Served by `POST /design_optimize` (threaded, `_design_opt_state`) + `GET /design_optimize/status`; result's `best_magnets` drawn back onto the canvas |
-| `ema_rag.py` | **Lokale Wissensbasis (RAG)** unter `~/cae_projekte/_rag/index.json`. EINE Basis, pro Dokument eine **Kategorie** `maschinen` (Referenzmaschinen → `ema_text2ema.derive`) oder `doku` (Doku → `ema_chat`). Embeddings über Ollama `/api/embeddings` (`nomic-embed-text`), Chunking ~900 Zeichen/150 Überlappung, Retrieval = Cosine (numpy). `add_text`/`add_file` (txt/md/csv direkt, **PDF via `pypdf`**), `search(query, category, k)`, `context_for(query, category)` (Prompt-Injektion), `list_documents`/`delete_document`/`stats`. Beide Konsumenten injizieren **best-effort** (ohne Ollama/Embeddings läuft alles weiter ohne Kontext). Server: `/rag/list`, `/rag/add`, `/rag/upload`, `/rag/delete/<id>`, `/rag/search`; UI: **„📚 Wissensbasis"**-Modal (Geometrie-Tab / `#rag`) |
+| `ema_rag.py` | **Lokale Wissensbasis (RAG)** unter `~/cae_projekte/_rag/index.json`. EINE Basis, pro Dokument eine **Kategorie** `maschinen` (Referenzmaschinen → `ema_text2ema.derive`) oder `doku` (Doku → `ema_chat`). Embeddings über Ollama `/api/embeddings` (`nomic-embed-text`), Chunking ~900 Zeichen/150 Überlappung, Retrieval = Cosine (numpy). `add_text`/`add_file` (txt/md/csv direkt, **PDF via `pypdf`**), `search(query, category, k)`, `context_for(query, category)` (Prompt-Injektion), `list_documents`/`delete_document`/`stats`. Beide Konsumenten injizieren **best-effort** (ohne Ollama/Embeddings läuft alles weiter ohne Kontext). **Pro-Projekt-Store:** alle Funktionen nehmen ein optionales `store_dir` (None = globale Basis, sonst `<dir>/index.json`) → die Projektakte legt unter `<projekt>/rag/` einen eigenen Store an; `context_for_project(query, project_dir)` fragt Projekt-Store zuerst + globale Basis gemerged ab (genutzt von `ema_chat` mit `project_dir`). Server: `/rag/list`, `/rag/add`, `/rag/upload`, `/rag/delete/<id>`, `/rag/search` (global) + `/project/<id>/rag*` (pro Projekt, s. `ema_projekt`); UI: **„📚 Wissensbasis"**-Modal (Geometrie-Tab / `#rag`) + Projektakte-Panel |
 | `ema_text2ema.py` | Text → parameter set. `derive(description)` asks `ministral-3` to fill the `SCHEMA` fields, then `_validate` clamps every value to its range/enum and enforces radial ordering (statorOD>statorID>rotorOD>shaftD>shaftBoreD, ~0.7 mm air gap, slots≈6·p) so the result always loads. Served by `POST /text2ema`; UI is the `🧠 Text → Auslegung` modal (Geometrie tab / `#text2ema`) → "In Formular übernehmen". **RAG:** retrieves `maschinen`-category reference machines from `ema_rag` and injects them into the prompt (returns `rag_used`); no web yet |
-| `ema_experts.py` | Agentic report mode: parallel per-section LLM expert agents. `run_expert_agents` (6 experts on ONE project) + `run_expert_agents_compare`/`assemble_expert_section_compare` (the SAME 6 experts judge ALL variants **comparatively** with Vor-/Nachteile je Variante — used by the agentic comparison report) |
+| `ema_experts.py` | Agentic report mode: parallel per-section LLM expert agents. `run_expert_agents` (6 experts on ONE project) + `run_expert_agents_compare`/`assemble_expert_section_compare` (the SAME 6 experts judge ALL variants **comparatively** with Vor-/Nachteile je Variante — used by the agentic comparison report). **3D-aware EM expert:** `_em_field_data` attaches a compact `em3d_validierung` slice (`_em3d_compact(results)` → B_gap 2D-FDM vs 3D, Endeffekt Rand/Mitte, skew, mesh — None/absent when no 3D run), the EM-Feld-expert task asks it to weigh the 3D validation, and `_EXPERT_IMAGES["em_feld"]` includes `em3d_airgap_2d3d`/`em3d_endeffect` (only rendered when the chart files exist) |
 | `ema_training.py` | Fortlaufendes **LLM-Trainingsfile** (`~/cae_projekte/_training/dataset_sft.jsonl`, instruction/input/output JSONL). `run_pipeline` ruft nach dem Speichern `ema_training.upsert(project_id, meta, results)` auf (label=null) — **upsert per project_id** (kein Duplikat beim Nachrechnen). `instruction` = `ema_chat._machine_datasheet(meta)` (Geometrie+Material); für **KI-Entwürfe** stellt `build_instruction` die natürliche-Sprache-Aufgabe (`meta["design_brief"]`, durchgereicht aus dem `/analyse`-Payload) voran → echte „Beschreibung→Entwurf→Kennwerte"-SFT-Paare; jede Zeile trägt `design_source` ("ki"/"hand"). `output` = Kennwert-Text aus `results["summary"]`. **Einheitliches Schema:** jede Zeile trägt exakt `RECORD_KEYS` (project_id/timestamp/design_source/instruction/input/output/label/label_source/auto_label/auto_reasons/comment/rated_at/metrics/images); `_write_all` zieht beim Schreiben **jede** Zeile über `_normalize` auf dieses Schema (Altzeilen werden so beim nächsten Schreibvorgang migriert). **Vorsortierung:** `auto_label`/`auto_reasons` (Heuristik) werden **immer** mitgeschrieben; **KI-Entwürfe** (`design_source=="ki"`) werden direkt mit dem Heuristik-Label vorsortiert (`label_source="auto"`), Hand-Entwürfe bleiben `label=null`. `set_label(pid, "gut"/"schlecht", comment)` setzt das Label manuell (`label_source="user"`, vom Ergebnis-Tab) und bleibt beim Nachrechnen erhalten (überschreibt die Auto-Vorsortierung). `stats()` zählt zusätzlich `n_user_rated`/`n_auto_rated`/`n_ki`. **Bilder:** jede SFT-Zeile führt `images:[{key,title,path}]` mit (projekt-relative Pfade in `~/cae_projekte`, NICHT base64 — `IMAGE_PAIRS` spiegelt `ema_report.build_context` pairs, nur deterministische Charts, keine Animations-Frames). `export_vlm()` erzeugt zusätzlich `dataset_vlm.jsonl` (EIN Eintrag je Bild im messages/content-Format mit absolutem Bildpfad, fürs Vision-Finetuning) — wird nach jedem `upsert`/`set_label` mitgeführt. Endpoints `POST /training/vlm/export`, `GET /training/vlm/download` |
+| `ema_projekt.py` (Projektakte) | **Eine KI-lesbare Quelle der Wahrheit pro Projekt** (`<projekt>/project.json`, `schema_version:1`). Wird in `create_project_dir` **zuerst** angelegt (`init`, neue kwargs `origin`/`parent`) und **laufend** fortgeschrieben: `run_pipeline` setzt zu Beginn `status="rechnet"` und ruft am Save-Block (`ema_pipeline.py:~2275`, direkt nach `ema_training.upsert`) `record_run(...)` → hängt eine **Evolutionsstufe** an (`{ts,action,changed_inputs,key_metrics,note,ref}`, Eingabe-Diff via flachem geom.*-Vergleich, Kennzahlen via `ema_training.build_metrics`) und aktualisiert `datasheet`/`metrics`/`assets`/`design`/`inputs.payload`/`status`. Action = `analyse`/`recompute:<stages>`/`design_ai`. Weitere Schreibpunkte: Rating (`status=bewertet`+Stufe), Report (`status=berichtet`+`assets.report`). **Referenzen statt base64** (Charts als rel. Pfade, gespiegelt aus `ema_training.IMAGE_PAIRS`). **Backward-Compat:** `load_or_synthesize(dir)` rekonstruiert die Akte für Altprojekte aus `meta.json`+`results.json` (kein Pflicht-Migrationslauf), optional Lazy-Write-Back. Jeder Schreibvorgang **soft-fail** (atomar `os.replace`), `load` nutzt `setdefault` je Schlüssel. Felder: `status`(neu/rechnet/gerechnet/bewertet/berichtet/verworfen)·`tags`·`notes`(Entscheidungs-Log)·`lineage{parent,origin}`·`design`·`datasheet`·`inputs.payload`·`metrics`·`assets`·`evolution[]`·`links[]`(persistente Vergleichs-Verknüpfungen, einweg+selbstheilend via `resolved_links`)·`rag.docs[]`·`attachments[]`. Konsumenten lesen dieselbe Quelle: `ema_report.build_context` zieht `evolution`/`links`/`notes` (deterministischer Abschnitt **„Projektverlauf & Verknüpfungen"** via `_evolution_links_md`, nach der Prosa angehängt), `ema_chat` erdet auf `notes` + (bei Altprojekten) das synthetisierte Payload. Server: `/project/<id>/manifest`·`/meta`(Status/Tags/Notizen)·`/links`(GET/POST)·`/links/remove`·`/clone`(ganzes Verzeichnis klonen, `lineage.parent`, RAG mitkopieren — KEINE schweren Ergebnisse)·`/bundle`(Export `.emaproj`-Zip)·`/import_bundle`(Zip-slip-sicher → neues Projekt, `origin=import`)·`/rag`+`/rag/add`+`/rag/<doc>/delete`(**Pro-Projekt-RAG** unter `<projekt>/rag/index.json`)·`/attachments`(Anhänge → automatisch in die Projekt-RAG). UI: Galerie-Badges (Status/Abstammung/⚖Links/⟳Stufen) + **📁 Klonen**/**⬇ Bundle**/**📦 Import**, Ergebnis-Tab-Panel **🗂 Projektakte** (Status/Tags/Notizen + Evolutions-Timeline + Verknüpfungen + Projekt-RAG/Anhänge). Test: `smoke_test.py` `[projektakte]`-Block (init/record/diff/links/synthesize/lineage + `ema_rag.store_dir`-Isolation, ohne Ollama/FreeCAD) |
 | `ema_step_import.py` | **STEP-Import eines fertigen Motors**: liest per FreeCAD alle Solids (`extract_solids_script`), klassifiziert FreeCAD-frei (`classify_solids` über radiale Bänder + Volumen-Cluster + Rotationssymmetrie), leitet Maße/Polzahl ab (`derive_geom`, `_gap_cluster_count` für Pole/Nuten) + erkennt Magnete via OBB-Fit (`detect_magnets`, pol-lokale Halbpol-Magnete im Canvas-Format) und schreibt `motor.FCStd` mit benanntem `"Rotor"` (`assemble_fcstd_script`) → die bestehende Struktur-FEM rechnet darauf, EM auf den `customLegs`. `run_import` → applyDesignToCanvas-Form. Server: `/import_step`+`/import_step/status`; UI-Tab **📥 STEP-Import** → lädt in den Designer (Bestätigung), dann `/analyse` mit `imported:true` (run_pipeline überspringt den Geometrie-Build). Makro `step_import.FCMacro`. Tests: `test_step_import.py` |
-| `ema_em3d.py` / `elmer_runner.py` | **Echte 3D-Magnetfeldberechnung (Elmer FEM)** — s. Architektur-Abschnitt. `build_mesh` (Gmsh-OCC), `write_sif` (Elmer-Magnetostatik), `parse_results` (vtk-VTU + 2D-Vergleich), `run_em3d` (Orchestrator). `elmer_runner` = Subprozess-Wrapper (`ElmerGrid`/`ElmerSolver`, `ELMER_OK`). Server `/em3d`(+`/status`,`/vtu`), UI-Tab **🧲 3D-Feld**. Tests `test_em3d.py` (Mesh/sif ohne Elmer) |
+| `ema_em3d.py` / `elmer_runner.py` | **Echte 3D-Magnetfeldberechnung (Elmer FEM)** — s. Architektur-Abschnitt. `build_mesh` (Gmsh-OCC), `write_sif` (Elmer-Magnetostatik), `parse_results` (vtk-VTU + 2D-Vergleich), `run_em3d` (Orchestrator, zerlegt in `_prep_mesh`/`_solve_point`/`_decorate_res`), `run_em3d_sweep` (Drehzahlband: Mesh einmal, Punkt-Raster), `run_em3d_refine` (ROI lokal feiner + voller Re-Solve, ROI-`Box`-Feld in `_build_mesh_once`), `run_em3d_sector` (Ein-Pol-Sektor, anti-periodisch, zum vollen Motor gespiegelt — `_build_sector_mesh`/`write_sector_sif`/`_pattern_full_motor`/`_sector_results`). `elmer_runner` = Subprozess-Wrapper (`ElmerGrid`/`ElmerSolver`, `ELMER_OK`). Server `/em3d`(+`/status`,`/vtu`,`/vtp`,`/streamlines`,`/paraview`) + `/em3d_sweep` + `/em3d/submodel` (Verfeinerung) + `/em3d/sector` (Ein-Pol-Symmetrie) + **`/em3d/abort`** + `/em3d/save\|saved\|saved/<id>\|saved/<id>/delete` (PROJEKT-gebundener Store `<projekt>/em3d_runs/` via `_em3d_runs_root`; alle Handler binden den Lauf über `_em3d_project_dir`), UI-Tab **🧲 3D-Feld** (gespeicherte Läufe + Bericht liegen auf Tab ① Projekt). **Lauf abbrechen (`/em3d/abort`, UI-Knopf „⛔ Abbrechen"):** setzt ein Abbruch-Flag (`server._em3d_abort`) UND killt den laufenden ElmerSolver (`elmer_runner.abort_current` → Popen `terminate`, `run_elmersolver` meldet `aborted`) → sofortiger Stopp statt bis zum `timeout`. Beim **Sweep** (`run_em3d_sweep(..., cancel_cb=)`) wird zwischen den Punkten geprüft und das **Teilergebnis behalten** (`out["aborted"]/["n_done"]`, Kurven aus den fertigen Punkten, persistiert; Detailfeld nur, wenn der Detailpunkt — zuletzt in der Reihenfolge — schon dran war). Status wird `aborted` (UI gibt den Start wieder frei, rendert das Teilergebnis, speicherbar). **Gespeicherten Lauf laden zeigte „kein Feld":** `_e3LoadRun` leert jetzt die Viewer-Caches (`_e3PlayStop` → `_e3PdCache`/`_e3LinesCache`, per Punkt-Index gecacht) + neutralisiert `_e3ViewIdx`/`_e3SweepPoints` VOR dem Rendern und öffnet den Viewer frisch — sonst zeigte `_e3GetPointPd` die (stale) VTP des vorherigen Laufs bzw. nichts. Tests `test_em3d.py` (Mesh/sif + Sweep + Feldlinien-Export ohne Elmer) + `test_em3d_submodel.py` (ROI-Verfeinerung) |
+| `em3d_perf_check.py` | **Performance-Check der 3D-Elmer-Berechnung** (Standalone-CLI): fährt die Netzfeinheit stufenweise hoch (Zellgrößen-Skalierung) und misst je Stufe **Knotenzahl, Zeit (Mesh/ElmerGrid/Solve) + Peak-RAM** (via `/usr/bin/time -v`), schreibt `em3d_perf.csv`/`.json` inkrementell. `--calibrate` (nur meshen), `--max-nodes`/`--timeout`/`--ram-stop`/`--factors`. Datengrundlage für `EM3D_NODE_CEILING` + die RAM/Zeit-Schätzung des Ziel-Knoten-Reglers |
 
 ## Reference docs (read these for domain detail before changing physics)
 

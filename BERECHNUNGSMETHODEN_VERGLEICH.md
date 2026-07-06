@@ -19,6 +19,7 @@ Industrie-Standardwerkzeugen **Abaqus** (allgemeine FEA) und **Ansys Motor-CAD**
 | Domäne | Dieses Tool | Abaqus | Ansys Motor-CAD |
 |---|---|---|---|
 | **Elektromagnetik** | 2D-**Finite-Differenzen** (FDM), magnetostatisch, linear + optionale B-H-Sättigung; analytische Drehmoment-/EMK-Kennwerte | (kein nativer Nieder­frequenz-EM-Solver; gekoppelt mit Maxwell/Opera) | 2D-**FEA** (magnetostatisch + transient) + Analytik, der Branchen­standard |
+| **Elektromagnetik (3D, optional)** | echtes 3D-**FEM** (Elmer, magnetostatisch, linear), Endeffekte + Schrägung, 2D-vs-3D-Vergleich — on-demand neben dem 2D-Pfad | Kopplung mit Maxwell 3D | Maxwell **3D** als separates, kostenpflichtiges Zusatzmodul |
 | **Festigkeit (Rotor)** | 3D-**FEM** linear-elastisch (CalculiX), Fliehkraft, ein Lastfall, lineare Tets; analytischer Lamé-Fallback | 3D-**FEM** voll nichtlinear (Plastizität, Kontakt, Ermüdung, Modal/NVH) | Analytik + **FEA**-Rotorspannung |
 | **Thermik** | 6-Knoten-**LPTN** (stationär + transient) | 3D-**FE-Wärmeleitung**/CHT | detailliertes **LPTN** (Branchenstandard) + CFD-kalibrierte Korrelationen |
 | **Welle-Nabe-Verbindung** | **analytisch** (Lamé-Schrumpfsitz / Keilwelle / Polygon) | 3D-FEM mit Kontakt + Vorspannung | analytisch + FEA |
@@ -94,7 +95,30 @@ Rotor-Eisen isoliert.
 (z.B. Magnet­wirbelstrom als Anteil der Kupferverluste). DC-Kupfer (**keine**
 AC-/Proximity-Verluste).
 
-### 2.4 System / Fahrzyklus (`ema_drivecycle.py`)
+### 2.4 Elektromagnetik (3D, optional) — Elmer FEM (`ema_em3d.py`, `elmer_runner.py`)
+
+- **Methode:** echte volumetrische **3D-FEM**, `WhitneyAVSolver` (Kantenelemente,
+  Vektorpotential) in **Elmer**, MUMPS-Direktlöser; Vernetzung mit **Gmsh** (Tetraeder,
+  zonal verfeinert). Magnete als Volumen-Magnetisierung (nicht Randströme wie im
+  2D-FDM), Eisen linear $\mu_r\approx500$.
+- **Erfasst, was 2D grundsätzlich nicht kann:** finite Baulänge (**Endeffekte**,
+  Feldabfall zum Wickelkopf-Ende hin), **Schrägung/Staffelung** (Skew), und liefert
+  einen quantitativen **2D-vs-3D-Vergleich** derselben Maschine.
+- **On-demand, kein Pflichtschritt:** läuft separat vom 2D-Pfad (eigener Tab, eigener
+  Job), der 2D-FDM-Solver bleibt der schnelle Standardpfad für Kennlinien/Sweeps über
+  viele Drehzahlpunkte.
+- **v1-Scope-Grenzen:** lineare Materialien (keine B-H-Kurve), vereinfachtes Lastfeld
+  (Grundwelle statt verteilter realer Wicklungsgeometrie), **keine** Bewegungs-/
+  Transientensimulation (ein Drehzahl-/Lastsweep ist eine Folge **statischer**
+  Arbeitspunkte, kein echtes Zeitschritt-Modell) — das unterscheidet diesen Pfad von
+  einer vollen Maxwell-3D-Transiente.
+
+**Charakter:** schließt die 2D-Lücke bei Endeffekten/Skew **geometrisch echt**, bleibt
+aber in Materialmodell und Zeitauflösung bewusst einfacher als ein kommerzieller
+3D-Transient-Löser — ein Validierungs-/Detailwerkzeug **neben**, nicht **statt** dem
+schnellen 2D-Pfad.
+
+### 2.5 System / Fahrzyklus (`ema_drivecycle.py`)
 
 - **Quasistatische** Rückwärtsrechnung: aus dem Geschwindigkeitsprofil
   (WLTP-3b, Volllast, Anhänger-Bergfahrt, CSV) → Rad-/Motormoment & -drehzahl →
@@ -135,7 +159,7 @@ deutlich detaillierter und messtechnisch validiert.
 
 | Aspekt | Dieses Tool | Motor-CAD |
 |---|---|---|
-| EMag-Methode | **2D-FDM**, analytisch verankertes Moment | **2D-FEA** (magnetostatisch + transient) + Analytik |
+| EMag-Methode | **2D-FDM**, analytisch verankertes Moment; optional echtes **3D-FEM** (Elmer, linear-magnetostatisch) für Endeffekte/Skew | **2D-FEA** (magnetostatisch + transient) + Analytik; **3D** als separates, kostenpflichtiges Zusatzmodul (Maxwell 3D) |
 | Sättigung | linear + Display-B-H-Pass | nichtlineare B-H im Solve |
 | Drehmoment/Rastmoment | analytisch (Maxwell, kgV) | aus FEA-Feld integriert (inkl. Oberwellen) |
 | Verluste | Bertotti-/empirisch, DC-Kupfer | Eisen (Modell), **AC-Kupfer + Proximity**, Magnet-Wirbelstrom per FEA |
@@ -165,7 +189,10 @@ Tool ist die **schnelle, freie Vorstufe** dazu.
 
 **Wo die Grenzen liegen (bewusst)**
 - EM **2D** + **linear** im Solve → keine 3D-Stirnstreuung, Sättigung nur als
-  Anzeige; Drehmoment analytisch verankert (nicht feldintegriert).
+  Anzeige; Drehmoment analytisch verankert (nicht feldintegriert). Der optionale
+  3D-Elmer-Pfad schließt die Endeffekt-/Skew-Lücke **geometrisch**, bleibt aber
+  linear-magnetostatisch (keine B-H-Kurve, keine Bewegungssimulation) — kein Ersatz
+  für eine volle nichtlineare 3D-Transiente.
 - Verluste teils **empirisch**; **keine** AC-Kupfer-/Proximity-Verluste.
 - Festigkeit **linear-elastisch, ein Lastfall** (keine Press-Vorspannung,
   Thermodehnung, Plastizität, Ermüdung).
@@ -186,7 +213,7 @@ Tool ist die **schnelle, freie Vorstufe** dazu.
 | | Dieses Tool | Motor-CAD | Abaqus |
 |---|---|---|---|
 | Rolle | Vorauslegung/Lehre | E-Maschinen-Detailtool | Struktur/Multiphysik-Nachweis |
-| EMag | 2D-FDM + Analytik | 2D-FEA + Analytik | — (Kopplung) |
+| EMag | 2D-FDM + Analytik, optional 3D-FEM (linear, Elmer) | 2D-FEA + Analytik, 3D optional (Maxwell) | — (Kopplung) |
 | Festigkeit | FEM linear, 1 Lastfall | analytisch + FEA | FEM nichtlinear, voll |
 | Thermik | LPTN (6 Knoten) | LPTN (detailliert) | FE-Wärmeleitung |
 | Validierung | Plausibilität | messvalidiert | zertifizierungs­tauglich |

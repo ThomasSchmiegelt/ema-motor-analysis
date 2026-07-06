@@ -588,43 +588,119 @@ def _crown_rect(at, ey, ez):
     return Part.makePolygon(cs + [cs[0]])
 
 def _crown_swept(s, k0, k1, out):
-    # Winding head as ONE continuous solid (Zugkörper): a FINELY-sampled ruled loft
-    # through the crown path swept with the rectangular conductor cross-section.
-    # Ruled (piecewise-linear) is used on purpose — a smooth B-spline sweep overshoots
-    # at the sharp r0→r1 apex step and the go/return arms touch (tiny overlaps); the
-    # many small linear segments here look smooth yet hug the path envelope, so the
-    # collision-free radial split (ascending @ r0, descending @ r1) is preserved.
-    # Uniform outward flare (wh_flare). Fallback: box chevron _crown.
+    # Winding head as ONE continuous SMOOTH sweep (durchgezogener Zugkörper).
+    # Path design (collision-safe by construction):
+    #   • straight chevron arms (constant slope) keep the 2H/pitch z-gap between
+    #     tangential same-lane neighbours exactly as the box chevron does;
+    #   • the r0→r1 radial hand-over is a smoothstep inside a C1 parabolic apex
+    #     window |t-0.5| <= w_apex < 1/(2·pitch), i.e. STRICTLY inside the
+    #     innermost go/return arm crossing (at t = 0.5 ± m/(2·pitch)) — crossing
+    #     arms therefore still sit on separate radii r0 vs r1;
+    #   • the outward flare is a pure function of the height profile h(t)
+    #     (identical on both arms at equal z), so the radial gap at any crossing
+    #     stays exactly r1−r0 — the same invariant the old step-apex path had.
+    # Sweep: SMOOTH loft (ruled=False) — the historical ballooning that forced
+    # ruled=True came from the instantaneous r0→r1 apex step, which no longer
+    # exists; an analytic volume gate (path length × cross-section) still catches
+    # any overshoot. Fallbacks: ruled loft → box chevron _crown.
     if wh_style == "box":
         _crown(s, k0, k1, out); return
     th0 = s * dtheta; th1 = (s + coil_pitch) * dtheta
     r0 = _r_lane(k0); r1 = _r_lane(k1); f = wh_flare
-    th_mid = th0 + 0.5 * (th1 - th0)
-    half = 16                                         # many segments → visually smooth
-    pts = []
-    for mseg in range(0, half + 1):                  # ascending @ r0, flaring out
-        t = 0.5 * mseg / half
-        pts.append(_pt(r0 + f * 2.0 * t, th0 + t * (th1 - th0), z_face + crown_H * 2.0 * t))
-    pts.append(_pt(r1 + f, th_mid, z_face + crown_H))            # apex (radial step, flared)
-    for mseg in range(1, half + 1):                  # descending @ r1, flaring back in
-        t = 0.5 + 0.5 * mseg / half
-        pts.append(_pt(r1 + f * 2.0 * (1.0 - t), th0 + t * (th1 - th0),
-                       z_face + crown_H * 2.0 * (1.0 - t)))
+    dr = r1 - r0
+    e_bend = 0.08                                    # θ-easing window at both path ends
+    # Apex window in t-space. The θ-easing compresses the mid region by (1−e), so a
+    # t-window maps to a WIDER θ-window (×1/(1−e)) — scale by (1−e) so the window
+    # stays clear of the innermost arm crossing at θ-fraction 0.5 − 1/(2·pitch)
+    # (0.28/pitch leaves a 0.22/pitch θ-margin; 0.35 unscaled overlapped at s36).
+    w_apex = min(0.18, 0.28 / max(1, coil_pitch)) * (1.0 - e_bend)
+    H_eff = crown_H / (1.0 - w_apex)                 # cap-sag compensation → peak ≈ crown_H
+    # Path samples grouped into 5 C²-clean segments: bend | arm | apex | arm | bend.
+    # Each is lofted SEPARATELY below — one global smooth loft rings (the B-spline
+    # interpolates ALL sections globally, and the end-bend curvature jumps made the
+    # surface oscillate ±0.2–0.4 mm along the whole arm, eating the 0.8 mm lane
+    # gaps → widespread pin grazes). Boundary sections are shared → seams are
+    # tangent-continuous and invisible.
+    e = e_bend; w = w_apex
+    ts = []
+    for (ta, tb, n_s) in ((0.0, e, 6), (e, 0.5 - w, 10), (0.5 - w, 0.5 + w, 9),
+                          (0.5 + w, 1.0 - e, 10), (1.0 - e, 1.0, 6)):
+        for i in range(n_s):
+            ts.append(ta + (tb - ta) * i / float(n_s))
+    ts.append(1.0)
+    h_b = 2.0 * e_bend                               # h at the end of the θ-bend
+    pts = [_pt(r0, th0, z_face - 1.2)]               # embedded in the own leg → seamless
+    for t in ts:
+        u = t - 0.5
+        if abs(u) >= w_apex:                         # straight arm
+            h = 1.0 - 2.0 * abs(u)
+        else:                                        # C1 parabolic apex cap
+            h = (1.0 - w_apex) - u * u / w_apex
+        if u <= -w_apex:
+            b = 0.0
+        elif u >= w_apex:
+            b = 1.0
+        else:                                        # smoothstep radial hand-over
+            q = (u + w_apex) / (2.0 * w_apex)
+            b = q * q * (3.0 - 2.0 * q)
+        # θ easing: s'(0)=s'(1)=0 → the crown LEAVES/ENTERS the slot bar exactly
+        # vertically (tangent = leg axis, cross-section = leg cross-section), then
+        # bends C1-continuously into the arm — no more kinked butt joint.
+        if t < e_bend:
+            s_t = t * t / (2.0 * e_bend) / (1.0 - e_bend)
+        elif t > 1.0 - e_bend:
+            tt = 1.0 - t
+            s_t = 1.0 - tt * tt / (2.0 * e_bend) / (1.0 - e_bend)
+        else:
+            s_t = (t - 0.5 * e_bend) / (1.0 - e_bend)
+        # Flare: LINEAR in h on the arms (pure function of h → equal flare on both
+        # arms at equal z, so every crossing keeps its r1−r0 radial gap — the
+        # behaviour the ruled baseline validated); only below the bend end (h<h_b,
+        # no crossings there) it blends cubically to slope 0 so r'(0)=0 and the
+        # slot exit stays truly straight.
+        if h >= h_b:
+            g = h
+        else:
+            x = h / h_b
+            g = h_b * (2.0 * x * x - x * x * x)
+        pts.append(_pt(r0 + b * dr + f * g, th0 + s_t * (th1 - th0),
+                       z_face + H_eff * h))
+    pts.append(_pt(r1, th1, z_face - 1.2))           # embedded return-leg end
     try:
         n = len(pts); secs = []
         for i in range(n):
             pf = pts[i - 1] if i > 0 else pts[i]
-            pt = pts[i + 1] if i < n - 1 else pts[i]
-            _ex, ey, ez = _crown_frame(pf, pt, pts[i])
+            pn = pts[i + 1] if i < n - 1 else pts[i]
+            _ex, ey, ez = _crown_frame(pf, pn, pts[i])
             secs.append(_crown_rect(pts[i], ey, ez))
-        solid = Part.makeLoft(secs, True, True)       # solid=True, ruled=True
+        cuts = (0, 7, 17, 26, 36, n - 1)             # embed+bend | arm | apex | arm | bend+embed
+        solids = []
+        for a in range(len(cuts) - 1):
+            sl = secs[cuts[a]:cuts[a + 1] + 1]
+            pl = sum(pts[i + 1].sub(pts[i]).Length for i in range(cuts[a], cuts[a + 1]))
+            v_ref = pl * cond_w * layer_h
+            sol = None
+            try:
+                sol = Part.makeLoft(sl, True, False)  # smooth loft per segment
+                if not (sol and sol.isValid()
+                        and 0.6 * v_ref < sol.Volume < 1.6 * v_ref):
+                    sol = None                        # balloon / degenerate
+            except Exception:
+                sol = None
+            if sol is None:
+                solids = None; break
+            solids.append(sol)
+        if solids:
+            out.extend(solids); return
+        solid = Part.makeLoft(secs, True, True)       # fallback: one ruled loft
         if solid and solid.isValid() and solid.Volume > 1e-6:
             out.append(solid); return
     except Exception:
         pass
     _crown(s, k0, k1, out)                            # fallback: box chevron
 
-def _tab(s, k, out):
+def _tab_box(s, k, out):
+    # Fallback: single angled bar (the old look — overlaps the leg end visibly).
     th0 = s * dtheta; r = _r_lane(k)
     direction = 1.0 if (k % 2 == 0) else -1.0
     p0 = _pt(r, th0, -z_face)
@@ -632,6 +708,81 @@ def _tab(s, k, out):
     seg = _bar(p0, p1, cond_w, layer_h)
     if seg is not None:
         out.append(seg)
+
+def _tab(s, k, out):
+    # Weld side (Schweißseite) with the REAL hairpin twist: every leg end leaves
+    # the slot straight down, bends into a sloped tangential ramp that twists it
+    # by HALF a coil pitch (all lanes the SAME direction — the standard weld
+    # twist), then runs STRAIGHT parallel to the motor axis as the weld tip.
+    # After the y/2 twist the return leg of pin(s−pitch) (lane 2j+1) and the go
+    # leg of pin(s) (lane 2j) — both in slot s — end SIDE BY SIDE at the same θ;
+    # over the last ramp quarter the pair CONVERGES radially (even lane out, odd
+    # lane in) to a 0.12 mm light gap, so the welded pair visibly meets without a
+    # boolean overlap. Collision-free like the crown arms: the ramp slope equals
+    # the crown-arm slope (H_w = crown_H over y/2 slots ⇒ z-gap 2H/pitch between
+    # slot neighbours), all ramps in a lane are PARALLEL (same direction — they
+    # never cross), lanes sit on separate radii, and a tip at θ = s+y/2 hangs
+    # ≥ H_w/(y/2) below any ramp still passing overhead.
+    if wh_style == "box":
+        _tab_box(s, k, out); return
+    th0 = s * dtheta; r = _r_lane(k)
+    span = 0.5 * coil_pitch * dtheta                 # half coil pitch twist
+    H_w = crown_H                                    # ⇒ ramp slope = crown-arm slope
+    t_w = 8.0                                        # straight weld tip ∥ axis
+    conv = (ins * 0.5 - 0.06) * (1.0 if (k % 2 == 0) else -1.0)
+    e = 0.22                                         # bend easing at ramp start/end
+    ts = []
+    for (ta, tb, n_s) in ((0.0, e, 4), (e, 1.0 - e, 7), (1.0 - e, 1.0, 4)):
+        for i in range(n_s):
+            ts.append(ta + (tb - ta) * i / float(n_s))
+    ts.append(1.0)
+    pts = [_pt(r, th0, -z_face + 1.2)]               # embedded in the own leg
+    for t in ts:
+        if t < e:                                    # vertical slot exit
+            s_t = t * t / (2.0 * e) / (1.0 - e)
+        elif t > 1.0 - e:                            # ease out → vertical tip
+            tt = 1.0 - t
+            s_t = 1.0 - tt * tt / (2.0 * e) / (1.0 - e)
+        else:
+            s_t = (t - 0.5 * e) / (1.0 - e)
+        c = 0.0                                      # radial pair convergence
+        if t > 0.75:
+            q = (t - 0.75) / 0.25
+            c = conv * q * q * (3.0 - 2.0 * q)
+        pts.append(_pt(r + c, th0 + span * s_t, -z_face - H_w * t))
+    pts.append(_pt(r + conv, th0 + span, -z_face - H_w - t_w))   # weld tip end
+    try:
+        n = len(pts); secs = []
+        for i in range(n):
+            pf = pts[i - 1] if i > 0 else pts[i]
+            pn = pts[i + 1] if i < n - 1 else pts[i]
+            _ex, ey, ez = _crown_frame(pf, pn, pts[i])
+            secs.append(_crown_rect(pts[i], ey, ez))
+        cuts = (0, 5, 12, 16, n - 1)                 # bend | ramp | bend | tip
+        solids = []
+        for a in range(len(cuts) - 1):
+            sl = secs[cuts[a]:cuts[a + 1] + 1]
+            pl = sum(pts[i + 1].sub(pts[i]).Length for i in range(cuts[a], cuts[a + 1]))
+            v_ref = pl * cond_w * layer_h
+            sol = None
+            try:
+                sol = Part.makeLoft(sl, True, False)  # smooth loft per segment
+                if not (sol and sol.isValid()
+                        and 0.6 * v_ref < sol.Volume < 1.6 * v_ref):
+                    sol = None
+            except Exception:
+                sol = None
+            if sol is None:
+                solids = None; break
+            solids.append(sol)
+        if solids:
+            out.extend(solids); return
+        solid = Part.makeLoft(secs, True, True)       # fallback: one ruled loft
+        if solid and solid.isValid() and solid.Volume > 1e-6:
+            out.append(solid); return
+    except Exception:
+        pass
+    _tab_box(s, k, out)
 
 # Build physical U-pins (each = one continuous conductor): leg(s,2j) + crown +
 # leg(s+pitch,2j+1) + weld tabs. Pins partition all legs uniquely. The U-crown

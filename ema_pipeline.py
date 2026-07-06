@@ -18,9 +18,13 @@ import ema_drivecycle
 
 # ── Project directory ─────────────────────────────────────────────────────────
 
-def create_project_dir(root: str, name: str = "") -> tuple[str, str]:
+def create_project_dir(root: str, name: str = "", *,
+                       origin: str = "analyse", parent=None) -> tuple[str, str]:
     """Create a fresh ~/cae_projekte/<timestamp>[_<name>]/ directory.
-    Returns (full_path, project_id)."""
+    Returns (full_path, project_id).
+
+    Also lays down the Projektakte stub (``project.json``) *first*, so the manifest
+    exists before any computation (``origin``/``parent`` record provenance/lineage)."""
     ts   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     safe = re.sub(r'[^\w\-]+', '_', (name or "").strip())[:48].strip("_")
     pid  = f"{ts}_{safe}" if safe else ts
@@ -28,6 +32,11 @@ def create_project_dir(root: str, name: str = "") -> tuple[str, str]:
     os.makedirs(full, exist_ok=True)
     for sub in ("cad_images", "charts", "frames"):
         os.makedirs(os.path.join(full, sub), exist_ok=True)
+    try:
+        import ema_projekt
+        ema_projekt.init(full, pid, origin=origin, parent=parent, label=name or pid)
+    except Exception:
+        pass
     return full, pid
 
 
@@ -1541,6 +1550,13 @@ def run_pipeline(data: dict, state: dict, frames: list,
     def _do(name: str) -> bool:
         return (stages is None) or (name in stages)
 
+    # Projektakte: Lauf startet → Status laufend (billig, kein base64). Soft.
+    try:
+        import ema_projekt
+        ema_projekt.update(proj, status="rechnet")
+    except Exception:
+        pass
+
     geom        = data["geom"]
     rotor_key   = data.get("rotor_lam",  data.get("material", "m270_35a"))
     stator_key  = data.get("stator_lam", rotor_key)
@@ -2320,6 +2336,23 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 _log(state, "📚 Trainingsdatensatz aktualisiert", 99)
             except Exception as _te:
                 _log(state, f"⚠ Trainingsfile nicht geschrieben: {_te}", 99)
+            # Projektakte fortschreiben: Evolutionsstufe anhängen (Eingabe-Diff +
+            # Kennzahlen) und Datenblatt/Assets/Status aktualisieren. Die Action
+            # unterscheidet Voll-/Teil-Lauf bzw. KI-Entwurf. Soft — Akte darf den
+            # Lauf nie abbrechen.
+            try:
+                import ema_projekt
+                if partial:
+                    _action = "recompute:" + ",".join(sorted(stages))
+                elif meta.get("design_source") == "ki":
+                    _action = "design_ai"
+                else:
+                    _action = "analyse"
+                ema_projekt.record_run(proj, os.path.basename(proj), meta, results,
+                                       action=_action,
+                                       note=str(data.get("evolution_note", "") or ""))
+            except Exception as _ae:
+                _log(state, f"⚠ Projektakte nicht geschrieben: {_ae}", 99)
         except Exception as _pe:
             _log(state, f"⚠ Projekt-Speichern fehlgeschlagen: {_pe}", 99)
 

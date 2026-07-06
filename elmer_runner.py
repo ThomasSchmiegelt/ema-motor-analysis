@@ -11,10 +11,47 @@ Verfügbarkeit fürs UI/Server-Gating.
 import os
 import shutil
 import subprocess
+import threading
 
 ELMERGRID = shutil.which("ElmerGrid")
 ELMERSOLVER = shutil.which("ElmerSolver")
 ELMER_OK = bool(ELMERGRID and ELMERSOLVER)
+
+# Laufender ElmerSolver-Prozess (für Abbruch). run_elmersolver benutzt Popen statt
+# subprocess.run und hinterlegt den Prozess hier, damit `abort_current()` ihn aus einem
+# anderen Thread (dem /em3d/abort-Handler) sofort beenden kann — sonst würde ein Abbruch
+# erst nach dem laufenden Solve (bis zu Minuten/`timeout`) greifen.
+_PROC_LOCK = threading.Lock()
+_CURRENT_PROC = None
+_ABORTED = False
+
+
+def abort_current() -> bool:
+    """Bricht den gerade laufenden ElmerSolver-Prozess ab (falls einer läuft). Setzt ein
+    Abbruch-Flag, damit ``run_elmersolver`` das Ergebnis als *abgebrochen* meldet. Gibt True
+    zurück, wenn ein Prozess terminiert wurde."""
+    global _ABORTED
+    with _PROC_LOCK:
+        _ABORTED = True
+        p = _CURRENT_PROC
+    if p is None:
+        return False
+    try:
+        p.terminate()                       # SIGTERM; ElmerSolver beendet zeitnah
+        try:
+            p.wait(timeout=5)
+        except Exception:
+            p.kill()                        # notfalls hart
+        return True
+    except Exception:
+        return False
+
+
+def clear_abort():
+    """Abbruch-Flag zurücksetzen (vom Start eines neuen Laufs aufzurufen)."""
+    global _ABORTED
+    with _PROC_LOCK:
+        _ABORTED = False
 
 INSTALL_HINT = ("Elmer nicht gefunden. Installation:\n"
                 "  sudo add-apt-repository -y ppa:elmer-csc-ubuntu/elmer-csc-ppa\n"
@@ -57,14 +94,30 @@ def run_elmersolver(sif_path: str, cwd: str, timeout: int = 3600) -> dict:
     sucht standardmäßig ELMERSOLVER_STARTINFO / case.sif im cwd)."""
     if not ELMERSOLVER:
         return {"ok": False, "error": "ElmerSolver fehlt", "stdout": "", "stderr": INSTALL_HINT}
+    global _CURRENT_PROC
     try:
-        proc = subprocess.run([ELMERSOLVER, os.path.basename(sif_path)],
-                              capture_output=True, text=True, timeout=timeout, cwd=cwd)
-        out = proc.stdout or ""
+        with _PROC_LOCK:
+            if _ABORTED:                     # schon vor dem Start abgebrochen
+                return {"ok": False, "aborted": True, "error": "abgebrochen",
+                        "stdout": "", "stderr": ""}
+            proc = subprocess.Popen([ELMERSOLVER, os.path.basename(sif_path)],
+                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    text=True, cwd=cwd)
+            _CURRENT_PROC = proc
+        try:
+            out, err = proc.communicate(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill(); proc.communicate()
+            return {"ok": False, "error": "ElmerSolver Timeout", "stdout": "", "stderr": ""}
+        out = out or ""
+        if _ABORTED or proc.returncode < 0:  # terminiert/gekillt (Signal → negativer Code)
+            return {"ok": False, "aborted": True, "error": "abgebrochen",
+                    "stdout": out, "stderr": err or ""}
         ok = "ELMER SOLVER FINISHED" in out.upper() or "*** Elmer Solver: ALL DONE" in out
-        return {"ok": ok, "stdout": out, "stderr": proc.stderr or "",
+        return {"ok": ok, "stdout": out, "stderr": err or "",
                 "returncode": proc.returncode}
-    except subprocess.TimeoutExpired:
-        return {"ok": False, "error": "ElmerSolver Timeout", "stdout": "", "stderr": ""}
     except Exception as e:
         return {"ok": False, "error": str(e), "stdout": "", "stderr": str(e)}
+    finally:
+        with _PROC_LOCK:
+            _CURRENT_PROC = None

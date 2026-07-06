@@ -44,10 +44,18 @@ _CHUNK_OVERLAP = 150
 
 # ── persistence ──────────────────────────────────────────────────────────────
 
-def _load() -> dict:
-    if os.path.exists(INDEX_PATH):
+def _paths(store_dir: str | None) -> tuple[str, str]:
+    """(root, index_path) for the global store (store_dir=None) or a per-project store."""
+    if store_dir:
+        return store_dir, os.path.join(store_dir, "index.json")
+    return RAG_ROOT, INDEX_PATH
+
+
+def _load(store_dir: str | None = None) -> dict:
+    _, index_path = _paths(store_dir)
+    if os.path.exists(index_path):
         try:
-            with open(INDEX_PATH) as f:
+            with open(index_path) as f:
                 d = json.load(f)
             d.setdefault("documents", [])
             d.setdefault("chunks", [])
@@ -57,12 +65,13 @@ def _load() -> dict:
     return {"schema_version": 1, "documents": [], "chunks": []}
 
 
-def _save(idx: dict) -> None:
-    os.makedirs(RAG_ROOT, exist_ok=True)
-    tmp = INDEX_PATH + ".tmp"
+def _save(idx: dict, store_dir: str | None = None) -> None:
+    root, index_path = _paths(store_dir)
+    os.makedirs(root, exist_ok=True)
+    tmp = index_path + ".tmp"
     with open(tmp, "w") as f:
         json.dump(idx, f, ensure_ascii=False)
-    os.replace(tmp, INDEX_PATH)
+    os.replace(tmp, index_path)
 
 
 # ── embeddings (Ollama) ──────────────────────────────────────────────────────
@@ -138,8 +147,9 @@ def extract_text(filename: str, raw: bytes) -> str:
 # ── public API ───────────────────────────────────────────────────────────────
 
 def add_text(text: str, title: str, category: str = DEFAULT_CATEGORY, source: str = "",
-             progress_cb=None) -> dict:
-    """Chunk + embed a text document and append it to the (single) store.
+             progress_cb=None, store_dir: str | None = None) -> dict:
+    """Chunk + embed a text document and append it to a store.
+    `store_dir=None` → the shared global base; a path → that per-project store.
     `category` is an optional free-form tag; it does not partition the base."""
     category = (category or DEFAULT_CATEGORY).strip() or DEFAULT_CATEGORY
     chunks = _chunk(text)
@@ -147,7 +157,7 @@ def add_text(text: str, title: str, category: str = DEFAULT_CATEGORY, source: st
         raise ValueError("Leerer Text — nichts zu hinterlegen")
     vecs = _embed_many(chunks, progress_cb=progress_cb)
 
-    idx = _load()
+    idx = _load(store_dir)
     doc_id = f"{int(time.time()*1000):x}"
     idx["documents"].append({
         "id": doc_id, "title": title or "(ohne Titel)", "category": category,
@@ -156,23 +166,23 @@ def add_text(text: str, title: str, category: str = DEFAULT_CATEGORY, source: st
     })
     for i, (c, v) in enumerate(zip(chunks, vecs)):
         idx["chunks"].append({"doc_id": doc_id, "idx": i, "text": c, "embedding": v})
-    _save(idx)
+    _save(idx, store_dir)
     return {"id": doc_id, "title": title, "category": category, "n_chunks": len(chunks)}
 
 
 def add_file(filename: str, raw: bytes, category: str = DEFAULT_CATEGORY, title: str = "",
-             progress_cb=None) -> dict:
+             progress_cb=None, store_dir: str | None = None) -> dict:
     text = extract_text(filename, raw)
     if not text.strip():
         raise ValueError(f"Kein Text aus {filename} extrahierbar")
     return add_text(text, title or filename, category, source=filename,
-                    progress_cb=progress_cb)
+                    progress_cb=progress_cb, store_dir=store_dir)
 
 
 def search(query: str, category: str | None = None, k: int = 5,
-           min_score: float = 0.2) -> list[dict]:
+           min_score: float = 0.2, store_dir: str | None = None) -> list[dict]:
     """Top-k chunks by cosine similarity, optionally filtered to one category."""
-    idx = _load()
+    idx = _load(store_dir)
     rows = idx["chunks"]
     if category:
         doc_cat = {d["id"]: d["category"] for d in idx["documents"]}
@@ -197,11 +207,7 @@ def search(query: str, category: str | None = None, k: int = 5,
     return out
 
 
-def context_for(query: str, category: str | None = None, k: int = 5,
-                max_chars: int = 4000) -> str:
-    """Retrieved snippets formatted for injection into an LLM prompt (or '' if none).
-    `category=None` (default) searches the WHOLE shared base."""
-    hits = search(query, category=category, k=k)
+def _format_hits(hits: list[dict], max_chars: int) -> str:
     if not hits:
         return ""
     parts, total = [], 0
@@ -214,30 +220,58 @@ def context_for(query: str, category: str | None = None, k: int = 5,
     return "\n\n---\n\n".join(parts)
 
 
-def list_documents() -> list[dict]:
-    return _load()["documents"]
+def context_for(query: str, category: str | None = None, k: int = 5,
+                max_chars: int = 4000, store_dir: str | None = None) -> str:
+    """Retrieved snippets formatted for injection into an LLM prompt (or '' if none).
+    `category=None` (default) searches the WHOLE shared base."""
+    return _format_hits(search(query, category=category, k=k, store_dir=store_dir),
+                        max_chars)
 
 
-def delete_document(doc_id: str) -> bool:
-    return delete_documents([doc_id]) > 0
+def context_for_project(query: str, project_dir: str, k: int = 4,
+                        max_chars: int = 4000) -> str:
+    """Per-project retrieval: the project's OWN store first, then the global base —
+    concatenated (project store given priority), bounded by ``max_chars``. Best effort
+    (returns '' on any error / empty base). The store lives in ``<project>/rag``."""
+    parts = []
+    try:
+        store = os.path.join(project_dir, "rag")
+        if os.path.exists(os.path.join(store, "index.json")):
+            ph = search(query, k=k, store_dir=store)
+            parts.append(_format_hits(ph, max_chars // 2))
+    except Exception:
+        pass
+    try:
+        parts.append(_format_hits(search(query, k=k), max_chars // 2))
+    except Exception:
+        pass
+    return "\n\n---\n\n".join(p for p in parts if p)
 
 
-def delete_documents(ids) -> int:
+def list_documents(store_dir: str | None = None) -> list[dict]:
+    return _load(store_dir)["documents"]
+
+
+def delete_document(doc_id: str, store_dir: str | None = None) -> bool:
+    return delete_documents([doc_id], store_dir=store_dir) > 0
+
+
+def delete_documents(ids, store_dir: str | None = None) -> int:
     """Delete one or many documents (and their chunks) in a single index write.
     Returns the number of documents actually removed."""
     ids = set(ids or [])
     if not ids:
         return 0
-    idx = _load()
+    idx = _load(store_dir)
     before = len(idx["documents"])
     idx["documents"] = [d for d in idx["documents"] if d["id"] not in ids]
     idx["chunks"] = [c for c in idx["chunks"] if c["doc_id"] not in ids]
-    _save(idx)
+    _save(idx, store_dir)
     return before - len(idx["documents"])
 
 
-def stats() -> dict:
-    idx = _load()
+def stats(store_dir: str | None = None) -> dict:
+    idx = _load(store_dir)
     by_cat = {}
     for d in idx["documents"]:
         c = d.get("category", DEFAULT_CATEGORY)

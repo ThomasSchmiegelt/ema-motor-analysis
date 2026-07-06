@@ -258,6 +258,80 @@ def _training():
     return f"instr {len(instr)}c, out {len(outp)}c, auto={auto['suggestion']}, ki-presort ok"
 check("training-file record + images + VLM export", _training)
 
+# ── Projektakte (manifest + evolution + synthesize, no Ollama/FreeCAD) ───────
+print("\n[projektakte]")
+def _projektakte():
+    import ema_projekt as P, ema_training as T, os, json, tempfile, shutil
+    meta = {"label": "Akte-Test", "created": "2026-01-01T00:00:00",
+            "payload": {"geom": dict(GEOM), "load_nm": 120, "rpm_to": 20000},
+            "materials": {"magnet": "NdFeB N42"}, "rpm_range": "5000–20000 U/min",
+            "design_source": "hand"}
+    results = {"summary": {"B_gap_T": 0.92, "Kt_Nm_per_A": 0.3, "T_winding_C": 140,
+               "T_magnet_C": 95, "max_safe_rpm": 22000, "mass_g": 3200,
+               "P_total_W": 1500}, "em_advanced": {"Isc_A": 400}}
+    base = tempfile.mkdtemp(prefix="smoke_akte_")
+    try:
+        # 1) init writes a v1 stub first
+        pdir = os.path.join(base, "20260101_000000_test"); os.makedirs(pdir)
+        assert P.init(pdir, "20260101_000000_test", origin="analyse"), "init fehlgeschlagen"
+        m0 = P.load(pdir)
+        assert m0 and m0["schema_version"] == 1 and m0["status"] == "neu", "Stub falsch"
+        # 2) record_run appends an evolution stage, sets status + metrics
+        os.makedirs(os.path.join(pdir, "charts"), exist_ok=True)
+        with open(os.path.join(pdir, "charts", "em_field.png"), "wb") as fh:
+            fh.write(b"\x89PNG\r\n\x1a\n")
+        P.record_run(pdir, "20260101_000000_test", meta, results, action="analyse")
+        # second run with a changed input → diff captured
+        meta2 = json.loads(json.dumps(meta)); meta2["payload"]["geom"]["statorOD"] = 300
+        P.record_run(pdir, "20260101_000000_test", meta2, results,
+                     action="recompute:field", note="OD vergrößert")
+        m1 = P.load(pdir)
+        assert len(m1["evolution"]) == 2, f"evolution {len(m1['evolution'])}!=2"
+        assert m1["status"] == "gerechnet", "Status nicht gerechnet"
+        assert m1["metrics"] == T.build_metrics(results), "metrics != build_metrics"
+        assert m1["evolution"][1]["changed_inputs"].get("geom.statorOD") == 300, "Diff fehlt"
+        assert any(c["key"] == "em_field" for c in m1["assets"]["charts"]), "Asset fehlt"
+        # 3) links: add + remove + resolve (self-healing)
+        other = os.path.join(base, "20260101_111111_b"); os.makedirs(other)
+        P.init(other, "20260101_111111_b")
+        P.add_link(pdir, "20260101_111111_b", label="B")
+        assert len(P.resolved_links(pdir, base)) == 1, "Link nicht aufgelöst"
+        P.add_link(pdir, "tot_weg")                       # toter Link
+        assert len(P.resolved_links(pdir, base)) == 1, "toter Link nicht übersprungen"
+        P.remove_link(pdir, "20260101_111111_b")
+        assert len(P.load(pdir)["links"]) == 1, "remove_link falsch"
+        # 4) legacy synthesize: dir mit NUR meta/results reproduziert Akte
+        leg = os.path.join(base, "20251212_000000_legacy"); os.makedirs(leg)
+        with open(os.path.join(leg, "meta.json"), "w") as fh: json.dump(meta, fh)
+        with open(os.path.join(leg, "results.json"), "w") as fh: json.dump(results, fh)
+        assert not os.path.exists(P.path_for(leg)), "darf vor Zugriff keine Akte haben"
+        syn = P.load_or_synthesize(leg, write_back=True)
+        assert syn["metrics"] == T.build_metrics(results), "synthese metrics falsch"
+        assert syn["datasheet"], "synthese datenblatt leer"
+        assert os.path.exists(P.path_for(leg)), "lazy write-back fehlt"
+        # 5) clone lineage (synthesized child carries parent)
+        child = os.path.join(base, "20260202_000000_clone"); os.makedirs(child)
+        P.init(child, "20260202_000000_clone", origin="clone",
+               parent="20260101_000000_test")
+        assert P.load(child)["lineage"]["parent"] == "20260101_000000_test", "lineage fehlt"
+        # 6) ema_rag store_dir isolation (ohne Ollama: nur _save/_load/delete-Pfad)
+        import ema_rag as RG
+        store = os.path.join(base, "ragstore")
+        idx = {"schema_version": 1,
+               "documents": [{"id": "d1", "title": "x", "category": "projekt",
+                              "n_chunks": 1, "chars": 3}],
+               "chunks": [{"doc_id": "d1", "idx": 0, "text": "abc", "embedding": [0.1]}]}
+        RG._save(idx, store_dir=store)
+        assert os.path.exists(os.path.join(store, "index.json")), "store nicht geschrieben"
+        assert RG._paths(None)[1] == RG.INDEX_PATH, "globaler Pfad verändert"
+        assert len(RG.list_documents(store_dir=store)) == 1, "store-Doku fehlt"
+        assert RG.delete_document("d1", store_dir=store), "store-delete wirkungslos"
+        assert RG.list_documents(store_dir=store) == [], "store nicht geleert"
+        return "init/record/diff/links/synthesize/lineage/store ok"
+    finally:
+        shutil.rmtree(base, ignore_errors=True)
+check("Projektakte manifest + evolution + synthesize", _projektakte)
+
 # ── param_schema + comparative experts wiring (no Ollama call) ───────────────
 print("\n[param/experts]")
 def _param_schema():

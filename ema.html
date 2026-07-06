@@ -180,6 +180,8 @@
     .two-col{display:grid;grid-template-columns:1fr 1fr;gap:12px}
     .section-h{font-size:.8rem;font-weight:700;color:#7db9e8;
                text-transform:uppercase;letter-spacing:.5px;margin:12px 0 6px}
+    .pj-group-h{font-size:.98rem;font-weight:700;color:#dce8f4;
+                border-bottom:1px solid #3a4250;padding-bottom:6px}
     .fem-box{background:#1a1a2e;border-radius:5px;padding:12px;border:1px solid #333}
     .fem-box .row{display:flex;justify-content:space-between;font-size:.83rem;
                   border-bottom:1px solid #2a2a2a;padding:4px 0}
@@ -193,25 +195,237 @@
 <div class="topbar">
   <div class="brand">⚡ E-Maschinen Designer<small>Geometrie → Betrieb → Berechnung → Ergebnisse</small></div>
   <div class="tab-bar">
-    <button class="tab-btn active" id="tbtn-geo"     onclick="switchTab('geo')">① Geometrie</button>
-    <button class="tab-btn"        id="tbtn-betrieb" onclick="switchTab('betrieb')">② Betrieb &amp; Material</button>
-    <button class="tab-btn"        id="tbtn-calc"    onclick="switchTab('calc')">③ Berechnung</button>
+    <button class="tab-btn active" id="tbtn-projekt" onclick="switchTab('projekt')">① Projekt</button>
+    <button class="tab-btn"        id="tbtn-geo"     onclick="switchTab('geo')">② Geometrie</button>
+    <button class="tab-btn"        id="tbtn-betrieb" onclick="switchTab('betrieb')">③ Betrieb &amp; Material</button>
+    <button class="tab-btn"        id="tbtn-calc"    onclick="switchTab('calc')">④ Berechnung</button>
     <button class="tab-btn"        id="tbtn-live"    onclick="switchTab('live')">▶ Live-Simulation</button>
     <button class="tab-btn"        id="tbtn-designer" onclick="switchTab('designer')">🎨 Designer</button>
     <button class="tab-btn"        id="tbtn-import"  onclick="switchTab('import')">📥 STEP-Import</button>
     <button class="tab-btn"        id="tbtn-em3d"    onclick="switchTab('em3d')">🧲 3D-Feld</button>
     <button class="tab-btn"        id="tbtn-results" onclick="switchTab('results')" disabled>📊 FEM-Ergebnisse</button>
-    <button class="tab-btn"        id="tbtn-report"  onclick="switchTab('report')" disabled>📄 Bericht</button>
     <button class="tab-btn"        id="tbtn-compare" onclick="switchTab('compare')">⚖ Vergleich</button>
   </div>
+  <button id="btn-global-save" onclick="openSaveModal()" title="Alles Speicherbare an einer Stelle sichern (mit Vorschau + Auswahl)"
+          style="margin-left:auto;background:#2e7d4a;width:auto;padding:8px 16px;font-size:.82rem;white-space:nowrap;border-radius:5px">💾 Speichern</button>
 </div>
 
 <!-- ═══════════════════ WORKSPACE (panels + persistent preview pane) ══════════ -->
 <div id="workspace">
 <div id="panel-area">
 
+<!-- ════════ TAB: Projekt (Einstieg: Anlage · Organisation · Wissensbasis) ════════ -->
+<div class="tab-panel active full-panel" id="panel-projekt">
+  <div style="max-width:1100px;margin:0 auto">
+
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <h2 style="margin:0;color:#fff;font-size:1.15rem">① Projekt</h2>
+      <span id="pj-active-badge" style="font-size:.82rem;color:#8aa;background:#1e2630;border:1px solid #3a4250;border-radius:14px;padding:4px 12px">
+        Kein aktives Projekt — lege eines an oder öffne ein bestehendes.</span>
+    </div>
+    <div style="font-size:.8rem;color:#9ab;margin-bottom:16px;line-height:1.5">
+      Hier startet jede Auslegung: ein Projekt anlegen, organisatorische Angaben + Notizen pflegen
+      und <b>wissenschaftliche Dokumente</b> hinterlegen. Alle folgenden Berechnungen (Geometrie,
+      FEM, 3D-Feld, Bericht) schreiben in das <b>aktive Projekt</b>.
+    </div>
+
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px;align-items:start">
+
+      <!-- Neues Projekt anlegen -->
+      <div style="background:#22262e;border:1px solid #3a4250;border-radius:8px;padding:14px 16px">
+        <div class="section-h">➕ Neues Projekt anlegen</div>
+        <label style="font-size:.78rem;color:#9ab">Name
+          <input id="pj_new_name" placeholder="z. B. Traktionsmotor 120 kW"
+                 style="width:100%;margin-top:3px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:7px 8px;border-radius:4px;font-size:.82rem"/></label>
+        <label style="font-size:.78rem;color:#9ab;display:block;margin-top:9px">Tags (Komma-getrennt)
+          <input id="pj_new_tags" placeholder="z. B. PKW, 800V, Prototyp"
+                 style="width:100%;margin-top:3px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:7px 8px;border-radius:4px;font-size:.82rem"/></label>
+        <label style="font-size:.78rem;color:#9ab;display:block;margin-top:9px">Notizen / Ziel der Auslegung
+          <textarea id="pj_new_notes" placeholder="Wozu? Randbedingungen, Anforderungen, Entscheidungen…"
+                    style="width:100%;margin-top:3px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:7px 8px;border-radius:4px;font-size:.82rem;min-height:60px"></textarea></label>
+        <button onclick="pjCreate()" style="background:#1f7a5a;width:100%;padding:10px;font-size:.82rem;margin-top:12px">
+          ➕ Projekt anlegen &amp; aktivieren</button>
+        <div id="pj_new_msg" style="font-size:.74rem;color:#888;margin-top:6px"></div>
+      </div>
+
+      <!-- Bestehendes Projekt öffnen -->
+      <div style="background:#22262e;border:1px solid #3a4250;border-radius:8px;padding:14px 16px">
+        <div style="display:flex;align-items:center;justify-content:space-between">
+          <div class="section-h" style="margin:0">📂 Bestehendes Projekt</div>
+          <button onclick="openProjectGallery()" style="background:#46607a;width:auto;padding:5px 10px;font-size:.74rem">Galerie ⤢</button>
+        </div>
+        <div style="font-size:.74rem;color:#9ab;margin:8px 0 6px">Aktiv setzen (bearbeiten/hineinrechnen) oder Ergebnisse ansehen.</div>
+        <div id="pj-list" style="max-height:360px;overflow:auto;font-size:.8rem">
+          <div style="color:#778;padding:10px">Lade Projekte…</div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- Aktives Projekt (erst sichtbar, wenn ein Projekt aktiv ist) -->
+    <div id="pj-active-wrap" style="display:none;margin-top:20px">
+
+      <!-- Gruppe 1: Projektdaten pflegen -->
+      <div class="pj-group-h">📋 Projektdaten &amp; Notizen</div>
+      <div style="font-size:.76rem;color:#889;margin:2px 0 10px;line-height:1.5">
+        Organisatorische Angaben und Quellen, die das aktive Projekt beschreiben und in Chat &amp; Bericht einfließen.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px;align-items:start">
+
+        <!-- Organisation -->
+        <div style="background:#22262e;border:1px solid #3a4250;border-radius:8px;padding:14px 16px">
+          <div class="section-h">🗂 Organisation &amp; Verlauf</div>
+          <div style="font-size:.74rem;color:#889;margin-bottom:10px;line-height:1.5">
+            Bearbeitungsstatus, Schlagworte und das Entscheidungs-Logbuch. Der Verlauf listet jede Berechnung
+            mit ihren geänderten Eingaben (Abstammung von Vorlagen/Klonen inklusive).
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+            <label style="font-size:.78rem;color:#9ab">Status
+              <select id="pj_status" style="background:#0f0f1a;border:1px solid #444;color:#eee;padding:5px;border-radius:4px;font-size:.78rem;margin-left:4px">
+                <option value="neu">neu</option><option value="rechnet">rechnet</option>
+                <option value="gerechnet">gerechnet</option><option value="bewertet">bewertet</option>
+                <option value="berichtet">berichtet</option><option value="verworfen">verworfen</option></select></label>
+            <button onclick="openSaveModal()" style="background:#2c5d8a;padding:6px 12px;font-size:.78rem">💾 Speichern…</button>
+            <span id="pj_meta_msg" style="font-size:.74rem;color:#888"></span>
+          </div>
+          <input id="pj_tags" placeholder="Tags (Komma-getrennt)"
+                 style="width:100%;margin-top:8px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px 8px;border-radius:4px;font-size:.78rem"/>
+          <textarea id="pj_notes" placeholder="Notizen / Entscheidungen (warum so ausgelegt) — fließt in Chat &amp; Training"
+                    style="width:100%;margin-top:8px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:7px;border-radius:4px;font-size:.78rem;min-height:60px"></textarea>
+          <div class="section-h" style="margin-top:12px">Evolutionsverlauf</div>
+          <div id="pj_evolution" style="font-size:.76rem;color:#bcd"></div>
+          <div id="pj_lineage" style="font-size:.74rem;color:#9ab;margin-top:8px"></div>
+        </div>
+
+        <!-- Projekt-Dokumente (RAG + Anhänge) -->
+        <div style="background:#22262e;border:1px solid #3a4250;border-radius:8px;padding:14px 16px">
+          <div class="section-h">📎 Projekt-Dokumente</div>
+          <div style="font-size:.74rem;color:#889;margin-bottom:10px;line-height:1.5">
+            Lege projektspezifische Quellen ab. <b>Wissens-Dateien</b> (PDF/MD/CSV) werden eingebettet und
+            vom <b>Chat &amp; Bericht</b> dieses Projekts durchsucht; <b>Anhänge</b> sind reine Ablage (landen
+            zusätzlich in der Projekt-RAG).
+          </div>
+          <div id="pj_docs" style="font-size:.78rem;color:#bcd"></div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <label style="background:#5a4a7a;color:#fff;padding:7px 12px;font-size:.78rem;border-radius:4px;cursor:pointer">📚 Wissens-Datei
+              <input type="file" onchange="pjUploadRag(this)" style="display:none"/></label>
+            <label style="background:#3a3a3e;color:#cde;padding:7px 12px;font-size:.78rem;border-radius:4px;cursor:pointer">📎 Anhang
+              <input type="file" onchange="pjUploadAttachment(this)" style="display:none"/></label>
+            <span id="pj_docs_msg" style="font-size:.74rem;color:#888;align-self:center"></span>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Gruppe 2: Auswertung & Ausgabe -->
+      <div class="pj-group-h" style="margin-top:22px">📄 Auswertung &amp; Bericht</div>
+      <div style="font-size:.76rem;color:#889;margin:2px 0 10px;line-height:1.5">
+        Ergebnisse des aktiven Projekts ansehen und einen PDF-Bericht erzeugen. Erst nach einer abgeschlossenen Analyse aktiv.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px;align-items:start">
+
+        <!-- Bericht -->
+        <div id="pj-report-card" style="background:#22262e;border:1px solid #3a4250;border-radius:8px;padding:14px 16px">
+          <div class="section-h">📄 PDF-Bericht</div>
+          <div id="pj_report_hint" style="font-size:.74rem;color:#889;margin-bottom:10px;line-height:1.5">
+            Technischer Bericht für das aktive Projekt. Kennwerte und Tabellen sind deterministisch, die
+            erläuternde Prosa schreibt ein lokales LLM. <b>Standard</b> = der 7-teilige Bericht;
+            <b>6-Experten</b> ergänzt sechs Fach-Gutachten (EM, Kennlinie, Luftspalt, Festigkeit, Thermik,
+            Fahrzyklus). Beide binden — sofern vorhanden — die <b>3D-Feldberechnung (Elmer)</b> mit ein.
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <button id="btn_report" onclick="generateReport('standard')" disabled
+                    style="background:#2c5d8a;padding:8px 12px;font-size:.78rem">📄 Bericht (Standard)</button>
+            <button id="btn_report_agentic" onclick="generateReport('agentic')" disabled
+                    style="background:#5a4a7a;padding:8px 12px;font-size:.78rem">🧠 6-Experten-Bericht</button>
+          </div>
+          <div id="report_status" style="display:none;margin-top:10px">
+            <div id="report_msg" style="font-size:.74rem;color:#9ab;margin-bottom:5px">…</div>
+            <div style="background:#1a1d24;border-radius:4px;height:8px;overflow:hidden">
+              <div id="report_bar" style="background:#3a7d5a;height:100%;width:0%;transition:width .3s"></div>
+            </div>
+          </div>
+          <div id="report_rag" style="display:none;margin-top:12px;padding-top:10px;border-top:1px solid #333">
+            <div style="font-size:.74rem;color:#9ab;line-height:1.5;margin-bottom:8px">
+              📚 <b>Wertfreie RAG-Fassung</b> — derselbe Bericht als allgemein gehaltenes Markdown
+              ohne konkrete Zahlenwerte, für die globale Wissensbasis.
+            </div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button id="btn_rag_dl" style="background:#3a6a4a;font-size:.76rem;padding:7px 12px">⬇ Markdown</button>
+              <button id="btn_rag_add" style="background:#3a5a7a;font-size:.76rem;padding:7px 12px">➕ In Wissensbasis</button>
+            </div>
+            <div id="report_rag_msg" style="font-size:.74rem;color:#888;margin-top:7px"></div>
+          </div>
+        </div>
+
+        <!-- 3D-Läufe dieses Projekts -->
+        <div style="background:#22262e;border:1px solid #3a4250;border-radius:8px;padding:14px 16px">
+          <div class="section-h">🧲 Gespeicherte 3D-Läufe</div>
+          <div style="font-size:.74rem;color:#889;margin-bottom:10px;line-height:1.5">
+            Im Tab <b>🧲 3D-Feld</b> berechnete Elmer-Feldlösungen lassen sich hier benannt ablegen und
+            später <b>ohne Neurechnen</b> wieder im Viewer öffnen. Liegen unter <code>&lt;Projekt&gt;/em3d_runs/</code>.
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+            <input type="text" id="e3_save_name" placeholder="Name, z. B. „N42 20000 1/min fein"
+                   style="flex:1;min-width:160px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px 8px;border-radius:4px;font-size:.78rem">
+            <button onclick="openSaveModal()" style="background:#2e7d4a;padding:7px 12px;font-size:.78rem">💾 Speichern…</button>
+          </div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px">
+            <select id="e3_saved_list" style="flex:1;min-width:160px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px;border-radius:4px;font-size:.78rem"><option value="">— gespeicherte Läufe —</option></select>
+            <button onclick="_e3LoadRun()" style="background:#3a4a6a;padding:7px 12px;font-size:.78rem">📂 Laden</button>
+            <button onclick="_e3DeleteSaved()" style="background:#5a3a3a;padding:7px 10px;font-size:.78rem">🗑</button>
+          </div>
+          <div id="e3_save_msg" style="margin-top:6px;font-size:.78rem;color:#9aa"></div>
+        </div>
+
+      </div>
+
+      <!-- Gruppe 3: Globale Werkzeuge & Daten (eingeklappt) -->
+      <details style="margin-top:22px">
+        <summary style="cursor:pointer;font-size:.9rem;color:#cde;font-weight:bold;padding:6px 0">
+          🧰 Globale Werkzeuge &amp; Daten <span style="font-weight:normal;color:#778;font-size:.78rem">— projektübergreifend</span>
+        </summary>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px;align-items:start;margin-top:10px">
+
+          <!-- Globale Wissensbasis -->
+          <div style="background:#22262e;border:1px solid #3a4250;border-radius:8px;padding:14px 16px">
+            <div class="section-h">📚 Globale Wissensbasis</div>
+            <div style="font-size:.74rem;color:#889;margin-bottom:10px;line-height:1.5">
+              Projektübergreifende Sammlung von <b>Referenzmaschinen</b> und <b>Dokumentation</b>. Speist die
+              KI-Funktionen „Text → Auslegung" und „KI entwerfen" sowie den Chat — unabhängig vom aktiven Projekt.
+            </div>
+            <button onclick="openRag()" style="background:#4a5a7a;padding:8px 12px;font-size:.78rem">📚 Wissensbasis öffnen</button>
+          </div>
+
+          <!-- LLM-Trainingsdaten -->
+          <div style="background:#22262e;border:1px solid #3a4250;border-radius:8px;padding:14px 16px">
+            <div class="section-h">🎓 LLM-Trainingsdaten</div>
+            <div style="font-size:.74rem;color:#889;margin-bottom:8px;line-height:1.5">
+              Jede Berechnung wird automatisch als Trainingsbeispiel angehängt (Text-Dataset für SFT +
+              Bild-Manifest für VLM). Bewerte Ergebnisse im Tab „📊 FEM-Ergebnisse" mit 👍/👎, um die Labels zu setzen.
+            </div>
+            <div id="training-stats" style="font-size:.78rem;color:#bcd;line-height:1.6">Lade…</div>
+            <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+              <button onclick="refreshTrainingStats()" style="background:#444;padding:7px 12px;font-size:.78rem">⟳</button>
+              <a id="training-dl" href="/training/download" style="background:#3a4a6a;padding:7px 12px;font-size:.78rem;border-radius:4px;color:#eee;text-decoration:none">⬇ Text (SFT)</a>
+              <a id="training-dl-vlm" href="/training/vlm/download" style="background:#4a5a7a;padding:7px 12px;font-size:.78rem;border-radius:4px;color:#eee;text-decoration:none">⬇ Bild (VLM)</a>
+            </div>
+          </div>
+
+        </div>
+      </details>
+
+      <div style="margin-top:20px;display:flex;gap:10px;flex-wrap:wrap">
+        <button onclick="switchTab('geo')" style="background:#2563a8;padding:10px 18px;font-size:.84rem">② Weiter zur Geometrie →</button>
+        <button onclick="pjOpenResults()" id="pj_btn_results" style="background:#3a3a3e;padding:10px 18px;font-size:.84rem;display:none">📊 Ergebnisse ansehen</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
 <!-- ════════ TAB: Geometrie ════════ -->
-<div class="tab-panel active" id="panel-geo">
+<div class="tab-panel" id="panel-geo">
   <div class="panel-grid">
 
   <!-- 1. Hauptabmessungen -->
@@ -251,9 +465,7 @@
     <button onclick="openText2Ema()" style="background:#1f7a5a;font-size:.78rem;padding:9px;width:100%">
       🧠 Aus Beschreibung ableiten (Text → Auslegung)
     </button>
-    <button onclick="openRag()" style="background:#5a4a7a;font-size:.78rem;padding:9px;width:100%;margin-top:6px">
-      📚 Wissensbasis (Referenzmaschinen &amp; Doku)
-    </button>
+    <!-- „📚 Wissensbasis" ist nach Tab ① Projekt umgezogen (globale Basis bleibt unverändert). -->
   </div>
 
   <!-- 2. Stator / Wicklung -->
@@ -1044,6 +1256,34 @@
           nutzbare Grundwelle/Kt. 0° = keine Staffelung (auch bei K&gt;1).</p></details>
       </div>
 
+      <div class="e3-field" style="background:#141f2a;border-color:#2c4a5e">
+        <div class="row" style="align-items:center">
+          <label style="flex:none"><input type="checkbox" id="e3_target_on" checked
+            onchange="_e3TargetSync()" style="width:auto;margin-right:6px">🎚 Ziel-Netzknoten</label>
+        </div>
+        <div class="row" style="align-items:center;gap:10px;margin-top:6px">
+          <input type="range" id="e3_target_nodes" min="10000" max="300000" step="5000" value="55000"
+            oninput="_e3TargetSync()" style="flex:1">
+          <span id="e3_target_lbl" style="color:#8cc;min-width:118px;text-align:right;font-variant-numeric:tabular-nums">55 000</span>
+        </div>
+        <div id="e3_target_est" class="e3-help" style="margin-top:4px;color:#9ab"></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Direkte Vorgabe der 3D-Netzknotenzahl. Der Mesher steuert sie
+          <b>beidseitig</b> an (zu grob ⇒ verfeinern, zu fein ⇒ vergröbern, ~Knoten∝h<sup>-1.85</sup>),
+          wobei die relativen Zonen (Luftspalt/Magnet/grob unten) erhalten bleiben. Überschreibt den
+          konservativen Auto-Cap (55 000).</p>
+          <p><span class="l">Laienverständlich:</span> Ein Schieberegler „grob ↔ fein". Rechts = feineres
+          Netz = genauer, aber mehr Rechenzeit und RAM.</p>
+          <p><span class="x">Wirkung (gemessen auf 31-GiB-Maschine, MUMPS-Direktlöser):</span>
+          55k ≈ 3,5 GiB / 35 s · 125k ≈ 10 GiB / 90 s · 200k ≈ 18 GiB / 3 min ·
+          <b>300k ≈ 27 GiB / ~5 min</b> (praktischer RAM-Deckel dieser Maschine). Aus = nur die
+          Zellgrößen unten + Auto-Cap.</p>
+          <p><span class="x">Selbstheilung:</span> Schlägt der Netzbau fehl (überlappende Facetten),
+          spielt der Monitor automatisch neue Parameter durch (Taschen aus → gröber → Skew aus …)
+          und protokolliert alles in <code>mesh_build.log</code> im Projekt-<code>em3d/</code>-Ordner.</p>
+        </details>
+      </div>
+
       <div class="e3-field">
         <div class="row"><label>Mesh-Grobgröße</label>
           <input type="number" id="e3_meshcl" value="12" min="3" max="40" step="1"><span class="unit">mm</span></div>
@@ -1122,16 +1362,114 @@
     </div>
   </div>
 
+  <div class="e3-card" id="e3_sweep_card">
+    <div class="section-title">🌡 Drehzahlband / Lastsweep (Betriebspunkt-Raster)</div>
+    <div style="font-size:.78rem;color:#9aa;margin-bottom:8px;line-height:1.5">
+      Dieselbe 3D-Magnetostatik für mehrere Betriebspunkte — das <b>Mesh wird nur EINMAL</b>
+      gebaut, pro Punkt läuft nur der Löser (Laufzeit ≈ Anzahl Punkte × Einzellauf). Schlanke
+      Kennwerte + Verlaufskurven über die Drehzahl für <b>alle</b> Punkte; das volle 3D-Feld
+      (VTU / Browser-Viewer / Bilder) nur für den gewählten <b>Detailpunkt (⦿)</b>.
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <button onclick="_e3SweepFromProfiles()" style="background:#3a5a6a;width:auto;padding:6px 12px">aus Profilen füllen</button>
+      <span style="color:#556">|</span>
+      <label style="font-size:.8rem;color:#bcd">rpm</label>
+      <input type="number" id="e3_sw_from" value="1000" min="0" max="60000" step="100" style="width:84px">
+      <span style="color:#889">–</span>
+      <input type="number" id="e3_sw_to" value="15000" min="0" max="60000" step="100" style="width:84px">
+      <label style="font-size:.8rem;color:#bcd">Punkte</label>
+      <input type="number" id="e3_sw_n" value="5" min="1" max="20" step="1" style="width:56px">
+      <label style="font-size:.8rem;color:#bcd">Last</label>
+      <input type="number" id="e3_sw_load" value="150" min="0" max="5000" step="10" style="width:76px"><span class="unit">Nm</span>
+      <button onclick="_e3SweepFromBand()" style="background:#3a5a6a;width:auto;padding:6px 12px">rpm-Band anhängen</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;border-top:1px solid #23232a;padding-top:8px">
+      <span style="font-size:.78rem;color:#9aa">Für die <b>dynamische Darstellung</b> (Player im 3D-Viewer):</span>
+      <button onclick="_e3RampSpeed()" style="background:#3a5a6a;width:auto;padding:6px 12px"
+        title="Ersetzt die Punktliste durch eine reine Drehzahl-Rampe (rpm von–bis, Punkte, feste Last oben) — im Viewer über die Drehzahl abspielbar">🌀 Drehzahl-Rampe (feste Last)</button>
+      <span style="color:#556">|</span>
+      <label style="font-size:.8rem;color:#bcd">feste rpm</label>
+      <input type="number" id="e3_sw_rpm_fixed" value="3000" min="0" max="60000" step="100" style="width:84px">
+      <label style="font-size:.8rem;color:#bcd">Last bis</label>
+      <input type="number" id="e3_sw_load_to" value="150" min="0" max="5000" step="10" style="width:76px"><span class="unit">Nm</span>
+      <button onclick="_e3RampLoad()" style="background:#3a5a6a;width:auto;padding:6px 12px"
+        title="Ersetzt die Punktliste durch eine reine Last-Rampe (Last 0→bis, Punkte, feste Drehzahl) — im Viewer über die Last abspielbar">⚡ Last-Rampe (feste Drehzahl)</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px;border-top:1px solid #23232a;padding-top:8px">
+      <span style="font-size:.78rem;color:#9aa">Dynamisches <b>Lastprofil</b> mit <b>Video</b> (|B|-Sättigung + Feldlinien + Ströme):</span>
+      <button onclick="_e3LoadProfile()" style="background:#5a4a2e;width:auto;padding:6px 12px"
+        title="Baut einen synthetischen Lastzyklus (Anfahren→Nenn→Feldschwächung→Boost→Auslauf) und rendert nach der Berechnung ein Querschnitts-Video (|B|, Feldlinien, i_q/i_d, Zeitleiste)">🎬 Lastprofil-Video erzeugen</button>
+      <label style="font-size:.8rem;color:#bcd">Punkte</label>
+      <input type="number" id="e3_prof_n" value="30" min="20" max="50" step="1" style="width:56px">
+      <span style="font-size:.72rem;color:#889">(20–50; erzwingt Lastfall + Statorströme)</span>
+    </div>
+    <table id="e3_sweep_table" style="width:100%;font-size:.8rem;border-collapse:collapse"></table>
+    <div style="display:flex;gap:8px;margin-top:8px">
+      <button onclick="_e3SweepAddRow()" style="background:#2e4a3a;width:auto;padding:5px 12px">+ Zeile</button>
+      <button onclick="_e3SweepClear()" style="background:#5a3a3a;width:auto;padding:5px 12px">leeren</button>
+    </div>
+    <button id="e3_sbtn" onclick="startEm3dSweep()" style="margin-top:10px">🧲 Drehzahlband berechnen (Elmer)</button>
+  </div>
+
   <div class="e3-card">
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button id="e3_pbtn" onclick="startEm3dPreview()" style="background:#3a4a6a">🧊 3D-Modell ansehen (ohne Elmer)</button>
       <button id="e3_btn" onclick="startEm3d()">🧲 3D-Feld berechnen (Elmer)</button>
+      <button id="e3_secbtn" onclick="startEm3dSector()" style="background:#2e6a4a"
+        title="Rechnet EINE Pol-Teilung fein (anti-periodische Symmetrie) und spiegelt sie zum vollen Motor — schneller + höher aufgelöst, Leerlauf">🔁 Schnelle Pol-Berechnung (Symmetrie)</button>
+      <button id="e3_abort" onclick="abortEm3d()" style="background:#a33;display:none"
+        title="Laufende 3D-Berechnung abbrechen — beim Drehzahlband/Sweep werden die bis dahin gerechneten Punkte behalten und lassen sich speichern; danach neu startbar">⛔ Abbrechen</button>
     </div>
+    <div style="font-size:.74rem;color:#8a9;margin-top:6px;line-height:1.4">
+      🔁 <b>Pol-Berechnung</b>: nutzt die Maschinensymmetrie — nur eine Pol-Teilung („Tortenstück")
+      wird gerechnet (anti-periodisch exakt gekoppelt) und zum vollen Motor gespiegelt, mit
+      <b>gestufter Verfeinerung</b> (Luftspalt am feinsten, dann Magnete + Flussbarrieren + Nuten,
+      dann grob). v1: Leerlauf, ohne Skew/Last.
+    </div>
+    <label class="row" style="margin-top:8px;font-size:.8rem"
+      title="Wie fein das Tortenstück vernetzt wird. 100 % = maximal mögliche Knotenzahl (Solver-Limit).">
+      Knoten-Kontingent
+      <input type="range" id="e3_node_budget" min="20" max="100" step="5" value="100"
+        oninput="document.getElementById('e3_node_budget_lbl').textContent=this.value+' %'"
+        style="vertical-align:middle;width:160px">
+      <span id="e3_node_budget_lbl" style="color:#8c8">100 %</span>
+      <span class="unit">(100 % = max. Knotenzahl)</span>
+    </label>
     <div id="e3_msg" style="margin-top:10px;font-size:.82rem"></div>
     <pre id="e3_log" style="margin-top:8px;max-height:220px;overflow:auto;background:#0d0d14;border:1px solid #2a2a30;border-radius:4px;padding:8px;font-size:.72rem;color:#9c9;white-space:pre-wrap;display:none"></pre>
   </div>
 
+  <!-- „💾 Berechnung speichern / aufrufen" ist nach Tab ① Projekt umgezogen
+       (projektgebundene 3D-Läufe unter <projekt>/em3d_runs/). -->
+
+  <div id="e3_sweep_results"></div>
   <div id="e3_results"></div>
+
+  <div class="e3-card" id="e3_refine_card" style="display:none">
+    <div class="section-title">🔍 Verfeinerungsgebiet (lokal höher auflösen)</div>
+    <div style="font-size:.78rem;color:#9aa;margin-bottom:8px;line-height:1.5">
+      Nach einer 3D-Berechnung einen <b>Quader von besonderem Interesse</b> festlegen, der
+      <b>feiner</b> aufgelöst wird. Das <b>volle Modell</b> wird mit lokal feinerem Netz im Quader
+      <b>komplett neu</b> gerechnet (normaler Außenrand) — physikalisch exakt, im Gebiet sogar
+      genauer als ein Submodell, dafür ein weiterer voller Solve. Öffnen Sie den Browser-Viewer;
+      der gelbe Rahmen zeigt den Quader live, die Felder sind in mm (Modellkoordinaten).
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px 14px;font-size:.8rem;max-width:520px">
+      <label class="row">x von <input type="number" id="e3_roi_xmin" step="1" oninput="_e3RoiChanged()"></label>
+      <label class="row">y von <input type="number" id="e3_roi_ymin" step="1" oninput="_e3RoiChanged()"></label>
+      <label class="row">z von <input type="number" id="e3_roi_zmin" step="1" oninput="_e3RoiChanged()"></label>
+      <label class="row">x bis <input type="number" id="e3_roi_xmax" step="1" oninput="_e3RoiChanged()"></label>
+      <label class="row">y bis <input type="number" id="e3_roi_ymax" step="1" oninput="_e3RoiChanged()"></label>
+      <label class="row">z bis <input type="number" id="e3_roi_zmax" step="1" oninput="_e3RoiChanged()"></label>
+    </div>
+    <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap;margin-top:10px">
+      <label class="row" title="Wie viel feiner als der Grob-Lauf im Gebiet">Verfeinerung
+        <input type="number" id="e3_roi_refine" value="3" min="1.5" max="10" step="0.5" style="width:70px"><span class="unit">×</span></label>
+      <button onclick="_e3RoiReset()" style="background:#3a4a6a;width:auto;padding:6px 12px">↺ Gebiet zurücksetzen</button>
+      <button id="e3_roi_btn" onclick="startEm3dSubmodel()" style="background:#2e6a4a;width:auto;padding:7px 14px">🧲 Gebiet fein rechnen</button>
+    </div>
+    <div id="e3_roi_msg" style="margin-top:6px;font-size:.78rem;color:#9aa"></div>
+  </div>
 
   <div class="e3-card" style="background:#1a1a22;border-color:#33333a;font-size:.74rem;color:#889;line-height:1.5">
     <b>Voraussetzung:</b> Elmer FEM (<code>ElmerSolver</code>/<code>ElmerGrid</code>) muss installiert sein
@@ -1283,22 +1621,11 @@
     </div>
     <hr class="sep"/>
 
-    <!-- Projekt-Verwaltung -->
-    <div style="margin-bottom:8px">
-      <label style="font-size:.79rem;color:#aaa;display:block;margin-bottom:3px">Projekt-Name (optional)</label>
-      <input type="text" id="project_name" placeholder="z.B. motor_v1_test"
-             style="width:100%;background:#222;border:1px solid #444;color:#ddd;padding:6px;border-radius:3px;font-size:.78rem"/>
-    </div>
-    <div style="margin-bottom:8px">
-      <label style="font-size:.79rem;color:#aaa;display:block;margin-bottom:3px">Vorhandene Projekte laden</label>
-      <select id="project_load" style="width:100%;background:#222;border:1px solid #444;color:#ddd;padding:6px;border-radius:3px;font-size:.74rem">
-        <option value="">— neues Projekt —</option>
-      </select>
-      <button onclick="openProjectGallery()"
-              style="background:#3a3f4b;width:100%;margin-top:5px;padding:8px;font-size:.76rem">
-        📂 Projekt-Browser (Galerie)
-      </button>
-    </div>
+    <!-- Projekt-Verwaltung ist nach Tab ① Projekt umgezogen; diese versteckten Felder
+         halten nur noch die bestehende JS-Verdrahtung (Varianten/Param-Tabelle/applyPayload)
+         am Leben — sichtbare Projektwahl + Galerie laufen über Tab 1. -->
+    <input type="hidden" id="project_name"/>
+    <select id="project_load" style="display:none"><option value="">— neues Projekt —</option></select>
     <div style="display:flex;gap:4px;margin-bottom:6px;align-items:stretch">
       <button id="btn_preview" onclick="previewFrame()"
               style="background:#2c5d8a;flex:1;padding:9px;font-size:.78rem">
@@ -1335,40 +1662,7 @@
 </div><!-- /panel-betrieb -->
 
 <!-- ════════ TAB: Bericht ════════ -->
-<div class="tab-panel full-panel" id="panel-report">
-  <div style="max-width:540px">
-    <div class="section-title">Berechnungsbericht</div>
-    <p style="font-size:.82rem;color:#aaa;line-height:1.5">
-      Erzeugt einen technischen PDF-Bericht aus dem aktuellen Projekt über das lokale
-      LLM <code>ministral-3:14b</code> (Ollama). Erst nach einer abgeschlossenen Analyse verfügbar.
-    </p>
-    <div id="report_btns" style="display:flex;flex-direction:column;gap:8px;margin-top:12px">
-      <button id="btn_report" style="background:#6a4caf;font-size:.8rem;padding:11px;width:100%">
-        📄 Bericht Standard (ministral-3:14b)
-      </button>
-      <button id="btn_report_agentic" style="background:#4a6caf;font-size:.8rem;padding:11px;width:100%">
-        🤖 Bericht Agentisch (6 Experten + ministral-3)
-      </button>
-    </div>
-    <div id="report_status" style="display:none;margin-top:14px;font-size:.78rem;color:#aaa">
-      <div id="report_msg">…</div>
-      <div style="background:#222;height:6px;border-radius:3px;margin-top:5px;overflow:hidden">
-        <div id="report_bar" style="background:#7d3cff;height:100%;width:0%;transition:width .3s"></div>
-      </div>
-    </div>
-    <div id="report_rag" style="display:none;margin-top:16px;padding-top:12px;border-top:1px solid #333">
-      <div style="font-size:.78rem;color:#aaa;line-height:1.5;margin-bottom:8px">
-        📚 <b>Wertfreie RAG-Fassung</b> — derselbe Bericht als allgemein gehaltenes
-        Markdown ohne konkrete Zahlenwerte, gedacht für die Wissensbasis.
-      </div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button id="btn_rag_dl" style="background:#3a6a4a;font-size:.76rem;padding:8px 12px">⬇ Markdown herunterladen</button>
-        <button id="btn_rag_add" style="background:#3a5a7a;font-size:.76rem;padding:8px 12px">➕ In Wissensbasis aufnehmen</button>
-      </div>
-      <div id="report_rag_msg" style="font-size:.74rem;color:#888;margin-top:7px"></div>
-    </div>
-  </div>
-</div><!-- /panel-report -->
+<!-- Bericht-Tab entfernt → Bericht-Karte lebt jetzt in Tab ① Projekt (#pj-report-card) -->
 
 <!-- ════════ TAB: FEM-Ergebnisse ════════ -->
 <div id="tab-results" class="tab-panel full-panel">
@@ -1391,6 +1685,46 @@
         </div>
         <div id="rate_auto" style="font-size:.74rem;color:#8aa;margin-top:6px"></div>
       </div>
+
+      <!-- Projektakte: Status/Tags/Notizen + Evolutionsverlauf + Verknüpfungen + Projekt-RAG/Anhänge -->
+      <details id="akte-panel" style="margin:4px 0 12px;background:#22262e;border:1px solid #3a4250;border-radius:6px;padding:9px 12px">
+        <summary style="cursor:pointer;font-size:.82rem;color:#cde;font-weight:bold">🗂 Projektakte (Verlauf · Notizen · Verknüpfungen · Wissensbasis)</summary>
+        <div id="akte-body" style="margin-top:10px;font-size:.8rem;color:#bbb">
+          <div style="display:flex;flex-wrap:wrap;gap:10px;align-items:center">
+            <label style="color:#9ab">Status
+              <select id="akte_status" style="background:#0f0f1a;border:1px solid #444;color:#eee;padding:5px;border-radius:4px;font-size:.78rem;margin-left:4px">
+                <option value="neu">neu</option><option value="gerechnet">gerechnet</option>
+                <option value="bewertet">bewertet</option><option value="berichtet">berichtet</option>
+                <option value="verworfen">verworfen</option></select></label>
+            <input id="akte_tags" placeholder="Tags (Komma-getrennt)"
+                   style="flex:1;min-width:160px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:5px 8px;border-radius:4px;font-size:.78rem"/>
+            <button onclick="openSaveModal()" style="background:#2c5d8a;padding:6px 12px;font-size:.78rem">💾 Speichern…</button>
+            <span id="akte_status_msg" style="font-size:.74rem;color:#888"></span>
+          </div>
+          <textarea id="akte_notes" placeholder="Notizen / Entscheidungen (warum so ausgelegt) — fließt in Chat & Training"
+                    style="width:100%;margin-top:8px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:7px;border-radius:4px;font-size:.78rem;min-height:54px"></textarea>
+
+          <div class="section-h" style="margin-top:12px">Evolutionsverlauf</div>
+          <div id="akte_evolution" style="font-size:.76rem;color:#bcd"></div>
+
+          <div class="section-h" style="margin-top:12px">Verknüpfte Vergleichsprojekte</div>
+          <div id="akte_links" style="font-size:.76rem;color:#bcd"></div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <select id="akte_link_pick" style="flex:1;background:#0f0f1a;border:1px solid #444;color:#eee;padding:5px;border-radius:4px;font-size:.78rem"></select>
+            <button onclick="addAkteLink()" style="background:#46607a;padding:6px 12px;font-size:.78rem">＋ verknüpfen</button>
+          </div>
+
+          <div class="section-h" style="margin-top:12px">Projekt-Wissensbasis (RAG) &amp; Anhänge</div>
+          <div id="akte_rag" style="font-size:.76rem;color:#bcd"></div>
+          <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+            <label style="background:#46607a;color:#fff;padding:6px 12px;font-size:.78rem;border-radius:4px;cursor:pointer">📚 Wissens-Datei (txt/md/pdf)
+              <input type="file" onchange="uploadAkteRag(this)" style="display:none"/></label>
+            <label style="background:#3a3a3e;color:#cde;padding:6px 12px;font-size:.78rem;border-radius:4px;cursor:pointer">📎 Anhang (auch in RAG)
+              <input type="file" onchange="uploadAkteAttachment(this)" style="display:none"/></label>
+            <span id="akte_rag_msg" style="font-size:.74rem;color:#888;align-self:center"></span>
+          </div>
+        </div>
+      </details>
 
       <!-- Stufen nachrechnen: vergessene Berechnungen selektiv nachziehen -->
       <details id="recompute-panel" style="margin:4px 0 12px;background:#26262b;border:1px solid #3a3a3a;border-radius:6px;padding:9px 12px">
@@ -1723,7 +2057,7 @@
           </label>
           <span style="width:1px;height:20px;background:#444"></span>
           <input id="var-set-name" placeholder="Set-Name (Server)" style="background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px 8px;border-radius:4px;font-size:.78rem;width:130px"/>
-          <button onclick="saveVariantSet()" style="background:#444;padding:7px 12px;font-size:.78rem">💾 Server</button>
+          <button onclick="openSaveModal()" style="background:#444;padding:7px 12px;font-size:.78rem">💾 Server…</button>
           <select id="var-set-list" onchange="loadVariantSet(this.value)" style="background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px 8px;border-radius:4px;font-size:.78rem"><option value="">— Server-Set laden —</option></select>
           <span id="var-status" style="font-size:.75rem;color:#888"></span>
         </div>
@@ -1775,22 +2109,7 @@
         <div id="cmp-triple-links" style="margin-top:8px;display:flex;flex-direction:column;gap:4px"></div>
       </div>
 
-      <!-- LLM training dataset (continuously appended per calculation) -->
-      <div id="training-panel" style="background:#1a1a2e;border:1px solid #333;padding:12px;border-radius:5px;margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
-          <div style="font-size:.82rem;color:#aaa">📚 LLM-Trainingsdaten <span id="training-stats" style="color:#777;font-size:.78rem"></span></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            <button onclick="refreshTrainingStats()" style="background:#444;padding:6px 12px;font-size:.78rem">⟳</button>
-            <a id="training-dl" href="/training/download" style="background:#444;padding:6px 12px;font-size:.78rem;border-radius:4px;color:#eee;text-decoration:none">⬇ Text (SFT)</a>
-            <a id="training-dl-vlm" href="/training/vlm/download" style="background:#444;padding:6px 12px;font-size:.78rem;border-radius:4px;color:#eee;text-decoration:none">⬇ Bild (VLM)</a>
-          </div>
-        </div>
-        <div style="font-size:.78rem;color:#777;margin-top:6px">
-          Jede Berechnung wird automatisch angehängt: <b>Text-Dataset</b> (Geometrie+Material → Kennwerte,
-          inkl. Bild-Pfade) und ein <b>VLM-Manifest</b> (ein Eintrag je Auswertungsbild fürs Vision-Finetuning).
-          Bewerte jedes Ergebnis im Tab „FEM-Ergebnisse" mit 👍/👎, um das Label zu setzen.
-        </div>
-      </div>
+      <!-- LLM-Trainingsdaten-Panel ist nach Tab ① Projekt umgezogen -->
 
       <div id="cmp-results" style="display:none">
         <div style="margin-bottom:12px">
@@ -1870,6 +2189,8 @@
         <input type="checkbox" id="gallery-only-results" checked onchange="renderGallery()"/> nur mit Ergebnissen
       </label>
       <span id="gallery-count" style="font-size:.78rem;color:#888;margin-left:auto"></span>
+      <label title="Ein .emaproj-Bundle importieren" style="background:#46607a;color:#fff;width:auto;padding:7px 14px;font-size:.8rem;border-radius:4px;cursor:pointer">📦 Bundle importieren
+        <input type="file" accept=".emaproj,.zip" onchange="importBundle(this)" style="display:none"/></label>
       <button onclick="closeProjectGallery()" style="background:#555;width:auto;padding:7px 16px;font-size:.8rem">✕ Schließen</button>
     </div>
     <div id="gallery-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px">
@@ -1935,6 +2256,28 @@
               style="margin-left:auto;background:#7a3030;width:auto;padding:6px 12px;font-size:.76rem;opacity:.5">🗑 Ausgewählte löschen</button>
     </div>
     <div id="rag-list" style="font-size:.8rem;color:#bbb">Lade…</div>
+  </div>
+</div>
+
+<!-- ═══════════════════ GLOBALES SPEICHERN (Modal) ════════════════════════════ -->
+<div id="save-modal" style="display:none;position:fixed;inset:0;z-index:217;
+     background:rgba(0,0,0,.8);overflow-y:auto;padding:22px">
+  <div style="max-width:720px;margin:0 auto;background:#1b1b1f;border:1px solid #3e3e42;border-radius:8px;padding:18px">
+    <div style="display:flex;align-items:center;gap:12px;margin-bottom:10px">
+      <h2 style="margin:0;color:#fff;font-size:1.1rem">💾 Speichern</h2>
+      <button onclick="closeSaveModal()" style="margin-left:auto;background:#555;width:auto;padding:7px 16px;font-size:.8rem">✕ Schließen</button>
+    </div>
+    <div style="font-size:.78rem;color:#999;margin-bottom:14px">
+      Hier siehst du <b>alles, was gerade gespeichert werden kann</b>. Wähle ab, was du
+      nicht sichern möchtest, passe ggf. Namen/Bewertung an und speichere alles auf
+      einmal. Nicht verfügbare Positionen sind ausgegraut.
+    </div>
+    <div id="save-items" style="display:flex;flex-direction:column;gap:10px"></div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:16px">
+      <button id="save-commit-btn" onclick="saveModalCommit()"
+              style="background:#2e7d4a;width:auto;padding:9px 20px;font-size:.85rem">💾 Ausgewählte speichern</button>
+      <span id="save-modal-msg" style="font-size:.8rem;color:#9c9"></span>
+    </div>
   </div>
 </div>
 
@@ -2013,17 +2356,20 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['geo','betrieb','calc','live','designer','import','em3d','results','report','compare'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','results','compare'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
+  projekt:'panel-projekt',
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
   designer:'panel-designer', import:'panel-import', em3d:'panel-em3d',
-  results:'tab-results', report:'panel-report', compare:'tab-compare'
+  results:'tab-results', compare:'tab-compare'
 };
 
 function switchTab(name) {
   window._activeTab = name;
+  // Beim Verlassen des 3D-Feld-Tabs den Animations-Timer stoppen (kein Rendern im Hintergrund).
+  if (name !== 'em3d' && typeof _e3PlayStopTimer === 'function') _e3PlayStopTimer();
   TABS.forEach(t => {
     const panel = document.getElementById(PANEL_OF[t]);
     if (panel) panel.classList.toggle('active', t === name);
@@ -2039,10 +2385,11 @@ function switchTab(name) {
   if (PREVIEW_TABS.has(name)) requestAnimationFrame(() => requestAnimationFrame(() => {
     if (typeof resize === 'function') resize();
   }));
+  if (name === 'projekt' && typeof pjActivate === 'function') pjActivate();
   if (name === 'calc' && typeof initParamStudy === 'function') initParamStudy();
   if (name === 'designer' && typeof dsnActivate === 'function')
     requestAnimationFrame(() => requestAnimationFrame(dsnActivate));
-  if (name === 'compare') { refreshComparePicker(); renderVariantList(); refreshVariantSets(); refreshTrainingStats(); }
+  if (name === 'compare') { refreshComparePicker(); renderVariantList(); refreshVariantSets(); }
   if (name === 'em3d' && typeof adoptEm3dGeom === 'function') {
     // Beim Öffnen die aktuelle Geometrie der gewählten Quelle übernehmen + Zusammenfassung zeigen.
     const src = document.getElementById('e3_geomsrc');
@@ -2055,6 +2402,8 @@ function switchTab(name) {
       if (!_e3SrcUserSet) src.value = 'geo';
       adoptEm3dGeom();
     }
+    if (typeof _e3RenderSweepTable === 'function') _e3RenderSweepTable();
+    if (typeof _e3TargetSync === 'function') _e3TargetSync();
   }
   if (history.replaceState) history.replaceState(null, '', '#' + name);
 }
@@ -2065,6 +2414,7 @@ window.addEventListener('load', () => {
   if (TABS.includes(h)) {
     const btn = document.getElementById('tbtn-' + h);
     if (btn && !btn.disabled) switchTab(h);
+    else switchTab('projekt');
   } else if (h === 'projects') {
     openProjectGallery();
   } else if (h === 'optimize') {
@@ -2073,6 +2423,8 @@ window.addEventListener('load', () => {
     openText2Ema();
   } else if (h === 'rag') {
     openRag();
+  } else {
+    switchTab('projekt');   // Standard-Einstieg: Projekt-Tab
   }
 });
 
@@ -2692,8 +3044,7 @@ document.getElementById('btn_cad_preview').addEventListener('click', startCadPre
 document.getElementById('btn_smoke').addEventListener('click', startSmokeTest);
 document.getElementById('btn_freecad').addEventListener('click', openFreeCAD);
 document.getElementById('btn_step').addEventListener('click', downloadStep);
-document.getElementById('btn_report').addEventListener('click', () => generateReport('standard'));
-document.getElementById('btn_report_agentic').addEventListener('click', () => generateReport('agentic'));
+// (Bericht-Knöpfe haben inline onclick="generateReport(...)" auf Tab ① Projekt)
 document.getElementById('project_load').addEventListener('change', onProjectSelect);
 document.getElementById('sel_cycle').addEventListener('change', e => {
   const v = e.target.value;
@@ -2736,6 +3087,8 @@ async function loadProjectById(pid) {
     if (r.error) { alert('Laden fehlgeschlagen: ' + r.error); return; }
     const data = await fetch('/results').then(x => x.json());
     const sel = document.getElementById('project_load'); if (sel) sel.value = pid;
+    // Geladenes Projekt = aktives Projekt (Nachrechnungen/Berichte landen hier).
+    pjSetActive(pid, (r.meta && (r.meta.name || r.meta.label)) || pid);
     // Sync the form to the project's saved inputs so "Stufen nachrechnen" (which uses
     // the current form) matches this project. Best-effort; ignore on legacy projects.
     try {
@@ -2757,14 +3110,227 @@ async function loadProjectById(pid) {
     renderManual(data.manual);
     document.getElementById('btn_freecad').style.display  = 'block';
     document.getElementById('btn_step').style.display     = 'block';
-    document.getElementById('report_btns').style.display  = 'flex';
-    document.getElementById('tbtn-report').disabled = false;
+    pjUpdateReportCard(pid, true);   // Bericht-Karte auf Tab ① freischalten
     renderRating(pid);
     showFrame(0);
   } catch(err) { alert('Fehler beim Laden: ' + err.message); }
 }
 
 refreshProjectList();
+
+// ── Projekt-Tab (Einstieg: Anlage · Organisation · Wissensbasis) ─────────────
+// Das "aktive Projekt": alle Berechnungen (buildPayload) schreiben hier hinein.
+window._activeProject = null;
+
+function pjActivate() {
+  pjRefreshList();
+  if (_activeProject && _activeProject.id) pjSetActive(_activeProject.id, _activeProject.name);
+}
+
+async function pjRefreshList() {
+  const box = document.getElementById('pj-list');
+  if (!box) return;
+  try {
+    const j = await fetch('/projects?detail=1').then(r => r.json());
+    const ps = j.projects || [];
+    if (!ps.length) { box.innerHTML = '<div style="color:#778;padding:10px">Noch keine Projekte.</div>'; return; }
+    box.innerHTML = ps.map(p => {
+      const act = (_activeProject && _activeProject.id === p.id);
+      const st  = p.status ? `<span style="color:#9bd;font-size:.7rem">${escHtml(p.status)}</span>` : '';
+      return `<div style="display:flex;align-items:center;gap:8px;padding:6px 4px;border-bottom:1px solid #2a2f38;${act?'background:#1b2a22':''}">
+        <div style="flex:1;min-width:0">
+          <div style="color:#cde;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${act?'✓ ':''}${escHtml(p.label || p.id)}</div>
+          <div style="color:#778;font-size:.7rem">${escHtml((p.id||'').slice(0,15))} ${st}</div>
+        </div>
+        <button onclick="pjSetActive('${p.id}', this.dataset.n)" data-n="${escHtml(p.label||p.id)}"
+                title="aktiv setzen" style="background:#2e7d4f;width:auto;padding:4px 9px;font-size:.72rem">Aktiv</button>
+        <button onclick="loadProjectById('${p.id}')" title="Ergebnisse ansehen"
+                style="background:#3a4a6a;width:auto;padding:4px 9px;font-size:.72rem">📊</button>
+        <button onclick="pjDelete('${p.id}', this.dataset.n)" data-n="${escHtml(p.label||p.id)}"
+                title="löschen" style="background:#5a2a2a;width:auto;padding:4px 8px;font-size:.72rem">✕</button>
+      </div>`;
+    }).join('');
+  } catch (e) {
+    box.innerHTML = '<div style="color:#e57;padding:10px">Fehler beim Laden.</div>';
+  }
+}
+
+async function pjCreate() {
+  const name  = document.getElementById('pj_new_name').value.trim();
+  const tags  = document.getElementById('pj_new_tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  const notes = document.getElementById('pj_new_notes').value;
+  const msg   = document.getElementById('pj_new_msg');
+  msg.textContent = '⏳ lege an…';
+  try {
+    const r = await fetch('/project/new', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, tags, notes }) }).then(x => x.json());
+    if (r.error) { msg.textContent = '❌ ' + r.error; return; }
+    msg.textContent = '✓ angelegt: ' + (r.name || r.id);
+    document.getElementById('pj_new_name').value = '';
+    document.getElementById('pj_new_tags').value = '';
+    document.getElementById('pj_new_notes').value = '';
+    await pjRefreshList();
+    pjSetActive(r.id, r.name || r.id);
+  } catch (e) { msg.textContent = '❌ ' + e.message; }
+}
+
+function pjSetActive(pid, name) {
+  if (!pid) return;
+  window._activeProject = { id: pid, name: name || pid };
+  const badge = document.getElementById('pj-active-badge');
+  if (badge) badge.innerHTML = '✓ Aktives Projekt: <b style="color:#cfe">' + escHtml(name || pid) + '</b>';
+  const wrap = document.getElementById('pj-active-wrap');
+  if (wrap) wrap.style.display = 'block';
+  // Server-side aktives Projekt setzen, damit Bericht + 3D-Feld (lesen _state) das
+  // gewählte Projekt treffen (best-effort).
+  fetch('/project/' + encodeURIComponent(pid) + '/activate', { method: 'POST' })
+    .then(r => r.json())
+    .then(j => { if (typeof pjUpdateReportCard === 'function') pjUpdateReportCard(pid, !!j.has_results); })
+    .catch(() => {});
+  pjRenderOrg(pid);
+  pjRenderDocs(pid);
+  pjRefreshList();
+  // projektgebundene Panels (auf Tab 1) auffrischen
+  if (typeof _e3RefreshSavedList === 'function') _e3RefreshSavedList();
+  if (typeof refreshTrainingStats === 'function') refreshTrainingStats();
+}
+
+// Bericht-Karte (Tab ① Projekt): nur aktiv, wenn das aktive Projekt Ergebnisse hat.
+function pjUpdateReportCard(pid, hasResults) {
+  const btnStd = document.getElementById('btn_report');
+  const btnAgt = document.getElementById('btn_report_agentic');
+  const hint   = document.getElementById('pj_report_hint');
+  if (!btnStd || !btnAgt) return;
+  btnStd.disabled = btnAgt.disabled = !hasResults;
+  // beim Projektwechsel die Knöpfe in den Ausgangszustand zurücksetzen (kein Download-Modus)
+  btnStd.textContent = '📄 Bericht (Standard)';
+  btnAgt.textContent = '🧠 6-Experten-Bericht';
+  btnStd.style.background = '#2c5d8a';
+  btnAgt.style.background = '#5a4a7a';
+  btnStd.onclick = () => generateReport('standard');
+  btnAgt.onclick = () => generateReport('agentic');
+  const box = document.getElementById('report_status'); if (box) box.style.display = 'none';
+  const rag = document.getElementById('report_rag');     if (rag) rag.style.display = 'none';
+  if (hint) hint.textContent = hasResults
+    ? 'PDF-Bericht für das aktive Projekt (lokales LLM für die Prosa, Kennwerte deterministisch).'
+    : 'Erst verfügbar, wenn das aktive Projekt Ergebnisse hat — Geometrie + Analyse laufen lassen.';
+}
+
+async function pjRenderOrg(pid) {
+  try {
+    const m = await fetch('/project/' + encodeURIComponent(pid) + '/manifest').then(x => x.json());
+    if (m.error) return;
+    if (m.label) {
+      if (_activeProject && _activeProject.id === pid) _activeProject.name = m.label;
+      const badge = document.getElementById('pj-active-badge');
+      if (badge) badge.innerHTML = '✓ Aktives Projekt: <b style="color:#cfe">' + escHtml(m.label) + '</b>';
+    }
+    const stEl = document.getElementById('pj_status'); if (stEl) stEl.value = m.status || 'neu';
+    document.getElementById('pj_tags').value  = (m.tags || []).join(', ');
+    document.getElementById('pj_notes').value = m.notes || '';
+    const evo = (m.evolution || []);
+    document.getElementById('pj_evolution').innerHTML = evo.length
+      ? evo.map((e, i) => {
+          const ch = Object.keys(e.changed_inputs || {});
+          const note = e.note ? ` · <i style="color:#9ab">${escHtml(e.note)}</i>` : '';
+          return `<div style="padding:3px 0;border-bottom:1px solid #2a2f38">
+            <b>${i+1}.</b> ${escHtml((e.ts||'').slice(0,16).replace('T',' '))} — <span style="color:#9bd">${escHtml(typeof _akteAction==='function'?_akteAction(e.action):(e.action||''))}</span>
+            <span style="color:#889;font-size:.72rem">${escHtml(ch.length?ch.join(', '):'—')}</span>${note}</div>`;
+        }).join('')
+      : '<span style="color:#778">noch keine Stufen — Berechnung anstoßen</span>';
+    const lin = m.lineage || {};
+    document.getElementById('pj_lineage').innerHTML =
+      (lin.parent ? `Abstammung: <a href="#" onclick="pjSetActive('${lin.parent}');return false" style="color:#9bd">${escHtml(lin.parent)}</a> · ` : '')
+      + 'Herkunft: ' + escHtml(lin.origin || '—');
+    const btn = document.getElementById('pj_btn_results');
+    if (btn) btn.style.display = (m.status && m.status !== 'neu') ? 'inline-block' : 'none';
+  } catch (e) {}
+}
+
+async function pjSaveMeta() {
+  const pid = _activeProject && _activeProject.id;
+  if (!pid) return;
+  const tags = document.getElementById('pj_tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  const msg = document.getElementById('pj_meta_msg'); msg.textContent = '⏳ …';
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/meta',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: document.getElementById('pj_status').value,
+          tags, notes: document.getElementById('pj_notes').value }) }).then(x => x.json());
+    msg.textContent = r.error ? ('❌ ' + r.error) : '✓ gespeichert';
+  } catch (e) { msg.textContent = '❌ ' + e.message; }
+}
+
+async function pjRenderDocs(pid) {
+  try {
+    const [rag, att] = await Promise.all([
+      fetch('/project/' + encodeURIComponent(pid) + '/rag').then(x => x.json()),
+      fetch('/project/' + encodeURIComponent(pid) + '/attachments').then(x => x.json()),
+    ]);
+    const docs = (rag.documents || []), atts = (att.attachments || []);
+    const dHtml = docs.length
+      ? docs.map(d => `<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid #2a2f38">
+          <span>📄 ${escHtml(d.title)} <span style="color:#778;font-size:.72rem">(${d.n_chunks} Abschnitte)</span></span>
+          <button onclick="pjDelDoc('${d.id}')" style="background:#5a2a2a;width:auto;padding:2px 8px;font-size:.72rem">✕</button></div>`).join('')
+      : '<span style="color:#778">keine Wissens-Dokumente</span>';
+    const aHtml = atts.length
+      ? '<div style="margin-top:7px;color:#9ab;font-size:.74rem">📎 Anhänge: ' + atts.map(a => escHtml(a.name)).join(', ') + '</div>'
+      : '';
+    document.getElementById('pj_docs').innerHTML = dHtml + aHtml;
+  } catch (e) {}
+}
+
+async function pjDelDoc(docId) {
+  const pid = _activeProject && _activeProject.id;
+  if (!pid) return;
+  await fetch('/project/' + encodeURIComponent(pid) + '/rag/' + encodeURIComponent(docId) + '/delete', { method: 'POST' });
+  pjRenderDocs(pid);
+}
+
+async function pjUploadRag(input) {
+  const pid = _activeProject && _activeProject.id;
+  const f = input.files && input.files[0];
+  if (!pid || !f) return;
+  const msg = document.getElementById('pj_docs_msg'); msg.textContent = '⏳ einbetten…';
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/rag/add', { method: 'POST', body: fd }).then(x => x.json());
+    msg.textContent = r.error ? ('❌ ' + r.error) : '✓ hinzugefügt';
+    pjRenderDocs(pid);
+  } catch (e) { msg.textContent = '❌ ' + e.message; }
+  finally { input.value = ''; }
+}
+
+async function pjUploadAttachment(input) {
+  const pid = _activeProject && _activeProject.id;
+  const f = input.files && input.files[0];
+  if (!pid || !f) return;
+  const msg = document.getElementById('pj_docs_msg'); msg.textContent = '⏳ lade hoch…';
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/attachments', { method: 'POST', body: fd }).then(x => x.json());
+    msg.textContent = r.error ? ('❌ ' + r.error) : ('✓ Anhang gespeichert' + (r.rag_added ? ' (+RAG)' : ''));
+    pjRenderDocs(pid);
+  } catch (e) { msg.textContent = '❌ ' + e.message; }
+  finally { input.value = ''; }
+}
+
+async function pjDelete(pid, name) {
+  if (!confirm('Projekt „' + (name || pid) + '" wirklich löschen?')) return;
+  await fetch('/project/' + encodeURIComponent(pid) + '/delete', { method: 'POST' });
+  if (_activeProject && _activeProject.id === pid) {
+    window._activeProject = null;
+    const badge = document.getElementById('pj-active-badge');
+    if (badge) badge.textContent = 'Kein aktives Projekt — lege eines an oder öffne ein bestehendes.';
+    const wrap = document.getElementById('pj-active-wrap'); if (wrap) wrap.style.display = 'none';
+  }
+  pjRefreshList();
+  if (typeof refreshProjectList === 'function') refreshProjectList();
+}
+
+function pjOpenResults() {
+  if (_activeProject && _activeProject.id) loadProjectById(_activeProject.id);
+}
 
 // ── Project gallery (browse + open + delete) ─────────────────────────────────
 let _galleryProjects = [];
@@ -2813,9 +3379,17 @@ function renderGallery() {
          </a>
          <div style="font-size:.64rem;color:#789;text-align:center;margin-top:1px">⚡ EM-Feld (Leerlauf) — klicken für volle Auflösung</div>`
       : '';
-    const badges = [p.has_results ? 'Ergebnisse' : '', p.has_step ? 'STEP' : '',
+    const STAT = {neu:'#555', rechnet:'#b58900', gerechnet:'#2c5d8a',
+                  bewertet:'#27632a', berichtet:'#6a4caf', verworfen:'#7a3030'};
+    const akteBadges = [];
+    if (p.status) akteBadges.push(`<span style="background:${STAT[p.status]||'#555'};color:#fff;border-radius:3px;padding:1px 6px;font-size:.66rem">${escHtml(p.status)}</span>`);
+    if (p.parent) akteBadges.push(`<span title="aus ${escHtml(p.parent)}" style="background:#3a3a3e;color:#9bd;border-radius:3px;padding:1px 6px;font-size:.66rem">⤴ Vorlage</span>`);
+    if (p.links_count) akteBadges.push(`<span title="verknüpfte Vergleichsprojekte" style="background:#3a3a3e;color:#9bd;border-radius:3px;padding:1px 6px;font-size:.66rem">⚖ ${p.links_count}</span>`);
+    if (p.evolution_count) akteBadges.push(`<span title="Evolutionsstufen" style="background:#3a3a3e;color:#9bd;border-radius:3px;padding:1px 6px;font-size:.66rem">⟳ ${p.evolution_count}</span>`);
+    const badges = [...akteBadges,
+                    ...[p.has_results ? 'Ergebnisse' : '', p.has_step ? 'STEP' : '',
                     p.has_fcstd ? 'FCStd' : '', p.has_report ? '📄 Bericht' : '']
-      .filter(Boolean).map(b => `<span style="background:#2c5d8a;color:#cde;border-radius:3px;padding:1px 6px;font-size:.66rem">${b}</span>`).join(' ');
+      .filter(Boolean).map(b => `<span style="background:#2c5d8a;color:#cde;border-radius:3px;padding:1px 6px;font-size:.66rem">${b}</span>`)].join(' ');
     const reportBtn = p.has_report
       ? `<a href="/project/${pid}/report/download?mode=latest" target="_blank" rel="noopener"
             title="Letzten erzeugten Bericht öffnen (${escHtml(p.report_file || 'PDF')})"
@@ -2841,8 +3415,14 @@ function renderGallery() {
         <button onclick="galleryDelete('${p.id}')" title="Projekt löschen"
                 style="background:#7a3030;width:auto;padding:7px 9px;font-size:.74rem">🗑</button>
       </div>
-      <button onclick="useAsTemplate('${p.id}')" title="Parameter dieses Projekts ins Formular laden"
-              style="margin-top:5px;width:100%;background:#2c5d8a;padding:7px;font-size:.74rem">📋 Als Vorlage verwenden</button>
+      <div style="display:flex;gap:5px;margin-top:5px">
+        <button onclick="useAsTemplate('${p.id}')" title="Parameter dieses Projekts ins Formular laden"
+                style="flex:1;background:#2c5d8a;padding:7px;font-size:.74rem">📋 Als Vorlage</button>
+        <button onclick="cloneProject('${p.id}')" title="Ganzes Projekt klonen (Eingaben + Notizen + Projekt-RAG, mit Abstammung)"
+                style="flex:1;background:#46607a;padding:7px;font-size:.74rem">📁 Klonen</button>
+      </div>
+      <a href="/project/${pid}/bundle" title="Projekt als .emaproj-Bundle exportieren"
+         style="display:block;text-align:center;margin-top:5px;background:#3a3a3e;color:#cde;padding:6px;font-size:.72rem;border-radius:4px;text-decoration:none">⬇ Bundle exportieren</a>
       ${reportBtn}
     </div>`;
   }).join('');
@@ -2899,6 +3479,151 @@ function applyText2Ema(){
 // ── Wissensbasis (RAG) ───────────────────────────────────────────────────────
 function openRag(){ document.getElementById('rag-modal').style.display='block'; refreshRagList(); }
 function closeRag(){ document.getElementById('rag-modal').style.display='none'; }
+
+// ═══════════════════ GLOBALES SPEICHERN (Modal) ══════════════════════════════
+// EIN Speicherknopf (Topbar) öffnet dieses Fenster: es zeigt alles, was gerade
+// gespeichert werden kann, mit Vorschau + Auswahl (abwählbar). Ersetzt die
+// verstreuten Einzel-Speicherknöpfe (Projektdaten / 3D-Lauf / Bewertung / Varianten).
+function closeSaveModal(){ document.getElementById('save-modal').style.display='none'; }
+
+function _saveEsc(s){ return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+// Baut die Liste der aktuell speicherbaren Positionen (kontextabhängig).
+function _buildSaveItems(){
+  const items = [];
+  // 1) Projektdaten & Notizen (aktives Projekt)
+  // Zwei spiegelnde Feldsätze: Tab ① (pj_*) und Projektakte-Panel (akte_*). Wenn die
+  // Akte auf dasselbe Projekt zeigt, lieber deren (evtl. gerade editierte) Werte lesen —
+  // und beim Speichern in BEIDE zurückschreiben, damit sie synchron bleiben.
+  const pid = _activeProject && _activeProject.id;
+  if (pid){
+    const aktePid = (document.getElementById('akte-body')||{}).dataset ? document.getElementById('akte-body').dataset.pid : null;
+    const useAkte = aktePid && aktePid === pid && document.getElementById('akte_status');
+    const gv = (id)=> (document.getElementById(id)||{}).value || '';
+    const status = useAkte ? gv('akte_status') : gv('pj_status');
+    const tags   = useAkte ? gv('akte_tags')   : gv('pj_tags');
+    const notes  = useAkte ? gv('akte_notes')  : gv('pj_notes');
+    const notesShort = notes.length>70 ? notes.slice(0,70)+'…' : notes;
+    items.push({ key:'projekt', label:'📋 Projektdaten & Notizen', checked:true,
+      preview:`Projekt „${_saveEsc(_activeProject.name||pid)}" · Status: <b>${_saveEsc(status||'—')}</b>`
+        + (tags?` · Tags: ${_saveEsc(tags)}`:'')
+        + (notes?`<br><span style="color:#889">Notiz: ${_saveEsc(notesShort)}</span>`:''),
+      commit: async ()=>{
+        const t = tags.split(',').map(x=>x.trim()).filter(Boolean);
+        const r = await fetch('/project/'+encodeURIComponent(pid)+'/meta',{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({status, tags:t, notes})}).then(x=>x.json());
+        if (r.error) throw new Error(r.error);
+        // beide Feldsätze angleichen
+        [['pj_status','akte_status',status],['pj_tags','akte_tags',tags],['pj_notes','akte_notes',notes]]
+          .forEach(([a,b,v])=>{ const ea=document.getElementById(a); if(ea)ea.value=v;
+                                 const eb=document.getElementById(b); if(eb)eb.value=v; });
+        const m=document.getElementById('pj_meta_msg'); if(m) m.textContent='✓ gespeichert';
+        const m2=document.getElementById('akte_status_msg'); if(m2) m2.textContent='✓ gespeichert';
+      }});
+  }
+  // 2) Bewertung (Projekt mit Ergebnissen)
+  if (_ratingPid){
+    const g=document.getElementById('rate_gut'), b=document.getElementById('rate_schlecht');
+    const cur = (g&&g.style.outline!=='none'&&g.style.outline)?'gut'
+              : (b&&b.style.outline!=='none'&&b.style.outline)?'schlecht':'';
+    items.push({ key:'rating', label:'⭐ Bewertung (gut/schlecht)', checked:!!cur,
+      preview:`für das aktive Projekt`
+        + `<div style="margin-top:5px"><select id="save_rating_sel" style="width:auto;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:5px;border-radius:3px;font-size:.8rem">`
+        + `<option value="">— nicht ändern —</option>`
+        + `<option value="gut"${cur==='gut'?' selected':''}>👍 gut</option>`
+        + `<option value="schlecht"${cur==='schlecht'?' selected':''}>👎 schlecht</option>`
+        + `</select></div>`,
+      commit: async ()=>{
+        const sel=document.getElementById('save_rating_sel');
+        const label = sel ? sel.value : cur;
+        if (!label) throw new Error('keine Bewertung gewählt');
+        const comment=(document.getElementById('rate_comment')||{}).value||'';
+        const r = await fetch('/project/'+encodeURIComponent(_ratingPid)+'/rating',{method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({label, comment:comment.trim()})}).then(x=>x.json());
+        if (r.error) throw new Error(r.error);
+        if (typeof _ratingHighlight==='function') _ratingHighlight(label);
+        if (typeof refreshTrainingStats==='function') refreshTrainingStats();
+      }});
+  }
+  // 3) 3D-Feld-Lauf (nur wenn ein Ergebnis im Viewer liegt)
+  if (window._e3HasResult){
+    const nm = (document.getElementById('e3_save_name')||{}).value || '';
+    items.push({ key:'em3d', label:'🧲 3D-Feld-Lauf', checked:true,
+      preview:`der aktuelle Elmer-Lauf (Feld + Kennwerte) im aktiven Projekt`
+        + `<div style="margin-top:5px"><input id="save_e3_name" value="${_saveEsc(nm)}" placeholder="Name (optional)" style="width:70%;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:5px;border-radius:3px;font-size:.8rem"/></div>`,
+      commit: async ()=>{
+        const name=((document.getElementById('save_e3_name')||{}).value||'').trim();
+        const src=document.getElementById('e3_save_name'); if(src) src.value=name;
+        const r = await fetch('/em3d/save',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({name, config:_e3BuildConfig()})}).then(x=>x.json());
+        if (r.error) throw new Error(r.error);
+        if (typeof _e3RefreshSavedList==='function') await _e3RefreshSavedList();
+      }});
+  }
+  // 4) Varianten-Set (nur wenn Varianten vorhanden)
+  if (typeof variants!=='undefined' && variants && variants.length){
+    const nm=(document.getElementById('var-set-name')||{}).value||'';
+    items.push({ key:'variants', label:`🗂 Varianten-Set (${variants.length})`, checked:true,
+      preview:`${variants.length} Variante(n) als Set auf dem Server`
+        + `<div style="margin-top:5px"><input id="save_var_name" value="${_saveEsc(nm)}" placeholder="Set-Name (Pflicht)" style="width:70%;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:5px;border-radius:3px;font-size:.8rem"/></div>`,
+      commit: async ()=>{
+        const name=((document.getElementById('save_var_name')||{}).value||'').trim();
+        if (!name) throw new Error('Set-Name angeben');
+        const src=document.getElementById('var-set-name'); if(src) src.value=name;
+        const r = await fetch('/variants/save',{method:'POST',headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({name, created:new Date().toISOString(), variants})}).then(x=>x.json());
+        if (r.error) throw new Error(r.error);
+        if (typeof refreshVariantSets==='function') refreshVariantSets();
+      }});
+  }
+  return items;
+}
+
+let _saveModalItems = [];
+function openSaveModal(){
+  _saveModalItems = _buildSaveItems();
+  const box = document.getElementById('save-items');
+  const msg = document.getElementById('save-modal-msg'); if (msg) msg.textContent='';
+  if (!_saveModalItems.length){
+    box.innerHTML = '<div style="color:#c96;padding:14px;text-align:center">'
+      + 'Momentan gibt es nichts zu speichern.<br>'
+      + '<span style="font-size:.78rem;color:#889">Lege ein Projekt an bzw. wähle es aus, führe eine Berechnung, einen 3D-Lauf oder Varianten aus.</span></div>';
+  } else {
+    box.innerHTML = _saveModalItems.map((it,i)=>
+      `<label style="display:flex;gap:10px;align-items:flex-start;background:#242428;border:1px solid #35353a;border-radius:6px;padding:10px 12px;cursor:pointer">
+         <input type="checkbox" id="save_chk_${i}" ${it.checked?'checked':''} style="margin-top:3px;width:16px;height:16px;flex:0 0 auto"/>
+         <div style="flex:1">
+           <div style="color:#eee;font-size:.86rem;font-weight:600">${it.label}</div>
+           <div style="color:#aab;font-size:.78rem;margin-top:2px">${it.preview}</div>
+         </div>
+         <span id="save_row_${i}" style="font-size:.8rem;color:#889;flex:0 0 auto;margin-top:2px"></span>
+       </label>`).join('');
+  }
+  document.getElementById('save-modal').style.display='block';
+}
+
+async function saveModalCommit(){
+  const msg = document.getElementById('save-modal-msg');
+  const btn = document.getElementById('save-commit-btn');
+  if (!_saveModalItems.length){ closeSaveModal(); return; }
+  btn.disabled = true; if (msg){ msg.style.color='#9c9'; msg.textContent='⏳ speichere…'; }
+  let ok=0, fail=0, skip=0;
+  for (let i=0;i<_saveModalItems.length;i++){
+    const chk=document.getElementById('save_chk_'+i);
+    const row=document.getElementById('save_row_'+i);
+    if (!chk || !chk.checked){ if(row){row.style.color='#667';row.textContent='übersprungen';} skip++; continue; }
+    if (row){ row.style.color='#889'; row.textContent='⏳'; }
+    try { await _saveModalItems[i].commit(); if(row){row.style.color='#6c6';row.textContent='✓';} ok++; }
+    catch(e){ if(row){row.style.color='#e77';row.textContent='❌ '+e.message;} fail++; }
+  }
+  btn.disabled = false;
+  if (msg){
+    msg.style.color = fail? '#e77' : '#6c6';
+    msg.textContent = `${ok} gespeichert` + (fail?`, ${fail} fehlgeschlagen`:'') + (skip?`, ${skip} abgewählt`:'');
+  }
+}
 async function refreshRagList(){
   const box=document.getElementById('rag-list');
   try{
@@ -3483,9 +4208,12 @@ async function _dsnBuildPayload() {
   // die Geometrie NICHT neu bauen, sondern die importierte für die Festigkeits-FEM nutzen.
   if (_importedActive) {
     payload.imported = true;
-    payload.project_name = document.getElementById('project_name')?.value || 'STEP-Import';
+    payload.project_name = (window._activeProject && _activeProject.name) || 'STEP-Import';
     if (_importedProjectId) payload.project_id = _importedProjectId;
   }
+  // Designer-/3D-Pfad ans aktive Projekt binden (Fallback, wenn kein Import läuft)
+  if (!payload.project_id && window._activeProject && _activeProject.id)
+    payload.project_id = _activeProject.id;
   return payload;
 }
 
@@ -3625,6 +4353,7 @@ function _em3dGeomSummaryHtml(p) {
 async function adoptEm3dGeom() {
   const sum = document.getElementById('e3_geomsummary');
   if (!sum) return;
+  _e3RefreshSavedList();           // gespeicherte 3D-Läufe in die Auswahl laden (Tab-Öffnen)
   try {
     _em3dGeomPayload = await _em3dBuildGeomPayload();
     sum.innerHTML = _em3dGeomSummaryHtml(_em3dGeomPayload);
@@ -3646,6 +4375,26 @@ async function _em3dGeom() {
   return JSON.parse(JSON.stringify(_em3dGeomPayload));
 }
 
+// Ziel-Knoten-Regler: Label, Grob-Schätzung (RAM/Zeit, gemessen) + Aktiv/Inaktiv der Zellgrößen.
+function _e3TargetSync() {
+  const on  = document.getElementById('e3_target_on');
+  const sl  = document.getElementById('e3_target_nodes');
+  const lbl = document.getElementById('e3_target_lbl');
+  const est = document.getElementById('e3_target_est');
+  if (!sl) return;
+  const n = +sl.value;
+  if (lbl) lbl.textContent = n.toLocaleString('de-DE');
+  sl.disabled = !(on && on.checked);
+  // gemessene Regression (31-GiB-Maschine, MUMPS): RAM ≈ n·(59…95)/1e6 GiB, Zeit ≈ ~Knoten^1.2.
+  const ramGiB = (n * (58 + 40 * (n / 300000)) / 1e6);   // kB/Knoten steigt 58→~98 (Fill-in)
+  const secs   = 24 * Math.pow(n / 38813, 1.35);
+  const mins   = secs >= 90 ? (secs / 60).toFixed(1) + ' min' : Math.round(secs) + ' s';
+  if (est) est.innerHTML = (on && on.checked)
+    ? `≈ <b>${ramGiB.toFixed(1)} GiB</b> RAM, ≈ <b>${mins}</b> Solve (grobe Schätzung)`
+      + (n > 300000 ? ' — <span style="color:#e88">über RAM-Deckel!</span>' : '')
+    : 'Regler aus — es gelten die Zellgrößen unten + Auto-Cap (55 000).';
+}
+
 // FEM-Einstellungen (inkl. Schrägung + gestaffelte Staffelung) in den Payload schreiben.
 function _em3dApplyOpts(payload) {
   const g = id => +document.getElementById(id).value;
@@ -3657,11 +4406,190 @@ function _em3dApplyOpts(payload) {
   payload.mag_cl        = g('e3_magcl');     // 0 = auto (≈ halbe Grobgröße)
   payload.mag_grow      = g('e3_maggrow');   // 0 = auto (≈ 3× Luftspalt)
   payload.airbox_factor = g('e3_box');
+  // Ziel-Netzknoten (Regler): überschreibt den Auto-Cap, steuert die Knotenzahl beidseitig an.
+  if (document.getElementById('e3_target_on')?.checked)
+    payload.target_nodes = +document.getElementById('e3_target_nodes').value || 0;
+  else
+    delete payload.target_nodes;
   // Betriebspunkt: Anregung + Drehzahl + Last (+ experimentelle 3D-Stromeinprägung).
   payload.excitation   = document.getElementById('e3_excitation').value;
   payload.rpm          = g('e3_rpm');
   payload.load_nm      = g('e3_load');
   payload.coil_currents = !!document.getElementById('e3_coilcurr')?.checked;
+}
+
+// ── 3D-Lauf speichern / aufrufen ────────────────────────────────────────────────
+// Felder, die eine 3D-Config ausmachen (round-trip Speichern↔Laden).
+const _E3_CFG_FIELDS = ['e3_geomsrc','e3_preset','e3_excitation','e3_rpm','e3_load',
+  'e3_skew','e3_segs','e3_stepdeg','e3_meshcl','e3_gapcl','e3_magcl','e3_maggrow','e3_box',
+  'e3_target_on','e3_target_nodes'];
+// Geometrie eines GELADENEN Laufs (damit eine Verfeinerung danach die passende Geometrie
+// nutzt statt der aktuellen Formularwerte). Null = frischer Lauf (Formular ist maßgeblich).
+let _e3LoadedGeom = null;
+
+function _e3BuildConfig() {
+  const cfg = { sweep: JSON.parse(JSON.stringify(_e3Sweep || [])), detail_index: _e3DetailIdx,
+                coil_currents: !!document.getElementById('e3_coilcurr')?.checked,
+                geom_payload: _em3dGeomPayload };
+  _E3_CFG_FIELDS.forEach(id => { const el = document.getElementById(id); if (el) cfg[id] = el.value; });
+  const to = document.getElementById('e3_target_on'); if (to) cfg.e3_target_on = to.checked;
+  return cfg;
+}
+
+function _e3ApplyConfig(cfg) {
+  if (!cfg) return;
+  _E3_CFG_FIELDS.forEach(id => {
+    const el = document.getElementById(id);
+    if (el && cfg[id] !== undefined && el.type !== 'checkbox') el.value = cfg[id];
+  });
+  const to = document.getElementById('e3_target_on');
+  if (to && cfg.e3_target_on !== undefined) to.checked = !!cfg.e3_target_on;
+  if (typeof _e3TargetSync === 'function') _e3TargetSync();
+  const cc = document.getElementById('e3_coilcurr'); if (cc) cc.checked = !!cfg.coil_currents;
+  if (Array.isArray(cfg.sweep)) { _e3Sweep = JSON.parse(JSON.stringify(cfg.sweep)); }
+  if (cfg.detail_index != null) _e3DetailIdx = cfg.detail_index;
+  if (typeof _e3RenderSweepTable === 'function') _e3RenderSweepTable();
+  if (cfg.geom_payload) { _em3dGeomPayload = cfg.geom_payload; _e3LoadedGeom = cfg.geom_payload; }
+  if (typeof _updateExcitationVis === 'function') _updateExcitationVis();
+}
+
+async function _e3SaveRun() {
+  const m = document.getElementById('e3_save_msg');
+  const name = (document.getElementById('e3_save_name').value || '').trim();
+  try {
+    const r = await fetch('/em3d/save', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ name, config: _e3BuildConfig() }) }).then(x => x.json());
+    if (r.error) { m.style.color = '#e57'; m.textContent = '⚠ ' + r.error; return; }
+    m.style.color = '#6c6'; m.textContent = '✓ Gespeichert: ' + (r.name || r.id);
+    await _e3RefreshSavedList();
+  } catch (e) { m.style.color = '#e57'; m.textContent = '⚠ ' + e.message; }
+}
+
+async function _e3RefreshSavedList() {
+  const sel = document.getElementById('e3_saved_list'); if (!sel) return;
+  try {
+    const list = await fetch('/em3d/saved').then(x => x.json());
+    const cur = sel.value;
+    sel.innerHTML = '<option value="">— gespeicherte Läufe —</option>' + (list || []).map(it => {
+      const tag = it.is_submodel ? ' · 🔍Gebiet' : (it.is_sweep ? ' · Sweep' : '');
+      const bg = it.b_gap != null ? ` · B_gap ${it.b_gap} T` : '';
+      return `<option value="${escHtml(it.id)}">${escHtml(it.name)} (${escHtml(it.timestamp||'')})${bg}${tag}</option>`;
+    }).join('');
+    sel.value = cur;
+  } catch (e) {}
+}
+
+async function _e3LoadRun() {
+  const m = document.getElementById('e3_save_msg');
+  const id = document.getElementById('e3_saved_list').value;
+  if (!id) { m.style.color = '#e57'; m.textContent = '⚠ Bitte einen Lauf wählen.'; return; }
+  try {
+    const r = await fetch('/em3d/saved/' + encodeURIComponent(id)).then(x => x.json());
+    if (r.error) { m.style.color = '#e57'; m.textContent = '⚠ ' + r.error; return; }
+    // WICHTIG: die Feld-/Feldlinien-Caches des VORHERIGEN Laufs leeren — _e3GetPointPd cached
+    // die geparste VTP je Punkt-Index; ohne Leeren zeigt der Viewer nach dem Laden das ALTE
+    // (oder gar kein) Feld („lädt ohne Feld"). _e3PlayStop() leert _e3PdCache/_e3LinesCache +
+    // stoppt einen laufenden Player. Danach den Viewer-Zustand neutralisieren.
+    if (typeof _e3PlayStop === 'function') _e3PlayStop();
+    _e3ViewIdx = null; _e3SweepPoints = null;
+    _e3ApplyConfig(r.config);
+    if (r.result && r.result.sweep) _renderEm3dSweep(r.result); else _renderEm3d(r.result);
+    // Viewer NICHT automatisch öffnen (der Saved-Runs-Knopf sitzt auf Tab ①, der Viewer im
+    // 3D-Feld-Tab → würde in einen versteckten 0×0-Container rendern). Der Cache ist geleert →
+    // „🧊 Im Browser ansehen" holt die Feld-VTP frisch aus dem Store.
+    m.style.color = '#6c6'; m.textContent = '✓ Geladen: ' + (r.name || id) + ' — im 3D-Feld-Tab „🧊 Im Browser ansehen".';
+  } catch (e) { m.style.color = '#e57'; m.textContent = '⚠ ' + e.message; }
+}
+
+async function _e3DeleteSaved() {
+  const m = document.getElementById('e3_save_msg');
+  const id = document.getElementById('e3_saved_list').value;
+  if (!id) return;
+  if (!confirm('Gespeicherten 3D-Lauf löschen?')) return;
+  try {
+    await fetch('/em3d/saved/' + encodeURIComponent(id) + '/delete', { method: 'POST' });
+    m.style.color = '#6c6'; m.textContent = '✓ Gelöscht.';
+    await _e3RefreshSavedList();
+  } catch (e) { m.style.color = '#e57'; m.textContent = '⚠ ' + e.message; }
+}
+
+// ── Verfeinerungsgebiet (Submodell) ─────────────────────────────────────────────
+let _e3RoiActor = null;     // gelber Drahtgitter-Quader im Viewer
+
+function _e3ShowRefineCard(show) {
+  const c = document.getElementById('e3_refine_card');
+  if (c) c.style.display = show ? 'block' : 'none';
+}
+
+// Vorbelegung des Quaders aus der Maschinengröße: Luftspalt-/Magnetbereich auf der +x-Seite.
+function _e3RoiDefaults() {
+  const g = (_em3dGeomPayload && _em3dGeomPayload.geom) || {};
+  const rso = (+g.statorOD || 160) / 2;
+  const L = (_em3dGeomPayload && (+_em3dGeomPayload.axial_len)) || (+g.axialLen) || 80;
+  return { xmin: +(0.12 * rso).toFixed(1), xmax: +(0.78 * rso).toFixed(1),
+           ymin: +(-0.32 * rso).toFixed(1), ymax: +(0.32 * rso).toFixed(1),
+           zmin: +(0.30 * L).toFixed(1), zmax: +(0.70 * L).toFixed(1) };
+}
+
+function _e3RoiReset() {
+  const d = _e3RoiDefaults();
+  ['xmin','xmax','ymin','ymax','zmin','zmax'].forEach(k => {
+    const el = document.getElementById('e3_roi_' + k); if (el) el.value = d[k];
+  });
+  _e3DrawRoiBox();
+}
+
+function _e3ReadRoi() {
+  const v = k => +document.getElementById('e3_roi_' + k).value;
+  const r = { xmin: v('xmin'), xmax: v('xmax'), ymin: v('ymin'),
+              ymax: v('ymax'), zmin: v('zmin'), zmax: v('zmax') };
+  if (r.xmax <= r.xmin || r.ymax <= r.ymin || r.zmax <= r.zmin) return null;
+  return r;
+}
+
+function _e3RoiChanged() { _e3DrawRoiBox(); }
+
+// Gelben Drahtgitter-Quader im 3D-Viewer zeichnen (live aus den Feldern). vtk.js-Box-Quelle;
+// fehlt sie im Build, bleiben die Zahlenfelder die (interaktive) Quelle der Wahrheit.
+function _e3DrawRoiBox() {
+  if (!_e3rw || !window.vtk) return;
+  const r = _e3ReadRoi(); if (!r) return;
+  const ren = _e3rw.getRenderer();
+  if (_e3RoiActor) { try { ren.removeActor(_e3RoiActor); } catch (e) {} _e3RoiActor = null; }
+  try {
+    const cube = vtk.Filters.Sources.vtkCubeSource.newInstance({
+      xLength: r.xmax - r.xmin, yLength: r.ymax - r.ymin, zLength: r.zmax - r.zmin,
+      center: [(r.xmin + r.xmax) / 2, (r.ymin + r.ymax) / 2, (r.zmin + r.zmax) / 2] });
+    const mp = vtk.Rendering.Core.vtkMapper.newInstance();
+    mp.setInputConnection(cube.getOutputPort());
+    const a = vtk.Rendering.Core.vtkActor.newInstance(); a.setMapper(mp);
+    a.getProperty().setRepresentation(1);      // Wireframe
+    a.getProperty().setColor(1.0, 0.85, 0.1); a.getProperty().setLineWidth(2);
+    ren.addActor(a); _e3RoiActor = a;
+    _e3rw.getRenderWindow().render();
+  } catch (e) {}
+}
+
+async function startEm3dSubmodel() {
+  const m = document.getElementById('e3_roi_msg');
+  const roi = _e3ReadRoi();
+  if (!roi) { m.style.color = '#e57'; m.textContent = '⚠ Ungültiger Quader (bis-Werte müssen > von-Werten sein).'; return; }
+  m.style.color = '#9aa'; m.textContent = '⏳ Verfeinerung wird gerechnet (volles Modell, lokal feiner)…';
+  try {
+    // Geometrie: bei geladenem Lauf die gespeicherte, sonst die aktuelle Form/Designer-Geometrie.
+    const payload = _e3LoadedGeom ? JSON.parse(JSON.stringify(_e3LoadedGeom)) : await _em3dGeom();
+    _em3dApplyOpts(payload);
+    payload.roi_box = roi;
+    payload.refine_factor = +document.getElementById('e3_roi_refine').value || 3;
+    const btn = document.getElementById('e3_roi_btn'); if (btn) btn.disabled = true;
+    ['e3_btn','e3_pbtn','e3_sbtn'].forEach(id => { const el=document.getElementById(id); if(el)el.disabled=true; });
+    const r = await fetch('/em3d/submodel', { method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(payload) }).then(x => x.json());
+    if (r.error) { m.style.color = '#e57'; m.textContent = '⚠ ' + r.error;
+      if (btn) btn.disabled = false; return; }
+    document.getElementById('e3_log').style.display = 'block';
+    _pollEm3d();
+  } catch (e) { m.style.color = '#e57'; m.textContent = '⚠ ' + e.message; }
 }
 
 // Geschätztes Nenn-Drehmoment aus der Maschinengröße (Tangentialspannungs-Auslegung):
@@ -3711,6 +4639,243 @@ function _updateExcitationVis() {
   if (f) f.style.display = loaded ? '' : 'none';
 }
 
+// ── Drehzahlband / Lastsweep ──────────────────────────────────────────────────────
+// Liste der Betriebspunkte (rpm/Last/Anregung) + Index des Detailpunkts (volles 3D-Feld).
+let _e3Sweep = [
+  { rpm: 1000, load_nm: 150, excitation: 'loaded' },
+  { rpm: 8000, load_nm: 90,  excitation: 'loaded' },
+  { rpm: 15000, load_nm: 55, excitation: 'loaded' },
+];
+let _e3DetailIdx = 2;
+
+function _e3RenderSweepTable() {
+  const t = document.getElementById('e3_sweep_table');
+  if (!t) return;
+  if (_e3DetailIdx >= _e3Sweep.length) _e3DetailIdx = Math.max(0, _e3Sweep.length - 1);
+  let h = '<tr style="color:#9ab;text-align:left;border-bottom:1px solid #2a2a30">'
+        + '<th style="padding:4px 6px">Detail&nbsp;⦿</th><th style="padding:4px 6px">Drehzahl [1/min]</th>'
+        + '<th style="padding:4px 6px">Last [Nm]</th><th style="padding:4px 6px">Anregung</th><th></th></tr>';
+  _e3Sweep.forEach((p, i) => {
+    h += `<tr style="border-bottom:1px solid #1d1d24">`
+      + `<td style="padding:3px 6px;text-align:center"><input type="radio" name="e3detail" ${i===_e3DetailIdx?'checked':''} onchange="_e3DetailIdx=${i}"></td>`
+      + `<td style="padding:3px 6px"><input type="number" value="${p.rpm}" min="0" max="60000" step="100" style="width:96px" onchange="_e3SweepSet(${i},'rpm',this.value)"></td>`
+      + `<td style="padding:3px 6px"><input type="number" value="${p.load_nm}" min="0" max="5000" step="10" style="width:84px" onchange="_e3SweepSet(${i},'load_nm',this.value)"></td>`
+      + `<td style="padding:3px 6px"><select onchange="_e3SweepSet(${i},'excitation',this.value)" style="width:auto;padding:3px">`
+      + `<option value="loaded" ${p.excitation==='loaded'?'selected':''}>Lastfall</option>`
+      + `<option value="open_circuit" ${p.excitation==='open_circuit'?'selected':''}>Leerlauf</option></select></td>`
+      + `<td style="padding:3px 6px;text-align:right"><button onclick="_e3SweepDel(${i})" style="background:#5a3a3a;width:auto;padding:2px 9px">✕</button></td></tr>`;
+  });
+  t.innerHTML = h;
+}
+function _e3SweepSet(i, k, v) {
+  if (!_e3Sweep[i]) return;
+  _e3Sweep[i][k] = (k === 'excitation') ? v : (+v || 0);
+}
+function _e3SweepDel(i) { _e3Sweep.splice(i, 1); if (!_e3Sweep.length) _e3SweepAddRow(); _e3RenderSweepTable(); }
+function _e3SweepAddRow() {
+  const last = _e3Sweep[_e3Sweep.length - 1] || { rpm: 3000, load_nm: 100, excitation: 'loaded' };
+  _e3Sweep.push({ rpm: last.rpm, load_nm: last.load_nm, excitation: last.excitation });
+  _e3RenderSweepTable();
+}
+function _e3SweepClear() { _e3Sweep = []; _e3DetailIdx = 0; _e3MakeVideo = false; _e3SweepAddRow(); }
+
+// Aus den 5 Lastprofilen ein Drehzahlband bauen (gleiche Logik wie _e3ApplyPreset).
+function _e3SweepFromProfiles() {
+  const g = (_em3dGeomPayload) || {};
+  const rpmTo = +g.rpm_to || 8000;
+  const Tn = _e3RatedTorque(g);
+  _e3Sweep = [
+    { rpm: Math.round(Math.max(300, rpmTo * 0.10)), load_nm: Math.round(Tn * 1.8), excitation: 'loaded' },   // Volllast/Anfahren
+    { rpm: Math.round(rpmTo * 0.5),  load_nm: Math.round(Tn * 0.4),  excitation: 'loaded' },                  // Teillast
+    { rpm: Math.round(rpmTo * 0.6),  load_nm: Math.round(Tn),        excitation: 'loaded' },                  // Nennlast
+    { rpm: Math.round(rpmTo),        load_nm: Math.round(Tn * 0.55), excitation: 'loaded' },                  // Feldschwächung
+    { rpm: Math.round(rpmTo * 0.5),  load_nm: 0,                     excitation: 'open_circuit' },            // Leerlauf
+  ];
+  _e3DetailIdx = 2;
+  _e3MakeVideo = false;
+  _e3RenderSweepTable();
+}
+// rpm von–bis · N Punkte · feste Last → Zeilen anhängen.
+function _e3SweepFromBand() {
+  const lo = +document.getElementById('e3_sw_from').value || 0;
+  const hi = +document.getElementById('e3_sw_to').value || 0;
+  const n = Math.max(1, Math.round(+document.getElementById('e3_sw_n').value || 1));
+  const load = +document.getElementById('e3_sw_load').value || 0;
+  const exc = load > 0 ? 'loaded' : 'open_circuit';
+  for (let i = 0; i < n; i++) {
+    const rpm = n === 1 ? lo : Math.round(lo + (hi - lo) * i / (n - 1));
+    _e3Sweep.push({ rpm, load_nm: load, excitation: exc });
+  }
+  _e3RenderSweepTable();
+}
+// Reine Drehzahl-Rampe (feste Last) → ERSETZT die Punktliste. Für die dynamische
+// Darstellung „über Drehzahl" im 3D-Viewer (der Player läuft dann über die rpm-Achse).
+function _e3RampSpeed() {
+  const lo = +document.getElementById('e3_sw_from').value || 0;
+  const hi = +document.getElementById('e3_sw_to').value || 0;
+  const n = Math.max(2, Math.round(+document.getElementById('e3_sw_n').value || 2));
+  const load = +document.getElementById('e3_sw_load').value || 0;
+  const exc = load > 0 ? 'loaded' : 'open_circuit';
+  _e3Sweep = [];
+  for (let i = 0; i < n; i++) {
+    const rpm = Math.round(lo + (hi - lo) * i / (n - 1));
+    _e3Sweep.push({ rpm, load_nm: load, excitation: exc });
+  }
+  _e3DetailIdx = Math.floor((n - 1) / 2);          // Detailfeld in der Bandmitte
+  _e3MakeVideo = false;
+  _e3RenderSweepTable();
+}
+// Reine Last-Rampe (feste Drehzahl) → ERSETZT die Punktliste. Für die dynamische
+// Darstellung „über Last" (0 → Last-bis); Punkt 0 = Leerlauf. Der Player läuft über die Last.
+function _e3RampLoad() {
+  const rpm = +document.getElementById('e3_sw_rpm_fixed').value || 0;
+  const hiT = +document.getElementById('e3_sw_load_to').value || 0;
+  const n = Math.max(2, Math.round(+document.getElementById('e3_sw_n').value || 2));
+  _e3Sweep = [];
+  for (let i = 0; i < n; i++) {
+    const load = Math.round(hiT * i / (n - 1));
+    _e3Sweep.push({ rpm, load_nm: load, excitation: load > 0 ? 'loaded' : 'open_circuit' });
+  }
+  _e3DetailIdx = n - 1;                             // Detailfeld bei Volllast
+  _e3MakeVideo = false;
+  _e3RenderSweepTable();
+}
+
+// Dynamisches Lastprofil (synthetischer Fahrzyklus) → Punktliste + Video-Flag. Ausgelegt, dass
+// i_q/i_d, Sättigung und Feldlinien maximal sichtbar variieren: Anfahren (Volllast) →
+// Beschleunigung → Nennbetrieb → Feldschwächung (i_d↓ über Basisdrehzahl) → Boost → Auslauf.
+let _e3MakeVideo = false;
+function _e3LoadProfile() {
+  const g = (_em3dGeomPayload) || {};
+  let N = Math.round(+document.getElementById('e3_prof_n').value || 30);
+  N = Math.max(20, Math.min(50, N));
+  const rpmTo = +g.rpm_to || 8000;
+  const Tn = _e3RatedTorque(g);
+  const rb = 0.55 * rpmTo;                           // Basisdrehzahl (darüber Feldschwächung)
+  // [Anteil, Label, rpm(t 0..1), Last(t)]
+  const segs = [
+    [0.18, 'Anfahren (Volllast)',  t => (0.05 + 0.30 * t) * rpmTo, t => (0.5 + 1.1 * t) * Tn],
+    [0.14, 'Beschleunigung',       t => (0.35 + 0.15 * t) * rpmTo, t => 1.6 * Tn],
+    [0.12, 'Nennbetrieb',          t => (0.50 + 0.05 * t) * rpmTo, t => Tn],
+    [0.26, 'Feldschwächung',       t => (0.55 + 0.45 * t) * rpmTo, t => Tn * rb / ((0.55 + 0.45 * t) * rpmTo)],
+    [0.10, 'Boost / Überlast',     t => (0.88 + 0.04 * t) * rpmTo, t => 1.5 * Tn],
+    [0.20, 'Lastabwurf / Auslauf', t => (0.90 - 0.85 * t) * rpmTo, t => 1.5 * Tn * (1 - t)],
+  ];
+  let counts = segs.map(s => Math.max(2, Math.round(s[0] * N)));
+  let sum = counts.reduce((a, b) => a + b, 0);
+  while (sum > N) { counts[counts.indexOf(Math.max(...counts))]--; sum--; }
+  while (sum < N) { counts[counts.indexOf(Math.max(...counts))]++; sum++; }
+  const pts = [];
+  segs.forEach((s, si) => {
+    const cnt = counts[si];
+    for (let k = 0; k < cnt; k++) {
+      const t = cnt === 1 ? 0.5 : k / (cnt - 1);
+      const rpm = Math.max(0, Math.round(s[2](t)));
+      const load = Math.max(0, Math.round(s[3](t)));
+      pts.push({ rpm, load_nm: load, excitation: load > 0 ? 'loaded' : 'open_circuit', phase: s[1] });
+    }
+  });
+  _e3Sweep = pts;
+  let acc = 0; for (let si = 0; si < 4; si++) acc += counts[si];   // Detailfeld = Boost-Beginn (max Sättigung)
+  _e3DetailIdx = Math.min(pts.length - 1, acc);
+  _e3MakeVideo = true;
+  // Das Mesh MUSS mit Stirnringen gebaut werden → Anregung „Lastfall" + Spulenströme erzwingen.
+  const ex = document.getElementById('e3_excitation'); if (ex) ex.value = 'loaded';
+  const cc = document.getElementById('e3_coilcurr'); if (cc) cc.checked = true;
+  if (typeof _updateExcitationVis === 'function') _updateExcitationVis();
+  _e3RenderSweepTable();
+  _toast(`🎬 Lastprofil mit ${pts.length} Punkten — „Drehzahlband berechnen" rendert danach das Video.`);
+}
+
+async function startEm3dSweep() {
+  const msg = document.getElementById('e3_msg');
+  const logEl = document.getElementById('e3_log');
+  const btn = document.getElementById('e3_sbtn');
+  if (!_e3Sweep.length) { msg.style.color = '#e57'; msg.textContent = '⚠ Keine Betriebspunkte in der Tabelle.'; return; }
+  btn.disabled = true; msg.style.color = '#9c9';
+  msg.textContent = `⏳ Starte Drehzahlband (${_e3Sweep.length} Punkte, Mesh nur einmal)…`;
+  logEl.style.display = 'block'; logEl.textContent = '';
+  document.getElementById('e3_results').innerHTML = '';
+  document.getElementById('e3_sweep_results').innerHTML = '';
+  _e3PlayStop();               // laufenden Player stoppen + Caches leeren (neuer Lauf)
+  _e3LoadedGeom = null; _e3ShowRefineCard(false);
+  try {
+    const payload = await _em3dGeom();
+    _em3dApplyOpts(payload);
+    payload.sweep = _e3Sweep.map(p => ({ rpm: +p.rpm || 0, load_nm: +p.load_nm || 0, excitation: p.excitation || 'loaded', phase: p.phase || '' }));
+    payload.detail_index = Math.max(0, Math.min(_e3DetailIdx, _e3Sweep.length - 1));
+    payload.make_video = !!_e3MakeVideo;
+    const r = await fetch('/em3d_sweep', { method: 'POST', headers: {'Content-Type':'application/json'},
+                                           body: JSON.stringify(payload) });
+    if (r.status === 503) {
+      const j = await r.json(); msg.style.color = '#e57';
+      msg.innerHTML = '⚠ ' + escHtml(j.error || 'Elmer fehlt').replace(/\n/g,'<br>');
+      btn.disabled = false; return;
+    }
+    if (!r.ok) { const j = await r.json().catch(()=>({})); msg.style.color='#e57';
+      msg.textContent = '⚠ ' + (j.error || r.status); btn.disabled = false; return; }
+    _pollEm3d();
+  } catch (e) { msg.style.color='#e57'; msg.textContent = 'Fehler: ' + e.message; btn.disabled = false; }
+}
+
+function _renderEm3dSweep(res) {
+  window._e3HasResult = true;   // ein 3D-Lauf liegt zum Speichern vor
+  const msg = document.getElementById('e3_msg');
+  const sbox = document.getElementById('e3_sweep_results');
+  const rows = res.sweep || [];
+  const nOk = rows.filter(r => r && r.ok).length;
+  msg.style.color = '#6c6';
+  msg.innerHTML = `✓ Drehzahlband fertig · ${nOk}/${rows.length} Punkte`
+    + (res.mesh ? ` · Mesh ${res.mesh.n_nodes} Knoten (einmal gebaut)` : '');
+  let h = '<div class="e3-card"><div class="section-title">🌡 Drehzahlband — Kennwerte je Betriebspunkt</div>';
+  h += '<table style="width:100%;font-size:.8rem;border-collapse:collapse">'
+     + '<tr style="color:#9ab;text-align:left;border-bottom:1px solid #2a2a30">'
+     + '<th style="padding:4px 6px">#</th><th style="padding:4px 6px">Drehzahl [1/min]</th>'
+     + '<th style="padding:4px 6px">Last [Nm]</th><th style="padding:4px 6px">Anregung</th>'
+     + '<th style="padding:4px 6px">B_gap(Mitte) [T]</th><th style="padding:4px 6px">Moment [Nm]</th>'
+     + '<th style="padding:4px 6px">i_q [A]</th><th style="padding:4px 6px">i_d [A]</th></tr>';
+  const fmt = v => (v == null ? '—' : v);
+  rows.forEach((r, i) => {
+    if (!r) return;
+    const detail = (i === res.detail_index);
+    h += `<tr style="border-bottom:1px solid #1d1d24;${detail?'background:#1c2a22':''}${r.ok?'':'color:#c77'}">`
+      + `<td style="padding:3px 6px">${i+1}${detail?' ⦿':''}${r.ok?'':' ⚠'}</td>`
+      + `<td style="padding:3px 6px">${fmt(r.rpm)}</td><td style="padding:3px 6px">${fmt(r.load_nm)}</td>`
+      + `<td style="padding:3px 6px">${r.excitation==='loaded'?'Lastfall':'Leerlauf'}</td>`
+      + `<td style="padding:3px 6px">${fmt(r.b_gap_mid_peak)}</td><td style="padding:3px 6px">${fmt(r.torque_Nm)}</td>`
+      + `<td style="padding:3px 6px">${fmt(r.iq_A)}</td><td style="padding:3px 6px">${fmt(r.id_A)}</td></tr>`;
+  });
+  h += '</table>';
+  (res.sweep_images || []).forEach(im => {
+    h += `<div style="margin-top:10px"><div style="font-size:.8rem;color:#9aa;margin-bottom:4px">${escHtml(im.title||'')}</div>`
+       + `<img src="${im.b64}" style="max-width:100%;border:1px solid #222;border-radius:4px"></div>`;
+  });
+  if (res.video) {
+    const pid = (window._activeProject && _activeProject.id) || 'current';
+    const vurl = `/project/${encodeURIComponent(pid)}/video/em3d?t=${Date.now()}`;
+    h += `<div style="margin-top:12px"><div style="font-size:.82rem;color:#ffd479;margin-bottom:4px">🎬 Dynamisches Lastprofil — |B|-Sättigung · Feldlinien · Ströme (i_q/i_d) · Zeitleiste</div>`
+       + `<video controls loop muted style="max-width:100%;border:1px solid #333;border-radius:6px;background:#000" src="${vurl}"></video>`
+       + `<div style="margin-top:4px"><a href="${vurl}" download style="color:#7ad;font-size:.78rem">⬇ Video herunterladen (MP4)</a></div></div>`;
+  }
+  if ((res.warnings || []).length)
+    h += `<div style="margin-top:8px;font-size:.76rem;color:#c96">⚠ ${res.warnings.map(escHtml).join('<br>⚠ ')}</div>`;
+  // Drehzahl/Lastfall-Auswahl: jeder gerechnete Punkt hat eine eigene 3D-VTP (+ Feldlinien).
+  // Der Umschalter sitzt in der Viewer-Bedienleiste (e3_clipbar) → direkt am 3D-Bild.
+  const okIdx = rows.map((r, i) => (r && r.ok) ? i : -1).filter(i => i >= 0);
+  const sweepPts = okIdx.map(i => ({ i, rpm: rows[i].rpm, load: rows[i].load_nm }));
+  h += `<div style="margin-top:10px;font-size:.78rem;color:#9aa">Detailpunkt #${(res.detail_index??0)+1} — volles 3D-Feld unten`
+     + (sweepPts.length > 1 ? ` · im Browser-Viewer zwischen allen Lastfällen umschaltbar (Auswahl „🧊 Lastfall")` : '')
+     + `:</div></div>`;
+  sbox.innerHTML = h;
+  // Detailpunkt über die vorhandene Einzelpunkt-Anzeige (Viewer/ParaView/VTU/2D-vs-3D).
+  if (res.detail) {
+    _renderEm3d(res.detail);                       // setzt _e3ViewIdx=null, _e3SweepPoints=null
+    // Browser-Viewer beim Sweep auf den Detailpunkt-Index vorbelegen + Lastfälle hinterlegen.
+    _e3ViewIdx = (res.detail_index == null ? null : res.detail_index);
+    _e3SweepPoints = sweepPts.length > 1 ? sweepPts : null;
+  } else document.getElementById('e3_results').innerHTML = '';
+}
+
 async function startEm3d() {
   const msg = document.getElementById('e3_msg');
   const logEl = document.getElementById('e3_log');
@@ -3718,11 +4883,45 @@ async function startEm3d() {
   btn.disabled = true; msg.style.color = '#9c9'; msg.textContent = '⏳ Starte 3D-Berechnung…';
   logEl.style.display = 'block'; logEl.textContent = '';
   document.getElementById('e3_results').innerHTML = '';
+  document.getElementById('e3_sweep_results').innerHTML = '';
+  _e3PlayStop();               // laufenden Player stoppen + Caches leeren (neuer Lauf)
+  _e3LoadedGeom = null;        // frischer Lauf → Grob-Quelle ist dieser Lauf (Formular maßgeblich)
+  _e3ShowRefineCard(false);
   try {
     const payload = await _em3dGeom();
     _em3dApplyOpts(payload);
     const r = await fetch('/em3d', { method: 'POST', headers: {'Content-Type':'application/json'},
                                      body: JSON.stringify(payload) });
+    if (r.status === 503) {
+      const j = await r.json(); msg.style.color = '#e57';
+      msg.innerHTML = '⚠ ' + escHtml(j.error || 'Elmer fehlt').replace(/\n/g,'<br>');
+      btn.disabled = false; return;
+    }
+    if (!r.ok) { const j = await r.json().catch(()=>({})); msg.style.color='#e57';
+      msg.textContent = '⚠ ' + (j.error || r.status); btn.disabled = false; return; }
+    _pollEm3d();
+  } catch (e) { msg.style.color='#e57'; msg.textContent = 'Fehler: ' + e.message; btn.disabled = false; }
+}
+
+// Ein-Pol-Sektor (Symmetrie-Submodell): eine Pol-Teilung fein, anti-periodisch, zum vollen
+// Motor gespiegelt. Teilt _em3d_state/Status/Viewer mit /em3d (über _pollEm3d).
+async function startEm3dSector() {
+  const msg = document.getElementById('e3_msg');
+  const logEl = document.getElementById('e3_log');
+  const btn = document.getElementById('e3_secbtn');
+  btn.disabled = true; msg.style.color = '#9c9';
+  msg.textContent = '⏳ Starte Pol-Berechnung (Symmetrie, feines Netz)…';
+  logEl.style.display = 'block'; logEl.textContent = '';
+  document.getElementById('e3_results').innerHTML = '';
+  document.getElementById('e3_sweep_results').innerHTML = '';
+  _e3PlayStop();               // laufenden Player stoppen + Caches leeren (neuer Lauf)
+  _e3LoadedGeom = null; _e3ShowRefineCard(false);
+  try {
+    const payload = await _em3dGeom();
+    _em3dApplyOpts(payload);
+    payload.node_budget_pct = +(document.getElementById('e3_node_budget')||{}).value || 100;
+    const r = await fetch('/em3d/sector', { method: 'POST', headers: {'Content-Type':'application/json'},
+                                            body: JSON.stringify(payload) });
     if (r.status === 503) {
       const j = await r.json(); msg.style.color = '#e57';
       msg.innerHTML = '⚠ ' + escHtml(j.error || 'Elmer fehlt').replace(/\n/g,'<br>');
@@ -3741,6 +4940,8 @@ async function startEm3dPreview() {
   btn.disabled = true; msg.style.color = '#9c9'; msg.textContent = '⏳ Baue 3D-Modell…';
   logEl.style.display = 'block'; logEl.textContent = '';
   document.getElementById('e3_results').innerHTML = '';
+  document.getElementById('e3_sweep_results').innerHTML = '';
+  _e3PlayStop();               // laufenden Player stoppen + Caches leeren (neuer Lauf)
   try {
     const payload = await _em3dGeom();
     _em3dApplyOpts(payload);
@@ -3752,15 +4953,44 @@ async function startEm3dPreview() {
   } catch (e) { msg.style.color='#e57'; msg.textContent = 'Fehler: ' + e.message; btn.disabled = false; }
 }
 
+function _e3ShowAbort(show) {
+  const b = document.getElementById('e3_abort'); if (b) b.style.display = show ? '' : 'none';
+}
+
+// Laufende 3D-Berechnung abbrechen. Beim Drehzahlband/Sweep behält der Server das bis dahin
+// gerechnete Teilergebnis (Status „aborted" → _pollEm3d rendert es); danach ist sofort ein
+// neuer Lauf startbar.
+async function abortEm3d() {
+  const b = document.getElementById('e3_abort'); if (b) b.disabled = true;
+  const msg = document.getElementById('e3_msg');
+  if (msg) { msg.style.color = '#fb0'; msg.textContent = '⛔ Breche ab… (laufenden Löser stoppen)'; }
+  try { await fetch('/em3d/abort', { method: 'POST' }); } catch (e) {}
+  if (b) b.disabled = false;   // _pollEm3d blendet ihn aus, sobald der Lauf endet
+}
+
 async function _pollEm3d(isPreview) {
   const msg = document.getElementById('e3_msg');
   const logEl = document.getElementById('e3_log');
-  const enable = () => { const a=document.getElementById('e3_btn'), b=document.getElementById('e3_pbtn');
-                         if(a)a.disabled=false; if(b)b.disabled=false; };
+  const enable = () => { ['e3_btn','e3_pbtn','e3_sbtn','e3_secbtn'].forEach(id => {
+                         const el=document.getElementById(id); if(el)el.disabled=false; });
+                         _e3ShowAbort(false); };
   try {
     const s = await fetch('/em3d/status').then(x => x.json());
     if (Array.isArray(s.log)) { logEl.textContent = s.log.join('\n'); logEl.scrollTop = logEl.scrollHeight; }
-    if (s.status === 'done') { _renderEm3d(s.result); enable(); return; }
+    // Abbrechen-Knopf nur bei einem echten (abbrechbaren) Elmer-Lauf zeigen, nicht bei der Vorschau.
+    _e3ShowAbort(s.status === 'running' && !isPreview);
+    if (s.status === 'done' || s.status === 'aborted') {
+      if (s.result && s.result.sweep) _renderEm3dSweep(s.result);
+      else if (s.result) _renderEm3d(s.result);
+      if (s.status === 'aborted') {
+        msg.style.color = '#fb0';
+        const nd = s.result && s.result.n_done;
+        msg.textContent = '⛔ Abgebrochen'
+          + (nd != null ? ` — ${nd} gerechnete(r) Punkt(e) behalten (speicherbar). ` : ' — ')
+          + 'Neustart jederzeit möglich.';
+      }
+      enable(); return;
+    }
     if (s.status === 'error') { msg.style.color='#e57'; msg.textContent = '⚠ ' + (s.error || 'Fehlgeschlagen'); enable(); return; }
   } catch (e) {}
   setTimeout(() => _pollEm3d(isPreview), 1500);
@@ -3770,6 +5000,10 @@ function _renderEm3d(res) {
   const msg = document.getElementById('e3_msg');
   const box = document.getElementById('e3_results');
   if (!res) { msg.textContent = '⚠ Kein Ergebnis.'; return; }
+  window._e3HasResult = true;   // ein 3D-Lauf liegt zum Speichern vor
+  _e3PlayStop();            // laufenden Player stoppen + Punkt-Caches leeren (neuer Lauf)
+  _e3ViewIdx = null;        // Einzellauf: Routen liefern den Detail-/Einzelpfad (Sweep setzt danach um)
+  _e3SweepPoints = null;    // Einzellauf: kein Lastfall-Umschalter (Sweep setzt danach)
   msg.style.color = '#6c6';
   const c = res.compare_2d || {};
   if (res.preview) {
@@ -3806,25 +5040,58 @@ function _renderEm3d(res) {
        + `<button onclick="openParaview()" style="background:#3a4a6a;width:auto;padding:6px 12px">📊 In ParaView öffnen</button>`
        + `<a href="/em3d/vtu" style="color:#7ad">⬇ VTU herunterladen</a></div>`;
     if (res.vtp_path) {
+      h += `<div id="e3_view_fs">`;   // Wrapper für Bedienleiste + Viewer → gemeinsam ins Vollbild
       h += `<div id="e3_clipbar" style="margin-top:10px;display:none;align-items:center;gap:12px;flex-wrap:wrap;`
          + `background:#16161c;border:1px solid #2e2e36;border-radius:6px;padding:8px 11px;font-size:.78rem;color:#bcd">`
+         + `<span id="e3_speed_wrap" style="display:none;gap:5px;align-items:center;border-right:1px solid #2e2e36;padding-right:12px"></span>`
+         + `<span style="display:flex;gap:4px;align-items:center;border-right:1px solid #2e2e36;padding-right:12px">`
+         +   `<span style="color:#89a">Ansicht</span>`
+         +   `<button onclick="_e3SetView('xy')" title="Blick entlang Z-Achse (Querschnitt / Stirnseite)" style="width:auto;padding:3px 9px;background:#2e3a4a">XY</button>`
+         +   `<button onclick="_e3SetView('xz')" title="Blick entlang Y-Achse (Längsschnitt)" style="width:auto;padding:3px 9px;background:#2e3a4a">XZ</button>`
+         +   `<button onclick="_e3SetView('yz')" title="Blick entlang X-Achse (Längsschnitt)" style="width:auto;padding:3px 9px;background:#2e3a4a">YZ</button>`
+         +   `<button onclick="_e3SetView('iso')" title="Iso-Perspektive (Standardansicht)" style="width:auto;padding:3px 9px;background:#3a4a3a">⬛ Iso</button>`
+         +   `<button onclick="_e3Fullscreen()" id="e3_fs_btn" title="3D-Ansicht als Vollbild (Esc zum Verlassen)" style="width:auto;padding:3px 9px;background:#3a4a3a">⛶ Vollbild</button>`
+         + `</span>`
          + `<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="e3_clip_on" onchange="_e3SetClip()" style="width:auto"> ✂️ Schnittebene</label>`
          + `<label style="display:flex;gap:5px;align-items:center">Achse `
          + `<select id="e3_clip_axis" onchange="_e3SetClip()" style="width:auto;padding:3px"><option value="x">X</option><option value="y" selected>Y</option><option value="z">Z (axial)</option></select></label>`
          + `<label style="display:flex;gap:6px;align-items:center;flex:1;min-width:140px">Position `
          + `<input type="range" id="e3_clip_pos" min="0" max="1000" value="500" oninput="_e3SetClip()" style="flex:1"></label>`
          + `<button onclick="_e3FlipClip()" style="width:auto;padding:4px 10px;background:#3a4a6a">↔ Seite</button>`
-         + `<label style="display:flex;gap:6px;align-items:center;cursor:pointer;border-left:1px solid #2e2e36;padding-left:12px"><input type="checkbox" id="e3_mesh_on" onchange="_e3ToggleMesh()" style="width:auto"> 🕸 Netz</label>`
+         + `<label style="display:flex;gap:6px;align-items:center;cursor:pointer;border-left:1px solid #2e2e36;padding-left:12px"><input type="checkbox" id="e3_lines_on" onchange="_e3ToggleLines()" style="width:auto"> 🧵 Feldlinien</label>`
+         + `<label id="e3_line_dens_wrap" style="display:none;gap:5px;align-items:center" title="Dichte der Feldlinien (wenige ↔ viele)">Dichte `
+         + `<input type="range" id="e3_line_density" min="8" max="100" value="45" oninput="_e3ApplyLineDensity()" style="width:90px"></label>`
+         + `<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="e3_mesh_on" onchange="_e3ToggleMesh()" style="width:auto"> 🕸 Netz</label>`
          + `<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="e3_logscale" checked onchange="_e3ApplyColor()" style="width:auto"> 📈 log |B|</label>`
          + `<label style="display:flex;gap:5px;align-items:center;flex:1;min-width:130px" title="Obergrenze der Farbskala">|B|max `
          + `<input type="range" id="e3_vmax" min="5" max="100" value="100" oninput="_e3ApplyColor()" style="flex:1"></label>`
          + `</div>`;
       h += `<div id="e3_viewer3d" style="margin-top:8px;width:100%;height:480px;background:#0d0d12;`
          + `border:1px solid #333;border-radius:6px;display:none;position:relative"></div>`;
+      h += `</div>`;   // /e3_view_fs
     }
   }
   (res.warnings || []).forEach(w => { h += `<div style="color:#e9a;font-size:.74rem">⚠ ${escHtml(w)}</div>`; });
+  if (res.source === 'refine') {
+    h = `<div style="background:#16161c;border:1px solid #2e6a4a;border-radius:6px;padding:8px 11px;margin:6px 0;font-size:.8rem;color:#bcd">`
+      + `🔍 <b>Lokal verfeinerter Lauf</b> (volles Modell, Gebiet ${res.refine_factor||''}× feiner)`
+      + `${res.mesh ? ' · '+res.mesh.n_nodes+' Knoten' : ''} — physikalisch exakt, kein Submodell.</div>` + h;
+  }
+  if (res.source === 'sector') {
+    const ap = res.antiperiodic_err != null ? (res.antiperiodic_err*100).toFixed(1)+'%' : '—';
+    h = `<div style="background:#16161c;border:1px solid #2e6a4a;border-radius:6px;padding:8px 11px;margin:6px 0;font-size:.8rem;color:#bcd">`
+      + `🔁 <b>Pol-Sektor (Symmetrie)</b> — eine von ${res.poles||''} Pol-Teilungen fein gerechnet`
+      + `${res.mesh ? ' ('+res.mesh.n_nodes+' Knoten/Pol'+(res.mesh.n_barriers?', '+res.mesh.n_barriers+' Barrieren':'')+')' : ''}`
+      + `${res.node_budget_pct!=null ? ' · Kontingent '+res.node_budget_pct+' % von '+(res.node_budget_max||'')+' max' : ''}`
+      + ` und zum vollen Motor gespiegelt. Gestufte Verfeinerung (Luftspalt/Magnete+Barrieren/grob).`
+      + ` Anti-Periodizität im Eisen ${ap} (0 = exakt; Rest = Netzgröße).</div>` + h;
+  }
   box.innerHTML = h;
+  // Verfeinerungsgebiet-Karte nach einem echten 3D-Feldlauf (mit VTU) anbieten; bei reiner
+  // Modell-Vorschau ausblenden. ROI-Felder einmalig aus der Maschinengröße vorbelegen.
+  const realRun = !!res.vtu_path && !res.preview;
+  _e3ShowRefineCard(realRun);
+  if (realRun && !document.getElementById('e3_roi_xmin').value) _e3RoiReset();
 }
 
 // ── Eingebetteter 3D-Viewer (vtk.js, lokal eingebettet) ─────────────────────────
@@ -3844,19 +5111,82 @@ function _loadVtkJs() {
 
 let _e3rw = null;
 let _e3clip = null;
-async function openBrowser3d() {
+let _e3ViewIdx = null;       // beim Sweep: Index des angezeigten Drehzahl-Punkts (sonst null)
+let _e3SweepPoints = null;   // beim Sweep: [{i,rpm,load}] für den Lastfall-Umschalter im Viewer
+let _e3ViewerLive = false;   // Render-Fenster gebaut → Punktwechsel per Daten-Swap (flüssig)
+let _e3PdCache = {};         // Punkt-Index → geparste vtkPolyData (Oberfläche + Bmag)
+let _e3LinesCache = {};      // Punkt-Index → geparste vtkPolyData (Feldlinien)
+// Punkt-VTP (Oberfläche) holen — aus dem Cache oder per Fetch+Parse (dann cachen).
+async function _e3GetPointPd(idx) {
+  const key = (idx == null ? 'single' : idx);
+  if (_e3PdCache[key]) return _e3PdCache[key];
+  const qs = (idx == null ? '' : '&i=' + idx);
+  const buf = await fetch('/em3d/vtp?t=' + Date.now() + qs, { cache: 'no-store' })
+    .then(r => { if (!r.ok) throw new Error('VTP nicht verfügbar'); return r.arrayBuffer(); });
+  const reader = vtk.IO.XML.vtkXMLPolyDataReader.newInstance();
+  reader.parseAsArrayBuffer(buf);
+  const pd = reader.getOutputData(0);
+  _e3PdCache[key] = pd;
+  return pd;
+}
+// Feldlinien-VTP holen — aus dem Cache oder per Fetch+Parse (dann cachen).
+async function _e3GetLinesPd(idx) {
+  const key = (idx == null ? 'single' : idx);
+  if (_e3LinesCache[key]) return _e3LinesCache[key];
+  const qs = (idx == null ? '' : '&i=' + idx);
+  const buf = await fetch('/em3d/streamlines?t=' + Date.now() + qs, { cache: 'no-store' })
+    .then(r => { if (!r.ok) throw new Error('Feldlinien nicht verfügbar'); return r.arrayBuffer(); });
+  const reader = vtk.IO.XML.vtkXMLPolyDataReader.newInstance();
+  reader.parseAsArrayBuffer(buf);
+  const pd = reader.getOutputData(0);
+  _e3LinesCache[key] = pd;
+  return pd;
+}
+// Alle Sweep-Punkte (und Feldlinien, falls aktiv) im Hintergrund vorladen → flüssiges Abspielen.
+function _e3PreloadSweep() {
+  if (!_e3SweepPoints) return;
+  const linesOn = document.getElementById('e3_lines_on')?.checked;
+  _e3SweepPoints.forEach(p => {
+    if (!_e3PdCache[p.i]) _e3GetPointPd(p.i).catch(() => {});
+    if (linesOn && !_e3LinesCache[p.i]) _e3GetLinesPd(p.i).catch(() => {});
+  });
+}
+// Feld-Daten im BESTEHENDEN Viewer austauschen (kein Render-Fenster-Neuaufbau) → flüssig.
+// fixScale=true hält die Farbskala fest (Feldwachstum über Last/Drehzahl bleibt vergleichbar).
+function _e3ShowPointData(pd, fixScale) {
+  if (!_e3rw || !_e3clip || !pd) return;
+  _e3clip.mapper.setInputData(pd);
+  _e3clip.bounds = pd.getBounds();
+  if (!fixScale) {
+    const arr = pd.getPointData().getArrayByName('Bmag');
+    if (arr) _e3clip.dataRange = _e3Percentiles(arr.getData(), 0.02, 0.98);
+  }
+  try { _e3clip.mapper.modified(); } catch (e) {}
+  _e3SetClip();      // Schnittebene an die (ggf. leicht anderen) Bounds anpassen
+  _e3ApplyColor();   // Skala/Legende neu (bei fixScale unverändert)
+  _e3rw.getRenderWindow().render();
+}
+
+async function openBrowser3d(idx, swap) {
+  if (idx !== undefined && idx !== null) _e3ViewIdx = idx;
   const div = document.getElementById('e3_viewer3d');
   if (!div) return;
+  // Schnellpfad: Viewer läuft schon → nur die Punkt-Daten tauschen (flüssiges Abspielen/Scrubben).
+  if (swap && _e3ViewerLive && _e3rw && _e3clip) {
+    try {
+      const pd = await _e3GetPointPd(_e3ViewIdx);
+      _e3ShowPointData(pd, document.getElementById('e3_play_fixscale')?.checked);
+      if (document.getElementById('e3_lines_on')?.checked) _e3SetLinesForIdx(_e3ViewIdx);
+      _e3PlaySyncControls();
+      return;
+    } catch (e) { /* Fallback: voller Aufbau */ }
+  }
   div.style.display = 'block';
   div.innerHTML = '<div style="padding:14px;color:#9aa;font-size:.82rem">⏳ Lade 3D-Viewer…</div>';
   try {
     await _loadVtkJs();
-    const buf = await fetch('/em3d/vtp?t=' + Date.now(), { cache: 'no-store' })
-      .then(r => { if (!r.ok) throw new Error('VTP nicht verfügbar'); return r.arrayBuffer(); });
+    const pd = await _e3GetPointPd(_e3ViewIdx);
     div.innerHTML = '';
-    const reader = vtk.IO.XML.vtkXMLPolyDataReader.newInstance();
-    reader.parseAsArrayBuffer(buf);
-    const pd = reader.getOutputData(0);
     const arr = pd.getPointData().getArrayByName('Bmag');
     // Robuste Skala: das 2./98. Perzentil statt min/max — Eckenspitzen am Magneten
     // bestimmen sonst die Obergrenze, sodass das moderate Statorfeld kaum Farbe bekommt.
@@ -3878,6 +5208,11 @@ async function openBrowser3d() {
     _e3rw = vtk.Rendering.Misc.vtkGenericRenderWindow.newInstance({ background: [0.05, 0.05, 0.07] });
     _e3rw.setContainer(div);
     _e3rw.getRenderer().addActor(actor);
+    // Depth-Peeling für korrekte Transparenz (Oberfläche wird bei Feldlinien durchsichtig).
+    try {
+      const r = _e3rw.getRenderer();
+      r.setUseDepthPeeling(true); r.setOcclusionRatio(0.1); r.setMaximumNumberOfPeels(4);
+    } catch (e) {}
     _e3rw.getRenderer().resetCamera();
     // leichte Iso-Perspektive statt frontal
     try {
@@ -3904,8 +5239,19 @@ async function openBrowser3d() {
       const pos = document.getElementById('e3_clip_pos'); if (pos) pos.value = 500;
       if (_e3clip) _e3clip.flip = 1;
     }
+    _e3PopulateSpeedSelect();   // Lastfall-Umschalter (nur Sweep) befüllen/zeigen
     _e3ApplyColor();   // Legende mit dem aktuellen Bereich füllen
+    // Feldlinien neu laden, falls der Toggle aktiv ist (z. B. nach Drehzahl-Wechsel) —
+    // setzt auch die Oberflächen-Transparenz.
+    const linesOn = document.getElementById('e3_lines_on');
+    if (linesOn && linesOn.checked) await _e3ToggleLines();
+    else _e3SurfaceOpacity();
+    // Verfeinerungs-Quader (gelbes Drahtgitter) zeichnen, wenn die ROI-Karte sichtbar ist.
+    if (document.getElementById('e3_refine_card')?.style.display !== 'none') _e3DrawRoiBox();
+    _e3ViewerLive = true;       // ab jetzt Punktwechsel per Daten-Swap (flüssig)
+    _e3PreloadSweep();          // restliche Sweep-Punkte im Hintergrund vorladen
   } catch (e) {
+    _e3ViewerLive = false;
     div.innerHTML = '<div style="padding:14px;color:#e57;font-size:.82rem">⚠ ' + escHtml(e.message)
       + '. Alternativ „📊 In ParaView öffnen" nutzen.</div>';
   }
@@ -3941,6 +5287,10 @@ function _e3ApplyColor() {
   }
   _e3clip.mapper.setScalarRange(lo, hi);
   try { _e3clip.mapper.modified(); } catch (e) {}
+  if (_e3clip.linesMapper) {
+    _e3clip.linesMapper.setScalarRange(lo, hi);
+    try { _e3clip.linesMapper.modified(); } catch (e) {}
+  }
   if (_e3rw) _e3rw.getRenderWindow().render();
   const leg = _e3clip.legEl;
   if (leg) {
@@ -3963,6 +5313,173 @@ function _e3ToggleMesh() {
   prop.setEdgeVisibility(!!on);
   prop.setEdgeColor(0.85, 0.88, 0.95);
   prop.setLineWidth(1);
+  _e3rw.getRenderWindow().render();
+}
+
+// Lastfall-Umschalter (nur Sweep) in der Viewer-Bedienleiste befüllen — direkt am 3D-Bild
+// zwischen allen gerechneten Betriebspunkten (Drehzahl/Last) des Drehzahlbands wechseln.
+function _e3PopulateSpeedSelect() {
+  const wrap = document.getElementById('e3_speed_wrap');
+  if (!wrap) return;
+  if (!_e3SweepPoints || _e3SweepPoints.length < 2) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+  wrap.style.display = 'flex';
+  wrap.style.alignItems = 'center';
+  wrap.style.gap = '6px';
+  wrap.style.flexWrap = 'wrap';
+  const pos = _e3SweepPoints.findIndex(p => p.i === _e3ViewIdx);
+  _e3PlayPos = pos >= 0 ? pos : 0;
+  const playing = !!_e3PlayTimer;
+  wrap.innerHTML =
+      `<button id="e3_play_btn" onclick="_e3PlayToggle()" title="Betriebspunkte abspielen (über Drehzahl bzw. Last)" style="width:auto;padding:3px 9px;background:${playing ? '#6a3a3a' : '#2e6a4a'}">${playing ? '⏸' : '▶'}</button>`
+    + `<input type="range" id="e3_play_slider" min="0" max="${_e3SweepPoints.length - 1}" step="1" value="${_e3PlayPos}" oninput="_e3Scrub(this.value)" style="width:120px" title="Betriebspunkt scrubben">`
+    + `<select id="e3_play_tempo" onchange="_e3PlaySetTempo(this.value)" title="Abspieltempo" style="width:auto;padding:3px">`
+    +   `<option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="2">2×</option></select>`
+    + `<label style="display:flex;gap:3px;align-items:center;cursor:pointer" title="am Ende von vorn"><input type="checkbox" id="e3_play_loop" checked style="width:auto"> ⟳</label>`
+    + `<label style="display:flex;gap:3px;align-items:center;cursor:pointer" title="Farbskala beim Abspielen fixieren (Feldwachstum bleibt vergleichbar)"><input type="checkbox" id="e3_play_fixscale" checked style="width:auto"> Skala</label>`
+    + `<span id="e3_play_lbl" style="min-width:150px;color:#bcd"></span>`
+    + `<select id="e3_view_speed" onchange="_e3SelectPoint(+this.value)" title="direkt zu Betriebspunkt" style="width:auto;padding:3px">`
+    +   _e3SweepPoints.map(p => `<option value="${p.i}"${p.i === _e3ViewIdx ? ' selected' : ''}>`
+        + `#${p.i + 1} · ${p.rpm} 1/min · ${p.load} Nm</option>`).join('')
+    + `</select>`;
+  _e3PlayUpdateLabel();
+}
+
+// ── Player: die berechneten Betriebspunkte flüssig abspielen (dynamische Darstellung
+// über Drehzahl bzw. über Last). Nutzt den Punkt-VTP-Cache → nur Daten-Swap, kein Neuaufbau.
+let _e3PlayTimer = null, _e3PlayPos = 0, _e3PlaySpeed = 1;
+function _e3PlayTempoMs() { return Math.round(700 / (_e3PlaySpeed || 1)); }
+function _e3PlayStartTimer() { _e3PlayStopTimer(); _e3PlayTimer = setInterval(_e3PlayTick, _e3PlayTempoMs()); }
+function _e3PlayStopTimer() { if (_e3PlayTimer) { clearInterval(_e3PlayTimer); _e3PlayTimer = null; } }
+function _e3PlaySetTempo(v) { _e3PlaySpeed = +v || 1; if (_e3PlayTimer) _e3PlayStartTimer(); }
+function _e3PlayToggle() {
+  if (!_e3SweepPoints || _e3SweepPoints.length < 2) return;
+  if (_e3PlayTimer) _e3PlayStopTimer(); else _e3PlayStartTimer();
+  _e3PlaySyncControls();
+}
+function _e3PlayTick() {
+  if (!_e3SweepPoints) { _e3PlayStopTimer(); return; }
+  let next = _e3PlayPos + 1;
+  if (next >= _e3SweepPoints.length) {
+    if (document.getElementById('e3_play_loop')?.checked) next = 0;
+    else { _e3PlayStopTimer(); _e3PlaySyncControls(); return; }
+  }
+  _e3Scrub(next);
+}
+// pos = Slider-Position 0…N-1 (nicht der Punkt-Index). Fährt den Punkt per Daten-Swap an.
+function _e3Scrub(pos) {
+  if (!_e3SweepPoints) return;
+  pos = Math.max(0, Math.min(_e3SweepPoints.length - 1, +pos || 0));
+  _e3PlayPos = pos;
+  openBrowser3d(_e3SweepPoints[pos].i, true);   // swap → _e3PlaySyncControls() folgt
+}
+function _e3SelectPoint(pointIdx) {
+  const pos = _e3SweepPoints ? _e3SweepPoints.findIndex(p => p.i === pointIdx) : -1;
+  if (pos >= 0) _e3Scrub(pos);
+}
+function _e3PlaySyncControls() {
+  const sl = document.getElementById('e3_play_slider'); if (sl) sl.value = _e3PlayPos;
+  const pt = _e3SweepPoints && _e3SweepPoints[_e3PlayPos];
+  const sel = document.getElementById('e3_view_speed'); if (sel && pt) sel.value = pt.i;
+  const btn = document.getElementById('e3_play_btn');
+  if (btn) { const on = !!_e3PlayTimer; btn.textContent = on ? '⏸' : '▶'; btn.style.background = on ? '#6a3a3a' : '#2e6a4a'; }
+  _e3PlayUpdateLabel();
+}
+function _e3PlayUpdateLabel() {
+  const lbl = document.getElementById('e3_play_lbl');
+  const pt = _e3SweepPoints && _e3SweepPoints[_e3PlayPos];
+  if (lbl && pt) lbl.textContent = `#${pt.i + 1} · ${pt.rpm} 1/min · ${pt.load} Nm`;
+}
+// Player stoppen + Caches leeren + Viewer-Status zurücksetzen (bei neuem Lauf / neuem Render).
+function _e3PlayStop() {
+  _e3PlayStopTimer();
+  _e3PdCache = {}; _e3LinesCache = {};
+  _e3ViewerLive = false;
+}
+
+// Oberflächen-Transparenz an den Feldlinien-Status koppeln: sind die Feldlinien an, wird die
+// |B|-Oberfläche (Sättigungsdarstellung) durchsichtig, damit die Linien im Inneren sichtbar sind.
+function _e3SurfaceOpacity() {
+  if (!_e3clip || !_e3clip.actor) return;
+  const linesOn = document.getElementById('e3_lines_on')?.checked;
+  _e3clip.actor.getProperty().setOpacity(linesOn ? 0.18 : 1.0);
+}
+
+// Magnetfeldlinien (serverseitig getracete Polylinien) ein-/ausblenden. Werden lazy
+// als schlanke .vtp geladen und mit DERSELBEN |B|-Farbskala (ctf) wie die Oberfläche
+// eingefärbt, damit sie log/|B|max-Reglern folgen. Beim Sweep über `?i=` der Drehzahl-Punkt.
+// Sind sie an, wird die |B|-Oberfläche transparent (Linien im Inneren sichtbar).
+// Feldlinien-Polydata in den Viewer setzen (Actor neu aufbauen). Von _e3ToggleLines und
+// vom Player (Punktwechsel) genutzt.
+function _e3SetLines(pd) {
+  if (!_e3clip || !_e3rw || !pd) return;
+  if (_e3clip.linesActor) { _e3rw.getRenderer().removeActor(_e3clip.linesActor); }
+  const lm = vtk.Rendering.Core.vtkMapper.newInstance();
+  lm.setLookupTable(_e3clip.ctf);
+  lm.setScalarModeToUsePointFieldData();
+  lm.setColorByArrayName('Bmag');
+  lm.setInterpolateScalarsBeforeMapping(true);
+  const la = vtk.Rendering.Core.vtkActor.newInstance();
+  la.setMapper(lm);
+  la.getProperty().setLineWidth(2);
+  _e3clip.linesMapper = lm;
+  _e3clip.linesActor = la;
+  _e3clip.linesFull = pd;              // volle (dichte) Feldlinien — der Slider dünnt sie aus
+  _e3rw.getRenderer().addActor(la);
+  _e3ApplyLineDensity();               // setzt den Mapper-Input auf die ausgedünnte Teilmenge
+  _e3SurfaceOpacity();                 // |B|-Oberfläche transparent, damit die Linien sichtbar werden
+  _e3ApplyColor();                     // Linien an die aktuelle Farbskala koppeln
+  _e3rw.getRenderWindow().render();
+}
+// Feldlinien für einen Punkt (aus Cache oder Fetch) setzen — beim Abspielen; blockiert nicht.
+function _e3SetLinesForIdx(idx) { _e3GetLinesPd(idx).then(pd => _e3SetLines(pd)).catch(() => {}); }
+
+async function _e3ToggleLines() {
+  if (!_e3clip || !_e3rw) return;
+  const on = document.getElementById('e3_lines_on')?.checked;
+  const densWrap = document.getElementById('e3_line_dens_wrap');
+  if (!on) {
+    if (_e3clip.linesActor) { _e3rw.getRenderer().removeActor(_e3clip.linesActor); }
+    if (densWrap) densWrap.style.display = 'none';
+    _e3SurfaceOpacity();   // Oberfläche wieder deckend
+    _e3rw.getRenderWindow().render();
+    return;
+  }
+  try {
+    const pd = await _e3GetLinesPd(_e3ViewIdx);
+    _e3SetLines(pd);
+    if (densWrap) densWrap.style.display = 'flex';
+  } catch (e) {
+    _toast('⚠ Feldlinien: ' + e.message);
+    const cb = document.getElementById('e3_lines_on'); if (cb) cb.checked = false;
+    if (densWrap) densWrap.style.display = 'none';
+    _e3SurfaceOpacity();   // Fehlschlag → Oberfläche deckend lassen
+  }
+}
+
+// Feldlinien-Dichte (Slider): die voll exportierten Linien clientseitig ausdünnen — jede
+// k-te Polylinie behalten (k aus dem Slider-Prozentwert). Schnell, ohne Server-Round-Trip,
+// für Einzellauf UND jeden Sweep-Punkt. Die Punkte (+ Bmag) bleiben unverändert, nur die
+// Linien-Zellen werden auf eine Teilmenge reduziert.
+function _e3ApplyLineDensity() {
+  if (!_e3clip || !_e3clip.linesMapper || !_e3clip.linesFull || !_e3rw) return;
+  const full = _e3clip.linesFull;
+  const frac = Math.max(0.01, (+document.getElementById('e3_line_density')?.value || 45) / 100);
+  const step = Math.max(1, Math.round(1 / frac));   // jede step-te Linie behalten
+  const data = full.getLines().getData();           // [n,i0,…,in-1, n,j0,…]
+  const kept = [];
+  let p = 0, ci = 0;
+  while (p < data.length) {
+    const n = data[p];
+    if (ci % step === 0) { kept.push(n); for (let k = 1; k <= n; k++) kept.push(data[p + k]); }
+    p += n + 1; ci++;
+  }
+  const sub = vtk.Common.DataModel.vtkPolyData.newInstance();
+  sub.setPoints(full.getPoints());
+  sub.getLines().setData(Uint32Array.from(kept));
+  const bm = full.getPointData().getArrayByName('Bmag');
+  if (bm) { sub.getPointData().addArray(bm); sub.getPointData().setActiveScalars('Bmag'); }
+  _e3clip.linesMapper.setInputData(sub);
+  try { _e3clip.linesMapper.modified(); } catch (e) {}
   _e3rw.getRenderWindow().render();
 }
 
@@ -3994,6 +5511,70 @@ function _e3FlipClip() {
   const on = document.getElementById('e3_clip_on');
   if (on && !on.checked) on.checked = true;
   _e3SetClip();
+}
+
+// Standard-Kameraorientierungen für den Browser-3D-Viewer (Feld + Flusslinien). Z ist die
+// Motorachse (axial), X/Y die Querschnittsebene. Die Blickrichtung + View-Up werden gesetzt,
+// resetCamera() passt anschließend Abstand/Zoom an die Bounds an.
+function _e3SetView(view) {
+  if (!_e3rw) return;
+  const ren = _e3rw.getRenderer();
+  const cam = ren.getActiveCamera();
+  const b = (_e3clip && _e3clip.bounds) || ren.computeVisiblePropBounds();
+  const cx = (b[0] + b[1]) / 2, cy = (b[2] + b[3]) / 2, cz = (b[4] + b[5]) / 2;
+  const dx = (b[1] - b[0]) || 1, dy = (b[3] - b[2]) || 1, dz = (b[5] - b[4]) || 1;
+  const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 1;   // nur Richtung zählt (resetCamera skaliert)
+  cam.setFocalPoint(cx, cy, cz);
+  if (view === 'xy')      { cam.setPosition(cx, cy, cz + d); cam.setViewUp(0, 1, 0); }  // Blick −Z
+  else if (view === 'xz') { cam.setPosition(cx, cy - d, cz); cam.setViewUp(0, 0, 1); }  // Blick +Y
+  else if (view === 'yz') { cam.setPosition(cx + d, cy, cz); cam.setViewUp(0, 0, 1); }  // Blick −X
+  else { cam.setPosition(cx + d * 0.7, cy - d * 0.7, cz + d * 0.5); cam.setViewUp(0, 0, 1); } // Iso
+  ren.resetCamera();                    // Abstand an Bounds anpassen (Blickrichtung bleibt)
+  ren.resetCameraClippingRange();
+  _e3rw.getRenderWindow().render();
+}
+
+// Vollbild-Umschaltung des eingebetteten 3D-Viewers: das Wrapper-Element #e3_view_fs (Bedienleiste
+// + Viewer) geht per nativer Fullscreen-API ins Vollbild, sodass die Steuerung (Ansicht/Schnitt/
+// Feldlinien/Farbe) auch im Vollbild erreichbar bleibt. Die vtk.js-GenericRenderWindow richtet sich
+// nach der Container-Größe → beim Ein-/Austritt Wrapper auf Spalten-Flex (volle Höhe) stellen, den
+// Viewer den Rest füllen lassen und resize()+render() aufrufen. Handler nur EINMAL registriert.
+let _e3FsHooked = false;
+function _e3Fullscreen() {
+  const wrap = document.getElementById('e3_view_fs');
+  const div = document.getElementById('e3_viewer3d');
+  if (!wrap || !div) return;
+  if (!_e3FsHooked) {
+    _e3FsHooked = true;
+    document.addEventListener('fullscreenchange', () => {
+      const w = document.getElementById('e3_view_fs');
+      const d = document.getElementById('e3_viewer3d');
+      if (!w || !d) return;
+      const fs = document.fullscreenElement === w;
+      // Inline-Styles schlagen UA-:fullscreen → Layout explizit setzen bzw. zurücknehmen.
+      if (fs) {
+        w.style.cssText = 'display:flex;flex-direction:column;height:100%;width:100%;background:#0d0d12;box-sizing:border-box;padding:8px';
+        d.style.flex = '1 1 auto';
+        d.style.height = 'auto';
+        d.style.marginTop = '8px';
+      } else {
+        w.style.cssText = '';
+        d.style.flex = '';
+        d.style.height = '480px';
+      }
+      const btn = document.getElementById('e3_fs_btn');
+      if (btn) btn.textContent = fs ? '⛶ Vollbild verlassen' : '⛶ Vollbild';
+      // vtk.js an die neue Größe anpassen (nach dem Layout-Reflow).
+      setTimeout(() => { if (_e3rw) { try { _e3rw.resize(); _e3rw.getRenderWindow().render(); } catch (e) {} } }, 60);
+    });
+  }
+  if (document.fullscreenElement === wrap) {
+    document.exitFullscreen && document.exitFullscreen();
+  } else if (wrap.requestFullscreen) {
+    wrap.requestFullscreen().catch(() => _toast('Vollbild vom Browser abgelehnt'));
+  } else {
+    _toast('Vollbild wird vom Browser nicht unterstützt');
+  }
 }
 
 async function openParaview() {
@@ -4443,6 +6024,8 @@ async function buildPayload() {
   if (_msEl) payload.geom.magShape = _msEl.value;
   delete payload.geom.customLegs;
   delete payload.geom.customBarriers;
+  // In das aktive Projekt (Projekt-Tab) hineinrechnen statt jedes Mal ein neues anzulegen.
+  if (window._activeProject && _activeProject.id) payload.project_id = _activeProject.id;
   return payload;
 }
 
@@ -4568,6 +6151,37 @@ async function useAsTemplate(pid) {
     const note = r.reconstructed ? ' — aus Metadaten rekonstruiert, einige Einstellungen auf Standard' : '';
     _toast('📋 Vorlage übernommen: „' + (r.label || pid) + '"' + note + '. Parameter anpassen und Analyse starten.');
   } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+// Ganzes Projekt klonen (Eingaben + Notizen + Projekt-RAG, mit Abstammung).
+async function cloneProject(pid) {
+  const name = prompt('Name des neuen (geklonten) Projekts:', '');
+  if (name === null) return;
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/clone',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }) }).then(x => x.json());
+    if (r.error) { alert('Klonen fehlgeschlagen: ' + r.error); return; }
+    if (r.payload) applyPayload(r.payload);
+    closeProjectGallery();
+    switchTab('geo');
+    await refreshProjectList();
+    _toast('📁 Klon „' + (r.label || r.id) + '" angelegt (Abstammung vermerkt). Eingaben übernommen — Analyse starten.');
+  } catch (e) { alert('Fehler: ' + e.message); }
+}
+
+// Bundle importieren (.emaproj) → neues Projekt
+async function importBundle(input) {
+  const f = input.files && input.files[0];
+  if (!f) return;
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const r = await fetch('/import_bundle', { method: 'POST', body: fd }).then(x => x.json());
+    if (r.error) { alert('Import fehlgeschlagen: ' + r.error); return; }
+    await openProjectGallery();
+    _toast('📦 Bundle importiert: „' + (r.label || r.id) + '"');
+  } catch (e) { alert('Fehler: ' + e.message); }
+  finally { input.value = ''; }
 }
 
 async function startAnalysis() {
@@ -4883,13 +6497,12 @@ async function loadResults() {
   document.getElementById('btn_analyse').textContent = '⚙ Erneut analysieren';
   document.getElementById('btn_freecad').style.display  = 'block';
   document.getElementById('btn_step').style.display     = 'block';
-  document.getElementById('report_btns').style.display  = 'flex';
-  document.getElementById('tbtn-report').disabled = false;
   refreshProjectList();
 
   try {
     const s = await fetch('/status').then(r => r.json());
     renderRating(s && s.project_id);
+    pjUpdateReportCard(s && s.project_id, true);   // Bericht-Karte auf Tab ① freischalten
   } catch (e) { renderRating(null); }
 
   showFrame(0);
@@ -4928,6 +6541,139 @@ async function renderRating(pid) {
     if (auto && r.auto) auto.textContent =
       `Heuristik-Vorschlag: ${r.auto.suggestion} — ${(r.auto.reasons || []).join('; ')}`;
   } catch (e) { if (stat) stat.textContent = ''; }
+  renderAkte(pid);
+}
+
+// ── Projektakte-Panel (Verlauf · Notizen · Verknüpfungen · Projekt-RAG) ──────
+const _AKTE_ACTIONS = { analyse:'Vollanalyse', design_ai:'KI-Entwurf', rating:'Bewertung',
+  report:'Bericht', clone:'Geklont', import:'Importiert' };
+function _akteAction(a){ if(!a) return ''; if(a.startsWith('recompute:')) return 'Nachgerechnet ('+a.slice(10)+')';
+  return _AKTE_ACTIONS[a.split(':')[0]] || a; }
+
+async function renderAkte(pid) {
+  const body = document.getElementById('akte-body');
+  if (!body) return;
+  if (!pid) { body.style.opacity = .5; return; }
+  body.style.opacity = 1;
+  body.dataset.pid = pid;
+  try {
+    const m = await fetch('/project/' + encodeURIComponent(pid) + '/manifest').then(x => x.json());
+    if (m.error) return;
+    if (document.getElementById('akte_status')) document.getElementById('akte_status').value = m.status || 'gerechnet';
+    document.getElementById('akte_tags').value = (m.tags || []).join(', ');
+    document.getElementById('akte_notes').value = m.notes || '';
+    // Evolution
+    const evo = (m.evolution || []);
+    document.getElementById('akte_evolution').innerHTML = evo.length
+      ? evo.map((e, i) => {
+          const ch = Object.keys(e.changed_inputs || {});
+          const chs = ch.length ? ch.join(', ') : '—';
+          const note = e.note ? ` · <i style="color:#9ab">${escHtml(e.note)}</i>` : '';
+          return `<div style="padding:3px 0;border-bottom:1px solid #2a2f38">
+            <b>${i+1}.</b> ${escHtml((e.ts||'').slice(0,16).replace('T',' '))} — <span style="color:#9bd">${escHtml(_akteAction(e.action))}</span>
+            <span style="color:#889;font-size:.72rem">${escHtml(chs)}</span>${note}</div>`;
+        }).join('')
+      : '<span style="color:#778">noch keine Stufen</span>';
+    // Links
+    const links = (m.links || []);
+    document.getElementById('akte_links').innerHTML = links.length
+      ? links.map(l => `<div style="display:flex;justify-content:space-between;align-items:center;padding:2px 0">
+          <span>⚖ <a href="#" onclick="loadProjectById('${l.id}');return false" style="color:#9bd">${escHtml(l.label||l.id)}</a></span>
+          <button onclick="removeAkteLink('${l.id}')" title="Verknüpfung entfernen" style="background:#5a2a2a;width:auto;padding:2px 8px;font-size:.72rem">✕</button></div>`).join('')
+      : '<span style="color:#778">keine Verknüpfungen</span>';
+    // Link-Picker aus der Projektliste füllen
+    try {
+      const j = await fetch('/projects').then(x => x.json());
+      const pick = document.getElementById('akte_link_pick');
+      pick.innerHTML = (j.projects || []).filter(p => p.id !== pid)
+        .map(p => `<option value="${p.id}">${escHtml(p.label || p.id)}</option>`).join('');
+    } catch (e) {}
+    renderAkteRag(pid);
+  } catch (e) {}
+}
+
+async function renderAkteRag(pid) {
+  try {
+    const [rag, att] = await Promise.all([
+      fetch('/project/' + encodeURIComponent(pid) + '/rag').then(x => x.json()),
+      fetch('/project/' + encodeURIComponent(pid) + '/attachments').then(x => x.json()),
+    ]);
+    const docs = (rag.documents || []);
+    const atts = (att.attachments || []);
+    const dHtml = docs.length
+      ? docs.map(d => `<div style="display:flex;justify-content:space-between;padding:2px 0">
+          <span>📄 ${escHtml(d.title)} <span style="color:#778;font-size:.72rem">(${d.n_chunks} Abschnitte)</span></span>
+          <button onclick="delAkteRag('${pid}','${d.id}')" style="background:#5a2a2a;width:auto;padding:2px 8px;font-size:.72rem">✕</button></div>`).join('')
+      : '<span style="color:#778">keine Wissens-Dokumente</span>';
+    const aHtml = atts.length
+      ? '<div style="margin-top:5px;color:#9ab;font-size:.74rem">Anhänge: ' + atts.map(a => escHtml(a.name)).join(', ') + '</div>'
+      : '';
+    document.getElementById('akte_rag').innerHTML = dHtml + aHtml;
+  } catch (e) {}
+}
+
+async function saveAkteMeta() {
+  const pid = document.getElementById('akte-body').dataset.pid;
+  if (!pid) return;
+  const tags = document.getElementById('akte_tags').value.split(',').map(t => t.trim()).filter(Boolean);
+  const msg = document.getElementById('akte_status_msg');
+  msg.textContent = '⏳ …';
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/meta',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: document.getElementById('akte_status').value,
+          tags, notes: document.getElementById('akte_notes').value }) }).then(x => x.json());
+    msg.textContent = r.error ? ('❌ ' + r.error) : '✓ gespeichert';
+  } catch (e) { msg.textContent = '❌ ' + e.message; }
+}
+
+async function addAkteLink() {
+  const pid = document.getElementById('akte-body').dataset.pid;
+  const other = document.getElementById('akte_link_pick').value;
+  if (!pid || !other) return;
+  await fetch('/project/' + encodeURIComponent(pid) + '/links',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ other }) });
+  renderAkte(pid);
+}
+async function removeAkteLink(other) {
+  const pid = document.getElementById('akte-body').dataset.pid;
+  if (!pid) return;
+  await fetch('/project/' + encodeURIComponent(pid) + '/links/remove',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ other }) });
+  renderAkte(pid);
+}
+async function delAkteRag(pid, docId) {
+  await fetch('/project/' + encodeURIComponent(pid) + '/rag/' + encodeURIComponent(docId) + '/delete',
+    { method: 'POST' });
+  renderAkteRag(pid);
+}
+async function uploadAkteRag(input) {
+  const pid = document.getElementById('akte-body').dataset.pid;
+  const f = input.files && input.files[0];
+  if (!pid || !f) return;
+  const msg = document.getElementById('akte_rag_msg'); msg.textContent = '⏳ einbetten…';
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/rag/add', { method: 'POST', body: fd }).then(x => x.json());
+    msg.textContent = r.error ? ('❌ ' + r.error) : '✓ hinzugefügt';
+    renderAkteRag(pid);
+  } catch (e) { msg.textContent = '❌ ' + e.message; }
+  finally { input.value = ''; }
+}
+async function uploadAkteAttachment(input) {
+  const pid = document.getElementById('akte-body').dataset.pid;
+  const f = input.files && input.files[0];
+  if (!pid || !f) return;
+  const msg = document.getElementById('akte_rag_msg'); msg.textContent = '⏳ lade hoch…';
+  const fd = new FormData(); fd.append('file', f);
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/attachments', { method: 'POST', body: fd }).then(x => x.json());
+    msg.textContent = r.error ? ('❌ ' + r.error) : ('✓ Anhang gespeichert' + (r.rag_added ? ' (+RAG)' : ''));
+    renderAkteRag(pid);
+  } catch (e) { msg.textContent = '❌ ' + e.message; }
+  finally { input.value = ''; }
 }
 
 async function setRating(label) {
@@ -4954,10 +6700,13 @@ async function downloadStep() {
 let _reportPoll = null;
 
 async function generateReport(mode = 'standard') {
-  const s = await fetch('/status').then(r => r.json()).catch(() => null);
-  const pid = s && s.project_id;
+  let pid = (window._activeProject && _activeProject.id) || null;
   if (!pid) {
-    alert('Kein aktives Projekt — erst Analyse abschließen oder Projekt laden');
+    const s = await fetch('/status').then(r => r.json()).catch(() => null);
+    pid = s && s.project_id;
+  }
+  if (!pid) {
+    alert('Kein aktives Projekt — erst Projekt wählen und Analyse abschließen');
     return;
   }
 

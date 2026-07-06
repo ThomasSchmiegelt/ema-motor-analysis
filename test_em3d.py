@@ -49,14 +49,25 @@ def test_mesh_tagging():
 
 
 def test_skew_twists_magnets():
-    # Skew dreht die Magnet-Endquerschnitte über die Länge → der obere Querschnitt
-    # ist gegenüber dem unteren um skew_deg verdreht. Wir prüfen das geometrisch über
-    # die magnet_rects-unabhängige Mesh-Baubarkeit + dass ein Lauf mit Skew durchläuft.
+    # Skew über die Länge. MIT Magnettaschen (Standard) wird der kontinuierliche Skew netzbarkeits-
+    # halber als feine STAFFELUNG um die Wellenachse umgesetzt (ein um den eigenen Schwerpunkt
+    # tordiertes Magnet+Tasche-Paar ist nicht robust netzbar) → jeder der 16 Magnete wird in K
+    # Segmente geschnitten; die K gestuften obround-Taschen werden PER MAGNET zu EINEM Luftkanal
+    # gefuset (keine Eisen-Slivers) → der ECHTE Geometrie-Tab-Klebespalt (magGapMm) bleibt erhalten,
+    # NICHT mehr angehoben. Wir prüfen: Mesh baubar, Segmentzahl = Vielfaches von 16, Taschen aktiv,
+    # Spalt = Geometrie-Spalt.
+    g = _geom("v"); g["magGapMm"] = 0.2
     msh = os.path.join(tempfile.mkdtemp(), "s.msh")
-    tags = E3.build_mesh(_geom("v"), 120.0, {"skew_deg": 12, "mesh_cl": 13.0, "gap_cl": 1.6}, msh)
-    assert tags["n_magnets"] == 16
+    tags = E3.build_mesh(g, 120.0, {"skew_deg": 12, "mesh_cl": 13.0, "gap_cl": 1.6}, msh)
+    assert tags["n_magnets"] % 16 == 0 and tags["n_magnets"] >= 16, tags["n_magnets"]
+    assert tags["skew_segments"] >= 2, "Skew als Staffelung umgesetzt"
+    assert not tags.get("caps_dropped"), "Magnettaschen sollten netzbar sein"
+    assert not tags.get("pocket_clear_raised"), "Spalt NICHT mehr anheben (gefuste Kanäle)"
+    assert abs(tags["pocket_clear_mm"] - 0.2) < 1e-6, tags["pocket_clear_mm"]
     assert os.path.exists(msh)
-    print("✓ skew=12°: Mesh baubar, 16 Magnete getaggt")
+    print(f"✓ skew=12°→Staffelung: {tags['skew_segments']} Segmente, "
+          f"{tags['n_magnets']} Magnetstücke, ECHTER Spalt {tags['pocket_clear_mm']}mm "
+          f"(geom {tags['pocket_clear_geom_mm']}mm), Taschen gefuset")
 
 
 def test_sif_generation():
@@ -73,11 +84,72 @@ def test_sif_generation():
     print(f"✓ sif: WhitneyAVSolver + CalcFields + {tags['n_magnets']} Magnetisierungen + BC")
 
 
+def test_sweep_per_point_sif():
+    # Sweep-Kern (run_em3d_sweep): das Mesh wird EINMAL gebaut, dann je Betriebspunkt nur
+    # write_sif neu — verschiedene rpm/Last ⇒ verschiedene dq-Ströme/operating_point auf
+    # DEMSELBEN Mesh. Genau das macht der Drehzahlband-Lauf (ohne Elmer prüfbar).
+    msh = os.path.join(tempfile.mkdtemp(), "m.msh")
+    work = os.path.dirname(msh)
+    tags = E3.build_mesh(_geom("v"), 120.0, {"skew_deg": 0, "mesh_cl": 14.0, "gap_cl": 1.8}, msh)
+    n_nodes0 = tags["n_nodes"]
+    ops = []
+    for rpm, load in ((1000, 150), (15000, 40)):
+        E3.write_sif(_geom("v"), {"rpm": rpm, "load_nm": load, "excitation": "loaded"},
+                     tags, work, "mesh")
+        ops.append(dict(tags["operating_point"]))
+    # Mesh unverändert (kein Neuaufbau pro Punkt).
+    assert tags["n_nodes"] == n_nodes0
+    assert ops[0]["load_nm"] == 150 and ops[1]["load_nm"] == 40
+    assert ops[0]["rpm"] == 1000 and ops[1]["rpm"] == 15000
+    # Verschiedene Betriebspunkte ⇒ verschiedene Statorströme.
+    assert (ops[0]["iq_A"], ops[0]["id_A"]) != (ops[1]["iq_A"], ops[1]["id_A"])
+    print(f"✓ sweep: 1 Mesh ({n_nodes0} Knoten), 2 Punkte → "
+          f"i_q {ops[0]['iq_A']}→{ops[1]['iq_A']} A, i_d {ops[0]['id_A']}→{ops[1]['id_A']} A")
+
+
+def test_streamlines_export():
+    # Feldlinien-Export für den Browser-Viewer: aus einem (synthetischen) Volumengitter mit
+    # B-Vektorfeld eine schlanke Polylinien-.vtp tracen — OHNE Elmer. Prüft, dass Linien
+    # entstehen, nur ``Bmag`` als Skalar übrig bleibt und das vtk.js-lesbare Format
+    # (UInt32-Header, float32-Punkte) geschrieben wird.
+    import numpy as np
+    import vtk
+    from vtk.util import numpy_support as ns
+
+    nx = ny = 21; nz = 13
+    img = vtk.vtkImageData()
+    img.SetDimensions(nx, ny, nz)
+    img.SetOrigin(-100.0, -100.0, 0.0)
+    img.SetSpacing(200.0 / (nx - 1), 200.0 / (ny - 1), 120.0 / (nz - 1))
+    B = np.zeros((nx * ny * nz, 3), dtype=float); B[:, 2] = 1.0   # homogenes +z-Feld
+    arr = ns.numpy_to_vtk(B); arr.SetName("B")
+    img.GetPointData().AddArray(arr)
+
+    tags = {"dims": {"r_so": 90.0, "r_shaft": 20.0}, "L": 120.0}
+    out = os.path.join(tempfile.mkdtemp(), "lines.vtp")
+    E3.export_browser_streamlines(img, "B", tags, out)
+
+    assert os.path.exists(out) and os.path.getsize(out) > 0
+    head = open(out, "rb").read(400).decode("latin-1")
+    assert 'header_type="UInt32"' in head, "vtk.js braucht UInt32-Header"
+    assert 'type="Float32"' in head, "Punkte müssen float32 sein"
+
+    rd = vtk.vtkXMLPolyDataReader(); rd.SetFileName(out); rd.Update()
+    poly = rd.GetOutput()
+    assert poly.GetNumberOfLines() > 0, "keine Feldlinien getraced"
+    pdp = poly.GetPointData()
+    names = {pdp.GetArrayName(i) for i in range(pdp.GetNumberOfArrays())}
+    assert names == {"Bmag"}, f"nur Bmag erwartet, ist {names}"
+    print(f"✓ streamlines: {poly.GetNumberOfLines()} Feldlinien, nur Bmag, UInt32/float32")
+
+
 def main():
     test_magnet_rects_count()
     test_mesh_tagging()
     test_skew_twists_magnets()
     test_sif_generation()
+    test_sweep_per_point_sif()
+    test_streamlines_export()
     print("\nALLE EM3D-MESH-TESTS BESTANDEN ✅  (Elmer-Solve separat, sobald installiert)")
 
 

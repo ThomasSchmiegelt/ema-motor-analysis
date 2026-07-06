@@ -57,7 +57,7 @@ def _normalize_text(text: str) -> str:
 # ── Image mapping: expert key → ordered list of img_map keys ────────────────
 
 _EXPERT_IMAGES: dict[str, list[str]] = {
-    "em_feld":    ["airgap"],
+    "em_feld":    ["airgap", "em3d_airgap_2d3d", "em3d_endeffect"],
     "kennlinien": ["em_curve"],
     "luftspalt":  ["airgap"],
     "festigkeit": ["structural", "deformation"],
@@ -128,6 +128,31 @@ def _call(prompt: str, model: str = EXPERT_MODEL, timeout: int = 300) -> str:
 
 # ── Data selectors ────────────────────────────────────────────────────────────
 
+def _em3d_compact(results: dict) -> dict | None:
+    """Kompakte 3D-Magnetfeld-Kennwerte (Elmer FEM) für die Experten — None, wenn für
+    dieses Projekt kein 3D-Lauf vorliegt. Spiegelt ``ema_report.build_context['em3d']``."""
+    e3 = results.get("em3d") or {}
+    if not e3:
+        return None
+    cmp3 = e3.get("compare_2d") or {}
+    bz   = e3.get("b_gap_axial") or []
+    endeff = round(min(bz) / max(bz), 3) if (bz and max(bz) > 0) else None
+    mesh = e3.get("mesh") or {}
+    return {
+        "B_gap_3D_Paketmitte_T": e3.get("b_gap_mid_peak"),
+        "B_gap_2D_FDM_T":        cmp3.get("B_gap_2D"),
+        "B_gap_3D_Vergleich_T":  cmp3.get("B_gap_3D_mid"),
+        "endeffekt_rand_zu_mitte": endeff,   # <1 ⇒ Feldabfall zu den Stirnseiten
+        "skew_deg":          e3.get("skew_deg"),
+        "skew_segments":     e3.get("skew_segments"),
+        "skew_step_deg":     e3.get("skew_step_deg"),
+        "axial_mm":          e3.get("axial_mm"),
+        "mesh_knoten":       mesh.get("n_nodes"),
+        "n_flussbarrieren":  mesh.get("n_barriers"),
+        "warnungen":         e3.get("warnings", []),
+    }
+
+
 def _em_field_data(results: dict, meta: dict) -> dict:
     em  = results.get("em", {}) or {}
     perf = em.get("performance", {}) or {}
@@ -138,7 +163,7 @@ def _em_field_data(results: dict, meta: dict) -> dict:
     bt  = gap.get("Bt_T", [])
     th  = gap.get("theta_deg", [])
     step = max(1, len(br) // 60)
-    return {
+    out = {
         "performance":    perf,
         "B_gap_T":        perf.get("B_gap_T"),
         "Kt_Nm_per_A":    perf.get("Kt_Nm_per_A"),
@@ -154,6 +179,10 @@ def _em_field_data(results: dict, meta: dict) -> dict:
         "Bt_T_samples":   [round(bt[i], 4) for i in range(0, len(bt), step)][:60],
         "theta_deg_samples": [round(th[i], 1) for i in range(0, len(th), step)][:60],
     }
+    e3 = _em3d_compact(results)
+    if e3:
+        out["em3d_validierung"] = e3   # echte 3D-Feldlösung (Elmer): Endeffekt + 2D-vs-3D
+    return out
 
 
 def _kennlinien_data(results: dict, meta: dict) -> dict:
@@ -327,6 +356,10 @@ _EXPERTS: list[dict] = [
             "Beurteile: Höhe der Luftspaltflussdichte (B_gap), Gleichmäßigkeit von Br und Bt über "
             "den Umfang, sichtbare Oberwellenanteile in den Abtastwerten, "
             "Sättigungsrisiko im Blech, Magnetschwächung (B_r-Wert). "
+            "Falls der Datensatz den Schlüssel 'em3d_validierung' enthält, liegt eine echte "
+            "3D-Magnetfeldberechnung (Elmer FEM) vor — beziehe sie ein: vergleiche B_gap 2D-FDM "
+            "gegen 3D, bewerte den Endeffekt (Feldabfall zu den Stirnseiten, "
+            "'endeffekt_rand_zu_mitte' < 1) und ggf. die Wirkung der Schrägung (skew). "
             "Gib 3–5 konkrete Empfehlungen."
         ),
         "selector": _em_field_data,

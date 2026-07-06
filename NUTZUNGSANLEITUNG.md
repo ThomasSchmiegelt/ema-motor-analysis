@@ -47,13 +47,17 @@ unten ein **Footer** mit drei Workflow-Buttons und der Fortschrittsanzeige.
 
 | Element | Funktion |
 |---|---|
-| **Tabs** | ① Geometrie · ② Betrieb & Material · ③ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · 🧲 3D-Feld · 📊 FEM-Ergebnisse · 📄 Bericht · ⚖ Vergleich |
-| **Vorschau-Spalte** (rechts) | dreht den Motor live und zeigt das Feld; sichtbar auf den Eingabe-Tabs, ausgeblendet bei Ergebnissen/Bericht/Vergleich |
+| **Tabs** | ① Projekt · ② Geometrie · ③ Betrieb & Material · ④ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · 🧲 3D-Feld · 📊 FEM-Ergebnisse · ⚖ Vergleich |
+| **Vorschau-Spalte** (rechts) | dreht den Motor live und zeigt das Feld; sichtbar auf den Eingabe-Tabs, ausgeblendet bei Projekt/Ergebnissen/Vergleich |
 | **⏸ Pause** (in der Vorschau) | stoppt/startet die Rotor-Drehung — von jedem Eingabe-Tab aus erreichbar |
 | **Vertikaler Splitter** | Trennlinie zwischen Eingaben und Vorschau ziehen → Vorschaubreite ändern (Canvas skaliert live mit) |
 | **Horizontaler Splitter** | Trennlinie über dem Footer hochziehen → Footer vergrößern, zeigt das vollständige Analyse-Log |
 | **Footer** | **🧊 CAD ansehen** (nur FreeCAD-Geometrie, schnell) · **🧪 Smoke-Test** (Backend-Selbsttest) · **⚙ Echte Berechnung** (volle Pipeline) |
 | **💬 Chat** (unten rechts) | Fragen zu den Ergebnissen bzw. zum Vergleich stellen |
+| **💾 Speichern…** (oben rechts) | Öffnet ein Vorschau-/Auswahlfenster mit allem, was gerade speicherbar ist (Projektdaten, Bewertung, 3D-Lauf, Varianten) — ein Klick statt mehrerer Einzelknöpfe |
+
+Es gibt **keinen eigenen „Bericht"-Tab** mehr — der PDF-Bericht wird im Tab
+**① Projekt** erzeugt (dort, wo auch alle anderen projektbezogenen Angaben liegen).
 
 Tabs sind auch per URL-Anker direkt erreichbar, z. B. `…:5000/#compare`,
 `#optimize`, `#projects`, `#text2ema`, `#rag`, `#designer`, `#import`, `#em3d`.
@@ -70,7 +74,47 @@ zurückgesetzt.
 
 ## 3. Schritt-für-Schritt-Workflow
 
-### Tab ① Geometrie
+### Tab ① Projekt
+
+Der **zentrale Einstiegspunkt** — hier startet jede Auslegung, und hier laufen alle
+projektbezogenen Angaben zusammen. Alle folgenden Berechnungen (Geometrie, FEM,
+3D-Feld, Bericht) schreiben in das **aktive Projekt**.
+
+| Bereich | Inhalt |
+|---|---|
+| **➕ Neues Projekt anlegen** | Name, Tags (Komma-getrennt), Notizen/Ziel der Auslegung → legt sofort einen Projektordner an und aktiviert ihn |
+| **📂 Bestehendes Projekt** | Liste + Suchfeld zum Aktivsetzen; **Galerie ⤢** öffnet die volle Kartenansicht (Vorschaubild, Kennwerte, „📋 Als Vorlage verwenden", „📁 Klonen", „⬇ Bundle exportieren", „📦 Import", „📄 Bericht öffnen", „🗑 Löschen") |
+| **🗂 Organisation & Verlauf** | Status (neu/rechnet/gerechnet/bewertet/berichtet/verworfen), Tags, Notizen (fließen in Chat & Bericht) sowie der **Evolutionsverlauf** — jede Berechnung als Eintrag mit den geänderten Eingaben, inkl. Abstammung von Vorlagen/Klonen |
+| **📎 Projekt-Dokumente** | Projektspezifische **Wissens-Dateien** (PDF/MD/CSV, werden eingebettet und von Chat & Bericht *dieses* Projekts durchsucht) und reine **Anhänge** (landen zusätzlich in der Projekt-Wissensbasis) |
+| **📄 PDF-Bericht** | Standard- oder 6-Experten-Bericht für das aktive Projekt erzeugen (siehe unten); bindet — sofern vorhanden — die 3D-Feldberechnung mit ein |
+| **🧲 Gespeicherte 3D-Läufe** | Im Tab 🧲 3D-Feld berechnete Elmer-Lösungen benannt ablegen und **ohne Neurechnen** wieder im Viewer öffnen (`<Projekt>/em3d_runs/`) |
+| **🧰 Globale Werkzeuge & Daten** (eingeklappt) | **📚 Globale Wissensbasis** (projektübergreifende Referenzmaschinen + Dokumentation, speist Text→Auslegung/KI entwerfen/Chat) und **🎓 LLM-Trainingsdaten** (Kennzahlen + Download SFT-/VLM-JSONL) |
+
+Ein Projekt muss **aktiv** sein, bevor auf den anderen Tabs sinnvoll gerechnet werden
+kann — der aktive Name steht als Badge oben im Tab, und `loadProjectById`/„Als Vorlage
+verwenden" setzen ihn automatisch. Die gleiche Organisations-/Verlaufs-/Verknüpfungs-
+Ansicht ist zusätzlich als aufklappbares **🗂 Projektakte**-Panel im Ergebnis-Tab
+verfügbar (kontextbezogen zum gerade geladenen Projekt).
+
+#### PDF-Bericht
+
+| Modus | Beschreibung |
+|---|---|
+| **Standard** | Ein LLM-Aufruf erzeugt den gesamten Bericht |
+| **Agentisch (6-Experten)** | Sechs Experten-Agenten schreiben parallel Teilkapitel (EM, Thermik, Struktur, Fahrzyklus, Bewertung, Empfehlung) |
+
+Benötigt Ollama + `pandoc` + `pdflatex`. **Formatierung:** keine Zahlenwerte im
+Fließtext (das LLM ordnet Werte oft falsch zu) — stattdessen umfassende
+**deterministische Tabellen** (nach Domäne gruppiert) direkt nach der Zusammenfassung
++ **qualitativer Fließtext** mit symbolischen Formeln; Feldbilder, Kennlinien und
+Verformungsbilder werden als Abbildungen eingebettet; das Dokument ist linksbündig
+(keine Blocksatz-Streckung um lange Formelausdrücke). Ist eine 3D-Feldberechnung
+vorhanden, ergänzt der Bericht automatisch einen bebilderten Abschnitt „3D-
+Magnetfeldvalidierung" mit der 2D-vs-3D-Kennwerttabelle.
+
+---
+
+### Tab ② Geometrie
 
 Hier legst du die komplette parametrische Motor-Geometrie fest.
 
@@ -102,7 +146,13 @@ für große Traktionsmotoren.
 
 Die Hairpin-Wickelköpfe werden als kollisionsfreie U-Pins gebaut: das „Hin"-Bein auf
 dem inneren Radius, das „Rück"-Bein auf dem äußeren, mit radialem Versatz am Scheitel —
-so kreuzen sich die Arme nie auf derselben Höhe.
+so kreuzen sich die Arme nie auf derselben Höhe. Als „Zugkörper" ist die Krone ein
+**durchgezogener, glatter Sweep** (kein Facetten-/Box-Look) mit **nahtlosem Übergang**
+in die Nutstäbe. Auf der gegenüberliegenden Seite (Schweißseite) wird die reale
+Hairpin-Fertigung nachgebildet: jedes Beinende verschränkt sich um eine halbe
+Spulenweite (Twist) und läuft dann ein Stück **gerade parallel zur Motorachse** als
+Schweißfahne aus — die zusammengehörigen Fahnenpaare konvergieren radial bis auf einen
+sichtbaren Lichtspalt, ganz ohne Bauteil-Durchdringung.
 
 #### Wellenverbindung (Blechpaket–Welle)
 
@@ -219,7 +269,7 @@ Fliehkraft-FEM ein.
 
 ---
 
-### Tab ② Betrieb & Material
+### Tab ③ Betrieb & Material
 
 #### Werkstoffe
 
@@ -279,20 +329,20 @@ Im Anhänger-Modus wird die Anhängermasse zum PKW addiert, c_wA steigt um 0,85 
 der Rollwiderstand steigt auf ≥ 0,018, v ist auf 100 km/h begrenzt und Rekuperation
 sinkt auf 30 %. WLTP und Autobahn fahren immer ohne Anhänger.
 
-#### Projektverwaltung (im selben Tab)
+#### Weitere Funktionen (im selben Tab)
 
 | Element | Funktion |
 |---|---|
-| **Projekt-Name** | Optionaler Name (wird an den Zeitstempel-Ordner angehängt) |
-| **Vorhandene Projekte laden** | Dropdown mit allen abgeschlossenen Projekten; Auswahl lädt Ergebnisse ohne Neuberechnung |
-| **📂 Projekt-Browser** | Galerie-Ansicht aller Projekte (siehe Abschnitt 4) |
 | **🖼 Nur ein Frame rechnen** | Einzelnes hochauflösendes Feldbild (400–5000 px) ohne Volllauf; ab 3000 px Multigrid-Solver |
 | **＋ Geometrie merken** | Aktuelle Konfiguration als Variante für den Vergleich ablegen (bis 10 Varianten) |
 | **🔧 FreeCAD / 📦 STEP** | Nach einem Lauf: FreeCAD-GUI öffnen / STEP herunterladen |
 
+Projekt anlegen/öffnen, Projekt-Browser (Galerie) und der PDF-Bericht liegen zentral im
+Tab **① Projekt** — siehe oben.
+
 ---
 
-### Tab ③ Berechnung
+### Tab ④ Berechnung
 
 #### Analyse-Einstellungen
 
@@ -366,7 +416,7 @@ visuellen Kontrolle** der Geometrie — ersetzt nicht die Vollberechnung.
 
 ---
 
-### Tab ✏ Designer (Canvas)
+### Tab 🎨 Designer (Canvas)
 
 Freier Rotor-Entwurf: du zeichnest **eine Halbpol-Geometrie** auf einem Canvas, die
 automatisch über die d-Achse gespiegelt und über alle Pole vervielfältigt wird
@@ -656,25 +706,6 @@ KI-vorsortiert getrennt.
 
 ---
 
-### Tab 📄 Bericht
-
-Erzeugt einen **deutschen PDF-Bericht** aus dem aktuellen Projekt. Benötigt Ollama +
-`pandoc` + `pdflatex`.
-
-| Modus | Beschreibung |
-|---|---|
-| **Standard** | Ein LLM-Aufruf erzeugt den gesamten Bericht |
-| **Agentisch** | Sechs Experten-Agenten schreiben parallel Teilkapitel (EM, Thermik, Struktur, Fahrzyklus, Bewertung, Empfehlung) |
-
-**Formatierung:**
-- Keine Zahlenwerte im Fließtext (das LLM ordnet Werte oft falsch zu) — stattdessen
-  umfassende **deterministische Tabellen** (nach Domäne gruppiert) direkt nach der
-  Zusammenfassung + **qualitativer Fließtext** mit symbolischen Formeln.
-- Feldbilder, Kennlinien und Verformungsbilder werden als Abbildungen eingebettet.
-- Das Dokument ist linksbündig (keine Blocksatz-Streckung um lange Formelausdrücke).
-
----
-
 ### Tab ⚖ Vergleich
 
 #### Varianten
@@ -710,11 +741,8 @@ Berechnung, Ergebnisse werden automatisch in den Vergleich übernommen.
 Der **LLM-Modell** für den Bericht ist im Vergleich-Tab wählbar (ministral-3:14b /
 gemma4:26b / andere installierte Ollama-Modelle).
 
-#### LLM-Trainingsdaten
-
-Im Vergleich-Tab: **📚 LLM-Trainingsdaten** — Übersicht über das Trainingsfile
-(Anzahl Datensätze, davon „gut"/„schlecht"/unbewertete, Bilder, VLM-Einträge).
-Download als SFT-JSONL und VLM-JSONL (für Vision-Finetuning mit Bildern).
+Die **LLM-Trainingsdaten** (Übersicht, Download als SFT-/VLM-JSONL) liegen zentral im
+Tab **① Projekt** unter „🧰 Globale Werkzeuge & Daten".
 
 ---
 
@@ -765,13 +793,14 @@ Unterschied zu **🧠 Text → Auslegung** (füllt nur das Formular mit einer pa
 Standard-Topologie) entwirft der KI-Pfad auch die **frei platzierten Magnete und
 Flussbarrieren** und speichert jeden Lauf als Trainingsdatensatz.
 
-### 📂 Projekt-Browser (Tab Betrieb & Material)
+### 📂 Projekt-Browser (Tab ① Projekt → „Galerie ⤢")
 
 Galerie aller Projekte unter `~/cae_projekte/` mit:
 
 - **Querschnitts-Vorschau** (Thumbnail + hochauflösendes EM-Feldbild zum Anklicken)
 - **Topologie, Abmessungen und Kennwerte** (Kt, Moment, max. Drehzahl, T_Magnet,
   Verluste, Verbrauch)
+- **Status-/Abstammungs-/Verknüpfungs-Badges** (aus der Projektakte)
 - **Suchfeld** + Filter „nur mit Ergebnissen"
 
 Aktionen pro Karte:
@@ -780,28 +809,31 @@ Aktionen pro Karte:
 |---|---|
 | **Ergebnisse ansehen** | Projekt laden (ohne Neuberechnung) → Ergebnis-Tab |
 | **📋 Als Vorlage verwenden** | Alle Eingabeparameter ins Formular übernehmen (Geometrie, Material, Drehzahlen, Fahrzeug, Anhänger, Struktur-/Feldeinstellungen) → Geometrie-Tab; dort anpassen und neu rechnen |
+| **📁 Klonen** | Ganzes Projekt (Eingaben + Notizen + Projekt-Wissensbasis) duplizieren, mit vermerkter Abstammung — ohne die schweren Ergebnisse |
+| **⬇ Bundle exportieren** | Projekt als `.emaproj`-Zip herunterladen; **📦 Import** (im Projekt-Tab) lädt ein solches Bundle wieder als neues Projekt hoch |
 | **📄 Bericht öffnen** | PDF-Bericht anzeigen (nur wenn vorhanden) |
 | **🗑 Löschen** | Projekt entfernen |
 
 Ältere Projekte ohne gespeicherten Eingabesatz: Geometrie + Kernparameter werden aus
 den Metadaten rekonstruiert.
 
-### 📚 Wissensbasis / RAG (Tab Geometrie)
+### 📚 Wissensbasis / RAG
 
-Eine lokale Wissensbasis (Retrieval-Augmented Generation) unter
-`~/cae_projekte/_rag/index.json`. Die Wissensbasis wird von **zwei** Systemen
-genutzt:
+Eine lokale Wissensbasis (Retrieval-Augmented Generation), Embeddings über Ollama
+(`nomic-embed-text`). Es gibt **zwei Ebenen**:
 
-1. **Text → Auslegung**: Referenzmaschinen als Kontext für die Parameterableitung.
-2. **Ergebnis-Chat**: Dokumentation als Hintergrundwissen für Fragen zu den
-   Ergebnissen.
+- **Globale Wissensbasis** (`~/cae_projekte/_rag/index.json`, Tab ① Projekt →
+  „🧰 Globale Werkzeuge & Daten" → **📚 Wissensbasis öffnen**) — projektübergreifende
+  Referenzmaschinen und Dokumentation. Speist **Text → Auslegung**, **🤖 KI entwerfen**
+  (Designer-Tab) und den **Ergebnis-Chat**.
+- **Projekt-Wissensbasis** (`<Projekt>/rag/index.json`, Tab ① Projekt → aktives Projekt
+  → „📎 Projekt-Dokumente") — projektspezifische Quellen, die zusätzlich zur globalen
+  Basis in Chat & Bericht *dieses* Projekts einfließen.
 
-Beide nutzen dieselbe Basis (keine Kategorie-Filterung), aber eigene System-Prompts.
-Die Wissensbasis funktioniert best-effort — ohne Ollama/Embeddings läuft alles weiter.
+Beide funktionieren **best-effort** — ohne Ollama/Embeddings läuft alles weiter, nur
+ohne Kontext-Anreicherung.
 
-#### Dokumente verwalten
-
-Öffnen über **📚 Wissensbasis** (Geometrie-Tab).
+#### Dokumente verwalten (globale Basis)
 
 | Aktion | Beschreibung |
 |---|---|
@@ -872,6 +904,7 @@ Benötigt Ollama.
 
 | Anker | Tab / Funktion |
 |---|---|
+| `#projekt` | Projekt (Anlegen/Öffnen, Bericht, 3D-Läufe) |
 | `#geo` | Geometrie |
 | `#betrieb` | Betrieb & Material |
 | `#calc` | Berechnung |
@@ -880,12 +913,13 @@ Benötigt Ollama.
 | `#import` | STEP-Import |
 | `#em3d` | 3D-Feld (Elmer) |
 | `#results` | FEM-Ergebnisse |
-| `#report` | Bericht |
 | `#compare` | Vergleich |
 | `#projects` | Projekt-Browser (Galerie) |
 | `#optimize` | Zielwertoptimierung |
 | `#text2ema` | Text → Auslegung |
 | `#rag` | Wissensbasis (RAG) |
+
+Es gibt keinen `#report`-Anker mehr — der Bericht liegt auf `#projekt`.
 
 ---
 

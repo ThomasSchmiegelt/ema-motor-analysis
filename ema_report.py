@@ -217,6 +217,19 @@ def build_context(project_dir: str) -> dict:
             "axial_mm":        e3.get("axial_mm"),
             "warnungen":       e3.get("warnings", []),
         }
+
+    # Projektakte: Evolutionsverlauf + verknüpfte Vergleichsprojekte + Notizen aus
+    # dem Manifest (load_or_synthesize → auch für Altprojekte verfügbar). Die Akte ist
+    # die EINE Quelle; meta/results bleiben der Fallback, den der Synthesizer selbst nutzt.
+    try:
+        import ema_projekt
+        man = ema_projekt.load_or_synthesize(project_dir, write_back=False)
+        ctx["evolution"] = man.get("evolution", [])
+        ctx["links"]     = man.get("links", [])
+        ctx["notes"]     = man.get("notes", "")
+        ctx["status"]    = man.get("status", "")
+    except Exception:
+        ctx.setdefault("evolution", []); ctx.setdefault("links", [])
     return ctx
 
 
@@ -604,6 +617,9 @@ def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
     md_raw   = _ensure_em3d_section(md_raw, ctx)           # eigener 3D-Abschnitt + Bilder
     md_final = insert_images(md_raw, ctx["_img_map"])
     md_final = insert_tables(md_final, {"kennwerte": _single_md_tables(ctx)})
+    _evo = _evolution_links_md(ctx)
+    if _evo:
+        md_final = md_final.rstrip() + "\n\n" + _evo + "\n"
 
     _log("Rendere PDF (pandoc + xelatex)…", 85)
     pdf_path = render_pdf(md_final, project_dir)
@@ -674,6 +690,9 @@ def generate_report_agentic(
     # Append expert section (with images + paragraph normalisation)
     expert_md = assemble_expert_section(expert_out, img_map=ctx["_img_map"])
     md_final  = md_main.rstrip() + "\n\n---\n\n" + expert_md
+    _evo = _evolution_links_md(ctx)
+    if _evo:
+        md_final = md_final.rstrip() + "\n\n" + _evo + "\n"
 
     _log("Rendere PDF (pandoc + xelatex)…", 85)
     pdf_path = render_pdf(md_final, project_dir, out_filename="bericht_agentisch.pdf")
@@ -1141,6 +1160,48 @@ def insert_tables(md: str, table_map: dict) -> str:
         if k not in used and tbl:
             md += f"\n\n## {titles.get(k, k)}\n\n{tbl}\n"
     return md
+
+
+_EVO_ACTION_LABELS = {
+    "analyse": "Vollanalyse", "design_ai": "KI-Entwurf",
+    "rating": "Bewertung", "report": "Bericht", "clone": "Geklont",
+}
+
+
+def _evolution_links_md(ctx: dict) -> str:
+    """Deterministic 'Evolutionsverlauf' + 'Verknüpfte Projekte' section from the
+    Projektakte (appended AFTER the LLM prose, so it never passes through table
+    stripping). Returns '' if there is nothing to show."""
+    evo = ctx.get("evolution") or []
+    links = ctx.get("links") or []
+    if not evo and not links:
+        return ""
+    parts = ["## Projektverlauf & Verknüpfungen\n"]
+    if evo:
+        parts.append("### Evolutionsverlauf\n")
+        parts.append("| # | Zeitpunkt | Aktion | Geänderte Eingaben |")
+        parts.append("|---|-----------|--------|--------------------|")
+        for i, e in enumerate(evo, 1):
+            act = e.get("action", "")
+            label = _EVO_ACTION_LABELS.get(act.split(":")[0], act) or act
+            if act.startswith("recompute:"):
+                label = "Nachgerechnet (" + act.split(":", 1)[1] + ")"
+            ch = e.get("changed_inputs") or {}
+            chs = ", ".join(sorted(ch.keys())) if ch else "—"
+            if len(chs) > 80:
+                chs = chs[:77] + "…"
+            note = e.get("note") or ""
+            cell = chs + (f" · _{note}_" if note else "")
+            parts.append(f"| {i} | {e.get('ts','')} | {label} | {cell} |")
+        parts.append("")
+    if links:
+        parts.append("### Verknüpfte Vergleichsprojekte\n")
+        for l in links:
+            note = f" — {l.get('note')}" if l.get("note") else ""
+            parts.append(f"- **{l.get('label', l.get('id'))}** "
+                        f"({l.get('relation', 'vergleich')}){note}")
+        parts.append("")
+    return "\n".join(parts).strip()
 
 
 def _comparison_context(project_ids, projects_root):

@@ -45,6 +45,45 @@ _import_state = {"status": "idle", "progress": 0, "log": [], "result": None, "er
 
 # Echte 3D-Magnetfeldberechnung (Elmer FEM): On-Demand-Job neben dem 2D-Pfad.
 _em3d_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+# Abbruch-Flag (mutabel, damit der Worker-Thread die Änderung sieht): /em3d/abort setzt es +
+# killt den laufenden ElmerSolver; der Sweep-Loop fragt es zwischen den Punkten ab und behält
+# das Teilergebnis. Jeder Start setzt es zurück.
+_em3d_abort = {"v": False}
+# Benannte 3D-Läufe (Config + Kennwerte + Feld) zum Speichern/Aufrufen — jetzt PROJEKT-
+# gebunden: pro Lauf ein Ordner <aktives Projekt>/em3d_runs/<id>/ mit config.json/
+# result.json + kopierten VTU/VTP (s. _em3d_runs_root). Kein globaler Store mehr.
+
+
+def _em3d_project_dir(data):
+    """Resolve the project dir for an em3d job (so VTU/VTP land in the active project):
+    honour an explicit ``project_id`` like /analyse's reuse_id, else the active _state
+    project, else a fresh '…_em3d' project. Sets _state so the viewer/save routes follow."""
+    from ema_pipeline import create_project_dir
+    reuse_id  = (data or {}).get("project_id")
+    reuse_dir = (os.path.join(PROJECTS_ROOT, reuse_id)
+                 if reuse_id and _safe_name(reuse_id) else None)
+    if reuse_dir and os.path.isdir(reuse_dir):
+        proj_dir, proj_id = reuse_dir, reuse_id
+    else:
+        pd = _state.get("project_dir")
+        if pd and os.path.isdir(pd):
+            proj_dir, proj_id = pd, _state.get("project_id")
+        else:
+            proj_dir, proj_id = create_project_dir(
+                PROJECTS_ROOT, (data or {}).get("project_name") or "em3d")
+    _state["project_dir"], _state["project_id"] = proj_dir, proj_id
+    return proj_dir, proj_id
+
+
+def _em3d_runs_root():
+    """Per-project store for saved 3D runs: <active project>/em3d_runs/. Returns None
+    when no project is active (the save/list/load routes then refuse / return empty)."""
+    pd = _state.get("project_dir")
+    if pd and os.path.isdir(pd):
+        d = os.path.join(pd, "em3d_runs")
+        os.makedirs(d, exist_ok=True)
+        return d
+    return None
 
 
 # ── Static ────────────────────────────────────────────────────────────────────
@@ -190,14 +229,10 @@ def em3d_start():
         return jsonify({"error": "3D-Berechnung läuft bereits"}), 409
     data = request.get_json(force=True) or {}
 
-    from ema_pipeline import create_project_dir
-    pd = _state.get("project_dir")
-    if pd and os.path.isdir(pd):
-        proj_dir, proj_id = pd, _state.get("project_id")
-    else:
-        proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, data.get("project_name") or "em3d")
-        _state["project_dir"], _state["project_id"] = proj_dir, proj_id
+    proj_dir, proj_id = _em3d_project_dir(data)
 
+    _em3d_abort["v"] = False
+    elmer_runner.clear_abort()
     _em3d_state.update({"status": "running", "progress": 0, "log": [],
                         "result": None, "error": None})
 
@@ -214,14 +249,138 @@ def em3d_start():
             _em3d_state["status"]   = "done"
             _em3d_state["progress"] = 100
         except Exception as e:
-            import traceback
-            _em3d_state["error"] = str(e)
-            _em3d_state["log"].append("⚠ " + str(e))
-            _em3d_state["log"].append(traceback.format_exc()[:600])
-            _em3d_state["status"] = "error"
+            _em3d_finish_error(e)
 
     threading.Thread(target=_worker, daemon=True).start()
     return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+def _em3d_finish_error(e):
+    """Fehler-/Abbruch-Abschluss eines em3d-Workers: ein vom Nutzer ausgelöster Abbruch
+    (``_em3d_abort``) ist KEIN Fehler → Status ``aborted`` (die UI gibt den Start wieder frei),
+    sonst normaler Fehlerstatus."""
+    import traceback
+    if _em3d_abort["v"]:
+        _em3d_state["log"].append("⛔ Abgebrochen.")
+        _em3d_state["status"] = "aborted"
+        _em3d_state["error"] = None
+    else:
+        _em3d_state["error"] = str(e)
+        _em3d_state["log"].append("⚠ " + str(e))
+        _em3d_state["log"].append(traceback.format_exc()[:600])
+        _em3d_state["status"] = "error"
+
+
+@app.route("/em3d_sweep", methods=["POST", "OPTIONS"])
+def em3d_sweep_start():
+    """Startet den 3D-Betriebspunkt-Sweep (Drehzahlband mit wechselnden Lasten). Body wie
+    /em3d + ``sweep`` (Liste {rpm, load_nm, excitation}) + optional ``detail_index``. Baut das
+    Mesh nur einmal und löst je Punkt. Teilt ``_em3d_state`` (Status/VTU/VTP/ParaView) mit
+    /em3d — der Detailpunkt liefert das volle 3D-Feld. 503 wenn Elmer fehlt."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import elmer_runner
+    if not elmer_runner.ELMER_OK:
+        return jsonify({"error": elmer_runner.INSTALL_HINT, "need_install": True}), 503
+    if _em3d_state["status"] == "running":
+        return jsonify({"error": "3D-Berechnung läuft bereits"}), 409
+    data = request.get_json(force=True) or {}
+    if not (data.get("sweep") or []):
+        return jsonify({"error": "Kein Betriebspunkt im Drehzahlband (sweep ist leer)"}), 400
+
+    proj_dir, proj_id = _em3d_project_dir(data)
+
+    _em3d_abort["v"] = False
+    elmer_runner.clear_abort()
+    _em3d_state.update({"status": "running", "progress": 0, "log": [],
+                        "result": None, "error": None})
+
+    def _worker():
+        import ema_em3d
+        def cb(msg, pct=None):
+            _em3d_state["log"].append(msg)
+            if pct is not None:
+                _em3d_state["progress"] = int(pct)
+        try:
+            res = ema_em3d.run_em3d_sweep(data, proj_dir, progress_cb=cb,
+                                          cancel_cb=lambda: _em3d_abort["v"])
+            res["project_id"] = proj_id
+            # /em3d/vtu|vtp|paraview servieren die Dateipfade des Detailpunkts; die
+            # per-Punkt-VTP/Linien (sweep_vtp/sweep_lines) bedient /em3d/vtp?i= / streamlines?i=.
+            det = res.get("detail") or {}
+            if det.get("vtu_path"):
+                res["vtu_path"] = det["vtu_path"]
+            if det.get("vtp_path"):
+                res["vtp_path"] = det["vtp_path"]
+            if det.get("lines_path"):
+                res["lines_path"] = det["lines_path"]
+            _em3d_state["result"]   = res
+            # Abbruch mit Teilergebnis: als „aborted" melden (Start wieder frei), Ergebnis bleibt
+            # gesetzt → die UI kann die gerechneten Punkte anzeigen/speichern.
+            _em3d_state["status"]   = "aborted" if res.get("aborted") else "done"
+            _em3d_state["progress"] = 100
+        except Exception as e:
+            _em3d_finish_error(e)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+@app.route("/em3d/sector", methods=["POST", "OPTIONS"])
+def em3d_sector_start():
+    """Startet die Ein-Pol-Sektor-Berechnung (Symmetrie-Submodell): rechnet EINE Pol-Teilung
+    fein, anti-periodisch gekoppelt, und spiegelt sie zum vollen Motor. Body wie /em3d.
+    Robustes, schnelles, feines Leerlauf-Feld. Teilt ``_em3d_state`` + alle Viewer-Routen
+    (/em3d/status|vtu|vtp|streamlines|paraview) mit /em3d. 503 wenn Elmer fehlt."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import elmer_runner
+    if not elmer_runner.ELMER_OK:
+        return jsonify({"error": elmer_runner.INSTALL_HINT, "need_install": True}), 503
+    if _em3d_state["status"] == "running":
+        return jsonify({"error": "3D-Berechnung läuft bereits"}), 409
+    data = request.get_json(force=True) or {}
+
+    proj_dir, proj_id = _em3d_project_dir(data)
+
+    _em3d_abort["v"] = False
+    elmer_runner.clear_abort()
+    _em3d_state.update({"status": "running", "progress": 0, "log": [],
+                        "result": None, "error": None})
+
+    def _worker():
+        import ema_em3d
+        def cb(msg, pct=None):
+            _em3d_state["log"].append(msg)
+            if pct is not None:
+                _em3d_state["progress"] = int(pct)
+        try:
+            res = ema_em3d.run_em3d_sector(data, proj_dir, progress_cb=cb)
+            res["project_id"] = proj_id
+            _em3d_state["result"] = res
+            _em3d_state["status"] = "done"
+            _em3d_state["progress"] = 100
+        except Exception as e:
+            _em3d_finish_error(e)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+@app.route("/em3d/abort", methods=["POST", "OPTIONS"])
+def em3d_abort():
+    """Bricht den laufenden 3D-Lauf ab: setzt das Abbruch-Flag (der Sweep-Loop hält nach dem
+    aktuellen Punkt an und behält das Teilergebnis) UND killt den gerade laufenden ElmerSolver-
+    Prozess, damit der Abbruch SOFORT greift (statt erst nach dem laufenden Solve)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import elmer_runner
+    if _em3d_state.get("status") != "running":
+        return jsonify({"status": "idle", "note": "kein laufender 3D-Lauf"})
+    _em3d_abort["v"] = True
+    killed = elmer_runner.abort_current()
+    _em3d_state["log"].append("⛔ Abbruch angefordert…" + (" (Löser gestoppt)" if killed else ""))
+    return jsonify({"status": "aborting", "killed": killed})
 
 
 @app.route("/em3d/status")
@@ -239,13 +398,7 @@ def em3d_preview():
     if _em3d_state["status"] == "running":
         return jsonify({"error": "3D-Job läuft bereits"}), 409
     data = request.get_json(force=True) or {}
-    from ema_pipeline import create_project_dir
-    pd = _state.get("project_dir")
-    if pd and os.path.isdir(pd):
-        proj_dir, proj_id = pd, _state.get("project_id")
-    else:
-        proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, data.get("project_name") or "em3d")
-        _state["project_dir"], _state["project_id"] = proj_dir, proj_id
+    proj_dir, proj_id = _em3d_project_dir(data)
     _em3d_state.update({"status": "running", "progress": 0, "log": [],
                         "result": None, "error": None})
 
@@ -280,15 +433,40 @@ def em3d_vtu():
     return send_file(vtu, as_attachment=True, download_name="motor_3d_feld.vtu")
 
 
+def _em3d_point_path(list_key, single_key):
+    """Löst den Browser-VTP-/Linien-Pfad auf: optional ``?i=<index>`` wählt beim Sweep
+    den i-ten Betriebspunkt (``sweep_vtp``/``sweep_lines``); sonst der Detail-/Einzelpfad."""
+    res = _em3d_state.get("result") or {}
+    i = request.args.get("i")
+    if i is not None:
+        try:
+            idx = int(i)
+            paths = res.get(list_key) or []
+            if 0 <= idx < len(paths) and paths[idx]:
+                return paths[idx]
+        except (ValueError, TypeError):
+            pass
+    return res.get(single_key)
+
+
 @app.route("/em3d/vtp")
 def em3d_vtp():
     """Serviert die schlanke .vtp (Festkörper-Oberfläche, |B|) für den eingebetteten
-    vtk.js-Browser-Viewer."""
-    res = _em3d_state.get("result") or {}
-    vtp = res.get("vtp_path")
+    vtk.js-Browser-Viewer. ``?i=`` wählt beim Sweep den jeweiligen Drehzahl-Punkt."""
+    vtp = _em3d_point_path("sweep_vtp", "vtp_path")
     if not vtp or not os.path.exists(vtp):
         return jsonify({"error": "keine VTP vorhanden"}), 404
     return send_file(vtp, mimetype="application/octet-stream")
+
+
+@app.route("/em3d/streamlines")
+def em3d_streamlines():
+    """Serviert die Feldlinien-.vtp (Polylinien, |B|) für den Browser-Viewer.
+    ``?i=`` wählt beim Sweep den jeweiligen Drehzahl-Punkt."""
+    lines = _em3d_point_path("sweep_lines", "lines_path")
+    if not lines or not os.path.exists(lines):
+        return jsonify({"error": "keine Feldlinien vorhanden"}), 404
+    return send_file(lines, mimetype="application/octet-stream")
 
 
 @app.route("/vendor/<path:name>")
@@ -323,6 +501,200 @@ def em3d_paraview():
     except Exception as e:
         return jsonify({"error": f"ParaView starten fehlgeschlagen: {e}"}), 500
     return jsonify({"status": "launched", "file": vtu})
+
+
+@app.route("/em3d/submodel", methods=["POST", "OPTIONS"])
+def em3d_submodel():
+    """ROI-Verfeinerung: rechnet das VOLLE Modell mit dem im Body übergebenen Quader
+    (``roi_box`` xmin..zmax mm, ``refine_factor``) lokal feiner neu und löst komplett neu
+    (normaler Außenrand, KEINE BC-Übertragung — ein echtes Submodell mit B-Rand explodiert in
+    diesem Elmer-Build, s. memory project_em3d_submodel_bc). Teilt ``_em3d_state`` + alle
+    Viewer-Routen mit /em3d (eigene VTU/VTP). 503 wenn Elmer fehlt."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import elmer_runner
+    if not elmer_runner.ELMER_OK:
+        return jsonify({"error": elmer_runner.INSTALL_HINT, "need_install": True}), 503
+    if _em3d_state["status"] == "running":
+        return jsonify({"error": "3D-Berechnung läuft bereits"}), 409
+    data = request.get_json(force=True) or {}
+    if not data.get("roi_box"):
+        return jsonify({"error": "Kein Verfeinerungsgebiet (roi_box) angegeben"}), 400
+
+    proj_dir, proj_id = _em3d_project_dir(data)
+
+    _em3d_state.update({"status": "running", "progress": 0, "log": [],
+                        "result": None, "error": None})
+
+    def _worker():
+        import ema_em3d
+        def cb(msg, pct=None):
+            _em3d_state["log"].append(msg)
+            if pct is not None:
+                _em3d_state["progress"] = int(pct)
+        try:
+            res = ema_em3d.run_em3d_refine(data, proj_dir, progress_cb=cb)
+            res["project_id"] = proj_id
+            _em3d_state["result"] = res
+            _em3d_state["status"] = "done"
+            _em3d_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _em3d_state["error"] = str(e)
+            _em3d_state["log"].append("⚠ " + str(e))
+            _em3d_state["log"].append(traceback.format_exc()[:600])
+            _em3d_state["status"] = "error"
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+# ── 3D-Lauf speichern / aufrufen (benannter Store, unabhängig vom Analyse-Projekt) ──
+
+_EM3D_RUN_FILEKEYS = ("vtu_path", "vtp_path", "lines_path")
+
+
+def _em3d_copy_run_files(res, dest):
+    """Kopiert die Feld-Dateien eines 3D-Ergebnisses (VTU/VTP/Feldlinien + alle Sweep-
+    Punkte) nach ``dest`` und gibt ein neues Result-Dict mit auf ``dest`` umgeschriebenen
+    Pfaden zurück (base64-Bilder bleiben inline → Viewer ohne Neurechnen)."""
+    import shutil, copy
+    out = copy.deepcopy(res)
+    os.makedirs(dest, exist_ok=True)
+
+    def _cp(src):
+        if src and os.path.exists(src):
+            dst = os.path.join(dest, os.path.basename(src))
+            try:
+                shutil.copy(src, dst); return dst
+            except Exception:
+                return src
+        return src
+    for k in _EM3D_RUN_FILEKEYS:
+        if out.get(k):
+            out[k] = _cp(out[k])
+    for lk in ("sweep_vtp", "sweep_lines"):
+        if isinstance(out.get(lk), list):
+            out[lk] = [_cp(p) for p in out[lk]]
+    det = out.get("detail")
+    if isinstance(det, dict):
+        for k in _EM3D_RUN_FILEKEYS:
+            if det.get(k):
+                det[k] = _cp(det[k])
+    return out
+
+
+@app.route("/em3d/save", methods=["POST", "OPTIONS"])
+def em3d_save():
+    """Speichert den zuletzt fertig berechneten 3D-Lauf benannt ab (Config aus dem Body +
+    Kennwerte/Feld aus ``_em3d_state``). Body = {name, config}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    data = request.get_json(force=True) or {}
+    res = _em3d_state.get("result")
+    if not res or _em3d_state.get("status") != "done":
+        return jsonify({"error": "Kein fertiger 3D-Lauf zum Speichern"}), 400
+    name = (data.get("name") or "").strip() or time.strftime("%Y%m%d_%H%M%S")
+    rid = time.strftime("%Y%m%d_%H%M%S") + "_" + "".join(
+        c for c in name if c.isalnum() or c in "-_")[:40]
+    if not _safe_name(rid):
+        return jsonify({"error": "ungültiger Name"}), 403
+    runs_root = _em3d_runs_root()
+    if not runs_root:
+        return jsonify({"error": "Kein aktives Projekt – bitte erst ein Projekt wählen"}), 400
+    dest = os.path.join(runs_root, rid)
+    try:
+        stored = _em3d_copy_run_files(res, dest)
+        stored["saved_id"] = rid
+        with open(os.path.join(dest, "result.json"), "w") as f:
+            json.dump(stored, f, ensure_ascii=False)
+        with open(os.path.join(dest, "config.json"), "w") as f:
+            json.dump({"name": name, "timestamp": time.strftime("%Y-%m-%d %H:%M"),
+                       "config": data.get("config") or {}}, f, ensure_ascii=False)
+    except Exception as e:
+        return jsonify({"error": f"Speichern fehlgeschlagen: {e}"}), 500
+    return jsonify({"status": "saved", "id": rid, "name": name})
+
+
+@app.route("/em3d/saved")
+def em3d_saved_list():
+    """Liste gespeicherter 3D-Läufe des aktiven Projekts (id, Name, Zeit, B_gap, …)."""
+    out = []
+    runs_root = _em3d_runs_root()
+    if not runs_root:
+        return jsonify(out)
+    for rid in sorted(os.listdir(runs_root), reverse=True):
+        d = os.path.join(runs_root, rid)
+        cfgp = os.path.join(d, "config.json")
+        if not os.path.isdir(d) or not os.path.exists(cfgp):
+            continue
+        try:
+            with open(cfgp) as f:
+                cfg = json.load(f)
+            res = {}
+            rp = os.path.join(d, "result.json")
+            if os.path.exists(rp):
+                with open(rp) as f:
+                    res = json.load(f)
+            op = res.get("operating_point") or {}
+            out.append({"id": rid, "name": cfg.get("name", rid),
+                        "timestamp": cfg.get("timestamp", ""),
+                        "b_gap": res.get("b_gap_mid_peak"),
+                        "excitation": op.get("excitation"),
+                        "is_sweep": bool(res.get("sweep")),
+                        "is_submodel": res.get("source") in ("submodel", "refine")})
+        except Exception:
+            continue
+    return jsonify(out)
+
+
+@app.route("/em3d/saved/<rid>")
+def em3d_saved_load(rid):
+    """Lädt einen gespeicherten 3D-Lauf: setzt ``_em3d_state['result']`` (Pfade zeigen in
+    den Store) → die Viewer-Routen /em3d/vtp|vtu|streamlines|paraview bedienen ihn ohne
+    Neurechnen. Liefert {config, result}."""
+    if not _safe_name(rid):
+        return jsonify({"error": "ungültiger Name"}), 403
+    runs_root = _em3d_runs_root()
+    if not runs_root:
+        return jsonify({"error": "Kein aktives Projekt"}), 400
+    d = os.path.join(runs_root, rid)
+    rp = os.path.join(d, "result.json")
+    if not os.path.exists(rp):
+        return jsonify({"error": "Lauf nicht gefunden"}), 404
+    if _em3d_state.get("status") == "running":
+        return jsonify({"error": "3D-Berechnung läuft gerade"}), 409
+    try:
+        with open(rp) as f:
+            res = json.load(f)
+        cfg = {}
+        cfgp = os.path.join(d, "config.json")
+        if os.path.exists(cfgp):
+            with open(cfgp) as f:
+                cfg = json.load(f)
+    except Exception as e:
+        return jsonify({"error": f"Laden fehlgeschlagen: {e}"}), 500
+    _em3d_state.update({"status": "done", "progress": 100, "log": [], "error": None,
+                        "result": res})
+    return jsonify({"config": cfg.get("config") or {}, "result": res,
+                    "name": cfg.get("name", rid)})
+
+
+@app.route("/em3d/saved/<rid>/delete", methods=["POST", "OPTIONS"])
+def em3d_saved_delete(rid):
+    if request.method == "OPTIONS":
+        return "", 200
+    if not _safe_name(rid):
+        return jsonify({"error": "ungültiger Name"}), 403
+    runs_root = _em3d_runs_root()
+    if not runs_root:
+        return jsonify({"error": "Kein aktives Projekt"}), 400
+    d = os.path.join(runs_root, rid)
+    if not os.path.isdir(d):
+        return jsonify({"error": "Lauf nicht gefunden"}), 404
+    import shutil
+    shutil.rmtree(d, ignore_errors=True)
+    return jsonify({"status": "deleted", "id": rid})
 
 
 @app.route("/smoke_test", methods=["POST", "OPTIONS"])
@@ -738,14 +1110,16 @@ def param_study_report_download():
 def _run(data):
     from ema_pipeline import run_pipeline, create_project_dir
     try:
-        # STEP-Import: das vom Import angelegte Projekt (mit der erkannten motor.FCStd,
-        # benanntem "Rotor") WIEDERVERWENDEN statt ein leeres neues anzulegen — sonst
-        # fände run_pipeline die importierte Geometrie nicht und würde sie parametrisch
-        # neu bauen. Nur akzeptiert, wenn der Ordner + die motor.FCStd existieren.
-        reuse_id = data.get("project_id") if data.get("imported") else None
+        # In ein BESTEHENDES Projekt rechnen, wenn der Client ein aktives Projekt
+        # mitschickt (Projekt-Tab: zuerst anlegen, dann hineinrechnen). Akzeptiert,
+        # sobald der Ordner existiert — auch leere Projekte (status "neu") ohne
+        # motor.FCStd werden wiederverwendet, statt jedes Mal ein neues anzulegen.
+        # STEP-Import nutzt denselben Weg: die erkannte motor.FCStd (benanntes "Rotor")
+        # bleibt erhalten, sonst würde run_pipeline die Geometrie parametrisch neu bauen.
+        reuse_id  = data.get("project_id")
         reuse_dir = (os.path.join(PROJECTS_ROOT, reuse_id)
                      if reuse_id and _safe_name(reuse_id) else None)
-        if reuse_dir and os.path.exists(os.path.join(reuse_dir, "motor.FCStd")):
+        if reuse_dir and os.path.isdir(reuse_dir):
             proj_dir, proj_id = reuse_dir, reuse_id
         else:
             proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, data.get("project_name", ""))
@@ -811,7 +1185,21 @@ def chat():
                         meta = json.load(f)
                 except Exception:
                     meta = {}
-            reply = ema_chat.chat_results(msg, history, results, meta=meta)
+            # Projektakte als gemeinsame Quelle: Notizen erden den Assistenten; bei
+            # Altprojekten ohne meta.json liefert die synthetisierte Akte das Payload.
+            if pd:
+                try:
+                    import ema_projekt
+                    man = ema_projekt.load_or_synthesize(pd, write_back=False)
+                    if not meta:
+                        meta = {"label": man.get("label", ""),
+                                "payload": (man.get("inputs") or {}).get("payload", {})}
+                    if man.get("notes"):
+                        meta["notes"] = man["notes"]
+                except Exception:
+                    pass
+            reply = ema_chat.chat_results(msg, history, results, meta=meta,
+                                          project_dir=pd)
         return jsonify({"reply": reply})
     except urllib.error.URLError:
         return jsonify({"error": "Ollama nicht erreichbar (localhost:11434). Läuft der Dienst?"}), 503
@@ -1124,6 +1512,19 @@ def list_projects():
             card["stator_od"] = geom.get("statorOD")
             card["axial"]     = meta.get("axial_len") or geom.get("axialLen")
             card["cooling"]   = meta.get("cooling")
+            # Projektakte-Kennzeichen (Status/Abstammung/Verknüpfungen/Stufen) — nur
+            # aus dem leichten Manifest gelesen, falls vorhanden (kein Synthese-Aufwand).
+            try:
+                import ema_projekt
+                man = ema_projekt.load(path)
+                if man:
+                    card["status"]          = man.get("status")
+                    card["tags"]            = man.get("tags", [])
+                    card["parent"]          = (man.get("lineage") or {}).get("parent")
+                    card["links_count"]     = len(man.get("links", []))
+                    card["evolution_count"] = len(man.get("evolution", []))
+            except Exception:
+                pass
             if has_results:
                 s = _project_summary(path, name)
                 card["metrics"] = {
@@ -1275,6 +1676,24 @@ def load_project(pid: str):
                     "summary": results.get("summary", {})})
 
 
+@app.route("/project/<pid>/activate", methods=["POST", "OPTIONS"])
+def activate_project(pid: str):
+    """Lightweight: mark a project as the server-side active one (``_state``) WITHOUT
+    loading its results/frames. Lets the Tab-1 'Aktiv'-click steer report + em3d (which
+    read ``_state['project_dir']``) at the chosen project. Returns whether it has results."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    path = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(path):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    _state["project_dir"] = path
+    _state["project_id"]  = pid
+    return jsonify({"status": "active", "id": pid,
+                    "has_results": os.path.exists(os.path.join(path, "results.json"))})
+
+
 def _label_to_key(table: dict, label: str, default: str) -> str:
     """Reverse-lookup a material key by its 'label' (for legacy projects whose
     meta.json stored only the material label, not the key)."""
@@ -1322,21 +1741,152 @@ def _reconstruct_payload(meta: dict) -> dict:
 @app.route("/project/<pid>/template")
 def project_template(pid: str):
     """Return a project's input payload so the UI can use it as a template for a
-    new run (repopulate the form, then the user tweaks + re-analyses)."""
+    new run (repopulate the form, then the user tweaks + re-analyses). Prefers the
+    Projektakte's stored payload (covers cloned/seeded projects without a meta.json)."""
     if not _safe_name(pid):
         return jsonify({"error": "ungültiger Projektname"}), 403
-    meta_path = os.path.join(PROJECTS_ROOT, pid, "meta.json")
-    if not os.path.exists(meta_path):
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
         return jsonify({"error": "Projekt nicht gefunden"}), 404
-    try:
-        with open(meta_path) as f:
-            meta = json.load(f)
-    except Exception as e:
-        return jsonify({"error": f"meta.json lesen fehlgeschlagen: {e}"}), 500
-    payload = meta.get("payload") or _reconstruct_payload(meta)
+    meta = {}
+    meta_path = os.path.join(proj, "meta.json")
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path) as f:
+                meta = json.load(f)
+        except Exception:
+            meta = {}
+    payload = meta.get("payload")
+    label = meta.get("label", "")
+    reconstructed = "payload" not in meta
+    if not payload:
+        # Manifest als Quelle (geklonte/gesäte Projekte, Altprojekte)
+        try:
+            import ema_projekt
+            man = ema_projekt.load_or_synthesize(proj, write_back=False)
+            payload = (man.get("inputs") or {}).get("payload") or {}
+            label = label or man.get("label", "")
+        except Exception:
+            payload = {}
+        if not payload:
+            payload = _reconstruct_payload(meta)
+    payload = dict(payload)
     payload.pop("cycle_csv", None)
-    return jsonify({"payload": payload, "label": meta.get("label", ""),
-                    "reconstructed": "payload" not in meta})
+    return jsonify({"payload": payload, "label": label,
+                    "reconstructed": reconstructed})
+
+
+@app.route("/project/<pid>/clone", methods=["POST"])
+def project_clone(pid: str):
+    """Seed a NEW project directory from the whole Projektakte (Eingaben + Notizen +
+    Tags + Projekt-RAG), recording lineage.parent. No heavy results/charts/FCStd are
+    copied — the clone is an input seed; the user runs /analyse to populate it.
+    Body: {name?, copy_links?}. Returns {id, payload} so the UI can switch + fill."""
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    src = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(src):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_projekt
+    from ema_pipeline import create_project_dir
+    body = request.get_json(silent=True) or {}
+    sman = ema_projekt.load_or_synthesize(src, write_back=False)
+    name = str(body.get("name", "")) or (sman.get("label") or pid) + "_Kopie"
+
+    new_dir, new_id = create_project_dir(PROJECTS_ROOT, name,
+                                         origin="clone", parent=pid)
+    payload = dict((sman.get("inputs") or {}).get("payload") or {})
+    payload.pop("cycle_csv", None)
+    # Akte des Klons mit Eingaben/Notizen/Tags/Design seeden
+    patch = {"inputs": {"payload": payload},
+             "notes": sman.get("notes", ""),
+             "tags": list(sman.get("tags", [])),
+             "design": dict(sman.get("design", {})),
+             "datasheet": sman.get("datasheet", "")}
+    if body.get("copy_links"):
+        patch["links"] = list(sman.get("links", []))
+    ema_projekt.update(new_dir, **patch)
+    ema_projekt.append_evolution(new_dir, {"action": "clone", "ref": pid,
+                                           "note": f"geklont aus {pid}"})
+    # Projekt-RAG mitnehmen (best effort)
+    try:
+        import shutil
+        src_rag = os.path.join(src, "rag")
+        if os.path.isdir(src_rag):
+            shutil.copytree(src_rag, os.path.join(new_dir, "rag"))
+            _sync_rag_inventory(new_id)
+    except Exception:
+        pass
+    # Vermerk im Eltern-Manifest (best effort)
+    try:
+        ema_projekt.append_evolution(src, {"action": "clone",
+                                           "ref": new_id, "note": f"geklont nach {new_id}"})
+    except Exception:
+        pass
+    return jsonify({"status": "cloned", "id": new_id, "label": name,
+                    "payload": payload})
+
+
+@app.route("/project/<pid>/bundle")
+def project_bundle(pid: str):
+    """Export the WHOLE project directory as a single .emaproj zip (Weitergabe/Backup)."""
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    src = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(src):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import io, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for root, _dirs, files in os.walk(src):
+            for fn in files:
+                fp = os.path.join(root, fn)
+                zf.write(fp, os.path.relpath(fp, src))
+    buf.seek(0)
+    return Response(buf.read(), mimetype="application/zip",
+                    headers={"Content-Disposition":
+                             f'attachment; filename="{pid}.emaproj"'})
+
+
+@app.route("/import_bundle", methods=["POST"])
+def import_bundle():
+    """Import a .emaproj (zip) into a NEW project directory. Zip-slip-safe; the new
+    manifest gets a fresh id and lineage.origin='import'."""
+    import io, zipfile
+    files = [f for f in request.files.getlist("file") if f and f.filename]
+    if not files:
+        return jsonify({"error": "keine Datei"}), 400
+    f = files[0]
+    name = os.path.splitext(os.path.basename(f.filename))[0][:48]
+    from ema_pipeline import create_project_dir
+    new_dir, new_id = create_project_dir(PROJECTS_ROOT, name, origin="import")
+    try:
+        with zipfile.ZipFile(io.BytesIO(f.read())) as zf:
+            for member in zf.namelist():
+                # Zip-Slip-Schutz: Zielpfad muss im new_dir bleiben
+                dest = os.path.realpath(os.path.join(new_dir, member))
+                if not dest.startswith(os.path.realpath(new_dir) + os.sep):
+                    continue
+                if member.endswith("/"):
+                    os.makedirs(dest, exist_ok=True)
+                    continue
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                with zf.open(member) as srcf, open(dest, "wb") as out:
+                    out.write(srcf.read())
+    except zipfile.BadZipFile:
+        import shutil
+        shutil.rmtree(new_dir, ignore_errors=True)
+        return jsonify({"error": "keine gültige .emaproj/Zip-Datei"}), 400
+    # Manifest-id auf das neue Verzeichnis ziehen + Import-Abstammung vermerken
+    try:
+        import ema_projekt
+        ema_projekt.update(new_dir, id=new_id,
+                           lineage={"parent": None, "origin": "import"})
+        ema_projekt.append_evolution(new_dir, {"action": "import",
+                                               "note": f"importiert aus {f.filename}"})
+    except Exception:
+        pass
+    return jsonify({"status": "imported", "id": new_id, "label": name})
 
 
 # ── Report generation (LLM → PDF) ────────────────────────────────────────────
@@ -1383,6 +1933,15 @@ def make_report(pid: str):
                     except OSError: pass
             _report_state["status"]   = "done"
             _report_state["progress"] = 100
+            # Projektakte: Bericht erzeugt → Asset + Status 'berichtet'. Soft.
+            try:
+                import ema_projekt
+                ema_projekt.update(proj, status="berichtet",
+                                   assets={"report": os.path.basename(r["pdf"])})
+                ema_projekt.append_evolution(proj, {"action": "report",
+                                                    "ref": os.path.basename(r["pdf"])})
+            except Exception:
+                pass
         except Exception as e:
             import traceback
             _report_state["log"].append(
@@ -1479,6 +2038,124 @@ def compare():
     return jsonify(result)
 
 
+@app.route("/project/<pid>/links", methods=["GET", "POST"])
+def project_links(pid: str):
+    """Persistente Vergleichs-Verknüpfungen eines Projekts.
+    GET → aufgelöste Liste (tote Ziele übersprungen).
+    POST {other, note?, label?, bidirectional?} → Link hinzufügen."""
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_projekt
+    if request.method == "GET":
+        return jsonify({"links": ema_projekt.resolved_links(proj, PROJECTS_ROOT)})
+
+    body = request.get_json(silent=True) or {}
+    other = str(body.get("other", "")).strip()
+    if not _safe_name(other):
+        return jsonify({"error": "ungültiges Zielprojekt"}), 400
+    other_dir = os.path.join(PROJECTS_ROOT, other)
+    if not os.path.isdir(other_dir):
+        return jsonify({"error": "Zielprojekt nicht gefunden"}), 404
+    # Label aus dem Ziel-Manifest (Fallback id)
+    olabel = body.get("label") or ""
+    if not olabel:
+        try:
+            om = ema_projekt.load_or_synthesize(other_dir, write_back=False)
+            olabel = om.get("label") or other
+        except Exception:
+            olabel = other
+    note = str(body.get("note", ""))
+    ema_projekt.add_link(proj, other, label=olabel, note=note)
+    if body.get("bidirectional"):
+        try:
+            sm = ema_projekt.load_or_synthesize(proj, write_back=False)
+            ema_projekt.add_link(other_dir, pid, label=sm.get("label") or pid, note=note)
+        except Exception:
+            pass
+    return jsonify({"status": "linked",
+                    "links": ema_projekt.resolved_links(proj, PROJECTS_ROOT)})
+
+
+@app.route("/project/<pid>/links/remove", methods=["POST"])
+def project_links_remove(pid: str):
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    body = request.get_json(silent=True) or {}
+    other = str(body.get("other", "")).strip()
+    import ema_projekt
+    ema_projekt.remove_link(proj, other)
+    return jsonify({"status": "removed",
+                    "links": ema_projekt.resolved_links(proj, PROJECTS_ROOT)})
+
+
+@app.route("/project/<pid>/meta", methods=["POST"])
+def project_meta_update(pid: str):
+    """Status / Tags / Notizen der Projektakte setzen (Ergebnis-Tab-Panel)."""
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_projekt
+    body = request.get_json(silent=True) or {}
+    patch = {}
+    if "status" in body and body["status"] in ema_projekt.VALID_STATUS:
+        patch["status"] = body["status"]
+    if "notes" in body:
+        patch["notes"] = str(body["notes"])
+    if "tags" in body and isinstance(body["tags"], list):
+        patch["tags"] = [str(t)[:40] for t in body["tags"]][:20]
+    if not patch:
+        return jsonify({"error": "nichts zu ändern"}), 400
+    ema_projekt.update(proj, **patch)
+    man = ema_projekt.load(proj) or {}
+    return jsonify({"status": "saved", "manifest_status": man.get("status"),
+                    "tags": man.get("tags", []), "notes": man.get("notes", "")})
+
+
+@app.route("/project/new", methods=["POST", "OPTIONS"])
+def project_new():
+    """Leeres Projekt SOFORT anlegen (Projekt-Tab: erst anlegen, dann hineinrechnen).
+    Legt Verzeichnis + project.json (status 'neu', origin 'manual') auf Platte an und
+    übernimmt optional Name/Tags/Notizen, damit wiss. Dokumente/Organisatorisches
+    schon vor dem ersten Lauf hinterlegt werden können. Gibt {id, name} zurück."""
+    if request.method == "OPTIONS":
+        return ("", 204)
+    from ema_pipeline import create_project_dir
+    import ema_projekt
+    body = request.get_json(silent=True) or {}
+    name = str(body.get("name", "")).strip()
+    proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, name, origin="manual")
+    patch = {}
+    if isinstance(body.get("tags"), list):
+        patch["tags"] = [str(t)[:40] for t in body["tags"]][:20]
+    if "notes" in body:
+        patch["notes"] = str(body["notes"])
+    if patch:
+        ema_projekt.update(proj_dir, **patch)
+    return jsonify({"id": proj_id, "name": name or proj_id})
+
+
+@app.route("/project/<pid>/manifest")
+def project_manifest(pid: str):
+    """Volle Projektakte (für das Ergebnis-Tab-Panel: Evolution/Links/Status/Tags)."""
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_projekt
+    man = ema_projekt.load_or_synthesize(proj, write_back=False)
+    man["links"] = ema_projekt.resolved_links(proj, PROJECTS_ROOT)
+    return jsonify(man)
+
+
 @app.route("/project/<pid>/delete", methods=["POST"])
 def delete_project(pid: str):
     if not _safe_name(pid):
@@ -1498,8 +2175,8 @@ def delete_project(pid: str):
 
 @app.route("/project/<pid>/video/<mode>")
 def project_video(pid: str, mode: str):
-    # field-animation modes + the structural deformation ramp (frames_struct)
-    video_subdirs = {**FIELD_SUBDIRS, "struct": "frames_struct"}
+    # field-animation modes + structural deformation ramp + 3D-Lastprofil (frames_em3d)
+    video_subdirs = {**FIELD_SUBDIRS, "struct": "frames_struct", "em3d": "frames_em3d"}
     if not _safe_name(pid) or mode not in video_subdirs:
         return jsonify({"error": "ungültig"}), 403
     base = os.path.join(PROJECTS_ROOT, pid) if pid and pid != "current" else _state.get("project_dir")
@@ -1751,6 +2428,118 @@ def rag_delete_many():
     return jsonify({"status": "deleted", "n_deleted": ema_rag.delete_documents(ids)})
 
 
+def _project_rag_dir(pid: str) -> str:
+    return os.path.join(PROJECTS_ROOT, pid, "rag")
+
+
+def _sync_rag_inventory(pid: str) -> None:
+    """Mirror the per-project RAG document list into the Projektakte. Soft."""
+    try:
+        import ema_rag, ema_projekt
+        docs = ema_rag.list_documents(store_dir=_project_rag_dir(pid))
+        ema_projekt.update(os.path.join(PROJECTS_ROOT, pid),
+                           rag={"docs": docs})
+    except Exception:
+        pass
+
+
+@app.route("/project/<pid>/rag", methods=["GET"])
+def project_rag_list(pid: str):
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    import ema_rag
+    store = _project_rag_dir(pid)
+    return jsonify({"documents": ema_rag.list_documents(store_dir=store),
+                    "stats": ema_rag.stats(store_dir=store)})
+
+
+@app.route("/project/<pid>/rag/add", methods=["POST", "OPTIONS"])
+def project_rag_add(pid: str):
+    """Per-Projekt-Wissensbasis: Text ODER Datei-Upload in <projekt>/rag.
+    JSON {text,title,category} oder multipart (file)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_rag
+    store = _project_rag_dir(pid)
+    try:
+        files = [f for f in request.files.getlist("file") if f and f.filename]
+        if files:
+            added = []
+            for f in files:
+                added.append(ema_rag.add_file(f.filename, f.read(),
+                             request.form.get("category", "") or "projekt",
+                             title=f.filename, store_dir=store))
+            _sync_rag_inventory(pid)
+            return jsonify({"status": "added", "n_added": len(added), "added": added})
+        d = request.get_json(silent=True) or {}
+        res = ema_rag.add_text(d.get("text", ""), d.get("title", ""),
+                               d.get("category", "") or "projekt", store_dir=store)
+        _sync_rag_inventory(pid)
+        return jsonify({"status": "added", **res})
+    except urllib.error.URLError:
+        return jsonify({"error": "Ollama-Embeddings nicht erreichbar (localhost:11434)."}), 503
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/project/<pid>/rag/<doc_id>/delete", methods=["POST"])
+def project_rag_delete(pid: str, doc_id: str):
+    if not _safe_name(pid) or not _safe_name(doc_id):
+        return jsonify({"error": "ungültiger Name"}), 403
+    import ema_rag
+    ok = ema_rag.delete_document(doc_id, store_dir=_project_rag_dir(pid))
+    _sync_rag_inventory(pid)
+    return jsonify({"status": "deleted" if ok else "missing"})
+
+
+@app.route("/project/<pid>/attachments", methods=["GET", "POST"])
+def project_attachments(pid: str):
+    """Anhänge-Ordner <projekt>/attachments. GET → Liste. POST (multipart file) legt
+    Dateien ab UND speist sie automatisch in die Projekt-RAG (txt/md/csv/pdf)."""
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_projekt
+    adir = os.path.join(proj, "attachments")
+    if request.method == "GET":
+        return jsonify({"attachments": ema_projekt.scan_attachments(proj)})
+
+    files = [f for f in request.files.getlist("file") if f and f.filename]
+    if not files:
+        return jsonify({"error": "keine Datei"}), 400
+    os.makedirs(adir, exist_ok=True)
+    import ema_rag
+    saved, rag_added = [], 0
+    for f in files:
+        name = os.path.basename(f.filename)
+        if not _safe_name(name):
+            continue
+        raw = f.read()
+        with open(os.path.join(adir, name), "wb") as out:
+            out.write(raw)
+        saved.append(name)
+        # automatisch in die Projekt-RAG (best effort, Textformate)
+        if os.path.splitext(name)[1].lower() in (".txt", ".md", ".csv", ".pdf"):
+            try:
+                ema_rag.add_file(name, raw, "anhang", title=name,
+                                 store_dir=_project_rag_dir(pid))
+                rag_added += 1
+            except Exception:
+                pass
+    ema_projekt.update(proj, attachments=ema_projekt.scan_attachments(proj))
+    if rag_added:
+        _sync_rag_inventory(pid)
+    return jsonify({"status": "saved", "saved": saved, "rag_added": rag_added,
+                    "attachments": ema_projekt.scan_attachments(proj)})
+
+
 @app.route("/rag/search")
 def rag_search():
     """Debug/preview retrieval: ?q=…&category=…&k=…"""
@@ -1864,6 +2653,17 @@ def project_rating(pid: str):
                                       comment=comment, project_dir=proj)
         except Exception as e:
             return jsonify({"error": f"Projektdaten nicht ladbar: {e}"}), 404
+    # Projektakte: Bewertung als Evolutionsstufe + Status 'bewertet'. Soft.
+    try:
+        import ema_projekt
+        proj = os.path.join(PROJECTS_ROOT, pid)
+        ema_projekt.append_evolution(proj, {
+            "action": "rating", "note": comment,
+            "ref": label, "key_metrics": {}})
+        if label is not None:
+            ema_projekt.update(proj, status="bewertet")
+    except Exception:
+        pass
     return jsonify({"status": "saved", "label": rec.get("label"),
                     "comment": rec.get("comment", "")})
 
