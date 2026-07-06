@@ -600,7 +600,7 @@ On-Demand-Job (der 2D-Pfad bleibt unverändert).
 | Parameter | Beschreibung |
 |---|---|
 | **Schrägung (Skew)** | Rotorschrägung in ° über die Paketlänge (0 = gerade) — reduziert Rastmoment/Oberwellen |
-| **🧱 Hexaeder-Netz (strukturiert)** | Opt-in: baut ein strukturiertes Hexaeder-/Prismen-Netz (2D-Querschnitt + axiale Extrusion) statt Tetraedern. Löst den Luftspalt mit weniger Freiheitsgraden auf → weniger RAM, oft schärferes Feld. Gerader **und** gestaffelter Fall. **Grenzen (v1):** keine Magnet-Luft-Taschen und kein eingeprägtes Lastfeld → bei aktivem Lastfeld automatischer Rückfall auf Tetraeder. Ideal für die Leerlauf-/Feldvisualisierung. Nutzt Elmers Piola-Transformation + iterativen Löser (kann bei feinen Netzen etwas länger dauern) |
+| **🧱 Hexaeder-Netz (strukturiert)** | Opt-in: baut ein strukturiertes Hexaeder-/Prismen-Netz (2D-Querschnitt + axiale Extrusion) statt Tetraedern. Löst den Luftspalt mit weniger Freiheitsgraden auf → weniger RAM, oft schärferes Feld. Gerader **und** gestaffelter Fall, inkl. Magnet-Langlöcher mit Klebespalt (wie im Tet-Netz). **Grenze (v1):** kein eingeprägtes Lastfeld → bei aktivem Lastfeld automatischer Rückfall auf Tetraeder. Ideal für die Leerlauf-/Feldvisualisierung. Nutzt Elmers Piola-Transformation + iterativen Löser (kann bei feinen Netzen etwas länger dauern) |
 | **Mesh-Grobgröße** | Gmsh-Elementgröße außen in mm (größer = schneller, gröber) |
 | **Luftspalt-Mesh** | Feinere Elementgröße im Luftspalt in mm (dort wird das Feld/Moment ausgewertet) |
 | **Luftbox-Faktor** | Größe der umgebenden Luftbox (× Stator-OD) für die Außenrandbedingung |

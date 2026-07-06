@@ -338,14 +338,18 @@ Barrieren in den GEMEINSAMEN 2D-Querschnitt geschnitten + in K konformen Slabs e
 Segment geometrisch klassifiziert (Schwerpunkt, um −φ_k rückgedreht) und mit der um φ_k
 gedrehten Magnetisierung getaggt. Der Luftspalt wird über wenige radial ausgerichtete
 Schichten mit einem Bruchteil der Tet-Freiheitsgrade aufgelöst (Speicher-/Genauigkeits-
-gewinn). **Elmer braucht auf Hex/Prisma zwingend die Piola-Transformation** der Kantenbasis
+gewinn). **Magnet-Luft-Taschen (Langloch):** wie im Tet-Pfad sitzt jeder vergrabene Magnet
+in einer obround-Tasche mit echtem `magGapMm`-Klebespalt (0,1–0,3 mm) — Tasche (magnet+clr)
+UND Magnet werden in den 2D-Querschnitt geschnitten, der Ring dazwischen als Luft
+klassifiziert (`_in_obround`/`_use_pockets`, `MeshSizeMin≈0,8·clr` löst den Ring auf).
+**Elmer braucht auf Hex/Prisma zwingend die Piola-Transformation** der Kantenbasis
 (`write_sif` setzt `Use Piola Transform` NUR bei `tags["mesh_kind"]=="hex"`) — und dann
 KEIN Tree-Gauge (unverträglich) und KEIN Direkt-/MUMPS-Löser (nur „lowest order edge basis"
 auf Simplizes). Das ungeeichte curl-curl-System ist symmetrisch **positiv-semidefinit** mit
 konsistenter RHS (Magnetquelle = curl von M) → **CG + ILU0** (BiCGStabL bricht mit NaN ab;
-verifiziert: korrektes 4-Pol-IPM-Feld). **v1-Scope-Grenzen:** KEINE Obround-Magnettaschen
-(0,1–0,3 mm Klebespalt bleibt Tet) und KEIN eingeprägtes Lastfeld (Stirnring-Leiter) —
-`build_mesh` fällt bei Lastfeld-Einprägung (`excitation=loaded`+`coil_currents`) automatisch
+verifiziert: korrektes 4-Pol-IPM-Feld). **v1-Scope-Grenze:** KEIN eingeprägtes Lastfeld
+(Stirnring-Leiter) — die Obround-Magnettaschen (Klebespalt) sind seit 2026-07-06b auch im
+Hex-Netz drin. `build_mesh` fällt bei Lastfeld-Einprägung (`excitation=loaded`+`coil_currents`) automatisch
 auf Tet zurück (`tags["hex_fallback"]`), ebenso bei Hex-Bau-Fehler. Der Selbstheil-/Knoten-
 Cap-Monitor (`_build_mesh_capped`) greift auch im Hex-Modus (die Zellgrößen-Skalierung wirkt
 gleich). Test: `test_em3d.py` `test_hex_mesh_and_piola_sif`/`test_hex_staffelung_segments`/

@@ -99,6 +99,8 @@ def test_hex_mesh_and_piola_sif():
     assert tags["n_magnets"] == 16, f"Magnete {tags['n_magnets']} ≠ 16"
     for name in ("shaft", "rotor", "stator", "air"):
         assert name in tags["bodies"], f"Körper {name} fehlt"
+    # Magnet-Langloch-Taschen (Klebespalt) sind auch im Hex-Netz drin (Standard an).
+    assert tags.get("pocket_clear_mm", 0) > 0, "Magnet-Luft-Taschen fehlen im Hex-Netz"
     sif = E3.write_sif(g, {"hex_mesh": True}, tags, work, "mesh")
     txt = open(sif).read()
     assert "Use Piola Transform = Logical True" in txt, "Piola-Transform fehlt im Hex-.sif"

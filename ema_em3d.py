@@ -909,13 +909,16 @@ def _build_hex_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) ->
       (voll konform), und pro Slab wird das jeweils aktive Magnet-/Barrieren-Segment
       geometrisch (Schwerpunkt, um −φ_k rückgedreht) klassifiziert.
 
-    **v1-Scope-Grenzen (bewusst, ggü. dem Tet-Pfad):** KEINE Obround-Luft-Taschen um
-    die Magnete (der 0,1–0,3 mm Klebespalt bleibt dem Tet-Pfad vorbehalten — im
-    strukturierten Hex-Netz wäre er nur mit sehr feiner Auflösung darstellbar), und
-    KEINE Stirnring-Leiter/Spulenstrom-Einprägung (Lastfeld) — Hex ist der
-    Leerlauf-/Feldvisualisierungs-Pfad. Der Aufrufer (``build_mesh``) fällt bei
-    Lastfeld-Bedarf auf Tet zurück. Elmer braucht auf Hex/Prisma die Piola-
-    Transformation (``write_sif`` setzt sie via ``tags["mesh_kind"]=="hex"``).
+    **Magnet-Luft-Taschen (Langloch/obround):** wie im Tet-Pfad sitzt jeder vergrabene
+    Magnet in einer obround-Luft-Tasche mit dem echten Geometrie-Tab-Klebespalt
+    ``magGapMm`` (0,1–0,3 mm) rundum — im 2D-Querschnitt werden Tasche (magnet+clr) UND
+    Magnet exakt geschnitten, der Ring dazwischen wird als Luft klassifiziert
+    (``_use_pockets``, gated über ``mag_pockets``). ``Mesh.MeshSizeMin ≈ 0,8·clr`` löst
+    den dünnen Ring auf. **v1-Scope-Grenze (bewusst, ggü. dem Tet-Pfad):** KEINE
+    Stirnring-Leiter/Spulenstrom-Einprägung (Lastfeld) — Hex ist der Leerlauf-/
+    Feldvisualisierungs-Pfad. Der Aufrufer (``build_mesh``) fällt bei Lastfeld-Bedarf
+    auf Tet zurück. Elmer braucht auf Hex/Prisma die Piola-Transformation (``write_sif``
+    setzt sie via ``tags["mesh_kind"]=="hex"``).
 
     Returns dieselbe ``tags``-Struktur wie ``_build_mesh_once`` (+ ``mesh_kind``).
     """
@@ -952,11 +955,30 @@ def _build_hex_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) ->
     brects = barrier_rects(geom)
     srects = slot_rects(geom)
 
+    # Magnet-Luft-Tasche (Langloch/obround mit Klebespalt clr rundum) auch im Hex-Netz —
+    # wie im Tet-Pfad der echte Geometrie-Tab-Spalt magGapMm (0,1–0,3 mm). Nur vergrabene
+    # (interior) Magnete; Oberflächenmagnete (SPM/Halbach) haben keinen Klebespalt.
+    _pockets = bool(opts.get("mag_pockets", True))
+    clr = min(0.3, max(0.1, float(geom.get("magGapMm", 0.1) or 0.1)))
+    if opts.get("mag_clear_mm"):
+        clr = float(opts["mag_clear_mm"])
+    _interior = [m for m in rects if m.get("placement") != "surface"]
+
     def _in_rect(px, py, m, eps=1e-6):
         c, s = math.cos(m["ang"]), math.sin(m["ang"])
         ux = (px - m["cx"]) * c + (py - m["cy"]) * s
         uy = -(px - m["cx"]) * s + (py - m["cy"]) * c
         return abs(ux) <= m["length"] / 2.0 + eps and abs(uy) <= m["thick"] / 2.0 + eps
+
+    def _in_obround(px, py, m, extra):
+        # Stadion-Enthaltung: Abstand des Punkts zur Mittellinie (Länge Lm entlang ang)
+        # ≤ Tm/2 + extra ⇒ innerhalb des Langlochs (Rechteck + zwei Halbkreis-Enden).
+        c, s = math.cos(m["ang"]), math.sin(m["ang"])
+        ux = (px - m["cx"]) * c + (py - m["cy"]) * s
+        uy = -(px - m["cx"]) * s + (py - m["cy"]) * c
+        ux = max(-m["length"] / 2.0, min(m["length"] / 2.0, ux))   # auf die Mittellinie klemmen
+        return math.hypot((px - m["cx"]) * c + (py - m["cy"]) * s - ux,
+                          uy) <= m["thick"] / 2.0 + extra + 1e-6
 
     gmsh.initialize(interruptible=False)
     try:
@@ -979,11 +1001,37 @@ def _build_hex_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) ->
             ls = [occ.addLine(pts[k], pts[(k + 1) % 4]) for k in range(4)]
             return (2, occ.addPlaneSurface([occ.addCurveLoop(ls)]))
 
+        def _obround2d(cx, cy, ang, Lm, Tm, extra, narc=6):
+            # Langloch-Fläche (Stadion): Rechteck Lm×Tm + zwei Halbkreis-Enden, Radius Tm/2+extra,
+            # Flanken um extra aufgeweitet — die Luft-Tasche um den Magneten (Klebespalt rundum).
+            c, s = math.cos(ang), math.sin(ang)
+            rc = Tm / 2.0 + extra
+            hl = Lm / 2.0
+            pts = []
+
+            def _P(u, v):
+                return occ.addPoint(cx + u * c - v * s, cy + u * s + v * c, 0)
+            for k in range(narc + 1):                        # rechte Kappe (+hl), −90°..+90°
+                th = -math.pi / 2 + math.pi * k / narc
+                pts.append(_P(hl + rc * math.cos(th), rc * math.sin(th)))
+            for k in range(narc + 1):                        # linke Kappe (−hl), +90°..+270°
+                th = math.pi / 2 + math.pi * k / narc
+                pts.append(_P(-hl + rc * math.cos(th), rc * math.sin(th)))
+            ls = [occ.addLine(pts[k], pts[(k + 1) % len(pts)]) for k in range(len(pts))]
+            return (2, occ.addPlaneSurface([occ.addCurveLoop(ls)]))
+
         cut_surfs = []
         rots = [k * step for k in range(K)] if K >= 2 else [0.0]
+        _use_pockets = _pockets and clr > 0 and bool(_interior)
         for phi in rots:
             c, s = math.cos(phi), math.sin(phi)
             for m in rects:
+                # Erst die Luft-Tasche (obround, magnet+clr), dann der Magnet exakt — beide ins
+                # Fragment; der Ring dazwischen wird als Luft klassifiziert (sichtbarer Spalt).
+                if _use_pockets and m.get("placement") != "surface":
+                    cut_surfs.append(_obround2d(m["cx"] * c - m["cy"] * s,
+                                                m["cx"] * s + m["cy"] * c,
+                                                m["ang"] + phi, m["length"], m["thick"], clr))
                 cut_surfs.append(_rect2d(m["cx"] * c - m["cy"] * s,
                                          m["cx"] * s + m["cy"] * c,
                                          m["ang"] + phi, m["length"], m["thick"]))
@@ -1038,7 +1086,12 @@ def _build_hex_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) ->
         fld.setAsBackgroundMesh(f_gap)
         gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
         gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
-        gmsh.option.setNumber("Mesh.MeshSizeMin", min(gap_cl, mag_cl))
+        # MeshSizeMin muss den dünnen Klebespalt (clr) auflösen dürfen (≥1 Zelle quer) — Boden
+        # ~0,8·clr, wie im Tet-Pfad; sonst überbrücken zu grobe Quads den Luftring.
+        _msmin = min(gap_cl, mag_cl)
+        if _use_pockets:
+            _msmin = min(_msmin, 0.8 * clr)
+        gmsh.option.setNumber("Mesh.MeshSizeMin", _msmin)
         gmsh.option.setNumber("Mesh.MeshSizeMax", mesh_cl)
         gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
         gmsh.model.mesh.generate(3)
@@ -1074,6 +1127,8 @@ def _build_hex_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) ->
             elif rc <= r_shaft:
                 groups["shaft"].append(v)
             elif rc < r_rot:
+                # Reihenfolge: Magnet exakt (innen) → sonst Luft-Tasche (obround-Ring, sichtbarer
+                # Klebespalt) → sonst Flussbarriere → sonst Rotoreisen.
                 mi = next((i for i, m in enumerate(rects) if _in_rect(ux, uy, m)), None)
                 if mi is not None:
                     m = rects[mi]
@@ -1082,6 +1137,8 @@ def _build_hex_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) ->
                         "mdy": m["mdx"] * sph + m["mdy"] * cph,
                         "sign": m.get("sign", 0.0), "pole": m.get("pole", 0)})
                     g["vols"].append(v)
+                elif _use_pockets and any(_in_obround(ux, uy, m, clr) for m in _interior):
+                    groups["air"].append(v)                  # Luft-Tasche (Klebespalt um den Magneten)
                 elif any(_in_rect(ux, uy, b) for b in brects):
                     groups["air"].append(v)                  # Flussbarriere (Luft)
                 else:
@@ -1158,7 +1215,7 @@ def _build_hex_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) ->
         tags["hex_counts"] = {"hex": n_hex, "prism": n_pri, "tet": n_tet}
         tags["mesh_zones"] = {"gap_cl": gap_cl, "mag_cl": mag_cl, "mesh_cl": mesh_cl,
                               "mag_grow": float(opts.get("mag_grow", 0.0) or 0.0)}
-        tags["pocket_clear_mm"] = 0.0
+        tags["pocket_clear_mm"] = round(clr, 2) if _use_pockets else 0.0
         return tags
     finally:
         gmsh.finalize()

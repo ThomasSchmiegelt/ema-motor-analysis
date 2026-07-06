@@ -1298,9 +1298,10 @@
           den <b>gestaffelten</b> Fall (kontinuierlicher Skew wird in eine feine Staffelung übersetzt).</p>
           <p><span class="l">Laienverständlich:</span> „Ziegelstein"-Netz statt Tetraeder — regelmäßiger,
           speichersparender, besonders gut für den dünnen Luftspalt.</p>
-          <p><span class="x">Grenzen (v1):</span> KEINE Magnet-Luft-Taschen (0,1–0,3 mm Klebespalt bleibt
-          dem Tet-Netz) und KEIN eingeprägtes Lastfeld (Spulenströme) — bei aktivem Lastfeld wird
-          automatisch auf Tetraeder zurückgefallen. Ideal für die <b>Leerlauf-/Feldvisualisierung</b>.</p>
+          <p><span class="x">Grenze (v1):</span> KEIN eingeprägtes Lastfeld (Spulenströme) — bei aktivem
+          Lastfeld wird automatisch auf Tetraeder zurückgefallen. Ideal für die
+          <b>Leerlauf-/Feldvisualisierung</b>. Die Magnet-Luft-Taschen (Langloch mit 0,1–0,3 mm
+          Klebespalt) sind wie im Tet-Netz enthalten.</p>
         </details>
       </div>
 
@@ -5055,6 +5056,10 @@ function _renderEm3d(res) {
       </table>`;
   }
   (res.images || []).forEach(im => {
+    // Das statische „3D-Feld |B| (aufgeschnitten)" ist doppelt zum interaktiven Browser-
+    // Viewer (drehen/schneiden/Feldlinien/Sättigungsfarben) → im UI weglassen, sobald der
+    // Viewer verfügbar ist (die .vtp existiert). Für den PDF-Bericht wird es weiter erzeugt.
+    if (im.key === 'em3d_field3d' && res.vtp_path) return;
     h += `<div style="margin:8px 0"><div style="font-size:.76rem;color:#9aa">${escHtml(im.title)}</div>`
        + `<img src="${im.b64}" style="max-width:100%;border:1px solid #333;border-radius:4px"/></div>`;
   });
