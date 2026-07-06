@@ -2171,6 +2171,49 @@ def _write_vtp(poly, out_path):
     return out_path
 
 
+def _clip_streamlines(poly, r_lim, z_lo, z_hi):
+    """Schneidet Feldlinien am Verlassen des Motor-Bereichs ab (Radius > ``r_lim`` oder z
+    außerhalb ``[z_lo, z_hi]``). Jede Polylinie wird in ihre zusammenhängenden IN-Bereichs-
+    Abschnitte (≥2 Punkte) zerlegt → Ausreißer in den weiten Luftraum verschwinden, die
+    guten Teile bleiben. Punktdaten (u. a. der B-Vektor) werden mitgenommen."""
+    import vtk
+    from vtk.util import numpy_support as ns
+    if poly.GetNumberOfPoints() == 0:
+        return poly
+    pts = ns.vtk_to_numpy(poly.GetPoints().GetData())
+    inb = ((np.hypot(pts[:, 0], pts[:, 1]) <= r_lim)
+           & (pts[:, 2] >= z_lo) & (pts[:, 2] <= z_hi))
+    opd = poly.GetPointData()
+    arrays = [(opd.GetArrayName(i), ns.vtk_to_numpy(opd.GetArray(i)))
+              for i in range(opd.GetNumberOfArrays())]
+    newpts = vtk.vtkPoints(); cells = vtk.vtkCellArray(); keep = []
+
+    def _flush(run):
+        if len(run) >= 2:
+            cells.InsertNextCell(len(run))
+            for oid in run:
+                cells.InsertCellPoint(newpts.GetNumberOfPoints())
+                newpts.InsertNextPoint(pts[oid]); keep.append(oid)
+
+    lines = poly.GetLines(); lines.InitTraversal(); idl = vtk.vtkIdList()
+    while lines.GetNextCell(idl):
+        run = []
+        for i in range(idl.GetNumberOfIds()):
+            oid = idl.GetId(i)
+            if inb[oid]:
+                run.append(oid)
+            else:
+                _flush(run); run = []
+        _flush(run)
+    out = vtk.vtkPolyData(); out.SetPoints(newpts); out.SetLines(cells)
+    keep = np.array(keep, dtype=int)
+    for name, arr in arrays:
+        sub = np.ascontiguousarray(arr[keep]) if keep.size else arr[:0]
+        va = ns.numpy_to_vtk(sub); va.SetName(name)
+        out.GetPointData().AddArray(va)
+    return out
+
+
 def export_browser_streamlines(grid, bname, tags, out_path):
     """Tracet Magnetfeldlinien (B-Vektor) durch das Volumennetz und schreibt sie als
     schlanke Polylinien-.vtp (eingefärbt nach |B|) für den vtk.js-Browser-Viewer.
@@ -2184,6 +2227,19 @@ def export_browser_streamlines(grid, bname, tags, out_path):
 
     # B-Vektorfeld als aktive Vektoren setzen (StreamTracer integriert das aktive Feld).
     grid.GetPointData().SetActiveVectors(bname)
+
+    # Referenz-Feldstärke für die Abbruch-Schwelle: das flussführende Gebiet liegt bei ~0,1–2 T,
+    # der Luftraum weit draußen bei ~0. Ohne Abbruch folgt der Tracer im (nahezu feldfreien,
+    # bei groben Hex-Zellen zusätzlich „blockigen") Luftraum winzigen Rausch-Komponenten hunderte
+    # mm weit → wilde Ausreißer. Wir setzen `TerminalSpeed` auf einen kleinen Bruchteil des
+    # typischen Feldniveaus, damit Linien im schwachen Feld sauber ENDEN statt zu mäandern.
+    try:
+        _barr = grid.GetPointData().GetArray(bname)
+        _bm = np.linalg.norm(ns.vtk_to_numpy(_barr).reshape(-1, 3), axis=1)
+        _bref = float(np.nanpercentile(_bm, 80)) if _bm.size else 0.3
+    except Exception:
+        _bref = 0.3
+    _term = max(1e-6, 0.04 * _bref)
 
     dims = tags["dims"]; L = float(tags["L"])
     r_so = float(dims["r_so"]); r_sh = float(dims.get("r_shaft", 0.0) or 0.0)
@@ -2218,12 +2274,20 @@ def export_browser_streamlines(grid, bname, tags, out_path):
     tracer.SetInitialIntegrationStep(0.03 * r_so)
     tracer.SetMinimumIntegrationStep(0.01 * r_so)
     tracer.SetMaximumIntegrationStep(0.08 * r_so)
-    tracer.SetMaximumPropagation(6.0 * r_so)             # einige OD weit verfolgen
-    tracer.SetMaximumNumberOfSteps(2000)
-    tracer.SetTerminalSpeed(1e-12)
+    # Nur ~2 Außendurchmesser weit verfolgen (eine Flusslinie schließt sich über das Joch in
+    # dieser Distanz) — 6·r_so ließ Ausreißer hunderte mm in den Luftraum schießen.
+    tracer.SetMaximumPropagation(2.2 * r_so)
+    tracer.SetMaximumNumberOfSteps(1200)
+    tracer.SetTerminalSpeed(_term)                       # im schwachen Feld enden (kein Mäandern)
     tracer.SetComputeVorticity(False)
     tracer.Update()
     poly = tracer.GetOutput()
+
+    # Nachfilter: Linien, die trotzdem weit aus dem Motor herauslaufen (Radius ≫ Stator-OD oder
+    # axial weit außerhalb des Pakets), abschneiden — hält die Darstellung im interessanten Bereich.
+    r_lim = 1.25 * r_so
+    z_lo_lim, z_hi_lim = -0.25 * L, 1.25 * L
+    poly = _clip_streamlines(poly, r_lim, z_lo_lim, z_hi_lim)
 
     # |B| je Linienpunkt als einziges Skalar behalten, Rest verwerfen → kleine Datei.
     pdp = poly.GetPointData()

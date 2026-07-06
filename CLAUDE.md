@@ -465,7 +465,12 @@ RK4 + `LENGTH_UNIT`-Schritt skaliert an `dims["r_so"]`, Seed-Raster Welle→Stat
 **viele axiale Ebenen über die volle Länge** (`n_z=12`, z∈[0,03·L … 0,97·L] im Eisenstapel, NICHT nur
 z=L/2 bzw. 3 Ebenen → die Linien füllen den ganzen 3D-Körper über die Bauteillänge statt in wenigen
 Ebenen zu kleben, Endeffekt/Skew sichtbar); der adaptive RK45 in
-CELL_LENGTH-Einheiten lieferte 0 Linien) und als schlanke
+CELL_LENGTH-Einheiten lieferte 0 Linien. **Zahmheit gegen „wilde" Linien (v. a. beim Hex-Netz, dessen
+B-Feld im schwachen Luftraum blockiger ist):** `TerminalSpeed` **adaptiv** = 4 % des 80.-|B|-Perzentils
+→ Linien ENDEN im schwachen Feld statt Rausch-Komponenten hunderte mm weit zu folgen; `MaximumPropagation`
+2,2·r_so (statt 6·); und `_clip_streamlines` schneidet Linien am Verlassen des Motorbereichs ab
+(r>1,25·r_so oder z∉[−0,25·L…1,25·L], je Polylinie in In-Bereichs-Abschnitte zerlegt, Punktdaten erhalten)
+— ohne das schossen einzelne Linien bis z≈±450 mm in die Luftbox. Ergebnis als schlanke
 Polylinien-.vtp (nur `Bmag`, float32/UInt32 wie `export_browser_vtp` — beide nutzen `_write_vtp`)
 über `/em3d/streamlines` geladen; im Viewer mit DERSELBEN `ctf`/`scalarRange` wie die Oberfläche
 eingefärbt (folgt log/|B|max). **Liniendichte einstellbar** (`Dichte`-Slider `e3_line_density` /
