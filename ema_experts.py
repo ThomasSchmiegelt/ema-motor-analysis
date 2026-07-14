@@ -9,6 +9,8 @@ from __future__ import annotations
 import json, math, re, urllib.request
 from typing import Callable
 
+from ema_topology import TOPOLOGY_LABELS
+
 
 OLLAMA_URL   = "http://localhost:11434"
 EXPERT_MODEL = "ministral-3:14b"
@@ -55,7 +57,7 @@ def _normalize_text(text: str) -> str:
 # ── Image mapping: expert key → ordered list of img_map keys ────────────────
 
 _EXPERT_IMAGES: dict[str, list[str]] = {
-    "em_feld":    ["airgap"],
+    "em_feld":    ["airgap", "em3d_airgap_2d3d", "em3d_endeffect"],
     "kennlinien": ["em_curve"],
     "luftspalt":  ["airgap"],
     "festigkeit": ["structural", "deformation"],
@@ -126,6 +128,31 @@ def _call(prompt: str, model: str = EXPERT_MODEL, timeout: int = 300) -> str:
 
 # ── Data selectors ────────────────────────────────────────────────────────────
 
+def _em3d_compact(results: dict) -> dict | None:
+    """Kompakte 3D-Magnetfeld-Kennwerte (Elmer FEM) für die Experten — None, wenn für
+    dieses Projekt kein 3D-Lauf vorliegt. Spiegelt ``ema_report.build_context['em3d']``."""
+    e3 = results.get("em3d") or {}
+    if not e3:
+        return None
+    cmp3 = e3.get("compare_2d") or {}
+    bz   = e3.get("b_gap_axial") or []
+    endeff = round(min(bz) / max(bz), 3) if (bz and max(bz) > 0) else None
+    mesh = e3.get("mesh") or {}
+    return {
+        "B_gap_3D_Paketmitte_T": e3.get("b_gap_mid_peak"),
+        "B_gap_2D_FDM_T":        cmp3.get("B_gap_2D"),
+        "B_gap_3D_Vergleich_T":  cmp3.get("B_gap_3D_mid"),
+        "endeffekt_rand_zu_mitte": endeff,   # <1 ⇒ Feldabfall zu den Stirnseiten
+        "skew_deg":          e3.get("skew_deg"),
+        "skew_segments":     e3.get("skew_segments"),
+        "skew_step_deg":     e3.get("skew_step_deg"),
+        "axial_mm":          e3.get("axial_mm"),
+        "mesh_knoten":       mesh.get("n_nodes"),
+        "n_flussbarrieren":  mesh.get("n_barriers"),
+        "warnungen":         e3.get("warnings", []),
+    }
+
+
 def _em_field_data(results: dict, meta: dict) -> dict:
     em  = results.get("em", {}) or {}
     perf = em.get("performance", {}) or {}
@@ -136,7 +163,7 @@ def _em_field_data(results: dict, meta: dict) -> dict:
     bt  = gap.get("Bt_T", [])
     th  = gap.get("theta_deg", [])
     step = max(1, len(br) // 60)
-    return {
+    out = {
         "performance":    perf,
         "B_gap_T":        perf.get("B_gap_T"),
         "Kt_Nm_per_A":    perf.get("Kt_Nm_per_A"),
@@ -145,11 +172,17 @@ def _em_field_data(results: dict, meta: dict) -> dict:
         "poles":          int(geom.get("p", 0)) * 2,
         "slots":          geom.get("slots"),
         "magnet":         meta.get("materials", {}).get("magnet", ""),
+        "magTopologie":   TOPOLOGY_LABELS.get(geom.get("magShape", "v"), geom.get("magShape")),
+        "em_erweitert":   results.get("em_advanced") or {},
         "airgap_mm":      geom.get("statorID", 0) - geom.get("rotorOD", 0) if geom else 0,
         "Br_T_samples":   [round(br[i], 4) for i in range(0, len(br), step)][:60],
         "Bt_T_samples":   [round(bt[i], 4) for i in range(0, len(bt), step)][:60],
         "theta_deg_samples": [round(th[i], 1) for i in range(0, len(th), step)][:60],
     }
+    e3 = _em3d_compact(results)
+    if e3:
+        out["em3d_validierung"] = e3   # echte 3D-Feldlösung (Elmer): Endeffekt + 2D-vs-3D
+    return out
 
 
 def _kennlinien_data(results: dict, meta: dict) -> dict:
@@ -196,6 +229,7 @@ def _luftspalt_data(results: dict, meta: dict) -> dict:
         "Bt_peak_T":      round(float(bt_arr.max()), 4),
         "T_maxwell_Nm":   perf.get("T_maxwell_Nm"),
         "magShape":       geom.get("magShape"),
+        "magTopologie":   TOPOLOGY_LABELS.get(geom.get("magShape", "v"), geom.get("magShape")),
         "rotorOD_mm":     geom.get("rotorOD"),
         "statorID_mm":    geom.get("statorID"),
     }
@@ -228,6 +262,9 @@ def _temperatur_data(results: dict, meta: dict) -> dict:
     steady = therm.get("steady", {}) or {}
     losses = therm.get("losses", {}) or {}
     trans  = therm.get("transient", {}) or {}
+    segmentierung = results.get("segmentation") or {}
+    em_adv = results.get("em_advanced") or {}
+    demag  = (em_adv.get("demag") or {}) if not em_adv.get("error") else {}
     # Trim transient to ~10 time points
     t_raw  = trans.get("t", [])
     step   = max(1, len(t_raw) // 10)
@@ -268,6 +305,8 @@ def _temperatur_data(results: dict, meta: dict) -> dict:
         "transient_winding": _thin("T_winding"),
         "transient_magnet":  _thin("T_magnet"),
         "transient_housing": _thin("T_housing"),
+        "segmentierung":     segmentierung,
+        "demagnetisierung":  demag,
     }
     for cyc_key, label in [("drivecycle", "wltp"),
                             ("drivecycle_vollast", "autobahn_220"),
@@ -317,6 +356,10 @@ _EXPERTS: list[dict] = [
             "Beurteile: Höhe der Luftspaltflussdichte (B_gap), Gleichmäßigkeit von Br und Bt über "
             "den Umfang, sichtbare Oberwellenanteile in den Abtastwerten, "
             "Sättigungsrisiko im Blech, Magnetschwächung (B_r-Wert). "
+            "Falls der Datensatz den Schlüssel 'em3d_validierung' enthält, liegt eine echte "
+            "3D-Magnetfeldberechnung (Elmer FEM) vor — beziehe sie ein: vergleiche B_gap 2D-FDM "
+            "gegen 3D, bewerte den Endeffekt (Feldabfall zu den Stirnseiten, "
+            "'endeffekt_rand_zu_mitte' < 1) und ggf. die Wirkung der Schrägung (skew). "
             "Gib 3–5 konkrete Empfehlungen."
         ),
         "selector": _em_field_data,
@@ -480,4 +523,85 @@ def assemble_expert_section(
             if entry:
                 img_md += f"\n![{entry['title']}]({entry['path']})\n\n"
         parts.append(section_md + img_md + text + "\n\n")
+    return "\n".join(parts)
+
+
+# ── Comparative variant evaluation (6 experts judge ALL variants together) ──
+
+def run_expert_agents_compare(
+    variants: list[dict],
+    model: str = EXPERT_MODEL,
+    progress_cb: Callable[[str, int | None], None] | None = None,
+) -> dict[str, str]:
+    """Lasse die 6 Experten ALLE Varianten VERGLEICHEND bewerten.
+
+    ``variants`` ist eine Liste ``[{"name", "results", "meta"}, …]`` (Variante 0 =
+    Basis). Jeder Experte erhält seinen Fachdaten-Ausschnitt für jede Variante und
+    schreibt einen vergleichenden Befund inkl. **Vor- und Nachteilen je Variante**.
+    Rückgabe: ``{expert_key: markdown_text}``.
+    """
+    def _log(msg, pct=None):
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    out: dict[str, str] = {}
+    n = len(_EXPERTS)
+    names = [v.get("name") or f"Variante {i+1}" for i, v in enumerate(variants)]
+
+    for idx, exp in enumerate(_EXPERTS):
+        _log(f"👤 Experte {idx+1}/{n} (Vergleich): {exp['title']}…", int(5 + idx * 90 / n))
+        try:
+            per_variant = []
+            for v, nm in zip(variants, names):
+                try:
+                    d = exp["selector"](v.get("results", {}) or {}, v.get("meta", {}) or {})
+                except Exception as se:
+                    d = {"fehler": str(se)}
+                per_variant.append({"variante": nm, "daten": d})
+            data_json = json.dumps(per_variant, ensure_ascii=False, indent=2)
+
+            prompt = (
+                f"Du bist ein {exp['role']}. Antworte auf Deutsch, sachlich und prägnant.\n\n"
+                f"Es werden {len(variants)} Motor-Varianten VERGLICHEND bewertet "
+                f"(Variante 0 = Basis): {', '.join(names)}.\n\n"
+                f"Deine Fachaufgabe: {exp['task']}\n\n"
+                f"Fachdaten je Variante (JSON):\n```json\n{data_json}\n```\n\n"
+                f"Schreibe einen VERGLEICHENDEN Befund aus DEINER Fachsicht:\n"
+                f"1. Ein bis zwei Absätze Fließtext, in denen du die Varianten anhand "
+                f"konkreter Zahlen gegenüberstellst (was ist besser/schlechter und warum).\n"
+                f"2. Danach für JEDE Variante eine kurze Zeile mit Vor- und Nachteilen im Format:\n"
+                f"   - **<Variantenname>** — Vorteile: … — Nachteile: …\n"
+                f"   (KEINE senkrechten Striche '|' verwenden)\n"
+                f"3. Abschließend ein Satz, welche Variante aus deiner Fachsicht die beste ist.\n\n"
+                f"FORMATIERUNGSREGELN – unbedingt einhalten:\n"
+                f"- Absätze sind zusammenhängende Zeilen ohne harte Umbrüche mittendrin.\n"
+                f"- Kein Zeilenumbruch nach einzelnen Wörtern, Zahlen oder Einheiten.\n"
+                f"- Keine Überschrift, keine Code-Blöcke, keine Markdown-Tabellen, keine Floskeln.\n"
+                f"Beginne direkt mit dem ersten Satz."
+            )
+            text = _call(prompt, model=model)
+            out[exp["key"]] = text
+            _log(f"  ✓ {exp['title']}: {len(text)} Zeichen", None)
+        except Exception as e:
+            out[exp["key"]] = f"*Vergleichsanalyse nicht verfügbar: {e}*"
+            _log(f"  ⚠ {exp['title']} fehlgeschlagen: {e}", None)
+
+    _log(f"✓ Alle {n} Experten (Vergleich) fertig", 98)
+    return out
+
+
+def assemble_expert_section_compare(expert_outputs: dict[str, str]) -> str:
+    """Vergleichende Experten-Befunde zu einem Markdown-Abschnitt zusammenfügen
+    (h2-Titel, h3 je Experte — passt in die nummerierte Berichtsstruktur)."""
+    parts = ["## 10. Agentische Experten-Bewertung der Varianten (6 Experten)\n",
+             "_Sechs Fachexperten beurteilen die Varianten vergleichend und nennen "
+             "Vor- und Nachteile je Variante._\n"]
+    for exp in _EXPERTS:
+        text = expert_outputs.get(exp["key"], "")
+        if not text:
+            continue
+        text = _normalize_text(text)
+        # exp["section"] ist eine h2-Überschrift ("## …") → auf h3 absenken
+        heading = "### " + exp["section"].lstrip("# ").strip()
+        parts.append(heading + "\n\n" + text + "\n\n")
     return "\n".join(parts)

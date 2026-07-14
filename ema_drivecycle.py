@@ -225,62 +225,87 @@ def fullload_cycle() -> dict:
 # Speed limit for trailer operation (German Tempo-100-Zulassung).
 ANHAENGER_V_CAP = 100.0
 
-ANHAENGER_PHASES = [
-    {"name": "Tal-Auffahrt",  "t_end": 60,   "v_max":  90.0, "v_avg":  70.0,
-     "slope_range": (0.0,  2.0)},
-    {"name": "Bergauffahrt",  "t_end": 780,  "v_max":  70.0, "v_avg":  52.0,
-     "slope_range": (7.0, 11.0)},
-    {"name": "Pass-Plateau",  "t_end": 960,  "v_max": 100.0, "v_avg":  85.0,
-     "slope_range": (0.0,  1.0)},
-    {"name": "Bergabfahrt",   "t_end": 1560, "v_max":  80.0, "v_avg":  65.0,
-     "slope_range": (-10.0, -6.0)},
-    {"name": "Tal-Sprint",    "t_end": 1800, "v_max": 100.0, "v_avg":  90.0,
-     "slope_range": (-1.0,  1.0)},
-]
+DEFAULT_TRAILER_GRADE_PCT = 15.0   # max uphill grade (steepest section) in %
+
+
+def _grade_to_deg(pct: float) -> float:
+    """Road grade in percent → inclination angle in degrees (slope arrays are in °)."""
+    return math.degrees(math.atan(float(pct) / 100.0))
+
+
+def _anhaenger_phases(max_grade_pct: float):
+    """Alpine-pass phases whose steepest uphill section reaches `max_grade_pct`.
+    Slopes are degrees (F_slope = m·g·sin(rad)); the down-hill phase mirrors it."""
+    g = _grade_to_deg(max_grade_pct)
+    return [
+        {"name": "Tal-Auffahrt", "t_end":   60, "v_max":  90.0, "v_avg": 70.0,
+         "slope_range": (0.0, 1.5)},
+        {"name": "Bergauffahrt", "t_end":  780, "v_max":  70.0, "v_avg": 52.0,
+         "slope_range": (0.55 * g, g)},                       # peaks at the target grade
+        {"name": "Pass-Plateau", "t_end":  960, "v_max": 100.0, "v_avg": 85.0,
+         "slope_range": (0.0, 1.0)},
+        {"name": "Bergabfahrt",  "t_end": 1560, "v_max":  80.0, "v_avg": 65.0,
+         "slope_range": (-g, -0.55 * g)},
+        {"name": "Tal-Sprint",   "t_end": 1800, "v_max": 100.0, "v_avg": 90.0,
+         "slope_range": (-1.0, 1.0)},
+    ]
+
+
+# Default phase set (15 % pass) — kept for reference/back-compat.
+ANHAENGER_PHASES = _anhaenger_phases(DEFAULT_TRAILER_GRADE_PCT)
 ANHAENGER_TOTAL_T = 1800
 
 # Trailer additions applied on top of the *base* PKW (whatever the user set).
 # Only the Anhänger-Alpenpass cycle uses these — WLTP and Autobahn keep the base
 # vehicle. The trailer is modelled as a tandem-axle unit (2 extra axles).
 TRAILER_ADD = {
-    "mass_kg":         1800,   # Anhänger-Masse zusätzlich zum PKW
+    "mass_kg":         1800,   # Default-Anhänger-Masse zusätzlich zum PKW (Nutzlast+Leergewicht)
     "cwA_m2":          0.85,   # zusätzliche (schlechte) Anhänger-Aerodynamik
     "n_extra_axles":   2,      # Tandemachser
-    "axle_friction_N": 140.0,  # Radlager-/Dichtungsreibung der 2 Zusatzachsen (~70 N/Achse)
+    "axle_friction_N_per_axle": 70.0,  # Radlager-/Dichtungsreibung je Zusatzachse
     "cr":              0.018,  # erhöhter Rollwiderstand (Bergstraße + Anhänger)
     "eta_drive":       0.92,   # zusätzliche Triebstrangverluste unter Last
     "regen_frac":      0.30,   # begrenzte Rekuperation (Stabilitätsgrenzen mit Anhänger)
 }
 
 
-def trailer_vehicle(base: dict) -> dict:
+def trailer_vehicle(base: dict, trailer_mass_kg: float | None = None,
+                    n_axles: int | None = None) -> dict:
     """Derive the trailer-laden vehicle from a *base* PKW dict.
 
     Adds the trailer mass and aero drag on top of the base car, raises the
     rolling resistance, caps regen, and adds an explicit constant axle-friction
-    force for the trailer's two extra axles (consumed by ``compute_drivetrain``).
-    Drivetrain geometry (r_wheel, gear_ratio) is inherited from the base car.
+    force for the trailer's extra axles (consumed by ``compute_drivetrain``).
+    `trailer_mass_kg` (total trailer mass incl. payload) and `n_axles` are user-
+    settable; defaults fall back to TRAILER_ADD. Drivetrain geometry (r_wheel,
+    gear_ratio) is inherited from the base car.
     """
+    mass  = TRAILER_ADD["mass_kg"]       if trailer_mass_kg in (None, "") else max(0.0, float(trailer_mass_kg))
+    axles = TRAILER_ADD["n_extra_axles"] if n_axles in (None, "")         else max(1, int(n_axles))
     v = dict(base)
-    v["mass_kg"]         = base.get("mass_kg",  DEFAULT_VEHICLE["mass_kg"])  + TRAILER_ADD["mass_kg"]
+    v["mass_kg"]         = base.get("mass_kg",  DEFAULT_VEHICLE["mass_kg"])  + mass
     v["cwA_m2"]          = base.get("cwA_m2",   DEFAULT_VEHICLE["cwA_m2"])   + TRAILER_ADD["cwA_m2"]
     v["cr"]              = max(base.get("cr",   DEFAULT_VEHICLE["cr"]), TRAILER_ADD["cr"])
     v["eta_drive"]       = min(base.get("eta_drive", DEFAULT_VEHICLE["eta_drive"]), TRAILER_ADD["eta_drive"])
     v["regen_frac"]      = min(base.get("regen_frac", DEFAULT_VEHICLE["regen_frac"]), TRAILER_ADD["regen_frac"])
-    v["n_extra_axles"]   = TRAILER_ADD["n_extra_axles"]
-    v["axle_friction_N"] = TRAILER_ADD["axle_friction_N"]
+    v["n_extra_axles"]   = axles
+    v["axle_friction_N"] = TRAILER_ADD["axle_friction_N_per_axle"] * axles
+    v["trailer_mass_kg"] = mass
     return v
 
 
-def _build_anhaenger() -> tuple[np.ndarray, np.ndarray]:
-    """Build v[km/h] and slope[°] profiles for the Anhänger-Alpenpass cycle."""
+def _build_anhaenger(max_grade_pct: float = DEFAULT_TRAILER_GRADE_PCT
+                     ) -> tuple[np.ndarray, np.ndarray, list]:
+    """Build v[km/h] and slope[°] profiles for the Anhänger-Alpenpass cycle whose
+    steepest uphill section reaches `max_grade_pct`. Returns (v, slope_deg, phases)."""
+    phases = _anhaenger_phases(max_grade_pct)
     rng = np.random.default_rng(20260601)
     n   = ANHAENGER_TOTAL_T + 1
     v   = np.zeros(n, dtype=float)
     slp = np.zeros(n, dtype=float)
     t_prev = 0
 
-    for phase in ANHAENGER_PHASES:
+    for phase in phases:
         t_start = t_prev
         t_end   = phase["t_end"]
         v_peak  = phase["v_max"]
@@ -326,31 +351,32 @@ def _build_anhaenger() -> tuple[np.ndarray, np.ndarray]:
     v   = np.convolve(v,   np.ones(5) / 5, mode="same")
     slp = np.convolve(slp, np.ones(9) / 9, mode="same")
     np.clip(v, 0, ANHAENGER_V_CAP, out=v)   # trailer speed limit (Tempo 100)
-    return v, slp
+    return v, slp, phases
 
 
 _ANHAENGER_CACHE: dict = {}
 
 
-def trailer_mountain_cycle() -> dict:
-    """Anhänger-Alpenpass: 1800 s, 8–10 % Steigung bergauf, −6 bis −10 % bergab.
-
-    Stress test for low-RPM / high-sustained-torque (thermal-critical zone).
+def trailer_mountain_cycle(max_grade_pct: float = DEFAULT_TRAILER_GRADE_PCT) -> dict:
+    """Anhänger-Alpenpass: 1800 s, steepest uphill = `max_grade_pct` %, mirrored
+    downhill. Stress test for low-RPM / high-sustained-torque (thermal-critical).
     The returned dict includes a ``slope_profile_deg`` array consumed by
-    ``compute_drivetrain`` to compute the correct driving force at each timestep.
-    Use ``trailer_vehicle(base)`` to derive the trailer-laden vehicle.
+    ``compute_drivetrain``. Use ``trailer_vehicle(base, mass, axles)`` for the
+    laden vehicle. Cached per grade so repeated runs are cheap.
     """
-    if "data" not in _ANHAENGER_CACHE:
-        v_kmh, slp = _build_anhaenger()
-        _ANHAENGER_CACHE["data"] = {
+    key = round(float(max_grade_pct), 1)
+    if key not in _ANHAENGER_CACHE:
+        v_kmh, slp, phases = _build_anhaenger(key)
+        _ANHAENGER_CACHE[key] = {
             "t":                np.arange(len(v_kmh)).astype(float),
             "v_kmh":            v_kmh,
             "slope_profile_deg": slp,
-            "name":             "Anhänger-Alpenpass",
-            "phases":           ANHAENGER_PHASES,
+            "name":             f"Anhänger-Alpenpass ({key:.0f} % Steigung)",
+            "phases":           phases,
+            "max_grade_pct":    key,
             "duration":         ANHAENGER_TOTAL_T,
         }
-    return _ANHAENGER_CACHE["data"]
+    return _ANHAENGER_CACHE[key]
 
 
 def load_csv_cycle(text: str) -> dict:

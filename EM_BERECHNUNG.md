@@ -20,22 +20,31 @@ Code verstehen, erweitern oder debuggen wollen.
 10. [Berichtgenerierung (`ema_report.py`)](#10-berichtgenerierung)
 11. [Schlüsselkonstanten und Materialien](#11-schlüsselkonstanten-und-materialien)
 12. [Bekannte Einschränkungen und Näherungen](#12-bekannte-einschränkungen)
+13. [Echte 3D-Feldberechnung — Elmer FEM (`ema_em3d.py`)](#13-echte-3d-feldberechnung)
 
 ---
 
 ## 1. Systemübersicht
 
 Die E-Maschinen-Pipeline ist eine vollständig lokale CAE-Kette für
-**Interior-Permanent-Magnet-(IPM)-Motoren**. Sie besteht aus zwei eigenständigen
-Streamlit-Apps:
+**Interior-Permanent-Magnet-(IPM)-Motoren**. Es gibt **eine** Flask-Anwendung
+(`server.py`) mit **einer** Single-Page-Browser-UI (`ema.html`, Vanilla JS, kein
+Build-Schritt). Es gibt **keine** separaten Streamlit-Apps und kein `bridge.py`
+mehr (frühere Architekturvarianten) — der Einstiegspunkt ist ausschließlich
+`server.py`, gestartet über `./start.sh`.
 
-| App | Port | Zweck |
-|---|---|---|
-| `ema_app.py` | 8503 | Schnelle 3-Schritt-Pipeline: Geometrie → EM → Festigkeit |
-| (in `ema_pipeline.py`) | — | Erweiterte Pipeline inkl. Thermik, Fahrzyklus, Vergleich, Bericht |
-
-Kein Cloud-Dienst ist beteiligt. Alle LLM-Aufrufe gehen an Ollama
-(`localhost:11434`). FEM läuft über FreeCAD + CalculiX.
+`server.py` hält den Analysezustand in modul-globalen Zustandsdicts (`_state` für
+die Hauptpipeline, plus eigene States für 3D-Feld, Design-KI, Optimierung,
+CAD-Vorschau, Smoke-Test) — es gibt **keine** Session-/Nutzerverwaltung, der Server
+verfolgt jeweils **einen** aktiven Job. `POST /analyse` startet
+`ema_pipeline.run_pipeline(...)` in einem Daemon-Thread und antwortet sofort mit
+`202`; das Browser-UI pollt `GET /status` und holt am Ende `GET /results` — dasselbe
+Poll-Muster gilt für die 3D-Feldberechnung (`/em3d`+`/em3d/status`), die
+KI-Auslegung (`/design_ai_ranged`+`/design_ai/status`) und weitere Hintergrund-Jobs.
+Kein Cloud-Dienst ist beteiligt. Alle LLM-Aufrufe (Bericht, Chat, Text→Auslegung,
+KI-Auslegung, Optimierung, RAG-Embeddings) gehen an Ollama (`localhost:11434`).
+FEM läuft über FreeCAD + CalculiX; die optionale echte 3D-Feldberechnung über
+Elmer FEM (Gmsh-Vernetzung + `ElmerSolver`, Abschnitt 13).
 
 ---
 
@@ -43,41 +52,54 @@ Kein Cloud-Dienst ist beteiligt. Alle LLM-Aufrufe gehen an Ollama
 
 ```
 Browser (ema.html)
-    │  Nutzer stellt Motor-Geometrie ein, klickt „CAD Export (Python)"
-    │  POST /geom  (JSON)
+    │  Nutzer stellt Motor-Geometrie/Betrieb/Material ein (oder zeichnet im
+    │  Designer-Tab), klickt „⚙ Echte Berechnung"
+    │  POST /analyse  (JSON-Payload: geom + Betriebspunkt + Material + …)
     ▼
-bridge.py  (Flask, Port 5000)
-    │  Schreibt workspace/ema_design.json
+server.py  (Flask, Port 5000)
+    │  spawnt Daemon-Thread → ema_pipeline.run_pipeline(payload, state)
+    │  Antwort: 202 Accepted; Browser pollt GET /status, danach GET /results
     ▼
-ema_app.py / ema_pipeline.py  (Streamlit)
+ema_pipeline.run_pipeline()
     │
-    ├─ Schritt 1: GEOMETRIE
-    │    ema_freecad.build_em_rotor_script()  → FreeCAD-Python-Code (String)
-    │    freecad_runner.run_freecad_script()  → Subprocess, parst stdout
-    │    Ergebnis: rotor.FCStd, Flächenliste, Volumen
+    ├─ GEOMETRIE
+    │    ema_freecad.build_full_motor_script()  → FreeCAD-Python-Code (String)
+    │    freecad_runner.run_freecad_script()    → Subprocess, parst stdout-Marker
+    │    Ergebnis: motor.FCStd, motor.step, CAD-Bilder
     │
-    ├─ Schritt 2: EM-ANALYSE
-    │    ema_analysis.run_em_analysis()       → FDM-Solver (NumPy, 150×150 Grid)
-    │    Ergebnis: A, Bx, By, Br_gap, Bt_gap, Performance-Dict
+    ├─ EM-FELD (statisch + Animation)
+    │    ema_analysis.run_em_analysis()         → FDM-Solver (scipy splu, Gitter 100–800 px)
+    │    pro RPM × Frame: neu skalierte Ströme (MTPA/Feldschwächung)
+    │    Ergebnis: A, Bx, By, Br_gap, Bt_gap, Frames (base64 + Disk), Performance-Sweep
     │
-    ├─ Schritt 3: THERMIK  (nur in ema_pipeline.py)
-    │    ema_thermal.run_thermal_analysis()   → LPTN (6 Knoten), Verlustrechnung
-    │    Ergebnis: Knotentemperaturen, Zeitreihen, Warnungen
+    ├─ STRUKTURELLE FEM (Fliehkraft, einmalig bei rpm_to)
+    │    ema_freecad.build_rotor_fem_script()   → FreeCAD-Python-Code (String)
+    │    freecad_runner.run_freecad_script()    → FreeCAD + CalculiX, Robustheits-Retry
+    │    Ergebnis: σ_v,max, u_max, SF, Berstdrehzahl, Knotenanzahl (+ rpm²-Ableitungen)
     │
-    ├─ Schritt 4: FAHRZYKLUS  (nur in ema_pipeline.py)
-    │    ema_drivecycle.wltp_class3()         → WLTP-3b-Profil (1800 s)
-    │    ema_drivecycle.compute_drivetrain()  → RPM/Drehmoment-Zeitreihe
-    │    ema_drivecycle.cycle_energy()        → Verbrauch, Wirkungsgrad, Reku
+    ├─ WELLENVERBINDUNG (analytisch, kein FEM)
+    │    ema_pipeline.connection_assessment()   → Fugenpressung/Flankenpressung, Moment
     │
-    ├─ Schritt 5: STRUKTURELLE FEM
-    │    ema_freecad.build_rotor_fem_script() → FreeCAD-Python-Code (String)
-    │    freecad_runner.run_freecad_script()  → FreeCAD + CalculiX
-    │    Ergebnis: σ_v,max, u_max, Knotenanzahl
+    ├─ THERMIK
+    │    ema_thermal.run_thermal_analysis()     → LPTN (6 Knoten), stationär + transient
     │
-    └─ Schritt 6: BERICHT  (nur in ema_pipeline.py)
-         ema_report.generate_report()         → Ministral-3:14b (Ollama)
-         → Markdown + pandoc + xelatex → bericht.pdf
+    ├─ FAHRZYKLUS (optional, je gewähltem Profil)
+    │    ema_drivecycle.compute_drivetrain()    → RPM/Drehmoment-Zeitreihe
+    │    ema_drivecycle.cycle_energy()          → Verbrauch, Wirkungsgrad, thermische Bewertung
+    │
+    └─ SPEICHERN
+         results.json, meta.json, project.json (Projektakte, ema_projekt.py),
+         ema_training.upsert() → LLM-Trainingsfile
 ```
+
+Der Bericht (`ema_report.py`, Ministral-3:14b via Ollama → Markdown → `pandoc` →
+`pdflatex` → `bericht.pdf`) und die echte 3D-Feldberechnung (`ema_em3d.py`, Elmer
+FEM) sind **eigene, separat angestoßene** Hintergrund-Jobs (`POST
+/project/<id>/report`, `POST /em3d`) — keine Pipeline-Stufen von `run_pipeline`.
+`run_pipeline(..., stages=<Teilmenge>)` erlaubt außerdem einen **selektiven
+Nachlauf** einzelner (teurer/optionaler) Stufen ⊆ `{field, structural, thermal,
+drivecycle}` auf einem bereits existierenden Projekt (`POST
+/project/<id>/recompute`), ohne die Geometrie neu zu bauen.
 
 ---
 
@@ -102,18 +124,25 @@ klickt „CAD Export (Python)". Die Seite sendet ein JSON-Objekt per `fetch` an
 | `slots` | int | Nutanzahl Stator |
 | `slotDepth` | float [mm] | Nuttiefe |
 | `slotWidthRatio` | float [0–1] | Nutenbreite relativ zur Nutteilung |
-| `magShape` | `"v"` / `"flat"` | V-förmige oder flache Magnettaschen |
+| `magShape` | string | Magnet-Topologie: `v`, `vasym`, `vv`, `u`, `delta`, `pmasynrm`, `spm`, `halbach`, `spoke`, `bar` oder `custom` (frei gezeichnet im Designer) |
 | `magWidth` | float [mm] | Magnetlänge (entlang der langen Achse) |
 | `magThick` | float [mm] | Magnetdicke |
 | `magAngle` | float [°] | Öffnungswinkel der V-Anordnung (gesamt) |
 | `magDist` | float [mm] | Abstand der beiden V-Magnete zur Polteilungsachse |
 | `magDepthRel` | float [0–1] | Radiale Position der Magnete (0 = Welle, 1 = Außenrand) |
 
-### `bridge.py` (Flask-Server)
+Dies ist nur ein Ausschnitt der Kern-Geometrieparameter. Die vollständige,
+einzige-Quelle-der-Wahrheit-Ableitung der Magnetplatzierung je Topologie steht in
+`ema_topology.py` (`magnet_legs(geom)`); die aktuelle, vollständige Parameterliste
+(inkl. Wicklung, Wellenverbindung, Komponenten-Toggles, Flussbarrieren,
+Wuchtscheiben-Bolzen, Skew/Staffelung fürs 3D-Feld) ist in `CLAUDE.md` gepflegt.
 
-Empfängt das JSON, fügt einen Zeitstempel (`_ts`) hinzu und schreibt es nach
-`workspace/ema_design.json`. Die Streamlit-App pollt diese Datei und startet
-die Pipeline, sobald die Datei erscheint.
+### `server.py` (Flask-Backend)
+
+`POST /analyse` nimmt das JSON entgegen und startet `ema_pipeline.run_pipeline`
+in einem Daemon-Thread; das Browser-UI (`ema.html`) pollt `GET /status` und holt
+am Ende `GET /results`. Es gibt keine separate Streamlit- oder `bridge.py`-Variante
+mehr — Einstiegspunkt ist ausschließlich `server.py` (siehe Abschnitt 1).
 
 ---
 
@@ -219,31 +248,26 @@ Löst die 2D-magnetostatische Gleichung:
 
 mit der Skalarvariable `A` (z-Komponente des magnetischen Vektorpotentials).
 
-**Methode:** Red-Black-SOR (Successive Over-Relaxation) mit
-Schachbrettmuster-Update für vektorisierte Verarbeitung.
+**Methode:** Ein Finite-Volumen-5-Punkt-Operator mit harmonisch gemittelten
+Flächen-ν (`_build_fv_matrix`) wird **direkt sparse faktorisiert** (`scipy splu`)
+und für die rechte Seite `J` rücksubstituiert. Das ist bei jeder Auflösung exakt
+(kein Iterations-Tuning), sodass Luftspalt und Zähne auch bei hoher Auflösung
+sauber aufgelöst werden. Der Operator hängt nur von der Permeabilitätskarte µ
+(Geometrie + Rotorwinkel) ab, **nicht** von den Strömen (die in `J` stecken) — die
+Faktorisierung wird daher per `(N, hash(µ))` gecacht und über alle Drehzahl-/
+Stromwinkel-/Lastschritte beim gleichen Rotorwinkel wiederverwendet.
 
 | Parameter | Wert | Bedeutung |
 |---|---|---|
-| Relaxationsfaktor ω | 1.4 | Über-Relaxation (> 1 beschleunigt Konvergenz) |
-| Iterationen | 120 | Feste Anzahl, kein Residuum-Abbruch |
-| Datentyp | float64 | Notwendig für Konvergenz (float32 divergiert) |
-| Randbedingung | A = 0 am Rand | Dirichlet (kein Fluss durch den Rand) |
+| Operator | FV-5-Punkt, harm. Mittel ν | symmetrisch positiv definit (interne Knoten) |
+| Faktorisierung | `scipy.sparse.linalg.splu` | exakt, einmal pro µ gecacht |
+| Hochauflösung | `pyamg` AMG (CG-beschl.) | ab N > 2500 (Speicher), Hierarchie ebenfalls gecacht |
+| Fallback | iterative Red-Black-SOR | nur falls scipy fehlt (`_solve_fdm_sor`) |
+| Datentyp | float64 | – |
+| Randbedingung | A = 0 am Rand | Dirichlet (10 % Luftrand, kein Fluss durch den Rand) |
 
-**Update-Schema pro Iteration:**
-
-```
-Für Rote Zellen:
-    nb  = A(i±1, j) + A(i, j±1)          (Nachbarn = Schwarze, unverändert)
-    tgt = (nb + μ·J) / 4
-    A[rot] += ω · (tgt - A[rot])
-
-Für Schwarze Zellen:
-    nb  = A(i±1, j) + A(i, j±1)          (Nachbarn = aktualisierte Rote)
-    tgt = (nb + μ·J) / 4
-    A[blk] += ω · (tgt - A[blk])
-
-Randpixel nach jeder Halbgruppe auf 0 setzen.
-```
+> Hinweis: Frühere Versionen nutzten Red-Black-SOR als primären Löser; diese
+> iterative Variante ist nur noch der scipy-lose Fallback.
 
 ### 5.3 Luftspaltabtastung (`_sample_airgap`)
 
@@ -594,6 +618,13 @@ cae_projekte/<timestamp>_<name>/
     └── drivecycle.png
 ```
 
+Diese Liste ist illustrativ, nicht vollständig — je nach genutzten Funktionen kommen
+weitere Verzeichnisse hinzu: `project.json` (Projektakte, `ema_projekt.py`),
+`frames_react/`/`frames_load/`/`frames_struct/`/`frames_em3d/` (weitere
+Feld-/Verformungs-/3D-Animationsmodi), `em3d/` (Elmer-Mesh/SIF/VTU bei einer 3D-
+Feldberechnung), `em3d_runs/<id>/` (gespeicherte 3D-Läufe) und `rag/index.json`
+(projektspezifische Wissensbasis).
+
 **Materialdatenbanken** (in `ema_pipeline.py`):
 
 - `LAMINATES`: Elektrostahl-Blechsorten (M250-35A bis M800-65A, S235, 42CrMo4)
@@ -701,7 +732,10 @@ timeout = 600  # Sekunden (CalculiX)
 ### EM-Feldsolver
 
 - **2D-Näherung:** Der FDM-Solver ist rein 2D (kein Axialschnitt). Randeffekte,
-  Wickelkopf-Streuung und Sättigungsverläufe axial sind nicht erfasst.
+  Wickelkopf-Streuung und Sättigungsverläufe axial sind nicht erfasst. Wer diese
+  Effekte quantitativ braucht (Endeffekte, Schrägung/Skew), kann optional die echte
+  3D-Feldberechnung (Elmer FEM, Abschnitt 13) danebenrechnen — der 2D-Solver bleibt
+  dabei unverändert der schnelle Standardpfad für Kennlinien/Sweeps.
 - **Gitterauflösung:** Bei N=150 entspricht ein Pixel ca. 1–2 mm. Sehr schmale
   Magnete (<3 mm) oder enge Luftspalte (<0.5 mm) werden ungenau dargestellt.
 - **Iterationszahl:** 120 SOR-Iterationen ohne Residuumsprüfung. Bei extremen
@@ -740,3 +774,87 @@ timeout = 600  # Sekunden (CalculiX)
   den gesamten Zyklus skaliert (quadratisch in T und rpm). Ein echtes Verlust-
   kennfeld (Torque-Map) wäre genauer.
 - **Einstufiges Getriebe:** Kein Gangwechsel, keine Schlupfmodellierung.
+
+---
+
+## 13. Echte 3D-Feldberechnung
+
+**Dateien:** `ema_em3d.py` (Orchestrierung, Mesh, SIF, Auswertung), `elmer_runner.py`
+(Subprozess-Wrapper für `ElmerGrid`/`ElmerSolver`).
+
+Ein eigenständiger, **on-demand** angestoßener Pfad neben dem 2D-FDM-Solver (der 2D-
+Löser bleibt unverändert der schnelle Standardpfad und dient zugleich als
+Vergleichsanker). Löst, was 2D grundsätzlich nicht kann: **finite Baulänge**
+(Endeffekte), **Schrägung/Staffelung**, eine echte volumetrische 3D-Feldlösung und
+einen quantitativen 2D-vs-3D-Vergleich.
+
+### 13.1 Vernetzung (`build_mesh`)
+
+Gmsh-OCC baut die volle 3D-Geometrie: konzentrische Zylinder je Radius (Welle,
+Rotoreisen, Luftspalt, Statoreisen, Luftbox), Magnete als `addThruSections`-Lofts aus
+`magnet_rects(geom)` (gespiegelt zur 2D-Rasterisierung `ema_analysis._rasterise`),
+optional um `skew_deg` verdreht (kontinuierlich) oder in `skew_segments` diskrete,
+um die Wellenachse gedrehte Stufen zerlegt (Staffelung). Alle Teile werden per
+`occ.fragment` verschnitten und über Schwerpunkt/Radius/z-Position als **Physical
+Volumes** getaggt (Magnet-Zuordnung über ein Massengate, da konzentrische Ringe ihren
+Volumenschwerpunkt auf der Achse haben). Optionale Zusatzgeometrie: Flussbarrieren
+(radiale Luft-Prismen), Statornuten (gerade Luft-Prismen über die volle Länge) und
+**Magnettaschen als echte Langlöcher** — jeder vergrabene Magnet sitzt in einer
+obround-Luftschale mit `magGapMm` (0,1–0,3 mm) Spalt rundum; bei Staffelung werden die
+gestuften Einzeltaschen pro Magnet zu **einem** zusammenhängenden Luftkanal fusioniert
+(sonst blieben zwischen den verdreht gestapelten Prismen dünne Eisen-Slivers stehen,
+die das Netz entarten lassen). Ein **Netz-Entartungs-Wächter** prüft nach jedem
+Vernetzungsversuch die Tetraeder-Qualität; schlägt sie fehl, durchläuft ein
+**selbstheilender Monitor** eine Mitigationsleiter (Netzqualität/-dichte hoch →
+Zonenverhältnisse angleichen → Gesamtnetz gröber → Zusatzgeometrie sukzessive
+abschalten), bis der Bau gelingt oder die Leiter erschöpft ist. Zonale Verfeinerung
+(Luftspalt sehr fein, Magnete/Barrieren/Nuten fein, Rest grob) hält die Knotenzahl
+innerhalb eines einstellbaren Budgets.
+
+### 13.2 Löser (`write_sif` → `ElmerSolver`)
+
+Magnetostatik über `WhitneyAVSolver` (Kantenelemente, Vektorpotential A) +
+`MagnetoDynamicsCalcFields` + `SaveScalars`, gelöst mit dem **direkten
+MUMPS-Löser** (ein iterativer Löser stagniert an diesem Gleichungssystem). Eisen
+linear µr≈500, Magnete µr≈1,05 mit `Body Force Magnetization = Br/µ0 · Richtung` pro
+Magnet; Außenrand `A×n=0`. Optional wird der **Betriebspunkt** (Drehzahl + Last)
+berücksichtigt: dq-Ströme aus `estimate_dq_currents` treiben Nutstromdichten +
+Stirnring-Rückleiter (damit ∇·J≈0 über die endliche Baulänge schließt), eine
+iterative Divergenzbereinigung (`Fix Input Current Density`) hält das System
+konsistent. v1-Scope: **lineare** Materialien, keine verteilte Wicklungsgeometrie.
+
+### 13.3 Auswertung (`parse_results`)
+
+Liest die VTU-Ergebnisse (Paket `vtk`): Luftspalt-B_r(θ) bei mehreren Axialpositionen
+→ **Endeffekt-Kurve** (Feldabfall zum Rand hin), |B|-Schnittbild bei z=L/2, Arkkio-
+Drehmoment sowie ein **2D-vs-3D-Vergleich** gegen `ema_analysis.run_em_analysis`.
+Ergebnisse fließen als kompakte Zusammenfassung in `results.json` (`results["em3d"]`)
+und damit automatisch in den PDF-Bericht ein.
+
+### 13.4 Erweiterte Modi
+
+- **Drehzahl-/Lastsweep** (`run_em3d_sweep`): das Netz hängt nicht von Drehzahl/Last
+  ab und wird deshalb **einmal** gebaut; pro Betriebspunkt läuft nur `write_sif` +
+  `ElmerSolver` neu. Ein Detailpunkt bekommt das volle 3D-Feld, alle anderen nur
+  schlanke Kennwerte — inklusive eines optionalen Lastprofil-Videos.
+- **ROI-Verfeinerung** (`run_em3d_refine`): lokal feineres Netz in einem markierten
+  Quader + vollständiger Re-Solve (kein Submodell mit Randwert-Transfer — das
+  scheitert an einem realen, nicht glatten Motor-Randfeld; ein voller Re-Solve ist
+  im ROI sogar genauer, kostet aber einen weiteren Solve).
+- **Ein-Pol-Symmetrie-Schnellmodus** (`run_em3d_sector`): löst nur eine
+  Polteilung mit anti-periodischer Randbedingung (Elmer `Periodic BC` +
+  `Scale=-1`) und spiegelt das Ergebnis zum vollen Motor — bei gleichem
+  Knotenbudget deutlich feiner aufgelöst, da die Domäne nur 1/(2p) so groß ist.
+  Erfordert `slots % poles == 0`; v1-Scope: Leerlauf + Magnete (+ Taschen) +
+  Statornuten + Flussbarrieren + Hohlwelle, kein Skew/keine Spulenströme.
+
+### 13.5 Voraussetzungen und Grenzen
+
+Benötigt Elmer (`elmerfem-csc`) sowie die Python-Pakete `gmsh`/`vtk` — rein optional,
+Mesh und SIF-Datei sind auch ohne installiertes Elmer test- und baubar
+(`test_em3d.py`). **v1-Scope-Einschränkungen:** lineare Materialien (keine
+BH-Kurve), vereinfachtes Lastfeld (Grundwelle statt verteilter realer Wicklung),
+keine Bewegungssimulation/Transiente (der Drehzahlsweep ist eine Folge statischer
+Arbeitspunkte, keine echte Zeitintegration). Ausführliche Architekturdetails
+(Gotchas, Tagging-Feinheiten, UI-Bedienung) stehen in `CLAUDE.md` und
+`NUTZUNGSANLEITUNG.md` (Tab „🧲 3D-Feld").
