@@ -389,6 +389,329 @@ def em3d_status():
                     for k in ("status", "progress", "log", "result", "error")})
 
 
+# ── Experimentelle Spritzöl-Kühlung (Blender/Mantaflow) ──────────────────────
+_oil_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+_oil_abort = {"v": False}
+
+
+@app.route("/oilspray", methods=["POST", "OPTIONS"])
+def oilspray_start():
+    """Startet die experimentelle Spritzöl-Simulation am Wickelkopf (Blender/Mantaflow-FLIP).
+    Body = normaler Analyse-Payload (geom + axial_len) + ``oil``-Optionen (resolution, frames,
+    section_slots, viscosity, surface_tension, jet_speed, engine). 503 wenn kein Mantaflow-
+    taugliches Blender vorhanden. QUALITATIV — kein Temperaturfeld/Wärmeübergang."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import blender_runner
+    if not blender_runner.BLENDER_OK:
+        return jsonify({"error": blender_runner.INSTALL_HINT, "need_install": True}), 503
+    if _oil_state["status"] == "running":
+        return jsonify({"error": "Spritzöl-Simulation läuft bereits"}), 409
+    data = request.get_json(force=True) or {}
+    proj_dir, proj_id = _em3d_project_dir(data)
+
+    _oil_abort["v"] = False
+    blender_runner.clear_abort()
+    _oil_state.update({"status": "running", "progress": 0, "log": [],
+                       "result": None, "error": None})
+
+    def _worker():
+        import ema_oilspray, traceback
+        def cb(msg, pct=None):
+            _oil_state["log"].append(msg)
+            if pct is not None:
+                _oil_state["progress"] = int(pct)
+        try:
+            res = ema_oilspray.run_oilspray(data, proj_dir, progress_cb=cb,
+                                            cancel_cb=lambda: _oil_abort["v"])
+            res["project_id"] = proj_id
+            _oil_state["result"]   = res
+            _oil_state["status"]   = "done"
+            _oil_state["progress"] = 100
+        except Exception as e:
+            if _oil_abort["v"] or "abgebrochen" in str(e).lower():
+                _oil_state["log"].append("⛔ Abgebrochen.")
+                _oil_state["status"] = "aborted"
+                _oil_state["error"] = None
+            else:
+                _oil_state["error"] = str(e)
+                _oil_state["log"].append("⚠ " + str(e))
+                _oil_state["log"].append(traceback.format_exc()[:600])
+                _oil_state["status"] = "error"
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+@app.route("/oilspray/preview", methods=["POST", "OPTIONS"])
+def oilspray_preview():
+    """Schnelle Zwischenansicht VOR dem Bake: rendert nur Geometrie + Düsen + Strahl-Ziellinien
+    als EIN Standbild (kein Mantaflow-Bake). Teilt sich Status/Job mit /oilspray (``_oil_state``)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import blender_runner
+    if not blender_runner.BLENDER_OK:
+        return jsonify({"error": blender_runner.INSTALL_HINT, "need_install": True}), 503
+    if _oil_state["status"] == "running":
+        return jsonify({"error": "Spritzöl-Job läuft bereits"}), 409
+    data = request.get_json(force=True) or {}
+    proj_dir, proj_id = _em3d_project_dir(data)
+    _oil_abort["v"] = False
+    blender_runner.clear_abort()
+    _oil_state.update({"status": "running", "progress": 0, "log": [],
+                       "result": None, "error": None})
+
+    def _worker():
+        import ema_oilspray, traceback
+        def cb(msg, pct=None):
+            _oil_state["log"].append(msg)
+            if pct is not None:
+                _oil_state["progress"] = int(pct)
+        try:
+            res = ema_oilspray.preview_oilspray(data, proj_dir, progress_cb=cb,
+                                                cancel_cb=lambda: _oil_abort["v"])
+            res["preview"] = True
+            res["project_id"] = proj_id
+            _oil_state["result"] = res
+            _oil_state["status"] = "done"
+            _oil_state["progress"] = 100
+        except Exception as e:
+            if _oil_abort["v"] or "abgebrochen" in str(e).lower():
+                _oil_state["log"].append("⛔ Abgebrochen.")
+                _oil_state["status"] = "aborted"
+                _oil_state["error"] = None
+            else:
+                _oil_state["error"] = str(e)
+                _oil_state["log"].append("⚠ " + str(e))
+                _oil_state["log"].append(traceback.format_exc()[:600])
+                _oil_state["status"] = "error"
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id, "preview": True}), 202
+
+
+@app.route("/oilspray/abort", methods=["POST", "OPTIONS"])
+def oilspray_abort():
+    """Bricht die laufende Spritzöl-Simulation ab (Flag + Blender-Prozess terminieren)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import blender_runner
+    if _oil_state.get("status") != "running":
+        return jsonify({"status": "idle", "note": "keine laufende Spritzöl-Simulation"})
+    _oil_abort["v"] = True
+    killed = blender_runner.abort_current()
+    _oil_state["log"].append("⛔ Abbruch angefordert…" + (" (Blender gestoppt)" if killed else ""))
+    return jsonify({"status": "aborting", "killed": killed})
+
+
+@app.route("/oilspray/status")
+def oilspray_status():
+    return jsonify({k: _oil_state[k]
+                    for k in ("status", "progress", "log", "result", "error")})
+
+
+@app.route("/project/<pid>/oilspray")
+def project_oilspray(pid: str):
+    """Gespeicherten Spritzöl-Lauf eines Projekts laden (results.json["oilspray"] + Chart-
+    Dateien als base64) — die „Speicherfunktion" des 💧-Tabs: Ergebnis ohne Neurechnen ansehen."""
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültig"}), 403
+    base = os.path.join(PROJECTS_ROOT, pid) if pid != "current" else _state.get("project_dir")
+    if not base or not os.path.isdir(base):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_oilspray
+    saved = ema_oilspray.load_saved(base)
+    if not saved:
+        return jsonify({"error": "Kein gespeicherter Spritzöl-Lauf in diesem Projekt"}), 404
+    saved["project_id"] = pid if pid != "current" else _state.get("project_id")
+    return jsonify(saved)
+
+
+def _oil_project_base(pid):
+    """Projektverzeichnis für die Spritzöl-Varianten-Routen (pid oder aktives Projekt)."""
+    if pid == "current":
+        return _state.get("project_dir")
+    if not _safe_name(pid):
+        return None
+    base = os.path.join(PROJECTS_ROOT, pid)
+    return base if os.path.isdir(base) else None
+
+
+@app.route("/project/<pid>/oilspray/saved")
+def project_oilspray_saved_list(pid: str):
+    """Liste aller automatisch gespeicherten Spritzöl-Varianten eines Projekts."""
+    base = _oil_project_base(pid)
+    if not base:
+        return jsonify([])
+    import ema_oilspray
+    return jsonify(ema_oilspray.list_saved_runs(base))
+
+
+@app.route("/project/<pid>/oilspray/saved/<rid>")
+def project_oilspray_saved_load(pid: str, rid: str):
+    """Eine gespeicherte Spritzöl-Variante laden (ohne Neurechnen) → run_oilspray-Format."""
+    base = _oil_project_base(pid)
+    if not base or not _safe_name(rid):
+        return jsonify({"error": "ungültig"}), 403
+    import ema_oilspray
+    run = ema_oilspray.load_saved_run(base, rid)
+    if not run:
+        return jsonify({"error": "Variante nicht gefunden"}), 404
+    run["project_id"] = pid if pid != "current" else _state.get("project_id")
+    run["video_src"] = f"/project/{pid}/oilspray/saved/{rid}/video"
+    return jsonify(run)
+
+
+@app.route("/project/<pid>/oilspray/saved/<rid>/video")
+def project_oilspray_saved_video(pid: str, rid: str):
+    base = _oil_project_base(pid)
+    if not base or not _safe_name(rid):
+        return jsonify({"error": "ungültig"}), 403
+    import ema_oilspray
+    mp4 = ema_oilspray.saved_run_video(base, rid)
+    if not mp4:
+        return jsonify({"error": "Kein Video für diese Variante"}), 404
+    return send_file(mp4, mimetype="video/mp4", as_attachment=True,
+                     download_name=f"{pid}_oil_{rid}.mp4")
+
+
+@app.route("/project/<pid>/oilspray/saved/<rid>/delete", methods=["POST", "OPTIONS"])
+def project_oilspray_saved_delete(pid: str, rid: str):
+    if request.method == "OPTIONS":
+        return "", 200
+    base = _oil_project_base(pid)
+    if not base or not _safe_name(rid):
+        return jsonify({"error": "ungültig"}), 403
+    import ema_oilspray
+    ok = ema_oilspray.delete_saved_run(base, rid)
+    return jsonify({"status": "deleted" if ok else "missing"})
+
+
+# ── 🧪 Spray-Test-Prüfstand (iteratives Spray-Tuning, Blender/Mantaflow) ──────
+# Projektunabhängig (Store unter ~/cae_projekte/_spraytest); gleiche Job-Mechanik
+# wie /oilspray (ein Lauf, Daemon-Thread, Abbruch via Flag + Blender-Kill).
+_spraytest_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+_spraytest_abort = {"v": False}
+
+
+@app.route("/spraytest", methods=["POST", "OPTIONS"])
+def spraytest_start():
+    """Startet EINE Spray-Test-Runde: sampelt n Varianten (Runde ≥2 um die markierten
+    Eltern), bäckt sie sequenziell auf dem Prüfstand (horizontale Düse + Kupferstäbe)
+    und speichert die Runde unter ~/cae_projekte/_spraytest/rounds/<rid>/."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import blender_runner
+    if not blender_runner.BLENDER_OK:
+        return jsonify({"error": blender_runner.INSTALL_HINT, "need_install": True}), 503
+    if _spraytest_state["status"] == "running" or _oil_state["status"] == "running":
+        return jsonify({"error": "Es läuft bereits ein Blender-Job (Spritzöl/Spray-Test)"}), 409
+    data = request.get_json(force=True) or {}
+
+    _spraytest_abort["v"] = False
+    blender_runner.clear_abort()
+    _spraytest_state.update({"status": "running", "progress": 0, "log": [],
+                             "result": None, "error": None})
+
+    def _worker():
+        import ema_spraytest, traceback
+        def cb(msg, pct=None):
+            _spraytest_state["log"].append(msg)
+            if pct is not None:
+                _spraytest_state["progress"] = int(pct)
+        try:
+            res = ema_spraytest.run_round(data, progress_cb=cb,
+                                          cancel_cb=lambda: _spraytest_abort["v"])
+            _spraytest_state["result"] = res
+            _spraytest_state["status"] = "aborted" if res.get("aborted") else "done"
+            _spraytest_state["progress"] = 100
+        except Exception as e:
+            if _spraytest_abort["v"] or "abgebrochen" in str(e).lower():
+                _spraytest_state["log"].append("⛔ Abgebrochen.")
+                _spraytest_state["status"] = "aborted"
+                _spraytest_state["error"] = None
+            else:
+                _spraytest_state["error"] = str(e)
+                _spraytest_state["log"].append("⚠ " + str(e))
+                _spraytest_state["log"].append(traceback.format_exc()[:600])
+                _spraytest_state["status"] = "error"
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/spraytest/status")
+def spraytest_status():
+    return jsonify({k: _spraytest_state[k]
+                    for k in ("status", "progress", "log", "result", "error")})
+
+
+@app.route("/spraytest/abort", methods=["POST", "OPTIONS"])
+def spraytest_abort():
+    if request.method == "OPTIONS":
+        return "", 200
+    import blender_runner
+    if _spraytest_state.get("status") != "running":
+        return jsonify({"status": "idle", "note": "keine laufende Spray-Test-Runde"})
+    _spraytest_abort["v"] = True
+    killed = blender_runner.abort_current()
+    _spraytest_state["log"].append("⛔ Abbruch angefordert…" + (" (Blender gestoppt)" if killed else ""))
+    return jsonify({"status": "aborting", "killed": killed})
+
+
+@app.route("/spraytest/rounds")
+def spraytest_rounds():
+    import ema_spraytest
+    return jsonify(ema_spraytest.list_rounds())
+
+
+@app.route("/spraytest/round/<rid>")
+def spraytest_round(rid: str):
+    if not _safe_name(rid):
+        return jsonify({"error": "ungültig"}), 403
+    import ema_spraytest
+    data = ema_spraytest.load_round(rid)
+    if not data:
+        return jsonify({"error": "Runde nicht gefunden"}), 404
+    return jsonify(data)
+
+
+@app.route("/spraytest/round/<rid>/marked", methods=["POST", "OPTIONS"])
+def spraytest_round_marked(rid: str):
+    if request.method == "OPTIONS":
+        return "", 200
+    if not _safe_name(rid):
+        return jsonify({"error": "ungültig"}), 403
+    import ema_spraytest
+    ids = (request.get_json(force=True) or {}).get("marked") or []
+    data = ema_spraytest.set_marked(rid, ids)
+    if data is None:
+        return jsonify({"error": "Runde nicht gefunden"}), 404
+    return jsonify({"status": "ok", "marked": data.get("marked")})
+
+
+@app.route("/spraytest/round/<rid>/delete", methods=["POST", "OPTIONS"])
+def spraytest_round_delete(rid: str):
+    if request.method == "OPTIONS":
+        return "", 200
+    if not _safe_name(rid):
+        return jsonify({"error": "ungültig"}), 403
+    import ema_spraytest
+    ok = ema_spraytest.delete_round(rid)
+    return jsonify({"status": "deleted" if ok else "missing"})
+
+
+@app.route("/spraytest/video/<rid>/<vid>")
+def spraytest_video(rid: str, vid: str):
+    if not (_safe_name(rid) and _safe_name(vid)):
+        return jsonify({"error": "ungültig"}), 403
+    import ema_spraytest
+    mp4 = ema_spraytest.video_path(rid, vid)
+    if not mp4:
+        return jsonify({"error": "Kein Video für diese Variante"}), 404
+    return send_file(mp4, mimetype="video/mp4")
+
+
 @app.route("/em3d/preview", methods=["POST", "OPTIONS"])
 def em3d_preview():
     """Schnelle 3D-MODELL-Vorschau (Gmsh-Mesh → vtk-Render), OHNE Elmer. Teilt sich
@@ -2176,7 +2499,8 @@ def delete_project(pid: str):
 @app.route("/project/<pid>/video/<mode>")
 def project_video(pid: str, mode: str):
     # field-animation modes + structural deformation ramp + 3D-Lastprofil (frames_em3d)
-    video_subdirs = {**FIELD_SUBDIRS, "struct": "frames_struct", "em3d": "frames_em3d"}
+    video_subdirs = {**FIELD_SUBDIRS, "struct": "frames_struct", "em3d": "frames_em3d",
+                     "oil": "frames_oil"}
     if not _safe_name(pid) or mode not in video_subdirs:
         return jsonify({"error": "ungültig"}), 403
     base = os.path.join(PROJECTS_ROOT, pid) if pid and pid != "current" else _state.get("project_dir")

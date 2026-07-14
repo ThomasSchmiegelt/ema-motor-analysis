@@ -96,7 +96,8 @@ print("CAD_SUCCESS")
 
 
 def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
-                            winding_debug: bool = False) -> str:
+                            winding_debug: bool = False,
+                            hairpin_slot_limit: int = 0) -> str:
     """Return FreeCAD Python code that creates a full IPM motor assembly:
     Shaft · Rotor iron · Magnets (N/S) · Stator iron · Hairpin conductors (3-phase).
     All parts are separate named objects with distinct colours.
@@ -216,6 +217,7 @@ legs      = {recs_json}   # pole-local magnet placement records (ema_topology)
 n_layers  = {n_layers}; ins   = {ins}; cond_w = {cond_w:.4f}; layer_h = {layer_h:.4f}
 coil_pitch = {coil_pitch}
 WIND_DEBUG = {winding_debug!r}
+WH_SLOT_LIMIT = {int(hairpin_slot_limit) if hairpin_slot_limit and hairpin_slot_limit > 0 else n_slots}
 wh_flare  = {wh_flare}; wh_style = {wh_style!r}
 shaft_conn = {shaft_conn!r}
 spline_teeth = {spline_teeth}; spline_depth = {spline_depth}
@@ -790,7 +792,7 @@ def _tab(s, k, out):
 # tabs are emitted without the over-hang loop (straight conductors only).
 if GEN_HAIRPIN:
     pins = []
-    for s in range(n_slots):
+    for s in range(min(n_slots, WH_SLOT_LIMIT)):
         for j in range(n_layers // 2):
             segs = []
             k0 = 2 * j; k1 = 2 * j + 1
@@ -872,6 +874,204 @@ except Exception as _se:
 
 print("CAD_SUCCESS")
 """
+
+
+_COMPONENT_KEYS = ("shaft", "rotor", "stator", "magnets", "winding")
+
+
+def build_winding_head_stl_script(geom: dict, axial_len: float, save_path: str,
+                                  stl_dir: str, section_slots: int = 3,
+                                  include_core: bool = True,
+                                  wedge_margin_deg: float = 8.0,
+                                  components: dict = None, cut: dict = None,
+                                  view_mode: str = "section",
+                                  hidden_pins=None, winding_full: bool = False) -> str:
+    """FreeCAD-Skript, das einen (ggf. aufgeschnittenen) Motor baut und **je Bauteil-Klasse eine
+    eigene STL-Datei** in ``stl_dir`` exportiert — Kollisions-/Kontextgeometrie für die Blender-
+    Spritzöl-Simulation. Getrennte Dateien (statt EINER gemergten Compound) sind nötig, damit
+    Blender jedem Bauteil sein ECHTES Material geben kann (Magnete unterscheiden sich sonst nicht
+    vom Rotoreisen, Hairpin-Beine in den Nuten nicht vom Stator — eine reine Radius-/Achsheuristik
+    auf einem gemergten Mesh kann das nicht).
+
+    Bauteil-Steuerung (Nutzer-Häkchenlisten):
+      * ``components`` — was GEBAUT/angezeigt wird: ``{shaft,rotor,stator,magnets,winding}`` bool.
+        (Fällt auf ``include_core`` zurück, wenn None — Kern nur bei include_core, Wickelkopf immer.)
+      * ``cut`` — welche der gebauten Bauteile AUFGESCHNITTEN werden (Rest bleibt ganz), gleiche Keys.
+      * ``view_mode`` — ``"section"`` (Keil-Ausschnitt: geschnittene Bauteile werden auf das
+        Tortenstück reduziert) oder ``"full"`` (voller 360°-Kern: geschnittene Bauteile bekommen ein
+        Tortenstück HERAUSgeschnitten = klassischer Cutaway; Rest voller Ring).
+      * ``hidden_pins`` — Menge von Pin-Indizes (``Pin_%03d``), die aus dem Wickelkopf AUSGESCHLOSSEN
+        werden (Untermenü „einzelne Hairpins ein-/ausblenden").
+      * ``winding_full`` — der Wickelkopf wird (wie die anderen Bauteile) als **voller 360°-Ring**
+        aufgebaut (``hairpin_slot_limit = alle Nuten``) statt nur über den Ausschnitt
+        (``section_slots``) — teurer (jede Nut ist ein eigener Hairpin-Lofting-Bau), aber „behandelt
+        wie die anderen Bauteile".
+
+    Marker ``STL_PARTS:<json>`` — ``{{"<key>": "<dateiname>.stl", …}}`` für jedes Bauteil mit Inhalt
+    (nur die tatsächlich geschriebenen Dateien, relativ zu ``stl_dir``). Grobe ``MeshPart``-
+    Tessellation (nicht ``exportStl`` default = Hunderte MB).
+    """
+    g = dict(geom)
+    core = bool(include_core)
+    comp = components if isinstance(components, dict) else None
+    def _show(k, dflt):
+        return bool(comp.get(k, dflt)) if comp is not None else dflt
+    show_shaft   = _show("shaft",   core)
+    show_rotor   = _show("rotor",   core)
+    show_stator  = _show("stator",  core)
+    show_magnets = _show("magnets", core)
+    show_winding = _show("winding", True)
+    g.update(genShaft=show_shaft, genRotorIron=show_rotor, genMagnets=show_magnets,
+             genStatorIron=show_stator, genHairpins=show_winding, genWindingHeads=show_winding,
+             genBearingA=False, genBearingB=False,
+             genInsulation=False, genBalanceBolts=False,
+             genFluxBarrierQ=False, genFluxBarrierD=False)
+    # Welche Bauteile aufgeschnitten werden. Default = alle (reproduziert den bisherigen Keil).
+    if cut is None:
+        cut_keys = list(_COMPONENT_KEYS)
+    else:
+        cut_keys = [k for k in _COMPONENT_KEYS if bool(cut.get(k, True))]
+    vm = "full" if str(view_mode) == "full" else "section"
+    n_slots_total = int(geom.get("slots", 12))
+    sec = n_slots_total if winding_full else max(1, min(n_slots_total, int(section_slots)))
+    hidden = sorted({int(i) for i in (hidden_pins or [])})
+    base = build_full_motor_script(g, axial_len, save_path, winding_debug=True,
+                                   hairpin_slot_limit=sec)
+    epilogue = f"""
+# ── STL export: component-aware motor cutaway for the Blender oil-spray sim ──
+import math as _m, json as _j, os as _os
+try:
+    import MeshPart
+    _os.makedirs(r"{stl_dir}", exist_ok=True)
+    _CUTSET = {cut_keys!r}
+    _VIEW   = {vm!r}
+    _HIDDEN_PINS = set({hidden!r})
+    def _classify(_nm):
+        if _nm == "Shaft":  return "shaft"
+        if _nm == "Rotor":  return "rotor"
+        if _nm == "Stator": return "stator"
+        if _nm.startswith("Magnet"): return "magnets"
+        if _nm.startswith("Pin_") or _nm.startswith("Coils"): return "winding"
+        return None
+    def _pin_index(_nm):
+        if _nm.startswith("Pin_"):
+            try: return int(_nm[4:])
+            except ValueError: return None
+        return None
+    # Winkelbereich des Ausschnitts: rein GEOMETRISCH aus der Nutteilung (dtheta/n_slots) statt
+    # aus den tatsaechlich gebauten Wickelkopf-Pins abgeleitet (frueher ".Shape.Vertexes" der
+    # Pin-Objekte). Zwei Gruende: (1) bei winding_full=True existieren ALLE Nuten-Pins (nicht nur
+    # der Ausschnitt) -- ihre Winkelspanne umspannt dann fast den vollen Kreis, der "Keil" wuerde
+    # zum Vollzylinder und schneidet beim Cutaway (view_mode=full) den GESAMTEN Rotor/Stator/
+    # Magnete weg (Volumen 0, komplett verschwunden -- reproduziert). (2) ".Vertexes" wertet die
+    # Shape-Geometrie aus und konnte bei einer entarteten BSpline-Kronenflaeche denselben "Spline
+    # curve: Knots interval values too close"-Fehler werfen wie die spaetere Vernetzung.
+    # Die sichtbare Ausschnittgroesse folgt jetzt IMMER der angeforderten Nutenanzahl
+    # ({section_slots!r}), UNABHAENGIG von winding_full, plus coil_pitch-Ueberhang fuer die
+    # Wickelkopf-Kronen (Nut s -> Nut s+coil_pitch).
+    _wedge_slots = max(1, min(n_slots, {int(section_slots)}))
+    _hi_slot = (_wedge_slots - 1) + coil_pitch
+    _mrg = _m.radians({float(wedge_margin_deg)})
+    _th0 = 0.0 * dtheta - _mrg
+    _span = min(358.0, _m.degrees((_hi_slot * dtheta + _mrg) - _th0))
+    # Tortenstück (Sektor-Zylinder), zentriert auf den Wickelkopf-Ausschnitt.
+    _R = R_so * 1.4
+    _H = axial + 6.0 * crown_H
+    _wedge = Part.makeCylinder(_R, _H, App.Vector(0, 0, -_H/2), App.Vector(0, 0, 1), _span)
+    # Placement statt transformGeometry: der Tortenstück-Zylinder ist eine getrimmte
+    # (Teil-)Zylinderflaeche, und transformGeometry baut die zugrundeliegende B-Rep-Geometrie
+    # bei einem beliebigen (nicht-rechten) Rotationswinkel _th0 komplett neu -- das degeneriert
+    # bei bestimmten Winkeln zu einer BSpline-Flaeche mit "Knots interval values too close"
+    # (reproduziert: exakt diese Zeile, Part.OCCError). Placement ist eine reine Starrkoerper-
+    # Transformation (nur Koordinatenrahmen, keine Geometrie-Neuberechnung) und daher robust --
+    # bei achsparallelen Boxen (Magnete/Zaehne/Nuten) anderswo im Skript ist transformGeometry
+    # unkritisch (rein planare Flaechen), NUR der teilzylindrische Keil ist betroffen.
+    _wedge.Placement = App.Placement(App.Vector(0, 0, 0), App.Rotation(App.Vector(0, 0, 1), _m.degrees(_th0)))
+    _kept_by_key = {{}}
+    for _o in doc.Objects:
+        if not (hasattr(_o, "Shape") and _o.Shape and not _o.Shape.isNull()):
+            continue
+        _cp = _classify(_o.Name)
+        if _cp is None:
+            continue
+        if _cp == "winding":
+            _pi = _pin_index(_o.Name)
+            if _pi is not None and _pi in _HIDDEN_PINS:
+                continue
+        _in_cut = _cp in _CUTSET
+        try:
+            if _cp == "winding":
+                # Wickelkopf ist ohnehin nur der Ausschnitt (bzw. der volle Ring bei winding_full):
+                # im Keil-Modus auf das Tortenstück trimmen, im Voll-Modus so lassen.
+                _s = _o.Shape.common(_wedge) if _VIEW == "section" and not {winding_full!r} else _o.Shape
+            elif _VIEW == "section":
+                # Keil-Ausschnitt: geschnittene Bauteile → nur das Tortenstück; Rest voller Ring.
+                _s = _o.Shape.common(_wedge) if _in_cut else _o.Shape
+            else:
+                # Voller 360°-Kern: geschnittene Bauteile → Tortenstück HERAUSschneiden (Cutaway);
+                # Rest voller Ring.
+                _s = _o.Shape.cut(_wedge) if _in_cut else _o.Shape
+            if _s is not None and not _s.isNull() and _s.Volume > 1e-3:
+                _kept_by_key.setdefault(_cp, []).append(_s)
+        except Exception:
+            pass
+    # Automatismus gegen entartete Einzel-Flaechen ("Spline curve: Knots interval values too
+    # close" -- eine seltene degenerierte BSpline-Wickelkopf-Krone/-Lasche): frueher liess EIN
+    # kaputtes Teil-Shape den GESAMTEN Bauteil-Export (und damit die ganze Oelspritz-Simulation)
+    # scheitern. Jetzt: erst als Kompound versuchen (schnell, Normalfall); scheitert das, jedes
+    # Teil-Shape EINZELN vernetzen und NUR die defekten ueberspringen statt das Bauteil zu
+    # verwerfen; scheitert ein ganzes Bauteil (kein Teil-Shape vernetzbar), dieses Bauteil
+    # ueberspringen statt den kompletten Export (alle anderen Bauteile) mitzureissen.
+    _parts = {{}}
+    for _key, _shapes in _kept_by_key.items():
+        try:
+            _shape = Part.makeCompound(_shapes) if len(_shapes) > 1 else _shapes[0]
+            if _shape is None or _shape.isNull():
+                continue
+            _fname = _key + ".stl"
+            _fpath = _os.path.join(r"{stl_dir}", _fname)
+            try:
+                _msh = MeshPart.meshFromShape(Shape=_shape, LinearDeflection=0.6,
+                                              AngularDeflection=0.6, Relative=False)
+                _msh.write(_fpath)
+            except Exception as _me:
+                print("STL_STAGE:MeshPart fehlgeschlagen fuer %s (%s), exportStl-Fallback" % (_key, _me))
+                try:
+                    _shape.exportStl(_fpath)
+                except Exception as _ee:
+                    print("STL_STAGE:exportStl fuer %s ebenfalls fehlgeschlagen (%s), "
+                          "Teil-Shapes einzeln pruefen" % (_key, _ee))
+                    _ok_shapes = []
+                    for _si, _sh in enumerate(_shapes):
+                        try:
+                            _sm = MeshPart.meshFromShape(Shape=_sh, LinearDeflection=0.6,
+                                                         AngularDeflection=0.6, Relative=False)
+                            if _sm and _sm.CountPoints > 0:
+                                _ok_shapes.append(_sh)
+                            else:
+                                print("STL_STAGE:Teil-Shape %d von %s leer vernetzt, uebersprungen"
+                                      % (_si, _key))
+                        except Exception:
+                            print("STL_STAGE:Teil-Shape %d von %s uebersprungen (defekte Geometrie)"
+                                  % (_si, _key))
+                    if not _ok_shapes:
+                        print("STL_STAGE:%s komplett uebersprungen (kein Teil-Shape vernetzbar)" % _key)
+                        continue
+                    _shape2 = Part.makeCompound(_ok_shapes) if len(_ok_shapes) > 1 else _ok_shapes[0]
+                    _msh2 = MeshPart.meshFromShape(Shape=_shape2, LinearDeflection=0.6,
+                                                   AngularDeflection=0.6, Relative=False)
+                    _msh2.write(_fpath)
+            _parts[_key] = _fname
+        except Exception as _ke:
+            print("STL_STAGE:Bauteil %s uebersprungen (%s)" % (_key, _ke))
+    if _parts:
+        print("STL_PARTS:" + _j.dumps(_parts))
+    else:
+        print("STL_FAIL:empty section")
+except Exception as _se:
+    print("STL_FAIL:" + str(_se))
+"""
+    return base + epilogue
 
 
 def build_rotor_fem_script(fcstd_path: str, rpm: float,

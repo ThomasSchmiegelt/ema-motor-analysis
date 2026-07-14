@@ -30,12 +30,21 @@ with the model `ministral-3:14b` (hardcoded in `ema_report.py` / `ema_experts.py
 `flask`, `numpy`, `matplotlib` (Agg backend, no display needed) — see
 `requirements.txt`. There is no build step for the frontend (`ema.html` is vanilla JS).
 
-No linters or CI. Two test scripts: `python smoke_test.py` — fast (~15 s, no
+No linters or CI. Two core test scripts: `python smoke_test.py` — fast (~15 s, no
 FreeCAD) sanity check of the main pure-Python paths (imports, topology, dq/MTPA,
 FDM + saturation, connection assessment, deformation, script generation incl. a
 rotor-only-FEM assertion); add `--cad` to also run one real FreeCAD build + rotor
 FEM (minutes). `python test_topology.py` gates magnet geometry + the JS↔Python
 `magnetLegs` mirror. Run `smoke_test.py` after any backend change.
+
+The on-demand sub-systems each have their own standalone test file, runnable via
+`python test_X.py` or pytest, all fast and dependency-free unless noted:
+`test_em3d.py` (mesh/sif generation for the Elmer 3D field, no Elmer needed),
+`test_em3d_submodel.py` (ROI refine + sector symmetry, needs Elmer for the
+physical-result half), `test_step_import.py` (STEP→FreeCAD classification),
+`test_oilspray.py` (Blender script generation/markers, no Blender needed),
+`test_spraytest.py` (Spray-Test bench: sampling/mutation, bench script, round store —
+no Blender needed).
 
 **Prerequisites:**
 - **FreeCAD 1.1.x built from source** under `~/freecad_1.1_quellcode` (via pixi).
@@ -318,8 +327,15 @@ Ablauf (`ema_em3d.run_em3d`): `build_mesh` (Gmsh-OCC: konzentrische Zylinder je 
 Magnete als `addThruSections`-Loft aus `magnet_rects(geom)` — gespiegelt zur 2D-Rasterung
 `ema_analysis._rasterise` — mit Skew = um `skew_deg` gedrehtem oberen Querschnitt; +
 Luftspalt-Ring + axiale Luftkappen + Luftbox → `occ.fragment` → **Physical-Volumes per
-Schwerpunkt/Radius/z getaggt**, Magnet-Match über exakten `getCenterOfMass` + Massengate,
-weil konzentrische Ringe ihren Volumenschwerpunkt AUF der Achse haben; Luftspalt per
+Schwerpunkt/Radius/z getaggt**, Magnet-Match über exakten `getCenterOfMass` + Massengate
+(`_assign_pieces`, Modul-Ebene/unit-testbar), weil konzentrische Ringe ihren Volumenschwerpunkt
+AUF der Achse haben. **Magnete matchen mit `single=True`** — pro Magnet-Stück nur das EINE
+massen-nächste Volumen: Magnet-Prisma und obround-Tasche teilen denselben COM, und bei KURZEN
+Magneten (PMa-SynRM-Außenlage 5×3 mm) passierte die Taschen-Schale (~0,6·Magnetmasse) das lockere
+Gate → die LUFT-Schale wurde mit-magnetisiert + die Tasche nie als Luft getaggt („Feldlinien gehen
+nicht durch die Magnete", Joch zeigte Nut- statt Polmuster). Verifiziert: 16/16 Magnete cos(B,M)=+1,
+sauberes 4-Pol-Schnittbild (Regressionstest `test_assign_pieces_single_keeps_magnet_not_pocket`);
+Luftspalt per
 MathEval-Hintergrundfeld verfeinert) → `ElmerGrid 14 2` (MSH→Elmer-Mesh, `elmer_runner`)
 → `write_sif` (Magnetostatik: `WhitneyAVSolver` + `MagnetoDynamicsCalcFields` + VTU +
 SaveScalars; Eisen μr=500 linear, Magnet μr=1.05 + per-Magnet `Body Force Magnetization`
@@ -960,6 +976,153 @@ This feeds all consumers (field frames, thermal, drive cycle).
 V-shaped magnet pockets are auto-shortened to the longest length that still fits the
 rotor: solves a quadratic so the outer pocket corner stays ≤ `R_rotor − bridge` (2 mm).
 
+### Experimentelle Spritzöl-Kühlung am Wickelkopf (Blender/Mantaflow) — `ema_oilspray.py` / `blender_runner.py`
+
+Eigenständiger On-Demand-Pfad **neben** dem Analyse-Chain (wie em3d): untersucht **qualitativ**
+die Fluidkühlung eines Wickelkopf-**Ausschnitts** mit Spritzöl — **Tröpfchenbildung, Benetzung,
+Abtropfen** — mit Blenders **Mantaflow-FLIP**-Löser. **Ehrliche Scope-Grenze (steht im UI):**
+visuell-plausibel, NICHT validiert, **kein Temperaturfeld / kein Wärmeübergangskoeffizient**; die
+„Kennwerte" sind rein **geometrische Benetzungs-Proxys** (benetzte Fläche %, Abdeckung je Fläche,
+Tropfen-/Fragmentzahl über die Zeit). Für echte Kühlrechnung bliebe OpenFOAM VOF ein Folgeschritt.
+
+Ablauf (`ema_oilspray.run_oilspray`): (1) **Motor-Keilausschnitt → STL** via
+`ema_freecad.build_winding_head_stl_script(..., include_core=True)` (reuse `build_full_motor_script`
+mit Welle/Rotor/Magnete/Stator+Hairpins/Wickelköpfen, `winding_debug=True`, **`hairpin_slot_limit`**
+begrenzt die Nuten-Schleife auf den Ausschnitt → Sekunden statt Minuten; Epilog schneidet alles per
+**Sektor-Zylinder** (`Part.makeCylinder(angle)` + `common`) zu einem **Tortenstück-Cutaway** über den
+Winkelbereich der Wickelköpfe; Export per **`MeshPart.meshFromShape`** grob 0,6 mm — NICHT `exportStl`
+default, das produziert Hunderte MB / Mio. Dreiecke; Marker `STL_SAVED:`). `include_core=False` → nur
+die Wickelköpfe (alt). (2)
+**Blender-Setup-Skript** (`_BLENDER_SCRIPT`, headless) — importiert die STL als **Effector**
+(COLLISION), baut **Domain** (LIQUID/FLIP, `resolution_max`), einen **Spritzöl-Kühlring** und
+misst Benetzung/Tropfen. **Kühlring-Modell** (statt eines simplen Fallstrahls): ein Rohr-Ring
+(Ø `ring_tube_mm`) **am +z-ENDE der Wickelköpfe** (`ring_z = z_tip`, nur der Überhang mit
+z>Blechpaket-Stirnfläche `stack_half_mm` wird betrachtet), Radius = Kronen-Außenradius am Ende +
+`ring_gap_mm` + Rohr-Radius, als sichtbarer Rohr-Bogen (Kurve+Bevel, Stahl); darauf `nozzle_count`
+**Düsen** (INFLOW), die Öl **Richtung Drehachse** spritzen — jeder Strahl **zielt auf die z-Achse auf
+Höhe des Wickelkopf-Körpers** (`z_aim`), also radial-nach-innen UND leicht nach unten, damit er die
+Leiter trifft statt horizontal über die Kronen zu fliegen. Strahlgeschwindigkeit aus dem **Druck**
+`pressure_bar` via Bernoulli `v = Cd·√(2·Δp/ρ)` (ρ=850, Cd=0,8; 3 bar ≈ 21 m/s). Öl-Stoffwerte
+(`use_viscosity`/`viscosity_value`, `surface_tension`) + **Secondary-Particles** (spray/foam/bubble →
+Tröpfchen). **Cutaway-Einfärbung:** eine STL-Mesh, Faces nach axialer Position (|z|>Stirnfläche =
+Wickelkopf-Überhang → Kupfer, sonst Kern → Stahlgrau). **Domain fokussiert auf das +z-Ende**
+(Wickelkopf-Überhang + Ring, NICHT bis zur Achse — sonst zu groß/grob) MIT **Ablaufraum nach unten**
+(`dz_lo = z_stack_end − 1·Überhang`), damit das Öl sichtbar über die Wickelköpfe runterläuft statt am
+Aufprall sofort zu zerstäuben und die offene Domain zu verlassen; **offene Ränder**
+(`use_collision_border_*=False`, Splash verlässt die Domain statt „Öl-Bleche" an den Wänden zu bilden)
++ Boden-**Outflow**-Drain; **Drain/Düsen-Objekte `hide_render=True`** (Sim-Hilfsobjekte). Benetzung
+wird NUR gegen die Wickelkopf-Überhang-Vertices gemessen (sonst verwässern die Kern-Vertices den
+%-Wert). Emitter ≥`1,2·voxel` (1-mm-Bohrung ist sub-voxel). Schneller Strahl braucht mehr Substeps
+(`timesteps_max`, adaptiv/CFL) sonst tunnelt das Öl.
+**Einbaulage + Nahaufnahme** (`orientation` `horizontal`(Standard)/`vertical`, `closeup`): bei
+**horizontal** (Motorachse waagerecht = übliche Einbaulage) wird der Wickelkopf-Sektor um die z-Achse
+nach **+y (oben)** gedreht (`wh.rotation_euler`), die **Schwerkraft** ist `(0,−9,81,0)` (quer zur
+Achse) und Domain-Ablaufraum + Boden-Outflow liegen an der **−y-Fläche** → das Öl läuft seitlich über
+die Wickelköpfe ab; bei **vertical** bleibt die alte Geometrie (Schwerkraft −z, Ablauf −z entlang der
+Achse). `closeup` erzwingt **1 Düse** und eine **Kamera-Nahaufnahme** (schräg außen-oben) auf den
+Auftreffpunkt; ohne `closeup` die 3/4-Übersicht mit allen Düsen.
+UI: Karte „🎥 Darstellung & Einbaulage" (`oil_orientation`/`oil_closeup`).
+**Düse auf echten Hairpin abgestimmt + sichtbarer Kupfertreffer** (`_crown_target`): jede Düse (die eine
+in der Nahaufnahme, sonst je Düse) wird auf einen **realen Kronen-(Kupfer-)Punkt** aus den STL-Überhang-
+Vertices (`_ovinfo`) gesetzt — größter Radius, Zielhöhe **knapp UNTER der Kronenspitze** (`z_hit = ring_z
+− 1,2·tube_r`, Kronen-**FLANKE**); der Strahl zielt **radial nach innen durch** den Punkt (`0.6·tgt`) und
+**landet AUF dem Leiter** (verifiziert: Öl legt sich über die Kronen, `wetted_mean` 0,64→1,53 %). Zwei
+frühere Fehlschläge: median-z-Ziel ⇒ Richtung ≈ −z axial vorbei (`wetted 0 %`); Apex GENAU auf Düsenhöhe
+⇒ halber Sprühkegel fliegt über die Spitze. Nahaufnahme: Düse UND Kamera teilen `close_th`/`close_tgt`
+(kein Winkel-Mismatch), Kamera `cam_d=2.2·span` von außen-oben (nicht enger — sonst OD-Zähne). Der
+**Keil-Ausschnitt** wird nach **radialem Band** eingefärbt (Welle/Rotoreisen/Stator, Radien via cfg) +
+Kupfer am Überhang. **Zeitlupe** (`oil.slowmo` 1–50, UI `#oil_slowmo` bis 50× Ultra): cfg
+`time_scale = 1/slowmo` → Mantaflow `ds.time_scale` — weniger Sim-Zeit pro Frame, das Video (feste fps)
+zeigt Strahlflug/Aufprall/Tröpfchen als Slow-Motion; Rechenzeit/Frame gleich, realer Zeitausschnitt
+kürzer. **Speicherfunktion:** `_persist` legt `results.json` **an** wenn sie fehlt (Öl-Lauf ohne
+vorherige Analyse ging sonst verloren); `load_saved(project_dir)` lädt den Lauf zurück (Chart-Dateien →
+base64, `video`-Flag = Existenz von `frames_oil/anim.mp4`) → `GET /project/<id>/oilspray`; UI-Knopf
+**„📼 Gespeicherten Lauf laden"** + stilles Auto-Laden beim Öffnen des 💧-Tabs (`switchTab('oil')`,
+nur wenn nichts läuft/angezeigt). Alter **Mantaflow-Cache** (`blendcache_oil`) wird je Lauf gelöscht
+(sonst stale Bake bei geänderten Einstellungen). **Video-Zoom** (`_oilInitZoom`, reine Frontend-Lupe):
+Mausrad zoomt (bis 8×, CSS-Transform), Ziehen verschiebt NUR wenn gezoomt (bei 100 % bleiben die
+Video-Controls bedienbar), Doppelklick/⟲ reset; 🔍±-Knöpfe unter dem Video. **Domain-Auflösung bis
+512** (`RES_RANGE`, UI `#oil_res` max 512 — Kosten ~kubisch, Hinweis im Hilfetext).
+**Bauteil-Häkchenlisten + Ansicht (`oil.show`/`oil.cut`/`oil.view_mode`, `build_winding_head_stl_script(
+components=,cut=,view_mode=)`):** zwei Listen — **👁 Anzeigen** (welche Bauteile gebaut werden →
+gen*-Flags: Wickelkopf/Rotor/Stator/Welle/Magnete) und **✂ Schneiden** (welche davon aufgeschnitten
+werden). Ansicht **Ausschnitt** (Keil, `common(_wedge)` — geschnittene Bauteile auf das Tortenstück
+reduziert, Rest voller Ring) vs **Gesamt** (voller 360°-Kern, geschnittene Bauteile mit `cut(_wedge)`
+= herausgeschnittener Cutaway). Der **Wickelkopf wird IMMER nur über den Ausschnitt** gebaut
+(`hairpin_slot_limit`, Rechenzeit); der Kern ist ohnehin ein voller Ring und wird getrimmt.
+`_classify` ordnet FreeCAD-Objekte (Shaft/Rotor/Stator/Magnet*/Pin_*·Coils) den Keys zu.
+**Zeitlupe bis 500×** (`slowmo` 1–500 → `time_scale=1/slowmo`, untere Klemme jetzt `0.001`).
+**⚡ Schnelle Darstellung** (`oil.fast`): Workbench-Engine + weniger Substeps + KEINE
+Sekundärpartikel → grobe, schnelle Vorschau. **Strahlrichtung justierbar** (`jet_tilt_deg` axial,
+`jet_yaw_deg` tangential, um den echten `_crown_target`-Grundstrahl gedreht → trifft die
+Wickelköpfe weiterhin) + **🔴 Ziellinie** (`show_jet_line` → leuchtende `JetLine_*`-Zylinder je Düse
+zeigen im Video, wohin der Strahl trifft). **🔍 Zwischenansicht/Vorschau (`preview_oilspray`,
+`POST /oilspray/preview`, `cfg["preview"]`):** rendert VOR dem teuren Bake EIN Standbild — nur
+Geometrie + Düsen + Strahl-Ziellinien (Blender-Skript `if PREVIEW:` überspringt `bake_all` + Metrik/
+Frame-Loop, blendet die leere Domain aus, `sys.exit(0)` nach `OIL_PREVIEW:`; `SHOW_JET_LINE` erzwungen,
+Workbench+fast). Eigene isolierte `oilspray_preview/`-Arbeitsdateien (berührt weder `frames_oil` noch
+Bake-Cache noch `results.json`); teilt `_oil_state` mit dem Voll-Lauf. UI: Knopf „🔍 Vorschau
+(Strahllinien, ohne Bake)" (`startOilPreview` → `_pollOil` verzweigt bei `result.preview` auf
+`_renderOilPreview`); `_oilBuildPayload` ist der geteilte Payload-Builder für Voll-Lauf + Vorschau.
+**Drehteller-Vorschau (`preview_turns`, UI `#oil_pv_turns` 1/12/24/36):** >1 ⇒ das Blender-Skript
+orbitet in der PREVIEW-Schleife die Kamera um `cam_tgt` um die Motorachse (Kamera-Oben-Achse `_pv_up`
+= Welt-Y horizontal / Welt-Z vertikal, `Matrix.Rotation`) und rendert N Winkel `preview_%03d.png` in
+`preview_dir` (Marker `OIL_PREVIEW:` je Bild + `OIL_PREVIEW_N:`); `preview_oilspray` sammelt sie zu
+`out["images"]` (base64-Liste, `image`=erstes, `turns`=N). Der Browser lässt das gerenderte Standbild
+**drehen** (`_oilInitTurntable`: Ziehen/Touch + Slider blättert clientseitig durch die vorab
+gerenderten Winkel — reines Frontend, kein Bake). 1 = einzelnes Standbild (alt).
+**Blickrichtung „Unten" + Koordinatensystem + Materialien/Glättung (`view_down`/`show_axes`/`material`/
+`smooth`/`oil_transparency`):** die **Unten-Achse** (`view_down` auto/±x/±y/±z, UI `#oil_view_down`) dreht die
+**Kamera** — sie setzt die Kamera-Oben-Achse (`_up_axis_str`→`_cam_up`, `_DOWN2UP`) UND die Drehteller-Orbit-
+Achse (`_UP2VEC[_cam_up]`); rein Blickrichtung, die Schwerkraft/Physik steuert weiter `orientation`. Ein
+**Koordinatensystem** (`SHOW_AXES`, in der Vorschau immer an, sonst `#oil_show_axes`) blendet emissive XYZ-Pfeile
+mit Beschriftung an der Modell-Ecke ein (X rot/Y grün/Z blau, Z=Motorachse) → Orientierung im drehbaren Bild.
+**Materialien in der Vorschau** (`material`, `#oil_material`): rendert die Vorschau mit EEVEE (Kupfer/Stahl/
+transluzentes Öl) statt flachem Workbench; **Shade Smooth** (`smooth`, Default an, `_smooth()` = `shade_smooth`
++ `shade_auto_smooth`-Winkel, Fallback per-Polygon) lässt die Netzfacetten auf Kronen/Rohr verschwinden;
+**Öl-Transparenz** (`oil_transparency` 0..1 → `OIL_ALPHA`, EEVEE `use_screen_refraction`+SSR). Im Drehteller
+folgt das Fülllicht der Kamera (jede Seite beleuchtet). **Einbaulage sichtbar** (`_cam_up` folgt `view_down`,
+auto = 'Y' horizontal / 'Z' vertikal → die Motorachse steht im vertikalen Fall aufrecht, das Öl läuft der Achse entlang ab).
+**Auto-Varianten-Store (`oilspray_runs/<id>/`):** jeder fertige Lauf wird AUTOMATISCH als eigene
+Variante (Video + Charts + `run.json`) abgelegt (`_autosave_variant`), sodass ein neuer Lauf die
+vorherigen NICHT überschreibt; `list_saved_runs`/`load_saved_run`/`saved_run_video`/`delete_saved_run`
++ Server `/project/<id>/oilspray/saved(/<rid>(/video|/delete))`, UI-Karte „🎞 Gespeicherte Läufe"
+(`refreshOilVariants`/`loadOilVariant`/`deleteOilVariant`, Variante lädt mit eigenem `video_src`).
+**Damit das Öl DÜNNFLÜSSIG spritzt + Tröpfchen bildet (statt als Gel-Klumpen zu hängen — Nutzer-
+Beanstandung), drei Hebel:** ① **dünnflüssiges Öl per Default** (`viscosity≈0,004`) — der **Mantaflow-
+Viskositätslöser läuft NUR bei zähem Öl `VISC>0,02`** (ein aktiver Löser macht selbst kleine Werte
+gelartig → Klumpen). ② **Moderate Oberflächenspannung** (`surface_tension≈0,01`): hoch genug für
+Tröpfchenbildung beim Auftreffen, niedrig genug dass sich der Strahl nicht sofort zur einen Kugel
+zusammenzieht (0,03 ballte ihn zu, 0,003 verschmierte ihn film-/rope-artig ohne Tropfen). ③
+**Sichtbarer Düsenstutzen:** je Düse ein kleiner Stahl-Zylinder radial nach innen am Ring, der Emitter
+sitzt an der **Stutzen-Mündung** (`r_emit=r_noz−stub_len`) → das Öl tritt sichtbar aus einer Bohrung aus
+(Emitter-Würfel selbst `hide_render`). **Scope-Ehrlichkeit (bewusst NICHT weiter getrieben):** bei
+1-mm-Düse + 3-mm-Ringspalt ist der freie Strahl sub-pixelig/kurz; ein „gestochener" Laser-Strahl bräuchte
+sehr hohe RES (rechenintensiv, Nutzer ist rechenleistungsbegrenzt). Ein Versuch mit *fokussierter*
+Nahaufnahme-Domain (eng um den Strahlweg für feine Zellen) wurde **verworfen** — die offenen Ränder ließen
+den schnellen Strahl sofort aus der kleinen Domain austreten (Öl erreichte den Leiter nicht mehr); die
+weite Domain lässt die Tropfen dagegen fliegen + auf den Leitern landen.
+**Bäckt** (`fluid.bake_all`), rendert je Frame und misst **Benetzung** (KDTree Effector-Vertices ↔
+Liquid-Vertices im Nahband) + **Tropfenzahl** (Mesh-Inseln via bmesh) → `OIL_METRICS:<json>`, plus
+eine **Abdeckungs-Heatmap** (Effector nach kumulierter Benetzung emissiv eingefärbt). (3) `blender_runner.run_blender_script` führt es
+gestreamt aus (Marker `OIL_STAGE/OIL_FRAMES/OIL_METRICS/OIL_DONE`, Abbruch via `abort_current`).
+(4) Frames → `frames_oil/anim.mp4` (ffmpeg, reuse `ema_em3d._encode_video`), Kennwert-Charts
+(matplotlib), `results["oilspray"]` schlank in `results.json` gemergt (`_persist`, ohne base64).
+
+**Gotcha — Blender-Build (kritisch):** Das Ubuntu-**`apt`-Blender** linkt gegen System-libpython →
+Mantaflow stürzt headless mit `PyImport_AppendInittab() may not be called after Py_Initialize()`
+ab (Fluid-Sim unbrauchbar). `blender_runner._find_blender()` bevorzugt daher einen **portablen
+blender.org-Build** (`~/blender_portable/blender-*/blender`, bringt eigenes Python mit; bäckt
+korrekt) vor `/usr/bin/blender`; `$EMA_BLENDER` überschreibt. `BLENDER_OK` ist **False beim reinen
+apt-Build** → Server `/oilspray` 503t mit Install-Hinweis. Getestet: 4.2.9 LTS. **Weitere Gotchas:**
+Blender 4.2 hat EEVEE in **`BLENDER_EEVEE_NEXT`** umbenannt → das Skript löst die Engine gegen die
+echte Enum auf (`_pick_engine`); `KDTree.find` liefert **`(position, index, distance)`** (nicht
+index zuerst); **Bake ist CPU-gebunden** (GPU nur beim Rendern). Server: `/oilspray` (503 wenn kein
+taugliches Blender), `/oilspray/status`, `/oilspray/abort`; Video über `project_video`
+(`video_subdirs["oil"]="frames_oil"`). UI: Tab **💧 Spritzöl-Kühlung** (`panel-oil`, `startOilspray`/
+`_pollOil`/`_renderOil`) mit Ausschnitt-/Öl-/Auflösungs-Feldern + Scope-Grenze-Hinweis. Test:
+`test_oilspray.py` (Skript-Generierung/Marker/Charts/Persist ohne Blender/FreeCAD).
+
 ### Materials
 
 All material tables are dicts at the top of `ema_pipeline.py:50-78`: `LAMINATES`
@@ -973,7 +1136,7 @@ dict passed to the FEM script.
 | File | Role |
 |---|---|
 | `server.py` | Flask backend: serves `ema.html`, REST API, threaded job state, FreeCAD GUI/STEP launching |
-| `ema.html` | Single-file vanilla-JS browser UI (no build). Workflow-tab layout: a top tab bar (`switchTab`, tabs `projekt/geo/betrieb/calc/live/designer/import/em3d/results/compare`, `#hash` deep-linkable; **there is no `report` tab — the Bericht moved into Tab ①**). The **entry tab is `① Projekt`** (`panel-projekt`, the default landing tab) — **the central project hub** for everything project-scoped. Top row: create a project (`pjCreate` → `POST /project/new`, lays down the dir + `project.json` immediately, `status:"neu"`, `origin:"manual"`) · open existing ones (`pjRefreshList` from `/projects?detail=1`, **Galerie ⤢** = `openProjectGallery`). When a project is active (`#pj-active-wrap` shown), the cards are grouped under `.pj-group-h` headers: **📋 Projektdaten & Notizen** (Organisation/status/tags/notes → `/project/<id>/meta` + evolution/lineage; Projekt-Dokumente = per-project RAG via `/project/<id>/rag/add` + attachments via `/project/<id>/attachments`) · **📄 Auswertung & Bericht** (the **PDF-Bericht card** `#pj-report-card` with `#btn_report`/`#btn_report_agentic` → `generateReport(mode)` + `#report_status`/`#report_rag`; the **gespeicherte 3D-Läufe** card `#e3_save_name`/`#e3_saved_list` → `_e3SaveRun`/`_e3LoadRun`/`_e3DeleteSaved`, project-scoped under `<projekt>/em3d_runs/`) · collapsed `<details>` **🧰 Globale Werkzeuge & Daten** (global Wissensbasis `openRag` + LLM-Trainingsdaten `refreshTrainingStats`/`#training-stats`). **Active-project plumbing:** `window._activeProject` is the client truth; **`pjSetActive` also POSTs `/project/<id>/activate`** (lightweight — sets server `_state["project_dir"]`/`project_id` WITHOUT loading results) so report + em3d (which read `_state`) target the chosen project, then refreshes the report card (`pjUpdateReportCard`), the saved-3D list, and the training stats. `buildPayload()`/`_dsnBuildPayload()` attach `payload.project_id = _activeProject.id`, and `/analyse`'s `_run` (+ all em3d handlers via `_em3d_project_dir`) reuse that dir (generalised `reuse_id`) so every calculation/3D-run writes **into** the active project. `loadProjectById` calls `pjSetActive` too. `generateReport` prefers `_activeProject.id` (falls back to `/status`). The Tab-3 (Betrieb) project-management block was removed; `#project_name`/`#project_load` survive as hidden elements only to keep variant/param-table/applyPayload JS wired. The results-tab `🗂 Projektakte` `<details>` panel (`renderAkte`) still mirrors the same project contextually. The rest of the layout sits over `#workspace` = `#panel-area` (active panel) + draggable `#vsplit` + persistent `#preview-pane` (live `#simCanvas`, hidden on results/compare) + draggable `#hsplit` + `#footer` (staged-workflow buttons `#btn_cad_preview` (🧊 CAD ansehen → `startCadPreview`) · `#btn_smoke` (🧪 Smoke-Test → `startSmokeTest`) · `#btn_analyse` (⚙ Echte Berechnung), all sharing the `_wfModal`/`_pollWf` overlay helpers for the first two, plus `#analysis-progress`; drag `#hsplit` taller to reveal the full `#progress-log`). Inputs grouped into `.tab-panel`s; the `results` tab is gated `disabled` until an analysis finishes. `#vsplit`/`#hsplit` (`initSplitters`) resize preview width / footer height and call the canvas `resize()` live. The preview overlay has a pause button (`#ov_play` → global `toggleSim`/`_syncSimUI`, mirrors the Live-tab `#btn_play_pause`) so rotation can be stopped from any input tab. **Globales Speichern** (`#btn-global-save` in der Topbar + `#save-modal`): EIN Speicherknopf öffnet ein Vorschau-/Auswahl-Fenster (`openSaveModal`/`saveModalCommit`/`_buildSaveItems`), das **kontextabhängig** alles Speicherbare als abwählbare Positionen listet — **Projektdaten & Notizen** (`/project/<id>/meta`, liest `pj_*` bzw. bei passendem `akte-body.pid` die `akte_*`-Felder und schreibt beim Speichern in BEIDE zurück), **Bewertung** (`/project/<id>/rating`, gut/schlecht-Select), **3D-Feld-Lauf** (`/em3d/save`, sichtbar via `window._e3HasResult`, gesetzt in `_renderEm3d`/`_renderEm3dSweep`), **Varianten-Set** (`/variants/save`, wenn `variants.length`). Jede Zeile zeigt eine Vorschau + Häkchen (+ optional Name/Bewertung), Commit speichert alle angehakten nacheinander mit ✓/❌ je Zeile. Die alten Einzel-Speicherknöpfe (Projektdaten/Akte/3D-Lauf/Varianten) zeigen jetzt alle auf `openSaveModal()`; `pjSaveMeta`/`saveAkteMeta`/`_e3SaveRun`/`saveVariantSet` bleiben als Funktionen bestehen, die Buttons rufen aber das Modal |
+| `ema.html` | Single-file vanilla-JS browser UI (no build). Workflow-tab layout: a top tab bar (`switchTab`, tabs `projekt/geo/betrieb/calc/live/designer/import/em3d/oil/results/compare` (`oil` = 💧 Spritzöl-Kühlung, Blender/Mantaflow), `#hash` deep-linkable; **there is no `report` tab — the Bericht moved into Tab ①**). The **entry tab is `① Projekt`** (`panel-projekt`, the default landing tab) — **the central project hub** for everything project-scoped. Top row: create a project (`pjCreate` → `POST /project/new`, lays down the dir + `project.json` immediately, `status:"neu"`, `origin:"manual"`) · open existing ones (`pjRefreshList` from `/projects?detail=1`, **Galerie ⤢** = `openProjectGallery`). When a project is active (`#pj-active-wrap` shown), the cards are grouped under `.pj-group-h` headers: **📋 Projektdaten & Notizen** (Organisation/status/tags/notes → `/project/<id>/meta` + evolution/lineage; Projekt-Dokumente = per-project RAG via `/project/<id>/rag/add` + attachments via `/project/<id>/attachments`) · **📄 Auswertung & Bericht** (the **PDF-Bericht card** `#pj-report-card` with `#btn_report`/`#btn_report_agentic` → `generateReport(mode)` + `#report_status`/`#report_rag`; the **gespeicherte 3D-Läufe** card `#e3_save_name`/`#e3_saved_list` → `_e3SaveRun`/`_e3LoadRun`/`_e3DeleteSaved`, project-scoped under `<projekt>/em3d_runs/`) · collapsed `<details>` **🧰 Globale Werkzeuge & Daten** (global Wissensbasis `openRag` + LLM-Trainingsdaten `refreshTrainingStats`/`#training-stats`). **Active-project plumbing:** `window._activeProject` is the client truth; **`pjSetActive` also POSTs `/project/<id>/activate`** (lightweight — sets server `_state["project_dir"]`/`project_id` WITHOUT loading results) so report + em3d (which read `_state`) target the chosen project, then refreshes the report card (`pjUpdateReportCard`), the saved-3D list, and the training stats. `buildPayload()`/`_dsnBuildPayload()` attach `payload.project_id = _activeProject.id`, and `/analyse`'s `_run` (+ all em3d handlers via `_em3d_project_dir`) reuse that dir (generalised `reuse_id`) so every calculation/3D-run writes **into** the active project. `loadProjectById` calls `pjSetActive` too. `generateReport` prefers `_activeProject.id` (falls back to `/status`). The Tab-3 (Betrieb) project-management block was removed; `#project_name`/`#project_load` survive as hidden elements only to keep variant/param-table/applyPayload JS wired. The results-tab `🗂 Projektakte` `<details>` panel (`renderAkte`) still mirrors the same project contextually. The rest of the layout sits over `#workspace` = `#panel-area` (active panel) + draggable `#vsplit` + persistent `#preview-pane` (live `#simCanvas`, hidden on results/compare) + draggable `#hsplit` + `#footer` (staged-workflow buttons `#btn_cad_preview` (🧊 CAD ansehen → `startCadPreview`) · `#btn_smoke` (🧪 Smoke-Test → `startSmokeTest`) · `#btn_analyse` (⚙ Echte Berechnung), all sharing the `_wfModal`/`_pollWf` overlay helpers for the first two, plus `#analysis-progress`; drag `#hsplit` taller to reveal the full `#progress-log`). Inputs grouped into `.tab-panel`s; the `results` tab is gated `disabled` until an analysis finishes. `#vsplit`/`#hsplit` (`initSplitters`) resize preview width / footer height and call the canvas `resize()` live. The preview overlay has a pause button (`#ov_play` → global `toggleSim`/`_syncSimUI`, mirrors the Live-tab `#btn_play_pause`) so rotation can be stopped from any input tab. **Globales Speichern** (`#btn-global-save` in der Topbar + `#save-modal`): EIN Speicherknopf öffnet ein Vorschau-/Auswahl-Fenster (`openSaveModal`/`saveModalCommit`/`_buildSaveItems`), das **kontextabhängig** alles Speicherbare als abwählbare Positionen listet — **Projektdaten & Notizen** (`/project/<id>/meta`, liest `pj_*` bzw. bei passendem `akte-body.pid` die `akte_*`-Felder und schreibt beim Speichern in BEIDE zurück), **Bewertung** (`/project/<id>/rating`, gut/schlecht-Select), **3D-Feld-Lauf** (`/em3d/save`, sichtbar via `window._e3HasResult`, gesetzt in `_renderEm3d`/`_renderEm3dSweep`), **Varianten-Set** (`/variants/save`, wenn `variants.length`). Jede Zeile zeigt eine Vorschau + Häkchen (+ optional Name/Bewertung), Commit speichert alle angehakten nacheinander mit ✓/❌ je Zeile. Die alten Einzel-Speicherknöpfe (Projektdaten/Akte/3D-Lauf/Varianten) zeigen jetzt alle auf `openSaveModal()`; `pjSaveMeta`/`saveAkteMeta`/`_e3SaveRun`/`saveVariantSet` bleiben als Funktionen bestehen, die Buttons rufen aber das Modal |
 | `ema_pipeline.py` | Pipeline orchestrator (`run_pipeline`) + material tables + all chart builders |
 | `ema_topology.py` | Single source of truth for rotor magnet placement (`magnet_legs`, `Leg`, topology labels) — consumed by `ema_freecad` + `ema_analysis`; mirrored by JS `magnetLegs` in `ema.html` |
 | `ema_freecad.py` | FreeCAD script generators (rotor, full motor, rotor FEM); interior pockets + surface arc magnets from `magnet_legs`; parametric hairpin end-windings (`conductorsPerSlot`/`coilPitch`, collision-free radial-split crowns) |
@@ -995,6 +1158,8 @@ dict passed to the FEM script.
 | `ema_projekt.py` (Projektakte) | **Eine KI-lesbare Quelle der Wahrheit pro Projekt** (`<projekt>/project.json`, `schema_version:1`). Wird in `create_project_dir` **zuerst** angelegt (`init`, neue kwargs `origin`/`parent`) und **laufend** fortgeschrieben: `run_pipeline` setzt zu Beginn `status="rechnet"` und ruft am Save-Block (`ema_pipeline.py:~2275`, direkt nach `ema_training.upsert`) `record_run(...)` → hängt eine **Evolutionsstufe** an (`{ts,action,changed_inputs,key_metrics,note,ref}`, Eingabe-Diff via flachem geom.*-Vergleich, Kennzahlen via `ema_training.build_metrics`) und aktualisiert `datasheet`/`metrics`/`assets`/`design`/`inputs.payload`/`status`. Action = `analyse`/`recompute:<stages>`/`design_ai`. Weitere Schreibpunkte: Rating (`status=bewertet`+Stufe), Report (`status=berichtet`+`assets.report`). **Referenzen statt base64** (Charts als rel. Pfade, gespiegelt aus `ema_training.IMAGE_PAIRS`). **Backward-Compat:** `load_or_synthesize(dir)` rekonstruiert die Akte für Altprojekte aus `meta.json`+`results.json` (kein Pflicht-Migrationslauf), optional Lazy-Write-Back. Jeder Schreibvorgang **soft-fail** (atomar `os.replace`), `load` nutzt `setdefault` je Schlüssel. Felder: `status`(neu/rechnet/gerechnet/bewertet/berichtet/verworfen)·`tags`·`notes`(Entscheidungs-Log)·`lineage{parent,origin}`·`design`·`datasheet`·`inputs.payload`·`metrics`·`assets`·`evolution[]`·`links[]`(persistente Vergleichs-Verknüpfungen, einweg+selbstheilend via `resolved_links`)·`rag.docs[]`·`attachments[]`. Konsumenten lesen dieselbe Quelle: `ema_report.build_context` zieht `evolution`/`links`/`notes` (deterministischer Abschnitt **„Projektverlauf & Verknüpfungen"** via `_evolution_links_md`, nach der Prosa angehängt), `ema_chat` erdet auf `notes` + (bei Altprojekten) das synthetisierte Payload. Server: `/project/<id>/manifest`·`/meta`(Status/Tags/Notizen)·`/links`(GET/POST)·`/links/remove`·`/clone`(ganzes Verzeichnis klonen, `lineage.parent`, RAG mitkopieren — KEINE schweren Ergebnisse)·`/bundle`(Export `.emaproj`-Zip)·`/import_bundle`(Zip-slip-sicher → neues Projekt, `origin=import`)·`/rag`+`/rag/add`+`/rag/<doc>/delete`(**Pro-Projekt-RAG** unter `<projekt>/rag/index.json`)·`/attachments`(Anhänge → automatisch in die Projekt-RAG). UI: Galerie-Badges (Status/Abstammung/⚖Links/⟳Stufen) + **📁 Klonen**/**⬇ Bundle**/**📦 Import**, Ergebnis-Tab-Panel **🗂 Projektakte** (Status/Tags/Notizen + Evolutions-Timeline + Verknüpfungen + Projekt-RAG/Anhänge). Test: `smoke_test.py` `[projektakte]`-Block (init/record/diff/links/synthesize/lineage + `ema_rag.store_dir`-Isolation, ohne Ollama/FreeCAD) |
 | `ema_step_import.py` | **STEP-Import eines fertigen Motors**: liest per FreeCAD alle Solids (`extract_solids_script`), klassifiziert FreeCAD-frei (`classify_solids` über radiale Bänder + Volumen-Cluster + Rotationssymmetrie), leitet Maße/Polzahl ab (`derive_geom`, `_gap_cluster_count` für Pole/Nuten) + erkennt Magnete via OBB-Fit (`detect_magnets`, pol-lokale Halbpol-Magnete im Canvas-Format) und schreibt `motor.FCStd` mit benanntem `"Rotor"` (`assemble_fcstd_script`) → die bestehende Struktur-FEM rechnet darauf, EM auf den `customLegs`. `run_import` → applyDesignToCanvas-Form. Server: `/import_step`+`/import_step/status`; UI-Tab **📥 STEP-Import** → lädt in den Designer (Bestätigung), dann `/analyse` mit `imported:true` (run_pipeline überspringt den Geometrie-Build). Makro `step_import.FCMacro`. Tests: `test_step_import.py` |
 | `ema_em3d.py` / `elmer_runner.py` | **Echte 3D-Magnetfeldberechnung (Elmer FEM)** — s. Architektur-Abschnitt. `build_mesh` (Gmsh-OCC), `write_sif` (Elmer-Magnetostatik), `parse_results` (vtk-VTU + 2D-Vergleich), `run_em3d` (Orchestrator, zerlegt in `_prep_mesh`/`_solve_point`/`_decorate_res`), `run_em3d_sweep` (Drehzahlband: Mesh einmal, Punkt-Raster), `run_em3d_refine` (ROI lokal feiner + voller Re-Solve, ROI-`Box`-Feld in `_build_mesh_once`), `run_em3d_sector` (Ein-Pol-Sektor, anti-periodisch, zum vollen Motor gespiegelt — `_build_sector_mesh`/`write_sector_sif`/`_pattern_full_motor`/`_sector_results`). `elmer_runner` = Subprozess-Wrapper (`ElmerGrid`/`ElmerSolver`, `ELMER_OK`). Server `/em3d`(+`/status`,`/vtu`,`/vtp`,`/streamlines`,`/paraview`) + `/em3d_sweep` + `/em3d/submodel` (Verfeinerung) + `/em3d/sector` (Ein-Pol-Symmetrie) + **`/em3d/abort`** + `/em3d/save\|saved\|saved/<id>\|saved/<id>/delete` (PROJEKT-gebundener Store `<projekt>/em3d_runs/` via `_em3d_runs_root`; alle Handler binden den Lauf über `_em3d_project_dir`), UI-Tab **🧲 3D-Feld** (gespeicherte Läufe + Bericht liegen auf Tab ① Projekt). **Lauf abbrechen (`/em3d/abort`, UI-Knopf „⛔ Abbrechen"):** setzt ein Abbruch-Flag (`server._em3d_abort`) UND killt den laufenden ElmerSolver (`elmer_runner.abort_current` → Popen `terminate`, `run_elmersolver` meldet `aborted`) → sofortiger Stopp statt bis zum `timeout`. Beim **Sweep** (`run_em3d_sweep(..., cancel_cb=)`) wird zwischen den Punkten geprüft und das **Teilergebnis behalten** (`out["aborted"]/["n_done"]`, Kurven aus den fertigen Punkten, persistiert; Detailfeld nur, wenn der Detailpunkt — zuletzt in der Reihenfolge — schon dran war). Status wird `aborted` (UI gibt den Start wieder frei, rendert das Teilergebnis, speicherbar). **Gespeicherten Lauf laden zeigte „kein Feld":** `_e3LoadRun` leert jetzt die Viewer-Caches (`_e3PlayStop` → `_e3PdCache`/`_e3LinesCache`, per Punkt-Index gecacht) + neutralisiert `_e3ViewIdx`/`_e3SweepPoints` VOR dem Rendern und öffnet den Viewer frisch — sonst zeigte `_e3GetPointPd` die (stale) VTP des vorherigen Laufs bzw. nichts. Tests `test_em3d.py` (Mesh/sif + Sweep + Feldlinien-Export ohne Elmer) + `test_em3d_submodel.py` (ROI-Verfeinerung) |
+| `ema_oilspray.py` / `blender_runner.py` | **Experimentelle Spritzöl-Kühlung am Wickelkopf** (Blender/Mantaflow-FLIP) — s. Architektur-Abschnitt. `run_oilspray` (STL-Ausschnitt → Mantaflow-Bake → Benetzungs-/Tropfen-Kennwerte → Video/Charts, `_persist` nach results.json); `blender_runner` = Subprozess-Wrapper (bevorzugt portablen blender.org-Build; `BLENDER_OK`, `abort_current`). Server `/oilspray`(+`/status`,`/abort`), UI-Tab **💧 Spritzöl-Kühlung**. **Qualitativ — kein Wärmeübergang.** Braucht `blender` (portabel, Mantaflow-tauglich) + FreeCAD (STL). Test: `test_oilspray.py` (ohne Blender). Wickelkopf-STL via `ema_freecad.build_winding_head_stl_script` (`hairpin_slot_limit`) |
+| `ema_spraytest.py` | **🧪 Spray-Test-Prüfstand** — iteratives Spray-Tuning (Mensch wählt, Evolution mutiert). Vereinfachter Blender/Mantaflow-Prüfstand OHNE FreeCAD/Motor: EINE Düse sprüht **horizontal** (+x, Schwerkraft −z) auf 3 Kupferstäbe; pro Runde n (Default 10) Varianten der 5 Spray-Physik-Parameter (`SPRAY_PARAMS`: pressure_bar/jet_cone_deg/surface_tension(log)/viscosity(log)/nozzle_d_mm) als kurze Loop-Videos. `sample_round`: Runde 1 = Latin-Hypercube-Streuung + Default-Anker; Runde ≥2 = Kreuzung zweier markierter Eltern + Gauß-Mutation im normierten Raum (σ=0.25·0.7^(r−2), Dedup). Eltern werden NICHT neu gebacken (Video-Referenz auf die Altrunde, `video_path` löst rekursiv auf). `run_round` bäckt Kinder **sequenziell** (blender_runner kann nur einen Prozess) in je eigene Verzeichnisse, Abbruch zwischen Varianten behält die Teilrunde. Store global `~/cae_projekte/_spraytest/rounds/<rid>/` (projektunabhängig), fixe Sim-Settings je Runde (Auflösung via `quality` schnell/normal/fein, 44 Frames, time_scale 0.35, Sekundärpartikel immer an). Server `_spraytest_state` + `POST /spraytest`, `/spraytest/status\|abort\|rounds\|round/<rid>(/marked\|/delete)\|video/<rid>/<vid>` (teilt sich die Blender-Sequenzialität mit `/oilspray` → 409 wenn einer läuft). UI-Tab **🧪 Spray-Test** (`panel-spraytest`, `st*`-JS): Kachel-Raster mit ⭐-Markierung (persistiert), „➡ Nächste Runde aus Markierten", „✔ Übernehmen" schreibt die Parameter in die 💧-Öl-Felder (`oil_pressure/oil_jet_cone/oil_surft/oil_visc/oil_nozzle_d`). Test: `test_spraytest.py` (ohne Blender) |
 | `em3d_perf_check.py` | **Performance-Check der 3D-Elmer-Berechnung** (Standalone-CLI): fährt die Netzfeinheit stufenweise hoch (Zellgrößen-Skalierung) und misst je Stufe **Knotenzahl, Zeit (Mesh/ElmerGrid/Solve) + Peak-RAM** (via `/usr/bin/time -v`), schreibt `em3d_perf.csv`/`.json` inkrementell. `--calibrate` (nur meshen), `--max-nodes`/`--timeout`/`--ram-stop`/`--factors`. Datengrundlage für `EM3D_NODE_CEILING` + die RAM/Zeit-Schätzung des Ziel-Knoten-Reglers |
 
 ## Reference docs (read these for domain detail before changing physics)

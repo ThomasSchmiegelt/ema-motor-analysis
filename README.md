@@ -8,13 +8,14 @@ Browser-basiertes Werkzeug zur Auslegung und Analyse von Innenläufer-Permanentm
 
 ## Bedienoberfläche
 
-Die Oberfläche (`ema.html`) ist ein **Workflow mit Tabs**: ① Projekt · ② Geometrie · ③ Betrieb & Material · ④ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · 🧲 3D-Feld · 📊 FEM-Ergebnisse · ⚖ Vergleich. **Tab ① Projekt** ist der zentrale Einstiegspunkt: Projekt anlegen/öffnen, organisatorische Angaben + Notizen, projektspezifische Wissens-Dokumente, PDF-Bericht und gespeicherte 3D-Läufe laufen dort zusammen (es gibt keinen separaten „Bericht"-Tab mehr). Rechts läuft eine **persistente Live-Vorschau** (Motorquerschnitt + Magnetfeld, mit Pause-Knopf), die Trennlinien zwischen Eingaben/Vorschau und über dem Footer sind **ziehbar**, und ein globaler **Analyse-starten-Footer** zeigt den Fortschritt. Weitere Komfortfunktionen:
+Die Oberfläche (`ema.html`) ist ein **Workflow mit Tabs**: ① Projekt · ② Geometrie · ③ Betrieb & Material · ④ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · 🧲 3D-Feld · 💧 Spritzöl-Kühlung · 📊 FEM-Ergebnisse · ⚖ Vergleich. **Tab ① Projekt** ist der zentrale Einstiegspunkt: Projekt anlegen/öffnen, organisatorische Angaben + Notizen, projektspezifische Wissens-Dokumente, PDF-Bericht und gespeicherte 3D-Läufe laufen dort zusammen (es gibt keinen separaten „Bericht"-Tab mehr). Rechts läuft eine **persistente Live-Vorschau** (Motorquerschnitt + Magnetfeld, mit Pause-Knopf), die Trennlinien zwischen Eingaben/Vorschau und über dem Footer sind **ziehbar**, und ein globaler **Analyse-starten-Footer** zeigt den Fortschritt. Weitere Komfortfunktionen:
 
 - **🧠 Text → Auslegung** – Anwendung in Worten beschreiben, das LLM leitet einen vollständigen, validierten Parametersatz ab (`ema_text2ema.py`), optional gestützt auf Referenzmaschinen aus der lokalen Wissensbasis (RAG).
 - **🎨 Designer + 🤖 KI entwerfen** – freies Zeichnen einer Rotor-Halbpol-Geometrie (Magnete + Flussbarrieren) auf einer Canvas, oder ein LLM entwirft komplette Maschinen aus einer Beschreibung + Bereichsvorgaben (Statorbohrung, Länge, Welle, Luftspalt) samt automatischer Qualitäts-Vorsortierung und Regenerierung schlechter Entwürfe (`ema_design_ai.py`).
 - **🎯 Zielwertoptimierung** – Randbedingungen + freie Parameter mit Bereichen vorgeben; ein LLM steuert eine Suche über einen schnellen Analytik-Evaluator (ohne FreeCAD/FEM), bester zulässiger Treffer → optional Voll-Lauf (`ema_optimize.py`). Für gezeichnete Designer-Entwürfe gibt es eine **Magnet-Feinoptimierung** der Einzelkoordinaten (`ema_design_optimize.py`).
 - **📈 Parameterstudie** – variiert einen Parameter über N Schritte bei fester Drehzahl und plottet den Einfluss auf alle Kennwerte (`ema_paramstudy.py`); funktioniert auch auf frei gezeichneten Designer-Geometrien.
 - **🧲 3D-Feld (Elmer FEM)** – echte 3D-Magnetfeldberechnung neben dem 2D-FDM-Solver: Endeffekte, Schrägung/Staffelung, Drehzahl-/Lastsweeps, Lastprofil-Video, ROI-Verfeinerung und ein symmetrie-basierter Ein-Pol-Schnellmodus, mit eingebettetem Browser-3D-Viewer (`ema_em3d.py`, siehe unten).
+- **💧 Spritzöl-Kühlung (experimentell, Blender/Mantaflow)** – **qualitative** Fluidsimulation von Spritzöl auf einem Wickelkopf-Ausschnitt: Tröpfchenbildung, Benetzung, Abtropfen als Animation + geometrische Benetzungs-Kennwerte (`ema_oilspray.py`). **Wichtig:** kein Temperaturfeld/Wärmeübergang — eine visuelle Studie, keine kalibrierte Kühlrechnung. Braucht einen portablen blender.org-Build (der apt-Build stürzt headless ab).
 - **📥 STEP-Import** – fertigen Motor aus einer STEP-Datei importieren; automatische Klassifikation der Bauteile und Magnet-Erkennung (`ema_step_import.py`).
 - **📂 Projekt-Browser** – Galerie aller Projekte mit Vorschau + Kennwerten, inkl. Klonen, Bundle-Export/-Import und Status-/Verlaufs-Badges aus der Projektakte.
 - **🗂 Projektakte** – jedes Projekt führt eine KI-lesbare Verlaufsakte (`project.json`): Status, Tags, Notizen, Evolutionsstufen mit Eingabe-Diffs, Verknüpfungen zu Vergleichsprojekten, projektspezifische Wissensbasis + Anhänge (`ema_projekt.py`).
@@ -71,6 +72,18 @@ Eigenständiger On-Demand-Pfad neben dem 2D-FDM-Solver (der 2D-Löser bleibt als
 - Ergebnisse (Kennwerte + 2D-vs-3D-Vergleich) fließen automatisch in den PDF-Bericht ein; 3D-Läufe lassen sich projektgebunden speichern und ohne Neurechnen wieder laden
 
 Benötigt Elmer (`elmerfem-csc`) + die Python-Pakete `gmsh`/`vtk` — optional, die gesamte übrige Pipeline läuft ohne.
+
+### 4b. Experimentelle Spritzöl-Kühlung am Wickelkopf (Blender/Mantaflow) (`ema_oilspray.py` / `blender_runner.py`)
+
+Ein eigenständiger On-Demand-Pfad (Tab **💧 Spritzöl-Kühlung**), der **qualitativ** die Fluidkühlung eines Wickelkopf-**Ausschnitts** mit Spritzöl untersucht:
+
+- Ein **Motor-Keilausschnitt** wird aus dem konfigurierten Motor als STL exportiert — optional als **Cutaway mit Welle · Rotor (mit Magneten) · Stator · Wickelköpfen** (Tortenstück über den Winkelbereich der Wickelköpfe) — und als Kollisionsgeometrie an Blenders **Mantaflow-FLIP**-Löser übergeben.
+- Ein **Kühlring mit Düsen sitzt am Ende der Wickelköpfe** und spritzt Öl unter **Druck** (bar → Strahlgeschwindigkeit via Bernoulli, 3 bar ≈ 21 m/s) **Richtung Drehachse auf die Leiter**, wo es **zerstäubt und abläuft**; **Secondary-Particles** erzeugen die **Tröpfchenbildung**. Ergebnis: eine gerenderte **Animation** (Video) + eine **Abdeckungs-Heatmap** + Zeitverläufe von **benetzter Fläche** und **Tropfen-/Fragmentzahl**.
+- **Ehrliche Einordnung:** Mantaflow ist visuell-plausibel, **nicht validiert** — es gibt **kein Temperaturfeld und keinen Wärmeübergangskoeffizienten**. Die Kennwerte sind rein **geometrische Benetzungs-Proxys** (Indikatoren für Kühl-Hotspots), keine kalibrierte Kühlleistung. Für echte Kühlrechnung wäre Mehrphasen-CFD (OpenFOAM VOF) der nächste Schritt.
+- **Einbaulage + Nahaufnahme:** die **horizontale** Darstellung (Motorachse waagerecht = übliche Einbaulage) lässt das Öl seitlich über die Wickelköpfe ablaufen; „vertikal" behält die Ablaufrichtung entlang der Achse. Mit **Nahaufnahme** wird ein **einzelner Strahl** aus **einer** Düse seitlich im Detail gezeigt, wie er **auf einen Leiter** des Wickelkopfs trifft und zerstäubt.
+- Der FLIP-**Bake läuft auf der CPU** (die GPU beschleunigt nur das Rendern); Auflösung × Framezahl ist der Kostentreiber, daher der Ausschnitt + moderate Defaults.
+
+Benötigt einen **portablen blender.org-Build** (der `apt`-Build stürzt bei der Fluidsimulation headless ab, siehe Voraussetzungen) + FreeCAD (STL-Export) — optional, die übrige Pipeline läuft ohne.
 
 ### 5. Canvas-Designer & KI-gestützte Auslegung (`ema_design_ai.py` / `ema_design_optimize.py`)
 
@@ -169,6 +182,7 @@ Kühltypen mit kalibrierten h_eff-Werten: Natürliche Konvektion, Zwangsluft, Wa
 |---|---|
 | Elmer FEM | `sudo add-apt-repository -y ppa:elmer-csc-ubuntu/elmer-csc-ppa && sudo apt install -y elmerfem-csc` |
 | `gmsh`, `vtk` | Python-Pakete, in `requirements.txt` enthalten |
+| Blender (💧 Spritzöl-Kühlung) | **Portabler blender.org-Build** nötig — der `apt`-Build stürzt bei der Fluidsimulation headless ab. `mkdir -p ~/blender_portable && cd ~/blender_portable && curl -O https://download.blender.org/release/Blender4.2/blender-4.2.9-linux-x64.tar.xz && tar xf blender-4.2.9-linux-x64.tar.xz` (oder Pfad via `$EMA_BLENDER`) |
 
 Die gesamte Analyse-Pipeline (FDM-Feldsolver, Thermik, Fahrzyklus, FEM) läuft vollständig ohne LLM, RAG oder Elmer. Ollama wird nur für die komfortbasierten Zusatzfunktionen aufgerufen — Bericht (`ema_report.py`, `ema_experts.py`), Ergebnis-Chat (`ema_chat.py`), Text→Auslegung (`ema_text2ema.py`), KI-Auslegung/Optimierung (`ema_design_ai.py`, `ema_design_optimize.py`, `ema_optimize.py`) und die Wissensbasis (`ema_rag.py`) — immer mit dem Modell `ministral-3:14b` (bzw. `nomic-embed-text` für Embeddings), im Code fest eingestellt. Ohne Ollama bleiben alle physikalischen Berechnungen voll nutzbar. Ohne Elmer läuft alles außer dem Tab „🧲 3D-Feld" normal (die 3D-Modell-Vorschau ohne Feldlösung funktioniert auch ohne Elmer).
 

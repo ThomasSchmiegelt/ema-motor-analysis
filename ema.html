@@ -203,6 +203,8 @@
     <button class="tab-btn"        id="tbtn-designer" onclick="switchTab('designer')">🎨 Designer</button>
     <button class="tab-btn"        id="tbtn-import"  onclick="switchTab('import')">📥 STEP-Import</button>
     <button class="tab-btn"        id="tbtn-em3d"    onclick="switchTab('em3d')">🧲 3D-Feld</button>
+    <button class="tab-btn"        id="tbtn-oil"     onclick="switchTab('oil')">💧 Spritzöl-Kühlung</button>
+    <button class="tab-btn"        id="tbtn-spraytest" onclick="switchTab('spraytest')">🧪 Spray-Test</button>
     <button class="tab-btn"        id="tbtn-results" onclick="switchTab('results')" disabled>📊 FEM-Ergebnisse</button>
     <button class="tab-btn"        id="tbtn-compare" onclick="switchTab('compare')">⚖ Vergleich</button>
   </div>
@@ -1502,6 +1504,483 @@
  </div>
 </div><!-- /panel-em3d -->
 
+<!-- ════════ TAB: Spritzöl-Kühlung (Blender/Mantaflow) ════════ -->
+<div class="tab-panel" id="panel-oil">
+ <div class="e3-wrap">
+
+  <div class="e3-card">
+    <div class="section-title">💧 Experimentelle Spritzöl-Kühlung am Wickelkopf</div>
+    <p style="font-size:.82rem;color:#9aa;line-height:1.5;margin:0">
+      Untersucht — <b>qualitativ</b> — die Fluidkühlung eines <b>Motor-Ausschnitts</b>
+      mit Spritzöl: Ein <b>Kühlring mit Düsen sitzt am Ende der Wickelköpfe</b> und spritzt Öl
+      unter Druck <b>Richtung Drehachse</b> auf die Leiter, wo es <b>zerstäubt und abtropft</b>.
+      Gerechnet mit Blenders <b>Mantaflow-FLIP</b>-Löser auf einem echten Cutaway (Welle · Rotor
+      mit Magneten · Stator · Wickelköpfe). Ergebnis: eine <b>Animation</b> + geometrische
+      <b>Benetzungs-Kennwerte</b>.
+    </p>
+    <div style="margin-top:9px;padding:8px 10px;background:#2a2320;border:1px solid #5a4a33;border-radius:5px;font-size:.76rem;color:#cba">
+      ⚠ <b>Ehrliche Einordnung:</b> Mantaflow ist ein visuell-plausibler, <b>nicht validierter</b>
+      Löser. Er liefert <b>kein Temperaturfeld und keinen Wärmeübergangskoeffizienten</b> — die
+      Kennwerte (benetzte Fläche %, Abdeckung, Tropfenzahl) sind <b>geometrische Proxys</b> für
+      Kühl-Hotspots, keine kalibrierte Kühlleistung. Für echte Kühlrechnung bräuchte es
+      Mehrphasen-CFD (OpenFOAM VOF).
+    </div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">🧩 Geometrie &amp; Ansicht</div>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Wickelkopf-Ausschnitt</label>
+          <input type="number" id="oil_section" value="3" min="1" max="12" step="1"><span class="unit">Nuten</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Anzahl benachbarter Statornuten, deren Hairpin-Wickelköpfe als
+          Kollisionsgeometrie gebaut werden. Der Wickelkopf wird aus Rechenzeitgründen <b>immer nur
+          über diesen Ausschnitt</b> gebaut — der Kern (Welle/Rotor/Stator/Magnete) dagegen als
+          voller Ring und je nach Ansicht getrimmt.</p>
+          <p><span class="l">Laienverständlich:</span> Nur ein kleines Stück des Wickelkopfs wird
+          gerechnet — das spart Rechenzeit und reicht für die Tropfen-Darstellung.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Ansicht</label>
+          <select id="oil_view_mode" style="width:auto;padding:4px">
+            <option value="section" selected>Ausschnitt (Keil)</option>
+            <option value="full">Gesamt (voller Kern)</option>
+          </select></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Ausschnitt:</b> geschnittene Bauteile werden auf ein schmales <b>Tortenstück</b>
+          reduziert (nur die Umgebung des Wickelkopfs). <b>Gesamt:</b> voller 360°-Kern; aus den
+          geschnittenen Bauteilen wird ein Tortenstück <b>herausgeschnitten</b> (klassischer
+          Cutaway), der Rest bleibt ganzer Ring. Der Wickelkopf bleibt immer nur der Ausschnitt.</p></details>
+      </div>
+    </div>
+    <div class="e3-set" style="margin-top:8px">
+      <div class="e3-field">
+        <div class="row"><label style="margin:0">👁 Anzeigen (welche Bauteile gebaut werden)</label></div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:5px;font-size:.82rem">
+          <label><input type="checkbox" id="oil_show_winding" checked style="width:auto;margin-right:4px">Wickelkopf</label>
+          <label><input type="checkbox" id="oil_show_rotor"   checked style="width:auto;margin-right:4px">Rotor</label>
+          <label><input type="checkbox" id="oil_show_stator"  checked style="width:auto;margin-right:4px">Stator</label>
+          <label><input type="checkbox" id="oil_show_shaft"   checked style="width:auto;margin-right:4px">Welle</label>
+          <label><input type="checkbox" id="oil_show_magnets" checked style="width:auto;margin-right:4px">Magnete</label>
+        </div>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label style="margin:0">✂ Schneiden (welche Bauteile aufgeschnitten werden)</label></div>
+        <div style="display:flex;flex-wrap:wrap;gap:10px;margin-top:5px;font-size:.82rem">
+          <label><input type="checkbox" id="oil_cut_winding" checked style="width:auto;margin-right:4px">Wickelkopf</label>
+          <label><input type="checkbox" id="oil_cut_rotor"   checked style="width:auto;margin-right:4px">Rotor</label>
+          <label><input type="checkbox" id="oil_cut_stator"  checked style="width:auto;margin-right:4px">Stator</label>
+          <label><input type="checkbox" id="oil_cut_shaft"   style="width:auto;margin-right:4px">Welle</label>
+          <label><input type="checkbox" id="oil_cut_magnets" style="width:auto;margin-right:4px">Magnete</label>
+        </div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>Nicht angehakte (nur angezeigte) Bauteile bleiben im Modell <b>ganz</b> — im
+          Ausschnitt-Modus als voller Ring rings um den Keil, im Gesamt-Modus ohne Cutaway.</p></details>
+      </div>
+    </div>
+    <div class="e3-set" style="margin-top:8px">
+      <div class="e3-field">
+        <div class="row"><label><input type="checkbox" id="oil_winding_full" style="width:auto;margin-right:6px"
+          onchange="_oilBuildPinList()">🌀 Wickelkopf komplett aufbauen (alle Nuten)</label></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> baut den Wickelkopf — wie die anderen Bauteile — als vollen 360°-Ring
+          (alle Nuten) statt nur über den Ausschnitt oben. Braucht spürbar mehr Rechenzeit beim
+          FreeCAD-Aufbau (jede Nut ist ein eigener Hairpin-Lofting-Bau) und mehr Düsen, um den
+          ganzen Ring zu benetzen.</p></details>
+      </div>
+      <div class="e3-field" style="flex-basis:100%">
+        <div class="row"><label style="margin:0">🔌 Einzelne Hairpins ein-/ausblenden</label>
+          <button type="button" onclick="_oilBuildPinList()" style="width:auto;margin-left:8px;padding:4px 10px;font-size:.76rem">🔄 Liste aktualisieren</button></div>
+        <div id="oil_pins_grid" style="max-height:180px;overflow:auto;margin-top:6px;font-size:.76rem;
+             display:flex;flex-wrap:wrap;gap:2px 4px;border:1px solid #3a3a44;padding:6px;border-radius:6px"></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> jeder physische Hairpin (U-förmiger Leiter, gruppiert nach Statornut)
+          ist einzeln abwählbar — abgewählte Hairpins fehlen im nächsten Bau komplett (nicht nur
+          ausgeblendet). „Liste aktualisieren", wenn sich Nutenzahl/Leiter je Nut geändert haben.</p></details>
+      </div>
+    </div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">🎥 Darstellung &amp; Einbaulage</div>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Einbaulage</label>
+          <select id="oil_orientation" style="width:auto;padding:4px">
+            <option value="horizontal" selected>horizontal (Achse waagerecht)</option>
+            <option value="vertical">vertikal (Achse senkrecht)</option>
+          </select></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> <b>horizontal</b> = Motorachse waagerecht (übliche Einbaulage) →
+          die Schwerkraft wirkt <b>quer zur Achse</b>, das Öl läuft seitlich über die Wickelköpfe
+          nach unten ab. <b>vertikal</b> = Achse senkrecht, Öl läuft entlang der Achse ab.</p>
+          <p><span class="l">Laienverständlich:</span> Wie der Motor im Fahrzeug steht — davon
+          hängt ab, wohin das Öl tropft.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label><input type="checkbox" id="oil_closeup" style="width:auto;margin-right:6px">
+          Nahaufnahme (1 Strahl auf 1 Leiter)</label></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Zeigt eine <b>seitliche Nahaufnahme</b>, wie <b>ein</b> Ölstrahl auf
+          <b>einen</b> Leiter des Wickelkopfs trifft und zerstäubt (die Düsenzahl wird intern auf 1
+          gesetzt). Aus: die Übersicht über den ganzen Ausschnitt mit allen Düsen.</p>
+          <p><span class="l">Laienverständlich:</span> Wie ein Makro-Foto direkt auf die
+          Auftreffstelle statt der Gesamtansicht.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>🐢 Zeitlupe</label>
+          <select id="oil_slowmo" style="width:auto;padding:4px">
+            <option value="1" selected>aus (Echtzeit)</option>
+            <option value="5">5× Zeitlupe</option>
+            <option value="10">10× Zeitlupe</option>
+            <option value="25">25× Ultra-Zeitlupe</option>
+            <option value="50">50× Ultra-Zeitlupe</option>
+            <option value="100">100× Ultra-Zeitlupe</option>
+            <option value="250">250× Ultra-Zeitlupe</option>
+            <option value="500">500× Ultra-Zeitlupe</option>
+          </select></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Skaliert die <b>Simulationszeit pro Frame</b> (Mantaflow
+          <code>time_scale</code>). Der Strahl fliegt mit ~21&nbsp;m/s — in Echtzeit quert er den
+          Ringspalt in 1–2 Frames. Bei 25–50× sieht man Strahlflug, Aufprall und
+          <b>Tröpfchenbildung</b> über viele Frames. Die Rechenzeit pro Frame bleibt gleich, aber
+          das Video zeigt einen entsprechend kürzeren realen Zeitausschnitt (ggf. mehr Frames
+          wählen).</p>
+          <p><span class="l">Laienverständlich:</span> Wie eine Hochgeschwindigkeitskamera —
+          derselbe Vorgang, stark verlangsamt abgespielt.</p></details>
+      </div>
+    </div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">🛢 Spritzöl-Kühlring &amp; Druck</div>
+    <p style="font-size:.8rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      Ein <b>Rohr-Ring</b> im Abstand zu den Wickelköpfen mit <b>Bohrungen</b> (Düsen), aus denen
+      Öl unter Druck <b>radial nach innen auf die Leiter</b> spritzt und dort zerstäubt. Die
+      Strahlgeschwindigkeit folgt aus dem Druck (Bernoulli: v = C<sub>d</sub>·√(2·Δp/ρ), ρ≈850 kg/m³).
+    </p>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Öldruck</label>
+          <input type="number" id="oil_pressure" value="3" min="0.2" max="20" step="0.5"><span class="unit">bar</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Speisedruck am Ring → Strahlgeschwindigkeit aus der Bohrung.
+          3 bar ≈ 21 m/s. Höherer Druck = schnellerer Strahl, mehr Zerstäubung.</p>
+          <p><span class="x">Wirkung:</span> Schnelle Strahlen brauchen hohe Auflösung + mehr
+          Substeps, sonst „tunnelt" das Öl durch die Leiter.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Anzahl Düsen</label>
+          <input type="number" id="oil_nozzles" value="6" min="1" max="40" step="1"><span class="unit">Bohrungen</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Bohrungen über den simulierten Ausschnitt, gleichmäßig auf dem
+          Ringbogen verteilt, alle radial nach innen gerichtet.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Bohrungs-Ø</label>
+          <input type="number" id="oil_nozzle_d" value="1" min="0.3" max="6" step="0.1"><span class="unit">mm</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Düsen-Durchmesser. <b>Hinweis:</b> 1 mm ist bei grober Auflösung
+          kleiner als eine Netz-Zelle — die Auflösung muss hoch genug sein, um den feinen Strahl
+          aufzulösen (sonst emittiert eine Mindest-Zellgröße).</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Abstand Ring→Wickelkopf</label>
+          <input type="number" id="oil_ring_gap" value="3" min="0.5" max="30" step="0.5"><span class="unit">mm</span></div>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Ring-Rohr-Ø</label>
+          <input type="number" id="oil_ring_tube" value="6" min="1" max="30" step="0.5"><span class="unit">mm</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">🎯 Strahlrichtung</div>
+    <p style="font-size:.8rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      Der Grund-Strahl zielt automatisch auf einen echten Kupferleiter des Wickelkopfs. Hier lässt
+      er sich zusätzlich <b>neigen</b> (axial) und <b>schwenken</b> (tangential). Die <b>Ziellinie</b>
+      zeigt im Video, wohin jeder Strahl trifft.
+    </p>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Axiale Neigung</label>
+          <input type="number" id="oil_jet_tilt" value="0" min="-60" max="60" step="5"><span class="unit">°</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Neigt den Strahl aus der rein radialen Richtung — <b>positiv</b> =
+          stärker zur Blechpaket-Stirnfläche (nach „unten"/innen), <b>negativ</b> = mehr zur
+          Wickelkopfspitze.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Tangentialer Schwenk</label>
+          <input type="number" id="oil_jet_yaw" value="0" min="-60" max="60" step="5"><span class="unit">°</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Dreht den Strahl seitlich um die Wellenachse (Gieren) — trifft den
+          Leiter dann schräg von der Seite statt frontal.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Düsen-Versatz um die Achse</label>
+          <input type="number" id="oil_nozzle_offset" value="15" min="-45" max="45" step="1"><span class="unit">°</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Verschiebt die Düsen-ÖFFNUNG selbst um diesen Winkel um die
+          Motorachse — das Ziel (der echte Kronenpunkt) bleibt gleich. Dadurch läuft der Strahl
+          schräg zwischen zwei Wickelköpfen statt frontal auf einen, sodass links UND rechts vom
+          Strahl Wickelkopf-Kupfer liegt. 0° = Düse direkt über dem Ziel (alte Anordnung).</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Sprühfächer (Kegelöffnung)</label>
+          <input type="number" id="oil_jet_cone" value="10" min="0" max="40" step="1"><span class="unit">°</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Streut die Anfangsgeschwindigkeit des Strahls zufällig um die
+          Grundrichtung (Mantaflow „Random Velocity") — der Strahl läuft kelchförmig/konisch statt
+          als scharfer Nadelstrahl und zerfällt beim Auftreffen auf die Kupferleiter sichtbarer in
+          Tröpfchen. 0° = alter Nadelstrahl.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label><input type="checkbox" id="oil_jet_line" style="width:auto;margin-right:6px">
+          🔴 Ziellinie einzeichnen</label></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Zeichnet je Düse eine leuchtende Linie in Strahlrichtung ins Video —
+          so ist sofort sichtbar, wohin der Strahl zeigt und ob er den Leiter trifft.</p></details>
+      </div>
+    </div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">🎨 Ansicht & Darstellung</div>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Unten zeigt (Blickrichtung)</label>
+          <select id="oil_view_down" style="width:auto;padding:4px">
+            <option value="auto">Automatisch (Einbaulage)</option>
+            <option value="-y">−Y</option><option value="+y">+Y</option>
+            <option value="-z">−Z (Motorachse ab)</option><option value="+z">+Z (Motorachse auf)</option>
+            <option value="-x">−X</option><option value="+x">+X</option>
+          </select></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Legt fest, welche Achse im gerenderten Bild <b>nach unten</b> zeigt (dreht
+          die Kamera bzw. die Drehteller-Achse). Rein die <i>Blickrichtung</i> — die Schwerkraft/Physik
+          (wohin das Öl abläuft) steuert weiterhin die <b>Einbaulage</b> oben. Das eingeblendete
+          <b>Koordinatensystem</b> (X rot · Y grün · Z blau, Z = Motorachse) hilft bei der Orientierung.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label><input type="checkbox" id="oil_show_axes" style="width:auto;margin-right:6px">
+          🧭 Koordinatensystem im Video</label></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Blendet die XYZ-Achsen auch im fertigen Video ein (in der Vorschau immer an).</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label><input type="checkbox" id="oil_material" style="width:auto;margin-right:6px" checked>
+          Vorschau mit Materialien (Kupfer/Stahl/Öl)</label></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Rendert die 🔍 <b>Vorschau</b> mit EEVEE-Materialien (Kupfer-Leiter,
+          Stahl-Ring, transluzentes Öl) statt flach — schöner, aber etwas langsamer. Das fertige
+          Video nutzt ohnehin Materialien (außer bei „schneller Darstellung"). Standardmäßig AN,
+          sonst zeigt die Vorschau flaches Grau/Weiß ohne jedes Material — das sah wie ein
+          Beleuchtungsfehler aus, war aber nur die abgeschaltete Materialdarstellung.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Beleuchtung</label>
+          <select id="oil_light_preset" style="width:auto;padding:4px">
+            <option value="studio" selected>Studio (neutral)</option>
+            <option value="werkstatt">Werkstatt (warm, hart)</option>
+            <option value="weich">Weich (gleichmäßig, wenig Glanzlicht)</option>
+            <option value="kontrast">Kontrastreich (dramatisch)</option>
+          </select></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Voreingestelltes 3-Punkt-Licht-Rig (Key/Fülllicht/Kantenlicht) + Welt-
+          Hintergrund. Das Fülllicht sitzt bewusst seitlich versetzt statt an der Kamera — ein Licht
+          direkt an der Kamera spiegelt sich auf glänzendem Metall (Welle/Kupfer) fast immer direkt in
+          die Linse zurück und lässt Stahl/Kupfer flach ausgebrannt weiß wirken.</p>
+          <p><span class="l">Laienverständlich:</span> Wie ein Fotostudio — verschiedene Lichtstimmungen
+          zur Auswahl, ohne dass Metallteile "weißglühend" aussehen.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label><input type="checkbox" id="oil_smooth" style="width:auto;margin-right:6px" checked>
+          Kanten glätten (Shade Smooth)</label></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Blenders „Shade Smooth" mit Winkel-Autoglättung — die Facetten der
+          Netzdarstellung auf gekrümmten Flächen (Kronen, Rohr) verschwinden, echte Kanten bleiben scharf.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Öl-Transparenz</label>
+          <input type="number" id="oil_transparency" value="0.45" min="0" max="1" step="0.05"><span class="unit">–</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Durchsichtigkeit des gerenderten Öls (0 = deckend … 1 = klar). Wirkt im
+          fertigen Video (EEVEE mit Refraktion).</p></details>
+      </div>
+    </div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">🧪 Öl-Stoffwerte</div>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Viskosität</label>
+          <input type="number" id="oil_visc" value="0.004" min="0" max="1" step="0.002"><span class="unit">–</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Simulationsviskosität des Öls. <b>Standard dünnflüssig</b> (≈0,004),
+          damit sich ein Strahl bildet und spritzt statt zu verklumpen; ab ~0,02 schaltet der
+          Viskositätslöser ein (zäher, klebrigerer Film, langsamere Tropfen). <b>Nicht
+          kalibriert.</b></p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Oberflächenspannung</label>
+          <input type="number" id="oil_surft" value="0.01" min="0" max="1" step="0.002"><span class="unit">–</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Treibt die <b>Tröpfchenbildung</b> beim Zerstäuben (höher = rundere,
+          kompaktere Tropfen). <b>Standard moderat</b> (≈0,01): genug für Tröpfchenbildung beim
+          Auftreffen, aber nicht so hoch, dass sich der Strahl sofort zur Kugel zusammenzieht.
+          Nicht kalibriert.</p></details>
+      </div>
+    </div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">⚙ Auflösung &amp; Rechenaufwand</div>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Domain-Auflösung</label>
+          <input type="number" id="oil_res" value="72" min="24" max="512" step="4"><span class="unit">Zellen</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Max. Zellenzahl der FLIP-Domain je Achse — der <b>Haupt-Kostentreiber</b>.
+          Höher = feinere Tropfen/Strahl, aber die Kosten wachsen ~kubisch (Zellen³ × Substeps).</p>
+          <p><span class="x">Wirkung:</span> Der <b>Bake läuft auf der CPU</b> (die GPU beschleunigt
+          nur das Rendern). 72 ist ein guter Startwert; für Detailtropfen 96–128; <b>192–512</b> löst
+          den 1-mm-Strahl richtig auf, kostet aber schnell Stunden und viel RAM — am besten mit
+          wenigen Frames (10–30) + Zeitlupe kombinieren.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Frames</label>
+          <input type="number" id="oil_frames" value="80" min="10" max="240" step="5"><span class="unit">Bilder</span></div>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Render-Engine</label>
+          <select id="oil_engine" style="width:auto;padding:4px">
+            <option value="BLENDER_EEVEE">EEVEE (schnell, transluzentes Öl)</option>
+            <option value="BLENDER_WORKBENCH">Workbench (am schnellsten, flach)</option>
+            <option value="CYCLES">Cycles GPU (beste Qualität, RTX)</option>
+          </select></div>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label><input type="checkbox" id="oil_fast" style="width:auto;margin-right:6px">
+          ⚡ Schnelle Darstellung (grobe Vorschau)</label></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Schaltet auf ein flaches, schnelles Rendern (Workbench), weniger
+          Substeps und <b>keine Sekundärpartikel</b> (Spray/Foam) um — deutlich schneller, aber
+          gröber (weniger Tröpfchen-Detail). Gut zum Ausprobieren von Richtung/Auflösung, bevor
+          man einen feinen Lauf startet.</p></details>
+      </div>
+    </div>
+    <div style="margin-top:8px;font-size:.74rem;color:#889">
+      ℹ Der FLIP-Bake ist CPU-gebunden. Rechenzeit wächst stark mit Auflösung × Frames — bei
+      hohen Werten mehrere Minuten. Ein Ausschnitt hält es beherrschbar.
+    </div>
+  </div>
+
+  <div class="e3-card">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button id="oil_btn" onclick="startOilspray()">💧 Spritzöl-Simulation starten</button>
+      <button id="oil_preview_btn" onclick="startOilPreview()" style="background:#3a5a7a;width:auto;padding:8px 14px">🔍 Vorschau (Strahllinien, ohne Bake)</button>
+      <label style="font-size:.8rem;color:#9aa;display:flex;align-items:center;gap:5px" title="1 = einzelnes Standbild. Mehr Winkel = die Vorschau lässt sich im Browser drehen (Ziehen). Mehr Winkel = längere Render-Zeit.">🔄 Drehteller
+        <select id="oil_pv_turns" style="width:auto;padding:4px">
+          <option value="1">1 (Standbild)</option>
+          <option value="12">12 Winkel</option>
+          <option value="24">24 Winkel</option>
+          <option value="36">36 Winkel</option>
+        </select></label>
+      <button id="oil_abort_btn" onclick="abortOilspray()" style="background:#7a3030;width:auto;padding:8px 14px;display:none">⛔ Abbrechen</button>
+      <button id="oil_load_btn" onclick="loadOilSaved(true)" style="background:#2f5a36;width:auto;padding:8px 14px">📼 Gespeicherten Lauf laden</button>
+    </div>
+    <div id="oil_status" style="margin-top:10px;font-size:.82rem;color:#9aa;white-space:pre-wrap"></div>
+    <div id="oil_progress_wrap" style="margin-top:8px;display:none">
+      <div style="height:6px;background:#222;border-radius:3px;overflow:hidden">
+        <div id="oil_progress" style="height:100%;width:0%;background:#3a8adf;transition:width .3s"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">🎞 Gespeicherte Läufe (Varianten)</div>
+    <p style="font-size:.8rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      Jeder fertige Lauf wird <b>automatisch</b> als eigene Variante mit Video gespeichert — ein
+      neuer Lauf überschreibt die vorherigen also nicht. Hier lassen sie sich ohne Neurechnen
+      wieder ansehen oder löschen.
+    </p>
+    <div id="oil_variants_list" style="font-size:.82rem;color:#9aa">— noch keine gespeicherten Läufe —</div>
+  </div>
+
+  <div id="oil_results" style="display:none"></div>
+
+ </div>
+</div><!-- /panel-oil -->
+
+<!-- ════════ TAB: Spray-Test-Prüfstand (iteratives Spray-Tuning) ════════ -->
+<div class="tab-panel" id="panel-spraytest">
+ <div class="e3-wrap">
+
+  <div class="e3-card">
+    <div class="section-title">🧪 Spray-Test-Prüfstand — Spray iterativ tunen</div>
+    <p style="font-size:.82rem;color:#9aa;line-height:1.5;margin:0">
+      Ein <b>vereinfachter Prüfstand</b> (statt des Motor-Ausschnitts): EINE Düse sprüht
+      <b>horizontal</b> auf drei Kupferstäbe (Hairpin-Stellvertreter) — schnell genug, um pro
+      Runde <b>~10 Parameter-Varianten</b> als Loop-Videos nebeneinander zu sehen. Ablauf:
+      Runde rechnen → die besten Kacheln mit ⭐ <b>markieren</b> → „Nächste Runde" sampelt neue
+      Varianten <b>um die markierten Eltern</b> (Streuung schrumpft je Runde) → wiederholen, bis
+      das Spray passt → <b>„✔ Übernehmen"</b> schreibt die Sieger-Parameter in den 💧-Tab.
+    </p>
+    <p style="font-size:.78rem;color:#9aa;line-height:1.5;margin:8px 0 0">
+      Variiert werden die 5 Spray-Physik-Hebel: <b>Druck</b> (bar), <b>Sprühkegel</b> (°),
+      <b>Oberflächenspannung</b> σ, <b>Viskosität</b> ν, <b>Düsen-Ø</b> (mm). Auflösung, Frames,
+      Licht und Kamera bleiben je Runde fest, damit die Kacheln vergleichbar sind.
+    </p>
+    <div class="row3" style="margin-top:10px">
+      <div>
+        <label>Varianten je Runde</label>
+        <input type="number" id="st_n" value="10" min="4" max="12" step="1">
+      </div>
+      <div>
+        <label>Qualität (Domain-Auflösung)</label>
+        <select id="st_quality">
+          <option value="schnell">schnell (48)</option>
+          <option value="normal" selected>normal (64)</option>
+          <option value="fein">fein (96)</option>
+        </select>
+      </div>
+      <div>
+        <label>Runden-Historie</label>
+        <select id="st_round_sel" onchange="stLoadRound(this.value)">
+          <option value="">— noch keine Runde —</option>
+        </select>
+      </div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button id="st_btn_start" onclick="stStartRound(true)"
+              style="width:auto;padding:8px 16px">▶ Runde 1 starten (breite Streuung)</button>
+      <button id="st_btn_next" onclick="stStartRound(false)"
+              style="width:auto;padding:8px 16px;background:#2e7d4a">➡ Nächste Runde aus Markierten</button>
+      <button id="st_btn_abort" onclick="stAbort()" disabled
+              style="width:auto;padding:8px 16px;background:#7d2e2e">⛔ Abbrechen</button>
+      <button onclick="stDeleteRound()" title="Die angezeigte Runde löschen"
+              style="width:auto;padding:8px 12px;background:#444">🗑 Runde löschen</button>
+    </div>
+    <div id="st_status" style="margin-top:10px;font-size:.82rem;color:#9aa;white-space:pre-wrap"></div>
+    <div id="st_progress_wrap" style="margin-top:8px;display:none">
+      <div style="height:6px;background:#222;border-radius:3px;overflow:hidden">
+        <div id="st_progress" style="height:100%;width:0%;background:#3a8adf;transition:width .3s"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="e3-card" id="st_grid_card" style="display:none">
+    <div class="section-title" id="st_grid_title">Runde</div>
+    <div id="st_grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px"></div>
+  </div>
+
+ </div>
+</div><!-- /panel-spraytest -->
+
 <!-- ════════ TAB: Betrieb & Material ════════ -->
 <div class="tab-panel" id="panel-betrieb">
   <div class="panel-grid">
@@ -2377,13 +2856,14 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','results','compare'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','spraytest','results','compare'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
   projekt:'panel-projekt',
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
-  designer:'panel-designer', import:'panel-import', em3d:'panel-em3d',
+  designer:'panel-designer', import:'panel-import', em3d:'panel-em3d', oil:'panel-oil',
+  spraytest:'panel-spraytest',
   results:'tab-results', compare:'tab-compare'
 };
 
@@ -2411,6 +2891,16 @@ function switchTab(name) {
   if (name === 'designer' && typeof dsnActivate === 'function')
     requestAnimationFrame(() => requestAnimationFrame(dsnActivate));
   if (name === 'compare') { refreshComparePicker(); renderVariantList(); refreshVariantSets(); }
+  if (name === 'oil') {
+    // Gespeicherten Öl-Lauf des aktiven Projekts still anzeigen (wenn nichts läuft/angezeigt wird)
+    const ob = document.getElementById('oil_results');
+    const runningOil = document.getElementById('oil_btn')?.disabled;
+    if (ob && ob.style.display === 'none' && !runningOil && typeof loadOilSaved === 'function')
+      loadOilSaved(false);
+    if (typeof refreshOilVariants === 'function') refreshOilVariants();
+    if (typeof _oilBuildPinList === 'function') _oilBuildPinList();
+  }
+  if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
   if (name === 'em3d' && typeof adoptEm3dGeom === 'function') {
     // Beim Öffnen die aktuelle Geometrie der gewählten Quelle übernehmen + Zusammenfassung zeigen.
     const src = document.getElementById('e3_geomsrc');
@@ -4991,6 +5481,603 @@ async function abortEm3d() {
   if (msg) { msg.style.color = '#fb0'; msg.textContent = '⛔ Breche ab… (laufenden Löser stoppen)'; }
   try { await fetch('/em3d/abort', { method: 'POST' }); } catch (e) {}
   if (b) b.disabled = false;   // _pollEm3d blendet ihn aus, sobald der Lauf endet
+}
+
+// ── Spritzöl-Kühlung (Blender/Mantaflow) ────────────────────────────────────────
+// Untermenü „einzelne Hairpins ein-/ausblenden": rein clientseitig aus GEOM.slots/
+// conductorsPerSlot berechnet (Pin-Index = s*pinsProSlot + j, spiegelt die FreeCAD-Reihenfolge
+// in build_full_motor_script) — kein Server-Roundtrip nötig, um die Liste zu befüllen.
+function _oilBuildPinList() {
+  const grid = document.getElementById('oil_pins_grid');
+  if (!grid) return;
+  const full = document.getElementById('oil_winding_full')?.checked;
+  const secEl = document.getElementById('oil_section');
+  const nSlots = full ? (GEOM.slots || 12) : Math.min(GEOM.slots || 12, +(secEl && secEl.value) || 3);
+  const pinsPerSlot = Math.max(1, Math.floor((GEOM.conductorsPerSlot || 4) / 2));
+  // Über einen Listen-Rebuild hinweg abgewählte Pins merken (z. B. nach „Wickelkopf komplett").
+  const prevHidden = new Set(Array.from(grid.querySelectorAll('.oil-pin-ck'))
+    .filter(c => !c.checked).map(c => +c.dataset.pin));
+  let html = '';
+  for (let s = 0; s < nSlots; s++) {
+    html += '<div style="display:flex;flex-direction:column;gap:1px;padding:2px 5px;border-right:1px solid #3a3a44">';
+    html += '<span style="opacity:.6">Nut ' + s + '</span>';
+    for (let j = 0; j < pinsPerSlot; j++) {
+      const pi = s * pinsPerSlot + j;
+      const checked = prevHidden.has(pi) ? '' : 'checked';
+      html += '<label style="white-space:nowrap"><input type="checkbox" class="oil-pin-ck" data-pin="' + pi + '" '
+            + checked + ' style="width:auto;margin-right:3px">#' + pi + '</label>';
+    }
+    html += '</div>';
+  }
+  grid.innerHTML = html || '<i>keine Geometrie</i>';
+}
+function _oilHiddenPinList() {
+  const grid = document.getElementById('oil_pins_grid');
+  if (!grid) return [];
+  return Array.from(grid.querySelectorAll('.oil-pin-ck')).filter(c => !c.checked).map(c => +c.dataset.pin);
+}
+
+// Gemeinsamer Payload-Builder für Voll-Lauf UND Vorschau (identische Geometrie/Richtung).
+async function _oilBuildPayload() {
+  const g = id => document.getElementById(id);
+  const ck = id => { const el = g(id); return el ? !!el.checked : false; };
+  const payload = await buildPayload();
+  const show = { winding: ck('oil_show_winding'), rotor: ck('oil_show_rotor'),
+                 stator: ck('oil_show_stator'), shaft: ck('oil_show_shaft'),
+                 magnets: ck('oil_show_magnets') };
+  const cut  = { winding: ck('oil_cut_winding'), rotor: ck('oil_cut_rotor'),
+                 stator: ck('oil_cut_stator'), shaft: ck('oil_cut_shaft'),
+                 magnets: ck('oil_cut_magnets') };
+  payload.oil = {
+    resolution:     +g('oil_res').value || 72,
+    frames:         +g('oil_frames').value || 80,
+    section_slots:  +g('oil_section').value || 3,
+    show, cut,
+    view_mode:      g('oil_view_mode').value || 'section',
+    include_core:   !!(show.rotor || show.stator || show.shaft || show.magnets),
+    winding_full:   ck('oil_winding_full'),
+    hidden_pins:    _oilHiddenPinList(),
+    viscosity:      +g('oil_visc').value || 0.004,
+    surface_tension:+g('oil_surft').value || 0.01,
+    pressure_bar:   +g('oil_pressure').value || 3,
+    nozzle_count:   +g('oil_nozzles').value || 6,
+    nozzle_d_mm:    +g('oil_nozzle_d').value || 1,
+    ring_gap_mm:    +g('oil_ring_gap').value || 3,
+    ring_tube_mm:   +g('oil_ring_tube').value || 6,
+    orientation:    g('oil_orientation').value || 'horizontal',
+    closeup:        !!g('oil_closeup').checked,
+    slowmo:         +g('oil_slowmo').value || 1,
+    fast:           ck('oil_fast'),
+    jet_tilt_deg:   +g('oil_jet_tilt').value || 0,
+    jet_yaw_deg:    +g('oil_jet_yaw').value || 0,
+    nozzle_offset_deg: +(g('oil_nozzle_offset') && g('oil_nozzle_offset').value) || 0,
+    jet_cone_deg:   +(g('oil_jet_cone') && g('oil_jet_cone').value) || 0,
+    show_jet_line:  ck('oil_jet_line'),
+    preview_turns:  +(g('oil_pv_turns') && g('oil_pv_turns').value) || 1,
+    view_down:      (g('oil_view_down') && g('oil_view_down').value) || 'auto',
+    show_axes:      ck('oil_show_axes'),
+    material:       ck('oil_material'),
+    light_preset:   (g('oil_light_preset') && g('oil_light_preset').value) || 'studio',
+    smooth:         g('oil_smooth') ? !!g('oil_smooth').checked : true,
+    oil_transparency: (g('oil_transparency') ? +g('oil_transparency').value : 0.45),
+    engine:         g('oil_engine').value || 'BLENDER_EEVEE',
+    camera_angle_deg: (window._oilCamLockDeg != null ? window._oilCamLockDeg : null),
+  };
+  if (window._activeProject && window._activeProject.id) payload.project_id = window._activeProject.id;
+  return payload;
+}
+
+async function startOilspray() {
+  const st = document.getElementById('oil_status');
+  const btn = document.getElementById('oil_btn');
+  btn.disabled = true; st.style.color = '#9c9'; st.textContent = '⏳ Starte Spritzöl-Simulation…';
+  document.getElementById('oil_results').style.display = 'none';
+  document.getElementById('oil_progress_wrap').style.display = 'block';
+  try {
+    const payload = await _oilBuildPayload();
+    const r = await fetch('/oilspray', { method:'POST', headers:{'Content-Type':'application/json'},
+                                         body: JSON.stringify(payload) });
+    if (r.status === 503) {
+      const j = await r.json(); st.style.color = '#e57';
+      st.innerHTML = '⚠ ' + escHtml(j.error || 'Blender fehlt').replace(/\n/g,'<br>');
+      btn.disabled = false; document.getElementById('oil_progress_wrap').style.display = 'none'; return;
+    }
+    if (!r.ok) { const j = await r.json().catch(()=>({})); st.style.color='#e57';
+      st.textContent = '⚠ ' + (j.error || r.status); btn.disabled = false;
+      document.getElementById('oil_progress_wrap').style.display = 'none'; return; }
+    document.getElementById('oil_abort_btn').style.display = 'inline-block';
+    _pollOil();
+  } catch (e) { st.style.color='#e57'; st.textContent = 'Fehler: ' + e.message; btn.disabled = false;
+    document.getElementById('oil_progress_wrap').style.display = 'none'; }
+}
+
+// Schnelle Zwischenansicht: nur Geometrie + Düsen + Strahl-Ziellinien, OHNE Fluid-Bake.
+async function startOilPreview() {
+  const st = document.getElementById('oil_status');
+  const btn = document.getElementById('oil_btn');
+  const pbtn = document.getElementById('oil_preview_btn');
+  btn.disabled = true; if (pbtn) pbtn.disabled = true;
+  st.style.color = '#9c9'; st.textContent = '⏳ Vorschau wird gerendert (kein Bake) …';
+  document.getElementById('oil_results').style.display = 'none';
+  document.getElementById('oil_progress_wrap').style.display = 'block';
+  try {
+    const payload = await _oilBuildPayload();
+    const r = await fetch('/oilspray/preview', { method:'POST', headers:{'Content-Type':'application/json'},
+                                                 body: JSON.stringify(payload) });
+    if (r.status === 503) {
+      const j = await r.json(); st.style.color = '#e57';
+      st.innerHTML = '⚠ ' + escHtml(j.error || 'Blender fehlt').replace(/\n/g,'<br>');
+      btn.disabled = false; if (pbtn) pbtn.disabled = false;
+      document.getElementById('oil_progress_wrap').style.display = 'none'; return;
+    }
+    if (!r.ok) { const j = await r.json().catch(()=>({})); st.style.color='#e57';
+      st.textContent = '⚠ ' + (j.error || r.status); btn.disabled = false; if (pbtn) pbtn.disabled = false;
+      document.getElementById('oil_progress_wrap').style.display = 'none'; return; }
+    document.getElementById('oil_abort_btn').style.display = 'inline-block';
+    _pollOil();
+  } catch (e) { st.style.color='#e57'; st.textContent = 'Fehler: ' + e.message; btn.disabled = false;
+    if (pbtn) pbtn.disabled = false; document.getElementById('oil_progress_wrap').style.display = 'none'; }
+}
+
+function _renderOilPreview(res) {
+  const box = document.getElementById('oil_results');
+  const st = document.getElementById('oil_status');
+  st.style.color = '#6c6';
+  st.textContent = '✓ Vorschau — die 🔴 Linien zeigen die Strahlrichtung (noch kein Fluid berechnet).';
+  const cfg = res.config || {};
+  const bits = [];
+  if (cfg.view_mode) bits.push(cfg.view_mode === 'full' ? 'Gesamt' : 'Ausschnitt');
+  if (cfg.closeup) bits.push('Nahaufnahme');
+  if (cfg.orientation) bits.push(cfg.orientation === 'vertical' ? 'vertikal' : 'horizontal');
+  bits.push((cfg.nozzle_count ?? '–') + ' Düse(n)');
+  if (cfg.jet_tilt_deg) bits.push('Neigung ' + cfg.jet_tilt_deg + '°');
+  if (cfg.jet_yaw_deg) bits.push('Schwenk ' + cfg.jet_yaw_deg + '°');
+  if (cfg.nozzle_offset_deg) bits.push('Düsen-Versatz ' + cfg.nozzle_offset_deg + '°');
+  if (cfg.jet_cone_deg) bits.push('Sprühfächer ' + cfg.jet_cone_deg + '°');
+  if (cfg.view_down && cfg.view_down !== 'auto') bits.push('unten ' + cfg.view_down.toUpperCase());
+  if (cfg.material) bits.push('Materialien');
+  if (cfg.light_preset) bits.push('Licht: ' + cfg.light_preset);
+  const imgs = Array.isArray(res.images) && res.images.length ? res.images
+             : (res.image ? [res.image] : []);
+  const turn = imgs.length > 1;
+  let h = '<div class="e3-card"><div class="section-title">🔍 Vorschau — Strahlrichtung (ohne Bake)</div>'
+        + `<div style="font-size:.82rem;color:#9aa;margin-bottom:8px">${escHtml(bits.join(' · '))}</div>`;
+  if (imgs.length) {
+    const cursor = turn ? 'grab' : 'default';
+    h += `<img id="oil_pv_img" src="data:image/png;base64,${imgs[0]}" `
+       + `style="max-width:100%;border-radius:6px;cursor:${cursor};user-select:none;-webkit-user-drag:none">`;
+  }
+  if (turn)
+    h += '<div style="margin-top:6px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+       + `<span style="font-size:.74rem;color:#889">🔄 Ziehen zum Drehen</span>`
+       + `<input id="oil_pv_slider" type="range" min="0" max="${imgs.length-1}" value="0" style="flex:1;min-width:120px">`
+       + `<button type="button" onclick="_oilLockCamera(${imgs.length})" `
+       + `style="width:auto;padding:4px 10px;font-size:.74rem">🔒 Diese Ansicht fürs Video übernehmen</button>`
+       + '</div><div id="oil_cam_lock_status" style="margin-top:4px;font-size:.74rem;color:#889"></div>';
+  h += '<div style="margin-top:8px;font-size:.74rem;color:#889">Die leuchtenden Linien markieren, '
+     + 'wohin jeder Ölstrahl zeigt. Das Koordinatensystem (X&nbsp;rot · Y&nbsp;grün · Z&nbsp;blau, '
+     + 'Z&nbsp;=&nbsp;Motorachse) zeigt die Lage. Passt die Richtung, unten die volle Simulation starten.</div>';
+  if (res.debug_log) h += `<div style="margin-top:4px;font-size:.7rem;color:#667">📄 Debug-Log `
+     + `(alle Einstellungen, bei Rückfragen mitschicken): <code>${escHtml(res.debug_log)}</code></div>`;
+  h += '</div>';
+  box.innerHTML = h; box.style.display = 'block';
+  // Eine neue Vorschau invalidiert einen zuvor fixierten Kamera-Winkel (Index↔Winkel-Zuordnung
+  // gilt nur für DIESE Drehteller-Bilderserie).
+  window._oilCamLockDeg = null;
+  if (turn) _oilInitTurntable(imgs);
+}
+
+// Kamera-Fixwinkel: die im Drehteller gewählte Position wird 1:1 im echten Bake-Video
+// wiederverwendet (dieselbe Rotationsformel wie der Drehteller: 360°·index/Anzahl), statt die
+// Standard-3/4-Ansicht neu zu berechnen.
+function _oilLockCamera(n) {
+  const sld = document.getElementById('oil_pv_slider');
+  const idx = sld ? +sld.value : 0;
+  window._oilCamLockDeg = 360 * idx / n;
+  const st = document.getElementById('oil_cam_lock_status');
+  if (st) st.innerHTML = `🔒 Kamera für das Video fixiert bei ${window._oilCamLockDeg.toFixed(1)}° — `
+    + `<a href="javascript:void(0)" onclick="_oilUnlockCamera()">zurücksetzen</a>`;
+}
+function _oilUnlockCamera() {
+  window._oilCamLockDeg = null;
+  const st = document.getElementById('oil_cam_lock_status');
+  if (st) st.innerHTML = '';
+}
+
+// Drehteller: Ziehen (oder Slider) blättert durch die vorab gerenderten Kamera-Winkel → das
+// Standbild lässt sich frei drehen, ohne den teuren Bake. Reines Frontend über die base64-Liste.
+function _oilInitTurntable(imgs) {
+  const img = document.getElementById('oil_pv_img');
+  const sld = document.getElementById('oil_pv_slider');
+  if (!img) return;
+  const n = imgs.length;
+  let idx = 0;
+  const show = i => { idx = ((i % n) + n) % n; img.src = 'data:image/png;base64,' + imgs[idx];
+                      if (sld) sld.value = idx; };
+  if (sld) sld.oninput = () => show(+sld.value);
+  let dragging = false, x0 = 0, i0 = 0;
+  const perImg = 12;  // Pixel Ziehweg pro Winkelschritt
+  const down = e => { dragging = true; x0 = (e.touches ? e.touches[0].clientX : e.clientX); i0 = idx;
+                      img.style.cursor = 'grabbing'; e.preventDefault(); };
+  const move = e => { if (!dragging) return;
+                      const x = (e.touches ? e.touches[0].clientX : e.clientX);
+                      show(i0 + Math.round((x - x0) / perImg)); e.preventDefault(); };
+  const up = () => { dragging = false; img.style.cursor = 'grab'; };
+  img.addEventListener('mousedown', down); window.addEventListener('mousemove', move);
+  window.addEventListener('mouseup', up);
+  img.addEventListener('touchstart', down, {passive:false});
+  img.addEventListener('touchmove', move, {passive:false});
+  img.addEventListener('touchend', up);
+}
+
+async function abortOilspray() {
+  const b = document.getElementById('oil_abort_btn'); if (b) b.disabled = true;
+  const st = document.getElementById('oil_status');
+  if (st) { st.style.color = '#fb0'; st.textContent = '⛔ Breche ab… (Blender stoppen)'; }
+  try { await fetch('/oilspray/abort', { method: 'POST' }); } catch (e) {}
+  if (b) b.disabled = false;
+}
+
+async function _pollOil() {
+  const st = document.getElementById('oil_status');
+  const done = () => { document.getElementById('oil_btn').disabled = false;
+    const pb = document.getElementById('oil_preview_btn'); if (pb) pb.disabled = false;
+    document.getElementById('oil_abort_btn').style.display = 'none';
+    document.getElementById('oil_progress_wrap').style.display = 'none'; };
+  try {
+    const s = await fetch('/oilspray/status').then(x => x.json());
+    if (Array.isArray(s.log) && s.log.length) st.textContent = s.log.slice(-6).join('\n');
+    const pw = document.getElementById('oil_progress'); if (pw) pw.style.width = (s.progress || 0) + '%';
+    if (s.status === 'done' || s.status === 'aborted') {
+      done();
+      if (s.result && s.result.preview) _renderOilPreview(s.result);
+      else if (s.result) _renderOil(s.result);
+      if (s.status === 'aborted') { st.style.color = '#fb0';
+        st.textContent = '⛔ Abgebrochen. Neustart jederzeit möglich.'; }
+      return;
+    }
+    if (s.status === 'error') { st.style.color='#e57'; st.textContent = '⚠ ' + (s.error || 'Fehlgeschlagen'); done(); return; }
+  } catch (e) {}
+  setTimeout(_pollOil, 1500);
+}
+
+function _renderOil(res) {
+  const box = document.getElementById('oil_results');
+  const st = document.getElementById('oil_status');
+  if (!res) { return; }
+  const m = res.metrics || {}, cfg = res.config || {}, imgs = res.images || {};
+  st.style.color = '#6c6';
+  st.textContent = '✓ Spritzöl-Simulation fertig — im Projekt gespeichert (📼 jederzeit wieder ladbar).';
+  const pid = res.project_id || (window._activeProject && window._activeProject.id) || 'current';
+  const f1 = v => (v == null ? '–' : (+v).toFixed(1));
+  const vsrc = res.video_src
+    ? (res.video_src + (res.video_src.indexOf('?') < 0 ? '?' : '&') + 't=' + Date.now())
+    : `/project/${encodeURIComponent(pid)}/video/oil?t=${Date.now()}`;
+  let h = '<div class="e3-card"><div class="section-title">💧 Ergebnis — Spritzöl-Kühlung (qualitativ)</div>';
+  if (res.video)
+    h += `<div id="oil_vwrap" style="overflow:hidden;border-radius:6px;position:relative;touch-action:none"`
+       + ` title="Mausrad: Zoom · Ziehen: Verschieben (wenn gezoomt) · Doppelklick: Zurücksetzen">`
+       + `<video id="oil_video" controls loop autoplay muted playsinline`
+       + ` style="max-width:100%;display:block;transform-origin:center center"`
+       + ` src="${vsrc}"></video></div>`
+       + `<div style="display:flex;gap:6px;align-items:center;margin-top:6px;font-size:.78rem;color:#9aa">`
+       + `<button onclick="_oilZoom(1/1.3)" style="width:auto;padding:2px 10px">🔍−</button>`
+       + `<span id="oil_zoom_lbl" style="min-width:44px;text-align:center">100%</span>`
+       + `<button onclick="_oilZoom(1.3)" style="width:auto;padding:2px 10px">🔍+</button>`
+       + `<button onclick="_oilZoomReset()" style="width:auto;padding:2px 10px">⟲ Reset</button>`
+       + `<span>Mausrad zoomt · gezoomtes Bild mit der Maus verschieben</span></div>`;
+  h += '<div style="display:flex;gap:20px;flex-wrap:wrap;margin-top:10px;font-size:.84rem">'
+     + `<div><b>Benetzung (Spitze)</b><br>${f1(m.wetted_pct_peak)} %</div>`
+     + `<div><b>Benetzung (Mittel)</b><br>${f1(m.wetted_pct_mean)} %</div>`
+     + `<div><b>Tropfen/Fragmente (max)</b><br>${m.droplets_peak ?? '–'}</div>`
+     + `<div><b>Spritzring</b><br>${cfg.pressure_bar ?? '–'} bar · ${cfg.nozzle_count ?? '–'} Düsen`
+     + `${cfg.jet_speed_mps ? ' · '+cfg.jet_speed_mps+' m/s' : ''}</div>`
+     + `<div><b>Auflösung</b><br>${cfg.resolution} · ${cfg.frames} Frames</div>`
+     + (cfg.slowmo > 1 ? `<div><b>Zeitlupe</b><br>${cfg.slowmo}×</div>` : '')
+     + (cfg.winding_full ? `<div><b>Wickelkopf</b><br>komplett (alle Nuten)</div>` : '')
+     + (cfg.hidden_pins && cfg.hidden_pins.length ? `<div><b>Ausgeblendete Hairpins</b><br>${cfg.hidden_pins.length}</div>` : '')
+     + (cfg.camera_angle_deg != null ? `<div><b>Kamera</b><br>fixiert bei ${(+cfg.camera_angle_deg).toFixed(1)}°</div>` : '')
+     + (cfg.light_preset ? `<div><b>Beleuchtung</b><br>${escHtml(cfg.light_preset)}</div>` : '')
+     + '</div>'
+     + `<div style="margin-top:8px;font-size:.72rem;color:#889">${escHtml(res.note || '')}</div>`
+     + (res.debug_log ? `<div style="margin-top:4px;font-size:.7rem;color:#667">📄 Debug-Log `
+        + `(alle Einstellungen, bei Rückfragen mitschicken): <code>${escHtml(res.debug_log)}</code></div>` : '')
+     + '</div>';
+  const charts = [['oil_wetting','Benetzung über die Zeit (Proxy)'],
+                  ['oil_droplets','Tröpfchenbildung / Fragmentierung über die Zeit'],
+                  ['oil_coverage','Benetzungs-Heatmap (Abdeckung je Fläche)']];
+  for (const [k, lbl] of charts) if (imgs[k])
+    h += `<div class="e3-card"><div class="section-title">${lbl}</div>`
+       + `<img src="data:image/png;base64,${imgs[k]}" style="max-width:100%;border-radius:6px"></div>`;
+  box.innerHTML = h; box.style.display = 'block';
+  _oilInitZoom();
+  refreshOilVariants();
+}
+
+// ── Gespeicherte Öl-Varianten (jeder Lauf wird automatisch als eigene Variante abgelegt) ──
+async function refreshOilVariants() {
+  const el = document.getElementById('oil_variants_list');
+  if (!el) return;
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  try {
+    const list = await fetch(`/project/${encodeURIComponent(pid)}/oilspray/saved`).then(x => x.json());
+    if (!Array.isArray(list) || !list.length) {
+      el.innerHTML = '<span style="color:#889">— noch keine gespeicherten Läufe —</span>'; return; }
+    let h = '<div style="display:flex;flex-direction:column;gap:6px">';
+    for (const v of list) {
+      const bits = [];
+      if (v.view_mode) bits.push(v.view_mode === 'full' ? 'Gesamt' : 'Ausschnitt');
+      if (v.closeup) bits.push('Nahaufnahme');
+      if (v.orientation) bits.push(v.orientation === 'vertical' ? 'vertikal' : 'horizontal');
+      if (v.slowmo > 1) bits.push(v.slowmo + '×');
+      if (v.resolution) bits.push('RES ' + v.resolution);
+      if (v.frames) bits.push(v.frames + ' Fr.');
+      if (v.wetted_pct_mean != null) bits.push('Benetz. ⌀ ' + (+v.wetted_pct_mean).toFixed(1) + '%');
+      h += `<div style="display:flex;gap:8px;align-items:center;background:#1c2024;border:1px solid #333;`
+         + `border-radius:5px;padding:6px 9px">`
+         + `<span style="flex:1"><b>${escHtml(v.timestamp || v.id)}</b>`
+         + `<span style="color:#889;font-size:.9em"> — ${escHtml(bits.join(' · '))}</span>`
+         + `${v.video ? '' : ' <span style="color:#c85">(kein Video)</span>'}</span>`
+         + `<button onclick="loadOilVariant('${encodeURIComponent(v.id)}')" style="width:auto;padding:3px 10px">📼 Ansehen</button>`
+         + `<button onclick="deleteOilVariant('${encodeURIComponent(v.id)}')" style="width:auto;padding:3px 9px;background:#7a3030">🗑</button>`
+         + `</div>`;
+    }
+    el.innerHTML = h + '</div>';
+  } catch (e) {
+    el.innerHTML = '<span style="color:#c66">⚠ Varianten-Liste nicht ladbar.</span>';
+  }
+}
+
+async function loadOilVariant(rid) {
+  const st = document.getElementById('oil_status');
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  try {
+    const res = await fetch(`/project/${encodeURIComponent(pid)}/oilspray/saved/${rid}`).then(x => x.json());
+    if (res.error) { if (st) { st.style.color = '#e57'; st.textContent = '⚠ ' + res.error; } return; }
+    _renderOil(res);
+    if (st) { st.style.color = '#6c6'; st.textContent = `📼 Variante ${res.timestamp || rid} geladen.`; }
+  } catch (e) { if (st) { st.style.color = '#e57'; st.textContent = '⚠ ' + e; } }
+}
+
+async function deleteOilVariant(rid) {
+  if (!confirm('Diese gespeicherte Variante wirklich löschen?')) return;
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  try {
+    await fetch(`/project/${encodeURIComponent(pid)}/oilspray/saved/${rid}/delete`, { method: 'POST' });
+  } catch (e) {}
+  refreshOilVariants();
+}
+
+// Zoom/Pan für das Spritzöl-Video (CSS-Transform): Mausrad zoomt (auch übers Video),
+// Ziehen verschiebt (nur wenn gezoomt, damit die Video-Controls bei 100 % normal bedienbar
+// bleiben), Doppelklick/⟲ setzt zurück. Bis 8× — reine Frontend-Lupe, kein Re-Render.
+function _oilInitZoom() {
+  const wrap = document.getElementById('oil_vwrap');
+  const vid = document.getElementById('oil_video');
+  if (!wrap || !vid) return;
+  let s = 1, tx = 0, ty = 0, drag = null;
+  const apply = () => {
+    vid.style.transform = `translate(${tx}px,${ty}px) scale(${s})`;
+    const l = document.getElementById('oil_zoom_lbl');
+    if (l) l.textContent = Math.round(s * 100) + '%';
+    wrap.style.cursor = s > 1 ? 'grab' : '';
+  };
+  window._oilZoom = f => { s = Math.min(8, Math.max(1, s * f)); if (s === 1) { tx = ty = 0; } apply(); };
+  window._oilZoomReset = () => { s = 1; tx = ty = 0; apply(); };
+  wrap.addEventListener('wheel', e => { e.preventDefault(); _oilZoom(e.deltaY < 0 ? 1.2 : 1 / 1.2); },
+                        { passive: false });
+  wrap.addEventListener('pointerdown', e => {
+    if (s === 1) return;                      // bei 100 % Video-Controls nicht blockieren
+    drag = { x: e.clientX - tx, y: e.clientY - ty };
+    wrap.setPointerCapture(e.pointerId); wrap.style.cursor = 'grabbing'; e.preventDefault();
+  });
+  wrap.addEventListener('pointermove', e => {
+    if (drag) { tx = e.clientX - drag.x; ty = e.clientY - drag.y; apply(); }
+  });
+  const end = () => { drag = null; wrap.style.cursor = s > 1 ? 'grab' : ''; };
+  wrap.addEventListener('pointerup', end);
+  wrap.addEventListener('pointercancel', end);
+  wrap.addEventListener('dblclick', () => _oilZoomReset());
+  apply();
+}
+
+// Gespeicherten Spritzöl-Lauf des aktiven Projekts laden (Speicherfunktion des 💧-Tabs).
+// explicit=true → vom Knopf (mit Fehlermeldung); false → stilles Auto-Laden beim Tab-Öffnen.
+async function loadOilSaved(explicit) {
+  const st = document.getElementById('oil_status');
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  try {
+    const r = await fetch(`/project/${encodeURIComponent(pid)}/oilspray`);
+    if (!r.ok) {
+      if (explicit) { st.style.color = '#fb0';
+        st.textContent = (await r.json().catch(() => ({}))).error
+          || '⚠ Kein gespeicherter Spritzöl-Lauf im aktiven Projekt.'; }
+      return false;
+    }
+    const res = await r.json();
+    _renderOil(res);
+    st.style.color = '#6c6';
+    st.textContent = `📼 Gespeicherter Spritzöl-Lauf geladen (Projekt ${res.project_id || pid}).`;
+    return true;
+  } catch (e) {
+    if (explicit) { st.style.color = '#e57'; st.textContent = '⚠ ' + e; }
+    return false;
+  }
+}
+
+// ── 🧪 Spray-Test-Tab (iteratives Spray-Tuning auf dem Prüfstand) ─────────────
+// Runden-Store liegt SERVER-seitig unter ~/cae_projekte/_spraytest (projektunabhängig).
+// window._stRound = die aktuell angezeigte Runde (round.json-Inhalt).
+window._stRound = null;
+
+function _stFmtParams(p) {
+  return `${(+p.pressure_bar).toFixed(1)} bar · ${Math.round(+p.jet_cone_deg)}° · ` +
+         `σ ${(+p.surface_tension).toFixed(4)} · ν ${(+p.viscosity).toFixed(4)} · ` +
+         `Ø ${(+p.nozzle_d_mm).toFixed(1)} mm`;
+}
+
+async function stRefresh() {
+  try {
+    const rounds = await (await fetch('/spraytest/rounds')).json();
+    const sel = document.getElementById('st_round_sel');
+    if (sel) {
+      const cur = window._stRound ? window._stRound.rid : '';
+      sel.innerHTML = rounds.length
+        ? rounds.map(r => `<option value="${r.rid}" ${r.rid === cur ? 'selected' : ''}>` +
+            `Runde ${r.round_no} — ${r.ts} (${r.n_variants} Varianten` +
+            `${r.aborted ? ', abgebrochen' : ''})</option>`).join('')
+        : '<option value="">— noch keine Runde —</option>';
+    }
+    // Beim Tab-Öffnen die neueste Runde still anzeigen (wenn nichts läuft/angezeigt wird)
+    if (!window._stRound && rounds.length && !document.getElementById('st_btn_start').disabled)
+      stLoadRound(rounds[0].rid);
+  } catch (e) {}
+}
+
+async function stLoadRound(rid) {
+  if (!rid) return;
+  try {
+    const r = await fetch(`/spraytest/round/${encodeURIComponent(rid)}`);
+    if (!r.ok) return;
+    stRenderRound(await r.json());
+  } catch (e) {}
+}
+
+function stRenderRound(round) {
+  window._stRound = round;
+  const card = document.getElementById('st_grid_card');
+  const grid = document.getElementById('st_grid');
+  const title = document.getElementById('st_grid_title');
+  if (!card || !grid) return;
+  card.style.display = '';
+  title.textContent = `Runde ${round.round_no} — ${round.ts}` +
+    ` (Qualität ${round.quality}${round.aborted ? ', abgebrochen — Teilrunde' : ''})` +
+    ' · ⭐ die Besten markieren, dann „Nächste Runde"';
+  const marked = new Set(round.marked || []);
+  grid.innerHTML = (round.variants || []).map(v => {
+    const isM = marked.has(v.id);
+    const vsrc = `/spraytest/video/${encodeURIComponent(round.rid)}/${encodeURIComponent(v.id)}?t=${Date.now()}`;
+    const badge = v.source === 'parent'
+      ? `<span style="background:#2e5a7d;color:#cde;padding:1px 6px;border-radius:3px;font-size:.68rem">Elter${v.src_round ? ' (' + v.src_round.split('_')[0] + ')' : ''}</span>`
+      : '';
+    const body = v.ok
+      ? `<video muted loop autoplay playsinline src="${vsrc}"
+           style="width:100%;border-radius:4px;background:#000;display:block"></video>`
+      : `<div style="padding:22px 8px;text-align:center;color:#e57;font-size:.78rem;background:#1a1214;border-radius:4px">
+           ⚠ fehlgeschlagen<br><span style="color:#977">${(v.error || '').slice(0, 90)}</span></div>`;
+    return `<div style="border:2px solid ${isM ? '#e5b93a' : '#333'};border-radius:6px;padding:6px;background:#161a1e">
+      ${body}
+      <div style="display:flex;align-items:center;gap:6px;margin-top:5px">
+        <button onclick="stToggleMark('${v.id}')" title="als Elter für die nächste Runde markieren"
+                style="width:auto;padding:3px 9px;font-size:.85rem;background:${isM ? '#8a6d1a' : '#333'}">⭐</button>
+        <span style="font-size:.72rem;color:#9ab;flex:1">${_stFmtParams(v.params)}</span>
+        ${badge}
+      </div>
+      <div style="display:flex;gap:6px;margin-top:5px;align-items:center">
+        <button onclick='stAdopt(${JSON.stringify(v.params)})' title="Parameter in den 💧-Spritzöl-Tab übernehmen"
+                style="width:auto;padding:3px 9px;font-size:.72rem;background:#2e7d4a">✔ Übernehmen</button>
+        ${v.droplets_peak != null ? `<span style="font-size:.7rem;color:#789">≈${v.droplets_peak} Fragmente max.</span>` : ''}
+      </div>
+    </div>`;
+  }).join('') || '<div style="color:#9aa;font-size:.8rem">— keine Varianten —</div>';
+}
+
+async function stToggleMark(vid) {
+  const round = window._stRound;
+  if (!round) return;
+  const marked = new Set(round.marked || []);
+  if (marked.has(vid)) marked.delete(vid); else marked.add(vid);
+  round.marked = [...marked];
+  stRenderRound(round);                      // sofortiges visuelles Feedback
+  try {
+    await fetch(`/spraytest/round/${encodeURIComponent(round.rid)}/marked`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ marked: round.marked }) });
+  } catch (e) {}
+}
+
+function stAdopt(params) {
+  const map = { pressure_bar: 'oil_pressure', jet_cone_deg: 'oil_jet_cone',
+                surface_tension: 'oil_surft', viscosity: 'oil_visc',
+                nozzle_d_mm: 'oil_nozzle_d' };
+  for (const [k, id] of Object.entries(map)) {
+    const el = document.getElementById(id);
+    if (el && params[k] != null) el.value = params[k];
+  }
+  const st = document.getElementById('st_status');
+  if (st) { st.style.color = '#6c6';
+    st.textContent = `✔ Übernommen in den 💧-Spritzöl-Tab: ${_stFmtParams(params)}`; }
+}
+
+async function stStartRound(first) {
+  const st = document.getElementById('st_status');
+  const spec = {
+    n: Math.max(4, Math.min(12, parseInt(document.getElementById('st_n').value) || 10)),
+    quality: document.getElementById('st_quality').value || 'normal',
+    round_no: 1, parents: []
+  };
+  if (!first) {
+    const round = window._stRound;
+    const marked = new Set((round && round.marked) || []);
+    if (!round || !marked.size) {
+      st.style.color = '#fb0';
+      st.textContent = '⚠ Erst mindestens eine Kachel mit ⭐ markieren — die nächste Runde sampelt UM die Markierten.';
+      return;
+    }
+    spec.round_no = (round.round_no || 1) + 1;
+    spec.parents = (round.variants || []).filter(v => marked.has(v.id)).map(v => ({
+      params: v.params, src_round: round.rid, src_vid: v.id }));
+  }
+  try {
+    const r = await fetch('/spraytest', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+    if (r.status === 503) {
+      const j = await r.json().catch(() => ({}));
+      st.style.color = '#e57'; st.textContent = '⚠ ' + (j.error || 'Blender fehlt'); return;
+    }
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      st.style.color = '#fb0'; st.textContent = '⚠ ' + (j.error || ('HTTP ' + r.status)); return;
+    }
+    ['st_btn_start', 'st_btn_next'].forEach(id => document.getElementById(id).disabled = true);
+    document.getElementById('st_btn_abort').disabled = false;
+    document.getElementById('st_progress_wrap').style.display = '';
+    st.style.color = '#9aa';
+    st.textContent = `🧪 Runde ${spec.round_no} läuft (${spec.n} Varianten, sequenziell) …`;
+    _pollSt();
+  } catch (e) { st.style.color = '#e57'; st.textContent = '⚠ ' + e; }
+}
+
+async function _pollSt() {
+  const st = document.getElementById('st_status');
+  try {
+    const s = await (await fetch('/spraytest/status')).json();
+    st.style.color = '#9aa';
+    st.textContent = (s.log || []).slice(-6).join('\n');
+    document.getElementById('st_progress').style.width = (s.progress || 0) + '%';
+    if (s.status === 'running') { setTimeout(_pollSt, 1500); return; }
+    ['st_btn_start', 'st_btn_next'].forEach(id => document.getElementById(id).disabled = false);
+    document.getElementById('st_btn_abort').disabled = true;
+    document.getElementById('st_progress_wrap').style.display = 'none';
+    if (s.status === 'error') { st.style.color = '#e57'; st.textContent = '⚠ ' + (s.error || 'Fehler'); }
+    if (s.result) { stRenderRound(s.result); stRefresh(); }
+  } catch (e) { setTimeout(_pollSt, 3000); }
+}
+
+async function stAbort() {
+  try { await fetch('/spraytest/abort', { method: 'POST' }); } catch (e) {}
+}
+
+async function stDeleteRound() {
+  const round = window._stRound;
+  if (!round) return;
+  if (!confirm(`Runde ${round.round_no} (${round.rid}) wirklich löschen?`)) return;
+  try {
+    await fetch(`/spraytest/round/${encodeURIComponent(round.rid)}/delete`, { method: 'POST' });
+  } catch (e) {}
+  window._stRound = null;
+  document.getElementById('st_grid_card').style.display = 'none';
+  stRefresh();
 }
 
 async function _pollEm3d(isPreview) {

@@ -72,6 +72,15 @@ def run_freecad_script(code: str, timeout: int = 120) -> dict:
                 parsed["step_path"] = line[11:]
             elif line.startswith("STEP_FAIL:"):
                 parsed["step_error"] = line[10:]
+            elif line.startswith("STL_SAVED:"):
+                parsed["stl_path"] = line[10:]
+            elif line.startswith("STL_PARTS:"):
+                try:
+                    parsed["stl_parts"] = json.loads(line[10:])
+                except json.JSONDecodeError:
+                    pass
+            elif line.startswith("STL_FAIL:"):
+                parsed["stl_error"] = line[10:]
             elif line.startswith("FRD_FILE:"):
                 parsed["frd_file"] = line[9:]
             elif line.startswith("FEM_RESULT:"):

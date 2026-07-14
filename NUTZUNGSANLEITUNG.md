@@ -47,7 +47,7 @@ unten ein **Footer** mit drei Workflow-Buttons und der Fortschrittsanzeige.
 
 | Element | Funktion |
 |---|---|
-| **Tabs** | ① Projekt · ② Geometrie · ③ Betrieb & Material · ④ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · 🧲 3D-Feld · 📊 FEM-Ergebnisse · ⚖ Vergleich |
+| **Tabs** | ① Projekt · ② Geometrie · ③ Betrieb & Material · ④ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · 🧲 3D-Feld · 💧 Spritzöl-Kühlung · 📊 FEM-Ergebnisse · ⚖ Vergleich |
 | **Vorschau-Spalte** (rechts) | dreht den Motor live und zeigt das Feld; sichtbar auf den Eingabe-Tabs, ausgeblendet bei Projekt/Ergebnissen/Vergleich |
 | **⏸ Pause** (in der Vorschau) | stoppt/startet die Rotor-Drehung — von jedem Eingabe-Tab aus erreichbar |
 | **Vertikaler Splitter** | Trennlinie zwischen Eingaben und Vorschau ziehen → Vorschaubreite ändern (Canvas skaliert live mit) |
@@ -659,6 +659,94 @@ Der Footer enthält drei Workflow-Buttons:
 Der Fortschritt (Balken + Log) wird im Footer angezeigt. Footer hochziehen (am
 horizontalen Splitter) für das vollständige Log. Nach Abschluss springt die Ansicht
 automatisch auf **FEM-Ergebnisse**.
+
+---
+
+### Tab 💧 Spritzöl-Kühlung (experimentell, Blender/Mantaflow)
+
+Untersucht **qualitativ** die Fluidkühlung eines **Motor-Ausschnitts** mit Spritzöl.
+Modelliert ist ein **Kühlring mit Düsen am Ende der Wickelköpfe**: aus seinen Bohrungen
+spritzt Öl unter **Druck** **Richtung Drehachse** auf die Leiter, wo es **zerstäubt,
+benetzt und abtropft**. Optional wird ein **Cutaway des Motors** (Welle · Rotor mit
+Magneten · Stator) unter den Wickelköpfen mitgezeigt — gerechnet mit Blenders
+Mantaflow-FLIP-Löser auf der echten generierten Geometrie.
+
+> **⚠ Ehrliche Einordnung:** Das ist eine **visuelle/qualitative** Studie, **keine**
+> validierte Kühlrechnung. Es entsteht **kein Temperaturfeld und kein Wärmeübergangs­
+> koeffizient**. Die Kennwerte (benetzte Fläche %, Abdeckungs-Heatmap, Tropfenzahl) sind
+> **geometrische Benetzungs-Proxys** — Indikatoren, wo das Öl hintrifft und wo es abtropft,
+> nicht *wie stark* es kühlt. Für echte Kühlleistung bräuchte es Mehrphasen-CFD (OpenFOAM).
+
+**Bedienung:** Geometrie & Ansicht (Anzahl Nuten; **Ansicht** *Ausschnitt* = schmaler Keil oder
+*Gesamt* = voller 360°-Kern; **👁 Anzeigen** = welche Bauteile gebaut werden — Wickelkopf/Rotor/
+Stator/Welle/Magnete; **✂ Schneiden** = welche davon aufgeschnitten werden, der Rest bleibt ganz);
+**Darstellung & Einbaulage** (**Einbaulage** horizontal/vertikal, **Nahaufnahme** an/aus,
+**🐢 Zeitlupe** bis **500×**); Kühlring (**Öldruck** in bar, Anzahl Düsen, Bohrungs-Ø, Abstand
+Ring→Wickelkopf, Ring-Rohr-Ø); **🎯 Strahlrichtung** (**axiale Neigung** + **tangentialer Schwenk**
+in Grad, **🔴 Ziellinie einzeichnen**); Öl-Stoffwerte (Viskosität/Oberflächenspannung);
+Domain-Auflösung + Framezahl + Render-Engine + **⚡ Schnelle Darstellung** (grobe Vorschau) →
+**💧 Spritzöl-Simulation starten**.
+Über **👁 Anzeigen** blendet man Bauteile ganz aus (z. B. nur Wickelkopf + Stator), über
+**✂ Schneiden** legt man fest, welche davon aufgeschnitten werden: im *Ausschnitt*-Modus wird ein
+geschnittenes Bauteil auf das schmale Tortenstück reduziert, im *Gesamt*-Modus wird aus dem vollen
+Ring ein Tortenstück **herausgeschnitten** (klassischer Cutaway); nicht geschnittene, nur angezeigte
+Bauteile bleiben als voller Ring stehen. (Der Wickelkopf wird aus Rechenzeitgründen immer nur über
+den Ausschnitt gebaut.)
+Die **🎯 Strahlrichtung** neigt/schwenkt den Strahl gegenüber der automatischen (immer auf einen
+echten Leiter gerichteten) Grundrichtung; die **🔴 Ziellinie** zeichnet je Düse eine leuchtende Linie
+ins Video, sodass sofort sichtbar ist, wohin der Strahl zeigt und ob er die Wickelköpfe trifft.
+Mit **🔍 Vorschau (Strahllinien, ohne Bake)** lässt sich das **vorab in einer Zwischenansicht** prüfen:
+es wird in wenigen Sekunden **ein Standbild** aus Geometrie, Düsen und den 🔴 Strahllinien gerendert —
+**ohne** die aufwändige Fluidberechnung. Passt die Richtung, startet man darunter den vollen Lauf.
+Über das Feld **🔄 Drehteller** (1 / 12 / 24 / 36 Winkel) neben dem Knopf wird die Vorschau aus
+mehreren Kamerawinkeln rund um die Motorachse gerendert; das Bild lässt sich dann per **Ziehen mit der
+Maus** (oder dem Schieberegler) **frei drehen** — so kann man das gerenderte Ergebnis von allen Seiten
+betrachten. (Mehr Winkel = etwas längere Render-Zeit. Das fertige Fluid-Video bleibt bei fester Kamera.)
+
+In der Karte **🎨 Ansicht & Darstellung** stellt man ein, **welche Achse nach unten zeigt** (Blickrichtung —
+die Schwerkraft/Physik steuert weiterhin die Einbaulage), ob das **🧭 Koordinatensystem** (X rot · Y grün ·
+Z blau, Z = Motorachse; in der Vorschau immer eingeblendet) auch im Video erscheint, ob die **Vorschau mit
+Materialien** (Kupfer-Leiter, Stahl-Ring, transluzentes Öl) statt flach gerendert wird, ob die **Kanten
+geglättet** werden (Shade Smooth — die Facetten der Netzdarstellung verschwinden) und wie **transparent das
+Öl** dargestellt wird. Materialien + Koordinatensystem machen die Drehteller-Rotation deutlich besser erkennbar.
+Die **Einbaulage** bestimmt die Schwerkraftrichtung **und die Ansicht**: **horizontal** (Motorachse
+waagerecht, übliche Einbaulage) lässt das Öl **seitlich** über die Wickelköpfe ablaufen; **vertikal**
+stellt die Motorachse aufrecht — das Öl läuft **entlang der Achse** nach unten ab (deutlich sichtbar
+anders).
+Mit **Nahaufnahme** wird **ein** Strahl aus **einer** Düse im Detail gezeigt, wie er **auf einen
+Leiter** trifft und zerstäubt (statt der Übersicht mit allen Düsen); jede Düse wird dabei automatisch
+**auf einen echten Wickelkopf-Leiter ausgerichtet** (Ziel knapp unter der Kronenspitze), sodass der
+Strahl sichtbar auf dem Kupfer landet.
+Die **🐢 Zeitlupe** (5×–500×) streckt die Simulationszeit pro Frame — wie eine Hochgeschwindigkeits­
+kamera zeigt das Video dann Strahlflug, Aufprall und Tröpfchenbildung im Detail (in Echtzeit quert
+der ~21-m/s-Strahl den Spalt in 1–2 Frames). Bei starker Zeitlupe ggf. mehr Frames wählen, sonst ist
+der gezeigte reale Zeitausschnitt sehr kurz.
+Die **⚡ Schnelle Darstellung** schaltet auf ein flaches, schnelles Rendern (weniger Substeps, keine
+Sekundärpartikel) — ideal, um Richtung/Auflösung/Ausschnitt auszuprobieren, bevor man einen feinen
+Lauf startet (gröber, weniger Tröpfchen-Detail).
+Die **Strahlgeschwindigkeit folgt aus dem Druck** (3 bar ≈ 21 m/s). Nach dem Lauf erscheinen ein
+**Video** (Öl spritzt aus dem Ring auf die Leiter und zerstäubt), eine **Benetzungs-Heatmap** und
+Zeitverläufe von Benetzung und Tropfenzahl. Der Lauf lässt sich **abbrechen**.
+**Speichern & Wiederladen:** Jeder fertige Lauf wird **automatisch als eigene Variante im aktiven
+Projekt gespeichert** (Video, Kennwerte, Charts) — ein neuer Lauf **überschreibt die vorherigen nicht**.
+Unter **„🎞 Gespeicherte Läufe (Varianten)"** sind alle Läufe gelistet und lassen sich ohne Neurechnen
+**ansehen** (📼) oder **löschen** (🗑). **„📼 Gespeicherten Lauf laden"** holt den zuletzt gespeicherten
+Lauf zurück; beim Öffnen des Tabs wird er automatisch angezeigt.
+**Zoomen im Video:** Mausrad über dem Video zoomt (bis 8×), gezoomtes Bild mit der Maus verschieben,
+Doppelklick oder ⟲ setzt zurück (🔍±-Knöpfe unter dem Video). Bei 100 % funktionieren die normalen
+Video-Bedienelemente (Play/Pause/Spulen) wie gewohnt.
+
+> **Auflösung & feine Düsen:** Eine 1-mm-Bohrung ist bei grober Auflösung kleiner als eine
+> Netz-Zelle. Für einen sauber aufgelösten Strahl die Domain-Auflösung hoch genug wählen
+> (72–128; für einen wirklich scharfen Strahl **192–512**) — die Kosten wachsen aber
+> ~kubisch mit der Auflösung. Hohe Auflösungen am besten mit wenigen Frames (10–30) und
+> Zeitlupe kombinieren.
+
+**Rechenaufwand:** Der FLIP-**Bake läuft auf der CPU** (die GPU beschleunigt nur das
+Rendern) — Auflösung × Frames ist der Haupt-Kostentreiber; ein Ausschnitt hält es im
+Minuten-Bereich. **Voraussetzung:** ein **portabler blender.org-Build** (der Ubuntu-`apt`-
+Build stürzt bei der Fluidsimulation headless ab — siehe README/Voraussetzungen); fehlt er,
+meldet der Server einen Installationshinweis.
 
 ---
 
