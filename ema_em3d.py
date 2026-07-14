@@ -204,6 +204,46 @@ def slot_rects(geom: dict) -> list:
     return out
 
 
+def _assign_pieces(target_pieces, avail, dist_frac=0.5, mlo=0.3, mhi=2.6, single=False):
+    """Fragment-Volumina den erwarteten Bauteilen zuordnen (COM-Distanz + Massengate).
+
+    Die kleinen Taschen-Kappen brauchen lockerere Toleranzen (dist_frac/mlo/mhi), weil sie
+    beim Fragmentieren am Magnet/Rotorrand beschnitten werden. Erwartetes Volumen: für die
+    dünnen Taschen-Luftschalen die explizite Schalenmasse (``vol_pred`` ≈ Tasche − Magnet),
+    sonst die volle Box — sonst überschätzt die Box die 0,1–0,3-mm-Schale massiv und das
+    Massengate würde die Tasche verwerfen.
+
+    ``single=True`` (für die MAGNETE): pro Stück wird nur das EINE Volumen behalten, dessen
+    Masse der Vorhersage am nächsten kommt. Grund: Magnet-Prisma UND seine obround-Luft-
+    Tasche haben denselben Schwerpunkt, und bei KURZEN Magneten (z. B. PMa-SynRM-Außenlage,
+    5×3 mm) passiert die Taschen-Schale (~0,6·Magnetmasse) das lockere Massengate — dann
+    wurde die LUFT-Schale mit-magnetisiert und die Tasche nie als Luft getaggt (Feldlinien
+    liefen an den Magneten vorbei). Das freigegebene Schalen-Volumen fängt danach die
+    Kappen-Zuordnung (``cap_pieces``/``vol_pred``) als Luft auf."""
+    assign = {i: [] for i in range(len(target_pieces))}
+    pred = [p.get("vol_pred", p["length"] * p["thick"] * (p["z1"] - p["z0"]))
+            for p in target_pieces]
+    cand = {i: [] for i in range(len(target_pieces))}
+    for (v, gx, gy, gz, vmass) in avail:
+        best, bd = None, 1e18
+        for i, p in enumerate(target_pieces):
+            zc = 0.5 * (p["z0"] + p["z1"])
+            d = math.hypot(gx - p["cx"], gy - p["cy"]) + abs(gz - zc)
+            if d < bd:
+                bd, best = d, i
+        if (best is not None
+                and bd < dist_frac * max(target_pieces[best]["length"], target_pieces[best]["thick"])
+                and mlo * pred[best] < vmass < mhi * pred[best]):
+            cand[best].append((v, vmass))
+    taken = set()
+    for i, lst in cand.items():
+        if single and len(lst) > 1:
+            lst = [min(lst, key=lambda t: abs(t[1] - pred[i]))]
+        for v, _m in lst:
+            assign[i].append(v); taken.add(v)
+    return assign, taken
+
+
 def _magnet_pieces(rects: list, L: float, opts: dict):
     """Zerlegt jeden Magneten in die zu bauenden 3D-Stücke.
 
@@ -568,28 +608,7 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         # ── Magnete + Barrieren PER GEOMETRIE identifizieren (vor dem Vernetzen, für
         #    die zonale Verfeinerung brauchen wir ihre Oberflächen). Match über exakten
         #    Volumenschwerpunkt + Massengate (Eisen-Bulk viel größer, Slivers kleiner).
-        def _assign(target_pieces, avail, dist_frac=0.5, mlo=0.3, mhi=2.6):
-            # Die kleinen Taschen-Kappen brauchen lockerere Toleranzen (dist_frac/mlo/mhi),
-            # weil sie beim Fragmentieren am Magnet/Rotorrand beschnitten werden.
-            assign = {i: [] for i in range(len(target_pieces))}
-            # Erwartetes Volumen: für die dünnen Taschen-Luftschalen die explizite Schalenmasse
-            # (vol_pred, ≈ Tasche − Magnet), sonst die volle Box — sonst überschätzt die Box die
-            # 0,1–0,3-mm-Schale massiv und das Massengate würde die Tasche verwerfen.
-            pred = [p.get("vol_pred", p["length"] * p["thick"] * (p["z1"] - p["z0"]))
-                    for p in target_pieces]
-            taken = set()
-            for (v, gx, gy, gz, vmass) in avail:
-                best, bd = None, 1e18
-                for i, p in enumerate(target_pieces):
-                    zc = 0.5 * (p["z0"] + p["z1"])
-                    d = math.hypot(gx - p["cx"], gy - p["cy"]) + abs(gz - zc)
-                    if d < bd:
-                        bd, best = d, i
-                if (best is not None
-                        and bd < dist_frac * max(target_pieces[best]["length"], target_pieces[best]["thick"])
-                        and mlo * pred[best] < vmass < mhi * pred[best]):
-                    assign[best].append(v); taken.add(v)
-            return assign, taken
+        _assign = _assign_pieces                            # (Modul-Ebene, unit-testbar)
 
         vinfo = []
         for (_d, v) in gmsh.model.getEntities(3):
@@ -600,7 +619,7 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
                 gx = gy = gz = 1e9; vmass = 1e18
             vinfo.append((v, gx, gy, gz, vmass))
 
-        mag_assign, mag_taken = _assign(pieces, vinfo)
+        mag_assign, mag_taken = _assign(pieces, vinfo, single=True)
         bar_avail = [t for t in vinfo if t[0] not in mag_taken]
         bar_assign, bar_taken = _assign(bpieces, bar_avail)
         cap_avail = [t for t in vinfo if t[0] not in mag_taken and t[0] not in bar_taken]

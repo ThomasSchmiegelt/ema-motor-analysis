@@ -197,8 +197,31 @@ def test_streamlines_export():
     print(f"✓ streamlines: {poly.GetNumberOfLines()} Feldlinien, nur Bmag, UInt32/float32")
 
 
+def test_assign_pieces_single_keeps_magnet_not_pocket():
+    """PMa-SynRM-Regression: Magnet-Prisma und seine obround-Luft-Tasche haben denselben
+    Schwerpunkt; bei KURZEN Magneten (5×3 mm Außenlage) passiert die Taschen-Schale das
+    Massengate. single=True muss das EINE massen-nächste Volumen (den echten Magneten)
+    behalten und die Schale freigeben (→ wird danach als Luft-Kappe getaggt)."""
+    import ema_em3d as E
+    L = 40.0
+    piece = {"cx": 30.7, "cy": 4.0, "z0": 0.0, "z1": L, "length": 5.0, "thick": 3.0}
+    pred = 5.0 * 3.0 * L                                   # 600 mm³
+    ring_mass = 361.0                                      # obround − Magnet (~0.6·pred → im Gate!)
+    avail = [(101, 30.7, 4.0, L / 2, ring_mass),           # Taschen-Schale (gleicher COM)
+             (102, 30.7, 4.0, L / 2, pred)]                # echter Magnet
+    # Alte Logik (single=False): BEIDE landen im Magnet → die Luft-Schale wird magnetisiert
+    a0, _t0 = E._assign_pieces([piece], avail)
+    assert len(a0[0]) == 2, "Doku des alten Fehlers: beide Volumina passieren das Gate"
+    # Fix: single=True behält nur den massen-nächsten Kandidaten (den echten Magneten)
+    a1, t1 = E._assign_pieces([piece], avail, single=True)
+    assert a1[0] == [102], f"erwartet [102] (echter Magnet), ist {a1[0]}"
+    assert t1 == {102}, "die Schale muss frei bleiben (für die Kappen-Zuordnung als Luft)"
+    print("✓ _assign_pieces(single=True): kurzer Magnet behalten, Taschen-Schale freigegeben")
+
+
 def main():
     test_magnet_rects_count()
+    test_assign_pieces_single_keeps_magnet_not_pocket()
     test_mesh_tagging()
     test_skew_twists_magnets()
     test_sif_generation()
