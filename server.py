@@ -706,10 +706,88 @@ def spraytest_video(rid: str, vid: str):
     if not (_safe_name(rid) and _safe_name(vid)):
         return jsonify({"error": "ungültig"}), 403
     import ema_spraytest
-    mp4 = ema_spraytest.video_path(rid, vid)
+    beauty = str(request.args.get("beauty") or "") not in ("", "0", "false")
+    mp4 = ema_spraytest.video_path(rid, vid, beauty=beauty)
     if not mp4:
         return jsonify({"error": "Kein Video für diese Variante"}), 404
     return send_file(mp4, mimetype="video/mp4")
+
+
+@app.route("/spraytest/favorites", methods=["GET", "POST", "OPTIONS"])
+def spraytest_favorites():
+    """💾 Spray-Favoriten: GET = Liste, POST = {name, params, sim, src} speichern."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_spraytest
+    if request.method == "GET":
+        return jsonify(ema_spraytest.list_favorites())
+    fav = ema_spraytest.save_favorite(request.get_json(force=True) or {})
+    return jsonify({"status": "ok", "favorite": fav})
+
+
+@app.route("/spraytest/favorites/<fid>/delete", methods=["POST", "OPTIONS"])
+def spraytest_favorite_delete(fid: str):
+    if request.method == "OPTIONS":
+        return "", 200
+    if not _safe_name(fid):
+        return jsonify({"error": "ungültig"}), 403
+    import ema_spraytest
+    ok = ema_spraytest.delete_favorite(fid)
+    return jsonify({"status": "deleted" if ok else "missing"})
+
+
+@app.route("/spraytest/beauty", methods=["POST", "OPTIONS"])
+def spraytest_beauty():
+    """✨ Schönheits-Render: EINE Variante einer Runde hochauflösend neu backen
+    (Body {rid, vid, resolution?, frames?, slowmo?}); teilt _spraytest_state."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import blender_runner
+    if not blender_runner.BLENDER_OK:
+        return jsonify({"error": blender_runner.INSTALL_HINT, "need_install": True}), 503
+    if _spraytest_state["status"] == "running" or _oil_state["status"] == "running":
+        return jsonify({"error": "Es läuft bereits ein Blender-Job (Spritzöl/Spray-Test)"}), 409
+    data = request.get_json(force=True) or {}
+    rid, vid = str(data.get("rid") or ""), str(data.get("vid") or "")
+    if not (_safe_name(rid) and _safe_name(vid)):
+        return jsonify({"error": "ungültig"}), 403
+
+    _spraytest_abort["v"] = False
+    blender_runner.clear_abort()
+    _spraytest_state.update({"status": "running", "progress": 0, "log": [],
+                             "result": None, "error": None})
+
+    def _worker():
+        import ema_spraytest, traceback
+        def cb(msg, pct=None):
+            _spraytest_state["log"].append(msg)
+            if pct is not None:
+                _spraytest_state["progress"] = int(pct)
+        try:
+            res = ema_spraytest.run_beauty(rid, vid, opts=data, progress_cb=cb,
+                                           cancel_cb=lambda: _spraytest_abort["v"])
+            _spraytest_state["result"] = res
+            if res.get("aborted"):
+                _spraytest_state["status"] = "aborted"
+            elif res.get("ok"):
+                _spraytest_state["status"] = "done"
+            else:
+                _spraytest_state["error"] = res.get("error")
+                _spraytest_state["status"] = "error"
+            _spraytest_state["progress"] = 100
+        except Exception as e:
+            if _spraytest_abort["v"] or "abgebrochen" in str(e).lower():
+                _spraytest_state["log"].append("⛔ Abgebrochen.")
+                _spraytest_state["status"] = "aborted"
+                _spraytest_state["error"] = None
+            else:
+                _spraytest_state["error"] = str(e)
+                _spraytest_state["log"].append("⚠ " + str(e))
+                _spraytest_state["log"].append(traceback.format_exc()[:600])
+                _spraytest_state["status"] = "error"
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
 
 
 @app.route("/em3d/preview", methods=["POST", "OPTIONS"])

@@ -230,6 +230,107 @@ def test_slowmo_500_and_fast_and_jet():
     print("✓ Zeitlupe 500× + schnelle Darstellung + Strahlrichtung/Ziellinie verdrahtet")
 
 
+def test_housing_transparent_and_drain():
+    """Transparentes Voll-Ring-Gehäuse (Innen-Ø = Stator-Ø, Wand, Ringkanal-Ausbuchtung, Ablauf
+    unten): geschlossene Schale + optionale KOLLISIONSWAND (housing_collide, Standard an — Öl
+    wird am Glas gefangen, Domain bis zur Innenwand, Outflow an der Gehäuse-tiefsten Stelle);
+    run_oilspray/preview reichen stator_od_mm + housing + housing_collide + wall durch."""
+    import json as _json
+    s = OIL._blender_script()
+    # CFG-Konstanten + Bau-Block
+    assert 'CFG.get("housing"' in s and 'CFG.get("housing_wall_mm"' in s
+    assert 'CFG.get("housing_collide"' in s, "housing_collide-CFG fehlt"
+    assert 'CFG.get("stator_od_mm"' in s and "STATOR_OD" in s
+    assert "if HOUSING:" in s
+    assert 'MotorHousing' in s and "SOLIDIFY" in s, "Gehäuseschale fehlt/ist kein Solidify"
+    assert "end_fill_type='NGON'" in s, "Gehäuse-Deckel fehlen (offenes Rohr statt Dose)"
+    assert 'HousingBulge' in s, "Ringkanal-Ausbuchtung fehlt"
+    assert 'HousingDrain' in s, "sichtbarer Ablauf-Stutzen fehlt"
+    # Kollisionswand: Domain-Erweiterung + Effector am Gehäuse + Drain an der tiefsten Stelle
+    assert "_haus_col = HOUSING and HOUSING_COLLIDE" in s
+    assert "R_hous_in" in s, "Domain-Erweiterung bis zur Gehäuse-Innenwand fehlt"
+    assert "if _haus_col:" in s and "if _haus_col and HORIZONTAL:" in s, \
+        "Kollisions-Effector/Drain-Verlagerung fehlt"
+
+    # cfg-Passthrough über preview_oilspray (fake STL + Blender)
+    d = tempfile.mkdtemp(); seen = {}
+
+    def _fake_stl(geom, axial, workdir, section, cb=None, include_core=True,
+                  components=None, cut=None, view_mode="section",
+                  hidden_pins=None, winding_full=False):
+        p = os.path.join(workdir, "winding_head.stl")
+        os.makedirs(workdir, exist_ok=True); open(p, "w").write("solid\nendsolid\n")
+        return {"winding": p}, "ok"
+
+    def _fake_blender(code, argv=None, cwd=None, timeout=None, progress_cb=None):
+        seen["cfg"] = _json.load(open(argv[0]))
+        with open(seen["cfg"]["preview_png"], "wb") as f: f.write(b"\x89PNG")
+        return {"ok": True, "aborted": False, "stdout": "", "returncode": 0}
+
+    orig_stl, orig_bl = OIL._export_winding_stl, OIL.blender_runner.run_blender_script
+    try:
+        OIL._export_winding_stl = _fake_stl
+        OIL.blender_runner.run_blender_script = _fake_blender
+        out = OIL.preview_oilspray(
+            {"geom": dict(_GEOM, statorOD=300.0), "axial_len": 120.0,
+             "oil": {"housing": True, "housing_wall_mm": 4.0, "housing_collide": False}}, d)
+    finally:
+        OIL._export_winding_stl, OIL.blender_runner.run_blender_script = orig_stl, orig_bl
+    c = seen["cfg"]
+    assert abs(c["stator_od_mm"] - 300.0) < 1e-9, "Stator-Außen-Ø nicht durchgereicht"
+    assert c["housing"] is True and abs(c["housing_wall_mm"] - 4.0) < 1e-9
+    assert c["housing_collide"] is False, "housing_collide=False nicht durchgereicht"
+    assert out["config"]["housing_collide"] is False
+    print("✓ Transparentes Gehäuse + Ablauf: Skript-Block + cfg-Passthrough (inkl. Kollisionswand)")
+
+
+def test_ring_full_360():
+    """Voller 360°-Spritzring: geschlossener Ring-Kreis + gleichverteilte Düsen + volle
+    Domain-Umfangsabdeckung sind im Skript verdrahtet; run/preview reichen ring_full durch."""
+    import json as _json
+    s = OIL._blender_script()
+    # CFG-Konstante + geschlossener Ring (cyclic-Spline, kein Doppelpunkt) + Domain über 360°
+    assert 'CFG.get("ring_full"' in s and "RING_FULL" in s
+    assert "use_cyclic_u = True" in s, "Voll-Ring ist keine geschlossene Kurvenschleife"
+    assert "_ring_closed = RING_FULL" in s, \
+        "Voll-Ring muss auch in der Nahaufnahme geschlossen bleiben (kein Stutzen-Fallback)"
+    assert "2.0 * math.pi * k / NOZZLES" in s, "Düsen nicht gleichmäßig über 360° verteilt"
+    # wrap-fester Zielpunkt-Helfer mit synthetischem Radial-Fallback (Keil + voller Ring)
+    assert "_crown_target_full" in s and "def _ang_d(" in s
+    assert s.count("r_crown * math.cos(th_want)") >= 1, "synthetisches Radialziel fehlt"
+
+    # cfg-Passthrough über preview_oilspray (fake STL + Blender)
+    d = tempfile.mkdtemp(); seen = {}
+
+    def _fake_stl(geom, axial, workdir, section, cb=None, include_core=True,
+                  components=None, cut=None, view_mode="section",
+                  hidden_pins=None, winding_full=False):
+        p = os.path.join(workdir, "winding_head.stl")
+        os.makedirs(workdir, exist_ok=True); open(p, "w").write("solid\nendsolid\n")
+        return {"winding": p}, "ok"
+
+    def _fake_blender(code, argv=None, cwd=None, timeout=None, progress_cb=None):
+        seen["cfg"] = _json.load(open(argv[0]))
+        with open(seen["cfg"]["preview_png"], "wb") as f: f.write(b"\x89PNG")
+        return {"ok": True, "aborted": False, "stdout": "", "returncode": 0}
+
+    orig_stl, orig_bl = OIL._export_winding_stl, OIL.blender_runner.run_blender_script
+    try:
+        OIL._export_winding_stl = _fake_stl
+        OIL.blender_runner.run_blender_script = _fake_blender
+        out = OIL.preview_oilspray(
+            {"geom": dict(_GEOM), "axial_len": 120.0,
+             "oil": {"ring_full": True, "nozzle_count": 12}}, d)
+    finally:
+        OIL._export_winding_stl, OIL.blender_runner.run_blender_script = orig_stl, orig_bl
+    c = seen["cfg"]
+    assert c["ring_full"] is True, "ring_full nicht in die Blender-cfg durchgereicht"
+    assert c["nozzle_count"] == 12
+    assert c["housing_collide"] is True, "Kollisionswand muss Standard AN sein"
+    assert out["config"]["ring_full"] is True, "ring_full fehlt in der result-config"
+    print("✓ Voller 360°-Spritzring: geschlossener Ring + 360°-Düsen + cfg-Passthrough")
+
+
 def test_view_down_axes_smooth_material():
     """Unten-Achse (Blickrichtung), Koordinatensystem, Shade-Smooth und Öl-Transparenz sind
     im Skript verdrahtet, und preview_oilspray reicht Materialien/View durch."""
@@ -552,6 +653,8 @@ def main():
     test_slowmo_time_scale()
     test_component_lists_and_view_mode()
     test_slowmo_500_and_fast_and_jet()
+    test_housing_transparent_and_drain()
+    test_ring_full_360()
     test_view_down_axes_smooth_material()
     test_variant_autosave_and_store_roundtrip()
     test_preview_branch_and_orchestrator()

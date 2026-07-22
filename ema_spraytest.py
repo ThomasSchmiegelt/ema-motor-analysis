@@ -3,15 +3,18 @@
 Eigenständiger On-Demand-Pfad neben der Spritzöl-Kühlung (`ema_oilspray`). Statt des
 teuren Motor-Ausschnitts (FreeCAD-STL + große Domain) simuliert ein **einfacher
 Prüfstand** nur das Spray selbst: EINE Düse sprüht **horizontal** (Strahl entlang +x,
-Schwerkraft −z) auf drei vertikale Kupferstäbe (Hairpin-Stellvertreter). Pro Runde
+Schwerkraft −z) als Freistrahl — standardmäßig ist NUR das Spray zu sehen (Kamera
+nah am Strahl); die drei vertikalen Kupferstäbe (Hairpin-Stellvertreter) sind per
+``show_rods`` optional zuschaltbar. Pro Runde
 werden ~10 Parameter-Varianten gebacken und als kurze Loop-Videos gezeigt; der Nutzer
 markiert die besten, die nächste Runde sampelt Kinder **um die markierten Eltern**
 (Kreuzung + Gauß-Mutation, Streuung schrumpft je Runde) — bis das Spray passt und die
 Sieger-Parameter in den echten 💧-Tab übernommen werden.
 
 Variiert wird NUR die Spray-Physik (`SPRAY_PARAMS`): Druck, Sprühkegel,
-Oberflächenspannung, Viskosität, Düsen-Ø. Auflösung/Frames/Licht/Kamera bleiben je
-Runde fest, damit die Kacheln vergleichbar sind.
+Oberflächenspannung, Viskosität, Düsen-Ø. Auflösung (frei bis 512), Frames und
+Zeitlupe sind je RUNDE einstellbar und gelten für alle Kacheln (Vergleichbarkeit);
+`run_beauty` rendert eine einzelne Variante hochauflösend nach (✨).
 
 Persistenz global unter ``~/cae_projekte/_spraytest/rounds/<rid>/`` (projektunabhängig,
 analog `_variants`/`_training`): je Runde ein Ordner mit ``round.json`` + je Kind-
@@ -25,6 +28,7 @@ import os
 import random
 import shutil
 import time
+import uuid
 
 import blender_runner
 
@@ -36,12 +40,14 @@ ROUNDS_SUBDIR = "rounds"
 # log=True ⇒ Sampling/Mutation im log-Raum (Größenordnungs-Parameter). Viskositäts-
 # Bereich kreuzt bewusst die 0.02-Schwelle, ab der der Mantaflow-Viskositätslöser
 # aktiv wird (darunter reibungsarm-dünnflüssig, darüber zunehmend zäh/gelartig).
+# Druck 0,1–3 bar und Düsen-Ø 0,5–1,5 mm sind die physikalischen Grenzen der realen
+# Öl-Anlage (Nutzer-Vorgabe) — Sampling/Mutation/Klemmung bleiben immer darin.
 SPRAY_PARAMS = {
-    "pressure_bar":    {"lo": 0.5,   "hi": 8.0,  "log": False, "label": "Druck",              "unit": "bar", "fmt": "%.1f"},
+    "pressure_bar":    {"lo": 0.1,   "hi": 3.0,  "log": False, "label": "Druck",              "unit": "bar", "fmt": "%.1f"},
     "jet_cone_deg":    {"lo": 0.0,   "hi": 30.0, "log": False, "label": "Sprühkegel",         "unit": "°",   "fmt": "%.0f"},
     "surface_tension": {"lo": 0.002, "hi": 0.05, "log": True,  "label": "Oberflächenspannung","unit": "",    "fmt": "%.4f"},
     "viscosity":       {"lo": 0.001, "hi": 0.08, "log": True,  "label": "Viskosität",         "unit": "",    "fmt": "%.4f"},
-    "nozzle_d_mm":     {"lo": 0.5,   "hi": 3.0,  "log": False, "label": "Düsen-Ø",            "unit": "mm",  "fmt": "%.1f"},
+    "nozzle_d_mm":     {"lo": 0.5,   "hi": 1.5,  "log": False, "label": "Düsen-Ø",            "unit": "mm",  "fmt": "%.1f"},
 }
 PARAM_ORDER = list(SPRAY_PARAMS)
 
@@ -50,14 +56,22 @@ DEFAULT_PARAMS = {"pressure_bar": 3.0, "jet_cone_deg": 10.0,
                   "surface_tension": 0.01, "viscosity": 0.004, "nozzle_d_mm": 1.0}
 
 # Feste Sim-/Render-Einstellungen (Vergleichbarkeit der Kacheln). `quality` skaliert
-# nur die Domain-Auflösung und gilt für die GANZE Runde.
+# nur die Domain-Auflösung und gilt für die GANZE Runde; eine freie Auflösung
+# (`spec["resolution"]` > 0) überschreibt das Preset (Kosten ~kubisch!).
 QUALITY_RES = {"schnell": 48, "normal": 64, "fein": 96}
 DEFAULT_QUALITY = "normal"
+RES_RANGE = (32, 512)            # freie Domain-Auflösung (wie der 💧-Tab)
+FRAMES_RANGE = (24, 120)
 BENCH_FRAMES = 44
 BENCH_FPS = 24
-BENCH_TIME_SCALE = 0.35          # leichte Zeitlupe: Strahlflug + Aufprall sichtbar
-N_RANGE = (4, 12)
+SLOWMO_RANGE = (1.0, 50.0)       # Zeitlupe je Runde: time_scale = 1/slowmo
+DEFAULT_SLOWMO = 3.0             # ≈ das alte feste time_scale 0.35
+N_RANGE = (1, 12)                # n=1 ⇒ Einzel-Strahl (eine Kachel)
 DEFAULT_N = 10
+# ✨ Schönheits-Render (eine Variante einzeln, hochauflösend, größeres Bild)
+BEAUTY_RES = 256
+BEAUTY_FRAMES = 60
+BEAUTY_RENDER_PX = [1280, 960]
 
 # Dedup-Schwelle im normierten Parameterraum (euklidisch): zu ähnliche Kinder werden
 # neu gewürfelt (sonst verschenkt eine Kachel Rechenzeit für ein Quasi-Duplikat).
@@ -197,6 +211,8 @@ PRESSURE_BAR = float(CFG.get("pressure_bar", 3.0))
 CONE    = math.radians(max(0.0, min(40.0, float(CFG.get("jet_cone_deg", 10.0)))))
 NOZ_D   = float(CFG.get("nozzle_d_mm", 1.0)) * 0.001      # [m]
 TIME_SCALE = max(0.001, min(1.0, float(CFG.get("time_scale", 0.35))))
+SHOW_RODS = bool(CFG.get("show_rods", False))
+RENDER_PX = CFG.get("render_px") or [640, 480]
 ENGINE  = CFG.get("engine", "BLENDER_EEVEE")
 RHO_OIL = 850.0
 JET_V   = 0.8 * math.sqrt(2.0 * PRESSURE_BAR * 1e5 / RHO_OIL)   # Bernoulli wie im Motor-Skript
@@ -208,7 +224,8 @@ bpy.ops.wm.read_factory_settings(use_empty=True)
 scene = bpy.context.scene
 
 # --- Prüfstand-Geometrie (Meter): Düse bei x=0, Strahl HORIZONTAL → +x, Schwerkraft −z.
-# Ziel: 3 vertikale Kupferstäbe Ø 6 mm bei x=25 mm (Hairpin-Stellvertreter).
+# Standard: FREISTRAHL ohne Ziele — "nur das Spray sehen". Optional (SHOW_RODS):
+# 3 vertikale Kupferstäbe Ø 6 mm bei x=25 mm (Hairpin-Stellvertreter) als Aufprallziele.
 ROD_X   = 0.025
 ROD_D   = 0.006
 ROD_H   = 0.05
@@ -227,9 +244,10 @@ def _mk_mat(name, rgb, metal, rough, spec=0.5):
 _mat_copper = _mk_mat("Kupfer", (0.74, 0.35, 0.12), 1.0, 0.34)
 _mat_steel  = _mk_mat("Stahl", (0.55, 0.57, 0.60), 0.95, 0.35)
 
-# Kupferstäbe (Effector = Kollision)
+# Kupferstäbe (Effector = Kollision) — nur wenn gewünscht; ohne sie fliegt der
+# Freistrahl ungestört durch die offene Domain (reine Strahl-/Tropfen-Beurteilung).
 rods = []
-for i, ry in enumerate((-0.008, 0.0, 0.008)):
+for i, ry in (enumerate((-0.008, 0.0, 0.008)) if SHOW_RODS else []):
     bpy.ops.mesh.primitive_cylinder_add(radius=0.5 * ROD_D, depth=ROD_H,
                                         location=(ROD_X, ry, -0.010))
     rod = bpy.context.object; rod.name = "Rod_%d" % i
@@ -258,6 +276,7 @@ Dymin, Dymax = -0.035, 0.035
 Dzmin, Dzmax = -0.055, 0.022
 dcx, dcy, dcz = (Dxmin+Dxmax)/2, (Dymin+Dymax)/2, (Dzmin+Dzmax)/2
 sx, sy, sz = (Dxmax-Dxmin)/2, (Dymax-Dymin)/2, (Dzmax-Dzmin)/2
+voxel = (2.0 * max(sx, sy, sz)) / max(1, RES)
 bpy.ops.mesh.primitive_cube_add(location=(dcx, dcy, dcz))
 dom = bpy.context.object; dom.name = "Domain"
 dom.scale = (sx, sy, sz)
@@ -270,10 +289,16 @@ _set(ds, "resolution_max", RES)
 _set(ds, "simulation_method", "FLIP")
 _set(ds, "use_mesh", True)
 _set(ds, "use_flip_particles", True)
-# Sekundärpartikel IMMER an — die Tröpfchen sind genau das, was hier beurteilt wird.
-_set(ds, "use_spray_particles", True)
-_set(ds, "use_foam_particles", True)
-_set(ds, "use_bubble_particles", True)
+# Sekundärpartikel (Spray/Foam/Bubble) BEWUSST AUS — in diesem Blender-4.2-Build
+# kaputt (ausgiebig verifiziert): ohne resumable Cache werden schlicht NULL Partikel
+# erzeugt (leere particles-Cache-Dateien), MIT resumable Cache laden sie als
+# domänenfüllender Staub (Positionen über den ganzen Quader statt an der
+# Flüssigkeit). Die sichtbaren Tröpfchen kommen stattdessen aus dem FEINEN
+# Upres-Flüssigkeitsmesh (mesh_scale=2 + mesh_particle_radius 1.4, s. u.) —
+# verifiziert: einzelne fliegende Tropfen statt Klumpen.
+_set(ds, "use_spray_particles", False)
+_set(ds, "use_foam_particles", False)
+_set(ds, "use_bubble_particles", False)
 # Viskositätslöser nur bei zähem Öl (>0.02) — wie im Motor-Skript: ein aktiver Löser
 # macht selbst kleine Werte gelartig (dünnes Öl soll reibungsarm spritzen).
 if VISC > 0.02:
@@ -292,14 +317,28 @@ for _b in ("use_collision_border_front", "use_collision_border_back",
            "use_collision_border_right", "use_collision_border_left",
            "use_collision_border_top", "use_collision_border_bottom"):
     _set(ds, _b, False)
-_set(ds, "timesteps_max", int(CFG.get("substeps_max", 8)))
+# Substeps skalieren mit der Auflösung (Anti-Tunneling des schnellen Strahls bei
+# hoher Auflösung; CFL bleibt adaptiv, grobe Läufe bleiben so schnell wie bisher).
+_set(ds, "timesteps_max", int(CFG.get("substeps_max") or max(8, RES // 24)))
 _set(ds, "timesteps_min", 1)
 _set(ds, "cfl_condition", 3.0)
 _set(ds, "use_adaptive_timesteps", True)
 _set(ds, "time_scale", TIME_SCALE)
 
+# --- Realismus: feines Flüssigkeits-Mesh + saubere Kollision ---------------------
+# Default mesh_particle_radius=2.0 machte dicke Blobs; mesh_scale=2 (Upres) erzeugt
+# das SICHTBARE Mesh auf 2× Sim-Auflösung — großer optischer Gewinn bei GROBEN Domains.
+# Bei hoher Auflösung MUSS der Upres aus: 512er-Domain + Upres ⇒ 1024³-Mesh-Gitter ⇒
+# >28 GB RSS ⇒ der Kernel OOM-killt Blender (real passiert auf dieser 31-GiB-Maschine);
+# ab ~192 ist die Sim selbst fein genug, das Mesh braucht keine Verdopplung mehr.
+_set(ds, "mesh_particle_radius", 1.4)
+_set(ds, "mesh_scale", 2 if RES < 192 else 1)
+_set(ds, "mesh_generator", 'IMPROVED')
+_set(ds, "mesh_smoothen_pos", 1)
+_set(ds, "use_fractions", True)          # glatte statt voxel-treppige Stab-Kollision
+_set(ds, "fractions_distance", voxel)
+
 # --- Düse (INFLOW): Emitter an der Stutzen-Mündung, Strahl horizontal +x ------
-voxel = (2.0 * max(sx, sy, sz)) / max(1, RES)
 # 1.6·voxel statt 1.2: bei Prüfstand-Auflösung 48–96 ist der 1-mm-Strahl sonst sub-voxel
 # und der FREISTRAHL zwischen Düse und Stab bleibt als Flüssigkeitsmesh unsichtbar
 # (nur der Aufprall-Splash war zu sehen — verifiziert im ersten Testlauf).
@@ -360,8 +399,8 @@ def _pick_engine(req):
 ENGINE = _pick_engine(ENGINE)
 log("Render vorbereiten (%s)" % ENGINE)
 scene.render.engine = ENGINE
-scene.render.resolution_x = 640
-scene.render.resolution_y = 480
+scene.render.resolution_x = int(RENDER_PX[0])
+scene.render.resolution_y = int(RENDER_PX[1])
 scene.render.image_settings.file_format = 'PNG'
 try:
     _vt = [i.identifier for i in scene.view_settings.bl_rna.properties['view_transform'].enum_items]
@@ -380,14 +419,26 @@ if _bg:
     _bg.inputs[1].default_value = 0.9
 
 # Kamera: 3/4-Ansicht (seitlich + leicht diagonal), Strahl läuft im Bild nach rechts,
-# Tropfen fallen nach unten. NICHT exakt entlang −y — die 3 Stäbe stehen in y-Reihe und
-# verdeckten sich sonst gegenseitig (im ersten Testlauf war nur EIN Stab sichtbar).
-cam_tgt = mathutils.Vector((0.022, 0.0, -0.014))
-bpy.ops.object.camera_add(location=(cam_tgt.x + 0.05, 0.105, cam_tgt.z + 0.04))
+# Tropfen fallen nach unten. Mit Stäben die weitere Übersicht (NICHT exakt entlang −y —
+# die 3 Stäbe stehen in y-Reihe und verdeckten sich sonst gegenseitig); OHNE Stäbe
+# ("nur das Spray") eine NAHAUFNAHME auf Düsenmündung + Freistrahl.
+if SHOW_RODS:
+    cam_tgt = mathutils.Vector((0.022, 0.0, -0.014))
+    cam_loc = (cam_tgt.x + 0.05, 0.105, cam_tgt.z + 0.04)
+    cam_lens = 45.0
+else:
+    cam_tgt = mathutils.Vector((0.019, 0.0, -0.006))
+    cam_loc = (cam_tgt.x + 0.030, 0.062, cam_tgt.z + 0.020)
+    cam_lens = 50.0
+bpy.ops.object.camera_add(location=cam_loc)
 cam = bpy.context.object
 cam.rotation_euler = (cam_tgt - cam.location).to_track_quat('-Z', 'Z').to_euler()
 if cam.data:
-    cam.data.lens = 45.0
+    cam.data.lens = cam_lens
+    # Near-Clip! Blender-Default 0.1 m — die Nahaufnahme steht nur ~0.07 m vom Ziel,
+    # damit läge die GANZE Szene vor der Clip-Ebene und das Bild bliebe leer.
+    cam.data.clip_start = 0.001
+    cam.data.clip_end = 10.0
 scene.camera = cam
 
 bpy.ops.object.light_add(type='SUN', location=(0.05, 0.08, 0.15))
@@ -474,8 +525,23 @@ def _bench_script():
 # ──────────────────────────────────────────────────────────────────────────────
 # Runden-Lauf + Persistenz
 # ──────────────────────────────────────────────────────────────────────────────
-def _bake_variant(params, vdir, quality, progress_cb=None, base_pct=0, span_pct=10):
-    """Bäckt EINE Kind-Variante in ihr eigenes Verzeichnis (work/frames/anim.mp4)."""
+def _clampf(v, lo, hi, default):
+    """float-Klemmung mit Default (None/0/Unfug ⇒ default)."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return default
+    if v <= 0:
+        return default
+    return max(lo, min(hi, v))
+
+
+def _bake_variant(params, vdir, quality, progress_cb=None, base_pct=0, span_pct=10,
+                  overrides=None):
+    """Bäckt EINE Kind-Variante in ihr eigenes Verzeichnis (work/frames/anim.mp4).
+    ``overrides`` (resolution/frames/time_scale/render_px …) überschreibt die
+    Qualitäts-Defaults — genutzt von run_round (freie Auflösung, Frames, Zeitlupe)
+    und run_beauty (✨ hochauflösender Einzel-Render)."""
     frames_dir = os.path.join(vdir, "frames")
     work = os.path.join(vdir, "work")
     os.makedirs(frames_dir, exist_ok=True)
@@ -485,10 +551,11 @@ def _bake_variant(params, vdir, quality, progress_cb=None, base_pct=0, span_pct=
         "frames_dir": frames_dir,
         "resolution": QUALITY_RES.get(quality, QUALITY_RES[DEFAULT_QUALITY]),
         "frames": BENCH_FRAMES,
-        "time_scale": BENCH_TIME_SCALE,
-        "substeps_max": 8,
+        "time_scale": 1.0 / DEFAULT_SLOWMO,
+        "show_rods": False,          # Standard: nur das Spray (Freistrahl, Kamera nah)
         "engine": "BLENDER_EEVEE",
     })
+    cfg.update(overrides or {})
     cfg_path = os.path.join(work, "bench_cfg.json")
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, indent=2)
@@ -499,8 +566,12 @@ def _bake_variant(params, vdir, quality, progress_cb=None, base_pct=0, span_pct=
         if progress_cb:
             progress_cb(msg, base_pct + (span_pct // 2 if pct is None else 0))
 
+    # Timeout skaliert mit der Auflösung (Kosten ~kubisch in RES; quadratisch angesetzt
+    # reicht als Budget, weil das Rendern nicht mitwächst): 96 ⇒ 30 min, 512 ⇒ Deckel 3 h.
+    res_n = int(cfg.get("resolution") or 64)
+    timeout = int(min(10800, max(1800, 1800 * (res_n / 96.0) ** 2)))
     res = blender_runner.run_blender_script(_bench_script(), argv=[cfg_path],
-                                            cwd=work, timeout=1800, progress_cb=_log)
+                                            cwd=work, timeout=timeout, progress_cb=_log)
     if not res.get("ok"):
         return {"ok": False, "aborted": bool(res.get("aborted")),
                 "error": res.get("error") or "Blender-Fehler", "metrics": res.get("metrics")}
@@ -522,6 +593,15 @@ def run_round(spec, progress_cb=None, cancel_cb=None):
     quality = str(spec.get("quality") or DEFAULT_QUALITY)
     if quality not in QUALITY_RES:
         quality = DEFAULT_QUALITY
+    # Freie Auflösung (>0) überschreibt das Qualitäts-Preset; Frames + Zeitlupe je Runde
+    # einstellbar — alle drei gelten für die GANZE Runde (Vergleichbarkeit der Kacheln).
+    res_eff = int(_clampf(spec.get("resolution"), *RES_RANGE,
+                          default=QUALITY_RES[quality]))
+    frames = int(_clampf(spec.get("frames"), *FRAMES_RANGE, default=BENCH_FRAMES))
+    slowmo = _clampf(spec.get("slowmo"), *SLOWMO_RANGE, default=DEFAULT_SLOWMO)
+    show_rods = bool(spec.get("show_rods"))
+    overrides = {"resolution": res_eff, "frames": frames, "time_scale": 1.0 / slowmo,
+                 "show_rods": show_rods}
     parents_in = spec.get("parents") or []
 
     rid = "r%03d_%s" % (round_no, time.strftime("%Y%m%d_%H%M%S"))
@@ -545,9 +625,16 @@ def run_round(spec, progress_cb=None, cancel_cb=None):
         })
 
     parent_params = [v["params"] for v in variants]
-    kids = sample_round(parent_params, n, round_no)
-    _log("🧪 Runde %d: %d Kinder backen (Qualität %s, Auflösung %d)"
-         % (round_no, len(kids), quality, QUALITY_RES[quality]), 2)
+    # 🎯 Einzel-Strahl: exakt DIESE Parameter einmal backen (keine Streuung/Mutation) —
+    # das Ergebnis ist eine normale Runde mit einer Kachel (markierbar/✨/💾 wie immer).
+    exact = spec.get("exact_params")
+    if exact:
+        kids = [_clean_params(exact)]
+    else:
+        kids = sample_round(parent_params, n, round_no)
+    _log("🧪 Runde %d: %d %s backen (Auflösung %d, %d Frames, Zeitlupe %.0f×)"
+         % (round_no, len(kids), "Einzel-Strahl" if exact else "Kinder",
+            res_eff, frames, slowmo), 2)
 
     aborted = False
     for i, params in enumerate(kids):
@@ -560,21 +647,65 @@ def run_round(spec, progress_cb=None, cancel_cb=None):
         base_pct = 2 + int(96.0 * i / max(1, len(kids)))
         _log("💧 Variante %d/%d: %s" % (i + 1, len(kids), format_params(params)), base_pct)
         r = _bake_variant(params, vdir, quality, progress_cb=progress_cb,
-                          base_pct=base_pct, span_pct=int(96.0 / max(1, len(kids))))
+                          base_pct=base_pct, span_pct=int(96.0 / max(1, len(kids))),
+                          overrides=overrides)
+        met = r.get("metrics") or {}
         variants.append({"id": vid, "params": _clean_params(params), "source": "child",
                          "ok": bool(r.get("ok")), "error": r.get("error"),
-                         "droplets_peak": (r.get("metrics") or {}).get("droplets_peak")})
+                         "droplets_peak": met.get("droplets_peak"),
+                         "series": met.get("series")})
         if r.get("aborted"):
             aborted = True
             _log("⛔ Abbruch während Variante %d — Teilrunde bleibt" % (i + 1), None)
             break
 
     round_data = {"rid": rid, "round_no": round_no, "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-                  "quality": quality, "n": n, "aborted": aborted,
+                  "quality": quality, "resolution": res_eff, "frames": frames,
+                  "slowmo": slowmo, "show_rods": show_rods, "n": n, "aborted": aborted,
                   "variants": variants, "marked": []}
     _write_round(rid, round_data)
     _log("✅ Runde %d gespeichert (%s)" % (round_no, rid), 100)
     return round_data
+
+
+def run_beauty(rid, vid, opts=None, progress_cb=None, cancel_cb=None):
+    """✨ Schönheits-Render: EINE Variante einer Runde einzeln neu backen — höhere
+    Domain-Auflösung + größeres Renderbild — nach ``<rid>/<vid>/beauty/``. Die
+    Runden-Kacheln bleiben unangetastet; ``round.json`` markiert die Variante mit
+    ``beauty: true`` (die UI schaltet die Kachel dann auf das Beauty-Video um)."""
+    opts = opts or {}
+    data = load_round(rid)
+    if not data:
+        return {"ok": False, "error": "Runde nicht gefunden"}
+    var = next((v for v in (data.get("variants") or []) if v.get("id") == vid), None)
+    if var is None:
+        return {"ok": False, "error": "Variante nicht gefunden"}
+    if cancel_cb and cancel_cb():
+        return {"ok": False, "aborted": True, "error": None}
+    res_n = int(_clampf(opts.get("resolution"), *RES_RANGE, default=BEAUTY_RES))
+    frames = int(_clampf(opts.get("frames"), *FRAMES_RANGE, default=BEAUTY_FRAMES))
+    slowmo = _clampf(opts.get("slowmo"), *SLOWMO_RANGE,
+                     default=float(data.get("slowmo") or DEFAULT_SLOWMO))
+    if progress_cb:
+        progress_cb("✨ Schönheits-Render %s: Auflösung %d, %d Frames, Zeitlupe %.0f× — %s"
+                    % (vid, res_n, frames, slowmo, format_params(var.get("params"))), 2)
+    vdir = os.path.join(_rounds_dir(), rid, vid, "beauty")
+    r = _bake_variant(var.get("params"), vdir, data.get("quality") or DEFAULT_QUALITY,
+                      progress_cb=progress_cb, base_pct=2, span_pct=96,
+                      overrides={"resolution": res_n, "frames": frames,
+                                 "time_scale": 1.0 / slowmo,
+                                 # Stäbe wie in der Original-Runde (Vergleichbarkeit ✨↔Kachel)
+                                 "show_rods": bool(opts.get("show_rods",
+                                                            data.get("show_rods"))),
+                                 "render_px": list(BEAUTY_RENDER_PX)})
+    if r.get("ok"):
+        data = load_round(rid) or data     # frisch laden (Markierungen etc. erhalten)
+        for v in data.get("variants") or []:
+            if v.get("id") == vid:
+                v["beauty"] = True
+                v["beauty_res"] = res_n
+        _write_round(rid, data)
+    return dict(r, rid=rid, vid=vid, beauty=bool(r.get("ok")), resolution=res_n)
 
 
 # ── Runden-Store ─────────────────────────────────────────────────────────────
@@ -638,14 +769,79 @@ def delete_round(rid):
     return False
 
 
-def video_path(rid, vid):
+# ── 💾 Spray-Favoriten (benannte Parametersätze für die echte 💧-Berechnung) ──
+# Ein guter Strahl wird MIT seinen Einstellungen benannt abgespeichert und später
+# im 💧-Tab in die Felder der echten Motor-Berechnung übernommen. Store global
+# unter SPRAYTEST_ROOT/favorites.json (wie die Runden projektunabhängig).
+def _favorites_path():
+    return os.path.join(SPRAYTEST_ROOT, "favorites.json")
+
+
+def list_favorites():
+    try:
+        with open(_favorites_path(), encoding="utf-8") as f:
+            favs = json.load(f)
+        return favs if isinstance(favs, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _write_favorites(favs):
+    os.makedirs(SPRAYTEST_ROOT, exist_ok=True)
+    tmp = _favorites_path() + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(favs, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, _favorites_path())
+
+
+def save_favorite(data):
+    """Speichert einen Spray-Favoriten: {name, params, sim:{resolution,frames,slowmo},
+    src:{rid,vid}}. Params werden geklemmt; Rückgabe = gespeicherter Eintrag."""
+    data = data or {}
+    sim = data.get("sim") or {}
+    fav = {
+        "id": "fav_%s_%s" % (time.strftime("%Y%m%d_%H%M%S"), uuid.uuid4().hex[:6]),
+        "name": (str(data.get("name") or "").strip() or "Spray")[:60],
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "params": _clean_params(data.get("params")),
+        "sim": {"resolution": int(_clampf(sim.get("resolution"), *RES_RANGE, default=QUALITY_RES[DEFAULT_QUALITY])),
+                "frames": int(_clampf(sim.get("frames"), *FRAMES_RANGE, default=BENCH_FRAMES)),
+                "slowmo": _clampf(sim.get("slowmo"), *SLOWMO_RANGE, default=DEFAULT_SLOWMO)},
+        "src": {"rid": (data.get("src") or {}).get("rid"),
+                "vid": (data.get("src") or {}).get("vid")},
+    }
+    favs = list_favorites()
+    favs.insert(0, fav)
+    _write_favorites(favs)
+    return fav
+
+
+def delete_favorite(fid):
+    favs = list_favorites()
+    keep = [f for f in favs if f.get("id") != fid]
+    if len(keep) == len(favs):
+        return False
+    _write_favorites(keep)
+    return True
+
+
+def video_path(rid, vid, beauty=False):
     """Absoluter Pfad der anim.mp4 einer Variante — löst bei Eltern die Referenz auf
-    die Altrunde auf (src_round/src_vid). None wenn nicht vorhanden."""
+    die Altrunde auf (src_round/src_vid). ``beauty=True`` liefert das ✨-Video
+    (``<vid>/beauty/frames/anim.mp4``; lokal zuerst, sonst Eltern-Referenz).
+    None wenn nicht vorhanden."""
     data = load_round(rid)
     if not data:
         return None
     for v in data.get("variants") or []:
         if v.get("id") == vid:
+            if beauty:
+                p = os.path.join(_rounds_dir(), rid, vid, "beauty", "frames", "anim.mp4")
+                if os.path.exists(p):
+                    return p
+                if v.get("source") == "parent" and v.get("src_round") and v.get("src_vid"):
+                    return video_path(v["src_round"], v["src_vid"], beauty=True)
+                return None
             if v.get("source") == "parent" and v.get("src_round") and v.get("src_vid"):
                 return video_path(v["src_round"], v["src_vid"])
             p = os.path.join(_rounds_dir(), rid, vid, "frames", "anim.mp4")

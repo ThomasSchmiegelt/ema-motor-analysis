@@ -1582,7 +1582,7 @@
     <div class="e3-set" style="margin-top:8px">
       <div class="e3-field">
         <div class="row"><label><input type="checkbox" id="oil_winding_full" style="width:auto;margin-right:6px"
-          onchange="_oilBuildPinList()">🌀 Wickelkopf komplett aufbauen (alle Nuten)</label></div>
+          onchange="_oilBuildPinList();_oilDrawAngleFig()">🌀 Wickelkopf komplett aufbauen (alle Nuten)</label></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> baut den Wickelkopf — wie die anderen Bauteile — als vollen 360°-Ring
           (alle Nuten) statt nur über den Ausschnitt oben. Braucht spürbar mehr Rechenzeit beim
@@ -1607,7 +1607,7 @@
     <div class="e3-set">
       <div class="e3-field">
         <div class="row"><label>Einbaulage</label>
-          <select id="oil_orientation" style="width:auto;padding:4px">
+          <select id="oil_orientation" style="width:auto;padding:4px" onchange="_oilDrawAngleFig()">
             <option value="horizontal" selected>horizontal (Achse waagerecht)</option>
             <option value="vertical">vertikal (Achse senkrecht)</option>
           </select></div>
@@ -1660,10 +1660,19 @@
       Öl unter Druck <b>radial nach innen auf die Leiter</b> spritzt und dort zerstäubt. Die
       Strahlgeschwindigkeit folgt aus dem Druck (Bernoulli: v = C<sub>d</sub>·√(2·Δp/ρ), ρ≈850 kg/m³).
     </p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:0 0 10px;
+                border:1px solid #2e5a7d;border-radius:5px;padding:6px 8px;background:#141a20">
+      <span style="font-size:.76rem;color:#9cf">💾 Getunter Spray aus dem 🧪-Prüfstand:</span>
+      <select id="oil_fav_sel" style="width:auto;max-width:60%;font-size:.76rem">
+        <option value="">— Spray-Favorit wählen —</option>
+      </select>
+      <button onclick="oilApplyFavorite()" title="Druck, Sprühkegel, σ, ν und Düsen-Ø aus dem Favoriten übernehmen"
+              style="width:auto;padding:3px 10px;font-size:.74rem;background:#2e7d4a">✔ Übernehmen</button>
+    </div>
     <div class="e3-set">
       <div class="e3-field">
         <div class="row"><label>Öldruck</label>
-          <input type="number" id="oil_pressure" value="3" min="0.2" max="20" step="0.5"><span class="unit">bar</span></div>
+          <input type="number" id="oil_pressure" value="3" min="0.1" max="3" step="0.1"><span class="unit">bar</span></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Speisedruck am Ring → Strahlgeschwindigkeit aus der Bohrung.
           3 bar ≈ 21 m/s. Höherer Druck = schnellerer Strahl, mehr Zerstäubung.</p>
@@ -1671,15 +1680,29 @@
           Substeps, sonst „tunnelt" das Öl durch die Leiter.</p></details>
       </div>
       <div class="e3-field">
-        <div class="row"><label>Anzahl Düsen</label>
-          <input type="number" id="oil_nozzles" value="6" min="1" max="40" step="1"><span class="unit">Bohrungen</span></div>
+        <div class="row"><label><input type="checkbox" id="oil_ring_full" style="width:auto;margin-right:6px"
+          onchange="_oilDrawAngleFig()">⭕ Voller Spritzring (360°)</label></div>
         <details class="e3-help"><summary>Erklärung</summary>
-          <p><b>Fachlich:</b> Bohrungen über den simulierten Ausschnitt, gleichmäßig auf dem
-          Ringbogen verteilt, alle radial nach innen gerichtet.</p></details>
+          <p><b>Fachlich:</b> Baut den Kühlring als <b>geschlossenen Voll-Kreis</b> und verteilt
+          die Düsen <b>gleichmäßig über 360°</b> — statt nur über den Wickelkopf-Ausschnitt oben.
+          Sinnvoll zusammen mit <b>🌀 Wickelkopf komplett aufbauen</b>; beim Keil-Ausschnitt
+          spritzen Düsen ohne Kupfer darunter radial nach innen ins Leere (die Benetzung wird
+          weiter nur am vorhandenen Wickelkopf gemessen).</p>
+          <p><span class="x">Wirkung:</span> Die Simulations-Domain deckt dann den <b>vollen
+          Umfang</b> ab — dieselbe Auflösungszahl verteilt sich auf einen viel größeren Raum.
+          Für scharfe Strahlen Auflösung deutlich erhöhen (Rechenzeit ~kubisch) und mehr Düsen
+          wählen (z.&nbsp;B. 12–24).</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Anzahl Düsen</label>
+          <input type="number" id="oil_nozzles" value="6" min="1" max="40" step="1" oninput="_oilDrawAngleFig()"><span class="unit">Bohrungen</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Bohrungen gleichmäßig auf dem Ringbogen verteilt (beim ⭕ vollen
+          Ring über 360°), alle radial nach innen gerichtet.</p></details>
       </div>
       <div class="e3-field">
         <div class="row"><label>Bohrungs-Ø</label>
-          <input type="number" id="oil_nozzle_d" value="1" min="0.3" max="6" step="0.1"><span class="unit">mm</span></div>
+          <input type="number" id="oil_nozzle_d" value="1" min="0.5" max="1.5" step="0.1"><span class="unit">mm</span></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Düsen-Durchmesser. <b>Hinweis:</b> 1 mm ist bei grober Auflösung
           kleiner als eine Netz-Zelle — die Auflösung muss hoch genug sein, um den feinen Strahl
@@ -1701,12 +1724,15 @@
     <p style="font-size:.8rem;color:#9aa;line-height:1.5;margin:0 0 8px">
       Der Grund-Strahl zielt automatisch auf einen echten Kupferleiter des Wickelkopfs. Hier lässt
       er sich zusätzlich <b>neigen</b> (axial) und <b>schwenken</b> (tangential). Die <b>Ziellinie</b>
-      zeigt im Video, wohin jeder Strahl trifft.
+      zeigt im Video, wohin jeder Strahl trifft. Die Skizzen unten zeigen <b>live</b>, was die
+      vier Winkel bedeuten — sie folgen den eingestellten Werten.
     </p>
+    <div id="oil_angle_fig" style="display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;
+         margin:0 0 12px;padding:8px;border:1px solid #3a3a44;border-radius:6px;background:#141418"></div>
     <div class="e3-set">
       <div class="e3-field">
         <div class="row"><label>Axiale Neigung</label>
-          <input type="number" id="oil_jet_tilt" value="0" min="-60" max="60" step="5"><span class="unit">°</span></div>
+          <input type="number" id="oil_jet_tilt" value="0" min="-60" max="60" step="5" oninput="_oilDrawAngleFig()"><span class="unit">°</span></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Neigt den Strahl aus der rein radialen Richtung — <b>positiv</b> =
           stärker zur Blechpaket-Stirnfläche (nach „unten"/innen), <b>negativ</b> = mehr zur
@@ -1714,14 +1740,14 @@
       </div>
       <div class="e3-field">
         <div class="row"><label>Tangentialer Schwenk</label>
-          <input type="number" id="oil_jet_yaw" value="0" min="-60" max="60" step="5"><span class="unit">°</span></div>
+          <input type="number" id="oil_jet_yaw" value="0" min="-60" max="60" step="5" oninput="_oilDrawAngleFig()"><span class="unit">°</span></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Dreht den Strahl seitlich um die Wellenachse (Gieren) — trifft den
           Leiter dann schräg von der Seite statt frontal.</p></details>
       </div>
       <div class="e3-field">
         <div class="row"><label>Düsen-Versatz um die Achse</label>
-          <input type="number" id="oil_nozzle_offset" value="15" min="-45" max="45" step="1"><span class="unit">°</span></div>
+          <input type="number" id="oil_nozzle_offset" value="15" min="-45" max="45" step="1" oninput="_oilDrawAngleFig()"><span class="unit">°</span></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Verschiebt die Düsen-ÖFFNUNG selbst um diesen Winkel um die
           Motorachse — das Ziel (der echte Kronenpunkt) bleibt gleich. Dadurch läuft der Strahl
@@ -1730,7 +1756,7 @@
       </div>
       <div class="e3-field">
         <div class="row"><label>Sprühfächer (Kegelöffnung)</label>
-          <input type="number" id="oil_jet_cone" value="10" min="0" max="40" step="1"><span class="unit">°</span></div>
+          <input type="number" id="oil_jet_cone" value="10" min="0" max="40" step="1" oninput="_oilDrawAngleFig()"><span class="unit">°</span></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Streut die Anfangsgeschwindigkeit des Strahls zufällig um die
           Grundrichtung (Mantaflow „Random Velocity") — der Strahl läuft kelchförmig/konisch statt
@@ -1809,6 +1835,24 @@
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Durchsichtigkeit des gerenderten Öls (0 = deckend … 1 = klar). Wirkt im
           fertigen Video (EEVEE mit Refraktion).</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label><input type="checkbox" id="oil_housing" style="width:auto;margin-right:6px" checked
+          onchange="_oilDrawAngleFig()">🛢 Transparentes Gehäuse + Ablauf zeigen</label></div>
+        <div class="row"><label><input type="checkbox" id="oil_housing_collide" style="width:auto;margin-right:6px" checked
+          onchange="_oilDrawAngleFig()">🧱 Gehäuse hält Öl zurück (Kollisionswand)</label></div>
+        <div class="row"><label>Gehäuse-Wandstärke</label>
+          <input type="number" id="oil_housing_wall" value="4" min="1" max="20" step="0.5"><span class="unit">mm</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Durchsichtige, <b>beidseitig geschlossene</b> Voll-Ring-Hülle rund um
+          Rotor/Stator — Innen-Ø = Stator-Außen-Ø, angegebene Wandstärke; am Spritzöl-Ringkanal buchtet
+          sie aus, unten sitzt ein Ablauf. Die Wickelköpfe liegen darin.</p>
+          <p><b>🧱 Kollisionswand (Standard an):</b> Das Gehäuse ist ein echtes Kollisionsobjekt —
+          das Öl wird am Glas <b>gefangen</b>, läuft innen an der Wand herunter und wird erst an der
+          <b>tiefsten Gehäusestelle</b> (am Ablauf) entfernt. Die Simulations-Domain wird dafür bis zur
+          Gehäuse-Innenwand in Schwerkraft-Richtung aufgezogen — <b>größerer Raum ⇒ Auflösung erhöhen</b>
+          (z.&nbsp;B. 128–256), sonst wird das Öl grob. Aus = reine Sichtwand: das Öl verlässt die
+          fokussierte Domain und „verschwindet" sichtbar mitten im Gehäuse (schnellster Modus).</p></details>
       </div>
     </div>
   </div>
@@ -1932,21 +1976,21 @@
     </p>
     <p style="font-size:.78rem;color:#9aa;line-height:1.5;margin:8px 0 0">
       Variiert werden die 5 Spray-Physik-Hebel: <b>Druck</b> (bar), <b>Sprühkegel</b> (°),
-      <b>Oberflächenspannung</b> σ, <b>Viskosität</b> ν, <b>Düsen-Ø</b> (mm). Auflösung, Frames,
-      Licht und Kamera bleiben je Runde fest, damit die Kacheln vergleichbar sind.
+      <b>Oberflächenspannung</b> σ, <b>Viskosität</b> ν, <b>Düsen-Ø</b> (mm). Auflösung, Frames
+      und Zeitlupe gelten je Runde für ALLE Kacheln (Vergleichbarkeit); Licht/Kamera sind fest.
+      Klick auf eine Kachel öffnet die <b>Großansicht</b>, „✨ Schön rendern" bäckt eine
+      einzelne Variante hochauflösend nach, „💾 Favorit" speichert einen guten Strahl
+      <b>benannt</b> für die spätere Übernahme in die echte Berechnung.
     </p>
     <div class="row3" style="margin-top:10px">
       <div>
-        <label>Varianten je Runde</label>
-        <input type="number" id="st_n" value="10" min="4" max="12" step="1">
+        <label>Varianten je Runde (1 = Einzel-Strahl)</label>
+        <input type="number" id="st_n" value="10" min="1" max="12" step="1">
       </div>
       <div>
-        <label>Qualität (Domain-Auflösung)</label>
-        <select id="st_quality">
-          <option value="schnell">schnell (48)</option>
-          <option value="normal" selected>normal (64)</option>
-          <option value="fein">fein (96)</option>
-        </select>
+        <label>Domain-Auflösung (32–512)</label>
+        <input type="number" id="st_res" value="64" min="32" max="512" step="16"
+               title="Auflösung des Simulationsgitters — je höher, desto feinere Tropfen. Kosten ~kubisch!">
       </div>
       <div>
         <label>Runden-Historie</label>
@@ -1955,6 +1999,40 @@
         </select>
       </div>
     </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">
+      <span style="font-size:.72rem;color:#9aa">Voreinstellungen:</span>
+      <button onclick="document.getElementById('st_res').value=48" style="width:auto;padding:2px 9px;font-size:.72rem;background:#333">schnell 48</button>
+      <button onclick="document.getElementById('st_res').value=64" style="width:auto;padding:2px 9px;font-size:.72rem;background:#333">normal 64</button>
+      <button onclick="document.getElementById('st_res').value=96" style="width:auto;padding:2px 9px;font-size:.72rem;background:#333">fein 96</button>
+      <button onclick="document.getElementById('st_res').value=160" style="width:auto;padding:2px 9px;font-size:.72rem;background:#333">hoch 160</button>
+      <button onclick="document.getElementById('st_res').value=320" style="width:auto;padding:2px 9px;font-size:.72rem;background:#333">sehr hoch 320</button>
+      <button onclick="document.getElementById('st_res').value=500" style="width:auto;padding:2px 9px;font-size:.72rem;background:#333">max 500</button>
+    </div>
+    <div class="row3" style="margin-top:8px">
+      <div>
+        <label>Frames je Video (24–120)</label>
+        <input type="number" id="st_frames" value="44" min="24" max="120" step="4">
+      </div>
+      <div>
+        <label>Zeitlupe × (1–50)</label>
+        <input type="number" id="st_slowmo" value="3" min="1" max="50" step="1"
+               title="time_scale = 1/Zeitlupe — höher = langsamerer Strahlflug im Video">
+      </div>
+      <div style="display:flex;align-items:flex-end;padding-bottom:6px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:.78rem">
+          <input type="checkbox" id="st_rods" style="width:auto"
+                 title="aus = nur das Spray (Freistrahl, Kamera nah am Strahl); an = 3 Kupferstäbe als Aufprallziele mit weiterer Übersicht">
+          Kupferstäbe (Aufprallziele) zeigen
+        </label>
+      </div>
+    </div>
+    <p style="font-size:.72rem;color:#a95;line-height:1.45;margin:6px 0 0">
+      ⚠ Rechenzeit wächst ~<b>kubisch</b> mit der Auflösung: 96 ≈ 30 s/Variante, 192 ≈ 4 min,
+      384 ≈ 30 min, 500 ≈ 1 h je Variante. Für hohe Auflösungen die Rundengröße auf 1–4 stellen —
+      oder billig bei 48–96 iterieren und nur den Sieger „✨ Schön rendern".
+      Ab Auflösung 192 wird der Mesh-Upres-Faktor automatisch abgeschaltet (RAM-Schutz —
+      die Sim ist dort selbst fein genug).
+    </p>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
       <button id="st_btn_start" onclick="stStartRound(true)"
               style="width:auto;padding:8px 16px">▶ Runde 1 starten (breite Streuung)</button>
@@ -1973,11 +2051,80 @@
     </div>
   </div>
 
+  <div class="e3-card">
+    <div class="section-title">🎯 Einzelnen Strahl backen (exakte Parameter)</div>
+    <p style="font-size:.78rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      EINEN Strahl mit <b>genau diesen Werten</b> simulieren — ohne Streuung/Mutation.
+      Das Ergebnis erscheint als normale Ein-Kachel-Runde (markierbar, ✨, 💾).
+      Auflösung/Frames/Zeitlupe kommen aus den Feldern oben.
+    </p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+      <div><label>Druck (bar)</label>
+        <input type="number" id="st_e_p" value="3" min="0.1" max="3" step="0.1" style="width:90px"></div>
+      <div><label>Sprühkegel (°)</label>
+        <input type="number" id="st_e_cone" value="10" min="0" max="30" step="1" style="width:90px"></div>
+      <div><label>Oberfl.-Spannung σ</label>
+        <input type="number" id="st_e_surft" value="0.01" min="0.002" max="0.05" step="0.001" style="width:100px"></div>
+      <div><label>Viskosität ν</label>
+        <input type="number" id="st_e_visc" value="0.004" min="0.001" max="0.08" step="0.001" style="width:100px"></div>
+      <div><label>Düsen-Ø (mm)</label>
+        <input type="number" id="st_e_noz" value="1" min="0.5" max="1.5" step="0.1" style="width:90px"></div>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <button id="st_btn_single" onclick="stStartSingle()"
+              style="width:auto;padding:8px 16px">🎯 Diesen Strahl backen</button>
+      <button onclick="stSingleFromOil()" title="Die aktuellen Spray-Werte aus dem 💧-Tab in diese Felder holen"
+              style="width:auto;padding:8px 12px;background:#444">↙ Werte aus 💧-Tab holen</button>
+    </div>
+  </div>
+
   <div class="e3-card" id="st_grid_card" style="display:none">
     <div class="section-title" id="st_grid_title">Runde</div>
     <div id="st_grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:10px"></div>
   </div>
 
+  <div class="e3-card" id="st_fav_card">
+    <div class="section-title">💾 Gespeicherte Sprays (Favoriten)</div>
+    <p style="font-size:.78rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      Einen guten Strahl mit „💾 Favorit" an der Kachel <b>benannt speichern</b> — hier gelistet
+      und jederzeit mit <b>„✔ in 💧 übernehmen"</b> in die Felder der echten
+      Spritzöl-Berechnung geschrieben (Druck, Sprühkegel, σ, ν, Düsen-Ø).
+    </p>
+    <div id="st_fav_list" style="display:flex;flex-direction:column;gap:6px">
+      <span style="font-size:.78rem;color:#789">— noch keine Favoriten —</span>
+    </div>
+  </div>
+
+ </div>
+
+ <!-- 🔍 Großansicht einer Kachel (Klick auf das Video) -->
+ <div id="st-big-modal" onclick="if(event.target===this)stCloseBig()"
+      style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.75);z-index:900;
+             align-items:center;justify-content:center">
+   <div style="background:#14181c;border:1px solid #345;border-radius:8px;padding:14px;
+               max-width:min(1100px,94vw);max-height:92vh;overflow:auto;width:100%">
+     <div style="display:flex;align-items:center;gap:10px">
+       <div class="section-title" id="st_big_title" style="margin:0;flex:1">Variante</div>
+       <button onclick="stCloseBig()" style="width:auto;padding:4px 12px;background:#444">✕ Schließen</button>
+     </div>
+     <video id="st_big_video" muted loop autoplay playsinline controls
+            style="width:100%;border-radius:6px;background:#000;margin-top:10px"></video>
+     <div id="st_big_params" style="font-size:.85rem;color:#9ab;margin-top:8px"></div>
+     <canvas id="st_big_spark" width="900" height="90"
+             style="width:100%;height:90px;margin-top:8px;display:none"></canvas>
+     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;align-items:center">
+       <button id="st_big_mark" onclick="stBigMark()" style="width:auto;padding:6px 14px;background:#333">⭐ Markieren</button>
+       <button onclick="stBigAdopt()" style="width:auto;padding:6px 14px;background:#2e7d4a">✔ Übernehmen (💧-Tab)</button>
+       <button onclick="stBeauty(window._stBigVid)" title="Diese Variante hochauflösend neu backen"
+               style="width:auto;padding:6px 14px;background:#6d5a1a">✨ Schön rendern</button>
+       <button onclick="stSaveFavorite(window._stBigVid)" title="Diesen Strahl benannt als Favorit speichern"
+               style="width:auto;padding:6px 14px;background:#2e5a7d">💾 Favorit</button>
+       <span id="st_big_toggle" style="display:none">
+         <button onclick="stBigSrc(false)" style="width:auto;padding:6px 10px;background:#333">Original</button>
+         <button onclick="stBigSrc(true)" style="width:auto;padding:6px 10px;background:#6d5a1a">✨ Beauty</button>
+       </span>
+     </div>
+   </div>
  </div>
 </div><!-- /panel-spraytest -->
 
@@ -2898,7 +3045,9 @@ function switchTab(name) {
     if (ob && ob.style.display === 'none' && !runningOil && typeof loadOilSaved === 'function')
       loadOilSaved(false);
     if (typeof refreshOilVariants === 'function') refreshOilVariants();
+    if (typeof stRefreshFavs === 'function') stRefreshFavs();   // 💾 Spray-Favoriten-Dropdown
     if (typeof _oilBuildPinList === 'function') _oilBuildPinList();
+    if (typeof _oilDrawAngleFig === 'function') _oilDrawAngleFig();  // Winkel-Skizzen aktualisieren
   }
   if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
   if (name === 'em3d' && typeof adoptEm3dGeom === 'function') {
@@ -5517,6 +5666,210 @@ function _oilHiddenPinList() {
   return Array.from(grid.querySelectorAll('.oil-pin-ck')).filter(c => !c.checked).map(c => +c.dataset.pin);
 }
 
+// --- 🎯 Live-Skizzen der Winkeleinstellungen (Strahlrichtung) -------------------------------
+// Zwei SVG-Panels, die den vier Winkelfeldern folgen: Stirnansicht (Düsen-Versatz + tangentialer
+// Schwenk + Sprühkegel, Blick entlang der Motorachse) und Seitenschnitt (axiale Neigung).
+// Reines Frontend — gleiche Vorzeichen-Konvention wie das Blender-Skript (positiver Versatz/
+// Schwenk = mathematisch positiv um die Achse; positive Neigung = zur Blechpaket-Stirnfläche).
+function _oilDrawAngleFig() {
+  const box = document.getElementById('oil_angle_fig');
+  if (!box) return;
+  const val = id => { const el = document.getElementById(id); return el ? (+el.value || 0) : 0; };
+  const offs = val('oil_nozzle_offset'), yaw = val('oil_jet_yaw');
+  const tilt = val('oil_jet_tilt'),      cone = val('oil_jet_cone');
+  const ringFull = !!document.getElementById('oil_ring_full')?.checked;
+  const D2R = Math.PI / 180;
+  // SVG-Punkt aus Polarkoordinaten (mathematisch: 90° = oben), y im Bild nach unten
+  const P = (cx, cy, r, deg) => [cx + r * Math.cos(deg * D2R), cy - r * Math.sin(deg * D2R)];
+  const fmt = n => n.toFixed(1);
+  const line = (a, b, col, w, dash) =>
+    `<line x1="${fmt(a[0])}" y1="${fmt(a[1])}" x2="${fmt(b[0])}" y2="${fmt(b[1])}" stroke="${col}"`
+    + ` stroke-width="${w}"${dash ? ` stroke-dasharray="${dash}"` : ''} stroke-linecap="round"/>`;
+  // Pfeil von a in Richtung dirDeg (math. Winkel), Länge L
+  const arrow = (a, dirDeg, L, col, w) => {
+    const b = P(a[0], a[1], L, dirDeg);
+    const h1 = P(b[0], b[1], 7, dirDeg + 155), h2 = P(b[0], b[1], 7, dirDeg - 155);
+    return line(a, b, col, w) + line(b, h1, col, w) + line(b, h2, col, w);
+  };
+  // Sprühkegel-Fläche um dirDeg (±cone), von a aus
+  const coneWedge = (a, dirDeg, L, c) => {
+    if (c <= 0) return '';
+    const p1 = P(a[0], a[1], L, dirDeg + c), p2 = P(a[0], a[1], L, dirDeg - c);
+    return `<path d="M ${fmt(a[0])} ${fmt(a[1])} L ${fmt(p1[0])} ${fmt(p1[1])} L ${fmt(p2[0])} ${fmt(p2[1])} Z"`
+         + ` fill="rgba(255,60,30,.14)" stroke="rgba(255,60,30,.5)" stroke-width=".7"/>`;
+  };
+  const txt = (x, y, s, col, anchor) =>
+    `<text x="${fmt(x)}" y="${fmt(y)}" fill="${col || '#aab'}" font-size="9.5"`
+    + ` text-anchor="${anchor || 'middle'}" font-family="sans-serif">${s}</text>`;
+
+  // ---------- Panel 1: Stirnansicht (Blick auf das Wickelkopf-Ende, Achse = Punkt) ----------
+  const cx = 128, cy = 140, rCr = 50, rRing = 95, rNoz = rRing - 7;
+  let s1 = '';
+  s1 += `<circle cx="${cx}" cy="${cy}" r="3" fill="#8af"/>` + txt(cx, cy + 14, 'Motorachse', '#8af');
+  // Wickelkopf-Kronen als Kupfer-Segmente (nur oben = Keil-Ausschnitt; voller Ring ⇒ rundum grau angedeutet)
+  const wFull = !!document.getElementById('oil_winding_full')?.checked;
+  const segSpan = ringFull ? 360 : 84, segN = ringFull ? 24 : 7, segA0 = 90 - segSpan / 2;
+  for (let i = 0; i < segN; i++) {
+    const a0 = segA0 + segSpan * (i + 0.12) / segN, a1 = segA0 + segSpan * (i + 0.88) / segN;
+    const q0 = P(cx, cy, rCr, a0), q1 = P(cx, cy, rCr, a1);
+    const q2 = P(cx, cy, rCr - 12, a1), q3 = P(cx, cy, rCr - 12, a0);
+    // beim vollen Ring: nur der gebaute Keil = Kupfer, Rest blass — außer 🌀 Wickelkopf komplett
+    const inWedge = wFull || !ringFull || (a0 > 48 && a1 < 132);
+    s1 += `<path d="M ${fmt(q0[0])} ${fmt(q0[1])} A ${rCr} ${rCr} 0 0 0 ${fmt(q1[0])} ${fmt(q1[1])}`
+        + ` L ${fmt(q2[0])} ${fmt(q2[1])} A ${rCr - 12} ${rCr - 12} 0 0 1 ${fmt(q3[0])} ${fmt(q3[1])} Z"`
+        + ` fill="${inWedge ? '#b87333' : '#4a4a52'}" opacity="${inWedge ? '.9' : '.45'}"/>`;
+  }
+  s1 += txt(cx, cy - 16, 'Wickelköpfe', '#e0a060');
+  // Spritzring: voller Kreis oder Bogen über dem Ausschnitt (Rest gestrichelt blass)
+  if (ringFull) {
+    s1 += `<circle cx="${cx}" cy="${cy}" r="${rRing}" fill="none" stroke="#99a" stroke-width="5"/>`;
+  } else {
+    const b0 = P(cx, cy, rRing, 34), b1 = P(cx, cy, rRing, 146);
+    s1 += `<path d="M ${fmt(b1[0])} ${fmt(b1[1])} A ${rRing} ${rRing} 0 0 1 ${fmt(b0[0])} ${fmt(b0[1])}"`
+        + ` fill="none" stroke="#99a" stroke-width="5"/>`
+        + `<circle cx="${cx}" cy="${cy}" r="${rRing}" fill="none" stroke="#555" stroke-width="1.2" stroke-dasharray="3 5"/>`;
+  }
+  s1 += txt(...P(cx, cy, rRing + 17, 236), 'Spritzring', '#99a', 'start');
+  // ALLE Düsen-Öffnungen (Anzahl aus „Anzahl Düsen") verteilt: voller Ring ⇒ gleichmäßig über
+  // 360°, sonst über den Ringbogen — jede mit kurzem Strahlpfeil radial nach innen. Die
+  // Haupt-Düse oben (90°+Versatz) zeigt zusätzlich Schwenk/Kegel im Detail.
+  const nN = Math.max(1, Math.round(val('oil_nozzles') || 6));
+  const thMain = 90 + offs;
+  for (let k = 0; k < nN; k++) {
+    const a = ringFull ? thMain + 360 * k / nN
+                       : (nN === 1 ? thMain : 46 + 88 * k / (nN - 1) + offs);
+    const dAng = ((a - thMain) % 360 + 360) % 360;
+    if (dAng < 1 || dAng > 359) continue;               // Haupt-Düse: Detail-Zeichnung unten
+    const Nk = P(cx, cy, rNoz, a);
+    s1 += `<rect x="${fmt(Nk[0] - 3)}" y="${fmt(Nk[1] - 3)}" width="6" height="6" fill="#dde" `
+        + `transform="rotate(${fmt(-(a - 90))} ${fmt(Nk[0])} ${fmt(Nk[1])})"/>`
+        + arrow(Nk, a + 180, rNoz - rCr + 2, '#ff4a30', 1.3);
+  }
+  // Ziel (echter Kronenpunkt) oben bei 90°, Düse um den Versatz verschoben
+  const thT = 90, thN = 90 + offs;
+  const T = P(cx, cy, rCr - 2, thT), N = P(cx, cy, rNoz, thN);
+  s1 += `<circle cx="${fmt(T[0])}" cy="${fmt(T[1])}" r="3" fill="#ffd54a"/>`
+      + txt(T[0] + 9, T[1] + 3, 'Ziel', '#ffd54a', 'start');
+  s1 += `<rect x="${fmt(N[0] - 3.5)}" y="${fmt(N[1] - 3.5)}" width="7" height="7" fill="#dde" `
+      + `transform="rotate(${fmt(-(thN - 90))} ${fmt(N[0])} ${fmt(N[1])})"/>`
+      + txt(...P(cx, cy, rRing + 12, thN + (offs >= 0 ? 12 : -12)), 'Düse', '#dde',
+            offs >= 0 ? 'end' : 'start');
+  // Versatz-Winkelbogen zwischen Ziel-Winkel und Düsen-Winkel
+  if (Math.abs(offs) > 0.5) {
+    const ra = rRing + 16, a0 = Math.min(thT, thN), a1 = Math.max(thT, thN);
+    const p0 = P(cx, cy, ra, a0), p1 = P(cx, cy, ra, a1);
+    s1 += `<path d="M ${fmt(p0[0])} ${fmt(p0[1])} A ${ra} ${ra} 0 0 0 ${fmt(p1[0])} ${fmt(p1[1])}"`
+        + ` fill="none" stroke="#6cf" stroke-width="1.6"/>`
+        + txt(...P(cx, cy, ra + 11, (a0 + a1) / 2), `Versatz ${offs}°`, '#6cf');
+  }
+  // Grundstrahl Düse→Ziel (gestrichelt), + Schwenk gedrehter Strahl (rot) + Kegel
+  const dir0 = Math.atan2(-(T[1] - N[1]), T[0] - N[0]) / D2R;   // math. Winkel Düse→Ziel
+  const dirJ = dir0 + yaw;                                       // Schwenk: math. positiv um z
+  const Lj = Math.hypot(T[0] - N[0], T[1] - N[1]) * 1.25;
+  if (Math.abs(yaw) > 0.5) s1 += line(N, P(N[0], N[1], Lj, dir0), '#888', 1.2, '4 4');
+  s1 += coneWedge(N, dirJ, Lj, cone) + arrow(N, dirJ, Lj, '#ff4a30', 2.2);
+  // Live-Werte gesammelt unten (in der Grafik selbst wird es sonst zu eng)
+  s1 += txt(cx, 246, `Schwenk ${yaw}°  ·  Sprühkegel ±${cone}°  ·  ${nN} Düsen`, '#ff8a70');
+  const panel1 = `<div style="text-align:center"><svg width="256" height="252" viewBox="0 0 256 252">${s1}</svg>`
+    + `<div style="font-size:.72rem;color:#889">Stirnansicht — Blick auf das Wickelkopf-Ende<br>`
+    + `(alle Düsen aus „Anzahl Düsen"; gestrichelt = Strahl ohne Schwenk)</div></div>`;
+
+  // ---------- Panel 2: Seitenschnitt (Motorachse waagerecht, r nach oben) ----------
+  let s2 = '';
+  const axY = 218;
+  s2 += line([12, axY], [244, axY], '#8af', 1.2, '8 4 2 4') + txt(230, axY - 5, 'Achse (z)', '#8af', 'end');
+  s2 += `<rect x="20" y="92" width="112" height="${axY - 92}" fill="#4a4a52"/>`
+      + txt(76, 118, 'Blechpaket', '#aab');
+  s2 += `<rect x="132" y="108" width="58" height="62" rx="7" fill="#b87333" opacity=".9"/>`
+      + txt(161, 188, 'Wickelkopf', '#e0a060') + line([132, 92], [132, axY], '#666', 1, '3 3')
+      + txt(128, 86, 'Stirnfläche', '#889', 'end');
+  // Ring-Rohr im Schnitt: Kreis über der Kronenspitze (am +z-Ende)
+  const rx = 186, ry = 84;
+  s2 += `<circle cx="${rx}" cy="${ry}" r="10" fill="none" stroke="#99a" stroke-width="4"/>`
+      + txt(rx + 16, ry - 6, 'Ring', '#99a', 'start');
+  // Düse an der Ring-Innenseite (unten), Grundstrahl radial nach innen auf die Kronen-FLANKE
+  const N2 = [rx, ry + 12];
+  const T2 = [168, 132];                                  // Kronenflanke knapp unter der Spitze
+  const dir20 = Math.atan2(-(T2[1] - N2[1]), T2[0] - N2[0]) / D2R;
+  // positive Neigung = mehr zur Stirnfläche (im Bild: nach LINKS, math. Winkel Richtung −180°)
+  const dir2 = dir20 - tilt;
+  const L2 = Math.hypot(T2[0] - N2[0], T2[1] - N2[1]) * 1.35;
+  if (Math.abs(tilt) > 0.5) s2 += line(N2, P(N2[0], N2[1], L2, dir20), '#888', 1.2, '4 4');
+  s2 += coneWedge(N2, dir2, L2, cone) + arrow(N2, dir2, L2, '#ff4a30', 2.2);
+  s2 += txt(N2[0] + 14, N2[1] + 8, `Neigung ${tilt}°`, '#ff8a70', 'start');
+  s2 += txt(16, 16, '+ = zur Stirnfläche', '#889', 'start')
+      + txt(16, 28, '− = zur Wickelkopfspitze', '#889', 'start');
+  s2 += arrow([24, axY - 14], 90, 26, '#8af', 1.4) + txt(32, axY - 34, 'r', '#8af', 'start');
+  const panel2 = `<div style="text-align:center"><svg width="256" height="252" viewBox="0 0 256 252">${s2}</svg>`
+    + `<div style="font-size:.72rem;color:#889">Seitenschnitt — Achse waagerecht<br>(axiale Neigung des Strahls)</div></div>`;
+
+  // ---------- Panel 3: Einbaulage — wo ist UNTEN? (Schwerkraft, Gehäuse, Ablauf) ----------
+  const orient = document.getElementById('oil_orientation')?.value || 'horizontal';
+  const hOn  = !!document.getElementById('oil_housing')?.checked;
+  const hCol = !!document.getElementById('oil_housing_collide')?.checked;
+  const glass = 'rgba(120,180,240,.55)', glassFill = 'rgba(120,180,240,.07)', oilCol = '#49c0ff';
+  let s3 = '';
+  if (orient !== 'vertical') {
+    // horizontal: Achse waagerecht — unten = Bildunterkante (quer zur Achse)
+    s3 += line([16, 118], [244, 118], '#8af', 1.2, '8 4 2 4') + txt(212, 112, 'Achse (z)', '#8af', 'start');
+    if (hOn) {
+      s3 += `<rect x="30" y="52" width="180" height="132" rx="8" fill="${glassFill}" stroke="${glass}" stroke-width="2.5"/>`;
+      s3 += `<rect x="112" y="184" width="16" height="16" fill="${glassFill}" stroke="${glass}" stroke-width="2"/>`
+          + txt(134, 198, 'Ablauf', '#7ab8f0', 'start');
+    }
+    s3 += `<rect x="46" y="76" width="104" height="84" fill="#4a4a52"/>` + txt(98, 122, 'Blechpaket', '#aab');
+    s3 += `<rect x="150" y="86" width="34" height="64" rx="6" fill="#b87333" opacity=".9"/>`
+        + txt(167, 70, 'Wickelkopf', '#e0a060');
+    s3 += `<circle cx="192" cy="62" r="6" fill="none" stroke="#99a" stroke-width="3"/>`
+        + `<circle cx="192" cy="174" r="6" fill="none" stroke="#99a" stroke-width="3"/>`
+        + txt(204, 58, 'Ring', '#99a', 'start');
+    // Öl-Weg nach unten: mit Kollisionswand bis zum Glas-Boden + Ablauf, sonst „verschwindet"
+    if (hOn && hCol) {
+      s3 += line([192, 70], [192, 168], oilCol, 1.8, '2 4')
+          + line([190, 181], [130, 183], oilCol, 1.8, '2 4')
+          + arrow([130, 183], 180, 8, oilCol, 1.8)
+          + txt(226, 160, 'Öl', oilCol, 'start');
+    } else {
+      s3 += line([192, 70], [192, 138], oilCol, 1.8, '2 4')
+          + txt(198, 148, 'Öl verschwindet (Domain-Grenze)', '#889', 'end');
+    }
+    s3 += arrow([18, 58], -90, 46, '#ffd54a', 2) + txt(18, 48, 'g', '#ffd54a');
+    s3 += txt(128, 236, '⬇ unten = quer zur Achse (−y)', '#ffd54a');
+  } else {
+    // vertikal: Achse senkrecht — Motor steht aufrecht, unten = −z entlang der Achse
+    s3 += line([128, 16], [128, 222], '#8af', 1.2, '8 4 2 4') + txt(136, 26, 'Achse (z)', '#8af', 'start');
+    if (hOn) {
+      s3 += `<rect x="60" y="32" width="136" height="180" rx="8" fill="${glassFill}" stroke="${glass}" stroke-width="2.5"/>`;
+      s3 += `<rect x="118" y="212" width="20" height="14" fill="${glassFill}" stroke="${glass}" stroke-width="2"/>`
+          + txt(146, 226, 'Ablauf', '#7ab8f0', 'start');
+    }
+    s3 += `<rect x="80" y="88" width="96" height="112" fill="#4a4a52"/>` + txt(128, 148, 'Blechpaket', '#aab');
+    s3 += `<rect x="90" y="54" width="76" height="34" rx="6" fill="#b87333" opacity=".9"/>`
+        + txt(128, 48, 'Wickelkopf', '#e0a060');
+    s3 += `<circle cx="72" cy="50" r="6" fill="none" stroke="#99a" stroke-width="3"/>`
+        + `<circle cx="184" cy="50" r="6" fill="none" stroke="#99a" stroke-width="3"/>`
+        + txt(196, 46, 'Ring', '#99a', 'start');
+    if (hOn && hCol) {
+      s3 += line([72, 58], [72, 206], oilCol, 1.8, '2 4')
+          + line([74, 209], [116, 211], oilCol, 1.8, '2 4')
+          + arrow([116, 211], 0, 8, oilCol, 1.8)
+          + txt(60, 140, 'Öl', oilCol, 'end');
+    } else {
+      s3 += line([72, 58], [72, 150], oilCol, 1.8, '2 4')
+          + txt(66, 164, 'Öl verschwindet (Domain-Grenze)', '#889', 'start');
+    }
+    s3 += arrow([28, 58], -90, 46, '#ffd54a', 2) + txt(28, 48, 'g', '#ffd54a');
+    s3 += txt(128, 240, '⬇ unten = entlang der Achse (−z)', '#ffd54a');
+  }
+  const cap3 = (hOn && hCol) ? 'Kollisionswand: Öl wird am Glas gefangen → Ablauf'
+             : hOn ? 'Sichtwand: Öl läuft aus dem berechneten Bereich'
+                   : 'ohne Gehäuse';
+  const panel3 = `<div style="text-align:center"><svg width="256" height="252" viewBox="0 0 256 252">${s3}</svg>`
+    + `<div style="font-size:.72rem;color:#889">Einbaulage „${orient === 'vertical' ? 'vertikal' : 'horizontal'}" — wo ist unten?<br>(${cap3})</div></div>`;
+
+  box.innerHTML = panel1 + panel2 + panel3;
+}
+
 // Gemeinsamer Payload-Builder für Voll-Lauf UND Vorschau (identische Geometrie/Richtung).
 async function _oilBuildPayload() {
   const g = id => document.getElementById(id);
@@ -5542,6 +5895,7 @@ async function _oilBuildPayload() {
     pressure_bar:   +g('oil_pressure').value || 3,
     nozzle_count:   +g('oil_nozzles').value || 6,
     nozzle_d_mm:    +g('oil_nozzle_d').value || 1,
+    ring_full:      ck('oil_ring_full'),
     ring_gap_mm:    +g('oil_ring_gap').value || 3,
     ring_tube_mm:   +g('oil_ring_tube').value || 6,
     orientation:    g('oil_orientation').value || 'horizontal',
@@ -5559,6 +5913,9 @@ async function _oilBuildPayload() {
     material:       ck('oil_material'),
     light_preset:   (g('oil_light_preset') && g('oil_light_preset').value) || 'studio',
     smooth:         g('oil_smooth') ? !!g('oil_smooth').checked : true,
+    housing:        ck('oil_housing'),
+    housing_collide:ck('oil_housing_collide'),   // 🧱 Gehäuse fängt das Öl (Kollisionswand)
+    housing_wall_mm:+(g('oil_housing_wall') && g('oil_housing_wall').value) || 4,
     oil_transparency: (g('oil_transparency') ? +g('oil_transparency').value : 0.45),
     engine:         g('oil_engine').value || 'BLENDER_EEVEE',
     camera_angle_deg: (window._oilCamLockDeg != null ? window._oilCamLockDeg : null),
@@ -5932,6 +6289,7 @@ async function stRefresh() {
     if (!window._stRound && rounds.length && !document.getElementById('st_btn_start').disabled)
       stLoadRound(rounds[0].rid);
   } catch (e) {}
+  stRefreshFavs();
 }
 
 async function stLoadRound(rid) {
@@ -5943,6 +6301,31 @@ async function stLoadRound(rid) {
   } catch (e) {}
 }
 
+function _stVideoUrl(round, v, beauty) {
+  return `/spraytest/video/${encodeURIComponent(round.rid)}/${encodeURIComponent(v.id)}` +
+         `?${beauty ? 'beauty=1&' : ''}t=${Date.now()}`;
+}
+
+// Mini-Sparkline: Tropfenzahl (Mesh-Inseln + Sekundärpartikel) über die Frames.
+function _stSparkline(canvas, series, big) {
+  if (!canvas || !Array.isArray(series) || series.length < 2) return false;
+  const vals = series.map(s => (s.n_islands || 0) + (s.n_snd || 0));
+  const max = Math.max(...vals, 1);
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height, pad = 2;
+  ctx.clearRect(0, 0, W, H);
+  ctx.beginPath();
+  vals.forEach((val, i) => {
+    const x = pad + (W - 2 * pad) * i / (vals.length - 1);
+    const y = H - pad - (H - 2 * pad) * val / max;
+    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+  });
+  ctx.strokeStyle = '#3a8adf'; ctx.lineWidth = big ? 2 : 1.2; ctx.stroke();
+  ctx.lineTo(W - pad, H - pad); ctx.lineTo(pad, H - pad); ctx.closePath();
+  ctx.fillStyle = 'rgba(58,138,223,.18)'; ctx.fill();
+  return true;
+}
+
 function stRenderRound(round) {
   window._stRound = round;
   const card = document.getElementById('st_grid_card');
@@ -5951,18 +6334,24 @@ function stRenderRound(round) {
   if (!card || !grid) return;
   card.style.display = '';
   title.textContent = `Runde ${round.round_no} — ${round.ts}` +
-    ` (Qualität ${round.quality}${round.aborted ? ', abgebrochen — Teilrunde' : ''})` +
-    ' · ⭐ die Besten markieren, dann „Nächste Runde"';
+    ` (Auflösung ${round.resolution || ({schnell:48,normal:64,fein:96}[round.quality] || '?')}` +
+    `${round.aborted ? ', abgebrochen — Teilrunde' : ''})` +
+    ' · ⭐ die Besten markieren, dann „Nächste Runde" · Klick aufs Video = Großansicht';
   const marked = new Set(round.marked || []);
   grid.innerHTML = (round.variants || []).map(v => {
     const isM = marked.has(v.id);
-    const vsrc = `/spraytest/video/${encodeURIComponent(round.rid)}/${encodeURIComponent(v.id)}?t=${Date.now()}`;
+    const vsrc = _stVideoUrl(round, v, !!v.beauty);
     const badge = v.source === 'parent'
       ? `<span style="background:#2e5a7d;color:#cde;padding:1px 6px;border-radius:3px;font-size:.68rem">Elter${v.src_round ? ' (' + v.src_round.split('_')[0] + ')' : ''}</span>`
       : '';
+    const bBadge = v.beauty
+      ? `<span title="Schönheits-Render (Auflösung ${v.beauty_res || '?'})"
+              style="background:#6d5a1a;color:#fda;padding:1px 6px;border-radius:3px;font-size:.68rem">✨${v.beauty_res || ''}</span>`
+      : '';
     const body = v.ok
-      ? `<video muted loop autoplay playsinline src="${vsrc}"
-           style="width:100%;border-radius:4px;background:#000;display:block"></video>`
+      ? `<video muted loop autoplay playsinline src="${vsrc}" onclick="stOpenBig('${v.id}')"
+           title="Klick = Großansicht"
+           style="width:100%;border-radius:4px;background:#000;display:block;cursor:zoom-in"></video>`
       : `<div style="padding:22px 8px;text-align:center;color:#e57;font-size:.78rem;background:#1a1214;border-radius:4px">
            ⚠ fehlgeschlagen<br><span style="color:#977">${(v.error || '').slice(0, 90)}</span></div>`;
     return `<div style="border:2px solid ${isM ? '#e5b93a' : '#333'};border-radius:6px;padding:6px;background:#161a1e">
@@ -5971,15 +6360,109 @@ function stRenderRound(round) {
         <button onclick="stToggleMark('${v.id}')" title="als Elter für die nächste Runde markieren"
                 style="width:auto;padding:3px 9px;font-size:.85rem;background:${isM ? '#8a6d1a' : '#333'}">⭐</button>
         <span style="font-size:.72rem;color:#9ab;flex:1">${_stFmtParams(v.params)}</span>
-        ${badge}
+        ${badge}${bBadge}
       </div>
-      <div style="display:flex;gap:6px;margin-top:5px;align-items:center">
+      <canvas id="st_spark_${v.id}" width="240" height="36"
+              style="width:100%;height:36px;margin-top:4px;display:none"></canvas>
+      <div style="display:flex;gap:6px;margin-top:5px;align-items:center;flex-wrap:wrap">
         <button onclick='stAdopt(${JSON.stringify(v.params)})' title="Parameter in den 💧-Spritzöl-Tab übernehmen"
                 style="width:auto;padding:3px 9px;font-size:.72rem;background:#2e7d4a">✔ Übernehmen</button>
-        ${v.droplets_peak != null ? `<span style="font-size:.7rem;color:#789">≈${v.droplets_peak} Fragmente max.</span>` : ''}
+        ${v.ok ? `<button onclick="stBeauty('${v.id}')" title="Diese Variante hochauflösend neu backen"
+                style="width:auto;padding:3px 9px;font-size:.72rem;background:#6d5a1a">✨ Schön rendern</button>` : ''}
+        <button onclick="stSaveFavorite('${v.id}')" title="Diesen Strahl benannt als Favorit speichern (für die echte 💧-Berechnung)"
+                style="width:auto;padding:3px 9px;font-size:.72rem;background:#2e5a7d">💾 Favorit</button>
+        ${v.droplets_peak != null ? `<span style="font-size:.7rem;color:#789">≈${v.droplets_peak} Tropfen max.</span>` : ''}
       </div>
     </div>`;
   }).join('') || '<div style="color:#9aa;font-size:.8rem">— keine Varianten —</div>';
+  // Sparklines nach dem DOM-Aufbau zeichnen (Canvas braucht existierende Elemente)
+  (round.variants || []).forEach(v => {
+    const cv = document.getElementById(`st_spark_${v.id}`);
+    if (cv && _stSparkline(cv, v.series)) cv.style.display = '';
+  });
+}
+
+// ── 🔍 Großansicht ────────────────────────────────────────────────────────────
+window._stBigVid = null;
+
+function stOpenBig(vid) {
+  const round = window._stRound;
+  if (!round) return;
+  const v = (round.variants || []).find(x => x.id === vid);
+  if (!v || !v.ok) return;
+  window._stBigVid = vid;
+  document.getElementById('st_big_title').textContent =
+    `Runde ${round.round_no} · Variante ${vid}` + (v.source === 'parent' ? ' (Elter)' : '');
+  document.getElementById('st_big_params').textContent = _stFmtParams(v.params) +
+    (v.droplets_peak != null ? ` · ≈${v.droplets_peak} Tropfen max.` : '');
+  const spark = document.getElementById('st_big_spark');
+  spark.style.display = _stSparkline(spark, v.series, true) ? '' : 'none';
+  document.getElementById('st_big_toggle').style.display = v.beauty ? '' : 'none';
+  stBigSrc(!!v.beauty);
+  _stBigSyncMark();
+  document.getElementById('st-big-modal').style.display = 'flex';
+}
+
+function stBigSrc(beauty) {
+  const round = window._stRound;
+  const v = round && (round.variants || []).find(x => x.id === window._stBigVid);
+  if (!v) return;
+  document.getElementById('st_big_video').src = _stVideoUrl(round, v, beauty && v.beauty);
+}
+
+function stCloseBig() {
+  document.getElementById('st-big-modal').style.display = 'none';
+  const vd = document.getElementById('st_big_video');
+  vd.pause(); vd.removeAttribute('src'); vd.load();
+  window._stBigVid = null;
+}
+
+function _stBigSyncMark() {
+  const round = window._stRound;
+  const btn = document.getElementById('st_big_mark');
+  if (!round || !btn || !window._stBigVid) return;
+  const isM = (round.marked || []).includes(window._stBigVid);
+  btn.style.background = isM ? '#8a6d1a' : '#333';
+  btn.textContent = isM ? '⭐ Markiert' : '⭐ Markieren';
+}
+
+async function stBigMark() {
+  if (window._stBigVid) { await stToggleMark(window._stBigVid); _stBigSyncMark(); }
+}
+
+function stBigAdopt() {
+  const round = window._stRound;
+  const v = round && (round.variants || []).find(x => x.id === window._stBigVid);
+  if (v) stAdopt(v.params);
+}
+
+// ── ✨ Schönheits-Render ──────────────────────────────────────────────────────
+async function stBeauty(vid) {
+  const round = window._stRound;
+  const st = document.getElementById('st_status');
+  if (!round || !vid) return;
+  stCloseBig();
+  // Beauty rendert IMMER hochauflösend: mindestens 256, oder das Feld, wenn höher.
+  const resIn = parseInt(document.getElementById('st_res').value) || 64;
+  const spec = { rid: round.rid, vid: vid,
+                 resolution: Math.min(512, Math.max(256, resIn)),
+                 frames: parseInt(document.getElementById('st_frames').value) || 60,
+                 slowmo: parseFloat(document.getElementById('st_slowmo').value) || 3 };
+  try {
+    const r = await fetch('/spraytest/beauty', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      st.style.color = r.status === 503 ? '#e57' : '#fb0';
+      st.textContent = '⚠ ' + (j.error || ('HTTP ' + r.status)); return;
+    }
+    ['st_btn_start', 'st_btn_next'].forEach(id => document.getElementById(id).disabled = true);
+    document.getElementById('st_btn_abort').disabled = false;
+    document.getElementById('st_progress_wrap').style.display = '';
+    st.style.color = '#9aa';
+    st.textContent = `✨ Schönheits-Render ${vid} läuft (Auflösung ${spec.resolution}) …`;
+    _pollSt();
+  } catch (e) { st.style.color = '#e57'; st.textContent = '⚠ ' + e; }
 }
 
 async function stToggleMark(vid) {
@@ -6002,20 +6485,129 @@ function stAdopt(params) {
                 nozzle_d_mm: 'oil_nozzle_d' };
   for (const [k, id] of Object.entries(map)) {
     const el = document.getElementById(id);
-    if (el && params[k] != null) el.value = params[k];
+    if (el && params[k] != null) {
+      // Auf die Feldgrenzen klemmen — Altrunden/-Favoriten können noch Werte aus den
+      // früheren, weiteren Bereichen tragen (z. B. 8 bar / Ø 3 mm).
+      let v = parseFloat(params[k]);
+      if (el.min !== '') v = Math.max(parseFloat(el.min), v);
+      if (el.max !== '') v = Math.min(parseFloat(el.max), v);
+      el.value = v;
+    }
   }
   const st = document.getElementById('st_status');
   if (st) { st.style.color = '#6c6';
     st.textContent = `✔ Übernommen in den 💧-Spritzöl-Tab: ${_stFmtParams(params)}`; }
 }
 
+// ── 💾 Spray-Favoriten (benannte Sprays für die echte 💧-Berechnung) ──────────
+window._stFavs = [];
+
+async function stRefreshFavs() {
+  try {
+    window._stFavs = await (await fetch('/spraytest/favorites')).json();
+  } catch (e) { window._stFavs = []; }
+  const box = document.getElementById('st_fav_list');
+  if (box) {
+    box.innerHTML = (window._stFavs || []).map(f => `
+      <div style="display:flex;align-items:center;gap:8px;border:1px solid #333;border-radius:5px;padding:6px 8px;background:#161a1e;flex-wrap:wrap">
+        <b style="font-size:.8rem;color:#cde">${(f.name || '').replace(/</g, '&lt;')}</b>
+        <span style="font-size:.72rem;color:#9ab;flex:1">${_stFmtParams(f.params)}
+          <span style="color:#678">· Prüfstand: ${f.sim ? f.sim.resolution : '?'}er, ${f.ts || ''}</span></span>
+        <button onclick="stApplyFavorite('${f.id}')" title="In die Felder der echten Spritzöl-Berechnung schreiben"
+                style="width:auto;padding:3px 10px;font-size:.72rem;background:#2e7d4a">✔ in 💧 übernehmen</button>
+        <button onclick="stDeleteFavorite('${f.id}')" style="width:auto;padding:3px 8px;font-size:.72rem;background:#444">🗑</button>
+      </div>`).join('') ||
+      '<span style="font-size:.78rem;color:#789">— noch keine Favoriten —</span>';
+  }
+  // Dropdown im 💧-Tab mitpflegen
+  const sel = document.getElementById('oil_fav_sel');
+  if (sel) {
+    sel.innerHTML = '<option value="">— Spray-Favorit wählen —</option>' +
+      (window._stFavs || []).map(f =>
+        `<option value="${f.id}">${(f.name || '').replace(/</g, '&lt;')} (${_stFmtParams(f.params)})</option>`).join('');
+  }
+}
+
+async function stSaveFavorite(vid) {
+  const round = window._stRound;
+  const v = round && (round.variants || []).find(x => x.id === vid);
+  if (!v) return;
+  const name = prompt('Name für diesen Spray-Favoriten:',
+                      `Spray ${(+v.params.pressure_bar).toFixed(1)} bar / Ø${(+v.params.nozzle_d_mm).toFixed(1)}`);
+  if (name === null) return;
+  try {
+    await fetch('/spraytest/favorites', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name, params: v.params,
+        sim: { resolution: round.resolution, frames: round.frames, slowmo: round.slowmo },
+        src: { rid: round.rid, vid: vid } }) });
+    const st = document.getElementById('st_status');
+    if (st) { st.style.color = '#6c6'; st.textContent = `💾 Favorit „${name}" gespeichert.`; }
+    stRefreshFavs();
+  } catch (e) {}
+}
+
+function stApplyFavorite(fid) {
+  const f = (window._stFavs || []).find(x => x.id === fid);
+  if (!f) return;
+  stAdopt(f.params);
+  switchTab('oil');                    // direkt hinspringen — dort landet der Strahl
+}
+
+async function stDeleteFavorite(fid) {
+  const f = (window._stFavs || []).find(x => x.id === fid);
+  if (f && !confirm(`Favorit „${f.name}" löschen?`)) return;
+  try {
+    await fetch(`/spraytest/favorites/${encodeURIComponent(fid)}/delete`, { method: 'POST' });
+  } catch (e) {}
+  stRefreshFavs();
+}
+
+function oilApplyFavorite() {
+  const sel = document.getElementById('oil_fav_sel');
+  if (sel && sel.value) stApplyFavorite(sel.value);
+}
+
+// Gemeinsame Sim-Einstellungen (Auflösung/Frames/Zeitlupe) aus der Kopfkarte lesen.
+function _stSimSettings() {
+  return {
+    resolution: Math.min(512, Math.max(32, parseInt(document.getElementById('st_res').value) || 64)),
+    frames: Math.max(24, Math.min(120, parseInt(document.getElementById('st_frames').value) || 44)),
+    slowmo: Math.max(1, Math.min(50, parseFloat(document.getElementById('st_slowmo').value) || 3)),
+    show_rods: document.getElementById('st_rods').checked,
+  };
+}
+
+// Runde/Einzel-Strahl an den Server schicken + Poll-Flow starten (geteilt).
+async function _stPostRound(spec, label) {
+  const st = document.getElementById('st_status');
+  try {
+    const r = await fetch('/spraytest', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
+    if (r.status === 503) {
+      const j = await r.json().catch(() => ({}));
+      st.style.color = '#e57'; st.textContent = '⚠ ' + (j.error || 'Blender fehlt'); return;
+    }
+    if (!r.ok) {
+      const j = await r.json().catch(() => ({}));
+      st.style.color = '#fb0'; st.textContent = '⚠ ' + (j.error || ('HTTP ' + r.status)); return;
+    }
+    ['st_btn_start', 'st_btn_next', 'st_btn_single'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.disabled = true; });
+    document.getElementById('st_btn_abort').disabled = false;
+    document.getElementById('st_progress_wrap').style.display = '';
+    st.style.color = '#9aa';
+    st.textContent = label;
+    _pollSt();
+  } catch (e) { st.style.color = '#e57'; st.textContent = '⚠ ' + e; }
+}
+
 async function stStartRound(first) {
   const st = document.getElementById('st_status');
-  const spec = {
-    n: Math.max(4, Math.min(12, parseInt(document.getElementById('st_n').value) || 10)),
-    quality: document.getElementById('st_quality').value || 'normal',
+  const spec = Object.assign({
+    n: Math.max(1, Math.min(12, parseInt(document.getElementById('st_n').value) || 10)),
     round_no: 1, parents: []
-  };
+  }, _stSimSettings());
   if (!first) {
     const round = window._stRound;
     const marked = new Set((round && round.marked) || []);
@@ -6028,24 +6620,31 @@ async function stStartRound(first) {
     spec.parents = (round.variants || []).filter(v => marked.has(v.id)).map(v => ({
       params: v.params, src_round: round.rid, src_vid: v.id }));
   }
-  try {
-    const r = await fetch('/spraytest', { method: 'POST',
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(spec) });
-    if (r.status === 503) {
-      const j = await r.json().catch(() => ({}));
-      st.style.color = '#e57'; st.textContent = '⚠ ' + (j.error || 'Blender fehlt'); return;
-    }
-    if (!r.ok) {
-      const j = await r.json().catch(() => ({}));
-      st.style.color = '#fb0'; st.textContent = '⚠ ' + (j.error || ('HTTP ' + r.status)); return;
-    }
-    ['st_btn_start', 'st_btn_next'].forEach(id => document.getElementById(id).disabled = true);
-    document.getElementById('st_btn_abort').disabled = false;
-    document.getElementById('st_progress_wrap').style.display = '';
-    st.style.color = '#9aa';
-    st.textContent = `🧪 Runde ${spec.round_no} läuft (${spec.n} Varianten, sequenziell) …`;
-    _pollSt();
-  } catch (e) { st.style.color = '#e57'; st.textContent = '⚠ ' + e; }
+  _stPostRound(spec, `🧪 Runde ${spec.round_no} läuft (${spec.n} Varianten, sequenziell) …`);
+}
+
+// 🎯 EINEN Strahl mit exakt den eingestellten Parametern backen (Ein-Kachel-Runde).
+async function stStartSingle() {
+  const params = {
+    pressure_bar:    parseFloat(document.getElementById('st_e_p').value) || 3,
+    jet_cone_deg:    parseFloat(document.getElementById('st_e_cone').value) || 0,
+    surface_tension: parseFloat(document.getElementById('st_e_surft').value) || 0.01,
+    viscosity:       parseFloat(document.getElementById('st_e_visc').value) || 0.004,
+    nozzle_d_mm:     parseFloat(document.getElementById('st_e_noz').value) || 1,
+  };
+  const spec = Object.assign({ n: 1, round_no: 1, parents: [], exact_params: params },
+                             _stSimSettings());
+  _stPostRound(spec, `🎯 Einzel-Strahl läuft (Auflösung ${spec.resolution}) …`);
+}
+
+// Die aktuellen Spray-Werte des 💧-Tabs in die Einzel-Strahl-Felder holen.
+function stSingleFromOil() {
+  const map = { st_e_p: 'oil_pressure', st_e_cone: 'oil_jet_cone', st_e_surft: 'oil_surft',
+                st_e_visc: 'oil_visc', st_e_noz: 'oil_nozzle_d' };
+  for (const [dst, src] of Object.entries(map)) {
+    const s = document.getElementById(src), d = document.getElementById(dst);
+    if (s && d && s.value !== '') d.value = s.value;
+  }
 }
 
 async function _pollSt() {
@@ -6056,11 +6655,15 @@ async function _pollSt() {
     st.textContent = (s.log || []).slice(-6).join('\n');
     document.getElementById('st_progress').style.width = (s.progress || 0) + '%';
     if (s.status === 'running') { setTimeout(_pollSt, 1500); return; }
-    ['st_btn_start', 'st_btn_next'].forEach(id => document.getElementById(id).disabled = false);
+    ['st_btn_start', 'st_btn_next', 'st_btn_single'].forEach(id => {
+      const el = document.getElementById(id); if (el) el.disabled = false; });
     document.getElementById('st_btn_abort').disabled = true;
     document.getElementById('st_progress_wrap').style.display = 'none';
     if (s.status === 'error') { st.style.color = '#e57'; st.textContent = '⚠ ' + (s.error || 'Fehler'); }
-    if (s.result) { stRenderRound(s.result); stRefresh(); }
+    if (s.result) {
+      if (s.result.variants) { stRenderRound(s.result); stRefresh(); }  // fertige Runde
+      else if (s.result.rid) stLoadRound(s.result.rid);                 // ✨ Beauty → Runde neu laden
+    }
   } catch (e) { setTimeout(_pollSt, 3000); }
 }
 

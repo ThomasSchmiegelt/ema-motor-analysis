@@ -164,8 +164,19 @@ def run_blender_script(script_code: str, argv=None, cwd=None, timeout: int = 360
                     "aborted": False, "metrics": metrics, "n_frames": n_frames}
 
         stdout = "\n".join(lines)
-        if _ABORTED or (proc.returncode is not None and proc.returncode < 0):
+        if _ABORTED:
             return {"ok": False, "aborted": True, "error": "abgebrochen",
+                    "stdout": stdout, "metrics": metrics, "n_frames": n_frames}
+        if proc.returncode is not None and proc.returncode < 0:
+            # Von einem Signal beendet OHNE Nutzer-Abbruch — praktisch immer der
+            # Kernel-OOM-Killer (SIGKILL bei RAM-Erschöpfung; real gemessen: 512er
+            # Fluid-Domain ~29 GB RSS). NICHT als "abgebrochen" melden, sonst sieht
+            # der Nutzer einen Phantom-Abbruch statt der Ursache.
+            sig = -proc.returncode
+            return {"ok": False, "aborted": False,
+                    "error": ("Blender wurde vom System beendet (Signal %d) — "
+                              "vermutlich RAM-Mangel. Domain-Auflösung senken "
+                              "oder Frames reduzieren." % sig),
                     "stdout": stdout, "metrics": metrics, "n_frames": n_frames}
         ok = bool(done) and proc.returncode == 0
         return {"ok": ok, "aborted": False, "metrics": metrics, "n_frames": n_frames,
