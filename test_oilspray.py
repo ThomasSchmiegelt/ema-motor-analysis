@@ -331,13 +331,132 @@ def test_ring_full_360():
     print("✓ Voller 360°-Spritzring: geschlossener Ring + 360°-Düsen + cfg-Passthrough")
 
 
+def test_section_cut():
+    """✂ Schnittdarstellung: Ebene durch Motorachse (z) + Austrittspunkt der gewählten
+    Düse — Boolean-Halbraum-Schnitt aller Anzeige-Festkörper, Kamera senkrecht auf die
+    Ebene, Öl/Metrik ungeschnitten; run/preview reichen section_cut(+noz) durch."""
+    import json as _json
+    s = OIL._blender_script()
+    # CFG-Konstanten + Düsenwinkel-Sammlung + Schnitt-Block
+    assert 'CFG.get("section_cut"' in s and 'CFG.get("section_cut_noz"' in s
+    assert "noz_angles.append(th_noz)" in s, "Düsen-Azimute werden nicht gesammelt"
+    assert "SectionCutter" in s and "if SECTION_CUT:" in s
+    assert "modifier_add(type='BOOLEAN')" in s and "'DIFFERENCE'" in s
+    assert "convert(target='MESH')" in s, "Ring-Kurve muss vor dem Boolean zu Mesh werden"
+    # Kamera-Override: senkrecht auf die Ebene, Bild-Oben = radiale In-Ebenen-Richtung
+    assert "_nrmc" in s and "_radc" in s, "Schnitt-Kamera-Basis fehlt"
+    # Nahansicht im Schnitt = rechtes oberes Viertel (Achse als Unterkante, Ring oben,
+    # etwas Blechpaket + Wickelkopf axial) statt der tangentialen Closeup-Kamera
+    assert "rechtes oberes Viertel" in s and "_r_out" in s and "_z1v" in s, \
+        "Schnitt+Nahaufnahme-Viertelansicht fehlt"
+    # Benetzung bleibt schnitt-unabhängig (Basis-Mesh statt evaluierter halbierter Mesh)
+    assert "wh_eval, wh_mesh = None, wh.data" in s, \
+        "Benetzungs-Metrik muss bei Schnitt das Basis-Mesh nehmen"
+
+    # cfg-Passthrough über preview_oilspray (fake STL + Blender)
+    d = tempfile.mkdtemp(); seen = {}
+
+    def _fake_stl(geom, axial, workdir, section, cb=None, include_core=True,
+                  components=None, cut=None, view_mode="section",
+                  hidden_pins=None, winding_full=False):
+        p = os.path.join(workdir, "winding_head.stl")
+        os.makedirs(workdir, exist_ok=True); open(p, "w").write("solid\nendsolid\n")
+        return {"winding": p}, "ok"
+
+    def _fake_blender(code, argv=None, cwd=None, timeout=None, progress_cb=None):
+        seen["cfg"] = _json.load(open(argv[0]))
+        with open(seen["cfg"]["preview_png"], "wb") as f: f.write(b"\x89PNG")
+        return {"ok": True, "aborted": False, "stdout": "", "returncode": 0}
+
+    orig_stl, orig_bl = OIL._export_winding_stl, OIL.blender_runner.run_blender_script
+    try:
+        OIL._export_winding_stl = _fake_stl
+        OIL.blender_runner.run_blender_script = _fake_blender
+        out = OIL.preview_oilspray(
+            {"geom": dict(_GEOM), "axial_len": 120.0,
+             "oil": {"section_cut": True, "section_cut_noz": 3}}, d)
+    finally:
+        OIL._export_winding_stl, OIL.blender_runner.run_blender_script = orig_stl, orig_bl
+    c = seen["cfg"]
+    assert c["section_cut"] is True and c["section_cut_noz"] == 3
+    assert out["config"]["section_cut"] is True
+    assert out["config"]["section_cut_noz"] == 3
+    # Klemme: Düsen-Nr. 1..40
+    assert OIL._clamp(99, 1, 40, 1) == 40
+    print("✓ Schnittdarstellung: Skript-Block + Kamera + Metrik-Schutz + cfg-Passthrough")
+
+
+def test_tilt_sign_camviews_zoom():
+    """(1) Axiale Neigung: Vorzeichen-Konvention wie die UI-Skizze (+ = zur Stirnfläche/−z) —
+    die positive Drehung um die Tangente kippt nach +z, daher MUSS das Skript mit −JET_TILT
+    drehen. (2) Feste Zusatz-Ansichten von oben/vorne (cam_view) + (3) Schnitt-Zoom
+    (section_zoom) sind im Skript verdrahtet und laufen durch run/preview-cfg."""
+    import json as _json
+    s = OIL._blender_script()
+    # (1) Vorzeichen: Neigung mit -JET_TILT um die Tangente (nicht +JET_TILT)
+    assert "Rotation(-JET_TILT" in s, "Neigungs-Vorzeichen: Skript muss mit -JET_TILT drehen"
+    assert "Rotation(JET_TILT" not in s
+    # (2) Zusatz-Ansichten: Konstante + beide Zweige + eigene Oben-Achse
+    assert 'CFG.get("cam_view"' in s and '("top", "front")' in s
+    assert "_cam_up_ovr" in s, "Zusatz-Ansicht braucht eigene Bild-Oben-Achse"
+    # Schnitt-Orientierung OHNE Schnitt: Section-Kamera greift auch ohne SECTION_CUT
+    assert "_SECTION_CAM = SECTION_CUT or CAM_VIEW == \"section\"" in s, \
+        "Schnitt-Orientierung-ohne-Schnitt (CAM_VIEW=='section') fehlt"
+    assert "if _SECTION_CAM:" in s and "elif _SECTION_CAM:" in s
+    assert "if _cam_up_ovr is not None:" in s and "elif _SECTION_CAM:" in s, \
+        "feste Zusatz-Ansicht braucht explizite Rotation und muss die Schnitt-Kameramatrix ausstechen"
+    # (3) Schnitt-Zoom: Konstante + Anwendung auf beide Schnitt-Kameradistanzen
+    assert 'CFG.get("section_zoom"' in s
+    assert "1.6 / SECTION_ZOOM" in s and "2.6 / SECTION_ZOOM" in s, \
+        "SECTION_ZOOM muss Voll- UND Nahansicht des Schnitts skalieren"
+
+    # cfg-Passthrough (preview, fake STL + Blender) inkl. Klemmen/Validierung
+    d = tempfile.mkdtemp(); seen = {}
+
+    def _fake_stl(geom, axial, workdir, section, cb=None, include_core=True,
+                  components=None, cut=None, view_mode="section",
+                  hidden_pins=None, winding_full=False):
+        p = os.path.join(workdir, "winding_head.stl")
+        os.makedirs(workdir, exist_ok=True); open(p, "w").write("solid\nendsolid\n")
+        return {"winding": p}, "ok"
+
+    def _fake_blender(code, argv=None, cwd=None, timeout=None, progress_cb=None):
+        seen["cfg"] = _json.load(open(argv[0]))
+        with open(seen["cfg"]["preview_png"], "wb") as f: f.write(b"\x89PNG")
+        return {"ok": True, "aborted": False, "stdout": "", "returncode": 0}
+
+    orig_stl, orig_bl = OIL._export_winding_stl, OIL.blender_runner.run_blender_script
+    try:
+        OIL._export_winding_stl = _fake_stl
+        OIL.blender_runner.run_blender_script = _fake_blender
+        out = OIL.preview_oilspray(
+            {"geom": dict(_GEOM), "axial_len": 120.0,
+             "oil": {"section_cut": True, "section_zoom": 2.0, "cam_view": "top"}}, d)
+        # unbekannte Ansicht fällt auf auto zurück, Zoom wird geklemmt (0.5–4)
+        out2 = OIL.preview_oilspray(
+            {"geom": dict(_GEOM), "axial_len": 120.0,
+             "oil": {"section_zoom": 99, "cam_view": "quatsch"}}, d)
+        # Schnitt-Orientierung OHNE Schnitt: cam_view "section" ist gültig, section_cut bleibt aus
+        out3 = OIL.preview_oilspray(
+            {"geom": dict(_GEOM), "axial_len": 120.0,
+             "oil": {"cam_view": "section", "closeup": True}}, d)
+    finally:
+        OIL._export_winding_stl, OIL.blender_runner.run_blender_script = orig_stl, orig_bl
+    c = seen["cfg"]
+    assert c["cam_view"] == "section" and c["section_cut"] is False   # aus out3 (zuletzt)
+    assert out["config"]["section_zoom"] == 2.0 and out["config"]["cam_view"] == "top"
+    assert out2["config"]["section_zoom"] == 4.0 and out2["config"]["cam_view"] == "auto"
+    assert out3["config"]["cam_view"] == "section"
+    print("✓ Neigungs-Vorzeichen + Ansichten oben/vorne + Schnitt-Zoom")
+
+
 def test_view_down_axes_smooth_material():
     """Unten-Achse (Blickrichtung), Koordinatensystem, Shade-Smooth und Öl-Transparenz sind
     im Skript verdrahtet, und preview_oilspray reicht Materialien/View durch."""
     s = OIL._blender_script()
     # Unten-Achse → Kamera-Oben-Achse; Drehteller orbitet um diese Achse
     assert "VIEW_DOWN" in s and "_up_axis_str()" in s and "_DOWN2UP" in s
-    assert "_cam_up = _up_axis_str()" in s, "Kamera-Oben folgt nicht der Unten-Achse"
+    assert "_cam_up = _cam_up_ovr or _up_axis_str()" in s, "Kamera-Oben folgt nicht der Unten-Achse"
     assert "_UP2VEC.get(_cam_up" in s, "Drehteller-Orbit nicht an die Unten-Achse gekoppelt"
     # Koordinatensystem-Gizmo (XYZ-Pfeile)
     assert "SHOW_AXES" in s and 'Axis_%s' in s and "primitive_cone_add" in s
@@ -655,6 +774,8 @@ def main():
     test_slowmo_500_and_fast_and_jet()
     test_housing_transparent_and_drain()
     test_ring_full_360()
+    test_section_cut()
+    test_tilt_sign_camviews_zoom()
     test_view_down_axes_smooth_material()
     test_variant_autosave_and_store_roundtrip()
     test_preview_branch_and_orchestrator()

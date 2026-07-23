@@ -44,7 +44,8 @@ The on-demand sub-systems each have their own standalone test file, runnable via
 physical-result half), `test_step_import.py` (STEP→FreeCAD classification),
 `test_oilspray.py` (Blender script generation/markers, no Blender needed),
 `test_spraytest.py` (Spray-Test bench: sampling/mutation, bench script, round store —
-no Blender needed).
+no Blender needed), `test_jobs.py` (persistent server job queue: ordering, restart
+recovery, pause/cancel — fake executors, no Flask/solvers).
 
 **Prerequisites:**
 - **FreeCAD 1.1.x built from source** under `~/freecad_1.1_quellcode` (via pixi).
@@ -75,6 +76,29 @@ the server tracks a single active job):
 returns `202`, and the UI polls `GET /status` and finally `GET /results`. Same
 pattern for `POST /project/<id>/report` → poll `GET /report/status`. Long-running
 work never blocks the request.
+
+**Persistent job queue (`ema_jobs.py`, Tab ⏳ Jobs):** jobs survive a closed browser AND
+a server restart. `POST /jobs/add {jobs:[{type,title,payload}]}` enqueues (types
+`analyse`/`em3d`/`em3d_sweep`/`oilspray`); ONE worker thread runs them sequentially by
+calling the **synchronous executor bodies** factored out of the routes (`_exec_analyse`
+→ `_run`; `_em3d_setup`+`_em3d_body`/`_em3d_sweep_body`; `_oil_setup`+`_oil_body` — the
+direct routes now spawn these same bodies in a thread, behaviour unchanged). Executors
+write into the SAME module state dicts (`_state`/`_em3d_state`/`_oil_state`), so the
+per-tab UIs show live progress and the routes' 409-guards apply; the worker `busy()`-waits
+when the user starts something directly. Store `~/cae_projekte/_jobs/queue.json` (atomic);
+on `init` stale `läuft` jobs → `abgebrochen (Server-Neustart)`, waiting jobs resume.
+`GET /jobs` (running job enriched with progress + last log line via `_JOB_STATES`),
+`POST /jobs/<jid>/cancel` (waiting → abgebrochen; running → executor abort hook, analyse
+not abortable → 409), `POST /jobs/clear_done`, `POST /jobs/config {paused}`. UI: tab
+**⏳ Jobs** (`panel-jobs`, `jobsActivate`/`jobsRefresh` poll 3 s, badge `#jobs-badge`
+every 10 s) + „➕ Warteschlange" buttons next to every heavy start button (footer analyse,
+Varianten `queueAllVariants`, Param-Tabelle `queueParamTable`, Designer
+`dsnQueueAllVariants` — 👎-variants still go to `/training/design_rejected` instead of the
+queue — em3d `queueEm3d`/`queueEm3dSweep`, oil `queueOilspray`; all share `enqueueJobs`).
+**Reattach on page load** (`_reattachJobs` on `window.load`): if `/status` (or
+`/em3d/status`, `/oilspray/status`) reports running, the matching poll loop/UI is restarted
+so a reopened browser shows the running job again. Job statuses (German): `wartet/läuft/
+fertig/fehler/abgebrochen`.
 
 Key endpoints: `/analyse`, `/status`, `/results`, `/field/<n>` (animation frame),
 `/cad_image/<name>`, `/chart/<name>`, `/open_freecad` (launches GUI FreeCAD on the
@@ -1057,6 +1081,31 @@ die Wickelköpfe ab; bei **vertical** bleibt die alte Geometrie (Schwerkraft −
 Achse). `closeup` erzwingt **1 Düse** und eine **Kamera-Nahaufnahme** (schräg außen-oben) auf den
 Auftreffpunkt; ohne `closeup` die 3/4-Übersicht mit allen Düsen.
 UI: Karte „🎥 Darstellung & Einbaulage" (`oil_orientation`/`oil_closeup`).
+**Schnittdarstellung durch eine Düse (`oil.section_cut` + `oil.section_cut_noz` 1-basiert, UI
+`#oil_section_cut`/`#oil_section_noz`):** Schnittebene durch die **Motorachse (z) UND den
+Austrittspunkt der gewählten Spritzbohrung** (Azimut θ0 aus `noz_angles`, in der Düsen-Schleife
+gesammelt); ein Halbraum-`SectionCutter`-Quader (um ε=0,1 mm aus der exakten Achsen-Ebene versetzt —
+koplanare NGON-/Solidify-Flächen erzeugen sonst Boolean-Splitter) wird per Boolean-DIFFERENCE von
+**allen** Anzeige-Festkörpern abgezogen: **jedem `_parts_obj`-Bauteil** (die STL kommt als getrennte
+Teile winding/rotor/stator/shaft/magnets — nur `wh` zu schneiden ließ den Kern ganz), dem Ring
+(Kurve → `convert(target='MESH')` vorher), Gehäuse-Schalen und `Nozzle_*`/`JetLine_*` (der gewählte
+Stutzen liegt IN der Ebene → Bohrung längs halbiert sichtbar). Kamera senkrecht auf die Ebene
+(Ziel = Motorachse Mitte, explizite Basis X_cam=+z/Y_cam=radial/Z_cam=n — `_cam_up` wäre bei Düse
+„oben" degeneriert). **Schnitt + Nahaufnahme (`closeup`)** = „rechtes oberes Viertel": Bild unten
+von der z-Achse begrenzt, radial bis über den Spritzring, axial etwas Blechpaket (Rotor/Stator) +
+Wickelkopf/Ring-Ende — die normale tangentiale Closeup-Kamera stünde in der weggeschnittenen
+Hälfte und passt nicht zum Halbraum-Schnitt; Basisdistanz **1.6** (dichter auf die Wickelköpfe,
+Nutzerwunsch) statt 2.2. **Schnitt-Zoom (`oil.section_zoom`, UI `#oil_section_zoom` 0,5–4×):**
+`cam_d /= SECTION_ZOOM` in Voll- UND Nahansicht des Schnitts (>1 = dichter). **Boolean-Robustheit (kritisch):** die STL-Teile
+(v. a. die Hairpins, Beinahe-Berührungen/Doppel-Dreiecke) sind NICHT mannigfaltig — EXACT braucht
+`use_self` + `use_hole_tolerant`, sonst „explodiert" der Schnitt (WindingHead-BBox ~4 m, kupfer-
+farbener Nebel füllte das ganze Bild); zusätzlich ein **BBox-Wächter** in `_cut` (Halbraum-
+DIFFERENCE kann nur verkleinern ⇒ BBox-Wachstum >1,5× = gescheitert → FAST probieren → sonst
+Bauteil ungeschnitten lassen). Kamera-/Objekt-BBoxen werden als `OIL_STAGE:cam/obj`-Zeilen
+geloggt (Debughilfe für „Bild zeigt nichts"). Die **Fluid-Domain wird NICHT geschnitten** (Öl/Strahl voll sichtbar) und die
+**Benetzungs-Metrik nimmt bei aktivem Schnitt das BASIS-Mesh** (`wh.data` statt der evaluierten,
+halbierten Mesh) → Kennwerte bleiben mit ungeschnittenen Läufen vergleichbar. Wirkt auch in der
+🔍 Vorschau (verifiziert: echter Längsschnitt mit halbierter Welle + Ringrohr-Querschnitt).
 **Düse auf echten Hairpin abgestimmt + sichtbarer Kupfertreffer** (`_crown_target`): jede Düse (die eine
 in der Nahaufnahme, sonst je Düse) wird auf einen **realen Kronen-(Kupfer-)Punkt** aus den STL-Überhang-
 Vertices (`_ovinfo`) gesetzt — größter Radius, Zielhöhe **knapp UNTER der Kronenspitze** (`z_hit = ring_z
@@ -1091,7 +1140,21 @@ reduziert, Rest voller Ring) vs **Gesamt** (voller 360°-Kern, geschnittene Baut
 Sekundärpartikel → grobe, schnelle Vorschau. **Strahlrichtung justierbar** (`jet_tilt_deg` axial,
 `jet_yaw_deg` tangential, um den echten `_crown_target`-Grundstrahl gedreht → trifft die
 Wickelköpfe weiterhin) + **🔴 Ziellinie** (`show_jet_line` → leuchtende `JetLine_*`-Zylinder je Düse
-zeigen im Video, wohin der Strahl trifft). **🔍 Zwischenansicht/Vorschau (`preview_oilspray`,
+zeigen im Video, wohin der Strahl trifft). **Neigungs-Vorzeichen (Gotcha, 2026-07-23 gefixt):**
+Konvention wie die UI-Skizze — POSITIVE Neigung = zur Blechpaket-Stirnfläche (−z); die positive
+Drehung um die lokale Tangente kippt den radial-einwärts-Strahl aber nach +z (k×v=+z), daher dreht
+das Blender-Skript mit **`Rotation(-JET_TILT, …)`** (vorher +JET_TILT ⇒ Skizze und Modell zeigten
+entgegengesetzt). **Feste Kamera-Ansichten (`oil.cam_view`, UI `#oil_cam_view`
+auto/top/front/section):** „von oben" (entgegen der Schwerkraft; horizontal ⇒ Kamera +y, Bild-Oben =
+Motorachse via `_cam_up_ovr='Z'`) und „von vorne" (Stirnansicht, Kamera am +z-Ende, Blick −z,
+`_cam_up_ovr='Y'`; vertikal fällt „oben" mit „vorne" zusammen) — überschreibt NUR die Kamera
+(Nahaufnahme/Schnittkörper bleiben wie eingestellt, die Schnitt-Kameramatrix wird bei aktiver
+top/front-Ansicht übersprungen), Drehteller orbitet um die Override-Oben-Achse.
+**„section" = Schnitt-Orientierung OHNE Schnitt** (`_SECTION_CAM = SECTION_CUT or CAM_VIEW=="section"`):
+dieselbe Section-Kamera (senkrecht auf die Ebene Motorachse↔`SECTION_NOZ`-Düse, `SECTION_ZOOM`- und
+`CLOSEUP`-abhängig wie beim echten Schnitt) UND dieselbe explizite `_radc`/`_nrmc`-Bild-Oben-Basis
+(`elif _SECTION_CAM:`), aber der Boolean-Cut-Block (`if SECTION_CUT:`) läuft NICHT → Wickelkopf-Ansicht
+in Schnitt-Blickrichtung, Motor ungeschnitten (Nutzerwunsch). **🔍 Zwischenansicht/Vorschau (`preview_oilspray`,
 `POST /oilspray/preview`, `cfg["preview"]`):** rendert VOR dem teuren Bake EIN Standbild — nur
 Geometrie + Düsen + Strahl-Ziellinien (Blender-Skript `if PREVIEW:` überspringt `bake_all` + Metrik/
 Frame-Loop, blendet die leere Domain aus, `sys.exit(0)` nach `OIL_PREVIEW:`; `SHOW_JET_LINE` erzwungen,
@@ -1171,7 +1234,8 @@ dict passed to the FEM script.
 | File | Role |
 |---|---|
 | `server.py` | Flask backend: serves `ema.html`, REST API, threaded job state, FreeCAD GUI/STEP launching |
-| `ema.html` | Single-file vanilla-JS browser UI (no build). Workflow-tab layout: a top tab bar (`switchTab`, tabs `projekt/geo/betrieb/calc/live/designer/import/em3d/oil/results/compare` (`oil` = 💧 Spritzöl-Kühlung, Blender/Mantaflow), `#hash` deep-linkable; **there is no `report` tab — the Bericht moved into Tab ①**). The **entry tab is `① Projekt`** (`panel-projekt`, the default landing tab) — **the central project hub** for everything project-scoped. Top row: create a project (`pjCreate` → `POST /project/new`, lays down the dir + `project.json` immediately, `status:"neu"`, `origin:"manual"`) · open existing ones (`pjRefreshList` from `/projects?detail=1`, **Galerie ⤢** = `openProjectGallery`). When a project is active (`#pj-active-wrap` shown), the cards are grouped under `.pj-group-h` headers: **📋 Projektdaten & Notizen** (Organisation/status/tags/notes → `/project/<id>/meta` + evolution/lineage; Projekt-Dokumente = per-project RAG via `/project/<id>/rag/add` + attachments via `/project/<id>/attachments`) · **📄 Auswertung & Bericht** (the **PDF-Bericht card** `#pj-report-card` with `#btn_report`/`#btn_report_agentic` → `generateReport(mode)` + `#report_status`/`#report_rag`; the **gespeicherte 3D-Läufe** card `#e3_save_name`/`#e3_saved_list` → `_e3SaveRun`/`_e3LoadRun`/`_e3DeleteSaved`, project-scoped under `<projekt>/em3d_runs/`) · collapsed `<details>` **🧰 Globale Werkzeuge & Daten** (global Wissensbasis `openRag` + LLM-Trainingsdaten `refreshTrainingStats`/`#training-stats`). **Active-project plumbing:** `window._activeProject` is the client truth; **`pjSetActive` also POSTs `/project/<id>/activate`** (lightweight — sets server `_state["project_dir"]`/`project_id` WITHOUT loading results) so report + em3d (which read `_state`) target the chosen project, then refreshes the report card (`pjUpdateReportCard`), the saved-3D list, and the training stats. `buildPayload()`/`_dsnBuildPayload()` attach `payload.project_id = _activeProject.id`, and `/analyse`'s `_run` (+ all em3d handlers via `_em3d_project_dir`) reuse that dir (generalised `reuse_id`) so every calculation/3D-run writes **into** the active project. `loadProjectById` calls `pjSetActive` too. `generateReport` prefers `_activeProject.id` (falls back to `/status`). The Tab-3 (Betrieb) project-management block was removed; `#project_name`/`#project_load` survive as hidden elements only to keep variant/param-table/applyPayload JS wired. The results-tab `🗂 Projektakte` `<details>` panel (`renderAkte`) still mirrors the same project contextually. The rest of the layout sits over `#workspace` = `#panel-area` (active panel) + draggable `#vsplit` + persistent `#preview-pane` (live `#simCanvas`, hidden on results/compare) + draggable `#hsplit` + `#footer` (staged-workflow buttons `#btn_cad_preview` (🧊 CAD ansehen → `startCadPreview`) · `#btn_smoke` (🧪 Smoke-Test → `startSmokeTest`) · `#btn_analyse` (⚙ Echte Berechnung), all sharing the `_wfModal`/`_pollWf` overlay helpers for the first two, plus `#analysis-progress`; drag `#hsplit` taller to reveal the full `#progress-log`). Inputs grouped into `.tab-panel`s; the `results` tab is gated `disabled` until an analysis finishes. `#vsplit`/`#hsplit` (`initSplitters`) resize preview width / footer height and call the canvas `resize()` live. The preview overlay has a pause button (`#ov_play` → global `toggleSim`/`_syncSimUI`, mirrors the Live-tab `#btn_play_pause`) so rotation can be stopped from any input tab. **Globales Speichern** (`#btn-global-save` in der Topbar + `#save-modal`): EIN Speicherknopf öffnet ein Vorschau-/Auswahl-Fenster (`openSaveModal`/`saveModalCommit`/`_buildSaveItems`), das **kontextabhängig** alles Speicherbare als abwählbare Positionen listet — **Projektdaten & Notizen** (`/project/<id>/meta`, liest `pj_*` bzw. bei passendem `akte-body.pid` die `akte_*`-Felder und schreibt beim Speichern in BEIDE zurück), **Bewertung** (`/project/<id>/rating`, gut/schlecht-Select), **3D-Feld-Lauf** (`/em3d/save`, sichtbar via `window._e3HasResult`, gesetzt in `_renderEm3d`/`_renderEm3dSweep`), **Varianten-Set** (`/variants/save`, wenn `variants.length`). Jede Zeile zeigt eine Vorschau + Häkchen (+ optional Name/Bewertung), Commit speichert alle angehakten nacheinander mit ✓/❌ je Zeile. Die alten Einzel-Speicherknöpfe (Projektdaten/Akte/3D-Lauf/Varianten) zeigen jetzt alle auf `openSaveModal()`; `pjSaveMeta`/`saveAkteMeta`/`_e3SaveRun`/`saveVariantSet` bleiben als Funktionen bestehen, die Buttons rufen aber das Modal |
+| `ema_jobs.py` | **Persistente Server-Job-Warteschlange** (`~/cae_projekte/_jobs/queue.json`): EIN Worker-Thread arbeitet eingereihte Jobs (analyse/em3d/em3d_sweep/oilspray) sequenziell ab — Jobs überleben geschlossenen Browser + Server-Neustart (stale `läuft`→`abgebrochen`, Wartende laufen wieder an). Executors werden von `server.py` via `init({type:{run,busy,abort}})` registriert und schreiben in dieselben State-Dicts wie die Direkt-Routen (Live-Fortschritt in den Tab-UIs). Server-Routen `/jobs` + `/jobs/add|<jid>/cancel|clear_done|config`; UI-Tab **⏳ Jobs** + „➕ Warteschlange"-Knöpfe + `_reattachJobs` (Reattach beim Seiten-Laden). Test: `test_jobs.py` |
+| `ema.html` | Single-file vanilla-JS browser UI (no build). Workflow-tab layout: a top tab bar (`switchTab`, tabs `projekt/geo/betrieb/calc/live/designer/import/em3d/oil/spraytest/jobs/results/compare` (`oil` = 💧 Spritzöl-Kühlung, Blender/Mantaflow; `jobs` = ⏳ Server-Job-Warteschlange, s. `ema_jobs.py`), `#hash` deep-linkable; **there is no `report` tab — the Bericht moved into Tab ①**). The **entry tab is `① Projekt`** (`panel-projekt`, the default landing tab) — **the central project hub** for everything project-scoped. Top row: create a project (`pjCreate` → `POST /project/new`, lays down the dir + `project.json` immediately, `status:"neu"`, `origin:"manual"`) · open existing ones (`pjRefreshList` from `/projects?detail=1`, **Galerie ⤢** = `openProjectGallery`). When a project is active (`#pj-active-wrap` shown), the cards are grouped under `.pj-group-h` headers: **📋 Projektdaten & Notizen** (Organisation/status/tags/notes → `/project/<id>/meta` + evolution/lineage; Projekt-Dokumente = per-project RAG via `/project/<id>/rag/add` + attachments via `/project/<id>/attachments`) · **📄 Auswertung & Bericht** (the **PDF-Bericht card** `#pj-report-card` with `#btn_report`/`#btn_report_agentic` → `generateReport(mode)` + `#report_status`/`#report_rag`; the **gespeicherte 3D-Läufe** card `#e3_save_name`/`#e3_saved_list` → `_e3SaveRun`/`_e3LoadRun`/`_e3DeleteSaved`, project-scoped under `<projekt>/em3d_runs/`) · collapsed `<details>` **🧰 Globale Werkzeuge & Daten** (global Wissensbasis `openRag` + LLM-Trainingsdaten `refreshTrainingStats`/`#training-stats`). **Active-project plumbing:** `window._activeProject` is the client truth; **`pjSetActive` also POSTs `/project/<id>/activate`** (lightweight — sets server `_state["project_dir"]`/`project_id` WITHOUT loading results) so report + em3d (which read `_state`) target the chosen project, then refreshes the report card (`pjUpdateReportCard`), the saved-3D list, and the training stats. `buildPayload()`/`_dsnBuildPayload()` attach `payload.project_id = _activeProject.id`, and `/analyse`'s `_run` (+ all em3d handlers via `_em3d_project_dir`) reuse that dir (generalised `reuse_id`) so every calculation/3D-run writes **into** the active project. `loadProjectById` calls `pjSetActive` too. `generateReport` prefers `_activeProject.id` (falls back to `/status`). The Tab-3 (Betrieb) project-management block was removed; `#project_name`/`#project_load` survive as hidden elements only to keep variant/param-table/applyPayload JS wired. The results-tab `🗂 Projektakte` `<details>` panel (`renderAkte`) still mirrors the same project contextually. The rest of the layout sits over `#workspace` = `#panel-area` (active panel) + draggable `#vsplit` + persistent `#preview-pane` (live `#simCanvas`, hidden on results/compare) + draggable `#hsplit` + `#footer` (staged-workflow buttons `#btn_cad_preview` (🧊 CAD ansehen → `startCadPreview`) · `#btn_smoke` (🧪 Smoke-Test → `startSmokeTest`) · `#btn_analyse` (⚙ Echte Berechnung), all sharing the `_wfModal`/`_pollWf` overlay helpers for the first two, plus `#analysis-progress`; drag `#hsplit` taller to reveal the full `#progress-log`). Inputs grouped into `.tab-panel`s; the `results` tab is gated `disabled` until an analysis finishes. `#vsplit`/`#hsplit` (`initSplitters`) resize preview width / footer height and call the canvas `resize()` live. The preview overlay has a pause button (`#ov_play` → global `toggleSim`/`_syncSimUI`, mirrors the Live-tab `#btn_play_pause`) so rotation can be stopped from any input tab. **Globales Speichern** (`#btn-global-save` in der Topbar + `#save-modal`): EIN Speicherknopf öffnet ein Vorschau-/Auswahl-Fenster (`openSaveModal`/`saveModalCommit`/`_buildSaveItems`), das **kontextabhängig** alles Speicherbare als abwählbare Positionen listet — **Projektdaten & Notizen** (`/project/<id>/meta`, liest `pj_*` bzw. bei passendem `akte-body.pid` die `akte_*`-Felder und schreibt beim Speichern in BEIDE zurück), **Bewertung** (`/project/<id>/rating`, gut/schlecht-Select), **3D-Feld-Lauf** (`/em3d/save`, sichtbar via `window._e3HasResult`, gesetzt in `_renderEm3d`/`_renderEm3dSweep`), **Varianten-Set** (`/variants/save`, wenn `variants.length`). Jede Zeile zeigt eine Vorschau + Häkchen (+ optional Name/Bewertung), Commit speichert alle angehakten nacheinander mit ✓/❌ je Zeile. Die alten Einzel-Speicherknöpfe (Projektdaten/Akte/3D-Lauf/Varianten) zeigen jetzt alle auf `openSaveModal()`; `pjSaveMeta`/`saveAkteMeta`/`_e3SaveRun`/`saveVariantSet` bleiben als Funktionen bestehen, die Buttons rufen aber das Modal |
 | `ema_pipeline.py` | Pipeline orchestrator (`run_pipeline`) + material tables + all chart builders |
 | `ema_topology.py` | Single source of truth for rotor magnet placement (`magnet_legs`, `Leg`, topology labels) — consumed by `ema_freecad` + `ema_analysis`; mirrored by JS `magnetLegs` in `ema.html` |
 | `ema_freecad.py` | FreeCAD script generators (rotor, full motor, rotor FEM); interior pockets + surface arc magnets from `magnet_legs`; parametric hairpin end-windings (`conductorsPerSlot`/`coilPitch`, collision-free radial-split crowns) |

@@ -229,30 +229,40 @@ def em3d_start():
         return jsonify({"error": "3D-Berechnung läuft bereits"}), 409
     data = request.get_json(force=True) or {}
 
-    proj_dir, proj_id = _em3d_project_dir(data)
+    proj_dir, proj_id = _em3d_setup(data)
+    threading.Thread(target=_em3d_body, args=(data, proj_dir, proj_id),
+                     daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
 
+
+def _em3d_setup(data):
+    """Gemeinsames Setup eines em3d-Laufs (Route + Job-Warteschlange): Projekt binden,
+    Abort-Flags zurücksetzen, State auf running."""
+    import elmer_runner
+    proj_dir, proj_id = _em3d_project_dir(data)
     _em3d_abort["v"] = False
     elmer_runner.clear_abort()
     _em3d_state.update({"status": "running", "progress": 0, "log": [],
                         "result": None, "error": None})
+    return proj_dir, proj_id
 
-    def _worker():
-        import ema_em3d
-        def cb(msg, pct=None):
-            _em3d_state["log"].append(msg)
-            if pct is not None:
-                _em3d_state["progress"] = int(pct)
-        try:
-            res = ema_em3d.run_em3d(data, proj_dir, progress_cb=cb)
-            res["project_id"] = proj_id
-            _em3d_state["result"]   = res
-            _em3d_state["status"]   = "done"
-            _em3d_state["progress"] = 100
-        except Exception as e:
-            _em3d_finish_error(e)
 
-    threading.Thread(target=_worker, daemon=True).start()
-    return jsonify({"status": "started", "project_id": proj_id}), 202
+def _em3d_body(data, proj_dir, proj_id):
+    """Synchroner Lauf-Körper von /em3d (ex-_worker) — auch von der Job-Warteschlange
+    direkt (ohne eigenen Thread) aufgerufen."""
+    import ema_em3d
+    def cb(msg, pct=None):
+        _em3d_state["log"].append(msg)
+        if pct is not None:
+            _em3d_state["progress"] = int(pct)
+    try:
+        res = ema_em3d.run_em3d(data, proj_dir, progress_cb=cb)
+        res["project_id"] = proj_id
+        _em3d_state["result"]   = res
+        _em3d_state["status"]   = "done"
+        _em3d_state["progress"] = 100
+    except Exception as e:
+        _em3d_finish_error(e)
 
 
 def _em3d_finish_error(e):
@@ -288,42 +298,40 @@ def em3d_sweep_start():
     if not (data.get("sweep") or []):
         return jsonify({"error": "Kein Betriebspunkt im Drehzahlband (sweep ist leer)"}), 400
 
-    proj_dir, proj_id = _em3d_project_dir(data)
-
-    _em3d_abort["v"] = False
-    elmer_runner.clear_abort()
-    _em3d_state.update({"status": "running", "progress": 0, "log": [],
-                        "result": None, "error": None})
-
-    def _worker():
-        import ema_em3d
-        def cb(msg, pct=None):
-            _em3d_state["log"].append(msg)
-            if pct is not None:
-                _em3d_state["progress"] = int(pct)
-        try:
-            res = ema_em3d.run_em3d_sweep(data, proj_dir, progress_cb=cb,
-                                          cancel_cb=lambda: _em3d_abort["v"])
-            res["project_id"] = proj_id
-            # /em3d/vtu|vtp|paraview servieren die Dateipfade des Detailpunkts; die
-            # per-Punkt-VTP/Linien (sweep_vtp/sweep_lines) bedient /em3d/vtp?i= / streamlines?i=.
-            det = res.get("detail") or {}
-            if det.get("vtu_path"):
-                res["vtu_path"] = det["vtu_path"]
-            if det.get("vtp_path"):
-                res["vtp_path"] = det["vtp_path"]
-            if det.get("lines_path"):
-                res["lines_path"] = det["lines_path"]
-            _em3d_state["result"]   = res
-            # Abbruch mit Teilergebnis: als „aborted" melden (Start wieder frei), Ergebnis bleibt
-            # gesetzt → die UI kann die gerechneten Punkte anzeigen/speichern.
-            _em3d_state["status"]   = "aborted" if res.get("aborted") else "done"
-            _em3d_state["progress"] = 100
-        except Exception as e:
-            _em3d_finish_error(e)
-
-    threading.Thread(target=_worker, daemon=True).start()
+    proj_dir, proj_id = _em3d_setup(data)
+    threading.Thread(target=_em3d_sweep_body, args=(data, proj_dir, proj_id),
+                     daemon=True).start()
     return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+def _em3d_sweep_body(data, proj_dir, proj_id):
+    """Synchroner Lauf-Körper von /em3d_sweep (ex-_worker) — auch von der Job-Warteschlange
+    direkt aufgerufen."""
+    import ema_em3d
+    def cb(msg, pct=None):
+        _em3d_state["log"].append(msg)
+        if pct is not None:
+            _em3d_state["progress"] = int(pct)
+    try:
+        res = ema_em3d.run_em3d_sweep(data, proj_dir, progress_cb=cb,
+                                      cancel_cb=lambda: _em3d_abort["v"])
+        res["project_id"] = proj_id
+        # /em3d/vtu|vtp|paraview servieren die Dateipfade des Detailpunkts; die
+        # per-Punkt-VTP/Linien (sweep_vtp/sweep_lines) bedient /em3d/vtp?i= / streamlines?i=.
+        det = res.get("detail") or {}
+        if det.get("vtu_path"):
+            res["vtu_path"] = det["vtu_path"]
+        if det.get("vtp_path"):
+            res["vtp_path"] = det["vtp_path"]
+        if det.get("lines_path"):
+            res["lines_path"] = det["lines_path"]
+        _em3d_state["result"]   = res
+        # Abbruch mit Teilergebnis: als „aborted" melden (Start wieder frei), Ergebnis bleibt
+        # gesetzt → die UI kann die gerechneten Punkte anzeigen/speichern.
+        _em3d_state["status"]   = "aborted" if res.get("aborted") else "done"
+        _em3d_state["progress"] = 100
+    except Exception as e:
+        _em3d_finish_error(e)
 
 
 @app.route("/em3d/sector", methods=["POST", "OPTIONS"])
@@ -408,39 +416,48 @@ def oilspray_start():
     if _oil_state["status"] == "running":
         return jsonify({"error": "Spritzöl-Simulation läuft bereits"}), 409
     data = request.get_json(force=True) or {}
-    proj_dir, proj_id = _em3d_project_dir(data)
+    proj_dir, proj_id = _oil_setup(data)
+    threading.Thread(target=_oil_body, args=(data, proj_dir, proj_id),
+                     daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
 
+
+def _oil_setup(data):
+    """Gemeinsames Setup eines Spritzöl-Laufs (Route + Job-Warteschlange)."""
+    import blender_runner
+    proj_dir, proj_id = _em3d_project_dir(data)
     _oil_abort["v"] = False
     blender_runner.clear_abort()
     _oil_state.update({"status": "running", "progress": 0, "log": [],
                        "result": None, "error": None})
+    return proj_dir, proj_id
 
-    def _worker():
-        import ema_oilspray, traceback
-        def cb(msg, pct=None):
-            _oil_state["log"].append(msg)
-            if pct is not None:
-                _oil_state["progress"] = int(pct)
-        try:
-            res = ema_oilspray.run_oilspray(data, proj_dir, progress_cb=cb,
-                                            cancel_cb=lambda: _oil_abort["v"])
-            res["project_id"] = proj_id
-            _oil_state["result"]   = res
-            _oil_state["status"]   = "done"
-            _oil_state["progress"] = 100
-        except Exception as e:
-            if _oil_abort["v"] or "abgebrochen" in str(e).lower():
-                _oil_state["log"].append("⛔ Abgebrochen.")
-                _oil_state["status"] = "aborted"
-                _oil_state["error"] = None
-            else:
-                _oil_state["error"] = str(e)
-                _oil_state["log"].append("⚠ " + str(e))
-                _oil_state["log"].append(traceback.format_exc()[:600])
-                _oil_state["status"] = "error"
 
-    threading.Thread(target=_worker, daemon=True).start()
-    return jsonify({"status": "started", "project_id": proj_id}), 202
+def _oil_body(data, proj_dir, proj_id):
+    """Synchroner Lauf-Körper von /oilspray (ex-_worker) — auch von der Job-Warteschlange
+    direkt aufgerufen."""
+    import ema_oilspray, traceback
+    def cb(msg, pct=None):
+        _oil_state["log"].append(msg)
+        if pct is not None:
+            _oil_state["progress"] = int(pct)
+    try:
+        res = ema_oilspray.run_oilspray(data, proj_dir, progress_cb=cb,
+                                        cancel_cb=lambda: _oil_abort["v"])
+        res["project_id"] = proj_id
+        _oil_state["result"]   = res
+        _oil_state["status"]   = "done"
+        _oil_state["progress"] = 100
+    except Exception as e:
+        if _oil_abort["v"] or "abgebrochen" in str(e).lower():
+            _oil_state["log"].append("⛔ Abgebrochen.")
+            _oil_state["status"] = "aborted"
+            _oil_state["error"] = None
+        else:
+            _oil_state["error"] = str(e)
+            _oil_state["log"].append("⚠ " + str(e))
+            _oil_state["log"].append(traceback.format_exc()[:600])
+            _oil_state["status"] = "error"
 
 
 @app.route("/oilspray/preview", methods=["POST", "OPTIONS"])
@@ -3139,6 +3156,155 @@ def training_vlm_download():
     return send_file(ema_training.VLM_FILE, as_attachment=True,
                      download_name="ema_dataset_vlm.jsonl",
                      mimetype="application/x-ndjson")
+
+
+# ── Job-Warteschlange (persistente Server-Jobs, s. ema_jobs) ──────────────────
+# Jobs laufen server-seitig weiter, wenn der Browser geschlossen wird; Job-Reihen
+# (Varianten/Param-Tabelle/KI-Entwürfe) werden hier statt in Client-JS-Schleifen
+# abgearbeitet. Die Executors laufen SYNCHRON im ema_jobs-Worker und schreiben in
+# dieselben Modul-State-Dicts wie die Direkt-Routen → die Tab-UIs zeigen weiter
+# Live-Fortschritt und die 409-Guards der Routen greifen automatisch.
+import ema_jobs
+
+
+def _exec_analyse(payload):
+    _state.update({"status": "running", "progress": 0, "log": [], "results": None})
+    for _b in _frames.values():
+        _b.clear()
+    _run(payload)
+    ok = _state["status"] == "done"
+    return {"status": "fertig" if ok else "fehler",
+            "project_id": _state.get("project_id"),
+            "error": None if ok else (_state["log"][-1] if _state["log"] else "Fehler")}
+
+
+def _em3d_job_outcome(proj_id):
+    st = _em3d_state["status"]
+    status = {"done": "fertig", "aborted": "abgebrochen"}.get(st, "fehler")
+    res = _em3d_state.get("result") or {}
+    return {"status": status, "project_id": res.get("project_id") or proj_id,
+            "error": _em3d_state.get("error")}
+
+
+def _exec_em3d(payload):
+    import elmer_runner
+    if not elmer_runner.ELMER_OK:
+        return {"status": "fehler", "error": elmer_runner.INSTALL_HINT}
+    proj_dir, proj_id = _em3d_setup(payload)
+    _em3d_body(payload, proj_dir, proj_id)
+    return _em3d_job_outcome(proj_id)
+
+
+def _exec_em3d_sweep(payload):
+    import elmer_runner
+    if not elmer_runner.ELMER_OK:
+        return {"status": "fehler", "error": elmer_runner.INSTALL_HINT}
+    if not (payload.get("sweep") or []):
+        return {"status": "fehler", "error": "Kein Betriebspunkt im Drehzahlband (sweep ist leer)"}
+    proj_dir, proj_id = _em3d_setup(payload)
+    _em3d_sweep_body(payload, proj_dir, proj_id)
+    return _em3d_job_outcome(proj_id)
+
+
+def _exec_oilspray(payload):
+    import blender_runner
+    if not blender_runner.BLENDER_OK:
+        return {"status": "fehler", "error": blender_runner.INSTALL_HINT}
+    proj_dir, proj_id = _oil_setup(payload)
+    _oil_body(payload, proj_dir, proj_id)
+    st = _oil_state["status"]
+    status = {"done": "fertig", "aborted": "abgebrochen"}.get(st, "fehler")
+    return {"status": status, "project_id": proj_id, "error": _oil_state.get("error")}
+
+
+def _jobs_abort_em3d():
+    import elmer_runner
+    _em3d_abort["v"] = True
+    elmer_runner.abort_current()
+
+
+def _jobs_abort_oil():
+    import blender_runner
+    _oil_abort["v"] = True
+    blender_runner.abort_current()
+
+
+# type → State-Dict des laufenden Jobs (für die Live-Anreicherung in GET /jobs)
+_JOB_STATES = {"analyse": _state, "em3d": _em3d_state,
+               "em3d_sweep": _em3d_state, "oilspray": _oil_state}
+
+
+@app.route("/jobs")
+def jobs_list():
+    out = ema_jobs.list_jobs()
+    for j in out["jobs"]:
+        if j.get("status") == "läuft":
+            st = _JOB_STATES.get(j.get("type"))
+            if st:
+                j["progress"] = st.get("progress", 0)
+                lg = st.get("log") or []
+                j["log_line"] = lg[-1] if lg else ""
+    return jsonify(out)
+
+
+@app.route("/jobs/add", methods=["POST", "OPTIONS"])
+def jobs_add():
+    """Reiht Jobs ein: Body {jobs:[{type,title,payload}]} — type ∈ registrierte
+    Executors (analyse/em3d/em3d_sweep/oilspray)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    data = request.get_json(force=True) or {}
+    try:
+        ids = ema_jobs.add_jobs(data.get("jobs") or [])
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    return jsonify({"status": "queued", "ids": ids, "n": len(ids)}), 202
+
+
+@app.route("/jobs/<jid>/cancel", methods=["POST", "OPTIONS"])
+def jobs_cancel(jid):
+    if request.method == "OPTIONS":
+        return "", 200
+    try:
+        r = ema_jobs.cancel(jid)
+    except KeyError:
+        return jsonify({"error": "Job nicht gefunden"}), 404
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 409
+    return jsonify({"status": r})
+
+
+@app.route("/jobs/clear_done", methods=["POST", "OPTIONS"])
+def jobs_clear_done():
+    if request.method == "OPTIONS":
+        return "", 200
+    return jsonify({"status": "ok", "removed": ema_jobs.clear_finished()})
+
+
+@app.route("/jobs/config", methods=["POST", "OPTIONS"])
+def jobs_config():
+    if request.method == "OPTIONS":
+        return "", 200
+    data = request.get_json(force=True) or {}
+    paused = ema_jobs.set_paused(bool(data.get("paused")))
+    return jsonify({"status": "ok", "paused": paused})
+
+
+ema_jobs.init({
+    "analyse":    {"run": _exec_analyse,
+                   "busy": lambda: _state["status"] == "running",
+                   "abort": None},
+    "em3d":       {"run": _exec_em3d,
+                   "busy": lambda: _em3d_state["status"] == "running",
+                   "abort": _jobs_abort_em3d},
+    "em3d_sweep": {"run": _exec_em3d_sweep,
+                   "busy": lambda: _em3d_state["status"] == "running",
+                   "abort": _jobs_abort_em3d},
+    "oilspray":   {"run": _exec_oilspray,
+                   "busy": lambda: (_oil_state["status"] == "running"
+                                    or _spraytest_state["status"] == "running"),
+                   "abort": _jobs_abort_oil},
+})
 
 
 @app.after_request

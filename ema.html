@@ -205,6 +205,7 @@
     <button class="tab-btn"        id="tbtn-em3d"    onclick="switchTab('em3d')">🧲 3D-Feld</button>
     <button class="tab-btn"        id="tbtn-oil"     onclick="switchTab('oil')">💧 Spritzöl-Kühlung</button>
     <button class="tab-btn"        id="tbtn-spraytest" onclick="switchTab('spraytest')">🧪 Spray-Test</button>
+    <button class="tab-btn"        id="tbtn-jobs"    onclick="switchTab('jobs')">⏳ Jobs<span id="jobs-badge" style="display:none;margin-left:5px;background:#e67e22;color:#fff;border-radius:9px;padding:0 6px;font-size:.68rem"></span></button>
     <button class="tab-btn"        id="tbtn-results" onclick="switchTab('results')" disabled>📊 FEM-Ergebnisse</button>
     <button class="tab-btn"        id="tbtn-compare" onclick="switchTab('compare')">⚖ Vergleich</button>
   </div>
@@ -1432,12 +1433,16 @@
       <button onclick="_e3SweepClear()" style="background:#5a3a3a;width:auto;padding:5px 12px">leeren</button>
     </div>
     <button id="e3_sbtn" onclick="startEm3dSweep()" style="margin-top:10px">🧲 Drehzahlband berechnen (Elmer)</button>
+    <button onclick="queueEm3dSweep()" style="margin-top:6px;background:#456"
+      title="Drehzahlband in die Server-Warteschlange einreihen (läuft auch bei geschlossenem Browser) → Tab ⏳ Jobs">➕ Warteschlange</button>
   </div>
 
   <div class="e3-card">
     <div style="display:flex;gap:8px;flex-wrap:wrap">
       <button id="e3_pbtn" onclick="startEm3dPreview()" style="background:#3a4a6a">🧊 3D-Modell ansehen (ohne Elmer)</button>
       <button id="e3_btn" onclick="startEm3d()">🧲 3D-Feld berechnen (Elmer)</button>
+      <button onclick="queueEm3d()" style="background:#456"
+        title="3D-Berechnung in die Server-Warteschlange einreihen (läuft auch bei geschlossenem Browser) → Tab ⏳ Jobs">➕ Warteschlange</button>
       <button id="e3_secbtn" onclick="startEm3dSector()" style="background:#2e6a4a"
         title="Rechnet EINE Pol-Teilung fein (anti-periodische Symmetrie) und spiegelt sie zum vollen Motor — schneller + höher aufgelöst, Leerlauf">🔁 Schnelle Pol-Berechnung (Symmetrie)</button>
       <button id="e3_abort" onclick="abortEm3d()" style="background:#a33;display:none"
@@ -1619,6 +1624,27 @@
           hängt ab, wohin das Öl tropft.</p></details>
       </div>
       <div class="e3-field">
+        <div class="row"><label>Kamera-Ansicht</label>
+          <select id="oil_cam_view" style="width:auto;padding:4px">
+            <option value="auto" selected>automatisch (3/4, Nahaufnahme, Schnitt)</option>
+            <option value="top">von oben</option>
+            <option value="front">von vorne (Stirnseite)</option>
+            <option value="section">Schnitt-Orientierung (ohne Schnitt)</option>
+          </select></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Feste Zusatz-Ansichten: <b>von oben</b> = Blick entgegen der
+          Schwerkraft aufs Modell (bei horizontaler Einbaulage quer zur Achse, Bild-Oben =
+          Motorachse); <b>von vorne</b> = Stirnansicht entlang der Motorachse aufs
+          Wickelkopf-Ende; <b>Schnitt-Orientierung (ohne Schnitt)</b> = dieselbe Blickrichtung
+          wie die ✂-Schnittansicht (senkrecht auf die Ebene Motorachse↔Düse Nr., mit Nahaufnahme
+          das „rechte obere Viertel" auf die Wickelköpfe), aber der Motor bleibt
+          <b>ungeschnitten</b> — Wickelkopf-Ansicht ohne Aufsägen. Nutzt „Düse Nr." + „🔍 Zoom"
+          + „Nahaufnahme" wie der Schnitt. Überschreibt nur die Kamera — ein aktiver ✂-Schnitt
+          bleibt geschnitten und wird dann von außen betrachtet. Wirkt auch in der 🔍 Vorschau.</p>
+          <p><span class="l">Laienverständlich:</span> Draufsicht bzw. Frontansicht statt der
+          automatischen Schrägansicht.</p></details>
+      </div>
+      <div class="e3-field">
         <div class="row"><label><input type="checkbox" id="oil_closeup" style="width:auto;margin-right:6px">
           Nahaufnahme (1 Strahl auf 1 Leiter)</label></div>
         <details class="e3-help"><summary>Erklärung</summary>
@@ -1627,6 +1653,29 @@
           gesetzt). Aus: die Übersicht über den ganzen Ausschnitt mit allen Düsen.</p>
           <p><span class="l">Laienverständlich:</span> Wie ein Makro-Foto direkt auf die
           Auftreffstelle statt der Gesamtansicht.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label><input type="checkbox" id="oil_section_cut" style="width:auto;margin-right:6px">
+          ✂ Schnittansicht durch eine Düse</label>
+          <label style="margin-left:10px">Düse Nr.</label>
+          <input type="number" id="oil_section_noz" value="1" min="1" max="40" step="1" style="width:60px">
+          <label style="margin-left:10px">🔍 Zoom</label>
+          <input type="number" id="oil_section_zoom" value="1" min="0.5" max="4" step="0.1" style="width:64px"><span class="unit">×</span>
+        </div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p><b>Fachlich:</b> Legt eine <b>Schnittebene durch die Motorachse (z) und den
+          Austrittspunkt der gewählten Ölspritz-Bohrung</b> und schneidet die kameraseitige
+          Modellhälfte weg; die Kamera blickt senkrecht auf die Schnittfläche. Sichtbar werden
+          die <b>längs halbierte Düsenbohrung</b>, der Ringkanal-Rohrquerschnitt und der
+          Wickelkopf im Längsschnitt. Das <b>Öl wird nicht mitgeschnitten</b> (der Strahl der
+          gewählten Düse liegt in der Ebene und bleibt voll sichtbar); Physik/Bake und die
+          Benetzungs-Kennwerte sind unverändert. Wirkt auch in der 🔍 Vorschau.
+          <b>Zoom</b>: &gt;1 = Kamera dichter an die Schnittfläche (Wickelköpfe größer im Bild),
+          &lt;1 = weiter weg — wirkt auf Voll- und Nahansicht des Schnitts. Mit
+          <b>Nahaufnahme</b> zusammen zeigt der Schnitt das „rechte obere Viertel"
+          (z-Achse als Bildunterkante, Stück Rotor/Stator + Wickelkopf + Ring).</p>
+          <p><span class="l">Laienverständlich:</span> Wie ein aufgesägter Motor im
+          Schaulabor — man schaut genau in die Ebene der Spritzbohrung hinein.</p></details>
       </div>
       <div class="e3-field">
         <div class="row"><label>🐢 Zeitlupe</label>
@@ -1926,6 +1975,8 @@
   <div class="e3-card">
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button id="oil_btn" onclick="startOilspray()">💧 Spritzöl-Simulation starten</button>
+      <button onclick="queueOilspray()" style="background:#456;width:auto;padding:8px 14px"
+        title="Spritzöl-Simulation in die Server-Warteschlange einreihen (läuft auch bei geschlossenem Browser) → Tab ⏳ Jobs">➕ Warteschlange</button>
       <button id="oil_preview_btn" onclick="startOilPreview()" style="background:#3a5a7a;width:auto;padding:8px 14px">🔍 Vorschau (Strahllinien, ohne Bake)</button>
       <label style="font-size:.8rem;color:#9aa;display:flex;align-items:center;gap:5px" title="1 = einzelnes Standbild. Mehr Winkel = die Vorschau lässt sich im Browser drehen (Ziehen). Mehr Winkel = längere Render-Zeit.">🔄 Drehteller
         <select id="oil_pv_turns" style="width:auto;padding:4px">
@@ -2310,6 +2361,29 @@
 
 <!-- ════════ TAB: Bericht ════════ -->
 <!-- Bericht-Tab entfernt → Bericht-Karte lebt jetzt in Tab ① Projekt (#pj-report-card) -->
+
+<!-- ════════ TAB: ⏳ Jobs (Server-Warteschlange) ════════ -->
+<div class="tab-panel" id="panel-jobs">
+  <h3 style="margin-top:0">⏳ Job-Warteschlange (Server)</h3>
+  <div style="font-size:.78rem;color:#9ab;max-width:760px;margin-bottom:10px;line-height:1.5">
+    Eingereihte Jobs laufen <b>auf dem Server</b> — auch wenn der Browser geschlossen wird.
+    Beim Wieder-Öffnen erscheint hier der aktuelle Stand (die Warteschlange überlebt sogar
+    einen Server-Neustart; ein dabei unterbrochener Job wird als abgebrochen markiert).
+    Reihen einreihen über die <b>„➕ Warteschlange"</b>-Knöpfe: im Fuß (aktuelle Berechnung),
+    bei den Varianten &amp; der Parameter-Tabelle (⚖ Vergleich), bei den KI-Entwürfen
+    (🎨 Designer) sowie im 🧲 3D-Feld- und 💧 Spritzöl-Tab. Es läuft immer
+    <b>ein</b> Job gleichzeitig (FreeCAD/CalculiX/Elmer/Blender sind rechenlast-schwer);
+    direkt gestartete Berechnungen haben Vorrang, die Warteschlange wartet dann.
+  </div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+    <button id="jobs_pause_btn" onclick="jobsTogglePause()"
+            style="background:#555;width:auto;padding:7px 14px;font-size:.78rem">⏸ Pausieren</button>
+    <button onclick="jobsClearDone()" style="background:#444;width:auto;padding:7px 14px;font-size:.78rem">🧹 Fertige entfernen</button>
+    <button onclick="jobsRefresh()" style="background:#444;width:auto;padding:7px 14px;font-size:.78rem">⟳ Aktualisieren</button>
+    <span id="jobs_hint" style="font-size:.75rem;color:#888"></span>
+  </div>
+  <div id="jobs_list" style="font-size:.8rem;color:#889;max-width:900px">Lade…</div>
+</div>
 
 <!-- ════════ TAB: FEM-Ergebnisse ════════ -->
 <div id="tab-results" class="tab-panel full-panel">
@@ -2698,6 +2772,8 @@
         <div id="var-list" style="display:flex;flex-direction:column;gap:4px;max-height:200px;overflow-y:auto;margin-bottom:8px"></div>
         <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
           <button id="btn_run_all" onclick="runAllVariants()" style="background:#27ae60;padding:7px 14px;font-size:.78rem">▶ Alle ausführen</button>
+          <button onclick="queueAllVariants()" title="Alle Varianten in die Server-Warteschlange (laufen auch bei geschlossenem Browser)"
+                  style="background:#456;padding:7px 14px;font-size:.78rem">➕ Warteschlange</button>
           <button onclick="exportVariants()" style="background:#444;padding:7px 12px;font-size:.78rem">⬇ Export Datei</button>
           <label style="background:#444;padding:7px 12px;font-size:.78rem;border-radius:4px;cursor:pointer">⬆ Import
             <input type="file" accept=".json,.emavars.json" onchange="importVariants(event)" style="display:none"/>
@@ -2725,6 +2801,8 @@
           <button onclick="addParamColumn()" style="background:#444;padding:7px 12px;font-size:.78rem">＋ Spalte</button>
           <button onclick="removeParamColumn()" style="background:#444;padding:7px 12px;font-size:.78rem">－ Spalte</button>
           <button onclick="runParamTable()" style="background:#27ae60;padding:7px 14px;font-size:.78rem">▶ Alle Spalten rechnen</button>
+          <button onclick="queueParamTable()" title="Alle Spalten in die Server-Warteschlange (laufen auch bei geschlossenem Browser)"
+                  style="background:#456;padding:7px 14px;font-size:.78rem">➕ Warteschlange</button>
           <span style="width:1px;height:20px;background:#444"></span>
           <button onclick="paramTableToVariants()" style="background:#444;padding:7px 12px;font-size:.78rem">→ als Varianten übernehmen</button>
         </div>
@@ -2815,6 +2893,8 @@
     <button id="btn_cad_preview" class="foot-secondary" title="Nur Geometrie bauen und ansehen (FreeCAD/STEP), ohne Rechnung">🧊 CAD ansehen</button>
     <button id="btn_smoke" class="foot-secondary" title="Schneller Selbsttest der Rechenkette (~15 s)">🧪 Smoke-Test</button>
     <button id="btn_analyse" class="start foot-start">⚙ Echte Berechnung</button>
+    <button id="btn_queue" class="foot-secondary"
+            title="Diese Berechnung in die Server-Warteschlange einreihen (läuft auch bei geschlossenem Browser) → Tab ⏳ Jobs">➕ Warteschlange</button>
     <div id="analysis-progress">
       <span id="progress-title">Analyse läuft…</span>
       <div class="progress-bar-bg"><div class="progress-bar-fill" id="progress-fill"></div></div>
@@ -3003,14 +3083,14 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','spraytest','results','compare'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','spraytest','jobs','results','compare'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
   projekt:'panel-projekt',
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
   designer:'panel-designer', import:'panel-import', em3d:'panel-em3d', oil:'panel-oil',
-  spraytest:'panel-spraytest',
+  spraytest:'panel-spraytest', jobs:'panel-jobs',
   results:'tab-results', compare:'tab-compare'
 };
 
@@ -3050,6 +3130,7 @@ function switchTab(name) {
     if (typeof _oilDrawAngleFig === 'function') _oilDrawAngleFig();  // Winkel-Skizzen aktualisieren
   }
   if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
+  if (name === 'jobs' && typeof jobsActivate === 'function') jobsActivate();
   if (name === 'em3d' && typeof adoptEm3dGeom === 'function') {
     // Beim Öffnen die aktuelle Geometrie der gewählten Quelle übernehmen + Zusammenfassung zeigen.
     const src = document.getElementById('e3_geomsrc');
@@ -3087,6 +3168,161 @@ window.addEventListener('load', () => {
     switchTab('projekt');   // Standard-Einstieg: Projekt-Tab
   }
 });
+
+// ── ⏳ Jobs-Tab: Server-Warteschlange (persistent, browser-unabhängig) ──────────
+// Jobs werden über POST /jobs/add eingereiht und vom Server sequenziell abgearbeitet;
+// dieser Tab zeigt/steuert nur den Server-Stand (Poll alle 3 s solange offen).
+let _jobsTimer = null, _jobsPaused = false;
+const _JOB_ICON = { analyse: '⚙', em3d: '🧲', em3d_sweep: '🌡', oilspray: '💧' };
+const _JOB_CHIP = { 'wartet': '#7f8c8d', 'läuft': '#2980b9', 'fertig': '#27ae60',
+                    'fehler': '#c0392b', 'abgebrochen': '#e67e22' };
+
+function jobsActivate() {
+  jobsRefresh();
+  if (_jobsTimer) clearInterval(_jobsTimer);
+  _jobsTimer = setInterval(() => {
+    if (window._activeTab === 'jobs') jobsRefresh();
+    else { clearInterval(_jobsTimer); _jobsTimer = null; }
+  }, 3000);
+}
+
+function _jobsBadge(n) {
+  const b = document.getElementById('jobs-badge');
+  if (!b) return;
+  if (n > 0) { b.textContent = n; b.style.display = 'inline-block'; }
+  else b.style.display = 'none';
+}
+
+function _jobsFmtT(t) {
+  if (!t) return '';
+  const d = new Date(t * 1000);
+  return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' }) + ' ' +
+         d.toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' });
+}
+
+async function jobsRefresh() {
+  let j;
+  try { j = await fetch('/jobs').then(r => r.json()); } catch (e) { return; }
+  _jobsPaused = !!j.paused;
+  const pb = document.getElementById('jobs_pause_btn');
+  if (pb) {
+    pb.textContent = _jobsPaused ? '▶ Fortsetzen' : '⏸ Pausieren';
+    pb.style.background = _jobsPaused ? '#27ae60' : '#555';
+  }
+  const jobs = j.jobs || [];
+  const open = jobs.filter(x => x.status === 'wartet' || x.status === 'läuft');
+  _jobsBadge(open.length);
+  const hint = document.getElementById('jobs_hint');
+  if (hint) hint.textContent = _jobsPaused
+    ? '⏸ pausiert — der laufende Job läuft zu Ende, danach wartet die Schlange'
+    : (open.length ? `${open.length} offen` : '');
+  const list = document.getElementById('jobs_list');
+  if (!list) return;
+  if (!jobs.length) {
+    list.innerHTML = '<div style="color:#777;padding:14px 0">Keine Jobs in der Warteschlange. ' +
+      'Mit den „➕ Warteschlange"-Knöpfen in den Berechnungs-Tabs einreihen.</div>';
+    return;
+  }
+  list.innerHTML = jobs.map(x => {
+    const chip = `<span style="background:${_JOB_CHIP[x.status] || '#555'};color:#fff;border-radius:3px;` +
+                 `padding:1px 7px;font-size:.7rem;white-space:nowrap">${escHtml(x.status)}</span>`;
+    const prog = (x.status === 'läuft')
+      ? `<div style="margin-top:4px"><div style="background:#222;border-radius:3px;height:7px;overflow:hidden">` +
+        `<div style="background:#2980b9;height:100%;width:${x.progress || 0}%"></div></div>` +
+        `<div style="font-size:.68rem;color:#89a;margin-top:2px">${escHtml((x.log_line || '').slice(0, 140))}</div></div>`
+      : '';
+    const err = x.error ? `<div style="font-size:.7rem;color:#e57;margin-top:3px">⚠ ${escHtml(String(x.error).slice(0, 200))}</div>` : '';
+    const proj = (x.status === 'fertig' && x.project_id)
+      ? `<button onclick="loadProjectById('${escHtml(x.project_id)}')" ` +
+        `style="background:#345;width:auto;padding:3px 9px;font-size:.7rem">📂 Ergebnis</button>` : '';
+    const cancel = (x.status === 'wartet' || x.status === 'läuft')
+      ? `<button onclick="jobsCancel('${x.id}')" title="abbrechen" ` +
+        `style="background:#733;width:auto;padding:3px 9px;font-size:.7rem">✖</button>` : '';
+    return `<div style="display:flex;gap:10px;align-items:flex-start;border:1px solid #2a2f38;` +
+           `border-radius:6px;padding:8px 10px;margin-bottom:6px;background:#161a20">` +
+           `<div style="font-size:1.1rem">${_JOB_ICON[x.type] || '⚙'}</div>` +
+           `<div style="flex:1;min-width:0"><div style="color:#dde;font-size:.82rem">${escHtml(x.title || x.type)}` +
+           ` <span style="color:#667;font-size:.68rem;margin-left:6px">${escHtml(x.type)} · ${_jobsFmtT(x.created)}</span></div>` +
+           prog + err + `</div>${chip}${proj}${cancel}</div>`;
+  }).join('');
+}
+
+async function jobsTogglePause() {
+  try {
+    await fetch('/jobs/config', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                  body: JSON.stringify({ paused: !_jobsPaused }) });
+  } catch (e) {}
+  jobsRefresh();
+}
+
+async function jobsClearDone() {
+  try { await fetch('/jobs/clear_done', { method: 'POST' }); } catch (e) {}
+  jobsRefresh();
+}
+
+async function jobsCancel(jid) {
+  try {
+    const r = await fetch('/jobs/' + encodeURIComponent(jid) + '/cancel', { method: 'POST' });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); alert('⚠ ' + (e.error || 'Abbruch nicht möglich')); }
+  } catch (e) {}
+  jobsRefresh();
+}
+
+// Gemeinsamer Einreih-Helfer für alle „➕ Warteschlange"-Knöpfe.
+async function enqueueJobs(items, feedbackEl) {
+  if (!items || !items.length) { alert('Nichts zum Einreihen.'); return false; }
+  try {
+    const r = await fetch('/jobs/add', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                         body: JSON.stringify({ jobs: items }) });
+    const j = await r.json();
+    if (!r.ok) { alert('⚠ ' + (j.error || 'Einreihen fehlgeschlagen')); return false; }
+    const msg = `✔ ${j.n} Job${j.n === 1 ? '' : 's'} eingereiht → Tab ⏳ Jobs`;
+    if (feedbackEl) { feedbackEl.textContent = msg; setTimeout(() => { feedbackEl.textContent = ''; }, 5000); }
+    try { const q = await fetch('/jobs').then(x => x.json());
+          _jobsBadge((q.jobs || []).filter(x => x.status === 'wartet' || x.status === 'läuft').length); } catch (e) {}
+    return true;
+  } catch (e) { alert('⚠ ' + e.message); return false; }
+}
+
+// Reattach beim Laden: laufende Server-Jobs wieder anzeigen (Browser war zu) + Jobs-Badge.
+async function _reattachJobs() {
+  try {
+    const s = await fetch('/status').then(r => r.json());
+    if (s.status === 'running') {
+      const rb = document.getElementById('tbtn-results'); if (rb) rb.disabled = false;
+      const btn = document.getElementById('btn_analyse');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ Analyse läuft…'; }
+      const ap = document.getElementById('analysis-progress'); if (ap) ap.classList.add('show');
+      const rc = document.getElementById('results-content'); if (rc) rc.style.display = 'none';
+      if (!_pollTimer) _pollTimer = setInterval(pollStatus, 1200);
+    }
+  } catch (e) {}
+  try {
+    const s = await fetch('/em3d/status').then(r => r.json());
+    if (s.status === 'running' && typeof _pollEm3d === 'function') _pollEm3d();
+  } catch (e) {}
+  try {
+    const s = await fetch('/oilspray/status').then(r => r.json());
+    if (s.status === 'running' && typeof _pollOil === 'function') {
+      const ob = document.getElementById('oil_btn'); if (ob) ob.disabled = true;
+      const pw = document.getElementById('oil_progress_wrap'); if (pw) pw.style.display = 'block';
+      const ab = document.getElementById('oil_abort_btn'); if (ab) ab.style.display = '';
+      _pollOil();
+    }
+  } catch (e) {}
+  try {
+    const j = await fetch('/jobs').then(r => r.json());
+    _jobsBadge((j.jobs || []).filter(x => x.status === 'wartet' || x.status === 'läuft').length);
+  } catch (e) {}
+  // Badge leichtgewichtig aktuell halten (der Jobs-Tab selbst pollt schneller).
+  setInterval(async () => {
+    try {
+      const j = await fetch('/jobs').then(r => r.json());
+      _jobsBadge((j.jobs || []).filter(x => x.status === 'wartet' || x.status === 'läuft').length);
+    } catch (e) {}
+  }, 10000);
+}
+window.addEventListener('load', _reattachJobs);
 
 // ── Compare tab ────────────────────────────────────────────────────────────────
 
@@ -3391,6 +3627,17 @@ async function runAllVariants() {
   updateCompareCount();
 }
 
+// ➕ Alle Varianten als SERVER-Jobs einreihen (statt der Client-Schleife oben) —
+// die Reihe läuft dann auch bei geschlossenem Browser weiter (Tab ⏳ Jobs).
+async function queueAllVariants() {
+  if (!variants.length) { alert('Keine Varianten'); return; }
+  const ok = await enqueueJobs(
+    variants.map(v => ({ type: 'analyse', title: v.name, payload: v.payload })),
+    document.getElementById('var-status'));
+  if (ok) document.getElementById('var-status').textContent =
+    `✔ ${variants.length} Varianten eingereiht → Tab ⏳ Jobs`;
+}
+
 async function saveVariantSet() {
   const name = (document.getElementById('var-set-name').value || '').trim();
   if (!name) { alert('Set-Name angeben'); return; }
@@ -3573,6 +3820,16 @@ async function runParamTable() {
   if (st) st.textContent = `fertig: ${ranIds.length} Spalten gerechnet`;
 }
 
+// ➕ Alle Tabellen-Spalten als SERVER-Jobs einreihen (läuft auch bei geschlossenem Browser).
+async function queueParamTable() {
+  if (_ptabCols.length < 1) { alert('Erst eine Tabelle erzeugen'); return; }
+  const items = [];
+  for (const col of _ptabCols)
+    items.push({ type: 'analyse', title: col.name || 'Spalte',
+                 payload: await _ptabColPayload(col) });
+  await enqueueJobs(items, document.getElementById('ptab-status'));
+}
+
 async function refreshTrainingStats() {
   try {
     const s = await fetch('/training/stats').then(x => x.json());
@@ -3700,6 +3957,12 @@ window.addEventListener('load', _updateRuntimeEstimate);
 let _pollTimer = null;
 
 document.getElementById('btn_analyse').addEventListener('click', startAnalysis);
+document.getElementById('btn_queue').addEventListener('click', async () => {
+  // Aktuelle Formular-Berechnung als Server-Job einreihen (statt sofort zu rechnen).
+  const p = await buildPayload();
+  const title = p.project_name || ('Analyse ' + ((p.geom && p.geom.magShape) || ''));
+  await enqueueJobs([{ type: 'analyse', title, payload: p }]);
+});
 document.getElementById('btn_cad_preview').addEventListener('click', startCadPreview);
 document.getElementById('btn_smoke').addEventListener('click', startSmokeTest);
 document.getElementById('btn_freecad').addEventListener('click', openFreeCAD);
@@ -5567,6 +5830,29 @@ async function startEm3d() {
   } catch (e) { msg.style.color='#e57'; msg.textContent = 'Fehler: ' + e.message; btn.disabled = false; }
 }
 
+// ➕ 3D-Berechnungen in die Server-Warteschlange einreihen (gleiche Payload-Builder wie
+// startEm3d/startEm3dSweep, aber POST /jobs/add statt sofortigem Start).
+async function queueEm3d() {
+  const payload = await _em3dGeom();
+  _em3dApplyOpts(payload);
+  const t = '3D-Feld ' + ((payload.geom && payload.geom.magShape) || '');
+  await enqueueJobs([{ type: 'em3d', title: t.trim(), payload }],
+                    document.getElementById('e3_msg'));
+}
+
+async function queueEm3dSweep() {
+  if (!_e3Sweep.length) { alert('Keine Betriebspunkte in der Tabelle.'); return; }
+  const payload = await _em3dGeom();
+  _em3dApplyOpts(payload);
+  payload.sweep = _e3Sweep.map(p => ({ rpm: +p.rpm || 0, load_nm: +p.load_nm || 0,
+                                       excitation: p.excitation || 'loaded', phase: p.phase || '' }));
+  payload.detail_index = Math.max(0, Math.min(_e3DetailIdx, _e3Sweep.length - 1));
+  payload.make_video = !!_e3MakeVideo;
+  await enqueueJobs([{ type: 'em3d_sweep',
+                       title: `3D-Drehzahlband (${_e3Sweep.length} Punkte)`, payload }],
+                    document.getElementById('e3_msg'));
+}
+
 // Ein-Pol-Sektor (Symmetrie-Submodell): eine Pol-Teilung fein, anti-periodisch, zum vollen
 // Motor gespiegelt. Teilt _em3d_state/Status/Viewer mit /em3d (über _pollEm3d).
 async function startEm3dSector() {
@@ -5916,12 +6202,23 @@ async function _oilBuildPayload() {
     housing:        ck('oil_housing'),
     housing_collide:ck('oil_housing_collide'),   // 🧱 Gehäuse fängt das Öl (Kollisionswand)
     housing_wall_mm:+(g('oil_housing_wall') && g('oil_housing_wall').value) || 4,
+    section_cut:    ck('oil_section_cut'),       // ✂ Schnitt durch Motorachse + Düsen-Austritt
+    section_cut_noz:+(g('oil_section_noz') && g('oil_section_noz').value) || 1,
+    section_zoom:   +(g('oil_section_zoom') && g('oil_section_zoom').value) || 1,
+    cam_view:       (g('oil_cam_view') && g('oil_cam_view').value) || 'auto',
     oil_transparency: (g('oil_transparency') ? +g('oil_transparency').value : 0.45),
     engine:         g('oil_engine').value || 'BLENDER_EEVEE',
     camera_angle_deg: (window._oilCamLockDeg != null ? window._oilCamLockDeg : null),
   };
   if (window._activeProject && window._activeProject.id) payload.project_id = window._activeProject.id;
   return payload;
+}
+
+// ➕ Spritzöl-Lauf in die Server-Warteschlange (gleiches Payload wie startOilspray).
+async function queueOilspray() {
+  const payload = await _oilBuildPayload();
+  await enqueueJobs([{ type: 'oilspray', title: '💧 Spritzöl-Simulation', payload }],
+                    document.getElementById('oil_status'));
 }
 
 async function startOilspray() {
@@ -7329,6 +7626,7 @@ function _dsnRenderVariants() {
        + `</div>`;
   });
   h += `<button onclick="dsnRunAllVariants()" style="width:100%;background:#2e7d32;font-size:.76rem;padding:8px;margin-top:2px">▶ Alle rechnen & vergleichen</button>`;
+  h += `<button onclick="dsnQueueAllVariants()" title="Alle 👍-Varianten in die Server-Warteschlange (laufen auch bei geschlossenem Browser)" style="width:100%;background:#456;font-size:.76rem;padding:8px;margin-top:4px">➕ In Warteschlange (Tab ⏳ Jobs)</button>`;
   box.innerHTML = h;
 }
 
@@ -7432,6 +7730,34 @@ async function dsnRunAllVariants() {
   ranIds.forEach(id => { const cb = document.querySelector(`.cmp-checkbox[value="${id}"]`); if (cb) cb.checked = true; });
   updateCompareCount();
   refreshTrainingStats();
+}
+
+// ➕ KI-Varianten als SERVER-Jobs einreihen (statt der Client-Schleife oben): identische
+// Payload-Erzeugung (applyDesignToCanvas + _dsnBuildPayload); 👎-Varianten werden wie in
+// dsnRunAllVariants NICHT gerechnet, sondern nur als „schlecht" ins Trainingsfile gemeldet.
+async function dsnQueueAllVariants() {
+  if (!_dsnAiVariants.length) return;
+  const items = [];
+  let skipped = 0;
+  for (let i = 0; i < _dsnAiVariants.length; i++) {
+    _dsnActiveVariant = i;
+    applyDesignToCanvas(_dsnAiVariants[i]);
+    const payload = await _dsnBuildPayload();
+    payload.project_name = `KI-V${i+1}`;
+    if (_dsnVerdict(_dsnAiVariants[i]) === 'schlecht') {
+      try {
+        await fetch('/training/design_rejected', { method:'POST', headers:{'Content-Type':'application/json'},
+          body: JSON.stringify({ payload, metrics: (_dsnAiVariants[i].quality||{}).metrics || {},
+                                 project_name: payload.project_name }) });
+      } catch (e) {}
+      skipped++;
+      continue;
+    }
+    items.push({ type: 'analyse', title: payload.project_name, payload });
+  }
+  if (!items.length) { alert(skipped ? 'Alle Varianten sind mit 👎 bewertet — nichts eingereiht.' : 'Keine Varianten.'); return; }
+  const ok = await enqueueJobs(items);
+  if (ok && skipped) alert(`ℹ ${skipped} 👎-Variante(n) nur als schlecht gespeichert, nicht eingereiht.`);
 }
 
 // ── Per-Magnet-Fein-Optimierung ────────────────────────────────────────────────
