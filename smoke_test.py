@@ -170,6 +170,37 @@ def _gen():
     return f"{n} motor scripts (incl. component toggles) + FEM, rotor-only confirmed"
 check("build_*_script syntax + rotor-only FEM", _gen)
 
+def _wh_spread():
+    # Stufenweise Spreizung der Wickelkopf-Lagen: innerste Lage 1·spread°, nächste 2·…
+    # Die emittierte Mathematik wird WIRKLICH ausgeführt (reines Python, kein FreeCAD):
+    # der Konstanten-Block zwischen z_face und _r_lane braucht nur math + die Header-Werte.
+    import math as _m, re as _re
+    def _slice(code):
+        ns = {"math": _m}
+        for ln in code.splitlines():
+            if _re.match(r"^(n_layers|axial|coil_pitch|wh_flare)\b", ln):
+                exec(ln, ns)
+        exec(code[code.index("z_face  = axial / 2.0"):code.index("def _r_lane(k):")], ns)
+        return ns
+    g = dict(GEOM, conductorsPerSlot=8, windingHeadFlare=6, windingHeadSpread=2.0)
+    code = ef.build_full_motor_script(g, AXIAL, "/tmp/_smoke.FCStd")
+    ast.parse(code)
+    assert "wh_spread = 2.0" in code and "f = _lane_flare(k0)" in code, "Spreizung nicht verdrahtet"
+    assert "2.0 * wh_flare_max" in code, "Isolierhülse muss die äußerste Lage umschließen"
+    ns = _slice(code)
+    fs = [ns["_lane_flare"](2 * j) for j in range(4)]
+    assert fs[0] < fs[1] < fs[2] < fs[3], f"keine Spreizung: {fs}"
+    for j, f in enumerate(fs):                       # dr/dz = f/H_eff ⇒ α = atan(…)
+        a = _m.degrees(_m.atan((f - 6.0) / ns["WH_HEFF"]))
+        assert abs(a - (j + 1) * 2.0) < 1e-6, f"Lage {j}: {a:.3f}° statt {(j+1)*2.0}°"
+    assert abs(ns["wh_flare_max"] - fs[3]) < 1e-9
+    # spread = 0 ⇒ historisches Verhalten (alle Lagen gleich)
+    ns0 = _slice(ef.build_full_motor_script(dict(GEOM, conductorsPerSlot=8),
+                                            AXIAL, "/tmp/_smoke.FCStd"))
+    assert {ns0["_lane_flare"](2 * j) for j in range(4)} == {ns0["wh_flare"]}
+    return "Lagen 2/4/6/8°, f=%s mm" % [round(f, 2) for f in fs]
+check("Wickelkopf-Spreizung je Lage (stufenweise)", _wh_spread)
+
 # ── 9. (optional) real FreeCAD CAD build + rotor FEM ─────────────────────────────
 if "--cad" in sys.argv:
     print("\n[CAD build — slow]")

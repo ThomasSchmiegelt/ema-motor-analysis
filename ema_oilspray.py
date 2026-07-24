@@ -1017,6 +1017,24 @@ if _SECTION_CAM:
     _th0c = noz_angles[min(SECTION_NOZ - 1, len(noz_angles) - 1)] if noz_angles else 0.0
     _nrmc = mathutils.Vector((-math.sin(_th0c), math.cos(_th0c), 0.0))
     _radc = mathutils.Vector((math.cos(_th0c), math.sin(_th0c), 0.0))   # radial IN der Ebene
+    # ZOOM-ANKER = WICKELKOPF (+ Ring), NICHT die Motorachse/Welle: der Wickelkopf ist der
+    # für die Spraybildung interessante Teil — beim Hineinzoomen auf ein achsenzentriertes
+    # Ziel wanderte er aus dem Bild (Nutzer-Beanstandung). Band in der Schnittebene:
+    # radial vom Kronen-Innenradius bis über den Spritzring, axial vom Blechpaket-Ende
+    # bis übers Ring-/Kronen-Ende.
+    _r_wh0 = min([math.hypot(p.x, p.y) for p in _ov] or [0.0])
+    _r_wh1 = max(r_ring + 2.0 * tube_r, r_crown)
+    _z_wh0 = z_stack_end - 0.25 * max(z_tip - z_stack_end, 3.0 * tube_r)
+    _z_wh1 = max(z_tip, ring_z) + 2.0 * tube_r
+    _wh_rm = 0.5 * (_r_wh0 + _r_wh1)
+    _wh_c  = mathutils.Vector((_wh_rm * _radc.x, _wh_rm * _radc.y, 0.5 * (_z_wh0 + _z_wh1)))
+    _wh_sz = max(_r_wh1 - _r_wh0, _z_wh1 - _z_wh0, 1e-6)
+    # Zoom-Blende: 1× = Übersicht (Ziel wie bisher), beim Hineinzoomen wandert das Ziel auf
+    # die Wickelkopf-Mitte und liegt ab ca. 2,7× voll darauf.
+    _wh_w = min(1.0, max(0.0, 1.6 * (1.0 - 1.0 / max(1e-6, SECTION_ZOOM))))
+
+    def _sec_tgt(base):
+        return base + (_wh_c - base) * _wh_w
     if CLOSEUP:
         # NAHANSICHT im Schnitt: „rechtes oberes Viertel" des Motors — von der z-ACHSE
         # (Bild-Unterkante) radial hinauf bis über den Spritzring, axial vom Blechpaket
@@ -1029,15 +1047,16 @@ if _SECTION_CAM:
         _r_out = max(r_ring + 2.0 * tube_r, 0.5 * STATOR_OD)   # Oberkante: Ring bzw. Stator-OD
         _z0v = z_stack_end - 0.6 * _overh                      # etwas Blechpaket zeigen
         _z1v = ring_z + 2.0 * tube_r                           # bis übers Ring-Ende
-        cam_tgt = mathutils.Vector((0.5 * _r_out * _radc.x, 0.5 * _r_out * _radc.y,
-                                    0.5 * (_z0v + _z1v)))
         cam_d = (1.6 / SECTION_ZOOM) * max(_z1v - _z0v, _r_out)
+        cam_tgt = _sec_tgt(mathutils.Vector((0.5 * _r_out * _radc.x, 0.5 * _r_out * _radc.y,
+                                             0.5 * (_z0v + _z1v))))
     else:
-        # Ziel = MOTORACHSE auf halber Länge (die Schnittfläche spannt den vollen Durchmesser
-        # ±R auf — ein Ziel am Düsenradius schob das Modell aus dem Bild); Distanz so, dass
-        # Durchmesser UND Länge (inkl. Spritzring bei ring_z) ins Bild passen.
-        cam_tgt = mathutils.Vector((0.0, 0.0, 0.5 * (zmin + max(zmax, ring_z))))
+        # Übersicht (Zoom 1×): Ziel = MOTORACHSE auf halber Länge — die Schnittfläche spannt
+        # den vollen Durchmesser ±R auf; Distanz so, dass Durchmesser UND Länge (inkl.
+        # Spritzring bei ring_z) ins Bild passen. Beim Hineinzoomen zieht _sec_tgt das Ziel
+        # auf den Wickelkopf zu, damit er im Bild bleibt.
         cam_d = (2.6 / SECTION_ZOOM) * max(ext, zmax - zmin)
+        cam_tgt = _sec_tgt(mathutils.Vector((0.0, 0.0, 0.5 * (zmin + max(zmax, ring_z)))))
     cam_loc = cam_tgt + _nrmc * cam_d
     _lens = 40.0
 # Feste Zusatz-Ansichten „von oben" / „von vorne" (Nutzerwunsch) — überschreibt die automatische
@@ -1353,19 +1372,25 @@ def liquid_world_verts(fr):
 
 series = []      # {frame, wetted_pct, n_islands, n_liquid_verts}
 log("Frames rendern + Benetzung messen")
+_liquid_total = 0                                    # Summe Fluid-Vertices über alle Frames
 for fr in range(F0, F1 + 1):
     scene.frame_set(fr)
-    scene.render.filepath = os.path.join(FRAMES_DIR, "frame_%04d.png" % (fr - F0 + 1))
-    try:
-        bpy.ops.render.render(write_still=True)
-    except Exception as e:
-        print("OIL_STAGE:render frame %d fehlgeschlagen: %s" % (fr, e), flush=True)
-    # Benetzung
+    # Fluid-Mesh ZUERST auswerten (vor dem Render): ist der Bake für diesen Frame LEER (kein
+    # Öl im Bild — Bake fehlgeschlagen / noch kein Tropfen / Öl schon abgelaufen), dann die
+    # Domain für diesen Frame AUSBLENDEN. Sonst rendert Blender die nackte Domain-Würfel-Mesh
+    # (mit Öl-Material) → ein „großer amberfarbener Quader statt Spray" (Nutzer-Beanstandung).
     try:
         vs, islands = liquid_world_verts(fr)
     except Exception as e:
         vs, islands = [], 0
         print("OIL_STAGE:liquid frame %d: %s" % (fr, e), flush=True)
+    dom.hide_render = (len(vs) == 0)
+    _liquid_total += len(vs)
+    scene.render.filepath = os.path.join(FRAMES_DIR, "frame_%04d.png" % (fr - F0 + 1))
+    try:
+        bpy.ops.render.render(write_still=True)
+    except Exception as e:
+        print("OIL_STAGE:render frame %d fehlgeschlagen: %s" % (fr, e), flush=True)
     frame_hit = set()
     for co in vs:
         _pos, idx, dist = kd.find(co)      # KDTree.find -> (position, index, distance)
@@ -1376,6 +1401,16 @@ for fr in range(F0, F1 + 1):
     series.append({"frame": fr, "wetted_pct": round(wetted_pct, 2),
                    "n_islands": int(islands), "n_liquid_verts": len(vs)})
     print("OIL_FRAMES:%d/%d" % (fr - F0 + 1, F1 - F0 + 1), flush=True)
+
+dom.hide_render = False
+if _liquid_total == 0:
+    # KEIN einziger Fluid-Vertex über ALLE Frames → der Mantaflow-Bake hat nichts erzeugt.
+    # Häufige Ursachen: Domain durch Kollisions-Gehäuse/vollen Ring + hohe Auflösung zu groß
+    # (Bake bricht mit zu wenig RAM/Zeit ab), Auflösung zu grob für die feine Düse, oder der
+    # Lauf wurde während des Bakes abgebrochen. Klar melden statt still den leeren Würfel zu zeigen.
+    print("OIL_STAGE:⚠ Bake hat KEIN Öl erzeugt (0 Fluid-Vertices in allen Frames) — "
+          "Domain ausgeblendet. Prüfe Auflösung/Gehäuse/Ring und ob der Bake durchlief.",
+          flush=True)
 
 # --- 7) Abdeckungs-Heatmap: Effector nach kumulierter Benetzung eingefärbt ----
 cov_png = CFG.get("coverage_png")

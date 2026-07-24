@@ -138,7 +138,10 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
     layer_h   = max(2.0, (slot_dep - 2 - (n_layers + 1) * ins) / n_layers)
 
     # Winding-head (Wickelkopf) shape: smooth loft "Zugkörper" flaring radially out.
+    # windingHeadSpread = STUFENWEISE Spreizung je Lage in ° (0 = alle Lagen gleich, wie
+    # bisher): innerste Lage 1·spread°, nächste 2·spread°, … → die Lagen fächern radial auf.
     wh_flare  = max(0.0, min(25.0, float(geom.get("windingHeadFlare", 6.0))))
+    wh_spread = max(0.0, min(15.0, float(geom.get("windingHeadSpread", 0.0))))
     wh_style  = str(geom.get("windingHeadStyle", "sweep"))
     if wh_style not in ("sweep", "box"):
         wh_style = "sweep"
@@ -218,7 +221,7 @@ n_layers  = {n_layers}; ins   = {ins}; cond_w = {cond_w:.4f}; layer_h = {layer_h
 coil_pitch = {coil_pitch}
 WIND_DEBUG = {winding_debug!r}
 WH_SLOT_LIMIT = {int(hairpin_slot_limit) if hairpin_slot_limit and hairpin_slot_limit > 0 else n_slots}
-wh_flare  = {wh_flare}; wh_style = {wh_style!r}
+wh_flare  = {wh_flare}; wh_style = {wh_style!r}; wh_spread = {wh_spread}
 shaft_conn = {shaft_conn!r}
 spline_teeth = {spline_teeth}; spline_depth = {spline_depth}
 poly_lobes = {poly_lobes}; poly_ecc = {poly_ecc}
@@ -502,6 +505,28 @@ crown_H = max(10.0, 0.5 * coil_pitch * (thick + clr) * 1.6)
 M_seg   = 6
 _COL    = [(0.90, 0.45, 0.05), (0.05, 0.75, 0.20), (0.10, 0.30, 0.90)]
 
+# Bahn-Konstanten der geschwungenen Krone (global, damit die Aufweitung je Lage exakt in
+# einen Biegewinkel umgerechnet werden kann — sie hängen nur von coil_pitch/crown_H ab).
+WH_EBEND = 0.08                                   # θ-Einlauf-Fenster an beiden Bahn-Enden
+WH_WAPEX = min(0.18, 0.28 / max(1, coil_pitch)) * (1.0 - WH_EBEND)
+WH_HEFF  = crown_H / (1.0 - WH_WAPEX)             # Höhen-Skalierung (Scheitel ≈ crown_H)
+
+def _lane_flare(k0):
+    # Radiale Aufweitung der Krone DIESES Lagen-Paares.
+    #   wh_spread = 0 → jede Lage bekommt dieselbe Aufweitung wh_flare (bisheriges Verhalten).
+    #   wh_spread > 0 → STUFENWEISE Spreizung: innerste Lage wh_spread°, nächste 2·wh_spread°,
+    #     dann 3·…, 4·… — die Lagen fächern radial auf (Kollisionsfreiheit + realer Hairpin).
+    # Auf dem Kronen-Arm gilt dr/dz = f/H_eff, also f = H_eff·tan(α) für den Winkel α.
+    # Die Aufweitung bleibt eine reine Funktion der Höhe h UND ist für Hin-/Rückarm
+    # derselben Krone identisch → der radiale Kreuzungsabstand r1−r0 bleibt erhalten.
+    if wh_spread <= 1e-9:
+        return wh_flare
+    j = max(0, int(k0) // 2)                      # Lagen-Paar-Index (0 = innerste Lage)
+    a = math.radians(min(60.0, (j + 1) * wh_spread))
+    return min(80.0, wh_flare + WH_HEFF * math.tan(a))
+
+wh_flare_max = max([_lane_flare(2 * _j) for _j in range(max(1, n_layers // 2))])
+
 def _r_lane(k):
     return R_si + ins + k * (layer_h + ins) + layer_h / 2.0
 
@@ -608,15 +633,15 @@ def _crown_swept(s, k0, k1, out):
     if wh_style == "box":
         _crown(s, k0, k1, out); return
     th0 = s * dtheta; th1 = (s + coil_pitch) * dtheta
-    r0 = _r_lane(k0); r1 = _r_lane(k1); f = wh_flare
+    r0 = _r_lane(k0); r1 = _r_lane(k1); f = _lane_flare(k0)
     dr = r1 - r0
-    e_bend = 0.08                                    # θ-easing window at both path ends
+    e_bend = WH_EBEND                                # θ-easing window at both path ends
     # Apex window in t-space. The θ-easing compresses the mid region by (1−e), so a
     # t-window maps to a WIDER θ-window (×1/(1−e)) — scale by (1−e) so the window
     # stays clear of the innermost arm crossing at θ-fraction 0.5 − 1/(2·pitch)
     # (0.28/pitch leaves a 0.22/pitch θ-margin; 0.35 unscaled overlapped at s36).
-    w_apex = min(0.18, 0.28 / max(1, coil_pitch)) * (1.0 - e_bend)
-    H_eff = crown_H / (1.0 - w_apex)                 # cap-sag compensation → peak ≈ crown_H
+    w_apex = WH_WAPEX
+    H_eff = WH_HEFF                                  # cap-sag compensation → peak ≈ crown_H
     # Path samples grouped into 5 C²-clean segments: bend | arm | apex | arm | bend.
     # Each is lofted SEPARATELY below — one global smooth loft rings (the B-spline
     # interpolates ALL sections globally, and the end-bend curvature jumps made the
@@ -831,7 +856,7 @@ if GEN_BEAR_A or GEN_BEAR_B:
 
 # ── 7. WINDING-HEAD INSULATION PAPER — thin shell hugging the crown OD (+z) ──
 if GEN_INSUL and GEN_HAIRPIN and GEN_WHEAD:
-    r_env = R_si + slot_dep + 2.0 * wh_flare + 1.5
+    r_env = R_si + slot_dep + 2.0 * wh_flare_max + 1.5   # weiteste (äußerste) Lage umschließen
     z_lo  = z_face - insul_thk
     z_hi  = z_face + crown_H + insul_thk
     sleeve = Part.makeCylinder(r_env + insul_thk, z_hi - z_lo, App.Vector(0, 0, z_lo))

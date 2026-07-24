@@ -494,6 +494,11 @@
       <div class="slider-header"><span>Wickelkopf-Aufweitung (radial)</span><span id="disp_wh_flare">6 mm</span></div>
       <input type="range" id="wh_flare" min="0" max="25" step="1" value="6"/>
     </div>
+    <div class="slider-group">
+      <div class="slider-header"><span>Spreizung je Lage (stufenweise)</span><span id="disp_wh_spread">0 °</span></div>
+      <input type="range" id="wh_spread" min="0" max="8" step="0.5" value="0"/>
+      <small style="font-size:.7rem;color:#666">0 = alle Lagen gleich weit aufgeweitet (wie bisher). &gt;0 = jede Lage wird stufenweise weiter nach außen gebogen: innerste Lage 1×, die nächste 2×, dann 3×, 4× … diesen Winkel. So fächern die Lagen radial auf, statt parallel übereinander zu liegen — mehr Abstand zwischen den Kronen (Kollisionsfreiheit) und näher am realen Hairpin-Wickelkopf. Wirkt nur auf den Zugkörper (Sweep), nicht auf die Box-Darstellung.</small>
+    </div>
     <div class="input-group">
       <label>Wickelkopf-Darstellung</label>
       <select id="wh_style" style="grid-column:2/-1">
@@ -1671,7 +1676,11 @@
           gewählten Düse liegt in der Ebene und bleibt voll sichtbar); Physik/Bake und die
           Benetzungs-Kennwerte sind unverändert. Wirkt auch in der 🔍 Vorschau.
           <b>Zoom</b>: &gt;1 = Kamera dichter an die Schnittfläche (Wickelköpfe größer im Bild),
-          &lt;1 = weiter weg — wirkt auf Voll- und Nahansicht des Schnitts. Mit
+          &lt;1 = weiter weg — wirkt auf Voll- und Nahansicht des Schnitts. <b>Gezoomt wird
+          auf den Wickelkopf</b>, nicht auf die Welle: bei 1× ist das Bild wie bisher auf die
+          Motorachse zentriert, mit steigendem Zoom wandert der Bildmittelpunkt auf den
+          Wickelkopf-/Spritzring-Bereich (ab ca. 2,7× liegt er voll darauf), sodass der für
+          die Spraybildung interessante Teil im Bild bleibt. Mit
           <b>Nahaufnahme</b> zusammen zeigt der Schnitt das „rechte obere Viertel"
           (z-Achse als Bildunterkante, Stück Rotor/Stator + Wickelkopf + Ring).</p>
           <p><span class="l">Laienverständlich:</span> Wie ein aufgesägter Motor im
@@ -8114,7 +8123,8 @@ function applyPayload(payload) {
     mag_dist: G.magDist, mag_layer_gap: G.magLayerGap, mag_layers: G.magLayers,
     pole_arc: pct(G.poleArcFrac), seg_per_pole: G.segPerPole, n_ax: G.nAx, n_circ: G.nCirc,
     slot_depth: G.slotDepth, cond_per_slot: G.conductorsPerSlot, coil_pitch: G.coilPitch,
-    wh_flare: G.windingHeadFlare, press_interf: G.pressInterferenceUm,
+    wh_flare: G.windingHeadFlare, wh_spread: G.windingHeadSpread,
+    press_interf: G.pressInterferenceUm,
     spline_teeth: G.splineTeeth, spline_depth: G.splineToothDepthMm,
     poly_lobes: G.polygonLobes, poly_ecc: G.polygonEccMm,
   };
@@ -9319,7 +9329,7 @@ function escHtml(s) {
     nAx: 1, nCirc: 1, shaftBoreD: 0, magTangLen: 0, magAngle2: 90, magAsym: 0, magGapMm: 0.1,
     pocketMode: "position", pocketOuterD: 178, pocketInnerD: 150,
     magOrient: "transverse", conductorsPerSlot: 4, coilPitch: 0,
-    windingHeadFlare: 6, windingHeadStyle: "sweep",
+    windingHeadFlare: 6, windingHeadSpread: 0, windingHeadStyle: "sweep",
     shaftConnection: "press", pressInterferenceUm: 40,
     splineTeeth: 10, splineToothDepthMm: 2, polygonLobes: 3, polygonEccMm: 2,
     // Stepwise geometry: per-component build toggles (CAD only). Core parts on,
@@ -9408,6 +9418,7 @@ function escHtml(s) {
     bindSlider("cond_per_slot", v => { GEOM.conductorsPerSlot = parseInt(v); }, "");
     bindSlider("coil_pitch",    v => { GEOM.coilPitch         = parseInt(v); }, "");
     bindSlider("wh_flare",      v => { GEOM.windingHeadFlare   = v; }, " mm");
+    bindSlider("wh_spread",     v => { GEOM.windingHeadSpread  = v; }, " °");
     document.getElementById("wh_style").onchange = e => { GEOM.windingHeadStyle = e.target.value; };
     // Wellenverbindung (Blechpaket–Welle)
     bindSlider("press_interf",  v => { GEOM.pressInterferenceUm = v; }, " µm");

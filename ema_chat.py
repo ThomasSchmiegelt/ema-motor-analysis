@@ -105,7 +105,8 @@ def _machine_datasheet(meta: dict) -> str:
         f"Rotor-Ø={_v(g('rotorOD'))}, Wellen-Ø={_v(g('shaftD'))}, Wellenbohrung={_v(g('shaftBoreD'))}, "
         f"Luftspalt={_v(g('airGap'))}, Blechpaketlänge={_v(axial)}",
         f"- Stator/Wicklung: Nuttiefe={_v(g('slotDepth'))} mm, Leiter/Nut={g('conductorsPerSlot')}, "
-        f"Spulenweite={g('coilPitch')} (0=auto), Wickelkopf-Aufweitung={_v(g('windingHeadFlare'))} mm",
+        f"Spulenweite={g('coilPitch')} (0=auto), Wickelkopf-Aufweitung={_v(g('windingHeadFlare'))} mm, "
+        f"Wickelkopf-Spreizung je Lage={_v(g('windingHeadSpread'))} ° (0=aus)",
         f"- Magnete: Form={g('magShape')}, Maße B/T/Abstand [mm]={_v(g('magWidth'))}/{_v(g('magThick'))}/{_v(g('magDist'))}, "
         f"Lagen={g('magLayers')}, Orientierung={g('magOrient')}, Segmentierung n_ax×n_circ={g('nAx')}×{g('nCirc')}",
         f"- Welle-Nabe-Verbindung: {g('shaftConnection')}",

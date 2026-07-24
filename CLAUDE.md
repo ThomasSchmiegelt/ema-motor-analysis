@@ -687,7 +687,19 @@ the crown's **radial split**: the "go" arm rises on the inner lane radius, the
 crossing arms are never at the same radius+z. The **winding head (crown)** is built
 by `_crown_swept` as a smooth SOLID sweep ("Zugkörper") through oriented rect
 sections (`_crown_frame`/`_crown_rect` keep the cross-section flat), flaring
-**radially outward** by `windingHeadFlare` mm. The path is **C¹-smooth by design**:
+**radially outward** by `windingHeadFlare` mm. **Stufenweise Spreizung der Lagen**
+(`windingHeadSpread`, ° je Lage, 0 = aus/historisch, UI-Slider „Spreizung je Lage"):
+statt für alle Lagen dieselbe Aufweitung bekommt jedes Lagen-Paar j (Lanes 2j/2j+1) den
+Biegewinkel `(j+1)·spread` — innerste Lage 1×, nächste 2×, dann 3×, 4× … → die Lagen
+fächern radial auf (mehr Kronen-Abstand, realer Hairpin-Wickelkopf). Umsetzung
+`_lane_flare(k0)` im erzeugten Skript: auf dem Kronen-Arm ist `dr/dz = f/H_eff`, also
+`f = wh_flare + H_eff·tan(α)` (`WH_EBEND`/`WH_WAPEX`/`WH_HEFF` sind dafür aus
+`_crown_swept` auf Modul-Ebene gehoben). **Der Kollisions-Invariant bleibt erhalten**:
+`f` hängt nur vom Lagen-Paar ab, ist also für Hin- UND Rückarm DERSELBEN Krone gleich →
+der radiale Kreuzungsabstand `r1−r0` ist unverändert; die Bänder verschiedener Lagen
+divergieren nur zusätzlich. Nur `sweep`, nicht die Box-Darstellung; die Isolierhülse nutzt
+`wh_flare_max` (äußerste Lage). Gate: `smoke_test.py` `[Wickelkopf-Spreizung]` führt die
+emittierte Mathematik ohne FreeCAD aus (Monotonie + Winkel je Lage). The path is **C¹-smooth by design**:
 a **vertical slot exit at BOTH ends** (θ-easing with s′=0 at the path ends + flare
 blended to slope 0 below the bend, start/end sections embedded 1.2 mm into the own
 leg → seamless leg↔crown junction), straight chevron arms (constant slope keeps the
@@ -1096,7 +1108,14 @@ von der z-Achse begrenzt, radial bis über den Spritzring, axial etwas Blechpake
 Wickelkopf/Ring-Ende — die normale tangentiale Closeup-Kamera stünde in der weggeschnittenen
 Hälfte und passt nicht zum Halbraum-Schnitt; Basisdistanz **1.6** (dichter auf die Wickelköpfe,
 Nutzerwunsch) statt 2.2. **Schnitt-Zoom (`oil.section_zoom`, UI `#oil_section_zoom` 0,5–4×):**
-`cam_d /= SECTION_ZOOM` in Voll- UND Nahansicht des Schnitts (>1 = dichter). **Boolean-Robustheit (kritisch):** die STL-Teile
+`cam_d /= SECTION_ZOOM` in Voll- UND Nahansicht des Schnitts (>1 = dichter). **Zoom-Anker ist der
+WICKELKOPF, nicht die Motorachse** (`_sec_tgt`): das Kameraziel liegt bei 1× weiter auf der Achse
+(Übersicht unverändert), rutscht aber mit steigendem Zoom auf die Wickelkopf-/Ring-Mitte in der
+Schnittebene zu — `room = 0,34·cam_d − 0,55·_wh_sz` ist der erlaubte Abstand des Ziels von der
+Wickelkopf-Mitte, `_wh_c`/`_wh_sz` = radiales Band (Kronen-Innenradius … über den Spritzring) ×
+axiales Band (Blechpaket-Ende … über Kronen-/Ring-Ende) aus den STL-Überhang-Vertices. Ohne das
+zoomte man auf die Welle und der für die Spraybildung interessante Wickelkopf lief aus dem Bild
+(Nutzer-Beanstandung). **Boolean-Robustheit (kritisch):** die STL-Teile
 (v. a. die Hairpins, Beinahe-Berührungen/Doppel-Dreiecke) sind NICHT mannigfaltig — EXACT braucht
 `use_self` + `use_hole_tolerant`, sonst „explodiert" der Schnitt (WindingHead-BBox ~4 m, kupfer-
 farbener Nebel füllte das ganze Bild); zusätzlich ein **BBox-Wächter** in `_cut` (Halbraum-
@@ -1202,7 +1221,15 @@ den schnellen Strahl sofort aus der kleinen Domain austreten (Öl erreichte den 
 weite Domain lässt die Tropfen dagegen fliegen + auf den Leitern landen.
 **Bäckt** (`fluid.bake_all`), rendert je Frame und misst **Benetzung** (KDTree Effector-Vertices ↔
 Liquid-Vertices im Nahband) + **Tropfenzahl** (Mesh-Inseln via bmesh) → `OIL_METRICS:<json>`, plus
-eine **Abdeckungs-Heatmap** (Effector nach kumulierter Benetzung emissiv eingefärbt). (3) `blender_runner.run_blender_script` führt es
+eine **Abdeckungs-Heatmap** (Effector nach kumulierter Benetzung emissiv eingefärbt). **Leer-Bake-
+Wächter (Gotcha „großer Quader statt Spray"):** die Domain trägt das (amberne) Öl-Material; produziert
+der FLIP-Bake für einen Frame KEIN Fluid (Bake fehlgeschlagen — z. B. Domain durch Kollisions-Gehäuse/
+vollen Ring + hohe Auflösung zu groß → OOM/Timeout —, Auflösung zu grob für die Düse, oder Lauf während
+des Bakes abgebrochen), rendert Blender die **nackte Domain-Würfel-Mesh** = ein großer amberner Quader
+statt Spray. Deshalb wertet der Frame-Loop (BEIDE Skripte, oilspray + `ema_spraytest`) das Fluid-Mesh
+**vor** dem Render aus und setzt `dom.hide_render = (len(vs)==0)`; ist der Bake über ALLE Frames leer
+(`_liquid_total==0`), meldet er das laut (`OIL_STAGE:⚠ Bake hat KEIN Öl erzeugt …`) statt still den
+Würfel zu zeigen. Gate: `test_oilspray.py`/`test_spraytest.py` (`dom.hide_render = (…==0)`). (3) `blender_runner.run_blender_script` führt es
 gestreamt aus (Marker `OIL_STAGE/OIL_FRAMES/OIL_METRICS/OIL_DONE`, Abbruch via `abort_current`).
 (4) Frames → `frames_oil/anim.mp4` (ffmpeg, reuse `ema_em3d._encode_video`), Kennwert-Charts
 (matplotlib), `results["oilspray"]` schlank in `results.json` gemergt (`_persist`, ohne base64).

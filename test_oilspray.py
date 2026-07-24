@@ -106,7 +106,11 @@ def test_blender_script_markers():
         assert tok in s, f"Blender-Skript ohne {tok!r}"
     # EEVEE-Umbenennung (4.2) robust aufgelöst
     assert "BLENDER_EEVEE_NEXT" in s and "_pick_engine" in s
-    print("✓ Blender-Skript: Domain/Inflow/Effector/Bake/Particles + OIL_*-Marker + Engine-Auflösung")
+    # Leer-Bake-Wächter: leerer Fluid-Frame blendet die Domain aus (sonst „großer Quader statt Spray"),
+    # und ein durchweg leerer Bake wird laut gemeldet statt still den nackten Würfel zu rendern.
+    assert "dom.hide_render = (len(vs) == 0)" in s, "Leer-Domain-Wächter je Frame fehlt"
+    assert "_liquid_total == 0" in s and "KEIN Öl erzeugt" in s, "Leer-Bake-Warnung fehlt"
+    print("✓ Blender-Skript: Domain/Inflow/Effector/Bake/Particles + OIL_*-Marker + Leer-Bake-Wächter")
 
 
 def test_orientation_closeup_branches():
@@ -409,6 +413,12 @@ def test_tilt_sign_camviews_zoom():
     assert 'CFG.get("section_zoom"' in s
     assert "1.6 / SECTION_ZOOM" in s and "2.6 / SECTION_ZOOM" in s, \
         "SECTION_ZOOM muss Voll- UND Nahansicht des Schnitts skalieren"
+    # (3b) Zoom-Anker = Wickelkopf (nicht die Motorachse/Welle): beim Hineinzoomen muss der
+    # Wickelkopf im Bild bleiben — beide Schnitt-Zweige gehen über _sec_tgt.
+    assert "def _sec_tgt(base):" in s and s.count("_sec_tgt(") >= 3, \
+        "Schnitt-Zoom muss auf den Wickelkopf ankern (_sec_tgt in Voll- UND Nahansicht)"
+    assert "_wh_c" in s and "1.0 / max(1e-6, SECTION_ZOOM)" in s, \
+        "Zoom-Blende auf die Wickelkopf-Mitte fehlt"
 
     # cfg-Passthrough (preview, fake STL + Blender) inkl. Klemmen/Validierung
     d = tempfile.mkdtemp(); seen = {}

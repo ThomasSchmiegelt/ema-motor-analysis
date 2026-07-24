@@ -496,19 +496,28 @@ def _islands():
 
 series = []
 log("Frames rendern")
+_liquid_total = 0
 for fr in range(F0, F1 + 1):
     scene.frame_set(fr)
+    # Fluid-Mesh ZUERST auswerten: leerer Bake-Frame → Domain ausblenden, sonst rendert Blender
+    # die nackte Domain-Würfel-Mesh (Öl-Material) = „großer Quader statt Spray".
+    try:
+        n_isl, n_verts = _islands()
+    except Exception:
+        n_isl, n_verts = 0, 0
+    dom.hide_render = (n_verts == 0)
+    _liquid_total += n_verts
     scene.render.filepath = os.path.join(FRAMES_DIR, "frame_%04d.png" % (fr - F0 + 1))
     try:
         bpy.ops.render.render(write_still=True)
     except Exception as e:
         print("OIL_STAGE:render frame %d fehlgeschlagen: %s" % (fr, e), flush=True)
-    try:
-        n_isl, n_verts = _islands()
-    except Exception:
-        n_isl, n_verts = 0, 0
     series.append({"frame": fr, "n_islands": int(n_isl), "n_liquid_verts": int(n_verts)})
     print("OIL_FRAMES:%d/%d" % (fr - F0 + 1, F1 - F0 + 1), flush=True)
+dom.hide_render = False
+if _liquid_total == 0:
+    print("OIL_STAGE:⚠ Bake hat KEIN Öl erzeugt (0 Fluid-Vertices in allen Frames) — "
+          "Domain ausgeblendet. Prüfe Auflösung und ob der Bake durchlief.", flush=True)
 
 out = {"series": series,
        "droplets_peak": max((s["n_islands"] for s in series), default=0),
