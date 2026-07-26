@@ -378,8 +378,33 @@ if GEN_ROTOR:
                 cap = cap.transformGeometry(m); cap.translate(App.Vector(cx, cy, 0))
                 pocket_shapes.append(cap)
 
+    rotor_base = rotor_solid                          # valid disc (ring − bore) — ultimate fallback
     if pocket_shapes:
-        rotor_solid = rotor_solid.cut(Part.makeCompound(pocket_shapes))
+        rotor_cut = rotor_solid.cut(Part.makeCompound(pocket_shapes))
+        if rotor_cut.isValid() and rotor_cut.Volume > 1e-6:
+            rotor_solid = rotor_cut
+        else:
+            # Aggressive multi-layer pockets sometimes leave degenerate/thin iron bridges →
+            # an invalid solid. Do NOT abort the whole model (that lost Rotor AND shaft/
+            # magnets/stator/hairpins — the "Rotor wird nicht erzeugt" bug). removeSplitter()
+            # heals most; else cut each pocket individually off the valid base disc.
+            _fx = None
+            try:    _fx = rotor_cut.removeSplitter()
+            except Exception: _fx = None
+            if _fx is not None and _fx.isValid() and _fx.Volume > 1e-6:
+                rotor_solid = _fx
+            else:
+                print("WARN: Magnettaschen-Schnitt ergab ungültiges Rotoreisen — "
+                      "schneide die Taschen einzeln (robuster)")
+                _rs = rotor_base
+                for _pk in pocket_shapes:
+                    try:
+                        _c = _rs.cut(_pk)
+                        if _c.isValid() and _c.Volume > 1e-6:
+                            _rs = _c
+                    except Exception:
+                        pass
+                rotor_solid = _rs
     # Balance-disc bolt holes through the whole stack (symmetric, count = poles).
     if GEN_BALANCE and bal_hole_r > 0:
         hole_shapes = []
@@ -411,7 +436,14 @@ if GEN_ROTOR:
             else:
                 print("WARN: custom barriers produced an invalid rotor — skipped")
     if not rotor_solid.isValid():
-        raise RuntimeError("Rotor iron invalid after pocket cuts")
+        try:    rotor_solid = rotor_solid.removeSplitter()
+        except Exception: pass
+    if (not rotor_solid.isValid()) or rotor_solid.Volume < 1e-6:
+        # Letzte Rückfallebene: die ungeschnittene Rotorscheibe. So entsteht IMMER ein
+        # gültiges "Rotor"-Objekt → Modell wird gespeichert, Struktur-FEM hat einen Körper.
+        print("WARN: Rotoreisen nach den Schnitten ungültig — nutze die ungeschnittene "
+              "Rotorscheibe (Magnettaschen entfallen in der CAD-Darstellung)")
+        rotor_solid = rotor_base
     _add("Rotor", rotor_solid, (0.40, 0.40, 0.46))
 
 # ── 2b. BALANCE-DISC BOLTS (optional; through the whole stack) ─────────────
@@ -511,21 +543,23 @@ WH_EBEND = 0.08                                   # θ-Einlauf-Fenster an beiden
 WH_WAPEX = min(0.18, 0.28 / max(1, coil_pitch)) * (1.0 - WH_EBEND)
 WH_HEFF  = crown_H / (1.0 - WH_WAPEX)             # Höhen-Skalierung (Scheitel ≈ crown_H)
 
-def _lane_flare(k0):
-    # Radiale Aufweitung der Krone DIESES Lagen-Paares.
+def _lane_flare(k):
+    # Radiale Aufweitung der Krone für die EINZELNE Lage k (0 = innerste Lage).
     #   wh_spread = 0 → jede Lage bekommt dieselbe Aufweitung wh_flare (bisheriges Verhalten).
-    #   wh_spread > 0 → STUFENWEISE Spreizung: innerste Lage wh_spread°, nächste 2·wh_spread°,
-    #     dann 3·…, 4·… — die Lagen fächern radial auf (Kollisionsfreiheit + realer Hairpin).
-    # Auf dem Kronen-Arm gilt dr/dz = f/H_eff, also f = H_eff·tan(α) für den Winkel α.
-    # Die Aufweitung bleibt eine reine Funktion der Höhe h UND ist für Hin-/Rückarm
-    # derselben Krone identisch → der radiale Kreuzungsabstand r1−r0 bleibt erhalten.
+    #   wh_spread > 0 → STUFENWEISE Spreizung PRO LAGE: Lage 0 → 1·wh_spread°, Lage 1 →
+    #     2·wh_spread°, Lage 2 → 3·…, Lage 3 → 4·… — JEDE Lage fächert um ihren EIGENEN
+    #     Winkel auf (nicht mehr paarweise gleich; der Nutzer wollte, dass sich auch Lage 1
+    #     und 2 im Winkel unterscheiden). Auf dem Kronen-Arm gilt dr/dz = f/H_eff, also
+    #     f = H_eff·tan(α) für den Winkel α.
+    # Kollisionsfreiheit bleibt: Hin-Arm (Lage k0) und Rück-Arm (Lage k1=k0+1) einer Krone
+    # bekommen jetzt f0<f1; der radiale Kreuzungsabstand wächst dadurch (r1−r0)+(f1−f0)·g ≥
+    # r1−r0 — die Bänder divergieren also nur zusätzlich, nie enger.
     if wh_spread <= 1e-9:
         return wh_flare
-    j = max(0, int(k0) // 2)                      # Lagen-Paar-Index (0 = innerste Lage)
-    a = math.radians(min(60.0, (j + 1) * wh_spread))
+    a = math.radians(min(60.0, (int(k) + 1) * wh_spread))
     return min(80.0, wh_flare + WH_HEFF * math.tan(a))
 
-wh_flare_max = max([_lane_flare(2 * _j) for _j in range(max(1, n_layers // 2))])
+wh_flare_max = max([_lane_flare(_k) for _k in range(max(1, n_layers))])
 
 def _r_lane(k):
     return R_si + ins + k * (layer_h + ins) + layer_h / 2.0
@@ -633,7 +667,8 @@ def _crown_swept(s, k0, k1, out):
     if wh_style == "box":
         _crown(s, k0, k1, out); return
     th0 = s * dtheta; th1 = (s + coil_pitch) * dtheta
-    r0 = _r_lane(k0); r1 = _r_lane(k1); f = _lane_flare(k0)
+    r0 = _r_lane(k0); r1 = _r_lane(k1)
+    f0 = _lane_flare(k0); f1 = _lane_flare(k1)     # per-Lage: Hin-Arm f0, Rück-Arm f1
     dr = r1 - r0
     e_bend = WH_EBEND                                # θ-easing window at both path ends
     # Apex window in t-space. The θ-easing compresses the mid region by (1−e), so a
@@ -690,6 +725,7 @@ def _crown_swept(s, k0, k1, out):
         else:
             x = h / h_b
             g = h_b * (2.0 * x * x - x * x * x)
+        f = f0 + b * (f1 - f0)                    # Aufweitung folgt der Lage (Hin→Rück)
         pts.append(_pt(r0 + b * dr + f * g, th0 + s_t * (th1 - th0),
                        z_face + H_eff * h))
     pts.append(_pt(r1, th1, z_face - 1.2))           # embedded return-leg end
@@ -757,6 +793,16 @@ def _tab(s, k, out):
     H_w = crown_H                                    # ⇒ ramp slope = crown-arm slope
     t_w = 8.0                                        # straight weld tip ∥ axis
     conv = (ins * 0.5 - 0.06) * (1.0 if (k % 2 == 0) else -1.0)
+    # Spreizung AUCH auf der Schweißseite: die Lagen-PAARE fächern radial nach außen auf,
+    # während die Rampe in −z abläuft (∝ Rampenhöhe, wie der Kronen-Arm). Beide Beine EINES
+    # Schweißpaares (Lage 2j und 2j+1) teilen dieselbe Aufweitung f_weld → der Schweißpunkt
+    # trifft weiterhin zusammen (per-Lage würde die zu verschweißenden Enden auseinander-
+    # ziehen); verschiedene Paare fächern auf. 0 = aus (historisch parallel).
+    if wh_spread > 1e-9:
+        a_w = math.radians(min(60.0, (int(k) // 2 + 1) * wh_spread))
+        f_weld = H_w * math.tan(a_w)
+    else:
+        f_weld = 0.0
     e = 0.22                                         # bend easing at ramp start/end
     ts = []
     for (ta, tb, n_s) in ((0.0, e, 4), (e, 1.0 - e, 7), (1.0 - e, 1.0, 4)):
@@ -776,8 +822,9 @@ def _tab(s, k, out):
         if t > 0.75:
             q = (t - 0.75) / 0.25
             c = conv * q * q * (3.0 - 2.0 * q)
-        pts.append(_pt(r + c, th0 + span * s_t, -z_face - H_w * t))
-    pts.append(_pt(r + conv, th0 + span, -z_face - H_w - t_w))   # weld tip end
+        fw = f_weld * (t * t * (3.0 - 2.0 * t))      # Spreizung wächst glatt mit der Rampe
+        pts.append(_pt(r + c + fw, th0 + span * s_t, -z_face - H_w * t))
+    pts.append(_pt(r + conv + f_weld, th0 + span, -z_face - H_w - t_w))   # weld tip end
     try:
         n = len(pts); secs = []
         for i in range(n):

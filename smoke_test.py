@@ -185,21 +185,25 @@ def _wh_spread():
     g = dict(GEOM, conductorsPerSlot=8, windingHeadFlare=6, windingHeadSpread=2.0)
     code = ef.build_full_motor_script(g, AXIAL, "/tmp/_smoke.FCStd")
     ast.parse(code)
-    assert "wh_spread = 2.0" in code and "f = _lane_flare(k0)" in code, "Spreizung nicht verdrahtet"
+    # per-Lage: Hin-Arm f0, Rück-Arm f1 (NICHT mehr ein gemeinsames f je Paar)
+    assert "wh_spread = 2.0" in code, "Spreizung nicht verdrahtet"
+    assert "f0 = _lane_flare(k0); f1 = _lane_flare(k1)" in code, "Kronen-Arme nicht per-Lage"
+    assert "f = f0 + b * (f1 - f0)" in code, "Aufweitung folgt der Lage nicht"
+    assert "f_weld = H_w * math.tan(a_w)" in code, "Spreizung fehlt auf der Schweißseite"
     assert "2.0 * wh_flare_max" in code, "Isolierhülse muss die äußerste Lage umschließen"
     ns = _slice(code)
-    fs = [ns["_lane_flare"](2 * j) for j in range(4)]
-    assert fs[0] < fs[1] < fs[2] < fs[3], f"keine Spreizung: {fs}"
-    for j, f in enumerate(fs):                       # dr/dz = f/H_eff ⇒ α = atan(…)
+    fs = [ns["_lane_flare"](k) for k in range(8)]    # JEDE Lage einzeln (0..7)
+    assert all(fs[i] < fs[i + 1] for i in range(7)), f"keine per-Lage-Spreizung: {fs}"
+    for k, f in enumerate(fs):                        # dr/dz = f/H_eff ⇒ α = atan(…)
         a = _m.degrees(_m.atan((f - 6.0) / ns["WH_HEFF"]))
-        assert abs(a - (j + 1) * 2.0) < 1e-6, f"Lage {j}: {a:.3f}° statt {(j+1)*2.0}°"
-    assert abs(ns["wh_flare_max"] - fs[3]) < 1e-9
+        assert abs(a - (k + 1) * 2.0) < 1e-6, f"Lage {k}: {a:.3f}° statt {(k+1)*2.0}°"
+    assert abs(ns["wh_flare_max"] - fs[-1]) < 1e-9   # Hülse umschließt die äußerste Lage
     # spread = 0 ⇒ historisches Verhalten (alle Lagen gleich)
     ns0 = _slice(ef.build_full_motor_script(dict(GEOM, conductorsPerSlot=8),
                                             AXIAL, "/tmp/_smoke.FCStd"))
-    assert {ns0["_lane_flare"](2 * j) for j in range(4)} == {ns0["wh_flare"]}
-    return "Lagen 2/4/6/8°, f=%s mm" % [round(f, 2) for f in fs]
-check("Wickelkopf-Spreizung je Lage (stufenweise)", _wh_spread)
+    assert {ns0["_lane_flare"](k) for k in range(8)} == {ns0["wh_flare"]}
+    return "Lagen 2/4/6/8/10/12/14/16°, f=%s mm" % [round(f, 2) for f in fs]
+check("Wickelkopf-Spreizung je Lage (per Lage, Krone + Schweißseite)", _wh_spread)
 
 # ── 9. (optional) real FreeCAD CAD build + rotor FEM ─────────────────────────────
 if "--cad" in sys.argv:

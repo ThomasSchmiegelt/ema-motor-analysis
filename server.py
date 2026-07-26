@@ -527,6 +527,29 @@ def oilspray_status():
                     for k in ("status", "progress", "log", "result", "error")})
 
 
+# ── Benannte 💧-Darstellungs-Presets (gute Einstellungen + Rechen-Pakete) ────────────
+@app.route("/oilspray/presets", methods=["GET", "POST", "OPTIONS"])
+def oilspray_presets():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import ema_oilspray
+    if request.method == "GET":
+        return jsonify(ema_oilspray.list_presets())
+    data = request.get_json(force=True) or {}
+    payload = data.get("payload")
+    if not isinstance(payload, dict) or not payload:
+        return jsonify({"error": "payload fehlt"}), 400
+    return jsonify(ema_oilspray.save_preset(data.get("name"), payload))
+
+
+@app.route("/oilspray/presets/<pid>/delete", methods=["POST", "OPTIONS"])
+def oilspray_preset_delete(pid: str):
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import ema_oilspray
+    return jsonify({"ok": bool(ema_oilspray.delete_preset(pid))})
+
+
 @app.route("/project/<pid>/oilspray")
 def project_oilspray(pid: str):
     """Gespeicherten Spritzöl-Lauf eines Projekts laden (results.json["oilspray"] + Chart-

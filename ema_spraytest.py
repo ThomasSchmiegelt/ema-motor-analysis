@@ -343,6 +343,19 @@ _set(ds, "fractions_distance", voxel)
 # und der FREISTRAHL zwischen Düse und Stab bleibt als Flüssigkeitsmesh unsichtbar
 # (nur der Aufprall-Splash war zu sehen — verifiziert im ersten Testlauf).
 emit_s = max(0.5 * NOZ_D, 1.6 * voxel)
+
+# --- Unter-Auflösungs-Wächter (analog zum Leer-Bake-Wächter) -------------------
+# Ist die Bohrung < ~2 Zellen breit, bleibt der Freistrahl als Flüssigkeitsmesh unsichtbar
+# (nur der Aufprall-Splash war zu sehen). Früh + laut warnen; Kennwerte tragen die Zahlen mit.
+_jet_cells = NOZ_D / max(1e-9, voxel)                    # Bohrungs-Ø / Zellgröße
+_voxel_mm  = voxel * 1000.0
+_jet_underres = _jet_cells < 2.0
+if _jet_underres:
+    print("OIL_STAGE:⚠ Strahl unter-aufgelöst — die %.2f-mm-Bohrung ist bei Auflösung %d nur "
+          "~%.1f Zellen breit (Voxel %.2f mm). Der Freistrahl wird kaum sichtbar (nur der "
+          "Aufprall-Splash). Abhilfe: Auflösung erhöhen." % (NOZ_D * 1000.0, RES, _jet_cells,
+          _voxel_mm), flush=True)
+
 bpy.ops.mesh.primitive_cube_add(location=(0.5 * emit_s, 0.0, 0.0))
 jt = bpy.context.object; jt.name = "OilNozzle"
 jt.scale = (emit_s, emit_s, emit_s)
@@ -521,7 +534,10 @@ if _liquid_total == 0:
 
 out = {"series": series,
        "droplets_peak": max((s["n_islands"] for s in series), default=0),
-       "n_frames": len(series)}
+       "n_frames": len(series),
+       "jet_cells": round(_jet_cells, 2),
+       "voxel_mm": round(_voxel_mm, 3),
+       "jet_underres": bool(_jet_underres)}
 print("OIL_METRICS:" + json.dumps(out), flush=True)
 print("OIL_DONE", flush=True)
 '''

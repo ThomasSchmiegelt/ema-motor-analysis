@@ -110,6 +110,9 @@ def test_blender_script_markers():
     # und ein durchweg leerer Bake wird laut gemeldet statt still den nackten Würfel zu rendern.
     assert "dom.hide_render = (len(vs) == 0)" in s, "Leer-Domain-Wächter je Frame fehlt"
     assert "_liquid_total == 0" in s and "KEIN Öl erzeugt" in s, "Leer-Bake-Warnung fehlt"
+    # Unter-Auflösungs-Wächter: warnt VOR dem Bake, wenn der Strahl < 2 Zellen breit ist
+    assert "_jet_cells" in s and "Strahl unter-aufgelöst" in s, "Unter-Auflösungs-Wächter fehlt"
+    assert '"jet_underres"' in s and '"voxel_mm"' in s, "jet-Kennwerte fehlen im Ergebnis"
     print("✓ Blender-Skript: Domain/Inflow/Effector/Bake/Particles + OIL_*-Marker + Leer-Bake-Wächter")
 
 
@@ -248,7 +251,13 @@ def test_housing_transparent_and_drain():
     assert "if HOUSING:" in s
     assert 'MotorHousing' in s and "SOLIDIFY" in s, "Gehäuseschale fehlt/ist kein Solidify"
     assert "end_fill_type='NGON'" in s, "Gehäuse-Deckel fehlen (offenes Rohr statt Dose)"
-    assert 'HousingBulge' in s, "Ringkanal-Ausbuchtung fehlt"
+    # EINE Hülle: KEINE separate Ringkanal-„Bulge"-Schale mehr (die wirkte als zweiter,
+    # ineinander steckender Zylinder wie „mehrere kollidierende Gehäuse"). Stattdessen
+    # umschließt der EINE Innenradius (R_hous_in) Stator UND Spritzring. ("HousingBulge"
+    # kommt nur noch als None-sicherer Name im Schnitt-Cut-Loop vor, wird nie gebaut.)
+    assert 'R_bulge' not in s, "separate Bulge-Schale (R_bulge) muss entfernt sein (EIN Gehäuse)"
+    assert '_shell(R_stat, z_lo, z_hi, "MotorHousing")' in s, "einzelne Gehäusehülle fehlt"
+    assert 'r_ring + 3.0 * tube_r' in s, "Gehäuse-Innenradius umschließt den Spritzring nicht"
     assert 'HousingDrain' in s, "sichtbarer Ablauf-Stutzen fehlt"
     # Kollisionswand: Domain-Erweiterung + Effector am Gehäuse + Drain an der tiefsten Stelle
     assert "_haus_col = HOUSING and HOUSING_COLLIDE" in s
@@ -390,6 +399,26 @@ def test_section_cut():
     print("✓ Schnittdarstellung: Skript-Block + Kamera + Metrik-Schutz + cfg-Passthrough")
 
 
+def test_presets_store_roundtrip():
+    """Benannte 💧-Darstellungs-Presets (gute Einstellungen + Rechen-Pakete): save/list/delete
+    im isolierten Store, leerer Name → Default, Payload wird verlustfrei gespeichert."""
+    d = tempfile.mkdtemp()
+    orig = OIL.OILSPRAY_PRESET_ROOT
+    try:
+        OIL.OILSPRAY_PRESET_ROOT = d
+        p1 = OIL.save_preset("Darstellung 1", {"resolution": 256, "cam_view": "wh_hero"})
+        p2 = OIL.save_preset("", {"resolution": 96})
+        lst = OIL.list_presets()
+        assert len(lst) == 2, lst
+        assert lst[0]["name"] == "Darstellung", "leerer Name → Default 'Darstellung'"
+        assert any(x["payload"].get("cam_view") == "wh_hero" for x in lst), "Payload verloren"
+        assert OIL.delete_preset(p1["id"]) and len(OIL.list_presets()) == 1
+        assert OIL.delete_preset("gibtsnicht") is False
+    finally:
+        OIL.OILSPRAY_PRESET_ROOT = orig
+    print("✓ Darstellungs-Presets: save/list/delete Roundtrip + Default-Name + Paket-Payload")
+
+
 def test_tilt_sign_camviews_zoom():
     """(1) Axiale Neigung: Vorzeichen-Konvention wie die UI-Skizze (+ = zur Stirnfläche/−z) —
     die positive Drehung um die Tangente kippt nach +z, daher MUSS das Skript mit −JET_TILT
@@ -402,6 +431,7 @@ def test_tilt_sign_camviews_zoom():
     assert "Rotation(JET_TILT" not in s
     # (2) Zusatz-Ansichten: Konstante + beide Zweige + eigene Oben-Achse
     assert 'CFG.get("cam_view"' in s and '("top", "front")' in s
+    assert 'CAM_VIEW == "wh_hero"' in s, "Wickelkopf-Schrägansicht (wh_hero) fehlt"
     assert "_cam_up_ovr" in s, "Zusatz-Ansicht braucht eigene Bild-Oben-Achse"
     # Schnitt-Orientierung OHNE Schnitt: Section-Kamera greift auch ohne SECTION_CUT
     assert "_SECTION_CAM = SECTION_CUT or CAM_VIEW == \"section\"" in s, \
@@ -793,6 +823,7 @@ def main():
     test_frames_marker_regex()
     test_clamp()
     test_metric_charts_and_persist()
+    test_presets_store_roundtrip()
     print("\nALLE SPRITZÖL-TESTS BESTANDEN ✅  (Blender-Bake separat, End-to-End über die UI)")
 
 

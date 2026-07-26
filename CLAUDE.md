@@ -687,19 +687,23 @@ the crown's **radial split**: the "go" arm rises on the inner lane radius, the
 crossing arms are never at the same radius+z. The **winding head (crown)** is built
 by `_crown_swept` as a smooth SOLID sweep ("Zugkörper") through oriented rect
 sections (`_crown_frame`/`_crown_rect` keep the cross-section flat), flaring
-**radially outward** by `windingHeadFlare` mm. **Stufenweise Spreizung der Lagen**
+**radially outward** by `windingHeadFlare` mm. **Stufenweise Spreizung je LAGE**
 (`windingHeadSpread`, ° je Lage, 0 = aus/historisch, UI-Slider „Spreizung je Lage"):
-statt für alle Lagen dieselbe Aufweitung bekommt jedes Lagen-Paar j (Lanes 2j/2j+1) den
-Biegewinkel `(j+1)·spread` — innerste Lage 1×, nächste 2×, dann 3×, 4× … → die Lagen
-fächern radial auf (mehr Kronen-Abstand, realer Hairpin-Wickelkopf). Umsetzung
-`_lane_flare(k0)` im erzeugten Skript: auf dem Kronen-Arm ist `dr/dz = f/H_eff`, also
-`f = wh_flare + H_eff·tan(α)` (`WH_EBEND`/`WH_WAPEX`/`WH_HEFF` sind dafür aus
-`_crown_swept` auf Modul-Ebene gehoben). **Der Kollisions-Invariant bleibt erhalten**:
-`f` hängt nur vom Lagen-Paar ab, ist also für Hin- UND Rückarm DERSELBEN Krone gleich →
-der radiale Kreuzungsabstand `r1−r0` ist unverändert; die Bänder verschiedener Lagen
-divergieren nur zusätzlich. Nur `sweep`, nicht die Box-Darstellung; die Isolierhülse nutzt
+JEDE Lage k bekommt ihren EIGENEN Biegewinkel `(k+1)·spread` — Lage 0 → 1×, Lage 1 → 2×,
+Lage 2 → 3× … → die Lagen fächern radial auf (mehr Kronen-Abstand, realer Hairpin). **Früher
+paarweise** (Lanes 2j/2j+1 teilten einen Winkel → Lage 1&2 bzw. 3&4 blieben parallel — genau
+die Nutzer-Beanstandung); jetzt **per Lane**. Umsetzung `_lane_flare(k)` im erzeugten Skript
+(`(k+1)·spread`): auf dem Kronen-Arm ist `dr/dz = f/H_eff`, also `f = wh_flare + H_eff·tan(α)`
+(`WH_EBEND`/`WH_WAPEX`/`WH_HEFF` aus `_crown_swept` auf Modul-Ebene gehoben). In `_crown_swept`
+bekommt der **Hin-Arm f0=`_lane_flare(k0)`, der Rück-Arm f1=`_lane_flare(k1)`**, per `b`
+geblendet (`f = f0 + b·(f1−f0)`). **Kollisionsfrei:** f0<f1 → der radiale Kreuzungsabstand
+wächst `(r1−r0)+(f1−f0)·g ≥ r1−r0` (Bänder divergieren nur zusätzlich, nie enger). **Auch auf
+der SCHWEISSSEITE** (`_tab`, `f_weld = H_w·tan(a_w)`, wächst glatt mit der Rampe): die Lagen-
+PAARE fächern auf, wobei beide Beine EINES Schweißpaares (Lage 2j/2j+1) dieselbe Aufweitung
+teilen → der Schweißpunkt trifft weiterhin zusammen (per-Lage würde die zu verschweißenden
+Enden auseinanderziehen). Nur `sweep`, nicht die Box-Darstellung; die Isolierhülse nutzt
 `wh_flare_max` (äußerste Lage). Gate: `smoke_test.py` `[Wickelkopf-Spreizung]` führt die
-emittierte Mathematik ohne FreeCAD aus (Monotonie + Winkel je Lage). The path is **C¹-smooth by design**:
+emittierte Mathematik ohne FreeCAD aus (per-Lage-Monotonie + Winkel (k+1)·spread + Schweißseite). The path is **C¹-smooth by design**:
 a **vertical slot exit at BOTH ends** (θ-easing with s′=0 at the path ends + flare
 blended to slope 0 below the bend, start/end sections embedded 1.2 mm into the own
 leg → seamless leg↔crown junction), straight chevron arms (constant slope keeps the
@@ -1012,6 +1016,16 @@ This feeds all consumers (field frames, thermal, drive cycle).
 V-shaped magnet pockets are auto-shortened to the longest length that still fits the
 rotor: solves a quadratic so the outer pocket corner stays ≤ `R_rotor − bridge` (2 mm).
 
+**Defensiver Rotor-Bau (`build_full_motor_script`, „Rotor wird nicht erzeugt"-Fix):** ein
+ungültiger Solid nach den Taschen-/Barrieren-Schnitten (aggressive Multi-Lagen-Taschen → dünne
+entartete Eisenstege) darf NICHT mehr das ganze Skript per `raise` abbrechen (das verlor Rotor
+UND Welle/Magnete/Stator/Hairpins — es wurde gar nichts gespeichert). Stattdessen: batch-Schnitt
+ungültig → `removeSplitter()` → sonst jede Tasche **einzeln** von der gültigen Basisscheibe
+(`rotor_base` = Ring − Bohrung) schneiden; ganz am Ende, falls immer noch ungültig, Fallback auf
+die **ungeschnittene Rotorscheibe** + Log-Warnung. So entsteht IMMER ein gültiges „Rotor"-Objekt
+→ das Modell speichert, die Struktur-FEM hat einen Körper. Gate: `smoke_test.py --cad` (echter
+FreeCAD-Build + Rotor-FEM).
+
 ### Experimentelle Spritzöl-Kühlung am Wickelkopf (Blender/Mantaflow) — `ema_oilspray.py` / `blender_runner.py`
 
 Eigenständiger On-Demand-Pfad **neben** dem Analyse-Chain (wie em3d): untersucht **qualitativ**
@@ -1056,7 +1070,14 @@ Pfeil g, Gehäuse-Umriss, Ablauf, Öl-Weg — folgt `oil_orientation` horizontal
 `oil_housing`/`oil_housing_collide`), die per `oninput`/`onchange` der vier Winkelfelder +
 `oil_nozzles` + `ring_full`/`winding_full`/`housing*`-Checkboxen + `oil_orientation` live
 mitzeichnen (gleiche Vorzeichen-Konvention wie das Blender-Skript: Versatz/Schwenk math. positiv um
-die Achse, Neigung + = zur Stirnfläche); aufgerufen auch beim Öffnen des 💧-Tabs (`switchTab`). Öl-Stoffwerte
+die Achse, Neigung + = zur Stirnfläche); aufgerufen auch beim Öffnen des 💧-Tabs (`switchTab`).
+**Skizze-↔-Simulation gleiche Basis (Bugfix):** in ② Seitenschnitt liegt der Ring jetzt DIREKT über
+der Kronenflanke (gleiches x wie das Ziel) → der Grundstrahl ist bei Neigung 0° **pur radial** (im
+Bild senkrecht) — genau die Basis, ab der auch Blender die Neigung rechnet (dort ist der Grundstrahl
+nahezu radial). Früher lehnte die Skizzen-Basis ~27° zur Stirnfläche → Skizze und Blender „rechneten
+von unterschiedlichen Basen". **x/y/z-Achsen-Triaden** (`axesTriad`, z blau = Motorachse, x rot,
+y/r grün; eine Achse ⊙ aus der Ebene) in allen drei Panels: Stirnansicht `front` (z⊙, x→, y↑),
+Seitenschnitt `side` (z→, r↑, x⊙), Einbaulage `install_h`/`install_v`. Öl-Stoffwerte
 (`use_viscosity`/`viscosity_value`, `surface_tension`) + **Secondary-Particles** (spray/foam/bubble →
 Tröpfchen). **Cutaway-Einfärbung:** eine STL-Mesh, Faces nach axialer Position (|z|>Stirnfläche =
 Wickelkopf-Überhang → Kupfer, sonst Kern → Stahlgrau). **Domain fokussiert auf das +z-Ende**
@@ -1067,11 +1088,14 @@ Aufprall sofort zu zerstäuben und die offene Domain zu verlassen; **offene Rän
 + Boden-**Outflow**-Drain; **Drain/Düsen-Objekte `hide_render=True`** (Sim-Hilfsobjekte).
 **Transparentes Motorgehäuse (`oil.housing`/UI `#oil_housing`, Default an, `housing_wall_mm`
 Default 4):** ein durchsichtiges, **beidseitig geschlossenes** Voll-Ring-Gehäuse („Dose",
-`end_fill_type='NGON'`-Deckel + Solidify) rund um Rotor/Stator — Innen-Ø = **Stator-Außen-Ø**
-(`stator_od_mm` in der cfg), Wand `HOUSING_WALL` (Solidify nach außen), axial von
-`min(zmin,−STACK_HALF)` bis `z_tip+gap` (die Wickelköpfe liegen darin) — mit einer **Ausbuchtung am Ringkanal**
-(zweite, weitere Schale über `[ring_z−1,5·tube_r … z_hi]`, nur wenn `r_ring+tube_r+2·tube_r > R_stat`) und einem
-**sichtbaren Ablauf-Stutzen** an der schwerkraft-tiefsten Seite (−y horizontal / −z vertikal). Glas-Material
+`end_fill_type='NGON'`-Deckel + Solidify) rund um Rotor/Stator, Wand `HOUSING_WALL` (Solidify
+nach außen), axial von `min(zmin,−STACK_HALF)` bis `z_tip+gap` (die Wickelköpfe liegen darin) +
+ein **sichtbarer Ablauf-Stutzen** an der schwerkraft-tiefsten Seite (−y horizontal / −z vertikal).
+**GENAU EINE Hülle** (Bugfix „mehrere kollidierende Gehäuse"): der Innenradius `R_hous_in =
+max(0,5·Stator-Ø, r_ring+3·tube_r)` umschließt Stator UND Spritzring — die frühere **zweite,
+weitere „Bulge"-Schale** über dem Ringkanal (`R_bulge`, wenn der Ring über den Stator-Ø ragte)
+wirkte als ineinander steckender zweiter Zylinder wie mehrere kollidierende Gehäuse und ist
+ENTFERNT. `R_hous_in` bleibt der Innenradius, an dem Kollisionswand/Domain enden. Glas-Material
 `_glass` mit **Alpha 0,14** (0,045 war im Video unsichtbar → „Gehäuse scheint nicht geschlossen").
 **Kollisionswand (`oil.housing_collide`/UI `#oil_housing_collide`, Default AN):** das Gehäuse bekommt einen
 Fluid-EFFECTOR (COLLISION) — das Öl wird am Glas **gefangen**, läuft innen herunter und wird an der
@@ -1164,11 +1188,14 @@ Konvention wie die UI-Skizze — POSITIVE Neigung = zur Blechpaket-Stirnfläche 
 Drehung um die lokale Tangente kippt den radial-einwärts-Strahl aber nach +z (k×v=+z), daher dreht
 das Blender-Skript mit **`Rotation(-JET_TILT, …)`** (vorher +JET_TILT ⇒ Skizze und Modell zeigten
 entgegengesetzt). **Feste Kamera-Ansichten (`oil.cam_view`, UI `#oil_cam_view`
-auto/top/front/section):** „von oben" (entgegen der Schwerkraft; horizontal ⇒ Kamera +y, Bild-Oben =
-Motorachse via `_cam_up_ovr='Z'`) und „von vorne" (Stirnansicht, Kamera am +z-Ende, Blick −z,
-`_cam_up_ovr='Y'`; vertikal fällt „oben" mit „vorne" zusammen) — überschreibt NUR die Kamera
-(Nahaufnahme/Schnittkörper bleiben wie eingestellt, die Schnitt-Kameramatrix wird bei aktiver
-top/front-Ansicht übersprungen), Drehteller orbitet um die Override-Oben-Achse.
+auto/wh_hero/top/front/section):** **„schräg oben auf die Wickelköpfe" (`wh_hero`)** — 3/4-Blick
+von außen-oben näher an den Wickelkopf-Überhang (Ziel = Mitte Blechpaket-Ende…Kronen-/Ring-Ende,
+horizontal: Kamera hoch +y zum +z-Ende, Bild-Oben=Motorachse `_cam_up_ovr='Z'`); „von oben"
+(entgegen der Schwerkraft; horizontal ⇒ Kamera +y, Bild-Oben = Motorachse via `_cam_up_ovr='Z'`)
+und „von vorne" (Stirnansicht, Kamera am +z-Ende, Blick −z, `_cam_up_ovr='Y'`; vertikal fällt
+„oben" mit „vorne" zusammen) — überschreibt NUR die Kamera (Nahaufnahme/Schnittkörper bleiben
+wie eingestellt, die Schnitt-Kameramatrix wird bei aktiver wh_hero/top/front-Ansicht übersprungen),
+Drehteller orbitet um die Override-Oben-Achse.
 **„section" = Schnitt-Orientierung OHNE Schnitt** (`_SECTION_CAM = SECTION_CUT or CAM_VIEW=="section"`):
 dieselbe Section-Kamera (senkrecht auf die Ebene Motorachse↔`SECTION_NOZ`-Düse, `SECTION_ZOOM`- und
 `CLOSEUP`-abhängig wie beim echten Schnitt) UND dieselbe explizite `_radc`/`_nrmc`-Bild-Oben-Basis
@@ -1200,6 +1227,15 @@ transluzentes Öl) statt flachem Workbench; **Shade Smooth** (`smooth`, Default 
 **Öl-Transparenz** (`oil_transparency` 0..1 → `OIL_ALPHA`, EEVEE `use_screen_refraction`+SSR). Im Drehteller
 folgt das Fülllicht der Kamera (jede Seite beleuchtet). **Einbaulage sichtbar** (`_cam_up` folgt `view_down`,
 auto = 'Y' horizontal / 'Z' vertikal → die Motorachse steht im vertikalen Fall aufrecht, das Öl läuft der Achse entlang ab).
+**Darstellungs-Presets + Rechen-Pakete (`ema_oilspray.save_preset`/`list_presets`/`delete_preset`,
+Store `~/cae_projekte/_oilspray/presets.json`):** eine benannte 💧-Darstellung = der KOMPLETTE
+oilspray-Payload (`_oilBuildPayload`, also Ausschnitt/Öl/Kamera/Auflösung …). Server `GET|POST
+/oilspray/presets` + `POST /oilspray/presets/<id>/delete`. UI-Karte **„💾 Darstellungen & Rechen-
+Pakete"** (`oilSavePreset`/`oilRefreshPresets`/`oilDeletePreset` + Häkchenliste): mehrere ausgewählte
+Presets gehen als **Paket** über `enqueueJobs` (Typ `oilspray`) in die Server-Job-Warteschlange
+(`ema_jobs`) und laufen nacheinander durch (auch bei geschlossenem Browser → Tab ⏳ Jobs) — „Berechne
+Darstellung 1, 5, 6". Gate: `test_oilspray.py` `test_presets_store_roundtrip`.
+
 **Auto-Varianten-Store (`oilspray_runs/<id>/`):** jeder fertige Lauf wird AUTOMATISCH als eigene
 Variante (Video + Charts + `run.json`) abgelegt (`_autosave_variant`), sodass ein neuer Lauf die
 vorherigen NICHT überschreibt; `list_saved_runs`/`load_saved_run`/`saved_run_video`/`delete_saved_run`
@@ -1229,7 +1265,23 @@ des Bakes abgebrochen), rendert Blender die **nackte Domain-Würfel-Mesh** = ein
 statt Spray. Deshalb wertet der Frame-Loop (BEIDE Skripte, oilspray + `ema_spraytest`) das Fluid-Mesh
 **vor** dem Render aus und setzt `dom.hide_render = (len(vs)==0)`; ist der Bake über ALLE Frames leer
 (`_liquid_total==0`), meldet er das laut (`OIL_STAGE:⚠ Bake hat KEIN Öl erzeugt …`) statt still den
-Würfel zu zeigen. Gate: `test_oilspray.py`/`test_spraytest.py` (`dom.hide_render = (…==0)`). (3) `blender_runner.run_blender_script` führt es
+Würfel zu zeigen. **Unter-Auflösungs-Wächter (Gotcha „Ölstrahl nicht sichtbar"):** der Freistrahl
+braucht ≥~2 Zellen über der Bohrung, sonst bildet der FLIP-Löser kein zusammenhängendes Öl-Mesh und der
+Strahl „verschwindet" (häufigste Falle: die **Kollisionswand 🧱** zieht die Domain bis zur Gehäuse-
+Innenwand auf → grobe Voxel bei gleicher Auflösung; verifiziert: 260-mm-Stator, 🧱 an, RES 260, 1-mm-Bohrung
+⇒ Voxel ≈ 0,98 mm ⇒ Strahl ~1 Zelle; 🧱 aus ⇒ fokussierte Domain, Voxel ≈ 0,23 mm ⇒ ~4 Zellen). BEIDE Skripte
+(oilspray + `ema_spraytest`) berechnen beim Domain-/Düsen-Setup `_jet_cells = Bohrungs-Ø / voxel` und melden
+bei `<2` **früh** (vor dem Bake) laut `OIL_STAGE:⚠ Strahl unter-aufgelöst …` mit konkreter Abhilfe (🧱 aus /
+Nahaufnahme / Auflösung erhöhen — im oilspray-Skript kontextabhängig aus `_haus_col`/`CLOSEUP`); die Kennwerte
+`jet_cells`/`voxel_mm`/`jet_underres` wandern zusätzlich ins Ergebnis (`OIL_METRICS`), und `_renderOil`
+zeigt bei `jet_underres` ein Warn-Banner oben im Ergebnis. Gate: `test_oilspray.py`/`test_spraytest.py`
+(`Strahl unter-aufgelöst` + `jet_underres`). **Live-Auflösungs-Empfehlung (`_oilRecommendRes`, Hint
+`#oil_res_hint`):** aus Bohrungs-Ø + Stator-Ø + 🧱/Nahaufnahme rechnet der 💧-Tab clientseitig
+`Voxel ≈ 2·halbe-Domain-Spanne/RES` (Spanne ≈ ½·Stator-Ø mit 🧱, sonst ~0,13·Stator-Ø fokussiert)
+und empfiehlt `RES ≥ 2·Spanne·3/Bohrung` für ~3 Zellen; ist das mit 🧱 selbst bei 512 unmöglich, rät
+der Hint zu **🧱 aus / Nahaufnahme** (der wirksamere Hebel). Ausgelöst per `oninput` von
+`oil_nozzle_d`/`oil_res` + `onchange` von `oil_housing`/`oil_housing_collide`/`oil_closeup` und aus
+`_oilDrawAngleFig`. (3) `blender_runner.run_blender_script` führt es
 gestreamt aus (Marker `OIL_STAGE/OIL_FRAMES/OIL_METRICS/OIL_DONE`, Abbruch via `abort_current`).
 (4) Frames → `frames_oil/anim.mp4` (ffmpeg, reuse `ema_em3d._encode_video`), Kennwert-Charts
 (matplotlib), `results["oilspray"]` schlank in `results.json` gemergt (`_persist`, ohne base64).

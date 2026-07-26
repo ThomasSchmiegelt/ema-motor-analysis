@@ -505,7 +505,12 @@ else:
 # vertikal: bis zum Boden-Deckel (z_lo) + radial bis zur Wand. Kostet Domain-Volumen →
 # Auflösung ggf. erhöhen (UI-Hinweis).
 _haus_col = HOUSING and HOUSING_COLLIDE and not CLOSEUP
-R_hous_in = 0.5 * STATOR_OD
+# EIN einziges Gehäuse: der Innenradius umschließt den Stator UND — falls der Spritzring
+# darüber hinausragt — den Ringkanal. Früher wurde bei überstehendem Ring eine ZWEITE,
+# weitere Schale („Bulge") über dem Ringband gebaut → zwei ineinander steckende Zylinder,
+# die wie „mehrere kollidierende Gehäuse" aussahen. Jetzt genau EINE Hülle; R_hous_in
+# bleibt der Innenradius, an dem Kollisionswand/Domain enden.
+R_hous_in = max(0.5 * STATOR_OD, r_ring + 3.0 * tube_r)
 # +z-Deckel des Gehäuses: MIT Abstand über dem Ring (der Ring ragte sonst durch den Deckel bei
 # z_tip+gap — Emitter und Deckel im selben Voxel ⇒ Öl „leckte" am Stirndeckel nach außen).
 _z_cap = z_tip + gap_m + 2.0 * tube_r
@@ -582,6 +587,26 @@ voxel = (2.0 * max(sx, sy, sz)) / max(1, RES)        # ~Zellgröße der Domain
 noz_r = 0.5 * NOZZLE_D_MM * SCALE
 emit_s = max(noz_r, 1.2 * voxel)                     # sub-voxel-Bohrung emittiert sonst nicht
                                                      # (etwas größer → mehr sichtbares Ölvolumen)
+
+# --- Unter-Auflösungs-Wächter (analog zum Leer-Bake-Wächter) -------------------
+# Der Freistrahl braucht ≥~2 Zellen über der Bohrung, sonst bildet der FLIP-Löser kein
+# zusammenhängendes Öl-Mesh und der Strahl „verschwindet". Häufigste Falle: die Kollisionswand
+# (🧱) zieht die Domain bis zur Gehäuse-Innenwand auf → grobe Voxel bei gleicher Auflösung.
+# FRÜH (beim Setup, VOR dem minutenlangen Bake) laut warnen — die OIL_STAGE-Zeile läuft live
+# in den Fortschritts-Log; die Kennwerte unten tragen die Zahlen zusätzlich ins Ergebnis.
+_jet_cells = (NOZZLE_D_MM * SCALE) / max(1e-9, voxel)   # Bohrungs-Ø / Zellgröße
+_voxel_mm  = voxel / SCALE
+_jet_underres = _jet_cells < 2.0
+if _jet_underres:
+    _fix = []
+    if _haus_col:
+        _fix.append("🧱 Kollisionswand aus (fokussiert die Domain)")
+    if not CLOSEUP:
+        _fix.append("Nahaufnahme aktivieren")
+    _fix.append("Auflösung erhöhen")
+    print("OIL_STAGE:⚠ Strahl unter-aufgelöst — die %.2f-mm-Bohrung ist bei Auflösung %d nur "
+          "~%.1f Zellen breit (Voxel %.2f mm). Der Strahl wird kaum/nicht sichtbar. Abhilfe: %s."
+          % (NOZZLE_D_MM, RES, _jet_cells, _voxel_mm, " · ".join(_fix)), flush=True)
 
 # (a) Ring-Manifold als sichtbares Rohr (Bogen am +z-Ende) — Kontext, kein Fluid-Objekt.
 # In der Nahaufnahme zeigt der Ring nur einen kurzen Bogen um die Mittel-Düse; sonst den vollen Bogen.
@@ -805,15 +830,13 @@ if HOUSING:
             _set(_mh.effector_settings, "use_effector", True)
         o.data.materials.append(_glass); _smooth(o); o.hide_render = False
         return o
-    R_stat = 0.5 * STATOR_OD
+    # EINE geschlossene „Dose" mit Innenradius R_hous_in (umschließt Stator, Wickelköpfe
+    # UND Spritzring). KEINE separate Ringkanal-Ausbuchtung mehr — die wirkte als zweite,
+    # ineinander steckende Schale wie „mehrere kollidierende Gehäuse".
+    R_stat = R_hous_in                                     # Innenradius der EINEN Hülle
     z_lo = min(zmin, -STACK_HALF)                          # Blechpaket + Wickelkopf umschließen
     z_hi = _z_cap                                          # Deckel MIT Abstand über dem Ring
     _shell(R_stat, z_lo, z_hi, "MotorHousing")
-    # Ringkanal-Ausbuchtung: nur wenn der Spritzring nicht unter den Stator-Ø passt.
-    clr = 2.0 * tube_r
-    R_bulge = r_ring + tube_r + clr
-    if R_bulge > R_stat + 1e-6:
-        _shell(R_bulge, ring_z - 1.5 * tube_r, z_hi, "HousingBulge")
     # Sichtbarer Ablauf-Stutzen an der schwerkraft-tiefsten Gehäuseseite (unten).
     _rd = 0.16 * R_stat                                    # Stutzen-Radius
     _dl2 = 0.9 * R_stat                                    # Stutzenlänge nach außen
@@ -1063,7 +1086,23 @@ if _SECTION_CAM:
 # Kamera (auch Nahaufnahme/Schnitt; ein aktiver Schnittkörper bleibt geschnitten und wird dann
 # von außen betrachtet). _cam_up_ovr setzt die Bild-Oben-Achse passend zur Blickrichtung.
 _cam_up_ovr = None
-if CAM_VIEW in ("top", "front"):
+if CAM_VIEW == "wh_hero":
+    # Schräg VON OBEN auf die WICKELKÖPFE (Nutzerwunsch): näher heran als die Übersicht,
+    # Blick von außen-oben in die Kronen am +z-Überhang. Ziel = Mitte des Wickelkopf-
+    # Überhangs (Blechpaket-Stirnfläche … Kronen-/Ring-Ende); Bild-Oben = Motorachse.
+    _zwh = 0.5 * (z_stack_end + max(zmax, ring_z))
+    cam_d = 1.7 * max(ext, zmax - zmin)
+    _lens = 42.0
+    if HORIZONTAL:
+        # Wickelkopf-Sektor liegt oben (+y). Kamera hoch (+y), zum +z-Ende und leicht seitlich (+x).
+        cam_tgt = mathutils.Vector((0.0, 0.35 * max(1e-4, wh_ymax), _zwh))
+        cam_loc = cam_tgt + mathutils.Vector((0.45 * cam_d, 0.85 * cam_d, 0.80 * cam_d))
+        _cam_up_ovr = 'Z'
+    else:
+        cam_tgt = mathutils.Vector((0.0, 0.0, _zwh))
+        cam_loc = cam_tgt + mathutils.Vector((0.70 * cam_d, -0.70 * cam_d, 0.90 * cam_d))
+        _cam_up_ovr = 'Z'
+elif CAM_VIEW in ("top", "front"):
     cam_tgt = mathutils.Vector((0.0, 0.0, 0.5 * (zmin + max(zmax, ring_z))))
     cam_d = 2.3 * max(ext, zmax - zmin)
     _lens = 40.0
@@ -1453,7 +1492,10 @@ out = {"series": series,
        "droplets_peak": int(peak_drops),
        "n_frames": len(series),
        "n_effector_verts": nwh,
-       "wet_band_mm": round(BAND * 1000, 2)}
+       "wet_band_mm": round(BAND * 1000, 2),
+       "jet_cells": round(_jet_cells, 2),
+       "voxel_mm": round(_voxel_mm, 3),
+       "jet_underres": bool(_jet_underres)}
 print("OIL_METRICS:" + json.dumps(out), flush=True)
 print("OIL_DONE", flush=True)
 '''
@@ -1583,7 +1625,7 @@ def run_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     section_zoom = max(0.5, min(4.0, float(oil.get("section_zoom", 1.0) or 1.0)))
     # Feste Zusatz-Ansicht: auto (automatische Kamera) | top (von oben) | front (Stirnansicht).
     cam_view = str(oil.get("cam_view", "auto")).lower()
-    if cam_view not in ("auto", "top", "front", "section"):
+    if cam_view not in ("auto", "wh_hero", "top", "front", "section"):
         cam_view = "auto"
     # Untermenü: einzelne Hairpins (Pin-Index) ausblenden.
     hidden_pins = oil.get("hidden_pins") or []
@@ -1810,7 +1852,7 @@ def preview_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     section_cut_noz = max(1, min(40, int(oil.get("section_cut_noz", 1) or 1)))
     section_zoom = max(0.5, min(4.0, float(oil.get("section_zoom", 1.0) or 1.0)))
     cam_view = str(oil.get("cam_view", "auto")).lower()
-    if cam_view not in ("auto", "top", "front", "section"):
+    if cam_view not in ("auto", "wh_hero", "top", "front", "section"):
         cam_view = "auto"
     hidden_pins = oil.get("hidden_pins") or []
     try:
@@ -2120,3 +2162,57 @@ def delete_saved_run(project_dir, rid):
         _sh.rmtree(d, ignore_errors=True)
         return True
     return False
+
+
+# ── Benannte 💧-Darstellungs-Presets (gut befundene Rechen-/Anzeige-Einstellungen) ──────────
+# Global (projektunabhängig) unter ~/cae_projekte/_oilspray/presets.json. Ein Preset speichert
+# den KOMPLETTEN oilspray-Payload (= alles, was der 💧-Tab an /oilspray schickt), damit man
+# gute Einstellungen wiederfindet UND ein „Berechnungspaket" (mehrere Darstellungen) über die
+# Server-Job-Warteschlange abarbeiten lassen kann (Darstellung 1, 5, 6 …).
+OILSPRAY_PRESET_ROOT = os.path.expanduser("~/cae_projekte/_oilspray")
+
+
+def _presets_path():
+    return os.path.join(OILSPRAY_PRESET_ROOT, "presets.json")
+
+
+def list_presets():
+    try:
+        with open(_presets_path(), encoding="utf-8") as f:
+            ps = json.load(f)
+        return ps if isinstance(ps, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _write_presets(ps):
+    os.makedirs(OILSPRAY_PRESET_ROOT, exist_ok=True)
+    tmp = _presets_path() + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(ps, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, _presets_path())
+
+
+def save_preset(name, payload):
+    """Speichert eine benannte 💧-Darstellung (kompletter oilspray-Payload). Rückgabe =
+    gespeicherter Eintrag {id,name,ts,payload}."""
+    import uuid
+    p = {
+        "id": "oilp_%s_%s" % (time.strftime("%Y%m%d_%H%M%S"), uuid.uuid4().hex[:6]),
+        "name": (str(name or "").strip() or "Darstellung")[:80],
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+    ps = list_presets()
+    ps.insert(0, p)
+    _write_presets(ps)
+    return p
+
+
+def delete_preset(pid):
+    ps = list_presets()
+    keep = [x for x in ps if x.get("id") != pid]
+    if len(keep) == len(ps):
+        return False
+    _write_presets(keep)
+    return True

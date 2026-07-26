@@ -112,6 +112,8 @@ def test_bench_script_content():
     # Leer-Bake-Wächter: leerer Fluid-Frame blendet die Domain aus (sonst „großer Quader statt Spray")
     assert "dom.hide_render = (n_verts == 0)" in code, "Leer-Domain-Wächter je Frame fehlt"
     assert "_liquid_total == 0" in code and "KEIN Öl erzeugt" in code, "Leer-Bake-Warnung fehlt"
+    assert "_jet_cells" in code and "Strahl unter-aufgelöst" in code, "Unter-Auflösungs-Wächter fehlt"
+    assert '"jet_underres"' in code, "jet_underres-Kennwert fehlt"
 
 
 def test_spray_param_physical_limits():

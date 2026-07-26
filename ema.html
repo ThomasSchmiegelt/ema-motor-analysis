@@ -1632,6 +1632,7 @@
         <div class="row"><label>Kamera-Ansicht</label>
           <select id="oil_cam_view" style="width:auto;padding:4px">
             <option value="auto" selected>automatisch (3/4, Nahaufnahme, Schnitt)</option>
+            <option value="wh_hero">schräg oben auf die Wickelköpfe</option>
             <option value="top">von oben</option>
             <option value="front">von vorne (Stirnseite)</option>
             <option value="section">Schnitt-Orientierung (ohne Schnitt)</option>
@@ -1650,7 +1651,7 @@
           automatischen Schrägansicht.</p></details>
       </div>
       <div class="e3-field">
-        <div class="row"><label><input type="checkbox" id="oil_closeup" style="width:auto;margin-right:6px">
+        <div class="row"><label><input type="checkbox" id="oil_closeup" style="width:auto;margin-right:6px" onchange="_oilRecommendRes()">
           Nahaufnahme (1 Strahl auf 1 Leiter)</label></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Zeigt eine <b>seitliche Nahaufnahme</b>, wie <b>ein</b> Ölstrahl auf
@@ -1760,7 +1761,7 @@
       </div>
       <div class="e3-field">
         <div class="row"><label>Bohrungs-Ø</label>
-          <input type="number" id="oil_nozzle_d" value="1" min="0.5" max="1.5" step="0.1"><span class="unit">mm</span></div>
+          <input type="number" id="oil_nozzle_d" value="1" min="0.5" max="1.5" step="0.1" oninput="_oilRecommendRes()"><span class="unit">mm</span></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Düsen-Durchmesser. <b>Hinweis:</b> 1 mm ist bei grober Auflösung
           kleiner als eine Netz-Zelle — die Auflösung muss hoch genug sein, um den feinen Strahl
@@ -1896,9 +1897,9 @@
       </div>
       <div class="e3-field">
         <div class="row"><label><input type="checkbox" id="oil_housing" style="width:auto;margin-right:6px" checked
-          onchange="_oilDrawAngleFig()">🛢 Transparentes Gehäuse + Ablauf zeigen</label></div>
+          onchange="_oilDrawAngleFig();_oilRecommendRes()">🛢 Transparentes Gehäuse + Ablauf zeigen</label></div>
         <div class="row"><label><input type="checkbox" id="oil_housing_collide" style="width:auto;margin-right:6px" checked
-          onchange="_oilDrawAngleFig()">🧱 Gehäuse hält Öl zurück (Kollisionswand)</label></div>
+          onchange="_oilDrawAngleFig();_oilRecommendRes()">🧱 Gehäuse hält Öl zurück (Kollisionswand)</label></div>
         <div class="row"><label>Gehäuse-Wandstärke</label>
           <input type="number" id="oil_housing_wall" value="4" min="1" max="20" step="0.5"><span class="unit">mm</span></div>
         <details class="e3-help"><summary>Erklärung</summary>
@@ -1944,7 +1945,8 @@
     <div class="e3-set">
       <div class="e3-field">
         <div class="row"><label>Domain-Auflösung</label>
-          <input type="number" id="oil_res" value="72" min="24" max="512" step="4"><span class="unit">Zellen</span></div>
+          <input type="number" id="oil_res" value="72" min="24" max="512" step="4" oninput="_oilRecommendRes()"><span class="unit">Zellen</span></div>
+        <div id="oil_res_hint" style="font-size:.72rem;margin:2px 0 4px;line-height:1.35"></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Max. Zellenzahl der FLIP-Domain je Achse — der <b>Haupt-Kostentreiber</b>.
           Höher = feinere Tropfen/Strahl, aber die Kosten wachsen ~kubisch (Zellen³ × Substeps).</p>
@@ -2003,6 +2005,27 @@
         <div id="oil_progress" style="height:100%;width:0%;background:#3a8adf;transition:width .3s"></div>
       </div>
     </div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">💾 Darstellungen &amp; Rechen-Pakete</div>
+    <div style="font-size:.76rem;color:#889;margin-bottom:8px">
+      Speichere die aktuellen 💧-Einstellungen (Ausschnitt, Öl, Kamera, Auflösung …) als benannte
+      <b>Darstellung</b>. Mehrere ausgewählte Darstellungen lassen sich als <b>Paket</b> in die
+      Server-Warteschlange legen und laufen nacheinander durch (auch bei geschlossenem Browser →
+      Tab ⏳ Jobs).
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+      <input id="oil_preset_name" type="text" placeholder="Name der Darstellung (z. B. „Schnitt Düse 1, 512")"
+             style="flex:1;min-width:220px;padding:6px">
+      <button onclick="oilSavePreset()" style="background:#2f5a36;width:auto;padding:8px 14px">💾 Aktuelle Darstellung speichern</button>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+      <button onclick="oilQueuePackage()" style="background:#456;width:auto;padding:7px 12px">▶ Ausgewählte als Paket rechnen (Warteschlange)</button>
+      <button onclick="oilRefreshPresets()" style="background:#3a4a5a;width:auto;padding:7px 12px">🔄 Aktualisieren</button>
+      <span id="oil_preset_status" style="font-size:.8rem;color:#9aa"></span>
+    </div>
+    <div id="oil_presets_list" style="font-size:.82rem"></div>
   </div>
 
   <div class="e3-card">
@@ -3137,6 +3160,7 @@ function switchTab(name) {
     if (typeof stRefreshFavs === 'function') stRefreshFavs();   // 💾 Spray-Favoriten-Dropdown
     if (typeof _oilBuildPinList === 'function') _oilBuildPinList();
     if (typeof _oilDrawAngleFig === 'function') _oilDrawAngleFig();  // Winkel-Skizzen aktualisieren
+    if (typeof oilRefreshPresets === 'function') oilRefreshPresets();  // gespeicherte Darstellungen
   }
   if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
   if (name === 'jobs' && typeof jobsActivate === 'function') jobsActivate();
@@ -5996,6 +6020,21 @@ function _oilDrawAngleFig() {
   const txt = (x, y, s, col, anchor) =>
     `<text x="${fmt(x)}" y="${fmt(y)}" fill="${col || '#aab'}" font-size="9.5"`
     + ` text-anchor="${anchor || 'middle'}" font-family="sans-serif">${s}</text>`;
+  // Kleines Koordinatensystem (x rot, y/r grün, z blau; z = Motorachse). Eine Achse zeigt aus
+  // der Bildebene → als Kreis mit Punkt (⊙). 'front' = Stirnansicht (Blick entlang der Achse):
+  // z aus der Ebene, x→rechts, y↑. 'side' = Seitenschnitt: z→rechts (Achse), r↑, x aus der Ebene.
+  const axesTriad = (x0, y0, mode) => {
+    const C = { x: '#ef6a5a', y: '#67c777', z: '#7ab8f0', r: '#67c777' };
+    const ax = (dx, dy, lbl) =>
+      arrow([x0, y0], Math.atan2(dy, dx) / D2R, 19, C[lbl], 1.5) + txt(x0 + dx * 27, y0 - dy * 27 + 3, lbl, C[lbl]);
+    const dot = lbl =>
+      `<circle cx="${x0}" cy="${y0}" r="4.5" fill="none" stroke="${C[lbl]}" stroke-width="1.6"/>`
+      + `<circle cx="${x0}" cy="${y0}" r="1.5" fill="${C[lbl]}"/>` + txt(x0 - 8, y0 - 8, lbl, C[lbl], 'end');
+    if (mode === 'front')     return dot('z') + ax(1, 0, 'x') + ax(0, 1, 'y');   // Stirnansicht: z aus Ebene
+    if (mode === 'install_h') return dot('x') + ax(1, 0, 'z') + ax(0, 1, 'y');   // horiz. Einbaulage: z waagerecht
+    if (mode === 'install_v') return dot('x') + ax(0, 1, 'z') + ax(1, 0, 'y');   // vert. Einbaulage: z senkrecht
+    return ax(1, 0, 'z') + ax(0, 1, 'r') + dot('x');                            // Seitenschnitt: z waagerecht, r↑
+  };
 
   // ---------- Panel 1: Stirnansicht (Blick auf das Wickelkopf-Ende, Achse = Punkt) ----------
   const cx = 128, cy = 140, rCr = 50, rRing = 95, rNoz = rRing - 7;
@@ -6063,6 +6102,7 @@ function _oilDrawAngleFig() {
   const Lj = Math.hypot(T[0] - N[0], T[1] - N[1]) * 1.25;
   if (Math.abs(yaw) > 0.5) s1 += line(N, P(N[0], N[1], Lj, dir0), '#888', 1.2, '4 4');
   s1 += coneWedge(N, dirJ, Lj, cone) + arrow(N, dirJ, Lj, '#ff4a30', 2.2);
+  s1 += axesTriad(34, 64, 'front');                       // x/y/z-Achsen (z = Motorachse, aus der Ebene)
   // Live-Werte gesammelt unten (in der Grafik selbst wird es sonst zu eng)
   s1 += txt(cx, 246, `Schwenk ${yaw}°  ·  Sprühkegel ±${cone}°  ·  ${nN} Düsen`, '#ff8a70');
   const panel1 = `<div style="text-align:center"><svg width="256" height="252" viewBox="0 0 256 252">${s1}</svg>`
@@ -6078,14 +6118,17 @@ function _oilDrawAngleFig() {
   s2 += `<rect x="132" y="108" width="58" height="62" rx="7" fill="#b87333" opacity=".9"/>`
       + txt(161, 188, 'Wickelkopf', '#e0a060') + line([132, 92], [132, axY], '#666', 1, '3 3')
       + txt(128, 86, 'Stirnfläche', '#889', 'end');
-  // Ring-Rohr im Schnitt: Kreis über der Kronenspitze (am +z-Ende)
-  const rx = 186, ry = 84;
+  // Ring-Rohr im Schnitt: Kreis DIREKT über der Kronenflanke (gleiches x wie das Ziel), damit
+  // der Grundstrahl PUR RADIAL nach innen (im Bild: senkrecht nach unten) verläuft — genau die
+  // Basis, ab der auch Blender die Neigung rechnet (dort ist der Grundstrahl nahezu radial). So
+  // rechnen Skizze und Simulation die axiale Neigung ab DERSELBEN Basis (0° = radial).
+  const T2 = [168, 132];                                  // Kronenflanke knapp unter der Spitze
+  const rx = T2[0], ry = 84;
   s2 += `<circle cx="${rx}" cy="${ry}" r="10" fill="none" stroke="#99a" stroke-width="4"/>`
       + txt(rx + 16, ry - 6, 'Ring', '#99a', 'start');
   // Düse an der Ring-Innenseite (unten), Grundstrahl radial nach innen auf die Kronen-FLANKE
   const N2 = [rx, ry + 12];
-  const T2 = [168, 132];                                  // Kronenflanke knapp unter der Spitze
-  const dir20 = Math.atan2(-(T2[1] - N2[1]), T2[0] - N2[0]) / D2R;
+  const dir20 = Math.atan2(-(T2[1] - N2[1]), T2[0] - N2[0]) / D2R;   // = −90° (radial nach innen)
   // positive Neigung = mehr zur Stirnfläche (im Bild: nach LINKS, math. Winkel Richtung −180°)
   const dir2 = dir20 - tilt;
   const L2 = Math.hypot(T2[0] - N2[0], T2[1] - N2[1]) * 1.35;
@@ -6094,7 +6137,7 @@ function _oilDrawAngleFig() {
   s2 += txt(N2[0] + 14, N2[1] + 8, `Neigung ${tilt}°`, '#ff8a70', 'start');
   s2 += txt(16, 16, '+ = zur Stirnfläche', '#889', 'start')
       + txt(16, 28, '− = zur Wickelkopfspitze', '#889', 'start');
-  s2 += arrow([24, axY - 14], 90, 26, '#8af', 1.4) + txt(32, axY - 34, 'r', '#8af', 'start');
+  s2 += axesTriad(30, axY - 18, 'side');                  // x/y/z-Achsen (z = Achse waagerecht, r↑)
   const panel2 = `<div style="text-align:center"><svg width="256" height="252" viewBox="0 0 256 252">${s2}</svg>`
     + `<div style="font-size:.72rem;color:#889">Seitenschnitt — Achse waagerecht<br>(axiale Neigung des Strahls)</div></div>`;
 
@@ -6129,6 +6172,7 @@ function _oilDrawAngleFig() {
           + txt(198, 148, 'Öl verschwindet (Domain-Grenze)', '#889', 'end');
     }
     s3 += arrow([18, 58], -90, 46, '#ffd54a', 2) + txt(18, 48, 'g', '#ffd54a');
+    s3 += axesTriad(228, 210, 'install_h');               // x/y/z-Achsen (z = Motorachse, waagerecht)
     s3 += txt(128, 236, '⬇ unten = quer zur Achse (−y)', '#ffd54a');
   } else {
     // vertikal: Achse senkrecht — Motor steht aufrecht, unten = −z entlang der Achse
@@ -6154,6 +6198,7 @@ function _oilDrawAngleFig() {
           + txt(66, 164, 'Öl verschwindet (Domain-Grenze)', '#889', 'start');
     }
     s3 += arrow([28, 58], -90, 46, '#ffd54a', 2) + txt(28, 48, 'g', '#ffd54a');
+    s3 += axesTriad(214, 210, 'install_v');               // x/y/z-Achsen (z = Motorachse, senkrecht)
     s3 += txt(128, 240, '⬇ unten = entlang der Achse (−z)', '#ffd54a');
   }
   const cap3 = (hOn && hCol) ? 'Kollisionswand: Öl wird am Glas gefangen → Ablauf'
@@ -6163,6 +6208,47 @@ function _oilDrawAngleFig() {
     + `<div style="font-size:.72rem;color:#889">Einbaulage „${orient === 'vertical' ? 'vertikal' : 'horizontal'}" — wo ist unten?<br>(${cap3})</div></div>`;
 
   box.innerHTML = panel1 + panel2 + panel3;
+  _oilRecommendRes();
+}
+
+// Auflösungs-Empfehlung aus dem Bohrungs-Ø: der Freistrahl braucht ≥~3 Zellen über die
+// Bohrung, sonst bildet der FLIP-Löser kein zusammenhängendes Öl-Mesh (der Strahl
+// „verschwindet"). Die Voxelgröße ≈ 2·halbe Domain-Spanne / Auflösung; die Domain-Spanne
+// hängt stark davon ab, ob die Kollisionswand 🧱 aktiv ist (dann bis zur Gehäuse-Innenwand
+// ≈ ½·Stator-Ø) oder die Domain auf den Wickelkopf fokussiert ist (viel kleiner). Näherung,
+// deckt sich mit den gemessenen Fällen (Stator-Ø 260, 🧱 an, RES 260 ⇒ Voxel ≈ 0,98 mm).
+function _oilRecommendRes() {
+  const el = document.getElementById('oil_res_hint');
+  if (!el) return;
+  const num = (id, d) => { const e = document.getElementById(id); const v = e ? +e.value : NaN; return isFinite(v) && v > 0 ? v : d; };
+  const ck  = id => { const e = document.getElementById(id); return e ? !!e.checked : false; };
+  const statOD = num('statorOD', 200);
+  const nozD   = num('oil_nozzle_d', 1);
+  const curRes = num('oil_res', 72);
+  const collide = ck('oil_housing') && ck('oil_housing_collide') && !ck('oil_closeup');
+  // halbe Domain-Spanne [mm]: 🧱 an ⇒ ~½·Stator-Ø (+Wand); sonst fokussiert ⇒ ~0,13·Stator-Ø
+  const halfSpan = collide ? 0.53 * statOD : 0.13 * statOD;
+  const Nmin = 2, Ntgt = 3;                                  // <2 = unsichtbar, ≥3 = sauber
+  const resFor = n => Math.ceil(2 * halfSpan * n / Math.max(0.1, nozD) / 4) * 4;
+  const recRaw = resFor(Ntgt);
+  const rec = Math.min(512, Math.max(24, recRaw));
+  const voxel = 2 * halfSpan / Math.max(1, curRes);
+  const cells = nozD / voxel;
+  const col = cells < Nmin ? '#f0a0a0' : cells < Ntgt ? '#f0c070' : '#8fce9b';
+  let msg = `<span style="color:${col}">Aktuell ~<b>${cells.toFixed(1)}</b> Zellen über die `
+          + `${nozD.toFixed(1)}-mm-Bohrung (Voxel ≈ ${voxel.toFixed(2)} mm).</span> `;
+  if (collide && recRaw > 512) {
+    // Selbst 512 reicht mit 🧱 nicht → auf fokussierte Domain hinweisen (der wirksamere Hebel).
+    const halfF = 0.13 * statOD, recF = Math.min(512, Math.max(24, Math.ceil(2 * halfF * Ntgt / Math.max(0.1, nozD) / 4) * 4));
+    msg += `Mit <b>🧱 Kollisionswand</b> ist die Domain zu groß — selbst 512 Zellen lösen die `
+         + `Bohrung kaum auf. Empfehlung: <b>🧱 aus</b> oder <b>Nahaufnahme</b> (fokussierte Domain), `
+         + `dann genügen ≈ <b>${recF}</b> Zellen.`;
+  } else {
+    msg += `Empfohlen: <b>≥ ${rec}</b> Zellen (für ~${Ntgt} Zellen über die Bohrung)`;
+    if (rec > curRes) msg += ` — aktuell ${curRes} ist zu grob.`;
+    else msg += `.`;
+  }
+  el.innerHTML = msg;
 }
 
 // Gemeinsamer Payload-Builder für Voll-Lauf UND Vorschau (identische Geometrie/Richtung).
@@ -6228,6 +6314,62 @@ async function queueOilspray() {
   const payload = await _oilBuildPayload();
   await enqueueJobs([{ type: 'oilspray', title: '💧 Spritzöl-Simulation', payload }],
                     document.getElementById('oil_status'));
+}
+
+// ── 💾 Darstellungs-Presets + Rechen-Pakete ─────────────────────────────────────────
+window._oilPresets = [];
+async function oilSavePreset() {
+  const st = document.getElementById('oil_preset_status');
+  const nameEl = document.getElementById('oil_preset_name');
+  const name = (nameEl?.value || '').trim();
+  if (!name) { if (st) st.textContent = '⚠ Bitte einen Namen eingeben.'; return; }
+  try {
+    const payload = await _oilBuildPayload();
+    const r = await fetch('/oilspray/presets', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, payload }) });
+    if (!r.ok) throw new Error(await r.text());
+    if (nameEl) nameEl.value = '';
+    if (st) st.textContent = '✓ Darstellung gespeichert.';
+    oilRefreshPresets();
+  } catch (e) { if (st) st.textContent = '❌ ' + e.message; }
+}
+async function oilRefreshPresets() {
+  const box = document.getElementById('oil_presets_list');
+  try {
+    const r = await fetch('/oilspray/presets');
+    window._oilPresets = r.ok ? await r.json() : [];
+  } catch (e) { window._oilPresets = []; }
+  if (!box) return;
+  if (!window._oilPresets.length) {
+    box.innerHTML = '<div style="color:#778">Noch keine Darstellungen gespeichert.</div>';
+    return;
+  }
+  box.innerHTML = window._oilPresets.map((p, i) =>
+    `<div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid #2a2a30">
+       <input type="checkbox" class="oil-preset-ck" data-id="${escHtml(p.id)}" style="width:auto">
+       <span style="color:#889;width:1.6em;text-align:right">${i + 1}.</span>
+       <b style="flex:1">${escHtml(p.name || 'Darstellung')}</b>
+       <span style="color:#778;font-size:.74rem">${escHtml(p.ts || '')}</span>
+       <button onclick="oilDeletePreset('${escHtml(p.id)}')" style="background:#5a2f2f;width:auto;padding:3px 8px">✖</button>
+     </div>`).join('');
+}
+async function oilDeletePreset(id) {
+  try { await fetch('/oilspray/presets/' + encodeURIComponent(id) + '/delete', { method: 'POST' }); }
+  catch (e) {}
+  oilRefreshPresets();
+}
+async function oilQueuePackage() {
+  const st = document.getElementById('oil_preset_status');
+  const ids = Array.from(document.querySelectorAll('.oil-preset-ck:checked')).map(c => c.dataset.id);
+  if (!ids.length) { if (st) st.textContent = '⚠ Keine Darstellung ausgewählt.'; return; }
+  const items = [];
+  for (const id of ids) {
+    const p = window._oilPresets.find(x => x.id === id);
+    if (p && p.payload) items.push({ type: 'oilspray', title: '💧 ' + (p.name || 'Darstellung'), payload: p.payload });
+  }
+  if (!items.length) { if (st) st.textContent = '⚠ Ausgewählte Darstellungen haben kein Payload.'; return; }
+  await enqueueJobs(items, st);
 }
 
 async function startOilspray() {
@@ -6417,6 +6559,18 @@ function _renderOil(res) {
     ? (res.video_src + (res.video_src.indexOf('?') < 0 ? '?' : '&') + 't=' + Date.now())
     : `/project/${encodeURIComponent(pid)}/video/oil?t=${Date.now()}`;
   let h = '<div class="e3-card"><div class="section-title">💧 Ergebnis — Spritzöl-Kühlung (qualitativ)</div>';
+  if (m.jet_underres) {
+    const fixes = [];
+    if (cfg.housing_collide) fixes.push('🧱 Kollisionswand ausschalten (fokussiert die Domain)');
+    if (!cfg.closeup) fixes.push('Nahaufnahme aktivieren');
+    fixes.push('Auflösung erhöhen');
+    h += `<div style="margin:2px 0 10px;padding:8px 10px;border-radius:6px;background:#3a2a12;`
+       + `border:1px solid #a56b1e;color:#f0c070;font-size:.8rem">`
+       + `⚠ <b>Ölstrahl unter-aufgelöst.</b> Die ${f1(cfg.nozzle_d_mm)}-mm-Bohrung ist bei `
+       + `Auflösung ${cfg.resolution} nur ~${f1(m.jet_cells)} Zellen breit `
+       + `(Voxel ≈ ${f1(m.voxel_mm)} mm) — der Strahl bildet kaum ein sichtbares Öl-Mesh. `
+       + `Abhilfe: ${fixes.map(escHtml).join(' · ')}.</div>`;
+  }
   if (res.video)
     h += `<div id="oil_vwrap" style="overflow:hidden;border-radius:6px;position:relative;touch-action:none"`
        + ` title="Mausrad: Zoom · Ziehen: Verschieben (wenn gezoomt) · Doppelklick: Zurücksetzen">`
