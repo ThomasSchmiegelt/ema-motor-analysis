@@ -380,7 +380,17 @@ def _expert_compare():
     assert hasattr(E, "run_expert_agents_compare")
     assert hasattr(E, "assemble_expert_section_compare")
     assert hasattr(R, "generate_comparison_report_agentic")
-    assert len(E._EXPERTS) == 6, "es sollten 6 Experten sein"
+    # 6 immer-aktive Experten + 2 bedingte (em3d, kuehlung) = 8 registriert
+    keys = [e["key"] for e in E._EXPERTS]
+    assert len(E._EXPERTS) == 8, "es sollten 8 Experten sein (6 + em3d + kuehlung)"
+    assert "em3d" in keys and "kuehlung" in keys, "3D-Feld-/Kühlungs-Experte fehlt"
+    # bedingte Experten NUR laufen lassen, wenn ihre Daten vorliegen
+    picked = [e["key"] for e in E._EXPERTS
+              if not e.get("condition") or e["condition"]({"summary": {}}, {})]
+    assert "em3d" not in picked and "kuehlung" not in picked, "bedingte Experten nicht gegated"
+    picked2 = [e["key"] for e in E._EXPERTS if not e.get("condition")
+               or e["condition"]({"em3d": {"x": 1}, "oilspray": {"y": 1}}, {})]
+    assert "em3d" in picked2 and "kuehlung" in picked2, "bedingte Experten laufen nicht mit Daten"
     md = E.assemble_expert_section_compare({"em_feld": "Befund A", "temperatur": "Befund B"})
     assert "Experten-Bewertung" in md and "Befund A" in md
     # Trennlinien (---) müssen aus Prosa entfernt werden (sonst pandoc-Schmalspalte)
@@ -388,7 +398,9 @@ def _expert_compare():
     # interne Pipes in Prosa werden escaped (keine versehentliche Tabelle)
     assert "\\|" in R._clean_prose("a | b"), "pipe nicht escaped"
     assert hasattr(R, "_render_chapters_pdf"), "Kapitel-Renderer fehlt"
-    return "6 experts, hrule-strip + pipe-escape + chapter render ok"
+    # Kühl-Abschnitt im Einzelbericht erscheint nur mit oilspray-Daten
+    assert R._ensure_kuehlung_section("# x", {"_img_map": {}}) == "# x", "Kühl-Abschnitt ohne Daten"
+    return "8 experts (2 gated), kuehlung section, hrule-strip + pipe-escape + chapter render ok"
 check("comparative experts wiring + report hardening", _expert_compare)
 
 # ── KI-Auslegung (Designer-Pfad) — Validator/Synth/Optimizer, ohne Ollama ────────

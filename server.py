@@ -1025,6 +1025,33 @@ def _em3d_copy_run_files(res, dest):
     return out
 
 
+def _em3d_store_run(res, name, config):
+    """Legt einen 3D-Lauf benannt im Store des aktiven Projekts ab (``em3d_runs/<id>/``):
+    kopiert die Feld-Dateien (VTU/VTP/Feldlinien) hinein und schreibt ``result.json`` +
+    ``config.json``. Gibt ``(rid, None)`` bei Erfolg zurück, sonst ``(None, fehlermeldung)``.
+    Von der /em3d/save-Route UND vom Job-Auto-Speichern (``_exec_em3d*``) genutzt."""
+    name = (name or "").strip() or time.strftime("%Y%m%d_%H%M%S")
+    rid = time.strftime("%Y%m%d_%H%M%S") + "_" + "".join(
+        c for c in name if c.isalnum() or c in "-_")[:40]
+    if not _safe_name(rid):
+        return None, "ungültiger Name"
+    runs_root = _em3d_runs_root()
+    if not runs_root:
+        return None, "Kein aktives Projekt – bitte erst ein Projekt wählen"
+    dest = os.path.join(runs_root, rid)
+    try:
+        stored = _em3d_copy_run_files(res, dest)
+        stored["saved_id"] = rid
+        with open(os.path.join(dest, "result.json"), "w") as f:
+            json.dump(stored, f, ensure_ascii=False)
+        with open(os.path.join(dest, "config.json"), "w") as f:
+            json.dump({"name": name, "timestamp": time.strftime("%Y-%m-%d %H:%M"),
+                       "config": config or {}}, f, ensure_ascii=False)
+    except Exception as e:
+        return None, f"Speichern fehlgeschlagen: {e}"
+    return rid, None
+
+
 @app.route("/em3d/save", methods=["POST", "OPTIONS"])
 def em3d_save():
     """Speichert den zuletzt fertig berechneten 3D-Lauf benannt ab (Config aus dem Body +
@@ -1036,24 +1063,10 @@ def em3d_save():
     if not res or _em3d_state.get("status") != "done":
         return jsonify({"error": "Kein fertiger 3D-Lauf zum Speichern"}), 400
     name = (data.get("name") or "").strip() or time.strftime("%Y%m%d_%H%M%S")
-    rid = time.strftime("%Y%m%d_%H%M%S") + "_" + "".join(
-        c for c in name if c.isalnum() or c in "-_")[:40]
-    if not _safe_name(rid):
-        return jsonify({"error": "ungültiger Name"}), 403
-    runs_root = _em3d_runs_root()
-    if not runs_root:
-        return jsonify({"error": "Kein aktives Projekt – bitte erst ein Projekt wählen"}), 400
-    dest = os.path.join(runs_root, rid)
-    try:
-        stored = _em3d_copy_run_files(res, dest)
-        stored["saved_id"] = rid
-        with open(os.path.join(dest, "result.json"), "w") as f:
-            json.dump(stored, f, ensure_ascii=False)
-        with open(os.path.join(dest, "config.json"), "w") as f:
-            json.dump({"name": name, "timestamp": time.strftime("%Y-%m-%d %H:%M"),
-                       "config": data.get("config") or {}}, f, ensure_ascii=False)
-    except Exception as e:
-        return jsonify({"error": f"Speichern fehlgeschlagen: {e}"}), 500
+    rid, err = _em3d_store_run(res, name, data.get("config") or {})
+    if err:
+        code = 400 if "Projekt" in err else (403 if "ungültig" in err else 500)
+        return jsonify({"error": err}), code
     return jsonify({"status": "saved", "id": rid, "name": name})
 
 
@@ -1209,26 +1222,29 @@ def optimize_start():
     spec = request.get_json(force=True)
     _opt_state.update({"status": "running", "progress": 0, "log": [],
                        "result": None, "error": None})
-
-    def _worker():
-        import ema_optimize
-        def cb(msg, pct=None):
-            _opt_state["log"].append(msg)
-            if pct is not None:
-                _opt_state["progress"] = int(pct)
-        try:
-            _opt_state["result"] = ema_optimize.optimize(spec, progress_cb=cb)
-            _opt_state["status"] = "done"
-            _opt_state["progress"] = 100
-        except Exception as e:
-            import traceback
-            _opt_state["error"] = str(e)
-            _opt_state["log"].append("⚠ " + str(e))
-            _opt_state["status"] = "error"
-            print(traceback.format_exc())
-
-    threading.Thread(target=_worker, daemon=True).start()
+    threading.Thread(target=_optimize_body, args=(spec,), daemon=True).start()
     return jsonify({"status": "started"}), 202
+
+
+def _optimize_body(spec):
+    """Synchroner Lauf-Körper der Zielwertoptimierung — von der Route (im Thread) UND der
+    Job-Warteschlange (direkt) genutzt. Erwartet, dass ``_opt_state`` bereits auf running
+    gesetzt wurde."""
+    import ema_optimize
+    def cb(msg, pct=None):
+        _opt_state["log"].append(msg)
+        if pct is not None:
+            _opt_state["progress"] = int(pct)
+    try:
+        _opt_state["result"] = ema_optimize.optimize(spec, progress_cb=cb)
+        _opt_state["status"] = "done"
+        _opt_state["progress"] = 100
+    except Exception as e:
+        import traceback
+        _opt_state["error"] = str(e)
+        _opt_state["log"].append("⚠ " + str(e))
+        _opt_state["status"] = "error"
+        print(traceback.format_exc())
 
 
 @app.route("/optimize/status")
@@ -1417,31 +1433,34 @@ def param_study_start():
     _study_state.update({"status": "running", "progress": 0, "log": [],
                          "result": None, "error": None,
                          "payload": data.get("payload")})   # kept for the study report
-
-    def _worker():
-        import ema_paramstudy
-        def cb(msg, pct=None):
-            _study_state["log"].append(msg)
-            if pct is not None:
-                _study_state["progress"] = int(pct)
-        try:
-            _study_state["result"] = ema_paramstudy.run_study(
-                data["payload"], data["param"], data["lo"], data["hi"],
-                steps=int(data.get("steps", 100)), rpm=data.get("rpm"),
-                field_frames=int(data.get("field_frames", 0)),
-                field_N=int(data.get("field_N", 300)),
-                out_dir=STUDY_FIELD_DIR, progress_cb=cb)
-            _study_state["status"] = "done"
-            _study_state["progress"] = 100
-        except Exception as e:
-            import traceback
-            _study_state["error"] = str(e)
-            _study_state["log"].append("⚠ " + str(e))
-            _study_state["status"] = "error"
-            print(traceback.format_exc())
-
-    threading.Thread(target=_worker, daemon=True).start()
+    threading.Thread(target=_param_study_body, args=(data,), daemon=True).start()
     return jsonify({"status": "started"}), 202
+
+
+def _param_study_body(data):
+    """Synchroner Lauf-Körper der Parameterstudie — von der Route (im Thread) UND der
+    Job-Warteschlange (direkt) genutzt. Erwartet ``_study_state`` bereits auf running +
+    ``payload`` gesetzt."""
+    import ema_paramstudy
+    def cb(msg, pct=None):
+        _study_state["log"].append(msg)
+        if pct is not None:
+            _study_state["progress"] = int(pct)
+    try:
+        _study_state["result"] = ema_paramstudy.run_study(
+            data["payload"], data["param"], data["lo"], data["hi"],
+            steps=int(data.get("steps", 100)), rpm=data.get("rpm"),
+            field_frames=int(data.get("field_frames", 0)),
+            field_N=int(data.get("field_N", 300)),
+            out_dir=STUDY_FIELD_DIR, progress_cb=cb)
+        _study_state["status"] = "done"
+        _study_state["progress"] = 100
+    except Exception as e:
+        import traceback
+        _study_state["error"] = str(e)
+        _study_state["log"].append("⚠ " + str(e))
+        _study_state["status"] = "error"
+        print(traceback.format_exc())
 
 
 @app.route("/param_study/status")
@@ -3201,12 +3220,36 @@ def _exec_analyse(payload):
             "error": None if ok else (_state["log"][-1] if _state["log"] else "Fehler")}
 
 
-def _em3d_job_outcome(proj_id):
+def _em3d_job_outcome(proj_id, payload=None):
     st = _em3d_state["status"]
     status = {"done": "fertig", "aborted": "abgebrochen"}.get(st, "fehler")
     res = _em3d_state.get("result") or {}
+    # Job-Lauf AUTOMATISCH im Projekt-Store ablegen, sobald ein Ergebnis vorliegt (auch bei
+    # „aborted" mit Teilergebnis) — sonst lässt sich eine als Job gerechnete 3D-Berechnung
+    # später NICHT im 3D-Feld-Tab aufrufen (Direktläufe müssen weiter manuell gespeichert
+    # werden, ein Job aber schließt den Browser → das Ergebnis wäre sonst nur flüchtig).
+    saved_id = None
+    if res and status in ("fertig", "abgebrochen"):
+        title = (payload or {}).get("_job_title") or "3D-Feld-Job"
+        try:
+            saved_id, serr = _em3d_store_run(res, title, _em3d_job_config(payload, res))
+            if saved_id:
+                _em3d_state["log"].append("💾 Job-Lauf gespeichert (%s) → Tab ① »Gespeicherte 3D-Läufe«" % saved_id)
+        except Exception as e:
+            _em3d_state["log"].append("⚠ Auto-Speichern des 3D-Job-Laufs fehlgeschlagen: %s" % e)
     return {"status": status, "project_id": res.get("project_id") or proj_id,
-            "error": _em3d_state.get("error")}
+            "error": _em3d_state.get("error"), "saved_id": saved_id}
+
+
+def _em3d_job_config(payload, res):
+    """Schlanke Config zum Wiederherstellen der 3D-Feld-Formularfelder aus einem Job-Lauf
+    (spiegelt die Client-``_e3BuildConfig``-Schlüssel, die ``_e3ApplyConfig`` liest)."""
+    p = payload or {}
+    return {"skew_deg": p.get("skew_deg"), "coil_currents": p.get("coil_currents"),
+            "hex_mesh": p.get("hex_mesh"), "sweep": p.get("sweep"),
+            "detail_index": p.get("detail_index"),
+            "geom_payload": {k: p.get(k) for k in ("geom", "axial_len", "rpm", "load_nm",
+                                                   "excitation") if p.get(k) is not None}}
 
 
 def _exec_em3d(payload):
@@ -3215,7 +3258,7 @@ def _exec_em3d(payload):
         return {"status": "fehler", "error": elmer_runner.INSTALL_HINT}
     proj_dir, proj_id = _em3d_setup(payload)
     _em3d_body(payload, proj_dir, proj_id)
-    return _em3d_job_outcome(proj_id)
+    return _em3d_job_outcome(proj_id, payload)
 
 
 def _exec_em3d_sweep(payload):
@@ -3226,7 +3269,7 @@ def _exec_em3d_sweep(payload):
         return {"status": "fehler", "error": "Kein Betriebspunkt im Drehzahlband (sweep ist leer)"}
     proj_dir, proj_id = _em3d_setup(payload)
     _em3d_sweep_body(payload, proj_dir, proj_id)
-    return _em3d_job_outcome(proj_id)
+    return _em3d_job_outcome(proj_id, payload)
 
 
 def _exec_oilspray(payload):
@@ -3238,6 +3281,33 @@ def _exec_oilspray(payload):
     st = _oil_state["status"]
     status = {"done": "fertig", "aborted": "abgebrochen"}.get(st, "fehler")
     return {"status": status, "project_id": proj_id, "error": _oil_state.get("error")}
+
+
+def _exec_param_study(payload):
+    """Job-Executor der Parameterstudie (Tab ④ Berechnung). Payload = derselbe Body wie
+    ``POST /param_study`` ({payload, param, lo, hi, steps, rpm, field_frames, field_N})."""
+    if not (payload.get("payload") and payload.get("param")):
+        return {"status": "fehler", "error": "Parameterstudie-Job unvollständig (payload/param fehlt)"}
+    _study_state.update({"status": "running", "progress": 0, "log": [],
+                         "result": None, "error": None,
+                         "payload": payload.get("payload")})
+    _param_study_body(payload)
+    ok = _study_state["status"] == "done"
+    return {"status": "fertig" if ok else "fehler", "project_id": None,
+            "error": None if ok else _study_state.get("error")}
+
+
+def _exec_optimize(payload):
+    """Job-Executor der Zielwertoptimierung (Tab ④ Berechnung). Payload = derselbe Spec wie
+    ``POST /optimize`` ({base_payload, objective, constraints, free, iterations, batch})."""
+    if not (payload.get("free") and payload.get("objective")):
+        return {"status": "fehler", "error": "Optimierungs-Job unvollständig (free/objective fehlt)"}
+    _opt_state.update({"status": "running", "progress": 0, "log": [],
+                       "result": None, "error": None})
+    _optimize_body(payload)
+    ok = _opt_state["status"] == "done"
+    return {"status": "fertig" if ok else "fehler", "project_id": None,
+            "error": None if ok else _opt_state.get("error")}
 
 
 def _jobs_abort_em3d():
@@ -3254,7 +3324,8 @@ def _jobs_abort_oil():
 
 # type → State-Dict des laufenden Jobs (für die Live-Anreicherung in GET /jobs)
 _JOB_STATES = {"analyse": _state, "em3d": _em3d_state,
-               "em3d_sweep": _em3d_state, "oilspray": _oil_state}
+               "em3d_sweep": _em3d_state, "oilspray": _oil_state,
+               "param_study": _study_state, "optimize": _opt_state}
 
 
 @app.route("/jobs")
@@ -3327,6 +3398,12 @@ ema_jobs.init({
                    "busy": lambda: (_oil_state["status"] == "running"
                                     or _spraytest_state["status"] == "running"),
                    "abort": _jobs_abort_oil},
+    "param_study":{"run": _exec_param_study,
+                   "busy": lambda: _study_state["status"] == "running",
+                   "abort": None},
+    "optimize":   {"run": _exec_optimize,
+                   "busy": lambda: _opt_state["status"] == "running",
+                   "abort": None},
 })
 
 

@@ -960,7 +960,12 @@
       </select>
     </div>
     <small style="display:block;font-size:.7rem;color:#666;margin:2px 0 6px">Bilder fürs Magnetfeld-Video (bis 500 für flüssige Animation wie die anderen Videos). Pro Frame wird das Feld neu gelöst — höhere Auflösung = schärfere Taschen, aber langsamer. Magnete sind rot (N) / blau (S) umrandet. Die Galerie zeigt eine Auswahl, das Video nutzt alle Frames.</small>
-    <button id="btn_study" onclick="runParamStudy()" style="background:#2d7d5a;width:100%;padding:10px;font-size:.8rem">📈 Parameterstudie starten</button>
+    <div style="display:flex;gap:6px">
+      <button id="btn_study" onclick="runParamStudy()" style="background:#2d7d5a;flex:1;padding:10px;font-size:.8rem">📈 Parameterstudie starten</button>
+      <button onclick="queueParamStudy()" style="background:#456;width:auto;padding:10px 12px;font-size:.78rem"
+        title="Parameterstudie in die Server-Warteschlange einreihen (läuft auch bei geschlossenem Browser) → Tab ⏳ Jobs">➕ Warteschlange</button>
+    </div>
+    <div id="study_queue_msg" style="font-size:.72rem;color:#6c8;margin-top:4px"></div>
     <div id="study_progress" style="display:none;margin-top:8px">
       <div style="font-size:.75rem;color:#9aa" id="study_msg">…</div>
       <div style="background:#21262d;border-radius:4px;height:8px;margin-top:4px;overflow:hidden">
@@ -3075,7 +3080,12 @@
           <label style="font-size:.78rem;color:#aaa">Budget (Auswertungen)</label>
           <input type="number" id="opt-budget" value="24" min="6" max="80" step="2" style="width:70px;background:#2a2a2e;border:1px solid #444;color:#ddd;padding:5px;border-radius:3px"/>
         </div>
-        <button id="opt-run" onclick="runOptimize()" style="background:#27ae60;width:100%;padding:11px;font-size:.82rem;margin-top:10px">▶ Optimierung starten</button>
+        <div style="display:flex;gap:6px;margin-top:10px">
+          <button id="opt-run" onclick="runOptimize()" style="background:#27ae60;flex:1;padding:11px;font-size:.82rem">▶ Optimierung starten</button>
+          <button onclick="queueOptimize()" style="background:#456;width:auto;padding:11px 12px;font-size:.78rem"
+            title="Optimierung in die Server-Warteschlange einreihen (läuft auch bei geschlossenem Browser) → Tab ⏳ Jobs">➕ Warteschlange</button>
+        </div>
+        <div id="opt_queue_msg" style="font-size:.72rem;color:#6c8;margin-top:4px"></div>
       </div>
       <!-- right: progress + result -->
       <div id="opt-out">
@@ -3206,7 +3216,8 @@ window.addEventListener('load', () => {
 // Jobs werden über POST /jobs/add eingereiht und vom Server sequenziell abgearbeitet;
 // dieser Tab zeigt/steuert nur den Server-Stand (Poll alle 3 s solange offen).
 let _jobsTimer = null, _jobsPaused = false;
-const _JOB_ICON = { analyse: '⚙', em3d: '🧲', em3d_sweep: '🌡', oilspray: '💧' };
+const _JOB_ICON = { analyse: '⚙', em3d: '🧲', em3d_sweep: '🌡', oilspray: '💧',
+                    param_study: '📈', optimize: '🎯' };
 const _JOB_CHIP = { 'wartet': '#7f8c8d', 'läuft': '#2980b9', 'fertig': '#27ae60',
                     'fehler': '#c0392b', 'abgebrochen': '#e67e22' };
 
@@ -3265,9 +3276,26 @@ async function jobsRefresh() {
         `<div style="font-size:.68rem;color:#89a;margin-top:2px">${escHtml((x.log_line || '').slice(0, 140))}</div></div>`
       : '';
     const err = x.error ? `<div style="font-size:.7rem;color:#e57;margin-top:3px">⚠ ${escHtml(String(x.error).slice(0, 200))}</div>` : '';
-    const proj = (x.status === 'fertig' && x.project_id)
-      ? `<button onclick="loadProjectById('${escHtml(x.project_id)}')" ` +
-        `style="background:#345;width:auto;padding:3px 9px;font-size:.7rem">📂 Ergebnis</button>` : '';
+    // „Ergebnis öffnen"-Knopf je Job-Typ: em3d → 3D-Feld-Tab (lädt den gespeicherten Lauf),
+    // oilspray → 💧-Tab, sonst die Analyse-Projektansicht. em3d-Jobs werden serverseitig
+    // automatisch gespeichert (auch bei Teilabbruch), daher auch bei „abgebrochen" anbieten.
+    const isE3 = (x.type === 'em3d' || x.type === 'em3d_sweep');
+    const bs = 'background:#345;width:auto;padding:3px 9px;font-size:.7rem';
+    let proj = '';
+    // Param-Studie/Optimierung sind nicht projektgebunden → Ergebnis liegt im Server-State,
+    // der „Ansehen"-Knopf öffnet den passenden Tab und rendert den letzten Lauf.
+    if (x.status === 'fertig' && x.type === 'param_study')
+      proj = `<button onclick="openJobStudy()" style="${bs}">📈 Ansehen</button>`;
+    else if (x.status === 'fertig' && x.type === 'optimize')
+      proj = `<button onclick="openJobOptimize()" style="${bs}">🎯 Ansehen</button>`;
+    else if (x.project_id && (x.status === 'fertig' || (isE3 && x.status === 'abgebrochen'))) {
+      if (isE3)
+        proj = `<button onclick="openJobEm3d('${escHtml(x.project_id)}')" style="${bs}">🧲 3D-Feld</button>`;
+      else if (x.type === 'oilspray')
+        proj = `<button onclick="openJobOil('${escHtml(x.project_id)}')" style="${bs}">💧 Spritzöl</button>`;
+      else
+        proj = `<button onclick="loadProjectById('${escHtml(x.project_id)}')" style="${bs}">📂 Ergebnis</button>`;
+    }
     const cancel = (x.status === 'wartet' || x.status === 'läuft')
       ? `<button onclick="jobsCancel('${x.id}')" title="abbrechen" ` +
         `style="background:#733;width:auto;padding:3px 9px;font-size:.7rem">✖</button>` : '';
@@ -3299,6 +3327,35 @@ async function jobsCancel(jid) {
     if (!r.ok) { const e = await r.json().catch(() => ({})); alert('⚠ ' + (e.error || 'Abbruch nicht möglich')); }
   } catch (e) {}
   jobsRefresh();
+}
+
+// Ergebnis eines als Job gelaufenen 3D-Feld-Laufs öffnen: aktives Projekt setzen (die
+// gespeicherten 3D-Läufe sind projektgebunden), in den 3D-Feld-Tab wechseln und den zuletzt
+// gespeicherten Lauf (= dieser Job, Auto-Speichern serverseitig) laden.
+async function openJobEm3d(pid) {
+  try {
+    if (pid) {
+      await fetch('/project/' + encodeURIComponent(pid) + '/activate', { method: 'POST' }).catch(() => {});
+      window._activeProject = { id: pid, name: (window._activeProject && _activeProject.id === pid && _activeProject.name) || pid };
+    }
+    switchTab('em3d');
+    if (typeof _e3RefreshSavedList === 'function') await _e3RefreshSavedList();
+    const sel = document.getElementById('e3_saved_list');
+    if (sel && sel.options.length > 1) { sel.selectedIndex = 1; await _e3LoadRun(); }
+    else alert('Kein gespeicherter 3D-Lauf für dieses Projekt gefunden.');
+  } catch (e) { alert('⚠ ' + e.message); }
+}
+
+// Ergebnis eines Spritzöl-Jobs öffnen: aktives Projekt setzen + 💧-Tab (lädt automatisch den
+// zuletzt gespeicherten Lauf beim Öffnen).
+async function openJobOil(pid) {
+  try {
+    if (pid) {
+      await fetch('/project/' + encodeURIComponent(pid) + '/activate', { method: 'POST' }).catch(() => {});
+      window._activeProject = { id: pid, name: (window._activeProject && _activeProject.id === pid && _activeProject.name) || pid };
+    }
+    switchTab('oil');
+  } catch (e) { alert('⚠ ' + e.message); }
 }
 
 // Gemeinsamer Einreih-Helfer für alle „➕ Warteschlange"-Knöpfe.
@@ -4707,14 +4764,16 @@ function addOptConstraint() {
     <button onclick="this.parentElement.remove()" style="background:#7a3030;width:auto;padding:4px 8px;font-size:.72rem">✕</button>`;
   document.getElementById('opt-constraints').appendChild(div);
 }
-async function runOptimize() {
+// Baut den Optimierungs-Spec aus dem Modal (null bei Validierungsfehler → Alert). Von
+// „▶ Optimierung starten" UND „➕ Warteschlange" gemeinsam genutzt.
+async function _optBuildSpec() {
   const free = [...document.querySelectorAll('.opt-free-cb:checked')].map(cb => {
     const k = cb.dataset.k;
     const lo = +document.querySelector(`.opt-free-lo[data-k="${k}"]`).value;
     const hi = +document.querySelector(`.opt-free-hi[data-k="${k}"]`).value;
     return { param: k, min: Math.min(lo, hi), max: Math.max(lo, hi) };
   });
-  if (!free.length) { alert('Mindestens einen freien Parameter wählen'); return; }
+  if (!free.length) { alert('Mindestens einen freien Parameter wählen'); return null; }
   const cons = [...document.querySelectorAll('.opt-constraint-row')].map(r => ({
     metric: r.querySelector('.opt-c-metric').value, op: r.querySelector('.opt-c-op').value,
     value: parseFloat(r.querySelector('.opt-c-val').value),
@@ -4723,8 +4782,13 @@ async function runOptimize() {
   const objective = { metric: document.getElementById('opt-obj-metric').value, goal };
   if (goal === 'target') objective.target = +document.getElementById('opt-obj-target').value;
   const base = await buildPayload();
-  const spec = { base_payload: base, objective, constraints: cons, free,
-                 iterations: +document.getElementById('opt-budget').value, batch: 6 };
+  return { base_payload: base, objective, constraints: cons, free,
+           iterations: +document.getElementById('opt-budget').value, batch: 6 };
+}
+
+async function runOptimize() {
+  const spec = await _optBuildSpec();
+  if (!spec) return;
   document.getElementById('opt-run').disabled = true;
   document.getElementById('opt-result').innerHTML = '';
   document.getElementById('opt-log').innerHTML = 'Starte…';
@@ -4732,6 +4796,24 @@ async function runOptimize() {
                                        body: JSON.stringify(spec) }).then(x => x.json());
   if (r.error) { alert(r.error); document.getElementById('opt-run').disabled = false; return; }
   _pollOptimize();
+}
+async function queueOptimize() {
+  const spec = await _optBuildSpec();
+  if (!spec) return;
+  const title = 'Optimierung: ' + (document.getElementById('opt-obj-metric').value || '') +
+                ' ' + (document.getElementById('opt-obj-goal').value || '');
+  await enqueueJobs([{ type: 'optimize', title, payload: spec }],
+                    document.getElementById('opt_queue_msg'));
+}
+// Ergebnis eines Optimierungs-Jobs ansehen (Modal öffnen + zuletzt gerechnetes Ergebnis).
+async function openJobOptimize() {
+  if (typeof openOptimizer === 'function') await openOptimizer();
+  try {
+    const s = await fetch('/optimize/status').then(x => x.json());
+    const lg = document.getElementById('opt-log');
+    if (lg) { lg.innerHTML = (s.log || []).map(escHtml).join('<br>'); lg.scrollTop = 1e9; }
+    if (s.result) renderOptResult(s.result);
+  } catch (e) {}
 }
 async function _pollOptimize() {
   const s = await fetch('/optimize/status').then(x => x.json());
@@ -4808,7 +4890,9 @@ function _studyParamChanged() {
   document.getElementById('study_unit1').textContent = lbl;
   document.getElementById('study_unit2').textContent = lbl;
 }
-async function runParamStudy() {
+// Baut den Parameterstudie-Body aus dem Formular (null bei Validierungsfehler → Alert).
+// Von „📈 Parameterstudie starten" UND „➕ Warteschlange" gemeinsam genutzt.
+async function _studyBuildBody() {
   const param = document.getElementById('study_param').value;
   const lo = +document.getElementById('study_lo').value;
   const hi = +document.getElementById('study_hi').value;
@@ -4817,18 +4901,44 @@ async function runParamStudy() {
   const wantField = document.getElementById('study_field').checked;
   const field_frames = wantField ? +document.getElementById('study_field_n').value : 0;
   const field_N = +document.getElementById('study_field_res').value;
-  if (lo === hi) { alert('Bereich x..y darf nicht leer sein (x ≠ y)'); return; }
+  if (lo === hi) { alert('Bereich x..y darf nicht leer sein (x ≠ y)'); return null; }
   // Studie auf dem Designer-/KI-Entwurf (custom-Geometrie) ODER der Formular-Auslegung
   const payload = _studyDesignPayload || await buildPayload();
+  return { payload, param, lo, hi, steps, rpm, field_frames, field_N };
+}
+
+async function runParamStudy() {
+  const body = await _studyBuildBody();
+  if (!body) return;
   document.getElementById('btn_study').disabled = true;
   document.getElementById('study_result').innerHTML = '';
   document.getElementById('study_progress').style.display = 'block';
   const r = await fetch('/param_study', {
     method: 'POST', headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ payload, param, lo, hi, steps, rpm, field_frames, field_N })
+    body: JSON.stringify(body)
   }).then(x => x.json());
   if (r.error) { alert(r.error); document.getElementById('btn_study').disabled = false; return; }
   _pollParamStudy();
+}
+
+async function queueParamStudy() {
+  const body = await _studyBuildBody();
+  if (!body) return;
+  const title = 'Parameterstudie: ' + body.param + ' ' + body.lo + '…' + body.hi;
+  await enqueueJobs([{ type: 'param_study', title, payload: body }],
+                    document.getElementById('study_queue_msg'));
+}
+// Ergebnis eines Parameterstudie-Jobs ansehen (Tab ④ öffnen + zuletzt gerechnetes Ergebnis).
+async function openJobStudy() {
+  switchTab('calc');
+  if (typeof initParamStudy === 'function') await initParamStudy();
+  try {
+    const s = await fetch('/param_study/status').then(x => x.json());
+    document.getElementById('study_progress').style.display = 'block';
+    document.getElementById('study_bar').style.width = (s.progress || 0) + '%';
+    if (s.status === 'running') { _pollParamStudy(); return; }
+    _studyRenderDone(s);
+  } catch (e) {}
 }
 async function _pollParamStudy() {
   const s = await fetch('/param_study/status').then(x => x.json());
@@ -4836,7 +4946,11 @@ async function _pollParamStudy() {
   const log = (s.log || []);
   document.getElementById('study_msg').textContent = log[log.length - 1] || '…';
   if (s.status === 'running') { setTimeout(_pollParamStudy, 700); return; }
-  document.getElementById('btn_study').disabled = false;
+  _studyRenderDone(s);
+}
+// Fertiges Studienergebnis rendern (aus dem Poll ODER beim Öffnen eines Job-Ergebnisses).
+function _studyRenderDone(s) {
+  const btn = document.getElementById('btn_study'); if (btn) btn.disabled = false;
   if (s.status === 'error') {
     document.getElementById('study_result').innerHTML =
       '<span style="color:#e57">Fehler: ' + escHtml(s.error || '') + '</span>';

@@ -57,11 +57,14 @@ def _normalize_text(text: str) -> str:
 # ── Image mapping: expert key → ordered list of img_map keys ────────────────
 
 _EXPERT_IMAGES: dict[str, list[str]] = {
-    "em_feld":    ["airgap", "em3d_airgap_2d3d", "em3d_endeffect"],
+    "em_feld":    ["airgap", "em_field", "em_field_load"],
     "kennlinien": ["em_curve"],
     "luftspalt":  ["airgap"],
+    "em3d":       ["em3d_airgap_2d3d", "em3d_endeffect", "em3d_field3d",
+                   "em3d_slice_mid", "em3d_model_iso"],
     "festigkeit": ["structural", "deformation"],
     "temperatur": ["thermal"],
+    "kuehlung":   ["oil_coverage", "oil_wetting", "oil_droplets"],
     "fahrzyklus": ["drivecycle", "drivecycle_vollast", "drivecycle_anhaenger"],
 }
 
@@ -179,10 +182,57 @@ def _em_field_data(results: dict, meta: dict) -> dict:
         "Bt_T_samples":   [round(bt[i], 4) for i in range(0, len(bt), step)][:60],
         "theta_deg_samples": [round(th[i], 1) for i in range(0, len(th), step)][:60],
     }
-    e3 = _em3d_compact(results)
-    if e3:
-        out["em3d_validierung"] = e3   # echte 3D-Feldlösung (Elmer): Endeffekt + 2D-vs-3D
+    # Hinweis: die echte 3D-Feldlösung (Elmer) hat einen EIGENEN 3D-Magnetfeld-Experten
+    # (_em3d_data) — der EM-Feld-Experte bleibt beim 2D-FDM-Schnittmodell.
     return out
+
+
+def _em3d_data(results: dict, meta: dict) -> dict:
+    """Fachdaten für den 3D-Magnetfeld-Experten (Elmer FEM) — kompakte 3D-Kennwerte +
+    2D-vs-3D-Vergleich + Endeffekt. Nur belegt, wenn ein 3D-Lauf vorliegt."""
+    e3 = _em3d_compact(results) or {}
+    geom = (meta.get("geom") or {})
+    e3["poles"] = int(geom.get("p", 0)) * 2
+    e3["slots"] = geom.get("slots")
+    e3["magTopologie"] = TOPOLOGY_LABELS.get(geom.get("magShape", "v"), geom.get("magShape"))
+    return e3
+
+
+def _kuehlung_data(results: dict, meta: dict) -> dict:
+    """Fachdaten für den Kühlungs-Experten: die experimentelle Spritzöl-Studie (Benetzungs-
+    Proxys, QUALITATIV — kein Wärmeübergang) im Kontext des analytischen LPTN-Thermikmodells."""
+    oil    = results.get("oilspray") or {}
+    om     = oil.get("metrics") or {}
+    oc     = oil.get("config") or {}
+    therm  = results.get("thermal") or {}
+    steady = therm.get("steady") or {}
+    losses = therm.get("losses") or {}
+    return {
+        "spritzoel": {
+            "benetzung_mittel_pct":   om.get("wetted_pct_mean"),
+            "benetzung_spitze_pct":   om.get("wetted_pct_peak"),
+            "tropfen_spitze":         om.get("droplets_peak"),
+            "n_frames":               om.get("n_frames"),
+            "strahl_zellen":          om.get("jet_cells"),
+            "strahl_unteraufgeloest": om.get("jet_underres"),
+            "voxel_mm":               om.get("voxel_mm"),
+            "aufloesung":             oc.get("resolution"),
+            "duesen":                 oc.get("nozzle_count"),
+            "duesen_d_mm":            oc.get("nozzle_d_mm"),
+            "druck_bar":              oc.get("pressure_bar"),
+            "voller_ring":            oc.get("ring_full"),
+            "einbaulage":             oc.get("orientation"),
+            "hinweis_scope":          oil.get("note", ""),
+        },
+        "thermik_kontext": {
+            "kuehlung":     therm.get("cooling_label", meta.get("cooling", "")),
+            "T_winding_C":  steady.get("T_winding"),
+            "T_magnet_C":   steady.get("T_magnet"),
+            "T_housing_C":  steady.get("T_housing"),
+            "verluste_W":   losses,
+            "T_ambient":    meta.get("T_ambient", 25),
+        },
+    }
 
 
 def _kennlinien_data(results: dict, meta: dict) -> dict:
@@ -352,14 +402,10 @@ _EXPERTS: list[dict] = [
         "title": "EM-Feld-Analyse",
         "role":  "EM-Feld-Experte für Permanentmagnet-Synchronmaschinen",
         "task":  (
-            "Bewerte die Feldqualität im Luftspalt und im Rotor. "
+            "Bewerte die Feldqualität im Luftspalt und im Rotor (2D-FDM-Schnittmodell). "
             "Beurteile: Höhe der Luftspaltflussdichte (B_gap), Gleichmäßigkeit von Br und Bt über "
             "den Umfang, sichtbare Oberwellenanteile in den Abtastwerten, "
             "Sättigungsrisiko im Blech, Magnetschwächung (B_r-Wert). "
-            "Falls der Datensatz den Schlüssel 'em3d_validierung' enthält, liegt eine echte "
-            "3D-Magnetfeldberechnung (Elmer FEM) vor — beziehe sie ein: vergleiche B_gap 2D-FDM "
-            "gegen 3D, bewerte den Endeffekt (Feldabfall zu den Stirnseiten, "
-            "'endeffekt_rand_zu_mitte' < 1) und ggf. die Wirkung der Schrägung (skew). "
             "Gib 3–5 konkrete Empfehlungen."
         ),
         "selector": _em_field_data,
@@ -393,6 +439,26 @@ _EXPERTS: list[dict] = [
         ),
         "selector": _luftspalt_data,
         "section":  "## Luftspalt-Analyse\n\n",
+    },
+    {
+        "key":   "em3d",
+        "title": "3D-Magnetfeld-Validierung (Elmer FEM)",
+        "role":  "Experte für 3D-Magnetfeld-FEM (Endeffekte, Schrägung, finite Paketlänge)",
+        "task":  (
+            "Bewerte die echte 3D-Magnetfeldberechnung (Elmer FEM) im Vergleich zum schnellen "
+            "2D-FDM-Schnittmodell. Beurteile: die mittige Luftspaltinduktion 3D "
+            "('B_gap_3D_Paketmitte_T') gegen die 2D-FDM-Referenz ('B_gap_2D_FDM_T') — ist die "
+            "2D-Näherung belastbar? Den Endeffekt ('endeffekt_rand_zu_mitte' < 1 ⇒ Feldabfall "
+            "zu den Stirnseiten durch dreidimensionalen Flussschluss), seine Bedeutung für "
+            "Drehmoment/Streuung bei kurzem Blechpaket. Falls Schrägung/Staffelung "
+            "('skew_deg'/'skew_segments'/'skew_step_deg') aktiv ist: Wirkung auf Rastmoment "
+            "und Oberwellen. Beziehe die Netzgüte ('mesh_knoten') und etwaige Warnungen ein. "
+            "Gib 3–5 konkrete Empfehlungen (z. B. wann eine 3D-Rechnung nötig ist, Skew, "
+            "Paketlänge)."
+        ),
+        "selector": _em3d_data,
+        "section":  "## 3D-Magnetfeld-Validierung (Elmer FEM)\n\n",
+        "condition": lambda results, meta: bool(results.get("em3d")),
     },
     {
         "key":   "festigkeit",
@@ -431,6 +497,29 @@ _EXPERTS: list[dict] = [
         "section":  "## Thermische Analyse\n\n",
     },
     {
+        "key":   "kuehlung",
+        "title": "Kühlungs-Analyse (Spritzöl-Wickelkopfkühlung)",
+        "role":  "Kühlungs-Experte für Spritzöl-/Fluidkühlung elektrischer Antriebe",
+        "task":  (
+            "Bewerte die experimentelle Spritzöl-Wickelkopfkühlung (FLIP-Fluidsimulation) "
+            "im Zusammenhang mit dem thermischen Modell. WICHTIG — Scope ehrlich benennen: die "
+            "Studie ist QUALITATIV (visuell-plausibel), liefert KEIN Temperaturfeld und KEINEN "
+            "Wärmeübergangskoeffizienten; die Kennwerte ('spritzoel') sind geometrische "
+            "Benetzungs-Proxys (benetzte Fläche %, Tropfen-/Fragmentzahl). Beurteile: wie gut "
+            "das Öl die Wickelköpfe erreicht (Benetzung mittel/Spitze), Strahlbildung/"
+            "Tröpfchen, ob der Strahl ausreichend aufgelöst ist ('strahl_zellen' ≥ ~2, sonst "
+            "'strahl_unteraufgeloest'), und ob die Düsenauslegung (Anzahl, Ø, Druck, voller "
+            "Ring) zur Benetzung passt. Setze das qualitativ in Bezug zum LPTN-Kühlungskontext "
+            "('thermik_kontext': gewählte Kühlung, Wicklungstemperatur, Verluste) — bestätigt "
+            "die Benetzung die Annahme einer wirksamen Ölkühlung? Betone, dass für eine echte "
+            "Kühlrechnung eine konjugierte CFD-/VOF-Simulation nötig wäre. "
+            "Gib 3–5 konkrete Empfehlungen (Düsenlage/-anzahl/-druck, Auflösung, nächste Stufe)."
+        ),
+        "selector": _kuehlung_data,
+        "section":  "## Kühlungs-Analyse (Spritzöl-Wickelkopfkühlung)\n\n",
+        "condition": lambda results, meta: bool(results.get("oilspray")),
+    },
+    {
         "key":   "fahrzyklus",
         "title": "Fahrzyklus-Analyse",
         "role":  "Antriebsstrang-Experte für EV-Verbrauchsanalyse",
@@ -466,9 +555,13 @@ def run_expert_agents(
             progress_cb(msg, pct)
 
     out: dict[str, str] = {}
-    n = len(_EXPERTS)
+    # Bedingte Experten (3D-Feld, Kühlung) nur ausführen, wenn die zugehörigen Daten
+    # vorliegen — sonst würde der Abschnitt leer bzw. halluziniert werden.
+    experts = [e for e in _EXPERTS
+               if not e.get("condition") or e["condition"](results, meta)]
+    n = len(experts)
 
-    for idx, exp in enumerate(_EXPERTS):
+    for idx, exp in enumerate(experts):
         _log(f"👤 Experte {idx+1}/{n}: {exp['title']}…", int(5 + idx * 90 / n))
         try:
             data = exp["selector"](results, meta)
@@ -545,10 +638,14 @@ def run_expert_agents_compare(
             progress_cb(msg, pct)
 
     out: dict[str, str] = {}
-    n = len(_EXPERTS)
     names = [v.get("name") or f"Variante {i+1}" for i, v in enumerate(variants)]
+    # Bedingte Experten (3D-Feld, Kühlung) mitnehmen, sobald IRGENDEINE Variante die Daten hat.
+    def _any(cond):
+        return any(cond(v.get("results", {}) or {}, v.get("meta", {}) or {}) for v in variants)
+    experts = [e for e in _EXPERTS if not e.get("condition") or _any(e["condition"])]
+    n = len(experts)
 
-    for idx, exp in enumerate(_EXPERTS):
+    for idx, exp in enumerate(experts):
         _log(f"👤 Experte {idx+1}/{n} (Vergleich): {exp['title']}…", int(5 + idx * 90 / n))
         try:
             per_variant = []

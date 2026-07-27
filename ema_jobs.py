@@ -127,7 +127,11 @@ def _worker_loop():
             job["status"], job["started"] = ST_RUN, time.time()
             _save()
         try:
-            out = ex["run"](job.get("payload") or {}) or {}
+            payload = job.get("payload") or {}
+            # Job-Titel für die Executors mitgeben (z. B. als Speichername eines 3D-Laufs),
+            # ohne die run(payload)-Signatur zu ändern.
+            payload.setdefault("_job_title", job.get("title"))
+            out = ex["run"](payload) or {}
             status = out.get("status") or ST_DONE
         except Exception as e:                        # Executor selbst geworfen
             out, status = {"error": str(e)}, ST_ERR
