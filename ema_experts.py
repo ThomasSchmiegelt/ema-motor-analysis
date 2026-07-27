@@ -64,7 +64,7 @@ _EXPERT_IMAGES: dict[str, list[str]] = {
                    "em3d_slice_mid", "em3d_model_iso"],
     "festigkeit": ["structural", "deformation"],
     "temperatur": ["thermal"],
-    "kuehlung":   ["oil_coverage", "oil_wetting", "oil_droplets"],
+    "kuehlung":   ["cfd_wetting", "oil_coverage", "oil_wetting", "oil_droplets"],
     "fahrzyklus": ["drivecycle", "drivecycle_vollast", "drivecycle_anhaenger"],
 }
 
@@ -199,15 +199,17 @@ def _em3d_data(results: dict, meta: dict) -> dict:
 
 
 def _kuehlung_data(results: dict, meta: dict) -> dict:
-    """Fachdaten für den Kühlungs-Experten: die experimentelle Spritzöl-Studie (Benetzungs-
-    Proxys, QUALITATIV — kein Wärmeübergang) im Kontext des analytischen LPTN-Thermikmodells."""
+    """Fachdaten für den Kühlungs-Experten: die QUANTITATIVE OpenFOAM-VOF-Rechnung (echter HTC,
+    Stufe-1-Korrelation) UND/ODER die qualitative Spritzöl-Studie (Benetzungs-Proxys) im Kontext
+    des analytischen LPTN-Thermikmodells."""
     oil    = results.get("oilspray") or {}
     om     = oil.get("metrics") or {}
     oc     = oil.get("config") or {}
+    cfd    = results.get("cfd") or {}
     therm  = results.get("thermal") or {}
     steady = therm.get("steady") or {}
     losses = therm.get("losses") or {}
-    return {
+    out = {
         "spritzoel": {
             "benetzung_mittel_pct":   om.get("wetted_pct_mean"),
             "benetzung_spitze_pct":   om.get("wetted_pct_peak"),
@@ -225,14 +227,28 @@ def _kuehlung_data(results: dict, meta: dict) -> dict:
             "hinweis_scope":          oil.get("note", ""),
         },
         "thermik_kontext": {
-            "kuehlung":     therm.get("cooling_label", meta.get("cooling", "")),
-            "T_winding_C":  steady.get("T_winding"),
-            "T_magnet_C":   steady.get("T_magnet"),
-            "T_housing_C":  steady.get("T_housing"),
-            "verluste_W":   losses,
-            "T_ambient":    meta.get("T_ambient", 25),
+            "kuehlung":       therm.get("cooling_label", meta.get("cooling", "")),
+            "htc_quelle":     therm.get("htc_source", "preset"),   # "cfd" ⇒ vom OpenFOAM getrieben
+            "htc_oil_Wm2K":   therm.get("htc_oil_Wm2K"),
+            "T_winding_C":    steady.get("T_winding"),
+            "T_magnet_C":     steady.get("T_magnet"),
+            "T_housing_C":    steady.get("T_housing"),
+            "verluste_W":     losses,
+            "T_ambient":      meta.get("T_ambient", 25),
         },
     }
+    if cfd:
+        hd = cfd.get("htc_detail") or {}
+        out["openfoam_vof"] = {   # QUANTITATIVE OpenFOAM-VOF-Rechnung (interFoam)
+            "htc_eff_Wm2K":         cfd.get("htc_eff"),
+            "benetzung_mittel_pct": cfd.get("wetted_pct_mean"),
+            "benetzung_spitze_pct": cfd.get("wetted_pct_peak"),
+            "benetzte_flaeche_cm2": round((cfd.get("wetted_area_m2") or 0.0) * 1e4, 1),
+            "Re_jet": hd.get("Re_jet"), "Pr": hd.get("Pr"), "Nu": hd.get("Nu"),
+            "strahl_v_mps": (cfd.get("config") or {}).get("jet_v_mps"),
+            "hinweis_scope": cfd.get("scope_note", ""),
+        }
+    return out
 
 
 def _kennlinien_data(results: dict, meta: dict) -> dict:
@@ -501,23 +517,23 @@ _EXPERTS: list[dict] = [
         "title": "Kühlungs-Analyse (Spritzöl-Wickelkopfkühlung)",
         "role":  "Kühlungs-Experte für Spritzöl-/Fluidkühlung elektrischer Antriebe",
         "task":  (
-            "Bewerte die experimentelle Spritzöl-Wickelkopfkühlung (FLIP-Fluidsimulation) "
-            "im Zusammenhang mit dem thermischen Modell. WICHTIG — Scope ehrlich benennen: die "
-            "Studie ist QUALITATIV (visuell-plausibel), liefert KEIN Temperaturfeld und KEINEN "
-            "Wärmeübergangskoeffizienten; die Kennwerte ('spritzoel') sind geometrische "
-            "Benetzungs-Proxys (benetzte Fläche %, Tropfen-/Fragmentzahl). Beurteile: wie gut "
-            "das Öl die Wickelköpfe erreicht (Benetzung mittel/Spitze), Strahlbildung/"
-            "Tröpfchen, ob der Strahl ausreichend aufgelöst ist ('strahl_zellen' ≥ ~2, sonst "
-            "'strahl_unteraufgeloest'), und ob die Düsenauslegung (Anzahl, Ø, Druck, voller "
-            "Ring) zur Benetzung passt. Setze das qualitativ in Bezug zum LPTN-Kühlungskontext "
-            "('thermik_kontext': gewählte Kühlung, Wicklungstemperatur, Verluste) — bestätigt "
-            "die Benetzung die Annahme einer wirksamen Ölkühlung? Betone, dass für eine echte "
-            "Kühlrechnung eine konjugierte CFD-/VOF-Simulation nötig wäre. "
-            "Gib 3–5 konkrete Empfehlungen (Düsenlage/-anzahl/-druck, Auflösung, nächste Stufe)."
+            "Bewerte die Spritzöl-Wickelkopfkühlung im Zusammenhang mit dem Thermikmodell. "
+            "Der Datensatz kann zwei Pfade enthalten: (A) 'openfoam_vof' — eine QUANTITATIVE "
+            "OpenFOAM-VOF-Rechnung (interFoam) mit einem echten effektiven "
+            "Wärmeübergangskoeffizienten ('htc_eff_Wm2K', Stufe-1-Prallstrahl-Korrelation über "
+            "der gerechneten Benetzung; interFoam ist isotherm → kein aufgelöstes Temperaturfeld); "
+            "(B) 'spritzoel' — eine QUALITATIVE FLIP-Studie (Blender/Mantaflow) mit rein "
+            "geometrischen Benetzungs-Proxys (KEIN HTC). Benenne den Scope beider ehrlich. "
+            "Bewerte: die Höhe des HTC und ob er physikalisch plausibel ist (Ölspray ~500–5000 "
+            "W/m²·K), die benetzte Fläche (mittel/Spitze), Re/Pr/Nu; ob im Thermik-Kontext "
+            "('thermik_kontext') der HTC vom CFD getrieben wird ('htc_quelle'=='cfd') und wie "
+            "stark das die Wicklungstemperatur senkt; ob die Düsen-/Druckauslegung zur Benetzung "
+            "passt. Empfehle, ob und wann die konjugierte CHT-Stufe nötig wäre. "
+            "Gib 3–5 konkrete Empfehlungen (Düsen/Druck, Netz/Auflösung, nächste Stufe)."
         ),
         "selector": _kuehlung_data,
         "section":  "## Kühlungs-Analyse (Spritzöl-Wickelkopfkühlung)\n\n",
-        "condition": lambda results, meta: bool(results.get("oilspray")),
+        "condition": lambda results, meta: bool(results.get("oilspray") or results.get("cfd")),
     },
     {
         "key":   "fahrzyklus",

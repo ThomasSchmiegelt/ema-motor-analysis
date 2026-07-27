@@ -2055,13 +2055,36 @@ def run_pipeline(data: dict, state: dict, frames: list,
             _log(state, f"⚠ Wellenverbindung-Bewertung fehlgeschlagen: {_ce}", 93)
 
         # ── 7. Thermal LPTN analysis ──────────────────────────────────────────
+        # CFD-Kopplung (opt-in): liegt für dieses Projekt eine OpenFOAM-VOF-Spritzölrechnung
+        # vor UND ist Ölkühlung gewählt, treibt der GERECHNETE HTC die Wicklungskühlung statt
+        # des Preset-h_eff. Der CFD-Lauf ist separat (schreibt results.json["cfd"]) → auch von
+        # der Platte lesen, falls nicht schon im in-memory results.
+        _htc_oil, _wetted_area, _htc_source = 0.0, 0.0, "preset"
+        if cooling == "oil":
+            _cfd = results.get("cfd")
+            if not _cfd:
+                try:
+                    with open(os.path.join(proj, "results.json")) as _cf:
+                        _cfd = json.load(_cf).get("cfd")
+                except Exception:
+                    _cfd = None
+            if _cfd and _cfd.get("htc_eff"):
+                _htc_oil = float(_cfd["htc_eff"])
+                _wetted_area = float(_cfd.get("wetted_area_m2") or 0.0)
+                _htc_source = "cfd"
         if _do("thermal"):
             _log(state, f"🌡 Thermisches Modell ({cooling}, {T_ambient}°C Umgebung)...", 93)
+            if _htc_source == "cfd":
+                _log(state, f"  🌊 CFD-Spritzöl-HTC {_htc_oil:.0f} W/m²·K (benetzt "
+                            f"{_wetted_area*1e4:.1f} cm²) treibt die Wicklungskühlung", 93)
             try:
                 therm = ema_thermal.run_thermal_analysis(
                     geom, axial, rpm_thermal, load_nm, perf,
                     mat, st_mat, hp_mat, mag,
-                    cooling=cooling, T_amb=T_ambient, t_max=_THERMAL_TIME_S)
+                    cooling=cooling, T_amb=T_ambient, t_max=_THERMAL_TIME_S,
+                    htc_oil=_htc_oil, wetted_area_m2=_wetted_area)
+                therm["htc_source"] = _htc_source
+                therm["htc_oil_Wm2K"] = round(_htc_oil, 1)
                 therm_chart_b64 = _thermal_chart(therm)
                 _save_png_b64(therm_chart_b64, os.path.join(proj, "charts", "thermal.png"))
                 therm["chart_b64"] = therm_chart_b64
@@ -2269,6 +2292,8 @@ def run_pipeline(data: dict, state: dict, frames: list,
             "T_housing_C":     ss.get("T_housing"),
             "P_total_W":       losses_summary.get("P_total"),
             "cooling":         therm_summary.get("cooling_label", ""),
+            "htc_source":      (results.get("thermal") or {}).get("htc_source", "preset"),
+            "htc_oil_Wm2K":    (results.get("thermal") or {}).get("htc_oil_Wm2K"),
             "cycle_kWh100km":  (results.get("drivecycle") or {}).get("E_per_100km_kWh"),
             "cycle_eta":       (results.get("drivecycle") or {}).get("eta_drive"),
             "cycle_name":      (results.get("drivecycle") or {}).get("cycle_name", ""),

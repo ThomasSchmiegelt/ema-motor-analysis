@@ -1,6 +1,25 @@
 """E-Maschinen Analyse-Server: serves ema.html + full analysis pipeline."""
 
 import json, os, threading, time, urllib.error
+
+
+def _fix_fontconfig_env():
+    """Setzt FONTCONFIG_FILE/PATH auf die System-Config, falls sie leer/ungültig sind.
+    Die pixi/conda-Umgebungen (FreeCAD/CCX) exportieren FONTCONFIG_FIL="" → libfontconfig
+    meldet dann bei JEDEM Unterprozess (FreeCAD/Blender/Elmer/matplotlib) »Cannot load default
+    config file: No such file: (null)«. Wir setzen die Variablen VOR allen weiteren Imports auf
+    die vorhandene System-Config; da alle Runner env=os.environ.copy() nutzen, erben die
+    Unterprozesse die Korrektur (verifiziert: pixi überschreibt einen gesetzten Wert nicht)."""
+    sys_conf = "/etc/fonts/fonts.conf"
+    if os.path.exists(sys_conf):
+        if not (os.environ.get("FONTCONFIG_FILE") or "").strip():
+            os.environ["FONTCONFIG_FILE"] = sys_conf
+        if not (os.environ.get("FONTCONFIG_PATH") or "").strip():
+            os.environ["FONTCONFIG_PATH"] = os.path.dirname(sys_conf)
+
+
+_fix_fontconfig_env()
+
 from flask import Flask, request, jsonify, send_from_directory, send_file, Response
 
 app = Flask(__name__, static_folder=os.path.dirname(__file__))
@@ -548,6 +567,93 @@ def oilspray_preset_delete(pid: str):
         return ("", 204)
     import ema_oilspray
     return jsonify({"ok": bool(ema_oilspray.delete_preset(pid))})
+
+
+# ── Quantitative Spritzöl-Kühlung (OpenFOAM VOF / interFoam) ──────────────────
+# On-Demand-Pfad NEBEN Mantaflow (💧): löst die Strömung/Benetzung quantitativ und leitet
+# einen effektiven HTC ab, der (bei Ölkühlung) die Thermik speist. Spiegelt /oilspray + /em3d.
+_cfd_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+_cfd_abort = {"v": False}
+
+
+@app.route("/cfd", methods=["POST", "OPTIONS"])
+def cfd_start():
+    """Startet die OpenFOAM-VOF-Kühlrechnung (STL → snappyHexMesh → interFoam → HTC).
+    Body = Analyse-Payload (geom + axial_len) + ``cfd``-Optionen (pressure_bar, section_slots,
+    end_time, n_cells, refine, viscosity). 503 wenn OpenFOAM fehlt."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import openfoam_runner
+    if not openfoam_runner.OPENFOAM_OK:
+        return jsonify({"error": openfoam_runner.INSTALL_HINT, "need_install": True}), 503
+    if _cfd_state["status"] == "running":
+        return jsonify({"error": "CFD-Berechnung läuft bereits"}), 409
+    data = request.get_json(force=True) or {}
+    proj_dir, proj_id = _cfd_setup(data)
+    threading.Thread(target=_cfd_body, args=(data, proj_dir, proj_id), daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+def _cfd_setup(data):
+    """Gemeinsames Setup eines CFD-Laufs (Route + Job-Warteschlange): Projekt binden,
+    Abort-Flags zurücksetzen, State auf running."""
+    import openfoam_runner
+    proj_dir, proj_id = _em3d_project_dir(data)     # projektgebunden wie em3d/oil
+    _cfd_abort["v"] = False
+    openfoam_runner.clear_abort()
+    _cfd_state.update({"status": "running", "progress": 0, "log": [],
+                       "result": None, "error": None})
+    return proj_dir, proj_id
+
+
+def _cfd_body(data, proj_dir, proj_id):
+    """Synchroner Lauf-Körper von /cfd — auch von der Job-Warteschlange direkt aufgerufen."""
+    import ema_cfd, traceback
+    def cb(msg, pct=None):
+        _cfd_state["log"].append(msg)
+        if pct is not None:
+            _cfd_state["progress"] = int(pct)
+    try:
+        res = ema_cfd.run_cfd(data, proj_dir, progress_cb=cb,
+                              cancel_cb=lambda: _cfd_abort["v"])
+        res["project_id"] = proj_id
+        if res.get("aborted"):
+            _cfd_state["log"].append("⛔ Abgebrochen.")
+            _cfd_state["status"] = "aborted"
+        else:
+            _cfd_state["result"] = res
+            _cfd_state["status"] = "done"
+            _cfd_state["progress"] = 100
+    except Exception as e:
+        if _cfd_abort["v"] or "abgebrochen" in str(e).lower():
+            _cfd_state["log"].append("⛔ Abgebrochen.")
+            _cfd_state["status"] = "aborted"
+            _cfd_state["error"] = None
+        else:
+            _cfd_state["error"] = str(e)
+            _cfd_state["log"].append("⚠ " + str(e))
+            _cfd_state["log"].append(traceback.format_exc()[:600])
+            _cfd_state["status"] = "error"
+
+
+@app.route("/cfd/status")
+def cfd_status():
+    return jsonify({k: _cfd_state[k]
+                    for k in ("status", "progress", "log", "result", "error")})
+
+
+@app.route("/cfd/abort", methods=["POST", "OPTIONS"])
+def cfd_abort():
+    """Bricht die laufende CFD-Simulation ab (Flag + OpenFOAM-Prozess terminieren)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import openfoam_runner
+    if _cfd_state.get("status") != "running":
+        return jsonify({"status": "idle", "note": "keine laufende CFD-Simulation"})
+    _cfd_abort["v"] = True
+    killed = openfoam_runner.abort_current()
+    _cfd_state["log"].append("⛔ Abbruch angefordert…" + (" (Solver gestoppt)" if killed else ""))
+    return jsonify({"status": "aborting", "killed": killed})
 
 
 @app.route("/project/<pid>/oilspray")
@@ -3316,6 +3422,23 @@ def _jobs_abort_em3d():
     elmer_runner.abort_current()
 
 
+def _exec_cfd(payload):
+    import openfoam_runner
+    if not openfoam_runner.OPENFOAM_OK:
+        return {"status": "fehler", "error": openfoam_runner.INSTALL_HINT}
+    proj_dir, proj_id = _cfd_setup(payload)
+    _cfd_body(payload, proj_dir, proj_id)
+    st = _cfd_state["status"]
+    status = {"done": "fertig", "aborted": "abgebrochen"}.get(st, "fehler")
+    return {"status": status, "project_id": proj_id, "error": _cfd_state.get("error")}
+
+
+def _jobs_abort_cfd():
+    import openfoam_runner
+    _cfd_abort["v"] = True
+    openfoam_runner.abort_current()
+
+
 def _jobs_abort_oil():
     import blender_runner
     _oil_abort["v"] = True
@@ -3325,7 +3448,8 @@ def _jobs_abort_oil():
 # type → State-Dict des laufenden Jobs (für die Live-Anreicherung in GET /jobs)
 _JOB_STATES = {"analyse": _state, "em3d": _em3d_state,
                "em3d_sweep": _em3d_state, "oilspray": _oil_state,
-               "param_study": _study_state, "optimize": _opt_state}
+               "param_study": _study_state, "optimize": _opt_state,
+               "cfd": _cfd_state}
 
 
 @app.route("/jobs")
@@ -3404,6 +3528,9 @@ ema_jobs.init({
     "optimize":   {"run": _exec_optimize,
                    "busy": lambda: _opt_state["status"] == "running",
                    "abort": None},
+    "cfd":        {"run": _exec_cfd,
+                   "busy": lambda: _cfd_state["status"] == "running",
+                   "abort": _jobs_abort_cfd},
 })
 
 

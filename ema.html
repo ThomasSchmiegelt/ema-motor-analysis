@@ -204,6 +204,7 @@
     <button class="tab-btn"        id="tbtn-import"  onclick="switchTab('import')">📥 STEP-Import</button>
     <button class="tab-btn"        id="tbtn-em3d"    onclick="switchTab('em3d')">🧲 3D-Feld</button>
     <button class="tab-btn"        id="tbtn-oil"     onclick="switchTab('oil')">💧 Spritzöl-Kühlung</button>
+    <button class="tab-btn"        id="tbtn-cfd"     onclick="switchTab('cfd')">🌊 OpenFOAM (quant.)</button>
     <button class="tab-btn"        id="tbtn-spraytest" onclick="switchTab('spraytest')">🧪 Spray-Test</button>
     <button class="tab-btn"        id="tbtn-jobs"    onclick="switchTab('jobs')">⏳ Jobs<span id="jobs-badge" style="display:none;margin-left:5px;background:#e67e22;color:#fff;border-radius:9px;padding:0 6px;font-size:.68rem"></span></button>
     <button class="tab-btn"        id="tbtn-results" onclick="switchTab('results')" disabled>📊 FEM-Ergebnisse</button>
@@ -1150,6 +1151,16 @@
   </div>
 
   <div class="e3-card">
+    <div class="section-title">🧲 Gespeicherte 3D-Läufe</div>
+    <p style="font-size:.8rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      Fertige 3D-Läufe des aktiven Projekts — auch <b>als Job gerechnete</b> (die werden
+      automatisch gespeichert). Hier ohne Neurechnen wieder <b>öffnen</b> (Feld + Browser-Viewer)
+      oder <b>löschen</b>. Ein frisch fertiger Lauf wird über „💾 Speichern" (Tab ① Projekt) benannt abgelegt.
+    </p>
+    <div id="e3_saved_cards" style="font-size:.82rem;color:#9aa">— noch keine gespeicherten 3D-Läufe —</div>
+  </div>
+
+  <div class="e3-card">
     <div class="section-title">📐 Geometriequelle</div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <select id="e3_geomsrc" onchange="_e3SrcUserSet=true; adoptEm3dGeom()" style="max-width:330px">
@@ -2048,6 +2059,74 @@
  </div>
 </div><!-- /panel-oil -->
 
+<!-- ════════ TAB: OpenFOAM VOF (quantitative Spritzöl-Kühlung) ════════ -->
+<div class="tab-panel" id="panel-cfd">
+ <div class="e3-wrap">
+
+  <div class="e3-card">
+    <div class="section-title">🌊 Quantitative Spritzöl-Kühlung (OpenFOAM VOF / interFoam)</div>
+    <p style="font-size:.82rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      Rechnet auf DEMSELBEN Wickelkopf-Ausschnitt wie 💧 eine echte <b>VOF-Zweiphasenströmung</b>
+      (Öl/Luft, <code>interFoam</code>) und leitet daraus die benetzte Fläche, die Filmverteilung
+      und einen <b>effektiven Wärmeübergangskoeffizienten (HTC)</b> ab. Bei gewählter Ölkühlung
+      speist der HTC direkt das Thermikmodell (Wicklung → Kühlmittel) → die Motortemperaturen
+      folgen dem gerechneten Spray statt dem pauschalen Preset-Wert.
+    </p>
+    <div style="background:#2a2620;border:1px solid #6a5a2e;border-radius:5px;padding:8px 11px;font-size:.76rem;color:#d8c89a;line-height:1.45">
+      ⚠ <b>Scope:</b> <code>interFoam</code> ist <b>isotherm</b> — die Strömung/Benetzung wird
+      exakt gelöst, der <b>HTC ist ein korrelationsbasierter Kennwert</b> (Prallstrahl-Nusselt
+      über der gerechneten Benetzung, Stufe 1), <b>kein</b> aufgelöstes Temperaturfeld. Ein
+      voll konjugierter HTC (CHT, <code>chtMultiRegionFoam</code>) wäre die Folgestufe.
+    </div>
+    <div id="cfd_need_install" style="display:none;margin-top:8px;font-size:.78rem;color:#e88"></div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">⚙ Simulationseinstellungen</div>
+    <div class="input-group"><label>Öldruck</label>
+      <input type="number" id="cfd_pressure" value="3" min="0.1" max="6" step="0.1"/><span>bar</span></div>
+    <div class="input-group"><label>Düsen-Ø (für HTC)</label>
+      <input type="number" id="cfd_nozzle_d" value="1.0" min="0.3" max="3" step="0.1"/><span>mm</span></div>
+    <div class="input-group"><label>Ausschnitt-Nuten</label>
+      <input type="number" id="cfd_section" value="3" min="1" max="12" step="1"/><span>Nuten</span></div>
+    <div class="input-group"><label>Sim-Endzeit</label>
+      <input type="number" id="cfd_endtime" value="0.05" min="0.005" max="0.5" step="0.005"/><span>s</span></div>
+    <div class="input-group"><label>Grund-Auflösung</label>
+      <input type="number" id="cfd_ncells" value="44" min="16" max="120" step="4"/><span>Zellen</span>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Hintergrund-Zellzahl je Längsachse; snappyHexMesh verfeinert um den Wickelkopf. Höher = feiner + langsamer.</small></div>
+    <div class="input-group"><label>Netz-Verfeinerung</label>
+      <select id="cfd_refine" style="grid-column:2/-1">
+        <option value="1">Level 1 — grob/schnell</option>
+        <option value="2" selected>Level 2 — Standard</option>
+        <option value="3">Level 3 — fein (langsam)</option>
+      </select></div>
+    <div class="input-group"><label>Öl-Viskosität ν</label>
+      <input type="number" id="cfd_visc" value="0.00004" min="0.000005" max="0.001" step="0.000005"/><span>m²/s</span>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Kinematische Viskosität (~40 cSt warm = 4e-5). Stoffwerte für die HTC-Korrelation sind dokumentierte Öl-Defaults.</small></div>
+  </div>
+
+  <div class="e3-card">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button id="cfd_btn" onclick="startCfd()" style="background:#2e6a8a;width:auto;padding:10px 16px;font-size:.85rem">🌊 CFD-Kühlrechnung starten</button>
+      <button id="cfd_abort_btn" onclick="abortCfd()" style="display:none;background:#833;width:auto;padding:10px 14px">⛔ Abbrechen</button>
+      <button onclick="queueCfd()" style="background:#456;width:auto;padding:10px 14px;font-size:.8rem"
+        title="CFD-Kühlrechnung in die Server-Warteschlange einreihen (läuft auch bei geschlossenem Browser) → Tab ⏳ Jobs">➕ Warteschlange</button>
+      <span id="cfd_queue_msg" style="font-size:.72rem;color:#6c8"></span>
+    </div>
+    <div id="cfd_progress_wrap" style="display:none;margin-top:10px">
+      <div style="background:#21262d;border-radius:4px;height:8px;overflow:hidden">
+        <div id="cfd_bar" style="background:#2e6a8a;height:100%;width:0%;transition:width .3s"></div>
+      </div>
+      <pre id="cfd_log" style="margin-top:6px;max-height:220px;overflow:auto;background:#0d1014;border-radius:4px;padding:8px;font-size:.72rem;color:#9cc;white-space:pre-wrap"></pre>
+    </div>
+    <div id="cfd_msg" style="margin-top:8px;font-size:.82rem;color:#9aa"></div>
+  </div>
+
+  <div id="cfd_results" style="display:none"></div>
+
+ </div>
+</div><!-- /panel-cfd -->
+
 <!-- ════════ TAB: Spray-Test-Prüfstand (iteratives Spray-Tuning) ════════ -->
 <div class="tab-panel" id="panel-spraytest">
  <div class="e3-wrap">
@@ -2407,10 +2486,14 @@
     Beim Wieder-Öffnen erscheint hier der aktuelle Stand (die Warteschlange überlebt sogar
     einen Server-Neustart; ein dabei unterbrochener Job wird als abgebrochen markiert).
     Reihen einreihen über die <b>„➕ Warteschlange"</b>-Knöpfe: im Fuß (aktuelle Berechnung),
-    bei den Varianten &amp; der Parameter-Tabelle (⚖ Vergleich), bei den KI-Entwürfen
-    (🎨 Designer) sowie im 🧲 3D-Feld- und 💧 Spritzöl-Tab. Es läuft immer
-    <b>ein</b> Job gleichzeitig (FreeCAD/CalculiX/Elmer/Blender sind rechenlast-schwer);
-    direkt gestartete Berechnungen haben Vorrang, die Warteschlange wartet dann.
+    bei der Parameterstudie &amp; Zielwertoptimierung (④ Berechnung), bei den Varianten &amp;
+    der Parameter-Tabelle (⚖ Vergleich), bei den KI-Entwürfen (🎨 Designer) sowie im
+    🧲 3D-Feld- und 💧 Spritzöl-Tab. Es läuft immer <b>ein</b> Job gleichzeitig
+    (FreeCAD/CalculiX/Elmer/Blender sind rechenlast-schwer); direkt gestartete Berechnungen
+    haben Vorrang, die Warteschlange wartet dann. Ist ein Job <b>fertig</b>, öffnet der
+    Knopf rechts das Ergebnis im passenden Tab (🧲 3D-Feld / 💧 Spritzöl / 📈 Studie /
+    🎯 Optimierung / 📂 Analyse). 3D-Feld-Jobs werden dabei automatisch gespeichert und
+    erscheinen auch in der Karte „🧲 Gespeicherte 3D-Läufe" im 3D-Feld-Tab.
   </div>
   <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
     <button id="jobs_pause_btn" onclick="jobsTogglePause()"
@@ -3125,14 +3208,14 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','spraytest','jobs','results','compare'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','cfd','spraytest','jobs','results','compare'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
   projekt:'panel-projekt',
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
   designer:'panel-designer', import:'panel-import', em3d:'panel-em3d', oil:'panel-oil',
-  spraytest:'panel-spraytest', jobs:'panel-jobs',
+  cfd:'panel-cfd', spraytest:'panel-spraytest', jobs:'panel-jobs',
   results:'tab-results', compare:'tab-compare'
 };
 
@@ -3217,7 +3300,7 @@ window.addEventListener('load', () => {
 // dieser Tab zeigt/steuert nur den Server-Stand (Poll alle 3 s solange offen).
 let _jobsTimer = null, _jobsPaused = false;
 const _JOB_ICON = { analyse: '⚙', em3d: '🧲', em3d_sweep: '🌡', oilspray: '💧',
-                    param_study: '📈', optimize: '🎯' };
+                    param_study: '📈', optimize: '🎯', cfd: '🌊' };
 const _JOB_CHIP = { 'wartet': '#7f8c8d', 'läuft': '#2980b9', 'fertig': '#27ae60',
                     'fehler': '#c0392b', 'abgebrochen': '#e67e22' };
 
@@ -3288,6 +3371,8 @@ async function jobsRefresh() {
       proj = `<button onclick="openJobStudy()" style="${bs}">📈 Ansehen</button>`;
     else if (x.status === 'fertig' && x.type === 'optimize')
       proj = `<button onclick="openJobOptimize()" style="${bs}">🎯 Ansehen</button>`;
+    else if (x.status === 'fertig' && x.type === 'cfd')
+      proj = `<button onclick="openJobCfd('${escHtml(x.project_id || '')}')" style="${bs}">🌊 Ansehen</button>`;
     else if (x.project_id && (x.status === 'fertig' || (isE3 && x.status === 'abgebrochen'))) {
       if (isE3)
         proj = `<button onclick="openJobEm3d('${escHtml(x.project_id)}')" style="${bs}">🧲 3D-Feld</button>`;
@@ -3339,10 +3424,26 @@ async function openJobEm3d(pid) {
       window._activeProject = { id: pid, name: (window._activeProject && _activeProject.id === pid && _activeProject.name) || pid };
     }
     switchTab('em3d');
-    if (typeof _e3RefreshSavedList === 'function') await _e3RefreshSavedList();
-    const sel = document.getElementById('e3_saved_list');
-    if (sel && sel.options.length > 1) { sel.selectedIndex = 1; await _e3LoadRun(); }
+    if (typeof _e3RefreshSavedCards === 'function') await _e3RefreshSavedCards();
+    if (typeof _e3RefreshSavedList === 'function') _e3RefreshSavedList();
+    // Neuesten gespeicherten Lauf (= dieser Job, Auto-Speichern) direkt in den Viewer laden.
+    const list = await fetch('/em3d/saved').then(x => x.json());
+    if (Array.isArray(list) && list.length)
+      await _e3LoadRunById(list[0].id, document.getElementById('e3_msg'), true);
     else alert('Kein gespeicherter 3D-Lauf für dieses Projekt gefunden.');
+  } catch (e) { alert('⚠ ' + e.message); }
+}
+
+// Ergebnis eines CFD-Jobs öffnen: 🌊-Tab + zuletzt gerechnetes Ergebnis (liegt im Server-State).
+async function openJobCfd(pid) {
+  try {
+    if (pid) {
+      await fetch('/project/' + encodeURIComponent(pid) + '/activate', { method: 'POST' }).catch(() => {});
+      window._activeProject = { id: pid, name: (window._activeProject && _activeProject.id === pid && _activeProject.name) || pid };
+    }
+    switchTab('cfd');
+    const s = await fetch('/cfd/status').then(x => x.json());
+    if (s.result) _renderCfd(s.result);
   } catch (e) { alert('⚠ ' + e.message); }
 }
 
@@ -3398,6 +3499,15 @@ async function _reattachJobs() {
       const pw = document.getElementById('oil_progress_wrap'); if (pw) pw.style.display = 'block';
       const ab = document.getElementById('oil_abort_btn'); if (ab) ab.style.display = '';
       _pollOil();
+    }
+  } catch (e) {}
+  try {
+    const s = await fetch('/cfd/status').then(r => r.json());
+    if (s.status === 'running' && typeof _pollCfd === 'function') {
+      const b = document.getElementById('cfd_btn'); if (b) b.disabled = true;
+      const pw = document.getElementById('cfd_progress_wrap'); if (pw) pw.style.display = 'block';
+      const ab = document.getElementById('cfd_abort_btn'); if (ab) ab.style.display = '';
+      _pollCfd();
     }
   } catch (e) {}
   try {
@@ -5423,7 +5533,8 @@ function _em3dGeomSummaryHtml(p) {
 async function adoptEm3dGeom() {
   const sum = document.getElementById('e3_geomsummary');
   if (!sum) return;
-  _e3RefreshSavedList();           // gespeicherte 3D-Läufe in die Auswahl laden (Tab-Öffnen)
+  _e3RefreshSavedList();           // gespeicherte 3D-Läufe in die Tab-①-Auswahl laden
+  if (typeof _e3RefreshSavedCards === 'function') _e3RefreshSavedCards();  // Karten im 3D-Feld-Tab
   try {
     _em3dGeomPayload = await _em3dBuildGeomPayload();
     sum.innerHTML = _em3dGeomSummaryHtml(_em3dGeomPayload);
@@ -5536,6 +5647,7 @@ async function _e3SaveRun() {
     if (r.error) { m.style.color = '#e57'; m.textContent = '⚠ ' + r.error; return; }
     m.style.color = '#6c6'; m.textContent = '✓ Gespeichert: ' + (r.name || r.id);
     await _e3RefreshSavedList();
+    if (typeof _e3RefreshSavedCards === 'function') _e3RefreshSavedCards();
   } catch (e) { m.style.color = '#e57'; m.textContent = '⚠ ' + e.message; }
 }
 
@@ -5553,26 +5665,73 @@ async function _e3RefreshSavedList() {
   } catch (e) {}
 }
 
+// Vom Tab-①-Dropdown (`#e3_saved_list`): den gewählten Lauf per ID laden.
 async function _e3LoadRun() {
   const m = document.getElementById('e3_save_msg');
   const id = document.getElementById('e3_saved_list').value;
   if (!id) { m.style.color = '#e57'; m.textContent = '⚠ Bitte einen Lauf wählen.'; return; }
+  // Vom Tab ① aus NICHT automatisch in den 3D-Feld-Tab springen; die Meldung führt hin.
+  const r = await _e3LoadRunById(id, m, false);
+  if (r && !r.error) m.textContent += ' — im 3D-Feld-Tab „🧊 Im Browser ansehen".';
+}
+
+// Gespeicherten 3D-Lauf per ID laden — genutzt vom Tab-①-Dropdown UND der Karten-Liste
+// „🧲 Gespeicherte 3D-Läufe" im 3D-Feld-Tab (und von openJobEm3d). openInTab=true wechselt
+// vorher in den 3D-Feld-Tab, damit das Ergebnis + der Browser-Viewer sofort sichtbar sind.
+async function _e3LoadRunById(id, msgEl, openInTab) {
   try {
     const r = await fetch('/em3d/saved/' + encodeURIComponent(id)).then(x => x.json());
-    if (r.error) { m.style.color = '#e57'; m.textContent = '⚠ ' + r.error; return; }
+    if (r.error) { if (msgEl) { msgEl.style.color = '#e57'; msgEl.textContent = '⚠ ' + r.error; } return r; }
     // WICHTIG: die Feld-/Feldlinien-Caches des VORHERIGEN Laufs leeren — _e3GetPointPd cached
     // die geparste VTP je Punkt-Index; ohne Leeren zeigt der Viewer nach dem Laden das ALTE
-    // (oder gar kein) Feld („lädt ohne Feld"). _e3PlayStop() leert _e3PdCache/_e3LinesCache +
-    // stoppt einen laufenden Player. Danach den Viewer-Zustand neutralisieren.
+    // (oder gar kein) Feld. _e3PlayStop() leert _e3PdCache/_e3LinesCache + stoppt den Player.
     if (typeof _e3PlayStop === 'function') _e3PlayStop();
     _e3ViewIdx = null; _e3SweepPoints = null;
     _e3ApplyConfig(r.config);
+    if (openInTab && window._activeTab !== 'em3d') switchTab('em3d');
     if (r.result && r.result.sweep) _renderEm3dSweep(r.result); else _renderEm3d(r.result);
-    // Viewer NICHT automatisch öffnen (der Saved-Runs-Knopf sitzt auf Tab ①, der Viewer im
-    // 3D-Feld-Tab → würde in einen versteckten 0×0-Container rendern). Der Cache ist geleert →
-    // „🧊 Im Browser ansehen" holt die Feld-VTP frisch aus dem Store.
-    m.style.color = '#6c6'; m.textContent = '✓ Geladen: ' + (r.name || id) + ' — im 3D-Feld-Tab „🧊 Im Browser ansehen".';
-  } catch (e) { m.style.color = '#e57'; m.textContent = '⚠ ' + e.message; }
+    if (msgEl) { msgEl.style.color = '#6c6'; msgEl.textContent = '✓ Geladen: ' + (r.name || id); }
+    return r;
+  } catch (e) { if (msgEl) { msgEl.style.color = '#e57'; msgEl.textContent = '⚠ ' + e.message; } }
+}
+
+// Karten-Liste „🧲 Gespeicherte 3D-Läufe" im 3D-Feld-Tab (Muster wie die 💧-Öl-Varianten).
+async function _e3RefreshSavedCards() {
+  const el = document.getElementById('e3_saved_cards');
+  if (!el) return;
+  try {
+    const list = await fetch('/em3d/saved').then(x => x.json());
+    if (!Array.isArray(list) || !list.length) {
+      el.innerHTML = '<span style="color:#889">— noch keine gespeicherten 3D-Läufe —</span>'; return; }
+    let h = '<div style="display:flex;flex-direction:column;gap:6px">';
+    for (const it of list) {
+      const bits = [];
+      if (it.is_submodel) bits.push('🔍 Gebiet/Sektor');
+      else if (it.is_sweep) bits.push('Sweep');
+      if (it.excitation) bits.push(it.excitation === 'loaded' ? 'mit Last' : 'Leerlauf');
+      if (it.b_gap != null) bits.push('B_gap ' + it.b_gap + ' T');
+      h += `<div style="display:flex;gap:8px;align-items:center;background:#1c2024;border:1px solid #333;`
+         + `border-radius:5px;padding:6px 9px">`
+         + `<span style="flex:1"><b>${escHtml(it.name || it.id)}</b>`
+         + `<span style="color:#889;font-size:.9em"> — ${escHtml(it.timestamp || '')}`
+         + `${bits.length ? ' · ' + escHtml(bits.join(' · ')) : ''}</span></span>`
+         + `<button onclick="_e3LoadRunById('${escHtml(it.id)}', document.getElementById('e3_msg'), true)" `
+         +   `style="width:auto;padding:3px 10px;background:#2e6a4a">📂 Laden</button>`
+         + `<button onclick="_e3DeleteSavedRun('${escHtml(it.id)}')" `
+         +   `style="width:auto;padding:3px 9px;background:#7a3030">🗑</button>`
+         + `</div>`;
+    }
+    el.innerHTML = h + '</div>';
+  } catch (e) {
+    el.innerHTML = '<span style="color:#c66">⚠ Liste nicht ladbar.</span>';
+  }
+}
+
+async function _e3DeleteSavedRun(id) {
+  if (!confirm('Gespeicherten 3D-Lauf löschen?')) return;
+  try { await fetch('/em3d/saved/' + encodeURIComponent(id) + '/delete', { method: 'POST' }); } catch (e) {}
+  _e3RefreshSavedCards();
+  if (typeof _e3RefreshSavedList === 'function') _e3RefreshSavedList();
 }
 
 async function _e3DeleteSaved() {
@@ -5584,6 +5743,7 @@ async function _e3DeleteSaved() {
     await fetch('/em3d/saved/' + encodeURIComponent(id) + '/delete', { method: 'POST' });
     m.style.color = '#6c6'; m.textContent = '✓ Gelöscht.';
     await _e3RefreshSavedList();
+    if (typeof _e3RefreshSavedCards === 'function') _e3RefreshSavedCards();
   } catch (e) { m.style.color = '#e57'; m.textContent = '⚠ ' + e.message; }
 }
 
@@ -6428,6 +6588,107 @@ async function queueOilspray() {
   const payload = await _oilBuildPayload();
   await enqueueJobs([{ type: 'oilspray', title: '💧 Spritzöl-Simulation', payload }],
                     document.getElementById('oil_status'));
+}
+
+// ── 🌊 OpenFOAM-VOF-Kühlrechnung (quantitativ) ──────────────────────────────────
+async function _cfdBuildPayload() {
+  const g = id => document.getElementById(id);
+  const payload = await buildPayload();        // Geometrie + axial_len (wie 💧/🧲)
+  payload.cfd = {
+    pressure_bar:  +g('cfd_pressure').value || 3,
+    nozzle_d_mm:   +g('cfd_nozzle_d').value || 1,
+    section_slots: +g('cfd_section').value || 3,
+    end_time:      +g('cfd_endtime').value || 0.05,
+    n_cells:       +g('cfd_ncells').value || 44,
+    refine:        +g('cfd_refine').value || 2,
+    viscosity:     +g('cfd_visc').value || 4e-5,
+  };
+  return payload;
+}
+
+async function startCfd() {
+  const btn = document.getElementById('cfd_btn');
+  const msg = document.getElementById('cfd_msg');
+  document.getElementById('cfd_results').style.display = 'none';
+  btn.disabled = true;
+  document.getElementById('cfd_progress_wrap').style.display = 'block';
+  document.getElementById('cfd_bar').style.width = '0%';
+  document.getElementById('cfd_log').textContent = '';
+  msg.style.color = '#9aa'; msg.textContent = '⏳ Starte OpenFOAM-VOF-Rechnung…';
+  try {
+    const payload = await _cfdBuildPayload();
+    const r = await fetch('/cfd', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify(payload) });
+    const j = await r.json();
+    if (r.status === 503) {
+      const ni = document.getElementById('cfd_need_install');
+      if (ni) { ni.style.display = 'block'; ni.textContent = j.error || 'OpenFOAM nicht installiert.'; }
+      msg.style.color = '#e88'; msg.textContent = '⚠ OpenFOAM nicht verfügbar.';
+      btn.disabled = false; return;
+    }
+    if (!r.ok) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + (j.error || 'Start fehlgeschlagen'); btn.disabled = false; return; }
+    document.getElementById('cfd_abort_btn').style.display = '';
+    _pollCfd();
+  } catch (e) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + e.message; btn.disabled = false; }
+}
+
+async function abortCfd() {
+  try { await fetch('/cfd/abort', { method: 'POST' }); } catch (e) {}
+}
+
+async function _pollCfd() {
+  let s;
+  try { s = await fetch('/cfd/status').then(x => x.json()); } catch (e) { setTimeout(_pollCfd, 2000); return; }
+  document.getElementById('cfd_bar').style.width = (s.progress || 0) + '%';
+  const logEl = document.getElementById('cfd_log');
+  if (Array.isArray(s.log)) { logEl.textContent = s.log.join('\n'); logEl.scrollTop = logEl.scrollHeight; }
+  if (s.status === 'running') { setTimeout(_pollCfd, 1500); return; }
+  document.getElementById('cfd_btn').disabled = false;
+  document.getElementById('cfd_abort_btn').style.display = 'none';
+  const msg = document.getElementById('cfd_msg');
+  if (s.status === 'error') { msg.style.color = '#e57'; msg.textContent = '⚠ ' + (s.error || 'Fehler'); return; }
+  if (s.status === 'aborted') { msg.style.color = '#c85'; msg.textContent = '⛔ Abgebrochen.'; return; }
+  if (s.result) { _renderCfd(s.result); msg.style.color = '#6c6'; msg.textContent = '✓ Fertig.'; }
+}
+
+function _renderCfd(res) {
+  const box = document.getElementById('cfd_results');
+  if (!res) return;
+  const hd = res.htc_detail || {};
+  const cfg = res.config || {};
+  const img = (res.images && res.images.cfd_wetting)
+    ? `<img src="data:image/png;base64,${res.images.cfd_wetting}" style="width:100%;max-width:640px;border-radius:5px;cursor:zoom-in" onclick="window.open(this.src)"/>` : '';
+  box.innerHTML = `
+    <div class="e3-card">
+      <div class="section-title">🌊 Ergebnis der VOF-Kühlrechnung</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:stretch;margin-bottom:10px">
+        <div style="flex:1;min-width:180px;background:#16302a;border:1px solid #2e6a4a;border-radius:8px;padding:12px 14px">
+          <div style="font-size:.74rem;color:#8ca">Effektiver Wärmeübergang (HTC)</div>
+          <div style="font-size:1.6rem;color:#7fe0b0;font-weight:600">${escHtml(String(res.htc_eff))} <span style="font-size:.9rem;color:#8ca">W/m²·K</span></div>
+          <div style="font-size:.72rem;color:#8ca;margin-top:3px">→ speist die Thermik (Wicklung → Kühlmittel)</div>
+        </div>
+        <div style="flex:1;min-width:180px;background:#1a2430;border:1px solid #2e4a6a;border-radius:8px;padding:12px 14px">
+          <div style="font-size:.74rem;color:#9bd">Benetzte Wickelkopf-Fläche</div>
+          <div style="font-size:1.6rem;color:#8cd0ff;font-weight:600">${escHtml(String(res.wetted_pct_mean))} <span style="font-size:.9rem;color:#9bd">%</span></div>
+          <div style="font-size:.72rem;color:#9bd;margin-top:3px">Spitze ${escHtml(String(res.wetted_pct_peak))} % · ${(res.wetted_area_m2*1e4).toFixed(1)} cm²</div>
+        </div>
+      </div>
+      <table style="width:100%;font-size:.78rem;border-collapse:collapse;margin-bottom:10px">
+        <tr><td style="color:#889;padding:2px 0">Strahlgeschwindigkeit</td><td style="text-align:right;color:#cde">${escHtml(String(cfg.jet_v_mps))} m/s (${escHtml(String(cfg.pressure_bar))} bar)</td></tr>
+        <tr><td style="color:#889;padding:2px 0">Re / Pr / Nu (Korrelation)</td><td style="text-align:right;color:#cde">${escHtml(String(hd.Re_jet))} / ${escHtml(String(hd.Pr))} / ${escHtml(String(hd.Nu))}</td></tr>
+        <tr><td style="color:#889;padding:2px 0">Charakteristische Länge</td><td style="text-align:right;color:#cde">${escHtml(String(hd.L_char_mm))} mm</td></tr>
+        <tr><td style="color:#889;padding:2px 0">Netz (Auflösung/Verfeinerung)</td><td style="text-align:right;color:#cde">${escHtml(String(cfg.n_cells))} / L${escHtml(String(cfg.refine))}</td></tr>
+      </table>
+      ${img}
+      <div style="margin-top:8px;font-size:.74rem;color:#987;line-height:1.4">ℹ ${escHtml(res.scope_note || '')}</div>
+    </div>`;
+  box.style.display = 'block';
+}
+
+async function queueCfd() {
+  const payload = await _cfdBuildPayload();
+  await enqueueJobs([{ type: 'cfd', title: '🌊 OpenFOAM-VOF-Kühlung', payload }],
+                    document.getElementById('cfd_queue_msg'));
 }
 
 // ── 💾 Darstellungs-Presets + Rechen-Pakete ─────────────────────────────────────────

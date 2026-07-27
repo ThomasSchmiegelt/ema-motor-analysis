@@ -1,6 +1,8 @@
 # Python-Abhängigkeiten (pip). Externe Programme (NICHT über pip): FreeCAD 1.1.x +
-# CalculiX (über pixi, s. README), optional Ollama/pandoc/pdflatex (PDF-Berichte) und
-# Elmer FEM für die 3D-Magnetfeldberechnung (s. NUTZUNGSANLEITUNG, Tab „🧲 3D-Feld").
+# CalculiX (über pixi, s. README), optional Ollama/pandoc/pdflatex (PDF-Berichte),
+# Elmer FEM für die 3D-Magnetfeldberechnung (Tab „🧲 3D-Feld") und OpenFOAM v2406
+# (ESI, apt `openfoam2406-default`) für die quantitative Spritzöl-Kühlung (Tab „🌊 OpenFOAM").
+# vtk (unten) wird auch von ema_cfd (STL-Skalierung + Rand-VTP-Auswertung) genutzt.
 flask>=3.0.0
 numpy>=1.26.0   # 2.x wird unterstützt (np.trapezoid statt np.trapz)
 matplotlib>=3.8.0
