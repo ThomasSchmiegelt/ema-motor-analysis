@@ -33,3 +33,11 @@ pikogk/dotnet-install.sh           # Installer-Skript (kein Source)
 # ── OS / Editor ──
 .DS_Store
 *.swp
+
+# pikogk-Unterprojekte sind EIGENE Git-Repos (Leap71/Blosc + eigenes PicoGKWebApi) —
+# nicht in den Monorepo einbetten; behalten ihre .git-Historie auf der Platte.
+pikogk/PicoGK/
+pikogk/PicoGKRuntime/
+pikogk/PicoGKWebApi/
+pikogk/PicoGK_Examples/
+pikogk/c-blosc/
