@@ -1,0 +1,35 @@
+# ── ai-workspace Monorepo .gitignore ──────────────────────────────────────────
+# Es wird NUR Quellcode versioniert. Laufzeitdaten, Build-Artefakte und native
+# Binaries bleiben auf der Platte (der laufende Dienst nutzt sie), gehen aber NICHT
+# in Git. Ein frischer Clone auf einem anderen Rechner müsste die nativen Teile
+# (pikogk picogk.so / c-blosc) neu bauen — bewusst außerhalb dieses POC-Scopes.
+
+# ── Python (cae_orchestrator, connection_detection) ──
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# ── cae_orchestrator: Laufzeit-/Zwischenartefakte (liegen ohnehin in ~/cae_projekte) ──
+cae_orchestrator/**/__pycache__/
+
+# ── .NET (pikogk) Build-Ausgaben ──
+pikogk/**/bin/
+pikogk/**/obj/
+pikogk/**/.vs/
+
+# ── pikogk: Laufzeitdaten + native Build-Artefakte (NICHT versionieren) ──
+pikogk/PicoGKWebApi/data/          # 11 G generierte STL-Instanzen (Laufzeit-Store)
+pikogk/PicoGKWebApi/output/        # Render-/Export-Ausgaben
+pikogk/PicoGKRuntime/Dist/         # gebaute native Runtime (picogk.so + Abhängigkeiten)
+pikogk/local-install/              # gebautes c-blosc-Install-Präfix
+pikogk/c-blosc/                    # vendored Third-Party-Build (rebuildbar)
+pikogk/logs/                       # Prüfstands-/Testläufe
+pikogk/.dotnet/                    # falls .NET SDK je hierher zeigt
+pikogk/dotnet-install.sh           # Installer-Skript (kein Source)
+
+# ── OS / Editor ──
+.DS_Store
+*.swp
