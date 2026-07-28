@@ -1,0 +1,11 @@
+# Python-Abhängigkeiten (pip). Externe Programme (NICHT über pip): FreeCAD 1.1.x +
+# CalculiX (über pixi, s. README), optional Ollama/pandoc/pdflatex (PDF-Berichte) und
+# Elmer FEM für die 3D-Magnetfeldberechnung (s. NUTZUNGSANLEITUNG, Tab „🧲 3D-Feld").
+flask>=3.0.0
+numpy>=1.26.0   # 2.x wird unterstützt (np.trapezoid statt np.trapz)
+matplotlib>=3.8.0
+scipy>=1.11.0   # direct sparse FDM solver (falls back to iterative SOR if absent)
+pyamg>=5.0      # iterativer AMG-Solver für sehr hohe FDM-Auflösung (>2500 px)
+pypdf>=4.0      # PDF-Textextraktion für die Wissensbasis (RAG); nur dafür benötigt
+gmsh>=4.12      # 3D-Mesh (OCC) für die Elmer-3D-Magnetfeldberechnung (ema_em3d)
+vtk>=9.0        # 3D-Visualisierung (offscreen) + VTU-Auswertung der Elmer-Ergebnisse
