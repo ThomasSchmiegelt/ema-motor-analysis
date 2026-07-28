@@ -652,8 +652,8 @@ def test_frames_marker_regex():
 
 
 def test_clamp():
-    assert OIL._clamp(900, *OIL.RES_RANGE, OIL.DEFAULT_RES) == OIL.RES_RANGE[1]
-    assert OIL.RES_RANGE[1] >= 512, "Domain-Auflösung soll bis mind. 512 gehen (Nutzerwunsch)"
+    assert OIL._clamp(2000, *OIL.RES_RANGE, OIL.DEFAULT_RES) == OIL.RES_RANGE[1]
+    assert OIL.RES_RANGE[1] >= 1000, "Domain-Auflösung soll bis mind. 1000 gehen (Nutzerwunsch)"
     assert OIL._clamp(1, *OIL.RES_RANGE, OIL.DEFAULT_RES) == OIL.RES_RANGE[0]
     assert OIL._clamp("abc", *OIL.RES_RANGE, OIL.DEFAULT_RES) == OIL.DEFAULT_RES
     assert OIL._clamp(72, *OIL.RES_RANGE, OIL.DEFAULT_RES) == 72

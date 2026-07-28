@@ -47,7 +47,7 @@ SPRAY_PARAMS = {
     "jet_cone_deg":    {"lo": 0.0,   "hi": 30.0, "log": False, "label": "Sprühkegel",         "unit": "°",   "fmt": "%.0f"},
     "surface_tension": {"lo": 0.002, "hi": 0.05, "log": True,  "label": "Oberflächenspannung","unit": "",    "fmt": "%.4f"},
     "viscosity":       {"lo": 0.001, "hi": 0.08, "log": True,  "label": "Viskosität",         "unit": "",    "fmt": "%.4f"},
-    "nozzle_d_mm":     {"lo": 0.5,   "hi": 1.5,  "log": False, "label": "Düsen-Ø",            "unit": "mm",  "fmt": "%.1f"},
+    "nozzle_d_mm":     {"lo": 0.5,   "hi": 3.0,  "log": False, "label": "Düsen-Ø",            "unit": "mm",  "fmt": "%.1f"},
 }
 PARAM_ORDER = list(SPRAY_PARAMS)
 

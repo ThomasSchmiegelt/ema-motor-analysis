@@ -117,14 +117,14 @@ def test_bench_script_content():
 
 
 def test_spray_param_physical_limits():
-    """Anlagen-Grenzen (Nutzer-Vorgabe): Druck 0,1–3 bar, Düsen-Ø 0,5–1,5 mm —
+    """Anlagen-Grenzen (Nutzer-Vorgabe): Druck 0,1–3 bar, Düsen-Ø 0,5–3,0 mm —
     Sampling, Mutation und Klemmung dürfen sie nie verlassen."""
     assert st.SPRAY_PARAMS["pressure_bar"]["lo"] == 0.1
     assert st.SPRAY_PARAMS["pressure_bar"]["hi"] == 3.0
     assert st.SPRAY_PARAMS["nozzle_d_mm"]["lo"] == 0.5
-    assert st.SPRAY_PARAMS["nozzle_d_mm"]["hi"] == 1.5
-    p = st._clean_params({"pressure_bar": 8.0, "nozzle_d_mm": 3.0})
-    assert p["pressure_bar"] == 3.0 and p["nozzle_d_mm"] == 1.5
+    assert st.SPRAY_PARAMS["nozzle_d_mm"]["hi"] == 3.0
+    p = st._clean_params({"pressure_bar": 8.0, "nozzle_d_mm": 5.0})
+    assert p["pressure_bar"] == 3.0 and p["nozzle_d_mm"] == 3.0
 
 
 # ── Runden-Persistenz ────────────────────────────────────────────────────────

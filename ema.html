@@ -1777,7 +1777,7 @@
       </div>
       <div class="e3-field">
         <div class="row"><label>Bohrungs-Ø</label>
-          <input type="number" id="oil_nozzle_d" value="1" min="0.5" max="1.5" step="0.1" oninput="_oilRecommendRes()"><span class="unit">mm</span></div>
+          <input type="number" id="oil_nozzle_d" value="1" min="0.5" max="3" step="0.1" oninput="_oilRecommendRes()"><span class="unit">mm</span></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Düsen-Durchmesser. <b>Hinweis:</b> 1 mm ist bei grober Auflösung
           kleiner als eine Netz-Zelle — die Auflösung muss hoch genug sein, um den feinen Strahl
@@ -1961,7 +1961,7 @@
     <div class="e3-set">
       <div class="e3-field">
         <div class="row"><label>Domain-Auflösung</label>
-          <input type="number" id="oil_res" value="72" min="24" max="512" step="4" oninput="_oilRecommendRes()"><span class="unit">Zellen</span></div>
+          <input type="number" id="oil_res" value="72" min="24" max="1000" step="4" oninput="_oilRecommendRes()"><span class="unit">Zellen</span></div>
         <div id="oil_res_hint" style="font-size:.72rem;margin:2px 0 4px;line-height:1.35"></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p><b>Fachlich:</b> Max. Zellenzahl der FLIP-Domain je Achse — der <b>Haupt-Kostentreiber</b>.
@@ -1969,7 +1969,9 @@
           <p><span class="x">Wirkung:</span> Der <b>Bake läuft auf der CPU</b> (die GPU beschleunigt
           nur das Rendern). 72 ist ein guter Startwert; für Detailtropfen 96–128; <b>192–512</b> löst
           den 1-mm-Strahl richtig auf, kostet aber schnell Stunden und viel RAM — am besten mit
-          wenigen Frames (10–30) + Zeitlupe kombinieren.</p></details>
+          wenigen Frames (10–30) + Zeitlupe kombinieren. <b>⚠ &gt;512 (bis 1000)</b> ist
+          <b>RAM-kritisch</b>: die Domain kann den Arbeitsspeicher sprengen (OOM → leerer Bake →
+          schwarzes Video). Nur mit fokussierter Domain (🧱 aus / Nahaufnahme) + wenigen Frames sinnvoll.</p></details>
       </div>
       <div class="e3-field">
         <div class="row"><label>Frames</label>
@@ -2082,13 +2084,19 @@
   </div>
 
   <div class="e3-card">
-    <div class="section-title">⚙ Simulationseinstellungen</div>
-    <div class="input-group"><label>Öldruck</label>
-      <input type="number" id="cfd_pressure" value="3" min="0.1" max="6" step="0.1"/><span>bar</span></div>
-    <div class="input-group"><label>Düsen-Ø (für HTC)</label>
-      <input type="number" id="cfd_nozzle_d" value="1.0" min="0.3" max="3" step="0.1"/><span>mm</span></div>
-    <div class="input-group"><label>Ausschnitt-Nuten</label>
-      <input type="number" id="cfd_section" value="3" min="1" max="12" step="1"/><span>Nuten</span></div>
+    <div class="section-title">💧 Aus dem Spritzöl-Tab übernommen</div>
+    <p style="font-size:.8rem;color:#9aa;line-height:1.5;margin:0 0 6px">
+      Geometrie, Öldruck, Düsen-Ø, Ausschnitt, Ring &amp; Düsenzahl kommen aus dem
+      <b>💧 Spritzöl-Kühlung</b>-Tab — dort einstellen. Hier setzt du nur noch die
+      OpenFOAM-Rechenparameter. <i>(In OpenFOAM wird der Wickelkopf-Ausschnitt als
+      no-slip-Wand gerechnet — ein Leiter-/Kronenband.)</i>
+    </p>
+    <div id="cfd_inherited" style="font-size:.8rem;color:#bcd;background:#0d1014;border-radius:4px;padding:7px 10px">—</div>
+    <button onclick="switchTab('oil')" style="margin-top:7px;background:#456;width:auto;padding:7px 12px;font-size:.78rem">💧 Spritzöl-Einstellungen öffnen</button>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">⚙ OpenFOAM-Rechenparameter</div>
     <div class="input-group"><label>Sim-Endzeit</label>
       <input type="number" id="cfd_endtime" value="0.05" min="0.005" max="0.5" step="0.005"/><span>s</span></div>
     <div class="input-group"><label>Grund-Auflösung</label>
@@ -2103,6 +2111,9 @@
     <div class="input-group"><label>Öl-Viskosität ν</label>
       <input type="number" id="cfd_visc" value="0.00004" min="0.000005" max="0.001" step="0.000005"/><span>m²/s</span>
       <small style="grid-column:1/-1;font-size:.7rem;color:#666">Kinematische Viskosität (~40 cSt warm = 4e-5). Stoffwerte für die HTC-Korrelation sind dokumentierte Öl-Defaults.</small></div>
+    <div class="input-group"><label>3D-Video erzeugen</label>
+      <input type="checkbox" id="cfd_make_video" checked style="width:auto;justify-self:start"/>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Rendert die gerechnete Öl/Luft-Grenzfläche (α=0.5) je Zeitschritt zu einem Browser-Video.</small></div>
   </div>
 
   <div class="e3-card">
@@ -2235,7 +2246,7 @@
       <div><label>Viskosität ν</label>
         <input type="number" id="st_e_visc" value="0.004" min="0.001" max="0.08" step="0.001" style="width:100px"></div>
       <div><label>Düsen-Ø (mm)</label>
-        <input type="number" id="st_e_noz" value="1" min="0.5" max="1.5" step="0.1" style="width:90px"></div>
+        <input type="number" id="st_e_noz" value="1" min="0.5" max="3" step="0.1" style="width:90px"></div>
     </div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
       <button id="st_btn_single" onclick="stStartSingle()"
@@ -3255,6 +3266,7 @@ function switchTab(name) {
     if (typeof _oilDrawAngleFig === 'function') _oilDrawAngleFig();  // Winkel-Skizzen aktualisieren
     if (typeof oilRefreshPresets === 'function') oilRefreshPresets();  // gespeicherte Darstellungen
   }
+  if (name === 'cfd' && typeof _cfdSyncInherited === 'function') _cfdSyncInherited();
   if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
   if (name === 'jobs' && typeof jobsActivate === 'function') jobsActivate();
   if (name === 'em3d' && typeof adoptEm3dGeom === 'function') {
@@ -6505,16 +6517,16 @@ function _oilRecommendRes() {
   const Nmin = 2, Ntgt = 3;                                  // <2 = unsichtbar, ≥3 = sauber
   const resFor = n => Math.ceil(2 * halfSpan * n / Math.max(0.1, nozD) / 4) * 4;
   const recRaw = resFor(Ntgt);
-  const rec = Math.min(512, Math.max(24, recRaw));
+  const rec = Math.min(1000, Math.max(24, recRaw));
   const voxel = 2 * halfSpan / Math.max(1, curRes);
   const cells = nozD / voxel;
   const col = cells < Nmin ? '#f0a0a0' : cells < Ntgt ? '#f0c070' : '#8fce9b';
   let msg = `<span style="color:${col}">Aktuell ~<b>${cells.toFixed(1)}</b> Zellen über die `
           + `${nozD.toFixed(1)}-mm-Bohrung (Voxel ≈ ${voxel.toFixed(2)} mm).</span> `;
-  if (collide && recRaw > 512) {
-    // Selbst 512 reicht mit 🧱 nicht → auf fokussierte Domain hinweisen (der wirksamere Hebel).
-    const halfF = 0.13 * statOD, recF = Math.min(512, Math.max(24, Math.ceil(2 * halfF * Ntgt / Math.max(0.1, nozD) / 4) * 4));
-    msg += `Mit <b>🧱 Kollisionswand</b> ist die Domain zu groß — selbst 512 Zellen lösen die `
+  if (collide && recRaw > 1000) {
+    // Selbst 1000 reicht mit 🧱 nicht → auf fokussierte Domain hinweisen (der wirksamere Hebel).
+    const halfF = 0.13 * statOD, recF = Math.min(1000, Math.max(24, Math.ceil(2 * halfF * Ntgt / Math.max(0.1, nozD) / 4) * 4));
+    msg += `Mit <b>🧱 Kollisionswand</b> ist die Domain zu groß — selbst 1000 Zellen lösen die `
          + `Bohrung kaum auf. Empfehlung: <b>🧱 aus</b> oder <b>Nahaufnahme</b> (fokussierte Domain), `
          + `dann genügen ≈ <b>${recF}</b> Zellen.`;
   } else {
@@ -6593,17 +6605,36 @@ async function queueOilspray() {
 // ── 🌊 OpenFOAM-VOF-Kühlrechnung (quantitativ) ──────────────────────────────────
 async function _cfdBuildPayload() {
   const g = id => document.getElementById(id);
-  const payload = await buildPayload();        // Geometrie + axial_len (wie 💧/🧲)
+  // Die GESAMTEN 💧-Einstellungen übernehmen (Geometrie + Öl + Ring/Düsen/Ausschnitt/Druck).
+  // Der OpenFOAM-Tab stellt nur noch OpenFOAM-spezifische Dinge ein.
+  const payload = await _oilBuildPayload();
+  const oil = payload.oil || {};
   payload.cfd = {
-    pressure_bar:  +g('cfd_pressure').value || 3,
-    nozzle_d_mm:   +g('cfd_nozzle_d').value || 1,
-    section_slots: +g('cfd_section').value || 3,
+    // ── aus dem 💧-Tab übernommen (strömungs-/geometrierelevant) ──
+    pressure_bar:  +oil.pressure_bar || 3,
+    nozzle_d_mm:   +oil.nozzle_d_mm  || 1,
+    section_slots: +oil.section_slots || 3,
+    // ── OpenFOAM-spezifisch (nur hier eingestellt) ──
     end_time:      +g('cfd_endtime').value || 0.05,
     n_cells:       +g('cfd_ncells').value || 44,
     refine:        +g('cfd_refine').value || 2,
     viscosity:     +g('cfd_visc').value || 4e-5,
+    make_video:    g('cfd_make_video') ? !!g('cfd_make_video').checked : true,
   };
   return payload;
+}
+
+// Zeigt im 🌊-Tab, welche Werte gerade aus dem 💧-Tab übernommen werden.
+function _cfdSyncInherited() {
+  const el = document.getElementById('cfd_inherited');
+  if (!el) return;
+  const g = id => document.getElementById(id);
+  const val = (id, d) => (g(id) ? (g(id).value || d) : d);
+  const secStr = (val('oil_section', 3)) + ' Nuten';
+  el.innerHTML =
+    'Öldruck <b>' + val('oil_pressure', 3) + ' bar</b> · Düsen-Ø <b>' + val('oil_nozzle_d', 1) +
+    ' mm</b> · Ausschnitt <b>' + secStr + '</b> · Düsen <b>' + val('oil_nozzles', 6) +
+    '</b> · Ring-Spalt <b>' + val('oil_ring_gap', 3) + ' mm</b>';
 }
 
 async function startCfd() {
@@ -6682,7 +6713,97 @@ function _renderCfd(res) {
       ${img}
       <div style="margin-top:8px;font-size:.74rem;color:#987;line-height:1.4">ℹ ${escHtml(res.scope_note || '')}</div>
     </div>`;
+
+  // ── 3D-Öloberfläche: gerechnetes VOF-Video + interaktiver Browser-Viewer ──
+  const pid = res.project_id || 'current';
+  const vid = res.video
+    ? `<video controls loop autoplay muted playsinline
+         style="width:100%;max-width:720px;border-radius:6px;background:#000"
+         src="/project/${encodeURIComponent(pid)}/video/cfd?t=${Date.now()}"></video>
+       <div style="font-size:.72rem;color:#789;margin-top:4px">
+         Gerechnete Öl/Luft-Grenzfläche (Isofläche α<sub>Öl</sub>=0.5) über die Zeit,
+         nach Strömungsgeschwindigkeit |U| eingefärbt — Strahlflug, Aufprall, Filmablauf.</div>`
+    : `<div style="font-size:.78rem;color:#987">Kein Video erzeugt (ffmpeg/Frames fehlen).</div>`;
+  const vcard = document.createElement('div');
+  vcard.className = 'e3-card';
+  vcard.innerHTML = `
+    <div class="section-title">🎥 3D-Öloberfläche (gerechnet) & Video</div>
+    ${vid}
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:10px 0 6px">
+      <button onclick="_cfdViewer()" style="background:#2e6a8a;width:auto;padding:8px 14px;font-size:.82rem">🧊 Im Browser ansehen (3D, dreh-/zoombar)</button>
+      <label style="font-size:.74rem;color:#9aa;display:flex;align-items:center;gap:5px">
+        <input type="range" id="cfd_oil_op" min="10" max="100" value="72" style="width:110px"
+          oninput="_cfdOilOpacity()"/> Öl-Transparenz</label>
+    </div>
+    <div id="cfd_viewer3d" style="display:none;position:relative;width:100%;height:520px;background:#0b0e12;border-radius:6px;overflow:hidden"></div>`;
+  box.appendChild(vcard);
   box.style.display = 'block';
+}
+
+// ── Selbst-enthaltener vtk.js-Viewer der gerechneten Öl-Isofläche + Wickelkopf ──
+let _cfdrw = null, _cfdOilActor = null;
+async function _cfdViewer() {
+  const div = document.getElementById('cfd_viewer3d');
+  if (!div) return;
+  div.style.display = 'block';
+  div.innerHTML = '<div style="padding:14px;color:#9aa;font-size:.82rem">⏳ Lade 3D-Viewer…</div>';
+  try {
+    await _loadVtkJs();
+    const rd = () => vtk.IO.XML.vtkXMLPolyDataReader.newInstance();
+    const getPd = async (part) => {
+      const buf = await fetch('/cfd/vtp?part=' + part + '&t=' + Date.now(), { cache: 'no-store' })
+        .then(r => { if (!r.ok) throw new Error(part + '-VTP nicht verfügbar'); return r.arrayBuffer(); });
+      const r = rd(); r.parseAsArrayBuffer(buf); return r.getOutputData(0);
+    };
+    const oilPd = await getPd('oil');
+    let solidPd = null; try { solidPd = await getPd('solid'); } catch (e) {}
+    div.innerHTML = '';
+    if (_cfdrw) { try { _cfdrw.delete(); } catch (e) {} _cfdrw = null; }
+    _cfdrw = vtk.Rendering.Misc.vtkGenericRenderWindow.newInstance({ background: [0.043, 0.055, 0.071] });
+    _cfdrw.setContainer(div);
+    const ren = _cfdrw.getRenderer();
+    // Depth-Peeling → korrekte Transparenz der Öloberfläche über dem opaken Wickelkopf.
+    try { ren.setUseDepthPeeling(true); ren.setOcclusionRatio(0.1); ren.setMaximumNumberOfPeels(4); } catch (e) {}
+
+    // Wickelkopf-Oberfläche (Kupfer, opak) als Geometrie-Kontext.
+    if (solidPd && solidPd.getNumberOfPoints() > 0) {
+      const sm = vtk.Rendering.Core.vtkMapper.newInstance(); sm.setInputData(solidPd); sm.setScalarVisibility(false);
+      const sa = vtk.Rendering.Core.vtkActor.newInstance(); sa.setMapper(sm);
+      sa.getProperty().setColor(0.72, 0.45, 0.20);
+      sa.getProperty().setAmbient(0.3); sa.getProperty().setDiffuse(0.85);
+      ren.addActor(sa);
+    }
+    // Öl-Isofläche, nach |U| eingefärbt (Blau→Bernstein→Rot), halbtransparent.
+    const arr = oilPd.getPointData().getArrayByName('Umag');
+    const [lo, hi] = arr ? _e3Percentiles(arr.getData(), 0.02, 0.98) : [0, 1];
+    const ctf = vtk.Rendering.Core.vtkColorTransferFunction.newInstance();
+    ctf.addRGBPoint(lo, 0.10, 0.20, 0.55);
+    ctf.addRGBPoint(lo + 0.35 * (hi - lo), 0.15, 0.65, 0.75);
+    ctf.addRGBPoint(lo + 0.70 * (hi - lo), 0.95, 0.62, 0.12);
+    ctf.addRGBPoint(hi, 0.95, 0.25, 0.15);
+    const om = vtk.Rendering.Core.vtkMapper.newInstance();
+    om.setInputData(oilPd); om.setLookupTable(ctf);
+    om.setScalarModeToUsePointFieldData(); om.setColorByArrayName('Umag');
+    om.setInterpolateScalarsBeforeMapping(true);
+    _cfdOilActor = vtk.Rendering.Core.vtkActor.newInstance(); _cfdOilActor.setMapper(om);
+    _cfdOilActor.getProperty().setOpacity((+document.getElementById('cfd_oil_op')?.value || 72) / 100);
+    ren.addActor(_cfdOilActor);
+
+    ren.resetCamera();
+    try { const cam = ren.getActiveCamera(); cam.azimuth(35); cam.elevation(-22); ren.resetCameraClippingRange(); } catch (e) {}
+    _cfdrw.resize(); _cfdrw.getRenderWindow().render();
+    const tip = document.createElement('div');
+    tip.style.cssText = 'position:absolute;top:6px;left:10px;font-size:.7rem;color:#789;pointer-events:none';
+    tip.textContent = 'ziehen = drehen · Rad = zoomen · Farbe = |U| (Strömungsgeschwindigkeit)';
+    div.appendChild(tip);
+  } catch (e) {
+    div.innerHTML = '<div style="padding:14px;color:#e57;font-size:.82rem">⚠ ' + escHtml(e.message) + '</div>';
+  }
+}
+function _cfdOilOpacity() {
+  if (!_cfdOilActor || !_cfdrw) return;
+  _cfdOilActor.getProperty().setOpacity((+document.getElementById('cfd_oil_op').value || 72) / 100);
+  _cfdrw.getRenderWindow().render();
 }
 
 async function queueCfd() {

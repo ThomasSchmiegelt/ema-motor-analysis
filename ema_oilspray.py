@@ -62,7 +62,7 @@ def _dbg_write(work_dir, sections):
 
 
 # ── Grenzen / Defaults ───────────────────────────────────────────────────────
-RES_RANGE      = (24, 512)      # Domain-Auflösung (Kostentreiber; >200 = sehr lange CPU-Bakes)
+RES_RANGE      = (24, 1000)     # Domain-Auflösung (Kostentreiber; >200 = sehr lange CPU-Bakes, >512 RAM-kritisch)
 FRAMES_RANGE   = (10, 240)      # Anzahl Simulationsframes
 SECTION_RANGE  = (1, 12)        # Wickelkopf-Ausschnitt (Nutenzahl)
 DEFAULT_RES    = 72
@@ -1133,17 +1133,28 @@ cam = bpy.context.object
 # senkrecht, das Öl läuft sichtbar der Achse entlang nach unten). So wirkt die Einbaulage sichtbar.
 _cam_up = _cam_up_ovr or _up_axis_str()      # feste Zusatz-Ansicht bringt ihre eigene Oben-Achse mit
 cam.rotation_euler = _track_quat(cam_tgt - cam.location, '-Z', _cam_up).to_euler()
+# NUR die ACHSPARALLELEN Zusatz-Ansichten (top/front) setzen die Rotation explizit — bei ihrem
+# reinen −y/−z-Blick ist to_track_quat mit Up 'Z' entartet (Track- und Up-Achse kollidieren) und
+# lieferte Bild-Oben = −z. **`wh_hero` ist DAGEGEN eine SCHRÄGE 3/4-Ansicht** (Kamera oben-seitlich
+# versetzt): sie MUSS ihr Ziel per `_track_quat` (Zeile oben) anpeilen. Früher fiel wh_hero (das
+# ebenfalls `_cam_up_ovr='Z'` setzt) in die „von oben"-Explizit-Matrix (Blick strikt −y) → die
+# schräg-hoch stehende Kamera schaute waagerecht ÜBER die Geometrie hinweg → leeres/schwarzes Bild.
 if _cam_up_ovr is not None:
-    # Feste Zusatz-Ansichten: Rotation EXPLIZIT setzen — to_track_quat mit Up 'Z' bei Blick −z/−y
-    # ist die entartete Kombination (Track- und Up-Achse kollidieren) und lieferte Bild-Oben = −z.
-    if CAM_VIEW == "front" or not HORIZONTAL:
-        cam.rotation_euler = (0.0, 0.0, 0.0)          # Identität: Blick −z, Bild-Oben = +y
-    else:
-        # von oben (horizontal): Blick −y, Bild-Oben = Motorachse +z (X_cam=−x, Y_cam=+z, Z_cam=+y)
-        cam.rotation_euler = mathutils.Matrix((
-            (-1.0, 0.0, 0.0),
-            (0.0, 0.0, 1.0),
-            (0.0, 1.0, 0.0))).to_euler()
+    # Eine feste Zusatz-Ansicht ist aktiv (wh_hero/top/front) → die Schnitt-Kameramatrix wird
+    # bewusst ÜBERSPRUNGEN (kein `elif _SECTION_CAM`). NUR die achsparallelen top/front setzen die
+    # Rotation explizit; wh_hero (schräg) behält die _track_quat-Rotation von oben.
+    if CAM_VIEW in ("top", "front"):
+        # Feste Zusatz-Ansichten: Rotation EXPLIZIT setzen — to_track_quat mit Up 'Z' bei Blick −z/−y
+        # ist die entartete Kombination (Track- und Up-Achse kollidieren) und lieferte Bild-Oben = −z.
+        if CAM_VIEW == "front" or not HORIZONTAL:
+            cam.rotation_euler = (0.0, 0.0, 0.0)          # Identität: Blick −z, Bild-Oben = +y
+        else:
+            # von oben (horizontal): Blick −y, Bild-Oben = Motorachse +z (X_cam=−x, Y_cam=+z, Z_cam=+y)
+            cam.rotation_euler = mathutils.Matrix((
+                (-1.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0),
+                (0.0, 1.0, 0.0))).to_euler()
+    # wh_hero: nichts setzen → die schräge 3/4-Kamera peilt ihr Ziel per _track_quat (Zeile oben) an.
 elif _SECTION_CAM:
     # Bild-Oben = radiale In-Ebenen-Richtung u (NICHT _cam_up — bei einer Düse „oben" wäre
     # Welt-Y parallel zur Blickrichtung und die Kamera degeneriert). Explizite Basis:
@@ -1589,7 +1600,7 @@ def run_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     nozzles  = max(1, min(40, int(oil.get("nozzle_count", 6) or 6)))
     ring_gap = max(0.5, min(30.0, float(oil.get("ring_gap_mm", 3.0) or 3.0)))
     ring_tube = max(1.0, min(30.0, float(oil.get("ring_tube_mm", 6.0) or 6.0)))
-    nozzle_d = max(0.5, min(1.5, float(oil.get("nozzle_d_mm", 1.0) or 1.0)))   # Düsen-Ø 0,5–1,5 mm
+    nozzle_d = max(0.5, min(3.0, float(oil.get("nozzle_d_mm", 1.0) or 1.0)))   # Düsen-Ø 0,5–3,0 mm
     ring_full = bool(oil.get("ring_full", False))    # voller 360°-Spritzring statt Ausschnitt-Bogen
     include_core = bool(oil.get("include_core", True))
     orientation = "vertical" if str(oil.get("orientation", "horizontal")) == "vertical" else "horizontal"
@@ -1834,7 +1845,7 @@ def preview_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     nozzles  = max(1, min(40, int(oil.get("nozzle_count", 6) or 6)))
     ring_gap = max(0.5, min(30.0, float(oil.get("ring_gap_mm", 3.0) or 3.0)))
     ring_tube = max(1.0, min(30.0, float(oil.get("ring_tube_mm", 6.0) or 6.0)))
-    nozzle_d = max(0.5, min(1.5, float(oil.get("nozzle_d_mm", 1.0) or 1.0)))   # Düsen-Ø 0,5–1,5 mm
+    nozzle_d = max(0.5, min(3.0, float(oil.get("nozzle_d_mm", 1.0) or 1.0)))   # Düsen-Ø 0,5–3,0 mm
     ring_full = bool(oil.get("ring_full", False))    # voller 360°-Spritzring statt Ausschnitt-Bogen
     include_core = bool(oil.get("include_core", True))
     orientation = "vertical" if str(oil.get("orientation", "horizontal")) == "vertical" else "horizontal"

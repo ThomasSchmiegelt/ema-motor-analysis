@@ -506,6 +506,195 @@ def _film_chart(series_pct, charts_dir):
     return b64
 
 
+# ── 3D-Visualisierung: Öl-Isofläche (alpha.oil=0.5) + Video + Browser-VTP ─────
+#
+# interFoam rechnet die Öl/Luft-Grenzfläche über die Zeit (`alpha.oil` je Zeitschritt in
+# `VTK/cfd_case_<N>/internal.vtu`). Daraus wird — physikalisch gerechnet, im Gegensatz zum
+# qualitativen Mantaflow-💧 — die Öloberfläche als **Isofläche alpha.oil=0.5** getract und
+#   (a) je Zeitschritt offscreen gerendert → `frames_cfd/anim.mp4` (Strahlflug/Aufprall/Film),
+#   (b) der letzte Zeitschritt als schlanke .vtp für den eingebetteten vtk.js-Browser-Viewer
+#       exportiert (Öl-Isofläche nach |U| eingefärbt + Wickelkopf-Oberfläche als Kontext).
+# Reuse: `ema_em3d._write_vtp` (vtk.js-lesbares .vtp) + `ema_em3d._encode_video` (ffmpeg).
+
+_ISO = 0.5                        # alpha.oil-Isowert = Öl/Luft-Grenzfläche
+_OIL_RGB = (0.95, 0.62, 0.12)     # Bernstein (Öl)
+_SOLID_RGB = (0.72, 0.45, 0.20)   # Kupfer (Wickelkopf)
+
+
+def _internal_vtus(case_dir: str):
+    """Alle internen Volumen-VTUs (je Schreibzeitpunkt), nach eingebettetem Index sortiert.
+    Der Zeitschritt 0 (Startfeld, kein Öl) wird übersprungen."""
+    import glob, re
+    files = glob.glob(os.path.join(case_dir, "VTK", "*", "internal.vtu"))
+
+    def _idx(f):
+        m = re.findall(r"_(\d+)", os.path.basename(os.path.dirname(f)))
+        return int(m[-1]) if m else 0
+    files = sorted(set(files), key=_idx)
+    return [f for f in files if _idx(f) > 0] or files
+
+
+def _read_vtu(path: str):
+    import vtk
+    rd = vtk.vtkXMLUnstructuredGridReader(); rd.SetFileName(path); rd.Update()
+    return rd.GetOutput()
+
+
+def _with_umag_points(grid):
+    """Sorgt für Punkt-Arrays ``alpha.oil`` (für den Contour) und ``Umag`` (|U|, Einfärbung).
+    foamToVTK schreibt beide als Punkt- UND Zelldaten; fehlt das Punkt-α, aus Zelle mitteln."""
+    import vtk
+    import numpy as np
+    from vtk.util import numpy_support as ns
+    pd = grid.GetPointData()
+    if pd.GetArray("alpha.oil") is None:
+        p2c = vtk.vtkCellDataToPointData(); p2c.SetInputData(grid); p2c.Update()
+        grid = p2c.GetOutput(); pd = grid.GetPointData()
+    U = pd.GetArray("U")
+    if U is not None:
+        umag = np.linalg.norm(ns.vtk_to_numpy(U).reshape(-1, 3), axis=1).astype(np.float32)
+        ua = ns.numpy_to_vtk(umag); ua.SetName("Umag"); pd.AddArray(ua)
+    return grid
+
+
+def _oil_isosurface(grid):
+    """Öl/Luft-Grenzfläche als vtkPolyData (Isofläche ``alpha.oil=0.5``), Punkt-Skalar ``Umag``."""
+    import vtk
+    grid = _with_umag_points(grid)
+    grid.GetPointData().SetActiveScalars("alpha.oil")
+    cont = vtk.vtkContourFilter(); cont.SetInputData(grid)
+    cont.SetValue(0, _ISO); cont.ComputeScalarsOff(); cont.ComputeNormalsOn()
+    cont.Update()
+    return cont.GetOutput()
+
+
+def _winding_surface(case_dir: str):
+    """Wickelkopf-Wandfläche (letztes windinghead-Rand-VTP) als vtkPolyData — statischer
+    Geometrie-Kontext für Video + Viewer (Benetzung α_oil als Punkt-Skalar bleibt erhalten)."""
+    import vtk
+    vtps = _find_boundary_vtps(case_dir)
+    if not vtps:
+        return None
+    rd = vtk.vtkXMLPolyDataReader(); rd.SetFileName(vtps[-1]); rd.Update()
+    return rd.GetOutput()
+
+
+def _lean_scalar_poly(poly, keep: str):
+    """Behält nur EIN Punkt-Skalar als **float32** (klein + vtk.js-lesbar); Zelldaten leeren."""
+    import numpy as np
+    from vtk.util import numpy_support as ns
+    if poly is None:
+        return None
+    pdp = poly.GetPointData()
+    src = pdp.GetArray(keep)
+    if src is not None:                          # als float32 neu setzen (Alignment für vtk.js)
+        vals = ns.vtk_to_numpy(src).astype(np.float32)
+        arr = ns.numpy_to_vtk(vals); arr.SetName(keep)
+        for nm in [pdp.GetArrayName(i) for i in range(pdp.GetNumberOfArrays())]:
+            pdp.RemoveArray(nm)
+        pdp.AddArray(arr); pdp.SetActiveScalars(keep)
+    else:
+        for nm in [pdp.GetArrayName(i) for i in range(pdp.GetNumberOfArrays())]:
+            pdp.RemoveArray(nm)
+    poly.GetCellData().Initialize()
+    return poly
+
+
+def export_browser_cfd(case_dir: str, out_oil: str, out_solid: str):
+    """Schreibt zwei schlanke .vtp für den vtk.js-Browser-Viewer:
+      * ``out_oil``   — Öl-Isofläche des LETZTEN Zeitschritts, Skalar ``Umag`` (|U|),
+      * ``out_solid`` — Wickelkopf-Oberfläche, Skalar ``alpha.oil`` (Benetzung).
+    Rückgabe (oil_path|None, solid_path|None)."""
+    import ema_em3d
+    op = sp = None
+    vtus = _internal_vtus(case_dir)
+    if vtus:
+        try:
+            iso = _lean_scalar_poly(_oil_isosurface(_read_vtu(vtus[-1])), "Umag")
+            if iso is not None and iso.GetNumberOfPoints() > 0:
+                ema_em3d._write_vtp(iso, out_oil); op = out_oil
+        except Exception:
+            op = None
+    try:
+        solid = _lean_scalar_poly(_winding_surface(case_dir), "alpha.oil")
+        if solid is not None and solid.GetNumberOfPoints() > 0:
+            ema_em3d._write_vtp(solid, out_solid); sp = out_solid
+    except Exception:
+        sp = None
+    return op, sp
+
+
+def _cfd_video(case_dir: str, frames_dir: str, cfg: dict, progress_cb=None):
+    """Rendert je Zeitschritt die Öl-Isofläche + den Wickelkopf offscreen (feste Kamera,
+    |U|-Einfärbung mit fester Skala 0..jet_v → das Feldwachstum bleibt vergleichbar) und
+    encodiert die Frames zu ``frames_cfd/anim.mp4``. Rückgabe: True bei erfolgreichem Video."""
+    import vtk
+    import ema_em3d
+    def _log(m, p=None):
+        if progress_cb:
+            progress_cb(m, p)
+    vtus = _internal_vtus(case_dir)
+    if not vtus:
+        return False
+    os.makedirs(frames_dir, exist_ok=True)
+
+    solid = _winding_surface(case_dir)
+    vmax = max(1e-3, float(cfg.get("jet_v", 21.0)))
+    ctf = vtk.vtkColorTransferFunction()
+    ctf.AddRGBPoint(0.0,        0.10, 0.20, 0.55)   # langsam = blau
+    ctf.AddRGBPoint(0.35 * vmax, 0.15, 0.65, 0.75)
+    ctf.AddRGBPoint(0.70 * vmax, 0.95, 0.62, 0.12)  # Öl-Bernstein
+    ctf.AddRGBPoint(vmax,       0.95, 0.25, 0.15)   # schnell = rot
+
+    ren = vtk.vtkRenderer(); ren.SetBackground(0.05, 0.05, 0.08)
+    rw = vtk.vtkRenderWindow(); rw.SetOffScreenRendering(1); rw.AddRenderer(ren)
+    rw.SetSize(900, 760)
+
+    # statischer Wickelkopf (grau/kupfer, opak) als Geometrie-Kontext
+    if solid is not None and solid.GetNumberOfPoints() > 0:
+        sm = vtk.vtkPolyDataMapper(); sm.SetInputData(solid); sm.ScalarVisibilityOff()
+        sa = vtk.vtkActor(); sa.SetMapper(sm)
+        sa.GetProperty().SetColor(*_SOLID_RGB)
+        sa.GetProperty().SetAmbient(0.3); sa.GetProperty().SetDiffuse(0.8)
+        ren.AddActor(sa)
+
+    oil_mapper = vtk.vtkPolyDataMapper(); oil_mapper.SetLookupTable(ctf)
+    oil_mapper.SetScalarModeToUsePointFieldData(); oil_mapper.SelectColorArray("Umag")
+    oil_mapper.SetScalarRange(0.0, vmax); oil_mapper.InterpolateScalarsBeforeMappingOn()
+    oil_actor = vtk.vtkActor(); oil_actor.SetMapper(oil_mapper)
+    oil_actor.GetProperty().SetOpacity(0.72)
+    ren.AddActor(oil_actor)
+
+    # feste Kamera aus den Wickelkopf-Bounds (leichte Iso-Perspektive)
+    ref = solid if (solid is not None and solid.GetNumberOfPoints() > 0) else _oil_isosurface(_read_vtu(vtus[-1]))
+    b = ref.GetBounds()
+    cx, cy, cz = (b[0] + b[1]) / 2, (b[2] + b[3]) / 2, (b[4] + b[5]) / 2
+    diag = max(1e-3, math.dist((b[0], b[2], b[4]), (b[1], b[3], b[5])))
+    cam = ren.GetActiveCamera()
+    cam.SetFocalPoint(cx, cy, cz)
+    cam.SetPosition(cx + 0.9 * diag, cy + 0.55 * diag, cz + 1.1 * diag)
+    cam.SetViewUp(0, 1, 0)
+    ren.ResetCameraClippingRange()
+
+    n = len(vtus)
+    for i, vtu in enumerate(vtus):
+        try:
+            iso = _oil_isosurface(_read_vtu(vtu))
+        except Exception:
+            iso = vtk.vtkPolyData()
+        oil_mapper.SetInputData(iso)
+        oil_mapper.Modified()
+        rw.Render()
+        w2i = vtk.vtkWindowToImageFilter(); w2i.SetInput(rw); w2i.Update()
+        wr = vtk.vtkPNGWriter()
+        wr.SetFileName(os.path.join(frames_dir, "frame_%04d.png" % i))
+        wr.SetInputConnection(w2i.GetOutputPort()); wr.Write()
+        if progress_cb and n:
+            _log("🎬 Video-Frame %d/%d …" % (i + 1, n), 88 + int(8 * (i + 1) / n))
+    mp4 = ema_em3d._encode_video(frames_dir, fps=8)
+    return bool(mp4)
+
+
 # ── Orchestrator + Persistenz ────────────────────────────────────────────────
 
 def run_cfd(payload, project_dir, progress_cb=None, cancel_cb=None):
@@ -527,6 +716,23 @@ def run_cfd(payload, project_dir, progress_cb=None, cancel_cb=None):
         return {"aborted": True}
     parsed = _parse(case_dir, cfg, charts_dir, progress_cb=_log)
 
+    # 3D-Öloberfläche: Browser-VTPs (Isofläche + Wickelkopf) + Animations-Video.
+    oil_vtp = solid_vtp = None
+    has_video = False
+    make_video = bool((payload.get("cfd") or {}).get("make_video", True))
+    try:
+        _log("🧊 Öl-Isofläche für den Browser-Viewer exportieren …", 84)
+        oil_vtp, solid_vtp = export_browser_cfd(
+            case_dir, os.path.join(work, "cfd_oil.vtp"), os.path.join(work, "cfd_solid.vtp"))
+    except Exception as e:
+        _log("⚠ Isoflächen-Export übersprungen: %s" % e)
+    if make_video:
+        try:
+            has_video = _cfd_video(case_dir, os.path.join(project_dir, "frames_cfd"), cfg,
+                                   progress_cb=_log)
+        except Exception as e:
+            _log("⚠ Video-Erzeugung übersprungen: %s" % e)
+
     htc = parsed["htc"]
     result = {
         "source": "openfoam_interfoam",
@@ -544,6 +750,9 @@ def run_cfd(payload, project_dir, progress_cb=None, cancel_cb=None):
         "series_pct": parsed["series_pct"],
         "images": {"cfd_wetting": parsed["chart"]},
         "vtp_path": parsed["vtp_path"],
+        "oil_vtp_path": oil_vtp,
+        "solid_vtp_path": solid_vtp,
+        "video": has_video,
         "scope_note": SCOPE_NOTE,
     }
     _persist_cfd_summary(project_dir, result)
@@ -562,9 +771,10 @@ def _persist_cfd_summary(project_dir, result):
         if os.path.exists(rj):
             with open(rj) as f:
                 data = json.load(f)
-        lean = {k: v for k, v in result.items() if k not in ("images", "vtp_path")}
+        _drop = ("images", "vtp_path", "oil_vtp_path", "solid_vtp_path")
+        lean = {k: v for k, v in result.items() if k not in _drop}
         lean["image_files"] = {k: "charts/%s.png" % k for k in result.get("images", {})}
-        # transienten Case-Pfad NICHT persistieren
+        # transiente Case-Pfade NICHT persistieren; nur das Video-Flag bleibt (bool).
         data["cfd"] = lean
         tmp = rj + ".tmp"
         with open(tmp, "w") as f:

@@ -656,6 +656,20 @@ def cfd_abort():
     return jsonify({"status": "aborting", "killed": killed})
 
 
+@app.route("/cfd/vtp")
+def cfd_vtp():
+    """Serviert die schlanke .vtp des letzten CFD-Laufs für den eingebetteten vtk.js-Browser-
+    Viewer: ``?part=oil`` = Öl-Isofläche (alpha.oil=0.5, |U|), ``?part=solid`` = Wickelkopf-
+    Oberfläche (Benetzung). Aus ``_cfd_state["result"]`` (transiente Case-Pfade, nicht persistiert)."""
+    res = _cfd_state.get("result") or {}
+    part = request.args.get("part", "oil")
+    key = "solid_vtp_path" if part == "solid" else "oil_vtp_path"
+    vtp = res.get(key)
+    if not vtp or not os.path.exists(vtp):
+        return jsonify({"error": "keine VTP vorhanden"}), 404
+    return send_file(vtp, mimetype="application/octet-stream")
+
+
 @app.route("/project/<pid>/oilspray")
 def project_oilspray(pid: str):
     """Gespeicherten Spritzöl-Lauf eines Projekts laden (results.json["oilspray"] + Chart-
@@ -2743,7 +2757,7 @@ def delete_project(pid: str):
 def project_video(pid: str, mode: str):
     # field-animation modes + structural deformation ramp + 3D-Lastprofil (frames_em3d)
     video_subdirs = {**FIELD_SUBDIRS, "struct": "frames_struct", "em3d": "frames_em3d",
-                     "oil": "frames_oil"}
+                     "oil": "frames_oil", "cfd": "frames_cfd"}
     if not _safe_name(pid) or mode not in video_subdirs:
         return jsonify({"error": "ungültig"}), 403
     base = os.path.join(PROJECTS_ROOT, pid) if pid and pid != "current" else _state.get("project_dir")

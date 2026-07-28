@@ -117,11 +117,66 @@ def test_thermal_coupling():
           % (s0["T_winding"], s1["T_winding"]))
 
 
+def _synth_case(dirp):
+    """Baut eine minimale foamToVTK-artige Struktur (VTK/cfd_case_<N>/internal.vtu +
+    boundary/windinghead.vtp) mit einem α_oil-Rampenfeld, das 0.5 durchläuft — ohne OpenFOAM."""
+    import os, numpy as np, vtk
+    from vtk.util import numpy_support as ns
+    n = 12
+    img = vtk.vtkImageData(); img.SetDimensions(n, n, n); img.SetSpacing(1.0 / n, 1.0 / n, 1.0 / n)
+    npts = n * n * n
+    xs = np.repeat(np.linspace(0, 1, n), n * n)          # α steigt entlang x → Isofläche α=0.5 existiert
+    al = ns.numpy_to_vtk(xs.astype(np.float32)); al.SetName("alpha.oil")
+    img.GetPointData().AddArray(al)
+    U = np.zeros((npts, 3), np.float32); U[:, 1] = -5.0   # konstantes |U|
+    ua = ns.numpy_to_vtk(U); ua.SetName("U"); ua.SetNumberOfComponents(3)
+    img.GetPointData().AddArray(ua)
+    ap = vtk.vtkAppendFilter(); ap.SetInputData(img); ap.Update()   # → UnstructuredGrid
+    tdir = os.path.join(dirp, "VTK", "cfd_case_50"); os.makedirs(os.path.join(tdir, "boundary"))
+    w = vtk.vtkXMLUnstructuredGridWriter(); w.SetFileName(os.path.join(tdir, "internal.vtu"))
+    w.SetInputData(ap.GetOutput()); w.Write()
+    # eine kleine Wickelkopf-Randfläche mit α_oil-Punktskalar
+    pl = vtk.vtkPlaneSource(); pl.SetResolution(4, 4); pl.Update(); poly = pl.GetOutput()
+    wa = ns.numpy_to_vtk(np.full(poly.GetNumberOfPoints(), 0.8, np.float32)); wa.SetName("alpha.oil")
+    poly.GetPointData().AddArray(wa)
+    wr = vtk.vtkXMLPolyDataWriter(); wr.SetFileName(os.path.join(tdir, "boundary", "windinghead.vtp"))
+    wr.SetInputData(poly); wr.Write()
+
+
+def test_isosurface_and_browser_vtp():
+    """Öl-Isofläche (α=0.5) + schlanke Browser-VTPs (float32, ein Skalar) aus synthetischem
+    foamToVTK-Output — deckt den neuen 3D-Visualisierungspfad OHNE OpenFOAM ab (braucht vtk)."""
+    try:
+        import vtk  # noqa: F401
+    except Exception:
+        print("· test_isosurface_and_browser_vtp übersprungen (kein vtk)")
+        return
+    import os, tempfile, vtk, numpy as np
+    from vtk.util import numpy_support as ns
+    case = tempfile.mkdtemp(); _synth_case(case)
+    vtus = ema_cfd._internal_vtus(case)
+    assert vtus and vtus[-1].endswith("internal.vtu"), vtus
+    iso = ema_cfd._oil_isosurface(ema_cfd._read_vtu(vtus[-1]))
+    assert iso.GetNumberOfPoints() > 0, "Isofläche α=0.5 muss Punkte haben"
+    assert iso.GetPointData().GetArray("Umag") is not None, "Umag muss auf der Isofläche liegen"
+    op = os.path.join(case, "oil.vtp"); sp = os.path.join(case, "solid.vtp")
+    a, b = ema_cfd.export_browser_cfd(case, op, sp)
+    assert a and os.path.exists(a) and b and os.path.exists(b), (a, b)
+    for p, scal in ((a, "Umag"), (b, "alpha.oil")):
+        rd = vtk.vtkXMLPolyDataReader(); rd.SetFileName(p); rd.Update(); pd = rd.GetOutput().GetPointData()
+        names = [pd.GetArrayName(i) for i in range(pd.GetNumberOfArrays())]
+        assert names == [scal], (p, names)
+        assert ns.vtk_to_numpy(pd.GetArray(scal)).dtype == np.dtype("float32")
+    print("✓ isosurface+browser_vtp: Isofläche α=0.5 (Umag), 2 schlanke float32-VTPs (Öl/Wickelkopf)")
+
+
 if __name__ == "__main__":
+    import numpy as np
     test_jet_velocity()
     test_htc_model()
     test_wetted_fraction()
     test_case_dicts()
     test_persist_lean()
     test_thermal_coupling()
+    test_isosurface_and_browser_vtp()
     print("\nALLE CFD-TESTS BESTANDEN ✅  (interFoam-End-to-End separat über die UI)")
