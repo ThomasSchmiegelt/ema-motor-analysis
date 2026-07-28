@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(gh api graphql -f 'query= *)",
+      "Bash(gh api *)",
+      "Bash(python3 -c ' *)"
+    ]
+  }
+}

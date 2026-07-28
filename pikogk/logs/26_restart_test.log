@@ -1,0 +1,48 @@
+Beende noch laufende PicoGKWebApi-Instanz(en) ...
+Starte PicoGK Web API (DISPLAY=:1) ...
+Ein PicoGK-Viewer-Fenster oeffnet sich zusaetzlich auf dem Desktop - das ist normal (PicoGK benoetigt es intern).
+Es startet leer/weiss und zeigt erst nach dem ersten Klick auf 'Generieren' etwas an.
+Die eigentliche Bedienoberflaeche (das Menue) ist die Browser-Seite, die sich gleich automatisch oeffnet: http://localhost:5266
+
+      0s    0.0+ Opened /home/thomas/Documents/PicoGK.log
+      0s    0.0+ 
+      0s    0.0+ ----------------------------------------
+      0s    0.0+ 
+      0s    0.0+ Current time (UTC): 2026-07-16 14:01:20 (UTC)
+      0s    0.0+ Current local time: 2026-07-16 16:01:20 (+02:00)
+      0s    0.0+ 
+      0s    0.0+ ----------------------------------------
+      0s    0.0+ 
+      0s    0.0+ System Info:
+      0s    0.0+ 
+      0s    0.0+ Machine Name:         GrosserRechner
+      0s    0.0+ Operating System      Ubuntu 24.04.3 LTS
+      0s    0.0+ Version:              Unix 6.17.0.40
+      0s    0.0+ OS Architecture:      X64
+      0s    0.0+ Proc Architecture:    X64
+      0s    0.0+ 64 Bit OS:            Yes
+      0s    0.0+ 64 Bit Process:       Yes
+      0s    0.0+ Processor Count:      8
+      0s    0.0+ Working Set:          42MB
+      0s    0.0+ C# Framework:         .NET 9.0.18
+      0s    0.0+ C# CLR Version:       9.0.18
+      0s    0.0+ PicoGK Path:          /home/thomas/ai-project/pikogk/PicoGKRuntime/Dist/picogk.so
+      0s    0.0+ Command Line:         /home/thomas/ai-project/pikogk/PicoGKWebApi/bin/Debug/net9.0/PicoGKWebApi.dll
+      0s    0.0+ 
+      0s    0.0+ ----------------------------------------
+      0s    0.0+ 
+      0s    0.0+ PicoGK:    PicoGK Core Library
+      0s    0.0+            26.2.0
+      0s    0.0+            2026-06-05 21:31:47 picogk
+      0s    0.0+ 
+      0s    0.0+ VoxelSize: 0.25 (mm)
+      0s    0.0+ Happy Computational Engineering!
+      0s    0.0+ 
+      0s    0.0+ 
+PicoGK Web API listening on http://localhost:5266
+Ollama-Warmup ok (qwen3.6-16k:latest)
+      1s    0.6+ OpenGL: 4.1.0 NVIDIA 580.105.08 / NVIDIA GeForce RTX 3090/PCIe/SSE2 / NVIDIA Corporation
+      1s    0.0+ Loading lights embedded environment
+      1s    0.0+ Starting tasks.
+      1s    0.0+ 
+      1s    0.0+ Loading Lights

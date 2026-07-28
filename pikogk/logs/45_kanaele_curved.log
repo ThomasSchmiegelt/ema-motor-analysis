@@ -1,0 +1,66 @@
+Beende noch laufende PicoGKWebApi-Instanz(en) ...
+Alte Instanz reagiert nicht auf SIGTERM - erzwinge Beendigung (SIGKILL) ...
+Starte PicoGK Web API (DISPLAY=:1) ...
+Ein PicoGK-Viewer-Fenster oeffnet sich zusaetzlich auf dem Desktop - das ist normal (PicoGK benoetigt es intern).
+Es startet leer/weiss und zeigt erst nach dem ersten Klick auf 'Generieren' etwas an.
+Die eigentliche Bedienoberflaeche (das Menue) ist die Browser-Seite, die sich gleich automatisch oeffnet: http://localhost:5266
+
+Zylinderkopf-Skills: fertige Instanzen und deren Referenzdaten ueberstehen
+sowohl das Schliessen des Browser-Tabs als auch einen Neustart dieses Skripts.
+Ein Skill-Lauf, der genau beim Beenden/Kill aktiv war, wird beim naechsten Start
+als 'fehlgeschlagen' erkannt (PicoGK kann laufende Berechnungen nicht fortsetzen) -
+in dem Fall den Skill in der Seite einfach erneut ausfuehren.
+
+      0s    0.0+ Opened /home/thomas/Documents/PicoGK.log
+      0s    0.0+ 
+      0s    0.0+ ----------------------------------------
+      0s    0.0+ 
+      0s    0.0+ Current time (UTC): 2026-07-17 11:09:42 (UTC)
+      0s    0.0+ Current local time: 2026-07-17 13:09:42 (+02:00)
+      0s    0.0+ 
+      0s    0.0+ ----------------------------------------
+      0s    0.0+ 
+      0s    0.0+ System Info:
+      0s    0.0+ 
+      0s    0.0+ Machine Name:         GrosserRechner
+      0s    0.0+ Operating System      Ubuntu 24.04.3 LTS
+      0s    0.0+ Version:              Unix 6.17.0.40
+      0s    0.0+ OS Architecture:      X64
+      0s    0.0+ Proc Architecture:    X64
+      0s    0.0+ 64 Bit OS:            Yes
+      0s    0.0+ 64 Bit Process:       Yes
+      0s    0.0+ Processor Count:      8
+      0s    0.0+ Working Set:          43MB
+      0s    0.0+ C# Framework:         .NET 9.0.18
+      0s    0.0+ C# CLR Version:       9.0.18
+      0s    0.0+ PicoGK Path:          /home/thomas/ai-project/pikogk/PicoGKRuntime/Dist/picogk.so
+      0s    0.0+ Command Line:         /home/thomas/ai-project/pikogk/PicoGKWebApi/bin/Debug/net9.0/PicoGKWebApi.dll
+      0s    0.0+ 
+      0s    0.0+ ----------------------------------------
+      0s    0.0+ 
+      0s    0.0+ PicoGK:    PicoGK Core Library
+      0s    0.0+            26.2.0
+      0s    0.0+            2026-06-05 21:31:47 picogk
+      0s    0.0+ 
+      0s    0.0+ VoxelSize: 0.25 (mm)
+      0s    0.0+ Happy Computational Engineering!
+      0s    0.0+ 
+      0s    0.0+ 
+PicoGK Web API listening on http://localhost:5266
+      1s    0.8+ OpenGL: 4.1.0 NVIDIA 580.105.08 / NVIDIA GeForce RTX 3090/PCIe/SSE2 / NVIDIA Corporation
+      1s    0.0+ Loading lights embedded environment
+      1s    0.0+ Starting tasks.
+      1s    0.0+ 
+      1s    0.0+ Loading Lights
+Ollama-Warmup fehlgeschlagen: HTTP 500
+   1881s 1880.0+ Viewer window closing requested - Waiting for task to end.
+   1881s    0.1+ Viewer Window Closed
+Disposing Library
+Done Disposing Library
+   1881s    0.0+ 
+   1881s    0.0+ ----------------------------------------
+   1881s    0.0+ 
+   1881s    0.0+ Closing log file.
+   1881s    0.0+ Current time (UTC): 2026-07-17 11:41:03 (UTC)
+   1881s    0.0+ Current local time: 2026-07-17 13:41:03 (+02:00)
+   1881s    0.0+ Done.

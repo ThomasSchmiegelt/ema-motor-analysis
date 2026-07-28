@@ -1,0 +1,230 @@
+[  5%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/blosc.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/fastcopy.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_shared.dir/fastcopy.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/blosclz.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_static.dir/blosc.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_shared.dir/blosclz.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_static.dir/blosclz.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_shared.dir/blosc.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_shared.dir/shuffle-generic.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/shuffle-generic.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/bitshuffle-generic.c.o
+[  5%] Building C object blosc/CMakeFiles/blosc_static.dir/fastcopy.c.o
+[  7%] Building C object blosc/CMakeFiles/blosc_static.dir/shuffle-generic.c.o
+[  7%] Building C object blosc/CMakeFiles/blosc_shared.dir/bitshuffle-generic.c.o
+[  7%] Building C object blosc/CMakeFiles/blosc_shared.dir/shuffle-sse2.c.o
+[  8%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/shuffle-sse2.c.o
+[  9%] Building C object blosc/CMakeFiles/blosc_shared.dir/bitshuffle-sse2.c.o
+[  9%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/bitshuffle-sse2.c.o
+[  9%] Building C object blosc/CMakeFiles/blosc_static.dir/bitshuffle-generic.c.o
+[ 10%] Building C object blosc/CMakeFiles/blosc_static.dir/shuffle-sse2.c.o
+[ 11%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/shuffle-avx2.c.o
+[ 11%] Building C object blosc/CMakeFiles/blosc_static.dir/bitshuffle-sse2.c.o
+[ 11%] Building C object blosc/CMakeFiles/blosc_shared.dir/shuffle-avx2.c.o
+[ 11%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/bitshuffle-avx2.c.o
+[ 12%] Building C object blosc/CMakeFiles/blosc_static.dir/shuffle-avx2.c.o
+[ 13%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/shuffle.c.o
+[ 14%] Building C object blosc/CMakeFiles/blosc_shared.dir/bitshuffle-avx2.c.o
+[ 14%] Building C object blosc/CMakeFiles/blosc_static.dir/bitshuffle-avx2.c.o
+[ 14%] Building C object blosc/CMakeFiles/blosc_shared.dir/shuffle.c.o
+[ 14%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/lz4-1.10.0/lz4.c.o
+[ 14%] Building C object blosc/CMakeFiles/blosc_static.dir/shuffle.c.o
+[ 15%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/lz4-1.10.0/lz4hc.c.o
+[ 15%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/adler32.c.o
+[ 16%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/lz4-1.10.0/lz4.c.o
+[ 17%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/lz4-1.10.0/lz4.c.o
+[ 18%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/compress.c.o
+[ 18%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/lz4-1.10.0/lz4hc.c.o
+[ 18%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/crc32.c.o
+[ 18%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/lz4-1.10.0/lz4hc.c.o
+[ 19%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/deflate.c.o
+[ 20%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/adler32.c.o
+[ 21%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/adler32.c.o
+[ 21%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/gzclose.c.o
+[ 21%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/compress.c.o
+[ 21%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/compress.c.o
+[ 22%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/gzlib.c.o
+[ 23%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/crc32.c.o
+[ 23%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/deflate.c.o
+[ 24%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/crc32.c.o
+[ 24%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/gzread.c.o
+[ 25%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/gzclose.c.o
+[ 25%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/deflate.c.o
+[ 26%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/gzwrite.c.o
+[ 27%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/gzclose.c.o
+[ 27%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/gzlib.c.o
+[ 27%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/infback.c.o
+[ 28%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/gzread.c.o
+[ 28%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/gzlib.c.o
+[ 28%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/gzwrite.c.o
+[ 29%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/gzread.c.o
+[ 29%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/infback.c.o
+[ 30%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/inffast.c.o
+[ 31%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/inffast.c.o
+[ 31%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/gzwrite.c.o
+[ 31%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/inflate.c.o
+[ 32%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/inftrees.c.o
+[ 33%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/infback.c.o
+[ 33%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/inflate.c.o
+[ 33%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/inffast.c.o
+[ 34%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/inftrees.c.o
+[ 34%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/trees.c.o
+[ 34%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/trees.c.o
+[ 35%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/inflate.c.o
+[ 36%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/uncompr.c.o
+[ 36%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/uncompr.c.o
+[ 36%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/inftrees.c.o
+[ 36%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zlib-1.3.1/zutil.c.o
+[ 37%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/trees.c.o
+[ 38%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zlib-1.3.1/zutil.c.o
+[ 39%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/common/debug.c.o
+[ 39%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/common/debug.c.o
+[ 39%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/uncompr.c.o
+[ 40%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/common/entropy_common.c.o
+[ 41%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zlib-1.3.1/zutil.c.o
+[ 41%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/common/entropy_common.c.o
+[ 41%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/common/debug.c.o
+[ 42%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/common/error_private.c.o
+[ 42%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/common/error_private.c.o
+[ 43%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/common/entropy_common.c.o
+[ 43%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/common/fse_decompress.c.o
+[ 44%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/common/fse_decompress.c.o
+[ 44%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/common/pool.c.o
+[ 45%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/common/pool.c.o
+[ 45%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/common/error_private.c.o
+[ 45%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/common/fse_decompress.c.o
+[ 46%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/common/threading.c.o
+[ 47%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/common/pool.c.o
+[ 47%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/common/threading.c.o
+[ 47%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/common/xxhash.c.o
+[ 48%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/common/xxhash.c.o
+[ 48%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/common/zstd_common.c.o
+[ 49%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/common/zstd_common.c.o
+[ 49%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/common/threading.c.o
+[ 49%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/fse_compress.c.o
+[ 50%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/fse_compress.c.o
+[ 50%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/hist.c.o
+[ 51%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/common/xxhash.c.o
+[ 52%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/huf_compress.c.o
+[ 52%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/common/zstd_common.c.o
+[ 52%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress.c.o
+[ 53%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/hist.c.o
+[ 54%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/fse_compress.c.o
+[ 54%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/hist.c.o
+[ 55%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress_literals.c.o
+[ 56%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/huf_compress.c.o
+[ 56%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/huf_compress.c.o
+[ 56%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress_sequences.c.o
+[ 56%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress_superblock.c.o
+[ 57%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress.c.o
+[ 58%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_double_fast.c.o
+[ 58%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress.c.o
+[ 59%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress_literals.c.o
+[ 59%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress_literals.c.o
+[ 59%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_fast.c.o
+[ 60%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress_sequences.c.o
+[ 61%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_lazy.c.o
+[ 61%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress_sequences.c.o
+[ 61%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_ldm.c.o
+[ 61%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress_superblock.c.o
+[ 62%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_compress_superblock.c.o
+[ 63%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_opt.c.o
+[ 64%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_double_fast.c.o
+[ 64%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/compress/zstdmt_compress.c.o
+[ 64%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_double_fast.c.o
+[ 65%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/decompress/huf_decompress.c.o
+[ 65%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_fast.c.o
+[ 66%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_fast.c.o
+[ 66%] Building ASM object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/decompress/huf_decompress_amd64.S.o
+[ 67%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_lazy.c.o
+[ 67%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_lazy.c.o
+[ 68%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/decompress/zstd_ddict.c.o
+[ 69%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_ldm.c.o
+[ 69%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_ldm.c.o
+[ 69%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/decompress/zstd_decompress.c.o
+[ 70%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/decompress/zstd_decompress_block.c.o
+[ 70%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_opt.c.o
+[ 71%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/compress/zstdmt_compress.c.o
+[ 71%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/cover.c.o
+[ 71%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/zstd_opt.c.o
+[ 72%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/divsufsort.c.o
+[ 72%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/decompress/huf_decompress.c.o
+[ 73%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/compress/zstdmt_compress.c.o
+[ 74%] Building ASM object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/decompress/huf_decompress_amd64.S.o
+[ 74%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/fastcover.c.o
+[ 74%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/decompress/huf_decompress.c.o
+[ 74%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/decompress/zstd_ddict.c.o
+[ 75%] Building C object blosc/CMakeFiles/blosc_shared.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/zdict.c.o
+[ 76%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/decompress/zstd_decompress.c.o
+[ 76%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/decompress/zstd_decompress_block.c.o
+[ 77%] Building ASM object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/decompress/huf_decompress_amd64.S.o
+[ 78%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/cover.c.o
+[ 78%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/decompress/zstd_ddict.c.o
+[ 78%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/decompress/zstd_decompress.c.o
+[ 78%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/divsufsort.c.o
+[ 79%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/decompress/zstd_decompress_block.c.o
+[ 80%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/fastcover.c.o
+[ 80%] Building C object blosc/CMakeFiles/blosc_shared_testing.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/zdict.c.o
+[ 80%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/cover.c.o
+[ 81%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/divsufsort.c.o
+[ 81%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/fastcover.c.o
+[ 82%] Building C object blosc/CMakeFiles/blosc_static.dir/__/internal-complibs/zstd-1.5.6/dictBuilder/zdict.c.o
+[ 82%] Linking C shared library libblosc.so
+[ 82%] Built target blosc_shared
+[ 83%] Building C object compat/CMakeFiles/filegen.dir/filegen.c.o
+[ 83%] Building C object bench/CMakeFiles/bench.dir/bench.c.o
+[ 83%] Linking C executable filegen
+[ 83%] Built target filegen
+[ 83%] Linking C executable bench
+[ 83%] Built target bench
+[ 84%] Linking C shared library libblosc_testing.so
+[ 84%] Built target blosc_shared_testing
+[ 85%] Building C object tests/CMakeFiles/test_getitem.dir/test_getitem.c.o
+[ 85%] Building C object tests/CMakeFiles/test_forksafe.dir/test_forksafe.c.o
+[ 87%] Building C object tests/CMakeFiles/test_api.dir/test_api.c.o
+[ 87%] Building C object tests/CMakeFiles/test_compress_roundtrip.dir/test_compress_roundtrip.c.o
+[ 87%] Building C object tests/CMakeFiles/test_bitshuffle_leftovers.dir/test_bitshuffle_leftovers.c.o
+[ 87%] Building C object tests/CMakeFiles/test_maxout.dir/test_maxout.c.o
+[ 87%] Building C object tests/CMakeFiles/test_compressor.dir/test_compressor.c.o
+[ 87%] Linking C executable test_bitshuffle_leftovers
+[ 88%] Linking C executable test_getitem
+[ 89%] Linking C executable test_forksafe
+[ 89%] Linking C executable test_compress_roundtrip
+[ 89%] Linking C executable test_api
+[ 90%] Linking C executable test_maxout
+[ 90%] Built target test_bitshuffle_leftovers
+[ 90%] Built target test_getitem
+[ 91%] Linking C executable test_compressor
+[ 91%] Built target test_compress_roundtrip
+[ 91%] Building C object tests/CMakeFiles/test_noinit.dir/test_noinit.c.o
+[ 91%] Built target test_forksafe
+[ 91%] Built target test_maxout
+[ 91%] Built target test_api
+[ 91%] Building C object tests/CMakeFiles/test_nolock.dir/test_nolock.c.o
+[ 91%] Building C object tests/CMakeFiles/test_nthreads.dir/test_nthreads.c.o
+[ 91%] Building C object tests/CMakeFiles/test_shuffle_roundtrip_avx2.dir/test_shuffle_roundtrip_avx2.c.o
+[ 91%] Building C object tests/CMakeFiles/test_shuffle_roundtrip_generic.dir/test_shuffle_roundtrip_generic.c.o
+[ 91%] Building C object tests/CMakeFiles/test_shuffle_roundtrip_sse2.dir/test_shuffle_roundtrip_sse2.c.o
+[ 91%] Built target test_compressor
+[ 92%] Linking C executable test_noinit
+[ 93%] Linking C executable test_nolock
+[ 94%] Linking C executable test_nthreads
+[ 95%] Linking C executable test_shuffle_roundtrip_avx2
+[ 96%] Linking C executable test_shuffle_roundtrip_generic
+[ 96%] Built target test_noinit
+[ 97%] Linking C executable test_shuffle_roundtrip_sse2
+[ 97%] Built target test_nolock
+[ 97%] Built target test_nthreads
+[ 97%] Built target test_shuffle_roundtrip_avx2
+[ 97%] Built target test_shuffle_roundtrip_generic
+[ 97%] Built target test_shuffle_roundtrip_sse2
+[ 97%] Linking C static library libblosc.a
+[ 97%] Built target blosc_static
+[ 99%] Building C object tests/fuzz/CMakeFiles/fuzz_decompress.dir/standalone.c.o
+[ 99%] Building C object tests/fuzz/CMakeFiles/fuzz_compress.dir/fuzz_compress.c.o
+[ 99%] Building C object tests/fuzz/CMakeFiles/fuzz_compress.dir/standalone.c.o
+[ 99%] Building C object tests/fuzz/CMakeFiles/fuzz_decompress.dir/fuzz_decompress.c.o
+[ 99%] Linking C executable decompress_fuzzer
+[100%] Linking C executable compress_fuzzer
+[100%] Built target fuzz_decompress
+[100%] Built target fuzz_compress

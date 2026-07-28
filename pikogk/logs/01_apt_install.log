@@ -1,0 +1,2 @@
+sudo: ein Terminal ist erforderlich, um das Passwort zu lesen; verwenden Sie entweder die Option -S zum Lesen von der Standardeingabe oder konfigurieren Sie einen Askpass-Helfer
+sudo: Ein Passwort ist notwendig

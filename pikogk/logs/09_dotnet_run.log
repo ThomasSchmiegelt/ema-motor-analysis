@@ -1,0 +1,11 @@
+Unhandled exception. System.IO.DirectoryNotFoundException: Could not find a part of the path '/home/thomas/Documents/PicoGK.log'.
+   at Interop.ThrowExceptionForIoErrno(ErrorInfo errorInfo, String path, Boolean isDirError)
+   at Microsoft.Win32.SafeHandles.SafeFileHandle.Open(String path, OpenFlags flags, Int32 mode, Boolean failForSymlink, Boolean& wasSymlink, Func`4 createOpenException)
+   at Microsoft.Win32.SafeHandles.SafeFileHandle.Open(String fullPath, FileMode mode, FileAccess access, FileShare share, FileOptions options, Int64 preallocationSize, UnixFileMode openPermissions, Int64& fileLength, UnixFileMode& filePermissions, Boolean failForSymlink, Boolean& wasSymlink, Func`4 createOpenException)
+   at System.IO.Strategies.OSFileStreamStrategy..ctor(String path, FileMode mode, FileAccess access, FileShare share, FileOptions options, Int64 preallocationSize, Nullable`1 unixCreateMode)
+   at System.IO.StreamWriter.ValidateArgsAndOpenPath(String path, Boolean append, Encoding encoding, Int32 bufferSize)
+   at System.IO.StreamWriter..ctor(String path, Boolean append)
+   at PicoGK.LogFile..ctor(String& strFileName, Boolean& bOutputToConsole) in /_/Types/Log.cs:line 84
+   at PicoGK.Library.GlobalInstance..ctor(Single fVoxelSizeMM, String strLogPath, String strViewerTitle, String strViewerEnvironment) in /_/Library/LibraryGlobal.cs:line 55
+   at PicoGK.Library.Go(Single fVoxelSizeMM, ThreadStart fnTask, String strLogFilePath, Boolean bEndAppWithTask, String strWindowTitle, String strLightsFile) in /_/Library/LibraryGlobal.cs:line 381
+   at Program.<Main>$(String[] args) in /home/thomas/ai-project/pikogk/PicoGK_Examples/Program.cs:line 24
