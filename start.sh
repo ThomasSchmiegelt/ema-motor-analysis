@@ -8,6 +8,14 @@ CCX_CMD="$FREECAD_ROOT/.pixi/envs/default/bin/ccx"
 OLLAMA_URL="http://localhost:11434"
 PORT=5000
 
+# Fontconfig: die pixi/conda-Umgebungen exportieren FONTCONFIG_FILE="" → libfontconfig
+# meldet bei Unterprozessen »Cannot load default config file: … (null)«. Auf die vorhandene
+# System-Config setzen, falls leer (Unterprozesse erben es via os.environ).
+if [ -z "${FONTCONFIG_FILE:-}" ] && [ -f /etc/fonts/fonts.conf ]; then
+    export FONTCONFIG_FILE=/etc/fonts/fonts.conf
+    export FONTCONFIG_PATH=/etc/fonts
+fi
+
 echo "=== E-Maschinen Analyse ==="
 echo ""
 

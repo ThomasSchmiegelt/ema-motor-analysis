@@ -23,6 +23,7 @@ import io
 import json
 import os
 import time
+import urllib.error
 import urllib.request
 
 import numpy as np
@@ -76,18 +77,43 @@ def _save(idx: dict, store_dir: str | None = None) -> None:
 
 # ── embeddings (Ollama) ──────────────────────────────────────────────────────
 
-def embed(text: str, model: str = EMBED_MODEL, timeout: int = 60) -> list[float]:
-    """Single embedding via Ollama /api/embeddings."""
+def embed(text: str, model: str = EMBED_MODEL, timeout: int = 120,
+          retries: int = 2) -> list[float]:
+    """Single embedding via Ollama /api/embeddings.
+
+    Robust gegen den transienten Kaltstart: läuft gerade ein großes LLM (z. B. für den
+    Bericht), muss Ollama das Embedding-Modell erst (nach)laden — die erste Anfrage kann
+    dann fehlschlagen oder langsam sein. Wir versuchen es daher mehrfach und geben bei
+    endgültigem Fehler die ECHTE Ollama-Meldung + einen Pull-Hinweis aus (statt nur
+    »Modell installiert?«), damit die Ursache sichtbar ist."""
     body = json.dumps({"model": model, "prompt": text}).encode("utf-8")
-    req = urllib.request.Request(
-        f"{OLLAMA_URL}/api/embeddings", data=body,
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        resp = json.loads(r.read())
-    vec = resp.get("embedding")
-    if not vec:
-        raise RuntimeError("Ollama lieferte kein Embedding (Modell installiert?)")
-    return vec
+    last_err = "unbekannt"
+    for attempt in range(max(1, retries)):
+        try:
+            req = urllib.request.Request(
+                f"{OLLAMA_URL}/api/embeddings", data=body,
+                headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                resp = json.loads(r.read())
+            vec = resp.get("embedding")
+            if vec:
+                return vec
+            last_err = resp.get("error") or "leeres Embedding"
+        except urllib.error.HTTPError as e:               # Ollama-Fehler (z. B. Modell fehlt)
+            try:
+                last_err = (json.loads(e.read()).get("error") or str(e))
+            except Exception:
+                last_err = str(e)
+        except urllib.error.URLError as e:                # Ollama nicht erreichbar
+            raise RuntimeError(
+                f"Ollama nicht erreichbar ({OLLAMA_URL}): {getattr(e, 'reason', e)}") from e
+        except Exception as e:
+            last_err = str(e)
+        if attempt < retries - 1:
+            time.sleep(1.5)                               # kurz warten: Modell lädt evtl. gerade
+    raise RuntimeError(
+        f"Ollama-Embedding fehlgeschlagen (Modell '{model}'): {last_err}. "
+        f"Ist das Embedding-Modell installiert? → »ollama pull {model}«")
 
 
 def _embed_many(texts: list[str], progress_cb=None) -> list[list[float]]:

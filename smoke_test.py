@@ -170,6 +170,41 @@ def _gen():
     return f"{n} motor scripts (incl. component toggles) + FEM, rotor-only confirmed"
 check("build_*_script syntax + rotor-only FEM", _gen)
 
+def _wh_spread():
+    # Stufenweise Spreizung der Wickelkopf-Lagen: innerste Lage 1·spread°, nächste 2·…
+    # Die emittierte Mathematik wird WIRKLICH ausgeführt (reines Python, kein FreeCAD):
+    # der Konstanten-Block zwischen z_face und _r_lane braucht nur math + die Header-Werte.
+    import math as _m, re as _re
+    def _slice(code):
+        ns = {"math": _m}
+        for ln in code.splitlines():
+            if _re.match(r"^(n_layers|axial|coil_pitch|wh_flare)\b", ln):
+                exec(ln, ns)
+        exec(code[code.index("z_face  = axial / 2.0"):code.index("def _r_lane(k):")], ns)
+        return ns
+    g = dict(GEOM, conductorsPerSlot=8, windingHeadFlare=6, windingHeadSpread=2.0)
+    code = ef.build_full_motor_script(g, AXIAL, "/tmp/_smoke.FCStd")
+    ast.parse(code)
+    # per-Lage: Hin-Arm f0, Rück-Arm f1 (NICHT mehr ein gemeinsames f je Paar)
+    assert "wh_spread = 2.0" in code, "Spreizung nicht verdrahtet"
+    assert "f0 = _lane_flare(k0); f1 = _lane_flare(k1)" in code, "Kronen-Arme nicht per-Lage"
+    assert "f = f0 + b * (f1 - f0)" in code, "Aufweitung folgt der Lage nicht"
+    assert "f_weld = H_w * math.tan(a_w)" in code, "Spreizung fehlt auf der Schweißseite"
+    assert "2.0 * wh_flare_max" in code, "Isolierhülse muss die äußerste Lage umschließen"
+    ns = _slice(code)
+    fs = [ns["_lane_flare"](k) for k in range(8)]    # JEDE Lage einzeln (0..7)
+    assert all(fs[i] < fs[i + 1] for i in range(7)), f"keine per-Lage-Spreizung: {fs}"
+    for k, f in enumerate(fs):                        # dr/dz = f/H_eff ⇒ α = atan(…)
+        a = _m.degrees(_m.atan((f - 6.0) / ns["WH_HEFF"]))
+        assert abs(a - (k + 1) * 2.0) < 1e-6, f"Lage {k}: {a:.3f}° statt {(k+1)*2.0}°"
+    assert abs(ns["wh_flare_max"] - fs[-1]) < 1e-9   # Hülse umschließt die äußerste Lage
+    # spread = 0 ⇒ historisches Verhalten (alle Lagen gleich)
+    ns0 = _slice(ef.build_full_motor_script(dict(GEOM, conductorsPerSlot=8),
+                                            AXIAL, "/tmp/_smoke.FCStd"))
+    assert {ns0["_lane_flare"](k) for k in range(8)} == {ns0["wh_flare"]}
+    return "Lagen 2/4/6/8/10/12/14/16°, f=%s mm" % [round(f, 2) for f in fs]
+check("Wickelkopf-Spreizung je Lage (per Lage, Krone + Schweißseite)", _wh_spread)
+
 # ── 9. (optional) real FreeCAD CAD build + rotor FEM ─────────────────────────────
 if "--cad" in sys.argv:
     print("\n[CAD build — slow]")
@@ -345,7 +380,17 @@ def _expert_compare():
     assert hasattr(E, "run_expert_agents_compare")
     assert hasattr(E, "assemble_expert_section_compare")
     assert hasattr(R, "generate_comparison_report_agentic")
-    assert len(E._EXPERTS) == 6, "es sollten 6 Experten sein"
+    # 6 immer-aktive Experten + 2 bedingte (em3d, kuehlung) = 8 registriert
+    keys = [e["key"] for e in E._EXPERTS]
+    assert len(E._EXPERTS) == 8, "es sollten 8 Experten sein (6 + em3d + kuehlung)"
+    assert "em3d" in keys and "kuehlung" in keys, "3D-Feld-/Kühlungs-Experte fehlt"
+    # bedingte Experten NUR laufen lassen, wenn ihre Daten vorliegen
+    picked = [e["key"] for e in E._EXPERTS
+              if not e.get("condition") or e["condition"]({"summary": {}}, {})]
+    assert "em3d" not in picked and "kuehlung" not in picked, "bedingte Experten nicht gegated"
+    picked2 = [e["key"] for e in E._EXPERTS if not e.get("condition")
+               or e["condition"]({"em3d": {"x": 1}, "oilspray": {"y": 1}}, {})]
+    assert "em3d" in picked2 and "kuehlung" in picked2, "bedingte Experten laufen nicht mit Daten"
     md = E.assemble_expert_section_compare({"em_feld": "Befund A", "temperatur": "Befund B"})
     assert "Experten-Bewertung" in md and "Befund A" in md
     # Trennlinien (---) müssen aus Prosa entfernt werden (sonst pandoc-Schmalspalte)
@@ -353,7 +398,9 @@ def _expert_compare():
     # interne Pipes in Prosa werden escaped (keine versehentliche Tabelle)
     assert "\\|" in R._clean_prose("a | b"), "pipe nicht escaped"
     assert hasattr(R, "_render_chapters_pdf"), "Kapitel-Renderer fehlt"
-    return "6 experts, hrule-strip + pipe-escape + chapter render ok"
+    # Kühl-Abschnitt im Einzelbericht erscheint nur mit oilspray-Daten
+    assert R._ensure_kuehlung_section("# x", {"_img_map": {}}) == "# x", "Kühl-Abschnitt ohne Daten"
+    return "8 experts (2 gated), kuehlung section, hrule-strip + pipe-escape + chapter render ok"
 check("comparative experts wiring + report hardening", _expert_compare)
 
 # ── KI-Auslegung (Designer-Pfad) — Validator/Synth/Optimizer, ohne Ollama ────────

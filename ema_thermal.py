@@ -338,8 +338,14 @@ def compute_capacities(geom: dict, axial: float,
 
 # ── Conductance matrix ───────────────────────────────────────────────────────
 
-def conductances(geom: dict, axial: float, cooling: str, rpm: float) -> dict:
-    """Pairwise conductances G [W/K] between nodes."""
+def conductances(geom: dict, axial: float, cooling: str, rpm: float,
+                 htc_oil: float = 0.0, wetted_area_m2: float = 0.0) -> dict:
+    """Pairwise conductances G [W/K] between nodes.
+
+    **CFD-Kopplung (opt-in):** ``htc_oil`` > 0 (aus einer OpenFOAM-VOF-Spritzölrechnung,
+    ``ema_cfd``) ergänzt einen DIREKTEN Wicklung→Kühlmittel-Pfad ``G_w_cool = htc_oil·A_wh``
+    (A_wh = benetzte Wickelkopf-Fläche aus dem CFD, sonst geometrischer Fallback). Ohne CFD
+    (``htc_oil==0``, Default) ist ``G_w_cool = 0`` → bit-identisch zum bisherigen Modell."""
     R_si    = geom["statorID"] / 2 / 1000
     R_so    = geom["statorOD"] / 2 / 1000
     R_rot   = geom["rotorOD"]  / 2 / 1000
@@ -394,6 +400,13 @@ def conductances(geom: dict, axial: float, cooling: str, rpm: float) -> dict:
     A_h_ext += 2 * math.pi * R_h_out**2           # end plates
     G_h_amb = cp["h_eff"] * A_h_ext
 
+    # Direkter Wicklung→Kühlmittel-Pfad aus einer CFD-Spritzölrechnung (opt-in). A_wh =
+    # benetzte Wickelkopf-Fläche (CFD) oder ~30 % der Bohrungsmantelfläche als Fallback.
+    G_w_cool = 0.0
+    if htc_oil and htc_oil > 0:
+        A_wh = wetted_area_m2 if (wetted_area_m2 and wetted_area_m2 > 0) else 0.30 * A_gap
+        G_w_cool = float(htc_oil) * float(A_wh)
+
     return {
         "G_w_si":   G_w_si,
         "G_si_h":   G_si_h,
@@ -403,6 +416,7 @@ def conductances(geom: dict, axial: float, cooling: str, rpm: float) -> dict:
         "G_ri_sh":  G_ri_sh,
         "G_sh_h":   G_sh_h,
         "G_h_amb":  G_h_amb,
+        "G_w_cool": G_w_cool,
         "_label":   cp["label"],
         "_delta_T_coolant": cp.get("delta_T_coolant", 0),
     }
@@ -430,6 +444,7 @@ def build_GA(G: dict) -> tuple[np.ndarray, np.ndarray]:
     add(RI, SH, G["G_ri_sh"])
     add(SH, H,  G["G_sh_h"])
     A[H, H] -= G["G_h_amb"]                     # ambient sink
+    A[W, W] -= G.get("G_w_cool", 0.0)           # CFD-Spritzöl: direkter Kühlmittel-Sink an der Wicklung
     return A
 
 
@@ -444,6 +459,7 @@ def solve_steady(G: dict, P_dict: dict, T_amb: float = 25.0) -> dict:
     P[SH] = P_dict["P_Bearing"]
     rhs = P.copy()
     rhs[H] += G["G_h_amb"] * (T_amb + G.get("_delta_T_coolant", 0))
+    rhs[W] += G.get("G_w_cool", 0.0) * (T_amb + G.get("_delta_T_coolant", 0))
     T = np.linalg.solve(-A, rhs)
     return {
         "T_winding":  round(float(T[W]),  1),
@@ -472,6 +488,7 @@ def solve_transient(G: dict, C_dict: dict, P_dict: dict,
     P[SH] = P_dict["P_Bearing"]
     rhs_const = P.copy()
     rhs_const[H] += G["G_h_amb"] * (T_amb + G.get("_delta_T_coolant", 0))
+    rhs_const[W] += G.get("G_w_cool", 0.0) * (T_amb + G.get("_delta_T_coolant", 0))
 
     # Implicit Euler: (C/dt - A) T^{n+1} = C/dt · T^n + rhs_const
     M_lhs = np.diag(C / dt) - A
@@ -540,7 +557,8 @@ def thermal_warnings(cont: dict, peak: dict | None, mag: dict) -> list[str]:
 
 def solve_transient_series(geom: dict, axial: float, caps: dict, series: dict,
                            rpm_series, t_series, cooling: str,
-                           T_amb: float = 25.0, T_init=None) -> dict:
+                           T_amb: float = 25.0, T_init=None,
+                           htc_oil: float = 0.0, wetted_area_m2: float = 0.0) -> dict:
     """Implicit-Euler transient driven by the per-timestep loss arrays and
     rpm-dependent conductances. Captures the *real* peak the thermal mass allows
     (short load spikes are buffered) and handles non-coincident T_max / rpm_max
@@ -562,11 +580,13 @@ def solve_transient_series(geom: dict, axial: float, caps: dict, series: dict,
     win  = np.empty(n)
     magt = np.empty(n)
     for k in range(n):
-        G = conductances(geom, axial, cooling, rpm[k])
+        G = conductances(geom, axial, cooling, rpm[k],
+                         htc_oil=htc_oil, wetted_area_m2=wetted_area_m2)
         A = build_GA(G)
         M_lhs = np.diag(C / dt) - A
         rhs = C / dt * Tn + P[:, k]
         rhs[H] += G["G_h_amb"] * (T_amb + G.get("_delta_T_coolant", 0))
+        rhs[W] += G.get("G_w_cool", 0.0) * (T_amb + G.get("_delta_T_coolant", 0))
         Tn = np.linalg.solve(M_lhs, rhs)
         Tmax = np.maximum(Tmax, Tn)
         win[k] = Tn[W]; magt[k] = Tn[M]
@@ -686,12 +706,17 @@ def run_thermal_analysis(geom: dict, axial: float, rpm: float, load_nm: float,
                           perf: dict,
                           mat: dict, st_mat: dict, hp_mat: dict, mag: dict,
                           cooling: str = "water", T_amb: float = 25.0,
-                          t_max: float = 1800.0) -> dict:
-    """Standalone S1 duty-point thermal analysis (continuous load_nm @ rpm)."""
+                          t_max: float = 1800.0,
+                          htc_oil: float = 0.0, wetted_area_m2: float = 0.0) -> dict:
+    """Standalone S1 duty-point thermal analysis (continuous load_nm @ rpm).
+
+    ``htc_oil``>0 (aus einer CFD-Spritzölrechnung, ``ema_cfd``) speist einen direkten
+    Wicklung→Kühlmittel-Pfad ein (s. ``conductances``); 0 = unverändertes Preset-Modell."""
     losses = design_point_losses(geom, axial, rpm, load_nm,
                                  perf, mat, st_mat, hp_mat, mag, cooling)
     caps   = compute_capacities(geom, axial, mat, st_mat, hp_mat, mag)
-    G      = conductances(geom, axial, cooling, rpm)
+    G      = conductances(geom, axial, cooling, rpm,
+                          htc_oil=htc_oil, wetted_area_m2=wetted_area_m2)
     steady = solve_steady(G, losses, T_amb)
     trans  = solve_transient(G, caps, losses, T_amb, t_max=t_max)
 
