@@ -62,7 +62,7 @@ def _dbg_write(work_dir, sections):
 
 
 # ── Grenzen / Defaults ───────────────────────────────────────────────────────
-RES_RANGE      = (24, 512)      # Domain-Auflösung (Kostentreiber; >200 = sehr lange CPU-Bakes)
+RES_RANGE      = (24, 1000)     # Domain-Auflösung (Kostentreiber; >200 = sehr lange CPU-Bakes, >512 RAM-kritisch)
 FRAMES_RANGE   = (10, 240)      # Anzahl Simulationsframes
 SECTION_RANGE  = (1, 12)        # Wickelkopf-Ausschnitt (Nutenzahl)
 DEFAULT_RES    = 72
@@ -208,6 +208,11 @@ NOZZLES      = int(CFG.get("nozzle_count", 6))
 RING_GAP_MM  = float(CFG.get("ring_gap_mm", 3.0))
 RING_TUBE_MM = float(CFG.get("ring_tube_mm", 6.0))
 NOZZLE_D_MM  = float(CFG.get("nozzle_d_mm", 1.0))
+# Voller Spritzring (360°): Ring als GESCHLOSSENER Kreis + Düsen gleichmäßig über den vollen
+# Umfang verteilt (statt nur über den Wickelkopf-Ausschnitt). Sinnvoll v. a. zusammen mit
+# winding_full — beim Keil-Ausschnitt zielen Düsen ohne Kupfer darunter synthetisch radial
+# nach innen auf den Kronenradius. Die Domain deckt dann den vollen Umfang ab (mehr Zellen!).
+RING_FULL    = bool(CFG.get("ring_full", False))
 RHO_OIL   = 850.0                                   # kg/m³ (Motoröl)
 CD_NOZZLE = 0.8                                     # Ausflusskoeffizient der Bohrung
 JET_V     = CD_NOZZLE * math.sqrt(2.0 * PRESSURE_BAR * 1e5 / RHO_OIL)   # m/s aus dem Druck
@@ -240,6 +245,20 @@ NOZZLE_OFFSET = math.radians(max(-45.0, min(45.0, float(CFG.get("nozzle_offset_d
 # scharfer Nadelstrahl und zerfällt beim Auftreffen sichtbarer in Tröpfchen (zusammen mit den
 # ohnehin aktiven Spray/Foam/Bubble-Sekundärpartikeln).
 JET_CONE   = math.radians(max(0.0, min(40.0, float(CFG.get("jet_cone_deg", 10.0)))))
+# Schnittdarstellung: Schnittebene durch die MOTORACHSE (z) und den AUSTRITTSPUNKT der gewählten
+# Düsen-Bohrung (1-basiert). Die kameraseitige Modellhälfte wird per Boolean weggeschnitten, die
+# Kamera blickt senkrecht auf die Schnittebene → Düsenbohrung/Ring-Rohr/Wickelkopf im Längsschnitt.
+# Das ÖL wird bewusst NICHT geschnitten (man will den Strahl ja sehen); Physik/Bake unverändert.
+SECTION_CUT = bool(CFG.get("section_cut", False))
+SECTION_NOZ = max(1, min(40, int(CFG.get("section_cut_noz", 1) or 1)))
+# Schnitt-Zoom: >1 = Kamera dichter an die Schnittfläche heran (Wickelköpfe größer im Bild),
+# <1 = weiter weg. Wirkt auf Voll- UND Nahansicht des Schnitts.
+SECTION_ZOOM = max(0.5, min(4.0, float(CFG.get("section_zoom", 1.0) or 1.0)))
+# Feste Zusatz-Ansichten: "top" = von oben (entgegen der Schwerkraft aufs Modell), "front" =
+# von vorne / Stirnansicht (Blick entlang der Motorachse aufs Wickelkopf-Ende). "auto" = die
+# automatische Kamera (3/4-Ansicht, Nahaufnahme, Schnitt). Überschreibt NUR die Kamera —
+# Schnittkörper/Physik bleiben, wie eingestellt.
+CAM_VIEW = str(CFG.get("cam_view", "auto")).lower()
 # Vorschau (Zwischenansicht): NUR Geometrie + Düsen + Strahl-Ziellinien rendern, KEIN Fluid-Bake.
 # Zeigt vorab, wohin die Strahlen zeigen, bevor der teure Mantaflow-Bake läuft.
 PREVIEW    = bool(CFG.get("preview", False))
@@ -255,6 +274,15 @@ SHOW_AXES  = bool(CFG.get("show_axes", False))
 SMOOTH     = bool(CFG.get("smooth", True))
 # Öl-Transparenz (0 = deckend … 1 = klar) für das gerenderte Öl-Material.
 OIL_ALPHA  = max(0.0, min(1.0, float(CFG.get("oil_transparency", 0.45))))
+# Transparentes Motorgehäuse: Voll-Ring-Hülle um Rotor/Stator, Innen-Ø = Stator-Außen-Ø, Wand
+# HOUSING_WALL, mit Ausbuchtung am Ringkanal + Ablauf unten. Mit HOUSING_COLLIDE (Standard AN)
+# ist das Gehäuse eine echte KOLLISIONSWAND: das Öl wird am Glas gefangen, läuft innen herunter
+# und wird am Ablauf entfernt (die Domain wird dafür bis zur Gehäuse-Innenwand in Schwerkraft-
+# Richtung aufgezogen — größer/gröber, s. Domain-Block). Ohne Collide: reine Sichtwand.
+HOUSING      = bool(CFG.get("housing", False))
+HOUSING_COLLIDE = bool(CFG.get("housing_collide", True))
+HOUSING_WALL = max(0.0005, float(CFG.get("housing_wall_mm", 4.0)) * SCALE)
+STATOR_OD    = float(CFG.get("stator_od_mm", 260.0)) * SCALE
 # Beleuchtungs-Voreinstellung (Weltfarbe/-stärke + 3-Punkt-Licht-Rig), s. ema_oilspray.LIGHT_PRESETS.
 LIGHT = CFG.get("light") or {}
 if PREVIEW:
@@ -377,7 +405,11 @@ ring_z  = z_tip                                      # AM ENDE der Wickelköpfe
 # die Wickelköpfe (direkt innerhalb des Rings) — die Domain wird daher NICHT bis zur Achse
 # aufgezogen (sonst wird sie riesig/grob), sondern hält den Wickelkopf-Endbereich eng + fein.
 _ro = r_ring + tube_r
-_ts = [th_min + (th_max - th_min) * i / 24.0 for i in range(25)]
+if RING_FULL and not CLOSEUP:
+    # Voller Ring: Domain muss den ganzen Umfang abdecken (Ring + Düsen rundum).
+    _ts = [2.0 * math.pi * i / 24.0 for i in range(25)]
+else:
+    _ts = [th_min + (th_max - th_min) * i / 24.0 for i in range(25)]
 _rx = [_ro * math.cos(t) for t in _ts] + [r_noz * math.cos(t) for t in _ts]
 _ry = [_ro * math.sin(t) for t in _ts] + [r_noz * math.sin(t) for t in _ts]
 ring_xmin, ring_xmax = min(_rx), max(_rx)
@@ -412,6 +444,24 @@ def _crown_target(th_want, win):
     near.sort(key=lambda t: abs(t[2] - z_hit))
     t = near[0]
     return t[0], mathutils.Vector((t[3].x, t[3].y, t[3].z))
+def _ang_d(a, b):
+    d = (a - b) % (2.0 * math.pi)
+    return min(d, 2.0 * math.pi - d)
+def _crown_target_full(th_want, win):
+    """Wie _crown_target, aber WINKEL-WRAP-fest (voller 360°-Ring: Kandidaten-Suche modulo 2π).
+    Liegt in der Nähe KEIN Wickelkopf-Kupfer (Keil-Ausschnitt + voller Ring), zielt die Düse
+    synthetisch radial nach innen auf den Kronenradius in derselben Trefferhöhe — so bleibt
+    jeder Strahl radial statt quer durch die Maschine auf den fernen Keil zu schießen."""
+    z_hit = ring_z - 1.2 * tube_r
+    cand = [t for t in _ovinfo if _ang_d(t[0], th_want) <= win]
+    if cand:
+        rmax = max(t[1] for t in cand)
+        near = [t for t in cand if t[1] >= rmax - 0.003]
+        near.sort(key=lambda t: abs(t[2] - z_hit))
+        t = near[0]
+        return t[0], mathutils.Vector((t[3].x, t[3].y, t[3].z))
+    return th_want, mathutils.Vector((r_crown * math.cos(th_want),
+                                      r_crown * math.sin(th_want), z_hit))
 # In der Nahaufnahme EINEN zentralen Leiter wählen; Düse UND Kamera nutzen EXAKT diesen Punkt
 # (so ist der Treffer im Bild, statt Düse-Winkel ≠ Kamera-Winkel wie in einem früheren Versuch).
 if CLOSEUP:
@@ -448,6 +498,34 @@ else:
     dz_hi = ring_z + gap_m + 0.15 * ext_end
     Dxmin = min(wh_xmin, ring_xmin) - splash; Dxmax = max(wh_xmax, ring_xmax) + splash
     Dymin = min(wh_ymin, ring_ymin) - splash; Dymax = max(wh_ymax, ring_ymax) + splash
+# Gehäuse als KOLLISIONSWAND (HOUSING_COLLIDE): die Domain muss die Gehäuse-Innenwand in
+# Schwerkraft-Richtung ENTHALTEN, sonst verschwindet das Öl mitten im Gehäuse an der
+# (unsichtbaren) Domain-Grenze — genau die Nutzer-Beanstandung „läuft trotzdem nach unten".
+# Horizontal: Domain bis unter die −y-Wand + etwas Breite für die Öl-Lache am Glas-Boden;
+# vertikal: bis zum Boden-Deckel (z_lo) + radial bis zur Wand. Kostet Domain-Volumen →
+# Auflösung ggf. erhöhen (UI-Hinweis).
+_haus_col = HOUSING and HOUSING_COLLIDE and not CLOSEUP
+# EIN einziges Gehäuse: der Innenradius umschließt den Stator UND — falls der Spritzring
+# darüber hinausragt — den Ringkanal. Früher wurde bei überstehendem Ring eine ZWEITE,
+# weitere Schale („Bulge") über dem Ringband gebaut → zwei ineinander steckende Zylinder,
+# die wie „mehrere kollidierende Gehäuse" aussahen. Jetzt genau EINE Hülle; R_hous_in
+# bleibt der Innenradius, an dem Kollisionswand/Domain enden.
+R_hous_in = max(0.5 * STATOR_OD, r_ring + 3.0 * tube_r)
+# +z-Deckel des Gehäuses: MIT Abstand über dem Ring (der Ring ragte sonst durch den Deckel bei
+# z_tip+gap — Emitter und Deckel im selben Voxel ⇒ Öl „leckte" am Stirndeckel nach außen).
+_z_cap = z_tip + gap_m + 2.0 * tube_r
+if _haus_col:
+    if HORIZONTAL:
+        Dymin = min(Dymin, -(R_hous_in + HOUSING_WALL) - 0.5 * splash)
+        Dxmin = min(Dxmin, -0.5 * R_hous_in - splash)
+        Dxmax = max(Dxmax, 0.5 * R_hous_in + splash)
+    else:
+        dz_lo = min(dz_lo, min(zmin, -STACK_HALF) - 0.02 * ext_end)
+        Dxmin = min(Dxmin, -(R_hous_in + HOUSING_WALL)); Dxmax = max(Dxmax, R_hous_in + HOUSING_WALL)
+        Dymin = min(Dymin, -(R_hous_in + HOUSING_WALL)); Dymax = max(Dymax, R_hous_in + HOUSING_WALL)
+    # Domain endet knapp HINTER dem Deckel: kaum „Außenraum", in dem durchgelecktes Öl
+    # (sub-voxel-Wand bei grober Auflösung) sichtbar weiterfliegen könnte.
+    dz_hi = min(dz_hi, _z_cap + 0.05 * ext_end)
 dcx, dcy, dcz = (Dxmin + Dxmax) / 2, (Dymin + Dymax) / 2, (dz_lo + dz_hi) / 2
 sx = (Dxmax - Dxmin) / 2 + 0.005
 sy = (Dymax - Dymin) / 2 + 0.005
@@ -503,16 +581,41 @@ _set(ds, "use_adaptive_timesteps", True)
 _set(ds, "time_scale", TIME_SCALE)
 
 # --- 3) Spritzöl-Kühlring AM ENDE der Wickelköpfe, Strahl Richtung Drehachse ---
-log("Spritzring am Wickelkopf-Ende + %d Düsen (%.1f bar → %.1f m/s, Richtung Achse)"
-    % (NOZZLES, PRESSURE_BAR, JET_V))
+log("Spritzring%s am Wickelkopf-Ende + %d Düsen (%.1f bar → %.1f m/s, Richtung Achse)"
+    % (" (voller 360°-Ring)" if RING_FULL else "", NOZZLES, PRESSURE_BAR, JET_V))
 voxel = (2.0 * max(sx, sy, sz)) / max(1, RES)        # ~Zellgröße der Domain
 noz_r = 0.5 * NOZZLE_D_MM * SCALE
 emit_s = max(noz_r, 1.2 * voxel)                     # sub-voxel-Bohrung emittiert sonst nicht
                                                      # (etwas größer → mehr sichtbares Ölvolumen)
 
+# --- Unter-Auflösungs-Wächter (analog zum Leer-Bake-Wächter) -------------------
+# Der Freistrahl braucht ≥~2 Zellen über der Bohrung, sonst bildet der FLIP-Löser kein
+# zusammenhängendes Öl-Mesh und der Strahl „verschwindet". Häufigste Falle: die Kollisionswand
+# (🧱) zieht die Domain bis zur Gehäuse-Innenwand auf → grobe Voxel bei gleicher Auflösung.
+# FRÜH (beim Setup, VOR dem minutenlangen Bake) laut warnen — die OIL_STAGE-Zeile läuft live
+# in den Fortschritts-Log; die Kennwerte unten tragen die Zahlen zusätzlich ins Ergebnis.
+_jet_cells = (NOZZLE_D_MM * SCALE) / max(1e-9, voxel)   # Bohrungs-Ø / Zellgröße
+_voxel_mm  = voxel / SCALE
+_jet_underres = _jet_cells < 2.0
+if _jet_underres:
+    _fix = []
+    if _haus_col:
+        _fix.append("🧱 Kollisionswand aus (fokussiert die Domain)")
+    if not CLOSEUP:
+        _fix.append("Nahaufnahme aktivieren")
+    _fix.append("Auflösung erhöhen")
+    print("OIL_STAGE:⚠ Strahl unter-aufgelöst — die %.2f-mm-Bohrung ist bei Auflösung %d nur "
+          "~%.1f Zellen breit (Voxel %.2f mm). Der Strahl wird kaum/nicht sichtbar. Abhilfe: %s."
+          % (NOZZLE_D_MM, RES, _jet_cells, _voxel_mm, " · ".join(_fix)), flush=True)
+
 # (a) Ring-Manifold als sichtbares Rohr (Bogen am +z-Ende) — Kontext, kein Fluid-Objekt.
 # In der Nahaufnahme zeigt der Ring nur einen kurzen Bogen um die Mittel-Düse; sonst den vollen Bogen.
-if CLOSEUP:
+if RING_FULL:
+    # Voller Ring gewinnt auch über die Nahaufnahme: der geschlossene Kreis ist billig zu
+    # zeichnen — sonst zeigte ⭕ + Nahaufnahme nur einen Rohrstutzen („Ring nicht geschlossen").
+    ring_rad = r_ring
+    arc_lo, arc_hi = 0.0, 2.0 * math.pi                    # geschlossener Voll-Kreis
+elif CLOSEUP:
     ring_rad = r_ring
     _aw = min(0.14, max(0.06, 0.10 * (th_max - th_min)))   # schmaler Rohrstutzen (~±8°), kein Hook
     # Bogen um den gewählten Leiter zentriert, plus Puffer für den Düsen-Versatz (sonst sitzt der
@@ -521,14 +624,17 @@ if CLOSEUP:
 else:
     ring_rad = r_ring
     arc_lo, arc_hi = th_min - abs(NOZZLE_OFFSET), th_max + abs(NOZZLE_OFFSET)
-_np = max(10, NOZZLES * 5)
+_ring_closed = RING_FULL
+_np = max(64 if _ring_closed else 10, NOZZLES * 5)
 _arc = []
-for i in range(_np + 1):
+for i in range(_np if _ring_closed else _np + 1):          # geschlossen: KEIN Doppelpunkt bei 0=2π
     th = arc_lo + (arc_hi - arc_lo) * i / _np
     _arc.append((ring_rad * math.cos(th), ring_rad * math.sin(th), ring_z, 1.0))
 _crv = bpy.data.curves.new("RingCurve", type='CURVE'); _crv.dimensions = '3D'
 _spl = _crv.splines.new('POLY'); _spl.points.add(len(_arc) - 1)
 for i, co in enumerate(_arc): _spl.points[i].co = co
+if _ring_closed:
+    _spl.use_cyclic_u = True                               # Rohr-Ring als geschlossene Schleife
 _crv.bevel_depth = tube_r; _crv.bevel_resolution = 6
 ring_obj = bpy.data.objects.new("SprayRing", _crv)
 scene.collection.objects.link(ring_obj)
@@ -561,11 +667,17 @@ if _jbs:
     if "Emission Strength" in _jbs.inputs:
         _jbs.inputs["Emission Strength"].default_value = 4.0
 oil_jets = []
+noz_angles = []                                      # Düsen-Azimut je Bohrung (für den Schnitt)
 for k in range(max(1, NOZZLES)):
     # Düsen-Winkel auf einen ECHTEN Leiter „abstimmen": in der Nahaufnahme der gewählte
     # zentrale Leiter, sonst je Düse den nächstliegenden Kronen-(Kupfer-)Punkt.
     if NOZZLES == 1:
         th, tgt = close_th, close_tgt
+    elif _ring_closed:
+        # Voller Ring: Düsen GLEICHMÄSSIG über 360° (k/N — kein Doppel bei 0°=360°); Ziel je
+        # Düse der nächste echte Kronenpunkt (wrap-fest), sonst synthetisch radial nach innen.
+        _thw = th_min + 2.0 * math.pi * k / NOZZLES
+        th, tgt = _crown_target_full(_thw, max(0.04, math.pi / NOZZLES))
     else:
         _thw = th_min + (th_max - th_min) * k / (NOZZLES - 1)
         th, tgt = _crown_target(_thw, max(0.04, 0.5 * (th_max - th_min) / NOZZLES))
@@ -573,6 +685,7 @@ for k in range(max(1, NOZZLES)):
     # Kronenpunkt bei th. Der Strahl läuft dadurch schräg zum Nachbar-Wickelkopf statt frontal auf
     # EINEN, sodass links UND rechts vom Strahlweg Wickelkopf-Kupfer liegt.
     th_noz = th + NOZZLE_OFFSET
+    noz_angles.append(th_noz)
     _c, _s = math.cos(th_noz), math.sin(th_noz)
     # sichtbarer Düsenstutzen: kleiner Zylinder von der Ring-Innenseite radial nach innen
     bpy.ops.mesh.primitive_cylinder_add(
@@ -603,13 +716,15 @@ for k in range(max(1, NOZZLES)):
         _d0 = mathutils.Vector((-_c, -_s, 0.0))
     _d0.normalize()
     # Justage: Gieren um die Wellenachse (z) = tangentialer Versatz; Neigung um die lokale
-    # Tangente = axiale Neigung (Strahl mehr Richtung Stirnfläche/nach unten). Grundziel bleibt
-    # der Kronenpunkt → der Strahl trifft die Wickelköpfe auch mit Justage.
+    # Tangente = axiale Neigung. Vorzeichen-Konvention wie die UI-Skizze: POSITIVE Neigung =
+    # zur Blechpaket-Stirnfläche (−z), negative = zur Wickelkopfspitze. Eine POSITIVE Drehung
+    # um _tang kippt den radial-einwärts zeigenden Strahl aber nach +z (k×v = +z), daher das
+    # Minus. Grundziel bleibt der Kronenpunkt → der Strahl trifft die Wickelköpfe auch mit Justage.
     _tang = mathutils.Vector((-_s, _c, 0.0))
     if abs(JET_YAW) > 1e-6:
         _d0 = mathutils.Matrix.Rotation(JET_YAW, 4, 'Z') @ _d0
     if abs(JET_TILT) > 1e-6:
-        _d0 = mathutils.Matrix.Rotation(JET_TILT, 4, _tang) @ _d0
+        _d0 = mathutils.Matrix.Rotation(-JET_TILT, 4, _tang) @ _d0
     _d0.normalize()
     _set(fs, "velocity_coord", [JET_V * _d0.x, JET_V * _d0.y, JET_V * _d0.z])
     # Sprühfächer: zufällige Streuung um die Grundrichtung (kelchförmiger Strahl statt Nadelstrahl)
@@ -633,8 +748,20 @@ for k in range(max(1, NOZZLES)):
         try: _ln.color = (1.0, 0.15, 0.05, 1.0)       # Workbench-Objektfarbe
         except Exception: pass
 
-# --- 3b) Abfluss (Outflow) am Domain-Boden (in Schwerkraft-Richtung) — kein Aufstauen ---
-if HORIZONTAL:      # Boden = −y-Fläche
+# --- 3b) Abfluss (Outflow) — kein Aufstauen. OHNE Kollisions-Gehäuse: am Domain-Boden (in
+#     Schwerkraft-Richtung). MIT Kollisions-Gehäuse (_haus_col): das Öl wird ja am Glas gefangen
+#     und sammelt sich an der GEHÄUSE-tiefsten Stelle — der Outflow sitzt dort INNEN am Glas
+#     (dort, wo auch der sichtbare Ablauf-Stutzen ist), damit die Lache sichtbar abläuft.
+if _haus_col and HORIZONTAL:        # Öl-Lache am Glas-Boden (Linie y=−R innen, entlang z)
+    _bnd = 0.05 * R_hous_in + 0.002
+    _dl = (0.0, -R_hous_in + 0.35 * _bnd, dcz)
+    _ds = (0.35 * R_hous_in, _bnd, sz * 0.98)
+elif _haus_col:                     # vertikal: Lache auf dem Boden-Deckel (z_lo) um die Welle
+    _z0 = min(zmin, -STACK_HALF)
+    _bnd = 0.03 * (dz_hi - dz_lo) + 0.002
+    _dl = (0.0, 0.0, _z0 + 0.35 * _bnd)
+    _ds = (0.9 * R_hous_in, 0.9 * R_hous_in, _bnd)
+elif HORIZONTAL:    # Boden = −y-Fläche
     _dl = (dcx, Dymin + 0.04 * (Dymax - Dymin), dcz)
     _ds = (sx * 0.98, 0.03 * (Dymax - Dymin) + 0.002, sz * 0.98)
 else:               # Boden = −z-Fläche
@@ -651,6 +778,153 @@ _set(fo, "flow_type", "LIQUID")
 _set(fo, "flow_behavior", "OUTFLOW")
 _set(fo, "use_inflow", False)
 drain.hide_render = True                              # Drain-Platte nicht rendern (nur Sim)
+
+# --- 3c) Transparentes Motorgehäuse (Sichtwand) + sichtbarer Ablauf unten ------
+# Voll-Ring-Hülle rund um Rotor/Stator: Innen-Ø = Stator-Außen-Ø, Wand HOUSING_WALL. Die
+# Wickelköpfe passen hinein (Innenradius > Kronen-Außenradius). Am Ringkanal (Spritzring) darf
+# der Durchmesser größer sein → eine zweite, weitere Schale nur über dem Ringband. REIN VISUELL:
+# kein Fluid-Modifier → keine Kollisions-/Bake-Kosten; die Öl-Entfernung bleibt der OilDrain.
+if HOUSING:
+    log("Transparentes Gehäuse (Innen-Ø %.0f mm, Wand %.1f mm)%s + Ablauf"
+        % (STATOR_OD / SCALE, HOUSING_WALL / SCALE,
+           ", KOLLISIONSWAND (Öl wird gefangen)" if _haus_col else ", Sichtwand"))
+    # Glas-Material (transluzent) — analog _steel, aber transparent + Blend-Modus für EEVEE/Workbench.
+    _glass = bpy.data.materials.new("Housing"); _glass.use_nodes = True
+    _gbs = _glass.node_tree.nodes.get("Principled BSDF")
+    if _gbs:
+        _gbs.inputs["Base Color"].default_value = (0.72, 0.82, 0.94, 1.0)
+        if "Roughness" in _gbs.inputs:    _gbs.inputs["Roughness"].default_value = 0.04
+        if "IOR" in _gbs.inputs:          _gbs.inputs["IOR"].default_value = 1.45
+        for _tn in ("Transmission", "Transmission Weight"):
+            if _tn in _gbs.inputs:
+                try: _gbs.inputs[_tn].default_value = 1.0
+                except Exception: pass
+        # Alpha: durchsichtig, aber SICHTBAR — bei 0.045 „verschwand" das Gehäuse im Video
+        # (Nutzer: „scheint nicht geschlossen zu sein"); 0.14 zeigt die geschlossene Hülle klar,
+        # ohne Wickelköpfe/Spray zu verdecken.
+        if "Alpha" in _gbs.inputs:        _gbs.inputs["Alpha"].default_value = 0.14
+    # EEVEE Next (Blender 4.2) transparent stellen: blend_method wurde durch surface_render_method
+    # ersetzt — beide best-effort setzen, damit die Hülle NICHT milchig-deckend rendert.
+    _set(_glass, "surface_render_method", "BLENDED")      # EEVEE Next 4.2 Enum ('DITHERED'/'BLENDED')
+    _set(_glass, "blend_method", "BLEND")                 # Legacy/Workbench-Kompatibilität
+    _set(_glass, "show_transparent_back", True)           # ferne Wand durchscheinen lassen
+    _set(_glass, "use_backface_culling", False)
+    _set(_glass, "use_screen_refraction", True)
+    def _shell(r_in, z0, z1, name):
+        """Hohle Zylinderschale: GESCHLOSSENER Zylinder (NGON-Deckel beidseits) r_in + Solidify
+        HOUSING_WALL nach außen — eine dichte „Dose", nicht ein offenes Rohr. Mit _haus_col
+        zusätzlich als Fluid-Effector (COLLISION): das Öl wird am Glas gefangen."""
+        zc = 0.5 * (z0 + z1); h = max(1e-4, z1 - z0)
+        bpy.ops.mesh.primitive_cylinder_add(radius=r_in, depth=h, location=(0.0, 0.0, zc),
+                                            vertices=96, end_fill_type='NGON')
+        o = bpy.context.object; o.name = name
+        bpy.context.view_layer.objects.active = o
+        bpy.ops.object.modifier_add(type='SOLIDIFY')
+        _sm = o.modifiers[-1]; _sm.thickness = HOUSING_WALL
+        _set(_sm, "offset", 1.0)                          # Wand nach AUSSEN (Innenradius bleibt r_in)
+        if _haus_col:
+            bpy.ops.object.modifier_add(type='FLUID')
+            _mh = o.modifiers[-1]; _mh.fluid_type = 'EFFECTOR'
+            _set(_mh.effector_settings, "effector_type", "COLLISION")
+            _set(_mh.effector_settings, "surface_distance", 0.5)
+            _set(_mh.effector_settings, "use_effector", True)
+        o.data.materials.append(_glass); _smooth(o); o.hide_render = False
+        return o
+    # EINE geschlossene „Dose" mit Innenradius R_hous_in (umschließt Stator, Wickelköpfe
+    # UND Spritzring). KEINE separate Ringkanal-Ausbuchtung mehr — die wirkte als zweite,
+    # ineinander steckende Schale wie „mehrere kollidierende Gehäuse".
+    R_stat = R_hous_in                                     # Innenradius der EINEN Hülle
+    z_lo = min(zmin, -STACK_HALF)                          # Blechpaket + Wickelkopf umschließen
+    z_hi = _z_cap                                          # Deckel MIT Abstand über dem Ring
+    _shell(R_stat, z_lo, z_hi, "MotorHousing")
+    # Sichtbarer Ablauf-Stutzen an der schwerkraft-tiefsten Gehäuseseite (unten).
+    _rd = 0.16 * R_stat                                    # Stutzen-Radius
+    _dl2 = 0.9 * R_stat                                    # Stutzenlänge nach außen
+    if HORIZONTAL:                                         # unten = −y
+        _dcen = mathutils.Vector((0.0, -(R_stat + HOUSING_WALL + 0.5 * _dl2), 0.5 * (z_lo + z_hi)))
+        _drot = mathutils.Vector((0.0, -1.0, 0.0)).to_track_quat('Z', 'Y').to_euler()
+    else:                                                 # unten = −z
+        _dcen = mathutils.Vector((0.0, 0.0, z_lo - 0.5 * _dl2))
+        _drot = (0.0, 0.0, 0.0)
+    bpy.ops.mesh.primitive_cylinder_add(radius=_rd, depth=_dl2, location=_dcen, vertices=32)
+    _dr = bpy.context.object; _dr.name = "HousingDrain"
+    _dr.rotation_euler = _drot
+    _dr.data.materials.append(_glass); _smooth(_dr); _dr.hide_render = False
+
+# --- 3d) Schnittdarstellung: Halbraum-Schnitt durch Motorachse + Düsen-Austritt ---
+# Die Schnittebene enthält die z-Achse UND den Austrittspunkt der gewählten Bohrung
+# (Azimut θ0 = noz_angles[SECTION_NOZ-1]); Normale n = (−sinθ0, cosθ0, 0). Der Halbraum
+# n·x > 0 (Kameraseite) wird per Boolean-DIFFERENCE von allen ANZEIGE-Festkörpern
+# abgezogen — der gewählte Düsenstutzen liegt IN der Ebene und wird längs halbiert
+# (Bohrung im Schnitt sichtbar), Stutzen/Ziellinien der weggeschnittenen Hälfte
+# verschwinden von selbst. Die FLUID-Domain wird bewusst NICHT geschnitten (Öl sichtbar).
+if SECTION_CUT:
+    _th0 = noz_angles[min(SECTION_NOZ - 1, len(noz_angles) - 1)] if noz_angles else 0.0
+    _nrm = mathutils.Vector((-math.sin(_th0), math.cos(_th0), 0.0))
+    _cut_sz = 10.0 * max(ext, zmax - zmin, 0.2)
+    # Winziger ε-Versatz aus der exakten Achsen-Ebene heraus: koplanare Flächen (NGON-Deckel,
+    # Solidify-Schale) erzeugen sonst Boolean-Splitter an der Schnittkante.
+    bpy.ops.mesh.primitive_cube_add(
+        size=_cut_sz,
+        location=_nrm * (0.5 * _cut_sz + 1e-4) + mathutils.Vector((0.0, 0.0, 0.5 * (zmin + zmax))))
+    _cutter = bpy.context.object; _cutter.name = "SectionCutter"
+    _cutter.rotation_euler = (0.0, 0.0, _th0)        # lokale +y-Fläche liegt in der Ebene
+    _cutter.display_type = 'WIRE'; _cutter.hide_render = True
+    def _bbox_max(o):
+        """Größte |Koordinate| der EVALUIERTEN Geometrie (inkl. Modifier)."""
+        dg = bpy.context.evaluated_depsgraph_get()
+        oe = o.evaluated_get(dg)
+        bb = [oe.matrix_world @ mathutils.Vector(c) for c in oe.bound_box]
+        return max(max(abs(v.x), abs(v.y), abs(v.z)) for v in bb)
+    def _cut(o):
+        if o is None:
+            return
+        try:
+            if o.type == 'CURVE':                    # Ring-Rohr: Kurve → Mesh (Boolean braucht Mesh)
+                for _so in bpy.context.selected_objects:
+                    _so.select_set(False)
+                bpy.context.view_layer.objects.active = o
+                o.select_set(True)
+                bpy.ops.object.convert(target='MESH')
+                o = bpy.context.object
+            _pre = _bbox_max(o)
+            bpy.context.view_layer.objects.active = o
+            bpy.ops.object.modifier_add(type='BOOLEAN')
+            _bm = o.modifiers[-1]
+            _bm.operation = 'DIFFERENCE'; _bm.object = _cutter
+            # EXACT + Selbstschnitt-/Loch-Toleranz: die STL-Teile (v. a. die Hairpins mit
+            # Beinahe-Berührungen/Doppel-Dreiecken) sind nicht mannigfaltig — ohne diese
+            # Flags „explodierte" der Boolean (WindingHead-BBox ~4 m, kupferfarbener Nebel
+            # füllte das ganze Bild).
+            try:
+                _bm.solver = 'EXACT'
+            except Exception:
+                _set(_bm, "solver", "FAST")
+            _set(_bm, "use_self", True)
+            _set(_bm, "use_hole_tolerant", True)
+            # BBox-Wächter: ein Halbraum-DIFFERENCE kann nur VERKLEINERN. Wächst die
+            # evaluierte BBox, ist der Boolean gescheitert → FAST probieren, sonst das
+            # Bauteil lieber UNGESCHNITTEN lassen (statt Riesen-Blob im Bild).
+            if _bbox_max(o) > 1.5 * _pre + 1e-6:
+                _set(_bm, "solver", "FAST")
+                if _bbox_max(o) > 1.5 * _pre + 1e-6:
+                    o.modifiers.remove(_bm)
+                    print("OIL_STAGE:section_cut %s: Boolean instabil -> ungeschnitten"
+                          % o.name, flush=True)
+        except Exception as e:
+            print("OIL_STAGE:section_cut %s: %s" % (getattr(o, "name", "?"), e), flush=True)
+    # ALLE importierten Bauteil-Objekte schneiden (die STL kommt als getrennte Teile:
+    # winding/rotor/stator/shaft/magnets — nur wh zu schneiden ließ den Kern ganz).
+    for _po in _parts_obj.values():
+        _cut(_po)
+    _cut(ring_obj)
+    for _nm in ("MotorHousing", "HousingBulge", "HousingDrain"):
+        _cut(bpy.data.objects.get(_nm))
+    for _o in list(bpy.data.objects):
+        if _o.name.startswith("Nozzle_") or _o.name.startswith("JetLine_"):
+            _cut(_o)
+    log("Schnittdarstellung: Ebene durch z-Achse + Düse %d (θ=%.1f°)"
+        % (SECTION_NOZ, math.degrees(_th0)))
 
 # --- 4) Bake ------------------------------------------------------------------
 scene.frame_start = F0; scene.frame_end = F1
@@ -756,6 +1030,93 @@ else:
     cam_d = 2.4 * max(ext, zmax - zmin)
     cam_loc = (cx + cam_d, cy - cam_d, cam_tgt.z + 0.55 * cam_d)
     _lens = 40.0
+# SCHNITT-Kamera: senkrecht auf die Schnittebene (Blick −n), von der weggeschnittenen Seite.
+# Ziel = Mitte zwischen Düsen-Austritt und Kronenradius der gewählten Düse, z ≈ Mitte
+# (Blechpaket-Stirn … Ringhöhe) — Düsenbohrung, Strahl und Wickelkopf-Längsschnitt im Bild.
+# Dieselbe Kamera dient auch der Ansicht „Schnitt-Orientierung OHNE Schnitt" (CAM_VIEW=="section",
+# Nutzerwunsch): Blick auf die Wickelköpfe in der Schnitt-Blickrichtung, der Körper aber ungeschnitten.
+_SECTION_CAM = SECTION_CUT or CAM_VIEW == "section"
+if _SECTION_CAM:
+    _th0c = noz_angles[min(SECTION_NOZ - 1, len(noz_angles) - 1)] if noz_angles else 0.0
+    _nrmc = mathutils.Vector((-math.sin(_th0c), math.cos(_th0c), 0.0))
+    _radc = mathutils.Vector((math.cos(_th0c), math.sin(_th0c), 0.0))   # radial IN der Ebene
+    # ZOOM-ANKER = WICKELKOPF (+ Ring), NICHT die Motorachse/Welle: der Wickelkopf ist der
+    # für die Spraybildung interessante Teil — beim Hineinzoomen auf ein achsenzentriertes
+    # Ziel wanderte er aus dem Bild (Nutzer-Beanstandung). Band in der Schnittebene:
+    # radial vom Kronen-Innenradius bis über den Spritzring, axial vom Blechpaket-Ende
+    # bis übers Ring-/Kronen-Ende.
+    _r_wh0 = min([math.hypot(p.x, p.y) for p in _ov] or [0.0])
+    _r_wh1 = max(r_ring + 2.0 * tube_r, r_crown)
+    _z_wh0 = z_stack_end - 0.25 * max(z_tip - z_stack_end, 3.0 * tube_r)
+    _z_wh1 = max(z_tip, ring_z) + 2.0 * tube_r
+    _wh_rm = 0.5 * (_r_wh0 + _r_wh1)
+    _wh_c  = mathutils.Vector((_wh_rm * _radc.x, _wh_rm * _radc.y, 0.5 * (_z_wh0 + _z_wh1)))
+    _wh_sz = max(_r_wh1 - _r_wh0, _z_wh1 - _z_wh0, 1e-6)
+    # Zoom-Blende: 1× = Übersicht (Ziel wie bisher), beim Hineinzoomen wandert das Ziel auf
+    # die Wickelkopf-Mitte und liegt ab ca. 2,7× voll darauf.
+    _wh_w = min(1.0, max(0.0, 1.6 * (1.0 - 1.0 / max(1e-6, SECTION_ZOOM))))
+
+    def _sec_tgt(base):
+        return base + (_wh_c - base) * _wh_w
+    if CLOSEUP:
+        # NAHANSICHT im Schnitt: „rechtes oberes Viertel" des Motors — von der z-ACHSE
+        # (Bild-Unterkante) radial hinauf bis über den Spritzring, axial vom Blechpaket
+        # (ein Stück Rotor/Stator sichtbar) bis zum Wickelkopf-/Ring-Ende. Die normale
+        # Closeup-Kamera (tangential auf den Auftreffpunkt) passt nicht zum Halbraum-
+        # Schnitt — sie stünde in der weggeschnittenen Hälfte und zeigte am Schnitt vorbei.
+        # Basisdistanz 1.6 (dichter als früher 2.2 — Nutzerwunsch „dichterer Zoom auf die
+        # Wickelköpfe"); SECTION_ZOOM justiert weiter (>1 = noch dichter).
+        _overh = max(z_tip - z_stack_end, 3.0 * tube_r, 0.02)
+        _r_out = max(r_ring + 2.0 * tube_r, 0.5 * STATOR_OD)   # Oberkante: Ring bzw. Stator-OD
+        _z0v = z_stack_end - 0.6 * _overh                      # etwas Blechpaket zeigen
+        _z1v = ring_z + 2.0 * tube_r                           # bis übers Ring-Ende
+        cam_d = (1.6 / SECTION_ZOOM) * max(_z1v - _z0v, _r_out)
+        cam_tgt = _sec_tgt(mathutils.Vector((0.5 * _r_out * _radc.x, 0.5 * _r_out * _radc.y,
+                                             0.5 * (_z0v + _z1v))))
+    else:
+        # Übersicht (Zoom 1×): Ziel = MOTORACHSE auf halber Länge — die Schnittfläche spannt
+        # den vollen Durchmesser ±R auf; Distanz so, dass Durchmesser UND Länge (inkl.
+        # Spritzring bei ring_z) ins Bild passen. Beim Hineinzoomen zieht _sec_tgt das Ziel
+        # auf den Wickelkopf zu, damit er im Bild bleibt.
+        cam_d = (2.6 / SECTION_ZOOM) * max(ext, zmax - zmin)
+        cam_tgt = _sec_tgt(mathutils.Vector((0.0, 0.0, 0.5 * (zmin + max(zmax, ring_z)))))
+    cam_loc = cam_tgt + _nrmc * cam_d
+    _lens = 40.0
+# Feste Zusatz-Ansichten „von oben" / „von vorne" (Nutzerwunsch) — überschreibt die automatische
+# Kamera (auch Nahaufnahme/Schnitt; ein aktiver Schnittkörper bleibt geschnitten und wird dann
+# von außen betrachtet). _cam_up_ovr setzt die Bild-Oben-Achse passend zur Blickrichtung.
+_cam_up_ovr = None
+if CAM_VIEW == "wh_hero":
+    # Schräg VON OBEN auf die WICKELKÖPFE (Nutzerwunsch): näher heran als die Übersicht,
+    # Blick von außen-oben in die Kronen am +z-Überhang. Ziel = Mitte des Wickelkopf-
+    # Überhangs (Blechpaket-Stirnfläche … Kronen-/Ring-Ende); Bild-Oben = Motorachse.
+    _zwh = 0.5 * (z_stack_end + max(zmax, ring_z))
+    cam_d = 1.7 * max(ext, zmax - zmin)
+    _lens = 42.0
+    if HORIZONTAL:
+        # Wickelkopf-Sektor liegt oben (+y). Kamera hoch (+y), zum +z-Ende und leicht seitlich (+x).
+        cam_tgt = mathutils.Vector((0.0, 0.35 * max(1e-4, wh_ymax), _zwh))
+        cam_loc = cam_tgt + mathutils.Vector((0.45 * cam_d, 0.85 * cam_d, 0.80 * cam_d))
+        _cam_up_ovr = 'Z'
+    else:
+        cam_tgt = mathutils.Vector((0.0, 0.0, _zwh))
+        cam_loc = cam_tgt + mathutils.Vector((0.70 * cam_d, -0.70 * cam_d, 0.90 * cam_d))
+        _cam_up_ovr = 'Z'
+elif CAM_VIEW in ("top", "front"):
+    cam_tgt = mathutils.Vector((0.0, 0.0, 0.5 * (zmin + max(zmax, ring_z))))
+    cam_d = 2.3 * max(ext, zmax - zmin)
+    _lens = 40.0
+    if CAM_VIEW == "front" or not HORIZONTAL:
+        # Stirnansicht: Kamera am +z-Ende (über Ring/Wickelkopf), Blick entlang −z auf die
+        # Stirnseite. Bei vertikaler Einbaulage ist „von oben" dieselbe Blickrichtung
+        # (Schwerkraft −z) — beide Fälle teilen diesen Zweig.
+        cam_loc = cam_tgt + mathutils.Vector((0.0, 0.0, cam_d))
+        _cam_up_ovr = 'Y'
+    else:
+        # von oben (horizontal): entgegen der Schwerkraft (−y) ⇒ Kamera bei +y, Blick nach
+        # unten; Bild-Oben = Motorachse (+z zeigt im Bild nach oben).
+        cam_loc = cam_tgt + mathutils.Vector((0.0, cam_d, 0.0))
+        _cam_up_ovr = 'Z'
 # Kamera-Fixwinkel (Drehteller→Video): im Vorschau-Drehteller gewählte Position wird 1:1 im
 # echten Bake-Render wiederverwendet, statt die Standard-3/4-Ansicht neu zu berechnen — dieselbe
 # Rotationsformel wie der Drehteller unten (Orbit um cam_tgt um die Kamera-Oben-Achse).
@@ -770,11 +1131,56 @@ cam = bpy.context.object
 # Kamera-Oben an die Einbaulage koppeln, damit „unten" (Schwerkraft) auch im Bild unten ist:
 # horizontal → Welt-+Y oben (Achse liegt waagerecht), vertikal → Welt-+Z oben (Motorachse steht
 # senkrecht, das Öl läuft sichtbar der Achse entlang nach unten). So wirkt die Einbaulage sichtbar.
-_cam_up = _up_axis_str()
+_cam_up = _cam_up_ovr or _up_axis_str()      # feste Zusatz-Ansicht bringt ihre eigene Oben-Achse mit
 cam.rotation_euler = _track_quat(cam_tgt - cam.location, '-Z', _cam_up).to_euler()
+# NUR die ACHSPARALLELEN Zusatz-Ansichten (top/front) setzen die Rotation explizit — bei ihrem
+# reinen −y/−z-Blick ist to_track_quat mit Up 'Z' entartet (Track- und Up-Achse kollidieren) und
+# lieferte Bild-Oben = −z. **`wh_hero` ist DAGEGEN eine SCHRÄGE 3/4-Ansicht** (Kamera oben-seitlich
+# versetzt): sie MUSS ihr Ziel per `_track_quat` (Zeile oben) anpeilen. Früher fiel wh_hero (das
+# ebenfalls `_cam_up_ovr='Z'` setzt) in die „von oben"-Explizit-Matrix (Blick strikt −y) → die
+# schräg-hoch stehende Kamera schaute waagerecht ÜBER die Geometrie hinweg → leeres/schwarzes Bild.
+if _cam_up_ovr is not None:
+    # Eine feste Zusatz-Ansicht ist aktiv (wh_hero/top/front) → die Schnitt-Kameramatrix wird
+    # bewusst ÜBERSPRUNGEN (kein `elif _SECTION_CAM`). NUR die achsparallelen top/front setzen die
+    # Rotation explizit; wh_hero (schräg) behält die _track_quat-Rotation von oben.
+    if CAM_VIEW in ("top", "front"):
+        # Feste Zusatz-Ansichten: Rotation EXPLIZIT setzen — to_track_quat mit Up 'Z' bei Blick −z/−y
+        # ist die entartete Kombination (Track- und Up-Achse kollidieren) und lieferte Bild-Oben = −z.
+        if CAM_VIEW == "front" or not HORIZONTAL:
+            cam.rotation_euler = (0.0, 0.0, 0.0)          # Identität: Blick −z, Bild-Oben = +y
+        else:
+            # von oben (horizontal): Blick −y, Bild-Oben = Motorachse +z (X_cam=−x, Y_cam=+z, Z_cam=+y)
+            cam.rotation_euler = mathutils.Matrix((
+                (-1.0, 0.0, 0.0),
+                (0.0, 0.0, 1.0),
+                (0.0, 1.0, 0.0))).to_euler()
+    # wh_hero: nichts setzen → die schräge 3/4-Kamera peilt ihr Ziel per _track_quat (Zeile oben) an.
+elif _SECTION_CAM:
+    # Bild-Oben = radiale In-Ebenen-Richtung u (NICHT _cam_up — bei einer Düse „oben" wäre
+    # Welt-Y parallel zur Blickrichtung und die Kamera degeneriert). Explizite Basis:
+    # X_cam = Motorachse (+z, zeigt im Bild nach rechts), Y_cam = u, Z_cam = n. Gilt für den
+    # echten Schnitt UND die Schnitt-Orientierung ohne Schnitt (CAM_VIEW=="section").
+    cam.rotation_euler = mathutils.Matrix((
+        (0.0, _radc.x, _nrmc.x),
+        (0.0, _radc.y, _nrmc.y),
+        (1.0, _radc.z, _nrmc.z))).to_euler()
 if cam.data:
     cam.data.lens = _lens
 scene.camera = cam
+# Debug: Kamera + Bauteil-Bounding-Boxes ins Log (hilft bei „Bild zeigt nichts"-Fällen).
+try:
+    print("OIL_STAGE:cam loc=(%.3f,%.3f,%.3f) tgt=(%.3f,%.3f,%.3f)"
+          % (cam.location.x, cam.location.y, cam.location.z,
+             cam_tgt[0], cam_tgt[1], cam_tgt[2]), flush=True)
+    for _dbgo in list(bpy.data.objects):
+        if _dbgo.type == 'MESH' and not _dbgo.hide_render:
+            _bbw = [_dbgo.matrix_world @ mathutils.Vector(c) for c in _dbgo.bound_box]
+            print("OIL_STAGE:obj %s x[%.3f..%.3f] y[%.3f..%.3f] z[%.3f..%.3f]"
+                  % (_dbgo.name, min(v.x for v in _bbw), max(v.x for v in _bbw),
+                     min(v.y for v in _bbw), max(v.y for v in _bbw),
+                     min(v.z for v in _bbw), max(v.z for v in _bbw)), flush=True)
+except Exception as _e:
+    print("OIL_STAGE:dbg %s" % _e, flush=True)
 # Beleuchtung — 3-Punkt-Rig (Key-Sonne + seitlich versetztes Fülllicht + Kantenlicht), Werte aus
 # der gewählten Voreinstellung (LIGHT_PRESETS). WICHTIG: das Fülllicht sitzt NICHT mehr an der
 # Kameraposition — ein Licht direkt an der Kamera erzeugt einen Kamerablitz-Effekt: auf glänzendem
@@ -968,8 +1374,14 @@ if PREVIEW:
 # --- 6) Benetzungs-Metrik: KDTree Effector-Vertices vs Liquid-Vertices --------
 from mathutils.kdtree import KDTree
 depsgraph = bpy.context.evaluated_depsgraph_get()
-wh_eval = wh.evaluated_get(depsgraph)
-wh_mesh = wh_eval.to_mesh()
+# Bei SCHNITTDARSTELLUNG das BASIS-Mesh nehmen (der Boolean-Schnitt ist rein optisch —
+# die evaluierte Mesh wäre halbiert und die Benetzungs-% nicht mehr mit ungeschnittenen
+# Läufen vergleichbar); sonst wie bisher die evaluierte Mesh.
+if SECTION_CUT:
+    wh_eval, wh_mesh = None, wh.data
+else:
+    wh_eval = wh.evaluated_get(depsgraph)
+    wh_mesh = wh_eval.to_mesh()
 # Benetzung NUR gegen die Wickelkopf-Überhänge messen (|z|>Stirnfläche) — sonst verwässern die
 # tausenden Kern-Vertices (Welle/Rotor/Stator) den Prozentwert, obwohl das Öl nur die Leiter trifft.
 wh_world = [wh.matrix_world @ v.co for v in wh_mesh.vertices
@@ -980,7 +1392,8 @@ nwh = len(wh_world)
 kd = KDTree(nwh)
 for i, co in enumerate(wh_world): kd.insert(co, i)
 kd.balance()
-wh_eval.to_mesh_clear()
+if wh_eval is not None:
+    wh_eval.to_mesh_clear()
 hit_count = [0] * nwh          # je Wickelkopf-Vertex: in wievielen Frames benetzt
 total_wh = max(1, nwh)
 
@@ -1009,19 +1422,25 @@ def liquid_world_verts(fr):
 
 series = []      # {frame, wetted_pct, n_islands, n_liquid_verts}
 log("Frames rendern + Benetzung messen")
+_liquid_total = 0                                    # Summe Fluid-Vertices über alle Frames
 for fr in range(F0, F1 + 1):
     scene.frame_set(fr)
-    scene.render.filepath = os.path.join(FRAMES_DIR, "frame_%04d.png" % (fr - F0 + 1))
-    try:
-        bpy.ops.render.render(write_still=True)
-    except Exception as e:
-        print("OIL_STAGE:render frame %d fehlgeschlagen: %s" % (fr, e), flush=True)
-    # Benetzung
+    # Fluid-Mesh ZUERST auswerten (vor dem Render): ist der Bake für diesen Frame LEER (kein
+    # Öl im Bild — Bake fehlgeschlagen / noch kein Tropfen / Öl schon abgelaufen), dann die
+    # Domain für diesen Frame AUSBLENDEN. Sonst rendert Blender die nackte Domain-Würfel-Mesh
+    # (mit Öl-Material) → ein „großer amberfarbener Quader statt Spray" (Nutzer-Beanstandung).
     try:
         vs, islands = liquid_world_verts(fr)
     except Exception as e:
         vs, islands = [], 0
         print("OIL_STAGE:liquid frame %d: %s" % (fr, e), flush=True)
+    dom.hide_render = (len(vs) == 0)
+    _liquid_total += len(vs)
+    scene.render.filepath = os.path.join(FRAMES_DIR, "frame_%04d.png" % (fr - F0 + 1))
+    try:
+        bpy.ops.render.render(write_still=True)
+    except Exception as e:
+        print("OIL_STAGE:render frame %d fehlgeschlagen: %s" % (fr, e), flush=True)
     frame_hit = set()
     for co in vs:
         _pos, idx, dist = kd.find(co)      # KDTree.find -> (position, index, distance)
@@ -1032,6 +1451,16 @@ for fr in range(F0, F1 + 1):
     series.append({"frame": fr, "wetted_pct": round(wetted_pct, 2),
                    "n_islands": int(islands), "n_liquid_verts": len(vs)})
     print("OIL_FRAMES:%d/%d" % (fr - F0 + 1, F1 - F0 + 1), flush=True)
+
+dom.hide_render = False
+if _liquid_total == 0:
+    # KEIN einziger Fluid-Vertex über ALLE Frames → der Mantaflow-Bake hat nichts erzeugt.
+    # Häufige Ursachen: Domain durch Kollisions-Gehäuse/vollen Ring + hohe Auflösung zu groß
+    # (Bake bricht mit zu wenig RAM/Zeit ab), Auflösung zu grob für die feine Düse, oder der
+    # Lauf wurde während des Bakes abgebrochen. Klar melden statt still den leeren Würfel zu zeigen.
+    print("OIL_STAGE:⚠ Bake hat KEIN Öl erzeugt (0 Fluid-Vertices in allen Frames) — "
+          "Domain ausgeblendet. Prüfe Auflösung/Gehäuse/Ring und ob der Bake durchlief.",
+          flush=True)
 
 # --- 7) Abdeckungs-Heatmap: Effector nach kumulierter Benetzung eingefärbt ----
 cov_png = CFG.get("coverage_png")
@@ -1074,7 +1503,10 @@ out = {"series": series,
        "droplets_peak": int(peak_drops),
        "n_frames": len(series),
        "n_effector_verts": nwh,
-       "wet_band_mm": round(BAND * 1000, 2)}
+       "wet_band_mm": round(BAND * 1000, 2),
+       "jet_cells": round(_jet_cells, 2),
+       "voxel_mm": round(_voxel_mm, 3),
+       "jet_underres": bool(_jet_underres)}
 print("OIL_METRICS:" + json.dumps(out), flush=True)
 print("OIL_DONE", flush=True)
 '''
@@ -1164,11 +1596,12 @@ def run_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     surft   = float(0.01 if _surft is None else _surft)
     engine  = str(oil.get("engine", "BLENDER_EEVEE") or "BLENDER_EEVEE")
     # Spritzöl-Kühlring
-    pressure = max(0.2, min(20.0, float(oil.get("pressure_bar", 3.0) or 3.0)))
+    pressure = max(0.1, min(3.0, float(oil.get("pressure_bar", 3.0) or 3.0)))   # Anlagen-Grenzen 0,1–3 bar
     nozzles  = max(1, min(40, int(oil.get("nozzle_count", 6) or 6)))
     ring_gap = max(0.5, min(30.0, float(oil.get("ring_gap_mm", 3.0) or 3.0)))
     ring_tube = max(1.0, min(30.0, float(oil.get("ring_tube_mm", 6.0) or 6.0)))
-    nozzle_d = max(0.3, min(6.0, float(oil.get("nozzle_d_mm", 1.0) or 1.0)))
+    nozzle_d = max(0.5, min(3.0, float(oil.get("nozzle_d_mm", 1.0) or 1.0)))   # Düsen-Ø 0,5–3,0 mm
+    ring_full = bool(oil.get("ring_full", False))    # voller 360°-Spritzring statt Ausschnitt-Bogen
     include_core = bool(oil.get("include_core", True))
     orientation = "vertical" if str(oil.get("orientation", "horizontal")) == "vertical" else "horizontal"
     closeup  = bool(oil.get("closeup", False))
@@ -1192,6 +1625,19 @@ def run_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     show_axes = bool(oil.get("show_axes", False))
     # Wickelkopf komplett (alle Nuten, wie die anderen Bauteile) statt nur der Ausschnitt.
     winding_full = bool(oil.get("winding_full", False))
+    # Transparentes Motorgehäuse (Innen-Ø = Stator-Ø, Wand 4 mm) + Ablauf zeigen; mit
+    # housing_collide (Standard AN) als echte Kollisionswand, die das Öl im Gehäuse fängt.
+    housing = bool(oil.get("housing", False))
+    housing_collide = bool(oil.get("housing_collide", True))
+    housing_wall = max(1.0, min(20.0, float(oil.get("housing_wall_mm", 4.0) or 4.0)))
+    # Schnittdarstellung: Ebene durch Motorachse (z) + Austrittspunkt der gewählten Düse.
+    section_cut = bool(oil.get("section_cut", False))
+    section_cut_noz = max(1, min(40, int(oil.get("section_cut_noz", 1) or 1)))
+    section_zoom = max(0.5, min(4.0, float(oil.get("section_zoom", 1.0) or 1.0)))
+    # Feste Zusatz-Ansicht: auto (automatische Kamera) | top (von oben) | front (Stirnansicht).
+    cam_view = str(oil.get("cam_view", "auto")).lower()
+    if cam_view not in ("auto", "wh_hero", "top", "front", "section"):
+        cam_view = "auto"
     # Untermenü: einzelne Hairpins (Pin-Index) ausblenden.
     hidden_pins = oil.get("hidden_pins") or []
     try:
@@ -1232,13 +1678,17 @@ def run_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
         "resolution": res, "frames": frames, "section_slots": section,
         "viscosity": visc, "surface_tension": surft, "engine": engine, "fast": fast,
         "pressure_bar": pressure, "nozzle_count": nozzles, "ring_gap_mm": ring_gap,
-        "ring_tube_mm": ring_tube, "nozzle_d_mm": nozzle_d, "include_core": include_core,
+        "ring_tube_mm": ring_tube, "nozzle_d_mm": nozzle_d, "ring_full": ring_full,
+        "include_core": include_core,
         "orientation": orientation, "closeup": closeup, "slowmo": slowmo,
         "view_mode": view_mode, "show": show_map, "cut": cut_map,
         "jet_tilt_deg": jet_tilt, "jet_yaw_deg": jet_yaw, "nozzle_offset_deg": nozzle_offset,
         "jet_cone_deg": jet_cone, "show_jet_line": show_jet_line, "view_down": view_down,
         "smooth": smooth, "oil_transparency": oil_tp, "show_axes": show_axes,
         "winding_full": winding_full, "hidden_pins": hidden_pins,
+        "housing": housing, "housing_collide": housing_collide, "housing_wall_mm": housing_wall,
+        "section_cut": section_cut, "section_cut_noz": section_cut_noz,
+        "section_zoom": section_zoom, "cam_view": cam_view,
         "camera_angle_deg": camera_angle, "light_preset": light_preset,
         "axial_len": axial_len, "geom": geom,
     })]
@@ -1267,12 +1717,16 @@ def run_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
            "surface_tension": surft, "engine": engine, "coverage_png": cov_png,
            "mesh_scale": 0.001, "wet_band_m": 0.004,
            "pressure_bar": pressure, "nozzle_count": nozzles, "ring_gap_mm": ring_gap,
-           "ring_tube_mm": ring_tube, "nozzle_d_mm": nozzle_d,
+           "ring_tube_mm": ring_tube, "nozzle_d_mm": nozzle_d, "ring_full": ring_full,
            "stack_half_mm": axial_len / 2.0, "include_core": include_core,
            "camera_angle_deg": camera_angle,
            "shaft_d_mm": float(geom.get("shaftD", 60.0) or 60.0),
            "rotor_od_mm": float(geom.get("rotorOD", 188.0) or 188.0),
            "stator_id_mm": float(geom.get("statorID", 190.0) or 190.0),
+           "stator_od_mm": float(geom.get("statorOD", 260.0) or 260.0),
+           "housing": housing, "housing_collide": housing_collide, "housing_wall_mm": housing_wall,
+        "section_cut": section_cut, "section_cut_noz": section_cut_noz,
+           "section_zoom": section_zoom, "cam_view": cam_view,
            "time_scale": 1.0 / slowmo,
            "orientation": orientation, "closeup": closeup, "fast": fast,
            "jet_tilt_deg": jet_tilt, "jet_yaw_deg": jet_yaw,
@@ -1288,8 +1742,9 @@ def run_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
         raise RuntimeError("abgebrochen")
 
     # 3) Blender headless
-    _log("💧 Spritzring: %d Düsen (Ø%.1f mm) im Abstand %.1f mm, %.1f bar → Strahl %.1f m/s"
-         % (nozzles, nozzle_d, ring_gap, pressure, jet_v), 15)
+    _log("💧 Spritzring%s: %d Düsen (Ø%.1f mm) im Abstand %.1f mm, %.1f bar → Strahl %.1f m/s"
+         % (" (voller 360°-Ring)" if ring_full else "", nozzles, nozzle_d, ring_gap,
+            pressure, jet_v), 15)
     _log("💧 Blender/Mantaflow-Bake (Auflösung %d, %d Frames%s) …"
          % (res, frames, ", %.0f×-Zeitlupe" % slowmo if slowmo > 1 else ""), 16)
     _log("ℹ Der FLIP-Bake läuft auf der CPU — die GPU beschleunigt nur das Rendern. "
@@ -1328,7 +1783,11 @@ def run_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
                    "viscosity": visc, "surface_tension": surft, "engine": engine,
                    "pressure_bar": pressure, "nozzle_count": nozzles,
                    "ring_gap_mm": ring_gap, "ring_tube_mm": ring_tube,
-                   "nozzle_d_mm": nozzle_d, "jet_speed_mps": jet_v,
+                   "nozzle_d_mm": nozzle_d, "ring_full": ring_full,
+                   "housing": housing, "housing_collide": housing_collide,
+                   "section_cut": section_cut, "section_cut_noz": section_cut_noz,
+                   "section_zoom": section_zoom, "cam_view": cam_view,
+                   "jet_speed_mps": jet_v,
                    "orientation": orientation, "closeup": closeup, "slowmo": slowmo,
                    "fast": fast, "view_mode": view_mode,
                    "jet_tilt_deg": jet_tilt, "jet_yaw_deg": jet_yaw,
@@ -1382,11 +1841,12 @@ def preview_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     show_map = oil.get("show") if isinstance(oil.get("show"), dict) else None
     cut_map  = oil.get("cut") if isinstance(oil.get("cut"), dict) else None
     view_mode = "full" if str(oil.get("view_mode", "section")) == "full" else "section"
-    pressure = max(0.2, min(20.0, float(oil.get("pressure_bar", 3.0) or 3.0)))
+    pressure = max(0.1, min(3.0, float(oil.get("pressure_bar", 3.0) or 3.0)))   # Anlagen-Grenzen 0,1–3 bar
     nozzles  = max(1, min(40, int(oil.get("nozzle_count", 6) or 6)))
     ring_gap = max(0.5, min(30.0, float(oil.get("ring_gap_mm", 3.0) or 3.0)))
     ring_tube = max(1.0, min(30.0, float(oil.get("ring_tube_mm", 6.0) or 6.0)))
-    nozzle_d = max(0.3, min(6.0, float(oil.get("nozzle_d_mm", 1.0) or 1.0)))
+    nozzle_d = max(0.5, min(3.0, float(oil.get("nozzle_d_mm", 1.0) or 1.0)))   # Düsen-Ø 0,5–3,0 mm
+    ring_full = bool(oil.get("ring_full", False))    # voller 360°-Spritzring statt Ausschnitt-Bogen
     include_core = bool(oil.get("include_core", True))
     orientation = "vertical" if str(oil.get("orientation", "horizontal")) == "vertical" else "horizontal"
     closeup  = bool(oil.get("closeup", False))
@@ -1395,6 +1855,16 @@ def preview_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     nozzle_offset = max(-45.0, min(45.0, float(oil.get("nozzle_offset_deg", 15.0) or 0.0)))
     jet_cone = max(0.0, min(40.0, float(oil.get("jet_cone_deg", 10.0) or 0.0)))
     winding_full = bool(oil.get("winding_full", False))
+    housing = bool(oil.get("housing", False))
+    housing_collide = bool(oil.get("housing_collide", True))
+    housing_wall = max(1.0, min(20.0, float(oil.get("housing_wall_mm", 4.0) or 4.0)))
+    # Schnittdarstellung auch in der Vorschau (billige Kontrolle vor dem Bake).
+    section_cut = bool(oil.get("section_cut", False))
+    section_cut_noz = max(1, min(40, int(oil.get("section_cut_noz", 1) or 1)))
+    section_zoom = max(0.5, min(4.0, float(oil.get("section_zoom", 1.0) or 1.0)))
+    cam_view = str(oil.get("cam_view", "auto")).lower()
+    if cam_view not in ("auto", "wh_hero", "top", "front", "section"):
+        cam_view = "auto"
     hidden_pins = oil.get("hidden_pins") or []
     try:
         hidden_pins = [int(i) for i in hidden_pins]
@@ -1429,10 +1899,14 @@ def preview_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     _dbg = [("Einstellungen (aufgelöst)", {
         "section_slots": section, "show": show_map, "cut": cut_map, "view_mode": view_mode,
         "pressure_bar": pressure, "nozzle_count": nozzles, "ring_gap_mm": ring_gap,
-        "ring_tube_mm": ring_tube, "nozzle_d_mm": nozzle_d, "include_core": include_core,
+        "ring_tube_mm": ring_tube, "nozzle_d_mm": nozzle_d, "ring_full": ring_full,
+        "include_core": include_core,
         "orientation": orientation, "closeup": closeup,
         "jet_tilt_deg": jet_tilt, "jet_yaw_deg": jet_yaw, "nozzle_offset_deg": nozzle_offset,
         "jet_cone_deg": jet_cone, "winding_full": winding_full, "hidden_pins": hidden_pins,
+        "housing": housing, "housing_collide": housing_collide, "housing_wall_mm": housing_wall,
+        "section_cut": section_cut, "section_cut_noz": section_cut_noz,
+        "section_zoom": section_zoom, "cam_view": cam_view,
         "preview_turns": preview_turns, "view_down": view_down, "material": material,
         "smooth": smooth, "oil_transparency": oil_tp, "light_preset": light_preset,
         "axial_len": axial_len, "geom": geom,
@@ -1459,11 +1933,15 @@ def preview_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     cfg = {"stl_parts": parts, "frames_dir": pv_frames, "resolution": 48,
            "frame_start": 1, "frame_end": 1, "mesh_scale": 0.001,
            "pressure_bar": pressure, "nozzle_count": nozzles, "ring_gap_mm": ring_gap,
-           "ring_tube_mm": ring_tube, "nozzle_d_mm": nozzle_d,
+           "ring_tube_mm": ring_tube, "nozzle_d_mm": nozzle_d, "ring_full": ring_full,
            "stack_half_mm": axial_len / 2.0, "include_core": include_core,
            "shaft_d_mm": float(geom.get("shaftD", 60.0) or 60.0),
            "rotor_od_mm": float(geom.get("rotorOD", 188.0) or 188.0),
            "stator_id_mm": float(geom.get("statorID", 190.0) or 190.0),
+           "stator_od_mm": float(geom.get("statorOD", 260.0) or 260.0),
+           "housing": housing, "housing_collide": housing_collide, "housing_wall_mm": housing_wall,
+        "section_cut": section_cut, "section_cut_noz": section_cut_noz,
+           "section_zoom": section_zoom, "cam_view": cam_view,
            "orientation": orientation, "closeup": closeup,
            "jet_tilt_deg": jet_tilt, "jet_yaw_deg": jet_yaw,
            "nozzle_offset_deg": nozzle_offset, "jet_cone_deg": jet_cone,
@@ -1509,7 +1987,11 @@ def preview_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     return {"image": images[0], "images": images, "turns": len(images),
             "config": {"section_slots": section, "view_mode": view_mode,
                        "orientation": orientation, "closeup": closeup,
-                       "nozzle_count": nozzles, "jet_tilt_deg": jet_tilt,
+                       "nozzle_count": nozzles, "ring_full": ring_full,
+                       "housing": housing, "housing_collide": housing_collide,
+                       "section_cut": section_cut, "section_cut_noz": section_cut_noz,
+                       "section_zoom": section_zoom, "cam_view": cam_view,
+                       "jet_tilt_deg": jet_tilt,
                        "jet_yaw_deg": jet_yaw, "nozzle_offset_deg": nozzle_offset,
                        "jet_cone_deg": jet_cone, "winding_full": winding_full,
                        "hidden_pins": hidden_pins, "turns": len(images),
@@ -1691,3 +2173,57 @@ def delete_saved_run(project_dir, rid):
         _sh.rmtree(d, ignore_errors=True)
         return True
     return False
+
+
+# ── Benannte 💧-Darstellungs-Presets (gut befundene Rechen-/Anzeige-Einstellungen) ──────────
+# Global (projektunabhängig) unter ~/cae_projekte/_oilspray/presets.json. Ein Preset speichert
+# den KOMPLETTEN oilspray-Payload (= alles, was der 💧-Tab an /oilspray schickt), damit man
+# gute Einstellungen wiederfindet UND ein „Berechnungspaket" (mehrere Darstellungen) über die
+# Server-Job-Warteschlange abarbeiten lassen kann (Darstellung 1, 5, 6 …).
+OILSPRAY_PRESET_ROOT = os.path.expanduser("~/cae_projekte/_oilspray")
+
+
+def _presets_path():
+    return os.path.join(OILSPRAY_PRESET_ROOT, "presets.json")
+
+
+def list_presets():
+    try:
+        with open(_presets_path(), encoding="utf-8") as f:
+            ps = json.load(f)
+        return ps if isinstance(ps, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _write_presets(ps):
+    os.makedirs(OILSPRAY_PRESET_ROOT, exist_ok=True)
+    tmp = _presets_path() + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(ps, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, _presets_path())
+
+
+def save_preset(name, payload):
+    """Speichert eine benannte 💧-Darstellung (kompletter oilspray-Payload). Rückgabe =
+    gespeicherter Eintrag {id,name,ts,payload}."""
+    import uuid
+    p = {
+        "id": "oilp_%s_%s" % (time.strftime("%Y%m%d_%H%M%S"), uuid.uuid4().hex[:6]),
+        "name": (str(name or "").strip() or "Darstellung")[:80],
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "payload": payload if isinstance(payload, dict) else {},
+    }
+    ps = list_presets()
+    ps.insert(0, p)
+    _write_presets(ps)
+    return p
+
+
+def delete_preset(pid):
+    ps = list_presets()
+    keep = [x for x in ps if x.get("id") != pid]
+    if len(keep) == len(ps):
+        return False
+    _write_presets(keep)
+    return True

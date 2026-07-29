@@ -55,6 +55,12 @@ def build_context(project_dir: str) -> dict:
         ("em3d_slice_mid",   "charts/em3d_slice_mid.png",   "|B|-Schnitt in der Paketmitte (z = L/2)"),
         ("em3d_endeffect",   "charts/em3d_endeffect.png",   "Endeffekt: axialer Verlauf der Luftspaltinduktion B(z)"),
         ("em3d_airgap_2d3d", "charts/em3d_airgap_2d3d.png", "Luftspaltinduktion: 2D-FDM vs. 3D-Elmer"),
+        # Experimentelle Spritzöl-Kühlung (Blender/Mantaflow) — nur bei durchgeführtem 💧-Lauf.
+        ("oil_coverage",  "charts/oil_coverage.png",  "Benetzungs-Heatmap am Wickelkopf (kumulierte Ölabdeckung)"),
+        ("oil_wetting",   "charts/oil_wetting.png",   "Benetzte Wickelkopf-Fläche über die Zeit"),
+        ("oil_droplets",  "charts/oil_droplets.png",  "Tröpfchenbildung / Fragmentierung über die Zeit"),
+        # Quantitative OpenFOAM-VOF-Kühlung (interFoam) — nur bei durchgeführtem 🌊-Lauf.
+        ("cfd_wetting",   "charts/cfd_wetting.png",   "VOF-Benetzung über die Zeit (OpenFOAM interFoam)"),
     ]
     for key, rel, title in pairs:
         full = os.path.join(project_dir, rel)
@@ -216,6 +222,52 @@ def build_context(project_dir: str) -> dict:
             "zone_grob":       mz.get("mesh_cl"),
             "axial_mm":        e3.get("axial_mm"),
             "warnungen":       e3.get("warnings", []),
+        }
+
+    # Experimentelle Spritzöl-Kühlung (Blender/Mantaflow) — falls ein 💧-Lauf im Projekt liegt.
+    # QUALITATIV: geometrische Benetzungs-Proxys, KEIN Wärmeübergang/Temperaturfeld.
+    oil = results.get("oilspray") or {}
+    if oil:
+        om = oil.get("metrics") or {}
+        oc = oil.get("config") or {}
+        ctx["oilspray"] = {
+            "benetzung_mittel_pct": om.get("wetted_pct_mean"),
+            "benetzung_spitze_pct": om.get("wetted_pct_peak"),
+            "tropfen_spitze":       om.get("droplets_peak"),
+            "n_frames":             om.get("n_frames"),
+            "voxel_mm":             om.get("voxel_mm"),
+            "strahl_zellen":        om.get("jet_cells"),
+            "strahl_unteraufgeloest": om.get("jet_underres"),
+            "aufloesung":           oc.get("resolution"),
+            "duesen":               oc.get("nozzle_count"),
+            "duesen_d_mm":          oc.get("nozzle_d_mm"),
+            "druck_bar":            oc.get("pressure_bar"),
+            "voller_ring":          oc.get("ring_full"),
+            "einbaulage":           oc.get("orientation"),
+            "video":                bool(oil.get("video")),
+            "hinweis":              oil.get("note", ""),
+        }
+
+    # Quantitative OpenFOAM-VOF-Kühlung (interFoam) — echter HTC (Stufe-1-Korrelation),
+    # falls ein 🌊-Lauf im Projekt liegt.
+    cfd = results.get("cfd") or {}
+    if cfd:
+        hd = cfd.get("htc_detail") or {}
+        cc = cfd.get("config") or {}
+        ctx["cfd"] = {
+            "htc_eff_Wm2K":         cfd.get("htc_eff"),
+            "benetzung_mittel_pct": cfd.get("wetted_pct_mean"),
+            "benetzung_spitze_pct": cfd.get("wetted_pct_peak"),
+            "benetzte_flaeche_cm2": round((cfd.get("wetted_area_m2") or 0.0) * 1e4, 1),
+            "strahl_v_mps":         cc.get("jet_v_mps"),
+            "druck_bar":            cc.get("pressure_bar"),
+            "Re_jet":               hd.get("Re_jet"),
+            "Pr":                   hd.get("Pr"),
+            "Nu":                   hd.get("Nu"),
+            "L_char_mm":            hd.get("L_char_mm"),
+            "netz_zellen":          cc.get("n_cells"),
+            "verfeinerung":         cc.get("refine"),
+            "hinweis":              cfd.get("scope_note", ""),
         }
 
     # Projektakte: Evolutionsverlauf + verknüpfte Vergleichsprojekte + Notizen aus
@@ -476,6 +528,48 @@ def _ensure_em3d_section(md: str, ctx: dict) -> str:
     return md.rstrip() + "\n" + "\n".join(block) + "\n"
 
 
+_KUEHL_KEYS = ("oil_coverage", "oil_wetting", "oil_droplets", "cfd_wetting")
+
+
+def _ensure_kuehlung_section(md: str, ctx: dict) -> str:
+    """Garantiert einen eigenen, bebilderten Abschnitt zur Spritzöl-Wickelkopfkühlung, wenn ein
+    qualitativer 💧-Lauf (Mantaflow) UND/ODER eine quantitative 🌊-Rechnung (OpenFOAM VOF)
+    vorliegt (spiegelt ``_ensure_em3d_section``). Erkennt ein bereits geschriebenes Kühl-Kapitel
+    bzw. gesetzte Bild-Platzhalter; fehlt beides, wird ein deterministischer, scope-ehrlicher
+    Abschnitt angehängt."""
+    has_oil = bool(ctx.get("oilspray"))
+    has_cfd = bool(ctx.get("cfd"))
+    if not (has_oil or has_cfd):
+        return md
+    img_map = ctx.get("_img_map", {})
+    avail = [k for k in _KUEHL_KEYS if k in img_map]
+    has_heading = bool(re.search(r"(?im)^#{1,3}\s.*(spritzöl|spritzoel|wickelkopfkühl|ölkühl)", md))
+    has_ph = any(re.search(rf"\[BILD\s*:\s*{k}\s*\]", md, re.I) for k in _KUEHL_KEYS)
+    if has_heading or has_ph:
+        return md
+    paras = []
+    if has_cfd:
+        paras.append(
+            "Die Spritzöl-Kühlung am Wickelkopf wurde **quantitativ** mit einer OpenFOAM-"
+            "VOF-Zweiphasensimulation (interFoam) gerechnet: Öl- und Luftphase, Strahl, "
+            "Benetzung und Abtropfen werden strömungsmechanisch aufgelöst. Daraus wird ein "
+            "**effektiver Wärmeübergangskoeffizient** abgeleitet, der bei gewählter Ölkühlung "
+            "direkt das Thermikmodell speist (Wicklung → Kühlmittel). **Scope-Ehrlichkeit:** "
+            "interFoam ist isotherm — die Strömung/Benetzung ist gerechnet, der HTC ist ein "
+            "korrelationsbasierter Kennwert (Prallstrahl-Nusselt), kein aufgelöstes "
+            "Temperaturfeld; ein voll konjugierter HTC (CHT) wäre die Folgestufe.")
+    if has_oil:
+        paras.append(
+            "Ergänzend/zum Vergleich wurde derselbe Wickelkopf-Ausschnitt mit einem schnellen "
+            "FLIP-Fluidlöser (Blender/Mantaflow) **qualitativ** betrachtet — Strahlbildung, "
+            "Tröpfchen und Abtropfen. Diese Studie liefert bewusst nur geometrische "
+            "Benetzungs-Proxys (kein Temperaturfeld/HTC). Die quantitativen Werte beider "
+            "Pfade stehen in der Kennwerttabelle.")
+    block = ["\n\n## Spritzöl-Wickelkopfkühlung\n"] + ["\n".join(paras)]
+    block += [f"[BILD:{k}]" for k in avail]
+    return md.rstrip() + "\n" + "\n".join(block) + "\n"
+
+
 def insert_images(md: str, img_map: dict) -> str:
     """Replace [BILD:key] with ![title](path) for each known key.
     Also strips backticks the LLM tends to add around the placeholder, and
@@ -615,6 +709,7 @@ def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
     _prose_vf = md_raw                     # value-free prose snapshot (for the RAG markdown)
     md_raw   = _ensure_em_images(md_raw, ctx["_img_map"])  # EM field maps into §3
     md_raw   = _ensure_em3d_section(md_raw, ctx)           # eigener 3D-Abschnitt + Bilder
+    md_raw   = _ensure_kuehlung_section(md_raw, ctx)       # Spritzöl-Kühlung + Bilder
     md_final = insert_images(md_raw, ctx["_img_map"])
     md_final = insert_tables(md_final, {"kennwerte": _single_md_tables(ctx)})
     _evo = _evolution_links_md(ctx)
@@ -684,6 +779,7 @@ def generate_report_agentic(
     _prose_vf = md_main                    # value-free prose snapshot (for the RAG markdown)
     md_main = _ensure_em_images(md_main, ctx["_img_map"])  # EM field maps into §3
     md_main = _ensure_em3d_section(md_main, ctx)           # eigener 3D-Abschnitt + Bilder
+    md_main = _ensure_kuehlung_section(md_main, ctx)       # Spritzöl-Kühlung + Bilder
     md_main = insert_images(md_main, ctx["_img_map"])
     md_main = insert_tables(md_main, {"kennwerte": _single_md_tables(ctx)})
 
@@ -1135,6 +1231,33 @@ def _single_md_tables(ctx: dict) -> str:
             ("Flussbarrieren (3D-Modell)", e3.get("n_barrieren"),  "", None),
             ("Netz-Zonen (fein→grob)",     zonen,                  "", None),
             ("Netzknoten (3D)",            e3.get("mesh_knoten"),  "", None),
+        ]))
+    cfd = ctx.get("cfd", {}) or {}
+    if cfd:
+        blocks.append(_tbl("Spritzöl-Kühlung — quantitativ (OpenFOAM VOF / interFoam)", [
+            ("Effektiver HTC",             cfd.get("htc_eff_Wm2K"),         "W/m²·K", 0),
+            ("Benetzte Fläche (Mittel)",   cfd.get("benetzung_mittel_pct"), "%", 1),
+            ("Benetzte Fläche (Spitze)",   cfd.get("benetzung_spitze_pct"), "%", 1),
+            ("Benetzte Fläche",            cfd.get("benetzte_flaeche_cm2"), "cm²", 1),
+            ("Strahlgeschwindigkeit",      cfd.get("strahl_v_mps"),         "m/s", 1),
+            ("Öldruck",                    cfd.get("druck_bar"),            "bar", 1),
+            ("Re / Pr / Nu (Korrelation)",
+             (f"{cfd.get('Re_jet')} / {cfd.get('Pr')} / {cfd.get('Nu')}"
+              if cfd.get("Re_jet") is not None else None), "", None),
+            ("Charakteristische Länge",    cfd.get("L_char_mm"),            "mm", 2),
+            ("Netz-Grundauflösung",        cfd.get("netz_zellen"),          "Zellen", None),
+        ]))
+    oil = ctx.get("oilspray", {}) or {}
+    if oil:
+        blocks.append(_tbl("Spritzöl-Kühlung — qualitativ (Blender/Mantaflow, Benetzungs-Proxys)", [
+            ("Benetzte Fläche (Mittel)",   oil.get("benetzung_mittel_pct"), "%", 1),
+            ("Benetzte Fläche (Spitze)",   oil.get("benetzung_spitze_pct"), "%", 1),
+            ("Tropfen/Fragmente (Spitze)", oil.get("tropfen_spitze"),       "", None),
+            ("Düsen",                      oil.get("duesen"),               "", None),
+            ("Düsen-Ø",                    oil.get("duesen_d_mm"),          "mm", 2),
+            ("Öldruck",                    oil.get("druck_bar"),            "bar", 1),
+            ("Domain-Auflösung",           oil.get("aufloesung"),           "px", None),
+            ("Strahl-Zellen (Auflösung)",  oil.get("strahl_zellen"),        "", 1),
         ]))
     return "\n".join(b for b in blocks if b).strip()
 
