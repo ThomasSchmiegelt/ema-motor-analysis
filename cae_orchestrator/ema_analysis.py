@@ -50,6 +50,13 @@ MU_R_MAG   = 1.05   # NdFeB relative permeability
 MU_R_IRON  = 500.0  # electrical steel (linear; see _saturate_mu for the B-H pass)
 MU0        = 4e-7 * math.pi
 B_SAT_IRON = 2.0    # T – electrical-steel saturation knee (nonlinear μ pass)
+
+# Inverter limits — the ONLY place they are defined. They were previously buried as
+# literals in `estimate_dq_currents` (v_dc default 800, the 800 A current clamp);
+# `power_envelope` needs exactly the same two numbers, and a torque/speed envelope
+# drawn against different limits than the operating point would be a silent lie.
+INVERTER_V_DC  = 800.0   # DC-link voltage [V]
+INVERTER_I_MAX = 800.0   # phase current amplitude [A_pk], at 1 turn/slot (see Kt)
 AIR_DOMAIN_FACTOR = 1.25   # outer air-box radius = statorOD/2 · this (Dirichlet A=0)
 # A real air gap (0.5–1 mm) is sub-pixel at usable N (e.g. 0.7 mm vs ~1.2 mm/px at
 # N=300), so the rotor/stator iron rings touch and the gap is unresolved.  Sampling
@@ -70,10 +77,36 @@ AIRGAP_PROFILE_N  = 700    # min FDM resolution for the (static) air-gap Br/Bt c
 # ── geometry rasterisation ────────────────────────────────────────────────────
 
 def _rasterise(geom: dict, N: int, rotor_angle: float = 0.0,
-               iq: float = 0.0, id_: float = 0.0):
+               iq: float = 0.0, id_: float = 0.0, maps: bool = False):
     """Build mu_r and J arrays for the 2-D motor cross-section.
 
     iq, id_ inject stator currents (Amps) via dq-transform per slot.
+
+    maps=True additionally returns a dict of the intermediate fields that are
+    otherwise thrown away — needed by the ML surrogate encoder
+    (``physics_surrogate/data/encode2d.py``), which must not re-implement this
+    rasterisation (a second implementation would silently drift from this one):
+
+      ``iron`` / ``magnet`` / ``air`` : bool (N,N) material masks, derived from the
+          FINAL ``mu`` (so the air-gap carve below is already reflected — exactly the
+          same classification the rest of this module uses, cf. ``_saturate_field``).
+      ``Mx`` / ``My`` : float32 (N,N) magnetisation vector field. NOTE only its curl
+          (``∂My/∂x − ∂Mx/∂y``) survives into ``J``, so the magnet polarity/direction
+          is NOT recoverable from the regular return values — that is the main reason
+          this switch exists.
+      ``j_amp`` : the amplitude scale of Mx/My (``6000/N``, i.e. grid-dependent);
+          divide by it for a unit-magnetisation field instead of hardcoding it.
+
+    Known raster quirk (PRE-EXISTING, do not "fix" here — it would change the field):
+    ``Mx/My`` can be non-zero on a few pixels that the masks classify as AIR. The
+    obround end cap of a magnet drawn later (``mu[cap_air] = 1.0``) overwrites the mu of
+    a magnet drawn earlier where multi-layer pockets touch, while the accumulated
+    magnetisation of the earlier magnet stays. Measured ~1 % of magnetised pixels for a
+    3-layer V-IPM, 0 % for surface/PMa-SynRM topologies. The encoder must therefore not
+    assume ``M != 0 ⇒ magnet``.
+
+    The default return signature is unchanged (4-tuple), so every existing caller is
+    unaffected; gated by ``smoke_test.py`` + ``test_fdm_golden.py``.
     """
     # Air domain: pad 25 % beyond the stator OD so the outer Dirichlet boundary
     # (A=0) sits well clear of the iron — keeps the external/leakage field lines
@@ -288,6 +321,21 @@ def _rasterise(geom: dict, N: int, rotor_angle: float = 0.0,
     band_px = max(r_si - r_ro, AIRGAP_MIN_MM * sc)
     ring = (R >= r_si - band_px) & (R < r_si) & (mu >= MU_R_IRON - 1e-3)
     mu[ring] = 1.0
+
+    if maps:
+        # Material classification from the final mu (1.0 air / MU_R_MAG magnet /
+        # MU_R_IRON iron). Tolerance bands rather than == so a future float32 mu value
+        # cannot silently fall out of a class.
+        m_iron = mu >= MU_R_IRON - 1e-3
+        m_mag  = (mu > 1.0 + 1e-3) & ~m_iron
+        return mu, J, sc, ctr, {
+            "iron":   m_iron,
+            "magnet": m_mag,
+            "air":    ~(m_iron | m_mag),
+            "Mx":     Mx_acc,
+            "My":     My_acc,
+            "j_amp":  J_amp,
+        }
 
     return mu, J, sc, ctr
 
@@ -509,7 +557,58 @@ def _interp2(arr, xf, yf):
             arr[y0, x0+1] * (1-fy)*fx     + arr[y0+1, x0+1] * fy*fx)
 
 
-def _sample_airgap(A, geom, sc, ctr, N):
+def _material_labels(mu):
+    """Coarse material class per cell from the LINEAR mu (0 air, 1 magnet, 2 iron).
+
+    Must be fed the base mu from ``_rasterise`` — after the nonlinear pass the iron
+    mu is a continuum and the classes would smear.
+    """
+    lbl = np.zeros(np.shape(mu), dtype=np.int8)
+    mu  = np.asarray(mu)
+    lbl[mu > 1.0 + 1e-6]        = 1
+    lbl[mu >= MU_R_IRON - 1e-3] = 2
+    return lbl
+
+
+def _curl_a(A, lbl=None):
+    """B = curl A = (∂A/∂y, −∂A/∂x) on the pixel grid, in A/pixel.
+
+    With ``lbl`` given the difference stencil is **material aware**: it never spans
+    a material change.  That is not cosmetic.  Only the NORMAL component of B is
+    continuous across an iron/air or magnet/iron interface — the tangential one
+    jumps by the mu ratio (up to 500), and the equivalent magnet surface current
+    ``J = ∇×M`` sits exactly in those boundary cells.  A central difference there
+    averages two physically different fields across a genuine discontinuity and
+    returns a value belonging to neither.  Measured on the delta IPM at N=512
+    (saturated pass): boundary cells read 2.14 T median / 14.0 T max against
+    0.86 T median / 2.91 T max three cells in — the inflation was the stencil, not
+    the field.  One-sided differencing from INSIDE the material gives the field of
+    that material, which is what a per-cell |B| map is supposed to show.
+
+    Cells whose neighbours on both sides are foreign (isolated 1-px slivers) keep
+    the plain central difference — there is no in-material stencil to use, and they
+    are rare (<0.2 % of iron at N=512).
+    """
+    if lbl is None:
+        return np.gradient(A, axis=0), -np.gradient(A, axis=1)
+
+    def _d(axis):
+        df   = np.diff(A, axis=axis)                  # F[i+1] − F[i]
+        same = np.diff(lbl, axis=axis) == 0
+        lo   = [slice(None)] * A.ndim; lo[axis] = slice(0, -1)
+        hi   = [slice(None)] * A.ndim; hi[axis] = slice(1, None)
+        lo, hi = tuple(lo), tuple(hi)
+        fwd = np.zeros_like(A); vf = np.zeros(A.shape, bool)
+        bwd = np.zeros_like(A); vb = np.zeros(A.shape, bool)
+        fwd[lo] = df; vf[lo] = same                   # forward diff lives at i
+        bwd[hi] = df; vb[hi] = same                   # backward diff lives at i+1
+        ctr = 0.5 * (fwd + bwd)                       # == np.gradient in the interior
+        return np.where(vf & vb, ctr, np.where(vf, fwd, np.where(vb, bwd, ctr)))
+
+    return _d(0), -_d(1)
+
+
+def _sample_airgap(A, geom, sc, ctr, N, mu=None):
     """Air-gap radial/tangential flux profile + the full-grid Cartesian B arrays.
 
     The 1-D gap profile is taken DIRECTLY from the vector potential on the gap
@@ -532,8 +631,9 @@ def _sample_airgap(A, geom, sc, ctr, N):
     r_si_px = (geom["statorID"] / 2) * sc
 
     # Full-grid B = curl A for the field-magnitude heatmap + iso-A field lines.
-    Bx_arr = np.gradient(A, axis=0)    # dA/dy  (rows = y)
-    By_arr = -np.gradient(A, axis=1)   # -dA/dx (cols = x)
+    # Material-aware stencil when mu is known (see _curl_a); the air-gap profile
+    # below does NOT use these arrays, so torque/EMF are untouched either way.
+    Bx_arr, By_arr = _curl_a(A, _material_labels(mu) if mu is not None else None)
 
     n_th  = 720
     theta = np.linspace(0, 2 * math.pi, n_th, endpoint=False)
@@ -766,7 +866,7 @@ def estimate_saliency(geom: dict) -> float:
 # ── main entry point ──────────────────────────────────────────────────────────
 
 def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
-                          v_dc: float = 800.0, b_gap_t: float = 1.0,
+                          v_dc: float = INVERTER_V_DC, b_gap_t: float = 1.0,
                           rpm_base: float | None = None) -> tuple[float, float]:
     """Physics-based i_q (load) + i_d (field-weakening) for a given RPM/load.
 
@@ -923,6 +1023,99 @@ def compute_advanced_em(geom: dict, perf: dict, axial_mm: float,
     }
 
 
+def power_envelope(geom: dict, adv: dict, rpm_max: float,
+                   T_rated_Nm: float = 0.0,
+                   v_dc: float = INVERTER_V_DC, i_max: float = INVERTER_I_MAX,
+                   n_pts: int = 80) -> dict:
+    """Torque/power over speed — the machine's CAPABILITY, not the demanded load.
+
+    Answers "was kann die Maschine maximal?" from quantities that already exist:
+    ψ_pm, Ld, Lq (``compute_advanced_em``) plus the two inverter limits. For every
+    speed the best feasible operating point is searched on an (I_s, β) grid under
+
+        |i| ≤ i_max                                        (current limit)
+        ω_el·√((ψ + Ld·i_d)² + (Lq·i_q)²) ≤ v_dc/√3        (voltage limit)
+
+    which reproduces the three classical regions on its own — constant torque below
+    base speed, constant power in field weakening, MTPV roll-off at the top — with
+    no case distinction in the code.
+
+    Two envelopes are returned:
+    * **peak** — everything the inverter allows (short-time, S2).
+    * **continuous** — additionally capped at ``T_rated_Nm``, the cooling-limited
+      S1 torque from ``ema_thermal.rated_torque``. Without it the "continuous"
+      curve would just be the peak one.
+
+    Scope, stated because the numbers look more precise than they are: the
+    inductances are **unsaturated** (the FDM is linear), so the real peak torque at
+    full current is lower; the currents share the **1 turn per slot** normalisation
+    of ``Kt``/``psi_pm``; losses are not deducted (this is shaft-side
+    electromagnetic power, not inverter input). ``rpm_max`` should be the
+    structurally safe speed, so a rotor that cannot spin does not book power.
+    """
+    p      = int(geom["p"])
+    psi    = float(adv.get("psi_pm_Wb") or 0.0)
+    Ld     = float(adv.get("Ld_mH") or 0.0) / 1e3
+    Lq     = float(adv.get("Lq_mH") or 0.0) / 1e3
+    rpm_hi = float(rpm_max)
+    if psi <= 0 or Ld <= 0 or Lq <= 0 or rpm_hi <= 0:
+        return {"error": "Ld/Lq/psi_pm oder Drehzahlgrenze fehlen"}
+
+    v_ph  = float(v_dc) / math.sqrt(3.0)                  # phase voltage limit [V_pk]
+    # Grid fine enough that the field-weakening branch comes out smooth — a coarse
+    # one shows a visible staircase in the chart (each step = one grid cell).
+    betas = np.radians(np.linspace(0.0, 90.0, 181))
+    amps  = np.linspace(0.0, float(i_max), 161)[1:]       # skip Is=0
+    IS, BE = np.meshgrid(amps, betas, indexing="ij")
+    id_g, iq_g = -IS * np.sin(BE), IS * np.cos(BE)
+    T_g   = 1.5 * p * (psi * iq_g + (Ld - Lq) * id_g * iq_g)
+    # flux-linkage magnitude is speed-independent → compute once, scale by ω_el
+    flux  = np.hypot(psi + Ld * id_g, Lq * iq_g)
+
+    rpms  = np.linspace(max(1.0, rpm_hi / n_pts), rpm_hi, n_pts)
+    T_pk, T_co = [], []
+    for rpm in rpms:
+        w_el = 2 * math.pi * rpm / 60.0 * p
+        ok   = (w_el * flux <= v_ph) & (T_g > 0)
+        T_pk.append(float(T_g[ok].max()) if ok.any() else 0.0)
+        ok_c = ok & (T_g <= T_rated_Nm) if T_rated_Nm > 0 else ok
+        T_co.append(float(T_g[ok_c].max()) if ok_c.any() else 0.0)
+
+    w_mech = 2 * math.pi * rpms / 60.0
+    P_pk   = np.asarray(T_pk) * w_mech
+    P_co   = np.asarray(T_co) * w_mech
+    k_pk   = int(np.argmax(P_pk))
+    k_co   = int(np.argmax(P_co))
+    T0     = float(np.max(T_pk))
+    # base speed = last point still holding (essentially) the full stall torque
+    i_base = int(np.max(np.where(np.asarray(T_pk) >= 0.98 * T0)[0])) if T0 > 0 else 0
+
+    return {
+        "rpm":            [round(float(r)) for r in rpms],
+        "T_peak_Nm":      [round(t, 1) for t in T_pk],
+        "T_cont_Nm":      [round(t, 1) for t in T_co],
+        "P_peak_kW":      [round(float(x) / 1e3, 2) for x in P_pk],
+        "P_cont_kW":      [round(float(x) / 1e3, 2) for x in P_co],
+        "P_max_kW":       round(float(P_pk[k_pk]) / 1e3, 1),
+        "P_max_rpm":      round(float(rpms[k_pk])),
+        "P_cont_max_kW":  round(float(P_co[k_co]) / 1e3, 1),
+        "P_cont_max_rpm": round(float(rpms[k_co])),
+        "T_peak_max_Nm":  round(T0, 1),
+        "T_rated_Nm":     round(float(T_rated_Nm), 1),
+        "rpm_base":       round(float(rpms[i_base])),
+        "rpm_max":        round(rpm_hi),
+        "v_dc_V":         round(float(v_dc)),
+        "i_max_A":        round(float(i_max)),
+        # Which limit actually binds the continuous curve: with generous cooling the
+        # inverter current runs out first, and then "Dauer" == "Spitze" — worth
+        # saying out loud, otherwise two identical curves look like a bug.
+        "cont_limited_by": ("kuehlung" if 0 < T_rated_Nm < T0 else "strom"),
+        # true when the speed window itself is the binding limit: power still rising
+        # at the last point, i.e. the structural cap cuts the constant-power region
+        "limited_by_rpm": bool(P_pk[-1] >= 0.995 * P_pk.max()),
+    }
+
+
 def _saturate_field(mu_base, J, geom, sc, ctr, N, target_peak_T,
                     iters: int = 4, P: float = 8.0, relax: float = 0.5):
     """Nonlinear B-H saturation pass for the DISPLAY field.
@@ -937,13 +1130,17 @@ def _saturate_field(mu_base, J, geom, sc, ctr, N, target_peak_T,
     """
     try:
         iron = mu_base > 1.5
+        lbl  = _material_labels(mu_base)   # from the LINEAR mu — mu itself changes below
         mu   = mu_base.copy()
         A    = _solve_fdm(mu, J)
         scale = 1.0
         for _ in range(max(1, iters)):
-            Bx = np.gradient(A, axis=0); By = -np.gradient(A, axis=1)
+            # Material-aware curl: with the plain central difference the boundary
+            # cells read several times the true |B|, the Fröhlich law then knocks mu
+            # down there, and the pass "saturates" cells that were never saturated.
+            Bx, By = _curl_a(A, lbl)
             Bmag = np.hypot(Bx, By)
-            Br, _bt, _th, _bx, _by = _sample_airgap(A, geom, sc, ctr, N)
+            Br, _bt, _th, _bx, _by = _sample_airgap(A, geom, sc, ctr, N, mu=mu_base)
             pk = float(np.max(np.abs(Br)))
             scale = (target_peak_T / pk) if pk > 1e-9 else scale
             ratio  = np.clip(Bmag * scale / max(B_SAT_IRON, 1e-3), 0.0, 50.0)
@@ -1003,7 +1200,7 @@ def run_em_analysis(geom: dict, N: int = 150, rotor_angle: float = 0.0,
         A_mag  = _solve_fdm(mu, J_full) if fdm_iters is None else _solve_fdm(mu, J_full, fdm_iters)
         A_stat = None
 
-    Br_m, Bt_m, th, Bx_m, By_m = _sample_airgap(A_mag, geom, sc, ctr, N)
+    Br_m, Bt_m, th, Bx_m, By_m = _sample_airgap(A_mag, geom, sc, ctr, N, mu=mu)
 
     B_analytical = _analytical_Bgap(geom)
     pk_mag = float(np.max(np.abs(Br_m)))
@@ -1012,7 +1209,7 @@ def run_em_analysis(geom: dict, N: int = 150, rotor_angle: float = 0.0,
     sf_mag = sf_ref if sf_ref is not None else (B_analytical / pk_mag if pk_mag > 1e-6 else 1.0)
 
     if A_stat is not None:
-        Br_s, Bt_s, _th, Bx_s, By_s = _sample_airgap(A_stat, geom, sc, ctr, N)
+        Br_s, Bt_s, _th, Bx_s, By_s = _sample_airgap(A_stat, geom, sc, ctr, N, mu=mu)
         pk_stat = float(np.max(np.abs(Br_s)))
         B_arm   = _analytical_Barm(geom, math.hypot(iq, id_))
         sf_arm  = (B_arm / pk_stat) if pk_stat > 1e-6 else 0.0
@@ -1039,8 +1236,7 @@ def run_em_analysis(geom: dict, N: int = 150, rotor_angle: float = 0.0,
         target = float(np.max(np.abs(Br_T)))
         A_nl, sc_nl = _saturate_field(mu, J_full, geom, sc, ctr, N, target)
         if A_nl is not None and sc_nl is not None:
-            Bx_nl = np.gradient(A_nl, axis=0)
-            By_nl = -np.gradient(A_nl, axis=1)
+            Bx_nl, By_nl = _curl_a(A_nl, _material_labels(mu))
             Bx_T = Bx_nl * sc_nl
             By_T = By_nl * sc_nl
             B_T  = np.hypot(Bx_T, By_T)

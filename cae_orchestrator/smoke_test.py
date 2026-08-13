@@ -92,6 +92,47 @@ def _adv():
     return f"Ld={adv['Ld_mH']} Lq={adv['Lq_mH']} mH, xi={adv['xi']}"
 check("compute_advanced_em (Ld/Lq/MTPA)", _adv)
 
+def _envelope():
+    """Leistungskennfeld: die drei klassischen Bereiche müssen ohne Fallunterscheidung
+    im Code herauskommen — sonst stimmt die Grenzenbehandlung nicht."""
+    em  = ea.run_em_analysis(GEOM, N=120)
+    adv = ea.compute_advanced_em(GEOM, em["performance"], AXIAL, 3000, 16000, 40.0)
+    env = ea.power_envelope(GEOM, adv, rpm_max=16000, T_rated_Nm=120.0)
+    assert "error" not in env, env.get("error")
+    T = env["T_peak_Nm"]
+    assert T[0] > 0, "kein Anfahrmoment"
+    # Konstantmoment unterhalb, Abfall oberhalb der Eckdrehzahl
+    i_b = env["rpm"].index(env["rpm_base"])
+    assert abs(T[0] - T[i_b]) < 0.05 * T[0], "Moment fällt schon vor der Eckdrehzahl"
+    assert T[-1] < T[i_b], "keine Feldschwächung oberhalb der Eckdrehzahl"
+    # Dauerlinie darf die Spitzenlinie nie überschreiten
+    assert all(c <= p + 1e-6 for c, p in zip(env["T_cont_Nm"], T)), "Dauer > Spitze"
+    assert env["T_cont_Nm"][0] <= 120.0 + 1e-6, "Kühlungsdeckel greift nicht"
+    assert env["cont_limited_by"] == "kuehlung"
+    b64 = ep._power_chart(env)
+    assert len(base64.b64decode(b64)) > 5000, "Kennfeld-Chart leer"
+    return (f"P_max={env['P_max_kW']} kW @ {env['P_max_rpm']} 1/min, "
+            f"M_max={env['T_peak_max_Nm']} Nm bis {env['rpm_base']} 1/min")
+check("power_envelope (Konstantmoment → Feldschwächung, Dauer ≤ Spitze)", _envelope)
+
+def _ki_training():
+    """Der KI-Training-Tab liest ein OPTIONALES Nachbarprojekt — er muss auch dann
+    sauber antworten, wenn `physics_surrogate/` gar nicht da ist."""
+    import ema_ki_training as kt
+    runs = kt.list_runs()                       # darf leer sein, aber nicht werfen
+    assert isinstance(runs, list)
+    for r in runs:
+        assert r["epochs"] >= 1 and isinstance(r["history"], list)
+        assert set(("name", "best_gate", "gate_passed", "active", "paused")) <= set(r)
+    svc = kt.service_status()
+    assert "up" in svc, "Dienst-Status ohne 'up'"
+    if runs:
+        b64 = kt.chart([runs[0]["name"]], x="progress")
+        assert len(base64.b64decode(b64)) > 5000, "Verlaufs-Chart leer"
+    return (f"{len(runs)} Lauf/Läufe, Dienst {'an' if svc['up'] else 'aus'}"
+            if kt.available() else "physics_surrogate/ nicht vorhanden → leer, kein Fehler")
+check("KI-Training-Tab: Läufe lesen + Chart + Dienst-Status", _ki_training)
+
 # ── 5. connection assessment (all 3) + charts ───────────────────────────────────
 print("\n[shaft connection]")
 mat = ep.LAMINATES["m270_35a"]
