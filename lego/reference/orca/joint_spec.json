@@ -1,0 +1,357 @@
+{
+  "source": {
+    "model": "ORCA Hand v1 (right)",
+    "urdf": "orcahand_right.urdf",
+    "description_repo": "https://github.com/orcahand/orcahand_description",
+    "hardware_repo": "https://github.com/orcahand/orcahand_hardware",
+    "licenses": {
+      "description": "MIT",
+      "hardware": "CC BY 4.0"
+    },
+    "attribution": "ORCA Hand by ORCA Dexterity, Inc. - CC BY 4.0"
+  },
+  "dof": 17,
+  "chains": {
+    "thumb": [
+      "right_thumb_mcp",
+      "right_thumb_abd",
+      "right_thumb_pip",
+      "right_thumb_dip"
+    ],
+    "index": [
+      "right_index_abd",
+      "right_index_mcp",
+      "right_index_pip"
+    ],
+    "middle": [
+      "right_middle_abd",
+      "right_middle_mcp",
+      "right_middle_pip"
+    ],
+    "ring": [
+      "right_ring_abd",
+      "right_ring_mcp",
+      "right_ring_pip"
+    ],
+    "pinky": [
+      "right_pinky_abd",
+      "right_pinky_mcp",
+      "right_pinky_pip"
+    ]
+  },
+  "joints": [
+    {
+      "name": "right_wrist",
+      "digit": null,
+      "role": "wrist",
+      "type": "revolute",
+      "parent": "right_tower",
+      "child": "right_wrist_jointbody",
+      "axis": [
+        1.0,
+        0.0,
+        0.0
+      ],
+      "lower_rad": -0.6736,
+      "upper_rad": 0.8972,
+      "lower_deg": -38.6,
+      "upper_deg": 51.4,
+      "span_deg": 90.0
+    },
+    {
+      "name": "right_thumb_mcp",
+      "digit": "thumb",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_palm",
+      "child": "right_thumb_mcp_jointbody",
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "lower_rad": -0.87266,
+      "upper_rad": 0.87266,
+      "lower_deg": -50.0,
+      "upper_deg": 50.0,
+      "span_deg": 100.0
+    },
+    {
+      "name": "right_thumb_abd",
+      "digit": "thumb",
+      "role": "abduction",
+      "type": "revolute",
+      "parent": "right_thumb_mp",
+      "child": "right_thumb_abd_jointbody",
+      "axis": [
+        0.0,
+        0.34202085907197166,
+        0.9396923602752502
+      ],
+      "lower_rad": -1.08211,
+      "upper_rad": 0.0,
+      "lower_deg": -62.0,
+      "upper_deg": 0.0,
+      "span_deg": 62.0
+    },
+    {
+      "name": "right_thumb_pip",
+      "digit": "thumb",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_thumb_pp",
+      "child": "right_thumb_pip_jointbody",
+      "axis": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "lower_rad": -0.7944,
+      "upper_rad": 1.23,
+      "lower_deg": -45.5,
+      "upper_deg": 70.5,
+      "span_deg": 116.0
+    },
+    {
+      "name": "right_thumb_dip",
+      "digit": "thumb",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_thumb_ip",
+      "child": "right_thumb_dip_jointbody",
+      "axis": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "lower_rad": -0.85384,
+      "upper_rad": 1.45,
+      "lower_deg": -48.9,
+      "upper_deg": 83.1,
+      "span_deg": 132.0
+    },
+    {
+      "name": "right_index_abd",
+      "digit": "index",
+      "role": "abduction",
+      "type": "revolute",
+      "parent": "right_palm",
+      "child": "right_index_abd_jointbody",
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "lower_rad": -1.04577,
+      "upper_rad": 0.24577,
+      "lower_deg": -59.9,
+      "upper_deg": 14.1,
+      "span_deg": 74.0
+    },
+    {
+      "name": "right_index_mcp",
+      "digit": "index",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_index_mp",
+      "child": "right_index_mcp_jointbody",
+      "axis": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "lower_rad": -0.34907,
+      "upper_rad": 1.65806,
+      "lower_deg": -20.0,
+      "upper_deg": 95.0,
+      "span_deg": 115.0
+    },
+    {
+      "name": "right_index_pip",
+      "digit": "index",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_index_pp",
+      "child": "right_index_pip_jointbody",
+      "axis": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "lower_rad": -0.34907,
+      "upper_rad": 1.88496,
+      "lower_deg": -20.0,
+      "upper_deg": 108.0,
+      "span_deg": 128.0
+    },
+    {
+      "name": "right_middle_abd",
+      "digit": "middle",
+      "role": "abduction",
+      "type": "revolute",
+      "parent": "right_palm",
+      "child": "right_middle_abd_jointbody",
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "lower_rad": -0.64577,
+      "upper_rad": 0.64577,
+      "lower_deg": -37.0,
+      "upper_deg": 37.0,
+      "span_deg": 74.0
+    },
+    {
+      "name": "right_middle_mcp",
+      "digit": "middle",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_middle_mp",
+      "child": "right_middle_mcp_jointbody",
+      "axis": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "lower_rad": -0.34907,
+      "upper_rad": 1.58825,
+      "lower_deg": -20.0,
+      "upper_deg": 91.0,
+      "span_deg": 111.0
+    },
+    {
+      "name": "right_middle_pip",
+      "digit": "middle",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_middle_pp",
+      "child": "right_middle_pip_jointbody",
+      "axis": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "lower_rad": -0.34907,
+      "upper_rad": 1.8675,
+      "lower_deg": -20.0,
+      "upper_deg": 107.0,
+      "span_deg": 127.0
+    },
+    {
+      "name": "right_ring_abd",
+      "digit": "ring",
+      "role": "abduction",
+      "type": "revolute",
+      "parent": "right_palm",
+      "child": "right_ring_abd_jointbody",
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "lower_rad": -0.47577,
+      "upper_rad": 0.80577,
+      "lower_deg": -27.3,
+      "upper_deg": 46.2,
+      "span_deg": 73.4
+    },
+    {
+      "name": "right_ring_mcp",
+      "digit": "ring",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_ring_mp",
+      "child": "right_ring_mcp_jointbody",
+      "axis": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "lower_rad": -0.34907,
+      "upper_rad": 1.58825,
+      "lower_deg": -20.0,
+      "upper_deg": 91.0,
+      "span_deg": 111.0
+    },
+    {
+      "name": "right_ring_pip",
+      "digit": "ring",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_ring_pp",
+      "child": "right_ring_pip_jointbody",
+      "axis": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "lower_rad": -0.34907,
+      "upper_rad": 1.8675,
+      "lower_deg": -20.0,
+      "upper_deg": 107.0,
+      "span_deg": 127.0
+    },
+    {
+      "name": "right_pinky_abd",
+      "digit": "pinky",
+      "role": "abduction",
+      "type": "revolute",
+      "parent": "right_palm",
+      "child": "right_pinky_abd_jointbody",
+      "axis": [
+        0.0,
+        0.0,
+        -1.0
+      ],
+      "lower_rad": -0.12244,
+      "upper_rad": 1.1691,
+      "lower_deg": -7.0,
+      "upper_deg": 67.0,
+      "span_deg": 74.0
+    },
+    {
+      "name": "right_pinky_mcp",
+      "digit": "pinky",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_pinky_mp",
+      "child": "right_pinky_mcp_jointbody",
+      "axis": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "lower_rad": -0.34907,
+      "upper_rad": 1.71042,
+      "lower_deg": -20.0,
+      "upper_deg": 98.0,
+      "span_deg": 118.0
+    },
+    {
+      "name": "right_pinky_pip",
+      "digit": "pinky",
+      "role": "flexion",
+      "type": "revolute",
+      "parent": "right_pinky_pp",
+      "child": "right_pinky_pip_jointbody",
+      "axis": [
+        0.0,
+        -1.0,
+        0.0
+      ],
+      "lower_rad": -0.34907,
+      "upper_rad": 1.88496,
+      "lower_deg": -20.0,
+      "upper_deg": 108.0,
+      "span_deg": 128.0
+    }
+  ],
+  "targets": {
+    "n_digits": 5,
+    "min_flexion_joints_per_digit": 2,
+    "median_flexion_span_deg": 118.0,
+    "min_flexion_span_deg": 100.0,
+    "opposable_thumb": true
+  }
+}
