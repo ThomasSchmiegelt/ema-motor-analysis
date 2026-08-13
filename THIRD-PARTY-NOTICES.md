@@ -16,16 +16,23 @@ hängen:
 
 | Komponente | Pfad im Repo | Lizenz | Copyright |
 |---|---|---|---|
-| VTK.js | `cae_orchestrator/vendor/vtk.js` | BSD-3-Clause | Kitware, Inc. und Mitwirkende |
+| VTK.js | `cae_orchestrator/vendor/vtk.js` (Lizenz: `vtk.js.LICENSE.txt` daneben) | BSD-3-Clause | (c) 2016 Kitware, Inc. |
 | c-blosc | `pikogk/local-install/lib/libblosc.{a,so.1.21.7}` | BSD-3-Clause | 2009–2018 Francesc Alted; 2019–heute Blosc Development Team |
 | oneTBB | `pikogk/SkillSandbox/host-libs/libtbb.so.12` | Apache-2.0 | Intel Corporation |
 | Boost.Iostreams | `pikogk/SkillSandbox/host-libs/libboost_iostreams.so.1.83.0` | BSL-1.0 | Boost-Mitwirkende |
 
 Anmerkungen:
 
-* Das VTK.js-Bündel verweist im Kopf auf `vtk.js.LICENSE.txt`. Diese Datei
-  gehört neben das Bündel gelegt — der eingebettete Verweis läuft sonst ins
-  Leere.
+* Das VTK.js-Bündel verweist im Kopf auf `vtk.js.LICENSE.txt`; diese Datei liegt
+  jetzt daneben und enthält den BSD-3-Vermerk von Kitware (wörtlich aus dem
+  npm-Paket).
+  **Offen:** das vendorierte Bündel ist 2.010.725 Bytes groß und stimmt mit
+  keinem npm-Release der Serien 17.x bis 36.x überein (alle ≥ 2,39 MB; per
+  Größen- und SHA-256-Abgleich geprüft). Seine Herkunft ist damit nicht belegt,
+  und die von webpack extrahierten Banner der mitgebündelten Fremdabhängigkeiten
+  ließen sich nicht versionsgenau beilegen. Beim nächsten Anfassen des
+  3D-Viewers sollte das Bündel gegen ein angeheftetes npm-Release getauscht
+  werden — das schließt beides zugleich.
 * c-blosc bündelt seinerseits FastLZ, LZ4, Snappy, Zlib und Bitshuffle; die
   jeweiligen Texte liegen im c-blosc-Quellbaum unter `LICENSES/` (BSD-/MIT-artig).
 * oneTBB steht unter Apache-2.0: Bei Weitergabe der Binärdatei gehören
