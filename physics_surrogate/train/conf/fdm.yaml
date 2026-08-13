@@ -1,0 +1,103 @@
+# Stufe 1 — 2D-FDM-Surrogat. Jeder Schlüssel ist per --set key=wert überschreibbar.
+#
+# ── Warum diese Fassung anders ist als die des Laufs vom 31.07.2026 ──────────────
+# Der damalige Lauf wurde bei Epoche 37 abgebrochen und als „unterangepasst" abgelegt.
+# Das war eine FEHLDIAGNOSE: verglichen wurde `train_loss` (= rel_l2_A + 0,5·rel_l2_Br)
+# gegen `val_rel_l2_A` — zwei verschiedene Größen. Der richtige Vergleich aus
+# checkpoints/fdm/history.csv:
+#
+#     Epoche   train_A   val_A   Lücke   train_Br   val_Br   Lücke
+#        15     0,202    0,214    +6%      0,254     0,253     -0%
+#        27     0,127    0,169   +33%      0,153     0,213    +39%
+#        37     0,097    0,157   +61%      0,115     0,210    +83%
+#
+# Das Netz hat ab Epoche ~15 ÜBERangepasst; `val_Br` stand ab Epoche 27 bei 0,21 still,
+# während der Trainingswert weiterfiel. Ein bloß größeres Netz hätte das verschlimmert.
+#
+# Deshalb zwei Änderungen, jede gegen einen der beiden gemessenen Befunde:
+#   1. `train.augment` — D4 × Vorzeichen = 16× exakte Symmetrien des Operators, gegen
+#      die Generalisierungslücke. Kostet ~0 (siehe train/augment.py für Herleitung,
+#      Messung und den 1-px-Fallstrick am Luftspaltring).
+#   2. Tiefe 8 statt 6, base 64 statt 48 — gegen den Trainingsfehler selbst: 0,097 lag
+#      schon ohne jede Generalisierungslücke über dem 0,03-Gate.
+#
+# Netzgrößen gemessen (RTX 3090, 512², bf16-AMP, inkl. Augmentierung und Br-Term):
+#   Tiefe 6 base 48 max 384  bs=4: 18,8 M Par · 33,0 ms/Sample ·  5,7 GB  (alter Lauf)
+#   Tiefe 7 base 64 max 512  bs=4: 46,2 M Par · 44,4 ms/Sample ·  8,0 GB
+#   Tiefe 8 base 64 max 512  bs=4: 59,1 M Par · 45,0 ms/Sample ·  8,2 GB  ← Vorgabe
+#   Tiefe 7 base 96 max 512  bs=4: 51,6 M Par · 76,6 ms/Sample · 11,3 GB
+#   Tiefe 7 base 64 max 512  bs=8: 46,2 M Par · 40,0 ms/Sample · 15,1 GB
+# Tiefe 8 kostet gegenüber 7 nur 0,6 ms/Sample — die achte Ebene rechnet auf 8×8 — und
+# verdoppelt die Reichweite des rezeptiven Felds. Für eine ELLIPTISCHE Gleichung (jeder
+# Punkt hängt vom ganzen Gebiet ab) ist das der billigste sinnvolle Zukauf; bei Tiefe 6
+# umfasste das rezeptive Feld nur ~220 von 512 px.
+# Der Datenlader schafft 270 Samples/s (6 Worker) gegen 45 ms/Sample auf der GPU — das
+# Training ist klar GPU-gebunden, größere Batches bringen daher nichts und kosten VRAM.
+#
+# Laufzeit: ~8300 Trainingsbeispiele × 45 ms + Validierung ≈ 7,5 min/Epoche.
+
+data:
+  root: ../../datasets/fdm_512        # relativ zu dieser Datei
+  val_frac: 0.2
+  split_seed: 0                    # muss mit evaluate.py übereinstimmen
+  num_workers: 6
+  limit: 0                         # >0: nur so viele Geometrien (Pilotläufe)
+  # Fünfter Eingangskanal: Freiraumlösung (µ≡1) derselben Quelle, exakt per
+  # Sinustransformation (~9 ms bei N=512), s. encode2d.free_space_field.
+  # AUS, mit Vorbehalt: der Auswendiglern-Test (48 Beispiele, 500 Schritte) zeigte nur
+  # einen schnelleren Anfang (nach 20 Schritten 0,76 statt 0,97) und kein besseres
+  # Plateau — aber 500 Schritte sind gegen einen 100-Epochen-Lauf 40× zu kurz, um ein
+  # Plateau zu belegen. Der eigentliche Grund, ihn hier wegzulassen, ist ein anderer:
+  # sein Zweck (globale Kopplung liefern, die ein endliches rezeptives Feld nicht hat)
+  # wird von Tiefe 8 direkter erfüllt, und er kostet ~9 ms Inferenz.
+  free_space: false
+
+model:
+  model_depth: 8
+  base_channels: 64
+  max_channels: 512
+  num_conv_blocks: 2
+  normalization: groupnorm
+  # avg statt max: der Quellkanal ist VORZEICHENBEHAFTET (Magnetquelle = ±-Dipolschicht),
+  # MaxPool verwirft den negativen Anteil, und Mittelwert-Pooling ist zugleich der
+  # Restriktionsoperator der Mehrgitterverfahren für dieselbe Gleichung. GEMESSEN macht
+  # es allerdings keinen Unterschied (0,584 avg vs. 0,554 max nach 500 Schritten) — die
+  # Wahl steht auf dem Argument, nicht auf einem Messvorteil.
+  pooling: avg
+
+train:
+  epochs: 100                      # ≈ 12,5 h; jederzeit pausierbar (touch out.dir/PAUSE)
+  batch_size: 4
+  lr: 4.0e-4                       # etwas höher als die 3e-4 des alten Laufs: die
+                                   # Augmentierung macht das Ziel schwerer, und der
+                                   # Kosinus hat jetzt 100 statt 60 Epochen Zeit
+  weight_decay: 1.0e-4
+  warmup_epochs: 3
+  grad_clip: 1.0
+  amp_dtype: bfloat16              # bfloat16 braucht keinen GradScaler
+  seed: 0
+  # D4 (4 Drehungen × Spiegelung) und Vorzeichentausch der Quelle — 16 exakte
+  # Symmetrien des diskreten Operators, verifiziert gegen `_solve_fdm`
+  # (tests/test_augment.py). Der einzige Hebel gegen die oben gemessene
+  # Generalisierungslücke, der weder Rechenzeit noch neue Daten kostet.
+  augment: true
+  # `d4_sign` = alle 16 (D4 × Vorzeichen) · `sign` = nur der Vorzeichentausch, 2×.
+  # GEMESSEN (fdm_v2, 11.08.2026): `d4_sign` schließt die Generalisierungslücke
+  # vollständig (−0 % ab Epoche 12 gegen +61 %) und macht das Netz dabei trotzdem
+  # SCHLECHTER (val_A 0,267 gegen 0,157), weil es unterangepasst bleibt — Faltungen
+  # sind nicht rotationsäquivariant, das Netz muss den Operator achtfach lernen, und
+  # die Maschinen liegen bei der Inferenz ohnehin immer kanonisch. `sign` behält den
+  # Anteil, der IN der Testverteilung liegt (Rotorwinkel über eine Polteilung ⇒ J
+  # wechselt das Vorzeichen) und linear ist. Welcher der beiden Hebel — Augmentierung
+  # oder Tiefe 8 — die Bremse war, klärt der Lauf `fdm_v3_noaug`.
+  augment_mode: d4_sign
+
+loss:
+  # Gewicht des Luftspalt-Terms. Beide Terme sind relative L2-Normen, also
+  # dimensionslos und bei Initialisierung O(1) — das Gewicht ist eine echte
+  # Gewichtung, keine Einheitenumrechnung.
+  w_br: 0.5
+
+out:
+  # NEUER Ordner, kein --resume auf checkpoints/fdm: die Architektur hat sich geändert.
+  dir: ../../checkpoints/fdm_v2
