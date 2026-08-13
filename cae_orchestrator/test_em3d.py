@@ -64,6 +64,11 @@ def test_skew_twists_magnets():
     assert not tags.get("caps_dropped"), "Magnettaschen sollten netzbar sein"
     assert not tags.get("pocket_clear_raised"), "Spalt NICHT mehr anheben (gefuste Kanäle)"
     assert abs(tags["pocket_clear_mm"] - 0.2) < 1e-6, tags["pocket_clear_mm"]
+    # Die Taschen müssen GEZÄHLT im Netz ankommen, nicht nur angefordert sein: `mag_pockets`
+    # sagte bisher nur, dass sie gebaut werden SOLLTEN. Im Betrieb lief ein Lauf mit
+    # „pockets=True" im Log und 0 Taschen im Netz.
+    assert tags["n_pockets"] > 0, "Taschen angefordert, aber keine im Netz gelandet"
+    assert tags["n_pockets_want"] > 0 and tags["mag_pockets_effective"]
     assert os.path.exists(msh)
     print(f"✓ skew=12°→Staffelung: {tags['skew_segments']} Segmente, "
           f"{tags['n_magnets']} Magnetstücke, ECHTER Spalt {tags['pocket_clear_mm']}mm "
@@ -219,11 +224,99 @@ def test_assign_pieces_single_keeps_magnet_not_pocket():
     print("✓ _assign_pieces(single=True): kurzer Magnet behalten, Taschen-Schale freigegeben")
 
 
+def test_monitor_keeps_pockets_until_its_own_ladder_step():
+    """Der Selbstheil-Monitor darf die Magnettaschen NICHT vor seiner eigenen Leiterstufe
+    aufgeben. Genau das passierte im Betrieb: `build_mesh` fing jeden Fehler ab und baute
+    sofort ohne Taschen neu, während `mesh_build.log` weiter `pockets=True` meldete.
+
+    Schneller Unit-Test mit gefälschtem `build_mesh` (kein gmsh, Millisekunden): Bau
+    gelingt nur OHNE Taschen. Erwartet: die Leiter probiert erst alle Netzqualitäts-Stufen
+    MIT Taschen, schaltet sie erst auf ihrer Stufe ab, und die Warnung sagt es dem Nutzer.
+    """
+    calls = []
+    real = E3.build_mesh
+
+    def fake(geom, axial, opts, msh_path):
+        calls.append(dict(opts))
+        assert opts.get("pocket_fallback") is False, \
+            "Monitor muss den stillen Sofort-Fallback abschalten"
+        if opts.get("mag_pockets", True):
+            raise RuntimeError("Invalid boundary mesh (overlapping facets) on surface 1")
+        open(msh_path, "w").write("x")
+        return {"n_nodes": 100000, "n_magnets": 16, "n_slots": 48, "n_barriers": 0,
+                "n_pockets": 0, "n_pockets_want": 0, "mag_pockets_effective": False,
+                "n_bodies": {"air": 4}, "bodies": {}, "magnets": [],
+                "pocket_clear_mm": 0.0, "pocket_clear_geom_mm": 0.1,
+                "mesh_zones": {"gap_cl": 1.0, "mag_cl": 4.0, "mesh_cl": 10.0}}
+
+    E3.build_mesh = fake
+    try:
+        msh = os.path.join(tempfile.mkdtemp(), "cap.msh")
+        tags, warns = E3._build_mesh_capped(_geom("v"), 120.0, {"target_nodes": 100000}, msh)
+    finally:
+        E3.build_mesh = real
+
+    with_pk = [c for c in calls if c.get("mag_pockets", True)]
+    # Erstbau + 4 Netzqualitäts-Stufen = 5 Versuche MIT Taschen, erst der 6. ohne.
+    assert len(with_pk) == 5, f"erst Erstbau + 4 Qualitätsstufen MIT Taschen, waren {len(with_pk)}"
+    assert calls[5].get("mag_pockets") is False, "Stufe 5 der Leiter schaltet die Taschen ab"
+    assert any("Magnettaschen" in w and "NICHT im 3D-Netz" in w for w in warns), warns
+    print(f"✓ Selbstheil-Monitor: {len(with_pk)} Versuche mit Taschen vor dem Abschalten, "
+          f"Nutzer-Warnung gesetzt")
+
+
+def test_pockets_off_is_counted_as_zero():
+    """Taschen aus ⇒ n_pockets == 0. Zusammen mit dem Gegenstück in
+    ``test_skew_twists_magnets`` heißt das: der Zähler unterscheidet die beiden Fälle
+    wirklich und ist nicht bloß ein durchgereichtes Flag."""
+    msh = os.path.join(tempfile.mkdtemp(), "np.msh")
+    tags = E3.build_mesh(_geom("v"), 120.0,
+                         {"skew_deg": 0, "mesh_cl": 13.0, "gap_cl": 1.6,
+                          "mag_pockets": False}, msh)
+    assert tags["n_pockets"] == 0 and not tags["mag_pockets_effective"]
+    assert tags["n_magnets"] == 16
+    print("✓ mag_pockets=False ⇒ n_pockets=0 (Zähler misst den IST-Stand)")
+
+
+def test_orientation_check_2d_vs_3d():
+    """``_orientation_check`` misst die Verdrehung der Polfolge zwischen 2D-FDM und
+    3D-Elmer. Reine Zahlenprüfung (kein Netz, kein Elmer): synthetische Br(θ) mit
+    BEKANNTEM Versatz hinein, gemessener Versatz heraus."""
+    import numpy as np
+    g = {"p": 3}
+    th = np.linspace(0, 2 * np.pi, 720, endpoint=False)
+    br2 = np.cos(3 * th)
+
+    # (a) identisch ⇒ 0° Versatz, in Ordnung
+    res = {"warnings": []}
+    out = E3._orientation_check(th, br2, th, br2.copy(), g, {}, res)
+    assert abs(out["phase_shift_mech_deg"]) < 1e-6, out
+    assert out["orientation_ok"] and not res["warnings"]
+
+    # (b) 4° mechanisch verdreht, Staffelung 3×3° ⇒ Toleranz 6+3 = 9° ⇒ in Ordnung
+    sh = math.radians(4.0)
+    res = {"warnings": []}
+    out = E3._orientation_check(th, br2, th, np.cos(3 * (th - sh)), g,
+                                {"skew_segments": 3, "skew_step_deg": 3.0}, res)
+    assert abs(out["phase_shift_mech_deg"] - 4.0) < 0.05, out
+    assert out["orientation_ok"] and len(res["warnings"]) == 1   # erklärender Hinweis
+
+    # (c) 20° mechanisch verdreht, keine Staffelung ⇒ Toleranz 3° ⇒ Warnung
+    sh = math.radians(20.0)
+    res = {"warnings": []}
+    out = E3._orientation_check(th, br2, th, np.cos(3 * (th - sh)), g, {}, res)
+    assert abs(out["phase_shift_mech_deg"] - 20.0) < 0.05, out
+    assert not out["orientation_ok"] and "verdreht" in res["warnings"][0]
+    print("✓ _orientation_check: 0°/4°(tol 9°)/20°(tol 3°) korrekt bewertet")
+
+
 def main():
     test_magnet_rects_count()
+    test_orientation_check_2d_vs_3d()
     test_assign_pieces_single_keeps_magnet_not_pocket()
     test_mesh_tagging()
     test_skew_twists_magnets()
+    test_pockets_off_is_counted_as_zero()
     test_sif_generation()
     test_hex_mesh_and_piola_sif()
     test_hex_staffelung_segments()

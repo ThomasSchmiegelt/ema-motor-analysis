@@ -332,7 +332,15 @@ def build_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> dict:
     except _DegenerateMeshError:
         raise                                          # Taschen helfen → nicht abschalten, ab an die Leiter
     except Exception:
-        if opts.get("mag_pockets", True):              # Taschen als Fehlerquelle ausschließen
+        # Sofort-Fallback „ohne Taschen" NUR für Direktaufrufer (Tests, Skripte). Der
+        # Selbstheil-Monitor (`_build_mesh_capped`) schaltet ihn per `pocket_fallback=False`
+        # ab: sonst fällt hier schon beim ERSTEN Fehlversuch das Modellfeature weg, bevor die
+        # Leiter überhaupt an der Netzqualität drehen konnte — genau die Reihenfolge, die
+        # `_mesh_mitigations` ausdrücklich umdreht (Netz zuerst, Modell zuletzt). Gemessen im
+        # Projekt 20260812_073601: alle 5 Logzeilen meldeten `pockets=True`, das behaltene
+        # Netz hatte 0 Taschen (`pocket_clear=0.0`, nur 8 Luftkörper, keine Luft im Rotor
+        # zwischen r=48 mm und r=94 mm).
+        if opts.get("mag_pockets", True) and opts.get("pocket_fallback", True):
             tags = _build_mesh_once(geom, axial, dict(opts, mag_pockets=False), msh_path)
             tags["caps_dropped"] = True
             return tags
@@ -890,6 +898,15 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         tags["n_magnets"] = len(tags["magnets"])
         tags["n_barriers"] = len(bar_vols)
         tags["n_slots"] = len(slot_vols)
+        # Magnettaschen ZÄHLEN, nicht nur anfordern. `mag_pockets=True` sagt nur, dass sie
+        # GEBAUT werden sollten — ob die Luft-Schalen die Schwerpunkt-/Massenzuordnung
+        # (`_assign_pieces`) überlebt haben, steht erst hier fest. Ohne diesen Zähler ist
+        # „waren die Taschen überhaupt im Netz?" aus dem Logfile nicht beantwortbar (genau
+        # diese Frage kam aus dem Betrieb): das Log meldete `pockets=True`, während die
+        # Taschen längst über den Fallback in `build_mesh` abgeschaltet waren.
+        tags["n_pockets"] = len(cap_vols)
+        tags["n_pockets_want"] = len(cap_pieces)
+        tags["mag_pockets_effective"] = bool(cap_vols)
         tags["n_bodies"] = {k: len(v) for k, v in groups.items()}
         tags["skew_segments"] = n_seg
         tags["skew_step_deg"] = math.degrees(_seg_step)
@@ -1235,6 +1252,11 @@ def _build_hex_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) ->
         tags["mesh_zones"] = {"gap_cl": gap_cl, "mag_cl": mag_cl, "mesh_cl": mesh_cl,
                               "mag_grow": float(opts.get("mag_grow", 0.0) or 0.0)}
         tags["pocket_clear_mm"] = round(clr, 2) if _use_pockets else 0.0
+        # Im Hex-Pfad sind die Taschen Teil des 2D-Querschnitts (kein separates Volumen) —
+        # gezählt wird deshalb die Zahl der vergrabenen Magnete, für die sie gebaut wurden.
+        tags["n_pockets"] = len(_interior) * K if _use_pockets else 0
+        tags["n_pockets_want"] = len(_interior) * K
+        tags["mag_pockets_effective"] = bool(_use_pockets)
         return tags
     finally:
         gmsh.finalize()
@@ -1553,12 +1575,69 @@ def _gap_field_metrics(grid, bname, tags) -> dict:
     arkkio = float(np.mean([_trap(br_by_z[i] * bt_by_z[i], th) for i in range(len(z_levels))]))
     return {
         "b_gap_mid_peak": round(float(np.max(np.abs(br_mid))), 3),
+        # Plausibilitätsmarke für die Aufrufer: Eisen sättigt bei ~2 T, im Luftspalt sind
+        # >3 T physikalisch ausgeschlossen. Im Lastfall dominieren die vereinfachten
+        # Stirnring-Leiter das Feld nahe den Stirnseiten (gemessen an 20260812_073601:
+        # 20,2 T am Rand gegen 2,4 T in der Mitte) — die „Endeffekt"-Kurve zeigt dann den
+        # Ringstrom, keinen Endeffekt. Ohne diese Marke stand das kommentarlos im Diagramm.
+        "b_gap_max_abs": round(float(np.max(np.abs(br_by_z))), 3),
         "b_gap_axial": [round(float(np.max(np.abs(b))), 3) for b in br_by_z],
         "z_levels": [round(float(z), 1) for z in z_levels],
         "torque_Nm": round((L * 1e-3) * (r_mid * 1e-3) ** 2 / MU0 * arkkio, 2),
         "torque_note": "Leerlauf (nur Magnete) ⇒ Netto-Moment ≈ 0; Lastfall folgt",
         "_th": th, "_br_mid": br_mid, "_z_levels_arr": z_levels,
     }
+
+
+def _orientation_check(th2d, br2d, th3d, br3d, geom, tags, res) -> dict:
+    """Prüft, ob die Magnetorientierung von 3D-Elmer und 2D-FDM ÜBEREINSTIMMT.
+
+    Beide Löser leiten die Magnetisierung aus derselben Quelle ab (`ema_topology.magnet_legs`
+    → `_rasterise` bzw. `magnet_rects`), aber an zwei Stellen können sie auseinanderlaufen:
+    * **Rotorwinkel** — die 2D-Rasterung dreht die Pole mit ``rotor_angle``, der 3D-Pfad
+      kennt keinen Rotorwinkel (das Netz sitzt immer bei 0). Der Vergleich läuft deshalb
+      bei ``rotor_angle=0``; wer das 3D-Bild gegen einen ANIMATIONSFRAME hält, sieht
+      zwangsläufig eine Verdrehung.
+    * **Staffelung/Skew** — nur 3D. Die Mittelebene sitzt im mittleren Segment und ist
+      damit um bis zu ``(K−1)·skew_step`` gegen die 2D-Lösung verdreht.
+
+    Gemessen wird die Phase der p-ten Umfangsharmonischen von ``B_r(θ)`` in beiden
+    Lösungen; die Differenz ist die mechanische Verdrehung der Polfolge. Alles darüber
+    hinaus ist ein echter Vorzeichen-/Zuordnungsfehler und wird als Warnung gemeldet.
+    """
+    p = max(int(geom.get("p", 1) or 1), 1)
+    _trap = getattr(np, "trapezoid", None) or np.trapz
+
+    def _phase(th, br):
+        th = np.asarray(th, float); br = np.asarray(br, float)
+        c = _trap(br * np.exp(-1j * p * th), th) / math.pi
+        return float(abs(c)), float(np.degrees(np.angle(c)))
+
+    a2, ph2 = _phase(th2d, br2d)
+    a3, ph3 = _phase(th3d, br3d)
+    d_el = (ph3 - ph2 + 180.0) % 360.0 - 180.0
+    # Vorzeichen so, dass die Zahl die GEOMETRISCHE Verdrehung ist: sitzt das 3D-Polmuster
+    # um +δ weiter im Umlaufsinn (B_r ~ cos(p(θ−δ))), ist die Phase −p·δ ⇒ negieren.
+    d_mech = -d_el / p
+    # Erlaubte Verdrehung: die Staffelung selbst + Abtast-/Netzrauschen.
+    skew_span = abs(float(tags.get("skew_step_deg", 0.0))) * max(int(tags.get("skew_segments", 1)) - 1, 0)
+    tol = skew_span + 3.0
+    out = {"phase_2D_deg": round(ph2, 2), "phase_3D_deg": round(ph3, 2),
+           "phase_shift_mech_deg": round(d_mech, 2),
+           "phase_tol_mech_deg": round(tol, 2),
+           "orientation_ok": bool(abs(d_mech) <= tol),
+           "fundamental_2D": round(a2, 4), "fundamental_3D": round(a3, 4)}
+    if not out["orientation_ok"]:
+        res.setdefault("warnings", []).append(
+            f"Magnetorientierung 3D gegen 2D-FDM um {d_mech:+.1f}° mechanisch verdreht "
+            f"(zulässig ±{tol:.1f}° aus der Staffelung). Beide Lösungen stehen bei "
+            f"rotor_angle=0 — eine größere Verdrehung ist ein Modellfehler, kein Animationsversatz.")
+    elif abs(d_mech) > 0.5:
+        res.setdefault("warnings", []).append(
+            f"Magnetorientierung 3D/2D stimmt überein (Versatz {d_mech:+.1f}° mechanisch, "
+            f"erklärt durch die Staffelung {tags.get('skew_segments', 1)}×"
+            f"{tags.get('skew_step_deg', 0.0):.1f}°, die es nur im 3D-Modell gibt).")
+    return out
 
 
 def _gap_metrics_only(work_dir: str, geom: dict, opts: dict, tags: dict) -> dict:
@@ -1578,7 +1657,34 @@ def _gap_metrics_only(work_dir: str, geom: dict, opts: dict, tags: dict) -> dict
     for k in ("_th", "_br_mid", "_z_levels_arr"):
         m.pop(k, None)
     res.update(m)
+    _b_gap_plausibility(res, tags)
     return res
+
+
+def _b_gap_plausibility(res: dict, tags: dict) -> None:
+    """Warnt, wenn das ausgewertete Luftspaltfeld physikalisch unmöglich ist.
+
+    Eisen sättigt bei ~2 T; alles über ~3 T im Luftspalt kann nur aus dem Modell kommen,
+    nicht aus der Maschine. Im Lastfall sind das die vereinfachten Stirnring-Leiter
+    (`COIL_J_SCALE`, an EINER Maschine kalibriert): sie sitzen als Luft-Ringe direkt an den
+    Stirnseiten und überstrahlen dort das Maschinenfeld. Gemessen am Lauf 20260812_073601:
+    20,2 T an der Stirnseite gegen 2,4 T in der Mitte, mit 180°-Phasensprung zwischen den
+    Hälften (die beiden Ringe führen gegensinnigen Umfangsstrom) — die „Endeffekt"-Kurve
+    zeigt dann den Ringstrom, keinen Endeffekt. Das stand bisher kommentarlos im Diagramm."""
+    b_max = float(res.get("b_gap_max_abs") or res.get("b_gap_mid_peak") or 0.0)
+    if b_max <= 3.0:
+        return
+    op = tags.get("operating_point") or {}
+    mid = float(res.get("b_gap_mid_peak") or 0.0)
+    txt = (f"Luftspaltfeld unphysikalisch hoch: {b_max:.1f} T (Eisen sättigt bei ~2 T). ")
+    if op.get("field_loaded"):
+        txt += ("Ursache ist der vereinfachte Stirnring-Leiter des Lastfalls, der nahe den "
+                f"Stirnseiten dominiert (Mitte {mid:.1f} T). Die Endeffekt-Kurve zeigt dort "
+                "den Ringstrom, nicht den Endeffekt — für Vergleiche nur die Mittelebene "
+                "verwenden, oder im Leerlauf rechnen.")
+    else:
+        txt += "Prüfen: Magnetisierung, Netz und Materialzuordnung."
+    res.setdefault("warnings", []).append(txt)
 
 
 def parse_results(work_dir: str, geom: dict, opts: dict, tags: dict,
@@ -1609,6 +1715,7 @@ def parse_results(work_dir: str, geom: dict, opts: dict, tags: dict,
     m = _gap_field_metrics(grid, bname, tags)
     th = m.pop("_th"); br_mid = m.pop("_br_mid"); z_levels = m.pop("_z_levels_arr")
     res.update(m)
+    _b_gap_plausibility(res, tags)
 
     charts = os.path.join(project_dir, "charts")
     os.makedirs(charts, exist_ok=True)
@@ -1637,14 +1744,31 @@ def parse_results(work_dir: str, geom: dict, opts: dict, tags: dict,
     import ema_analysis
     cmp2d = {}
     try:
-        em2d = ema_analysis.run_em_analysis(geom, N=int(opts.get("n2d", 360)), rotor_angle=0.0)
+        # GLEICHER BETRIEBSPUNKT wie der 3D-Lauf. Vorher lief der Vergleich immer im
+        # LEERLAUF gegen ein 3D-Lastfeld — B_gap_2D=0,629 T gegen B_gap_3D=2,401 T sind so
+        # gar nicht vergleichbar, und die beiden Kurven landeten trotzdem in einem Bild.
+        # Im Lastfall braucht `run_em_analysis` den Leerlauf-`sf_ref`, sonst kalibriert es
+        # sich auf den eigenen Spitzenwert und wirft die Ankerrückwirkung wieder heraus.
+        _n2d = int(opts.get("n2d", 360))
+        _op = tags.get("operating_point") or {}
+        _ld = bool(_op.get("field_loaded"))
+        _oc = ema_analysis.run_em_analysis(geom, N=_n2d, rotor_angle=0.0)
+        if _ld:
+            em2d = ema_analysis.run_em_analysis(
+                geom, N=_n2d, rotor_angle=0.0, iq=float(_op.get("iq_A") or 0.0),
+                id_=float(_op.get("id_A") or 0.0), sf_ref=_oc.get("sf_ref"))
+            _lbl2d = (f"2D-FDM (∞ lang, i_q={_op.get('iq_A')} A, i_d={_op.get('id_A')} A)")
+        else:
+            em2d, _lbl2d = _oc, "2D-FDM (∞ lang, Leerlauf)"
         br2d = np.asarray(em2d["Br_gap"]); th2d = np.linspace(0, 2 * np.pi, len(br2d), endpoint=False)
         perf = em2d.get("performance", {})
         cmp2d = {"B_gap_2D": round(float(np.max(np.abs(br2d))), 3),
                  "B_gap_3D_mid": res["b_gap_mid_peak"],
-                 "Kt_2D": perf.get("Kt_Nm_per_A")}
+                 "Kt_2D": perf.get("Kt_Nm_per_A"),
+                 "excitation": "loaded" if _ld else "open_circuit"}
+        cmp2d.update(_orientation_check(th2d, br2d, th, br_mid, geom, tags, res))
         fig, ax = plt.subplots(figsize=(6.2, 3.4), facecolor="#0d0d0d")
-        ax.plot(np.degrees(th2d), br2d, label="2D-FDM (∞ lang)", color="#4fc3f7", lw=1.4)
+        ax.plot(np.degrees(th2d), br2d, label=_lbl2d, color="#4fc3f7", lw=1.4)
         ax.plot(np.degrees(th), br_mid, label="3D Elmer (z=L/2)", color="#ff7043", lw=1.4)
         ax.set_xlabel("Umfangswinkel θ [°]"); ax.set_ylabel("B_r Luftspalt [T]")
         ax.set_title("Luftspalt-Radialfeld: 2D vs 3D", color="#ddd")
@@ -2479,7 +2603,11 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
 
     # cl explizit machen (nie 0/auto) → Skalierung immer definiert.
     g0, m0, me0, gr0 = _seed_cl(geom, opts)
-    cur = dict(opts, gap_cl=g0, mag_cl=m0, mesh_cl=me0, mag_grow=gr0)
+    # `pocket_fallback=False`: über die Taschen entscheidet AUSSCHLIESSLICH die Leiter
+    # (Stufe 5), nicht der stille Sofort-Fallback in `build_mesh` — sonst wäre die
+    # ausdrückliche Reihenfolge „Netzqualität zuerst, Modell-Features zuletzt" wirkungslos.
+    cur = dict(opts, gap_cl=g0, mag_cl=m0, mesh_cl=me0, mag_grow=gr0,
+               pocket_fallback=False)
 
     wl(f"=== Netzbau: Topologie={geom.get('magShape','?')} p={geom.get('p','?')} "
        f"slots={geom.get('slots','?')} L={axial:.0f}mm | "
@@ -2489,7 +2617,10 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
     mitigations = _mesh_mitigations()
     mit_i = 0                      # nächster Mitigationsschritt bei Fehler
     scale_passes = 0               # Ziel-/Cap-Nachführungen
-    max_attempts = 10
+    pocket_ok_nodes = []           # Knotenzahlen der Versuche, die die Taschen getragen haben
+    # 7 Mitigationsstufen + bis zu 4 Ziel-/Cap-Nachführungen; seit die Taschen nicht mehr
+    # vorab still abgeschaltet werden, kann die Leiter tatsächlich bis ans Ende laufen.
+    max_attempts = 13
 
     tags = None
     for attempt in range(1, max_attempts + 1):
@@ -2512,11 +2643,44 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
             continue
 
         n = tags["n_nodes"]
+        # Taschen IST-Stand, nicht Soll-Stand: `cur['mag_pockets']` sagt nur, was angefordert
+        # war. Gezählt wird, was wirklich als Luft im Netz steht.
+        n_pk, n_pk_want = tags.get("n_pockets", 0), tags.get("n_pockets_want", 0)
+        if n_pk:
+            pk_txt = f"{n_pk} Magnettaschen (Spalt {tags.get('pocket_clear_mm', 0):.2f} mm)"
+        elif cur.get("mag_pockets", True):
+            pk_txt = "KEINE Magnettaschen (angefordert, aber nicht im Netz)"
+        else:
+            pk_txt = "KEINE Magnettaschen (abgeschaltet)"
         wl(f"  ✓ {n} Knoten, {tags.get('n_magnets','?')} Magnete, "
-           f"{tags.get('n_slots',0)} Nuten, {tags.get('n_barriers',0)} Barrieren")
-        if tags.get("caps_dropped"):
-            warns.append("Magnettaschen-Endkappen für diese Geometrie/Netzfeinheit deaktiviert "
-                         "(Netzkonflikt) — Magnet-/Luftspalt-Mesh feiner wählen, dann erscheinen sie.")
+           f"{tags.get('n_slots',0)} Nuten, {tags.get('n_barriers',0)} Barrieren, {pk_txt}")
+        if n_pk:
+            pocket_ok_nodes.append(n)      # dieser Netzbau trug die Taschen (für den Hinweis unten)
+        if tags.get("caps_dropped") or (cur.get("mag_pockets", True) is False
+                                        and opts.get("mag_pockets", True)):
+            # Konkret werden statt „feiner wählen": gemessen an der Delta-Maschine aus
+            # 20260812_073601 gelang der Bau MIT Taschen sowohl sehr fein (245 k Knoten) als
+            # auch sehr grob (30 k) und scheiterte nur im mittleren Band — es ist ein Problem
+            # des Größen-GRADIENTEN, nicht der absoluten Feinheit. Deshalb bekommt der Nutzer
+            # die Knotenzahlen genannt, bei denen es in DIESEM Lauf funktioniert hat.
+            hint = (f" In diesem Lauf gelang der Netzbau mit Taschen bei "
+                    f"{', '.join(str(x) for x in sorted(set(pocket_ok_nodes)))} Knoten — "
+                    f"Knoten-Ziel dorthin setzen." if pocket_ok_nodes else
+                    " Abhilfe: Knoten-Ziel deutlich erhöhen oder Luftspalt-/Magnet-Mesh von Hand setzen.")
+            warns.append(
+                "Magnettaschen (Luftkappen um die Magnete) sind NICHT im 3D-Netz — sie waren bei "
+                f"Knoten-Ziel {target if target else cap} nicht konfliktfrei vernetzbar "
+                f"(Klebespalt {tags.get('pocket_clear_geom_mm', 0.1)} mm). Das 3D-Feld zeigt die "
+                "Magnete deshalb in massivem Eisen, die 2D-FDM-Lösung dagegen mit Luftkappen." + hint)
+        elif cur.get("mag_pockets", True) and not n_pk:
+            # Taschen waren an, wurden gebaut — aber keine einzige Luft-Schale hat die
+            # Zuordnung überlebt. Das blieb bisher völlig unbemerkt: das 3D-Feld zeigt dann
+            # Magnete in massivem Eisen, während die 2D-FDM-Lösung Luftkappen hat.
+            wl(f"  ⚠ {n_pk_want} Magnettaschen gebaut, aber 0 als Luft zugeordnet "
+               f"— 3D-Rotor ohne Flussbarrieren (weicht von der 2D-FDM-Lösung ab).", ui=True)
+            warns.append(f"Magnettaschen im 3D-Netz nicht angekommen ({n_pk_want} gebaut, 0 zugeordnet) "
+                         "— das 3D-Feld zeigt die Magnete in massivem Eisen, die 2D-FDM-Lösung "
+                         "dagegen mit Luftkappen. Magnet-/Luftspalt-Mesh feiner wählen.")
 
         # --- Ziel-/Cap-Nachführung ---
         too_fine = n > cap
@@ -2672,7 +2836,9 @@ def _decorate_res(res, tags, opts, axial, op, mesh_warns):
     """Hängt Mesh-/Geometrie-/Betriebspunkt-Metadaten + Last-Momentnotiz an ein Einzelpunkt-
     Ergebnis (geteilt von ``run_em3d`` und dem Sweep-Detailpunkt)."""
     res["mesh"] = {"n_nodes": tags["n_nodes"], "n_magnets": tags["n_magnets"],
-                   "n_barriers": tags.get("n_barriers", 0), "bodies": tags["n_bodies"]}
+                   "n_barriers": tags.get("n_barriers", 0), "bodies": tags["n_bodies"],
+                   "n_pockets": tags.get("n_pockets", 0),
+                   "pocket_clear_mm": tags.get("pocket_clear_mm", 0.0)}
     if opts.get("target_nodes"):
         res["mesh"]["target_nodes"] = int(opts["target_nodes"])
     if tags.get("mesh_log"):
