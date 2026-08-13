@@ -3320,6 +3320,48 @@ def training_vlm_download():
                      mimetype="application/x-ndjson")
 
 
+# ── KI-Training (Physik-Surrogat, physics_surrogate/) — nur Lesezugriff ───────
+# Der Orchestrator startet hier NICHTS: das Training läuft in einer eigenen venv
+# (Torch/CUDA) und einem eigenen Dienst auf :5300. Diese Routen zeigen nur, was auf
+# Platte liegt, plus den Zustand des Dienstes. Fehlt das Subprojekt, ist das kein
+# Fehler — der Tab bleibt dann sauber leer (wie /em3d ohne Elmer).
+
+
+@app.route("/ki_training/runs")
+def ki_training_runs():
+    import ema_ki_training as kt
+    if not kt.available():
+        return jsonify({"available": False, "runs": [], "service": kt.service_status(),
+                        "dir": kt.SURROGATE_DIR})
+    return jsonify({"available": True, "runs": kt.list_runs(),
+                    "service": kt.service_status(), "gates": kt.GATES,
+                    "dir": kt.SURROGATE_DIR})
+
+
+@app.route("/ki_training/chart")
+def ki_training_chart():
+    """Vergleichs-Kurven der gewählten Läufe. ``?runs=a,b&x=epoch|progress`` —
+    `progress` normiert auf den Anteil des Kosinus-Zeitplans (der einzig zulässige
+    Vergleich zwischen Läufen verschiedener Gesamtlänge, s. ema_ki_training)."""
+    import ema_ki_training as kt
+    if not kt.available():
+        return jsonify({"error": "physics_surrogate/checkpoints nicht gefunden"}), 404
+    names = [n for n in (request.args.get("runs", "").split(",")) if n and _safe_name(n)]
+    x     = "progress" if request.args.get("x") == "progress" else "epoch"
+    try:
+        return jsonify({"chart_b64": kt.chart(names, x=x)})
+    except Exception as e:
+        return jsonify({"error": str(e)[:300]}), 500
+
+
+@app.route("/ki_training/log/<name>")
+def ki_training_log(name: str):
+    import ema_ki_training as kt
+    if not _safe_name(name):
+        return jsonify({"error": "ungültiger Laufname"}), 403
+    return jsonify({"log": kt.log_tail(name)})
+
+
 # ── Job-Warteschlange (persistente Server-Jobs, s. ema_jobs) ──────────────────
 # Jobs laufen server-seitig weiter, wenn der Browser geschlossen wird; Job-Reihen
 # (Varianten/Param-Tabelle/KI-Entwürfe) werden hier statt in Client-JS-Schleifen
