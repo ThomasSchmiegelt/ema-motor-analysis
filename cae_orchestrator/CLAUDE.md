@@ -1021,6 +1021,37 @@ factorisation is **cached by `(N, hash(mu))`** in `_LU_CACHE` and reused across
 every RPM / current-angle / load step at the same rotor position; the rotate
 sweep re-uses ~`n_frames` angles across all RPMs (N=600 ≈ 3 s to factor, <0.1 s
 per subsequent solve). `run_pipeline` calls `clear_lu_cache()` in its `finally`.
+
+**Der Cache ist nach SPEICHER gedeckelt, nicht nach Eintragszahl** (`_LU_CACHE_GB`,
+Standard 6 GB, per `EMA_LU_CACHE_GB` überschreibbar; `_lu_bytes` rechnet 24 B je
+Nichtnull, `_evict_lu` wirft LRU raus). `_LU_CACHE_MAX`=256 ist nur noch ein
+Rückfallnetz. Grund (13.08.2026 gemessen, Nutzerbeobachtung „FDM hat sich bei
+Frame 469 aufgehangen"): eine Faktorisierung kostet **0,06 GB bei N=240, aber
+1,02 GB RSS bei N=600** (44,2 M Nichtnull; die reinen Faktordaten sind 0,53 GB,
+SuperLUs Arbeitsspeicher verdoppelt das). Der frühere feste Deckel von 48
+Einträgen war damit bei der Standardauflösung harmlos und reservierte bei N=600
+**~49 GB auf einer 31-GiB-Maschine** — der Lauf lagerte aus und blieb mitten in
+der Animation stehen, statt zu scheitern. Gegenprobe an denselben Einstellungen:
+72 Frames × 14 Drehzahlen bei `frame_resolution=300` liefen komplett durch, bei
+600 nicht.
+
+**Die Sättigungs-Iterate dürfen NICHT in den Cache** (`_saturate_field` ruft
+`_solve_fdm(..., cache=False)`). Der Fixpunkt rechnet je Iteration ein neues
+feldabhängiges `mu`, das per Konstruktion nie wieder vorkommt. Gecacht wuchsen
+die Einträge um **5 je Frame** (gemessen: 7 Solves/Frame, davon 5 Fehltreffer),
+verdrängten die wiederverwendbaren Basis-`mu`-Einträge und machten die
+Trefferquote über Frames hinweg zu **null** — der Cache tat also das Gegenteil
+seines Zwecks. Der ERSTE Solve in `_saturate_field` nutzt noch das lineare
+`mu_base` und teilt sich den Eintrag mit `run_em_analysis`, der bleibt gecacht.
+Seit dem Fix: ein Eintrag je Rotorwinkel, über Drehzahlen hinweg wiederverwendet.
+Gate: `test_fdm_golden.py::test_lu_cache_bounded` (Budget, Eintrag-je-Winkel,
+Wiederverwendung über Betriebspunkte).
+
+**Kostenrealität der Animation:** 4 der 5 Faktorisierungen je Frame sind die
+Sättigungs-Iterate und **prinzipiell nicht cachebar**. Bei N=600 sind das ~14 s
+je Frame (1008 Frames ≈ 4 h), bei N=300 ~1,5 s. Die hohe Auflösung gehört
+deshalb nicht in die Animation — die Berichtsbilder rendern über
+`_emf_N = min(600, max(300, frame_res·2))` ohnehin getrennt in 600².
 Above N≈2500 (`_DIRECT_N_MAX`) the direct factorisation needs too much RAM, so
 `_solve_fdm` dispatches to `_solve_fdm_amg` — CG-accelerated `pyamg`
 smoothed-aggregation AMG (Ruge-Stüben fallback for hard µ-jumps), with the

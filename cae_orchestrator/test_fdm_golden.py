@@ -295,6 +295,65 @@ def test_curl_a_material_interface():
     print(f"  ✓ uniformes Material: rundungsgleich zu np.gradient")
 
 
+def test_lu_cache_bounded():
+    """Der LU-Cache muss nach SPEICHER gedeckelt sein, nicht nach Eintragszahl.
+
+    Zwei Eigenschaften, die zusammen einen realen Aufhänger verhindert haben
+    (13.08.2026, 72 Frames × 14 Drehzahlen bei N=600 blieben um Frame 469 stehen):
+
+    * Der Sättigungs-Fixpunkt rechnet je Iteration ein neues ``mu``, das per
+      Konstruktion nie wieder vorkommt. Landete es im Cache, wuchsen die
+      Einträge um 5 je Frame und verdrängten die wiederverwendbaren.
+    * Ein Eintrag kostet bei N=240 ~0,12 GB, bei N=600 ~1,0 GB — eine feste
+      Eintragszahl reserviert dort zweistellige GB und die Maschine lagert aus.
+    """
+    print("\n[LU-Cache Deckel]")
+    geom = dict(GEOM, magShape="v")
+    angles = [0.0, 0.03, 0.06, 0.09, 0.12]
+
+    def _run(ang, iq, id_):
+        ea.run_em_analysis(geom, N=240, rotor_angle=ang, iq=iq, id_=id_,
+                           axial_mm=AXIAL, saturate=True)
+
+    def _used_gb():
+        return sum(ea._lu_bytes(lu) for lu, _iv in ea._LU_CACHE.values()) / 1e9
+
+    budget_orig = ea._LU_CACHE_GB
+    try:
+        ea._LU_CACHE_GB = 0.25                    # bei N=240 Platz für zwei Einträge
+        ea.clear_lu_cache()
+        for ang in angles:
+            _run(ang, 120.0, -60.0)
+            assert _used_gb() <= ea._LU_CACHE_GB, (
+                f"Cache {_used_gb():.3f} GB über Budget {ea._LU_CACHE_GB} GB")
+        n = len(ea._LU_CACHE)
+        assert n <= 2, f"{n} Einträge trotz 0,25-GB-Budget — Eviction greift nicht"
+        print(f"  ✓ Budget gehalten: {n} Einträge / {_used_gb():.3f} GB "
+              f"nach {len(angles)} Frames")
+
+        # Ohne den cache=False-Pfad stünden hier 5 Einträge je Frame.
+        ea._LU_CACHE_GB = 100.0
+        ea.clear_lu_cache()
+        for ang in angles:
+            _run(ang, 120.0, -60.0)
+        n = len(ea._LU_CACHE)
+        assert n == len(angles), (
+            f"{n} Einträge für {len(angles)} Rotorwinkel — die Sättigungs-Iterate "
+            f"werden mitgecacht")
+        print(f"  ✓ ein Eintrag je Rotorwinkel: {n} bei {len(angles)} Frames")
+
+        # Zweiter Betriebspunkt über dieselben Winkel: der Operator hängt nur an mu,
+        # es darf kein einziger Eintrag dazukommen.
+        for ang in angles:
+            _run(ang, 110.0, -70.0)
+        assert len(ea._LU_CACHE) == len(angles), (
+            f"{len(ea._LU_CACHE)} statt {n} Einträge — Wiederverwendung kaputt")
+        print(f"  ✓ Wiederverwendung über Betriebspunkte: weiterhin {n} Einträge")
+    finally:
+        ea._LU_CACHE_GB = budget_orig
+        ea.clear_lu_cache()
+
+
 def _update():
     out = {}
     for name, shape, N, iq, id_, *rest in CASES_FAST + CASES_SLOW + CASES_SAT:
@@ -318,4 +377,5 @@ if __name__ == "__main__":
     test_golden_n512()
     test_golden_saturated()
     test_rasterise_maps()
+    test_lu_cache_bounded()
     print("\nALLE FDM-GOLDEN-TESTS BESTANDEN ✅")

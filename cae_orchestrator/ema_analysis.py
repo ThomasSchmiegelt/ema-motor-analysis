@@ -1,6 +1,7 @@
 """Python FDM field solver + analytical EM estimates for IPM motors."""
 
 import math
+import os
 from collections import OrderedDict
 
 import numpy as np
@@ -30,8 +31,18 @@ _DIRECT_N_MAX = 2500
 # RPM / current-angle / load step at the same rotor position — the rotate sweep
 # re-uses the same handful of angles across all RPMs, and the standstill modes
 # factor once.  Keyed by (N, hash(mu)); LRU-evicted to bound memory.
+#
+# The bound is a BYTE BUDGET, not an entry count: one factorisation costs
+# ~0.06 GB at N=240 but ~1.0 GB at N=600, so a fixed count that is harmless at
+# the default animation resolution silently reserves tens of GB at high N.  A
+# 48-entry cache at N=600 works out to ~49 GB on a 31 GiB machine — the run then
+# swaps and looks hung mid-animation rather than failing (measured 13.08.2026 on
+# a 72-frame × 14-rpm sweep that stalled around frame 469; the same sweep at
+# N=300 completed).  `_LU_CACHE_MAX` remains only as a backstop against a huge
+# number of tiny entries.
 _LU_CACHE = OrderedDict()
-_LU_CACHE_MAX = 48
+_LU_CACHE_MAX = 256
+_LU_CACHE_GB = float(os.environ.get("EMA_LU_CACHE_GB", "6"))
 
 # AMG-hierarchy cache (used for N > _DIRECT_N_MAX).  Hierarchies are large, so a
 # small LRU (a few rotor angles) is enough.  Keyed like _LU_CACHE: (N, hash(mu)).
@@ -43,6 +54,32 @@ def clear_lu_cache():
     """Drop all cached factorisations (call between analyses to free memory)."""
     _LU_CACHE.clear()
     _AMG_CACHE.clear()
+
+
+def _lu_bytes(lu) -> int:
+    """Resident cost of one cached factorisation.
+
+    Billed at 24 B per nonzero, not the 12 B the L/U arrays themselves need:
+    measured at N=600 a factorisation holds 44.2 M nonzeros (0.53 GB of factor
+    data) but grows RSS by 1.02 GB, because SuperLU keeps working storage of the
+    same order.  Under-billing here is what makes the cache overshoot.
+    """
+    return (lu.L.nnz + lu.U.nnz) * 24
+
+
+def _evict_lu() -> None:
+    """Evict oldest entries until the cache is inside its byte budget.
+
+    A single factorisation larger than the whole budget ends up not cached at
+    all (the loop empties the cache) — the caller still holds it for the solve
+    in progress, so that degrades to re-factorising per solve instead of
+    swapping.
+    """
+    budget = int(_LU_CACHE_GB * 1e9)
+    total = sum(_lu_bytes(lu) for lu, _iv in _LU_CACHE.values())
+    while _LU_CACHE and (total > budget or len(_LU_CACHE) > _LU_CACHE_MAX):
+        _key, (lu, _iv) = _LU_CACHE.popitem(last=False)
+        total -= _lu_bytes(lu)
 
 # Material constants
 Br_NdFeB   = 1.15   # T – NdFeB N35 remanence
@@ -377,7 +414,8 @@ def _build_fv_matrix(mu: np.ndarray):
     return M, interior
 
 
-def _solve_fdm(mu: np.ndarray, J: np.ndarray, iters: int | None = None) -> np.ndarray:
+def _solve_fdm(mu: np.ndarray, J: np.ndarray, iters: int | None = None,
+               cache: bool = True) -> np.ndarray:
     """Solve ∇·(ν∇A) = −J exactly via a cached direct sparse factorisation.
 
     SuperLU factorises −∇·(ν∇A) once per permeability map and back-substitutes
@@ -387,6 +425,10 @@ def _solve_fdm(mu: np.ndarray, J: np.ndarray, iters: int | None = None) -> np.nd
     Falls back to the iterative defect-correction SOR if SciPy is unavailable.
     The `iters` argument is accepted for backwards compatibility and ignored
     by the direct path.
+
+    `cache=False` factorises without storing the result — for a `mu` that cannot
+    recur by construction (the saturation fixed-point's intermediates), where
+    caching only evicts entries that would have been reused.
     """
     if not _HAVE_SCIPY:
         return _solve_fdm_sor(mu, J, iters if iters is not None else 180)
@@ -400,14 +442,14 @@ def _solve_fdm(mu: np.ndarray, J: np.ndarray, iters: int | None = None) -> np.nd
             f"({_DIRECT_N_MAX}); für höhere Auflösung wird pyamg benötigt "
             f"(pip install pyamg).")
 
-    key = (N, hash(mu.tobytes()))
-    cached = _LU_CACHE.get(key)
+    key = (N, hash(mu.tobytes())) if cache else None
+    cached = _LU_CACHE.get(key) if cache else None
     if cached is None:
         M, interior = _build_fv_matrix(mu)
         lu = _spla.splu(M)
-        _LU_CACHE[key] = (lu, interior)
-        if len(_LU_CACHE) > _LU_CACHE_MAX:
-            _LU_CACHE.popitem(last=False)
+        if cache:
+            _LU_CACHE[key] = (lu, interior)
+            _evict_lu()
     else:
         lu, interior = cached
         _LU_CACHE.move_to_end(key)
@@ -1132,6 +1174,9 @@ def _saturate_field(mu_base, J, geom, sc, ctr, N, target_peak_T,
         iron = mu_base > 1.5
         lbl  = _material_labels(mu_base)   # from the LINEAR mu — mu itself changes below
         mu   = mu_base.copy()
+        # Still the LINEAR mu here, shared with run_em_analysis's own solves at
+        # this rotor angle — so this one belongs in the cache.  The iterates below
+        # do not: each is a fresh field-dependent mu that no later solve can hit.
         A    = _solve_fdm(mu, J)
         scale = 1.0
         for _ in range(max(1, iters)):
@@ -1149,7 +1194,7 @@ def _saturate_field(mu_base, J, geom, sc, ctr, N, target_peak_T,
             if not np.all(np.isfinite(mu_upd)):
                 break
             mu = mu_upd.astype(np.float32)
-            A  = _solve_fdm(mu, J)
+            A  = _solve_fdm(mu, J, cache=False)
         return A, scale
     except Exception:
         return None, None
