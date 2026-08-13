@@ -32,6 +32,21 @@ teilt sich die FreeCAD-Toolchain mit `cae_orchestrator`.
 
 ## Hinweis native Teile
 
-Dieses Repo versioniert **nur Quellcode**. Die gebaute native `pikogk.so` + `c-blosc`
-liegen auf der Platte (gitignored) und werden vom laufenden Dienst genutzt. Ein Clone auf
+Dieses Repo versioniert **im Wesentlichen Quellcode**. Die gebaute native `pikogk.so`
+liegt auf der Platte (gitignored) und wird vom laufenden Dienst genutzt. Ein Clone auf
 einem anderen Rechner müsste sie neu bauen (siehe `pikogk/EXPERIENCE_REPORT.md`).
+
+Ausnahme, weil daran Lizenzpflichten hängen: einige **gebaute Fremd-Binärdateien** sind
+versioniert und gehen bei jedem Klon mit (`libblosc` aus c-blosc, `libtbb`,
+`libboost_iostreams`, das gebündelte `vtk.js`). Sie sind in `THIRD-PARTY-NOTICES.md`
+aufgeführt — wer weitere hinzufügt, trägt sie dort nach.
+
+## Lizenz
+
+Der hier entwickelte Code steht unter der **MIT-Lizenz** (`LICENSE`).
+
+Fremdkomponenten behalten ihre eigenen Lizenzen. `THIRD-PARTY-NOTICES.md` trennt dabei,
+was **mitverbreitet** wird (im Repo enthalten — Lizenztext und Copyright-Vermerk müssen
+mitreisen) und was lediglich **vorausgesetzt** wird (lokal installiert oder selbst gebaut,
+nicht Teil dieses Repos). Dazu zählt insbesondere **PicoGK** von LEAP 71 (Apache-2.0):
+das `pikogk`-Subprojekt bindet es ein, enthält aber keinen PicoGK-Quellcode.
