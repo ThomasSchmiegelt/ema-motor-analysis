@@ -7,6 +7,7 @@ its conda env (CCX is bundled inside the same env).
 """
 
 import subprocess
+import sys
 import tempfile
 import os
 import json
@@ -27,14 +28,41 @@ def _pixi_cmd(*args: str) -> list[str]:
             os.path.join(FREECAD_ROOT, "pixi.toml"), "--", *args]
 
 
+def child_env() -> dict:
+    """Environment for the FreeCAD subprocess: our venv's `bin` REMOVED from PATH,
+    the pixi env's `ccx` prepended.
+
+    Why the removal matters (this cost a silent, hard-to-see failure): the Flask
+    server runs inside `venv/`, whose `bin/gmsh` is the **pip package's console
+    wrapper** with a `#!/usr/bin/env python` shebang. FreeCAD runs in the pixi env,
+    where only `python3` exists — the wrapper therefore dies with
+    "/usr/bin/env: python: not found". FreeCAD's `GmshTools` picks the FIRST `gmsh`
+    on PATH, gets that wrapper, and `create_mesh()` returns **no warning** while
+    producing a mesh with **0 nodes**. The structural FEM then has nothing to solve,
+    CalculiX writes no result, and the pipeline silently falls back to the
+    analytical rotating-disc deformation — a smooth annulus with no magnets and no
+    magnet pockets. FreeCAD needs nothing from our venv, so dropping it is the fix
+    (verified: same script, 0 nodes with venv on PATH vs 747 nodes without).
+    """
+    env = os.environ.copy()
+    drop = {os.path.realpath(os.path.join(sys.prefix, "bin"))}
+    if os.environ.get("VIRTUAL_ENV"):
+        drop.add(os.path.realpath(os.path.join(os.environ["VIRTUAL_ENV"], "bin")))
+    parts = [p for p in env.get("PATH", "").split(os.pathsep)
+             if p and os.path.realpath(p) not in drop]
+    env["PATH"] = os.pathsep.join([CCX_DIR, *parts])
+    env.pop("VIRTUAL_ENV", None)
+    env.pop("PYTHONHOME", None)
+    return env
+
+
 def run_freecad_script(code: str, timeout: int = 120) -> dict:
     """Execute a FreeCAD Python script headlessly. Returns parsed output dict."""
     with tempfile.NamedTemporaryFile(mode="w", suffix=".py", delete=False, encoding="utf-8") as f:
         f.write(code)
         script_path = f.name
 
-    env = os.environ.copy()
-    env["PATH"] = CCX_DIR + os.pathsep + env.get("PATH", "")
+    env = child_env()
 
     try:
         proc = subprocess.run(
