@@ -15,6 +15,17 @@ venv/
 # ── cae_orchestrator: Laufzeit-/Zwischenartefakte (liegen ohnehin in ~/cae_projekte) ──
 cae_orchestrator/**/__pycache__/
 
+# ── physics_surrogate: Modelle + Trainingsdaten (GB-Größe, reproduzierbar) ──
+# ACHTUNG: .gitignore kennt KEINE Kommentare am Zeilenende — ein "# …" hinter dem
+# Muster wird Teil des Pfads und die Regel greift stillschweigend nicht mehr.
+# (Genau so sind hier einmal 17 GB Datensatz durchgerutscht.)
+# trainierte Gewichte (aus datasets/ reproduzierbar)
+physics_surrogate/checkpoints/
+# NPZ-Trainingsdaten (aus den Lösern regenerierbar, ~17 GB)
+physics_surrogate/datasets/
+# Auswertungs-/Laufausgaben je Training
+physics_surrogate/outputs/
+
 # ── .NET (pikogk) Build-Ausgaben ──
 pikogk/**/bin/
 pikogk/**/obj/
@@ -41,3 +52,10 @@ pikogk/PicoGKRuntime/
 pikogk/PicoGKWebApi/
 pikogk/PicoGK_Examples/
 pikogk/c-blosc/
+
+# lego: Laufzeitdaten (LDraw-Bibliothek, Kollisionsnetze, Wine-Prefix, Downloads)
+lego/data/
+lego/.venv/
+
+# pikogk: Laufzeit-Logs
+pikogk/logs/
