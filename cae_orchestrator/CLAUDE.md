@@ -223,6 +223,22 @@ calc can be (re)configured first; `loadProjectById` now also repopulates the for
    `fem_rpm`, `fem_sigma_vm_MPa`.
 7b. **Shaft–core connection** — `connection_assessment` (analytical, no FEM) →
    `results["connection"]` + `charts/connection.png`.
+7c. **Drehmoment-/Leistungskennfeld** — `ema_analysis.power_envelope(geom, em_advanced,
+   rpm_max=max_safe_rpm, T_rated_Nm=…)` → `results["power"]` + `charts/power.png`
+   (`_power_chart`). Beantwortet „was **kann** die Maschine?" (bisher gab es nur die
+   *angeforderte* Last `load_nm` und Verlustleistungen). Für jede Drehzahl wird auf
+   einem (I_s, β)-Raster der beste zulässige Punkt unter **Strom-** (`INVERTER_I_MAX`)
+   und **Spannungsgrenze** (`INVERTER_V_DC`, beide neu als einzige Quelle in
+   `ema_analysis`, vorher Literale in `estimate_dq_currents`) gesucht — daraus fallen
+   Konstantmoment-, Feldschwäch- und MTPV-Bereich ohne Fallunterscheidung heraus.
+   Zweite Kurve = zusätzlich auf `ema_thermal.rated_torque` gedeckelt (Dauer/S1);
+   `cont_limited_by` sagt, ob Kühlung oder Strom bindet (bei großzügiger Kühlung
+   fallen beide Kurven zusammen — sonst sieht das wie ein Fehler aus). **Grenzen, die
+   im UI mitstehen:** Ld/Lq sind ungesättigt (der FDM rechnet linear), Ströme auf
+   **1 Wdg/Nut** normiert wie `Kt`, Verluste nicht abgezogen (Wellenleistung).
+   `summary` trägt `P_max_kW`/`P_max_rpm`/`P_cont_max_kW`/`T_peak_max_Nm`; UI:
+   Karte im Ergebnis-Untertab **🔄 EM-Kennlinie** (`renderPower`) + zwei Kacheln im
+   Kennwert-Raster.
 8. **Thermal LPTN** — `ema_thermal.run_thermal_analysis()` (steady + transient over 30 min).
 9. **Drive cycles** — optional WLTP-3b / full-load / trailer / CSV, each with per-cycle thermal.
 
@@ -381,6 +397,34 @@ SaveScalars; Eisen μr=500 linear, Magnet μr=1.05 + per-Magnet `Body Force Magn
 Luftspalt-Br(θ) bei mehreren z → Endeffekt-Kurve, |B|-Schnitt z=L/2, Arkkio-Moment; +
 `run_em_analysis`-2D-Vergleich).
 
+**2D↔3D-Vergleich — Betriebspunkt + Orientierung (2026-08-12).** Der Vergleich lief bis dahin
+IMMER im Leerlauf (`run_em_analysis(geom, N, rotor_angle=0)` ohne `iq`/`id_`) und wurde gegen ein
+3D-**Last**feld gestellt: `B_gap_2D=0,629 T` neben `B_gap_3D=2,401 T` im selben Diagramm, ohne dass
+irgendwo stand, dass das zwei verschiedene Betriebspunkte sind. Jetzt übernimmt `parse_results` den
+Punkt aus `tags["operating_point"]` (im Lastfall mit dem Leerlauf-`sf_ref`, sonst rechnet
+`run_em_analysis` die Ankerrückwirkung durch Selbstkalibrierung wieder heraus) und beschriftet die
+Kurve entsprechend; `compare_2d["excitation"]` hält fest, welcher Fall es war.
+**`_orientation_check`** misst zusätzlich die Phase der p-ten Umfangsharmonischen von `B_r(θ)` in
+beiden Lösungen und meldet die geometrische Verdrehung der Polfolge
+(`phase_shift_mech_deg`, `orientation_ok`, Toleranz = Staffelungs-Spanne + 3°). Hintergrund: die
+Magnetisierung kommt in BEIDEN Pfaden aus `ema_topology.magnet_legs` (2D `_rasterise:245-300`,
+3D `magnet_rects:73-121`, Formel identisch `Hc·sign·mag_sign·(mdx,mdy)`), ABER die 2D-Rasterung dreht
+die Pole mit `rotor_angle`, der 3D-Pfad kennt keinen Rotorwinkel — wer das 3D-Bild gegen einen
+**Animationsframe** hält, sieht deshalb immer eine Verdrehung, die kein Fehler ist. Am Lauf
+`20260812_073601` nachgemessen: Versatz **0,06° mechanisch** (Staffelung 3×3°) ⇒ die Orientierungen
+stimmen überein, beide sind richtig. Ebenfalls nachgemessen und dokumentiert: die Delta-Topologie
+(`_build_delta`, V-Paar + tangentiales Deck) ist **gleichsinnig** magnetisiert — Deck-Vorzeichen
+umdrehen senkt die Luftspalt-Grundwelle von 1,216 auf 0,723 (0,59×), das Deck arbeitet also nicht
+gegen die Arme. Test: `test_em3d.test_orientation_check_2d_vs_3d` (rein numerisch, ohne Netz/Elmer).
+
+**Plausibilitätswächter `_b_gap_plausibility` (2026-08-12).** `_gap_field_metrics` liefert jetzt
+`b_gap_max_abs`; überschreitet es 3 T (Eisen sättigt bei ~2 T), warnen beide Auswertepfade. Anlass:
+im Lastfall überstrahlen die vereinfachten **Stirnring-Leiter** (`COIL_J_SCALE`, an EINER Maschine
+kalibriert) das Maschinenfeld nahe den Stirnseiten. Am Lauf `20260812_073601` gemessen: `b_gap_axial`
+= 14,8 / 20,2 / … / **2,4** (Mitte) / … / 11,5 T, mit **180°-Phasensprung** zwischen den Hälften (die
+beiden Ringe führen gegensinnigen Umfangsstrom). Die als „Endeffekt" beschriftete Kurve zeigt dort
+also den Ringstrom, nicht den Endeffekt — belastbar ist nur die Mittelebene (oder der Leerlauf).
+
 **Hexaeder-Netz (opt-in, `opts["hex_mesh"]` / UI `e3_hex_mesh`, `_build_hex_mesh_once`):**
 strukturiertes **Hex-/Prismen**-Netz statt der Tetraeder — 2D-Querschnitt-OCC-Fragment
 (konzentrische Scheiben + Magnete + Statornuten + Flussbarrieren), zu Vierecken
@@ -486,7 +530,22 @@ Modell-Features entfernen** — Netzqualität erhöhen (`mesh_robust`: gmsh Fron
 `Mesh.Optimize`/`OptimizeThreshold`) → Luftspalt-/Magnet-Mesh ×1,5 vergröbern → Zonen-Verhältnisse angleichen
 (`mag_cl`→`gap_cl`-nah, Saumzone `mag_grow` ×1,6, sanfterer Größengradient) → Gesamtnetz ×1,8 → Magnettaschen-Kappen
 aus → Skew/Staffelung aus → Statornuten aus — und baut mit neuen Parametern neu, bis es klappt oder die Leiter
-erschöpft ist. **Logfile `mesh_build.log`** (`_mesh_logger`,
+erschöpft ist (13 Versuche = 7 Stufen + bis zu 4 Skalier-Pässe).
+**Gotcha (2026-08-12 gefixt, „waren die Magnettaschen überhaupt da?"):** `build_mesh` fing JEDEN Fehler ab und baute
+sofort ohne Taschen neu (`caps_dropped`) — damit war die ganze Reihenfolge oben wirkungslos: das Modellfeature fiel
+schon beim ERSTEN Fehlversuch weg, bevor die Leiter an der Netzqualität drehen konnte, und `mesh_build.log` meldete
+weiter `pockets=True` (es druckte den SOLL-Stand). Belegt am Projekt `20260812_073601`: 5 Logzeilen `pockets=True`,
+behaltenes Netz mit `pocket_clear=0.0`, nur 8 Luftkörpern und KEINER Luft im Rotor zwischen r=48 mm und r=94 mm.
+Jetzt: `build_mesh(..., opts["pocket_fallback"])` (Default True für Direktaufrufer/Tests), `_build_mesh_capped`
+setzt `pocket_fallback=False` ⇒ die Leiter entscheidet. `_build_mesh_once` zählt die Taschen als IST-Stand
+(`tags["n_pockets"]` = zugeordnete Luftvolumen, `n_pockets_want`, `mag_pockets_effective`), die ✓-Logzeile und
+`res["mesh"]["n_pockets"]` melden ihn, und „gebaut, aber 0 zugeordnet" gibt eine eigene Warnung. **Praxis:** die
+Taschen sind kein Feinheits-, sondern ein GRADIENTEN-Problem — dieselbe Delta-Geometrie baute sie sowohl bei
+`gap_cl=0.42` (245 k Knoten) als auch bei `gap_cl=1.75` (30 k Knoten) und scheiterte nur im mittleren Band
+(0,65…0,97). Der Monitor merkt sich deshalb die Knotenzahlen der Versuche, die die Taschen getragen haben, und
+nennt sie in der Warnung. **Und es ist nicht kosmetisch:** die Kappen sind der Streupfad an den Magnetenden —
+im 2D-FDM derselben Maschine steigt die Luftspalt-Grundwelle ohne sie von 1,216 auf 2,130 (**+75 %**), ein 3D-Lauf
+ohne Taschen ist also nicht mit der 2D-Lösung vergleichbar. **Logfile `mesh_build.log`** (`_mesh_logger`,
 im `em3d/`-Ordner des Projekts) protokolliert JEDEN Versuch (Parameter + Knoten/Fehler + Monitor-Entscheidung) mit
 Zeitstempel; Pfad in `res["mesh"]["log"]`. `_seed_cl` macht die cl-Werte vor dem ersten Bau explizit (nie 0/auto)
 → Skalierung immer definiert. Test: schneller Unit-Test via gefälschtem `build_mesh` (Targeting/Heilung/Logfile
@@ -892,6 +951,12 @@ takes the user value when set.
   sync between `ema_pipeline` and `server`). `server._frames` is a **dict of buckets**;
   `/field/<n>` is a legacy alias for `/field/rotate/<n>`. Each frame set is encoded to
   `anim.mp4` via `ema_pipeline._make_video` (ffmpeg) → `/project/<id>/video/<mode>`.
+  Im Ergebnis-Untertab ⚡ EM-Feld steht **je gerechnetem Modus ein eigener
+  `<video>`-Player** (`renderFieldVideos` → `#field-videos`, Reihenfolge und
+  Beschriftung aus `field_modes`, `_MODE_LABEL` als Rückfall für Altprojekte ohne
+  Metadaten). Vorher gab es dort nur den Frame-Player (Standard `rotate`) plus winzige
+  `⬇ react.mp4`-Links — Last-Rampe und Stromwinkel waren dadurch praktisch unsichtbar,
+  obwohl sie gerechnet und als MP4 vorhanden waren.
 - **Hollow shaft**: `shaftBoreD` (0=solid) hollows the *display* shaft in
   `build_full_motor_script` and reduces shaft mass in `ema_thermal`; the FEM shaft in
   `build_rotor_fem_script` stays solid so the bore-face fixed constraint is unchanged.
@@ -989,10 +1054,72 @@ saturate=True)` runs a fixed-point µ-pass (`_saturate_field`): lower µ where t
 physically-scaled |B| exceeds the steel knee `B_SAT_IRON` (≈2 T), re-solve (~4 iters,
 under-relaxed) → flux redistributes and |B| caps near saturation. It replaces ONLY
 the displayed field (`Bx/By/B_mag/A`), anchored to the same air-gap peak; the
-quantitative `Br_gap/Bt_gap` (torque) keep the rigorous linear split. Used for the
-single high-res `render_preview_frame` (animation frames stay linear for speed).
+quantitative `Br_gap/Bt_gap` (torque) keep the rigorous linear split.
 Independently, `_field_frame`/`_field_vmax` clip the heatmap + colour-bar to
 `IRON_B_SAT_DISPLAY` (2.1 T) so even linear frames never show an unphysical scale.
+
+**Rotor-|B| war unbrauchbar hoch — zwei getrennte Ursachen (13.08.2026).** Auslöser
+war die Nutzerbeobachtung „die Flussdichten im Rotor kommen mir viel zu hoch vor".
+Beides nachgemessen an `20260812_073601`, Rotoreisen ohne Welle:
+
+1. **Die Animations-Frames liefen linear.** `saturate=True` stand nur an den beiden
+   Berichtsbildern (`_field_frame` @ `em_field.png`/`em_field_load.png`) und an
+   `render_preview_frame` — die Frames für Rotation/Stromwinkel/Last-Rampe **und**
+   der Referenzlauf, aus dem `vmax_ref` kommt, waren linear. Im linearen Modell
+   **divergiert** das Rotorfeld mit der Auflösung: Median 0,09 / 0,48 / 3,56 / 4,23 T
+   bei N = 120 / 180 / 300 / 512, Maximum bis 109 T, 83 % der Zellen über 2 T. Grund:
+   die dünnen Eisenstege sind unter N≈300 gar nicht aufgelöst, darüber schließen sie
+   den Magneten bei µr=500 **ohne Sättigungsbremse** kurz. Mit dem nichtlinearen
+   Durchgang konvergiert dieselbe Reihe auf 0,09 / 0,67 / 0,95 / 1,03 T. Gegenprobe
+   über die Flusserhaltung (nur Luftspalt + Geometrie, ohne Löser): Polfluss 3,08 mWb
+   ⇒ Rotorjoch ~0,66 T; gemessen linear 1,74 T, nichtlinear 0,35 T Median / 1,02 T p90.
+   **Alle vier Aufrufstellen laufen jetzt mit `saturate=True`**; Kosten +0…0,3 s/Frame
+   bei N=180. Kein ausgewiesener Kennwert hing daran (Moment/Leistung analytisch,
+   `P_fe_W` aus `perf["B_gap_T"]`).
+2. **Der |B|-Stencil mittelte über die Materialgrenze.** `B = curl A` kam aus
+   `np.gradient`, dessen zentrale Differenz in den Grenzzellen zwei physikalisch
+   verschiedene Felder mittelt — über eine **echte** Unstetigkeit: nur die
+   Normalkomponente von B ist stetig, die Tangentialkomponente springt um bis zu
+   µr=500, und die Ersatz-Flächenströme `J = ∇×M` sitzen genau dort. Neu `_curl_a`
+   (+ `_material_labels`): einseitige Differenz **aus dem Material heraus**, zentrale
+   Differenz nur wenn beide Nachbarn dasselbe Material sind. Unit-Test
+   `test_curl_a_material_interface` gegen einen analytisch bekannten Zweisteigungs-
+   Sprung (materialbewusst Fehler 0, zentrale Differenz liefert (s1+s2)/2 in der
+   Grenzzeile) und Rundungsgleichheit zu `np.gradient` bei uniformem Material.
+
+**Was übrig bleibt: die dünnen Eisenstege, NICHT die Magnetecken.** Nach beiden Fixes
+stehen im Rotor Zellen bis ~14 T. Die erste Lesart („Eckensingularität an den
+Magnetecken") war **falsch** — sie stammte aus einem Eckendetektor, der Zellen mit
+wenigen gleichartigen Nachbarn zählt und bei 1 px dünnen Strukturen deshalb *jede*
+Zelle meldet. Im Magnet-Lokalsystem nachgemessen sitzen die Zellen über 5 T:
+Längslage `l/W` gleichmäßig über **0,06…0,95** (nur 10 % an den Stirnseiten), Querlage
+`|t|/(H/2)` = 1,01…1,30 — also **entlang der ganzen Breitseite, knapp außerhalb des
+Magneten**; lokale Eisendicke dort (EDT) Median 1,0 px; 81 % grenzen an einen Magneten,
+1 % an Luft. Das sind die **Stege zwischen den Magnetlagen** (hier `magLayers=3`).
+Ihre wahre Dicke konvergiert auf **~0,97 mm** (2×EDT p05: 2,73 / 1,37 / 0,97 / 0,97 mm
+bei N = 256/512/724/1024) — bei N=512 sind das 1,4 px. Ein 1-px-Steg kann den Fluss
+nicht mit der richtigen Querschnittsfläche führen, deshalb ist |B| dort nicht
+konvergiert (Maximum 12,9 / 12,8 / 13,5 / 14,1 T über dieselbe N-Reihe), während das
+Volumen sauber konvergiert (0,46 → 0,66 → 0,83 → 0,94 T). **Faustregel: für ≥3 px über
+dem dünnsten Steg dieser Maschine braucht es N ≳ 1050.** Reale Stege sättigen bei
+2,0–2,4 T; alles darüber ist Auflösung, nicht Physik.
+
+**Verworfen (gemessen, nicht vermutet): die Magnet-Eckenfase.** Als 45°-Schnitt an
+allen vier Magnetecken implementiert und über `magChamferMm` = 0…3 mm durchgefahren:
+max|B| 13,48 → 13,48 → 13,49 → 13,60 → **13,79 T** (steigt sogar leicht), Anteil > 5 T
+1,7 % → 1,5 %, `B_gap` und `Kt` unverändert. Erwartbar, sobald die Ursache benannt ist
+— die Fase verschiebt nur die Magnet/Luft-Grenze **innerhalb** der obround-Tasche, die
+heißen Zellen liegen aber im **Eisen außerhalb** davon. Eine Fase unter ~0,7 mm ist bei
+N=512 ohnehin subpixelig. Der Code wurde vollständig zurückgenommen (`ema_topology`
+unverändert), damit kein toter Geometrieparameter stehen bleibt, der 2D und 3D
+auseinanderlaufen lassen könnte.
+
+Konsequenz für den Golden-Test: `b_max` ist als Anker untauglich (es ist eine
+Stichprobe eines nicht aufgelösten Stegs) und steht nur noch dokumentiert daneben; der
+belastbare Anker ist das neue **`b_iron_bulk_p98`** (Eisen, 3 Zellen von jeder
+Materialgrenze erodiert). Neu sind außerdem zwei `CASES_SAT`-Fälle — der nichtlineare
+Anzeigepfad war bis dahin durch **keinen** Test abgedeckt, obwohl jetzt jedes Bild
+daraus kommt.
 **Air domain:** the rasteriser pads `AIR_DOMAIN_FACTOR=1.25`× the stator OD (was
 1.1) so the outer Dirichlet `A=0` boundary is clear of the iron (less squared-off
 external/leakage field lines); costs ~14 %/N machine resolution — raise N for a
@@ -1378,7 +1505,7 @@ dict passed to the FEM script.
 |---|---|
 | `server.py` | Flask backend: serves `ema.html`, REST API, threaded job state, FreeCAD GUI/STEP launching |
 | `ema_jobs.py` | **Persistente Server-Job-Warteschlange** (`~/cae_projekte/_jobs/queue.json`): EIN Worker-Thread arbeitet eingereihte Jobs (analyse/em3d/em3d_sweep/oilspray) sequenziell ab — Jobs überleben geschlossenen Browser + Server-Neustart (stale `läuft`→`abgebrochen`, Wartende laufen wieder an). Executors werden von `server.py` via `init({type:{run,busy,abort}})` registriert und schreiben in dieselben State-Dicts wie die Direkt-Routen (Live-Fortschritt in den Tab-UIs). Server-Routen `/jobs` + `/jobs/add|<jid>/cancel|clear_done|config`; UI-Tab **⏳ Jobs** + „➕ Warteschlange"-Knöpfe + `_reattachJobs` (Reattach beim Seiten-Laden). Test: `test_jobs.py` |
-| `ema.html` | Single-file vanilla-JS browser UI (no build). Workflow-tab layout: a top tab bar (`switchTab`, tabs `projekt/geo/betrieb/calc/live/designer/import/em3d/oil/spraytest/jobs/results/compare` (`oil` = 💧 Spritzöl-Kühlung, Blender/Mantaflow; `jobs` = ⏳ Server-Job-Warteschlange, s. `ema_jobs.py`), `#hash` deep-linkable; **there is no `report` tab — the Bericht moved into Tab ①**). The **entry tab is `① Projekt`** (`panel-projekt`, the default landing tab) — **the central project hub** for everything project-scoped. Top row: create a project (`pjCreate` → `POST /project/new`, lays down the dir + `project.json` immediately, `status:"neu"`, `origin:"manual"`) · open existing ones (`pjRefreshList` from `/projects?detail=1`, **Galerie ⤢** = `openProjectGallery`). When a project is active (`#pj-active-wrap` shown), the cards are grouped under `.pj-group-h` headers: **📋 Projektdaten & Notizen** (Organisation/status/tags/notes → `/project/<id>/meta` + evolution/lineage; Projekt-Dokumente = per-project RAG via `/project/<id>/rag/add` + attachments via `/project/<id>/attachments`) · **📄 Auswertung & Bericht** (the **PDF-Bericht card** `#pj-report-card` with `#btn_report`/`#btn_report_agentic` → `generateReport(mode)` + `#report_status`/`#report_rag`; the **gespeicherte 3D-Läufe** card `#e3_save_name`/`#e3_saved_list` → `_e3SaveRun`/`_e3LoadRun`/`_e3DeleteSaved`, project-scoped under `<projekt>/em3d_runs/`) · collapsed `<details>` **🧰 Globale Werkzeuge & Daten** (global Wissensbasis `openRag` + LLM-Trainingsdaten `refreshTrainingStats`/`#training-stats`). **Active-project plumbing:** `window._activeProject` is the client truth; **`pjSetActive` also POSTs `/project/<id>/activate`** (lightweight — sets server `_state["project_dir"]`/`project_id` WITHOUT loading results) so report + em3d (which read `_state`) target the chosen project, then refreshes the report card (`pjUpdateReportCard`), the saved-3D list, and the training stats. `buildPayload()`/`_dsnBuildPayload()` attach `payload.project_id = _activeProject.id`, and `/analyse`'s `_run` (+ all em3d handlers via `_em3d_project_dir`) reuse that dir (generalised `reuse_id`) so every calculation/3D-run writes **into** the active project. `loadProjectById` calls `pjSetActive` too. `generateReport` prefers `_activeProject.id` (falls back to `/status`). The Tab-3 (Betrieb) project-management block was removed; `#project_name`/`#project_load` survive as hidden elements only to keep variant/param-table/applyPayload JS wired. The results-tab `🗂 Projektakte` `<details>` panel (`renderAkte`) still mirrors the same project contextually. The rest of the layout sits over `#workspace` = `#panel-area` (active panel) + draggable `#vsplit` + persistent `#preview-pane` (live `#simCanvas`, hidden on results/compare) + draggable `#hsplit` + `#footer` (staged-workflow buttons `#btn_cad_preview` (🧊 CAD ansehen → `startCadPreview`) · `#btn_smoke` (🧪 Smoke-Test → `startSmokeTest`) · `#btn_analyse` (⚙ Echte Berechnung), all sharing the `_wfModal`/`_pollWf` overlay helpers for the first two, plus `#analysis-progress`; drag `#hsplit` taller to reveal the full `#progress-log`). Inputs grouped into `.tab-panel`s; the `results` tab is gated `disabled` until an analysis finishes. `#vsplit`/`#hsplit` (`initSplitters`) resize preview width / footer height and call the canvas `resize()` live. The preview overlay has a pause button (`#ov_play` → global `toggleSim`/`_syncSimUI`, mirrors the Live-tab `#btn_play_pause`) so rotation can be stopped from any input tab. **Globales Speichern** (`#btn-global-save` in der Topbar + `#save-modal`): EIN Speicherknopf öffnet ein Vorschau-/Auswahl-Fenster (`openSaveModal`/`saveModalCommit`/`_buildSaveItems`), das **kontextabhängig** alles Speicherbare als abwählbare Positionen listet — **Projektdaten & Notizen** (`/project/<id>/meta`, liest `pj_*` bzw. bei passendem `akte-body.pid` die `akte_*`-Felder und schreibt beim Speichern in BEIDE zurück), **Bewertung** (`/project/<id>/rating`, gut/schlecht-Select), **3D-Feld-Lauf** (`/em3d/save`, sichtbar via `window._e3HasResult`, gesetzt in `_renderEm3d`/`_renderEm3dSweep`), **Varianten-Set** (`/variants/save`, wenn `variants.length`). Jede Zeile zeigt eine Vorschau + Häkchen (+ optional Name/Bewertung), Commit speichert alle angehakten nacheinander mit ✓/❌ je Zeile. Die alten Einzel-Speicherknöpfe (Projektdaten/Akte/3D-Lauf/Varianten) zeigen jetzt alle auf `openSaveModal()`; `pjSaveMeta`/`saveAkteMeta`/`_e3SaveRun`/`saveVariantSet` bleiben als Funktionen bestehen, die Buttons rufen aber das Modal |
+| `ema.html` | Single-file vanilla-JS browser UI (no build). Workflow-tab layout: a top tab bar (`switchTab`, tabs `projekt/geo/betrieb/calc/live/designer/import/em3d/oil/cfd/spraytest/ki/jobs/results/compare` (`oil` = 💧 Spritzöl-Kühlung, Blender/Mantaflow; `ki` = 🧠 KI-Training, s. `ema_ki_training.py`; `jobs` = ⏳ Server-Job-Warteschlange, s. `ema_jobs.py`), `#hash` deep-linkable; **there is no `report` tab — the Bericht moved into Tab ①**). The **entry tab is `① Projekt`** (`panel-projekt`, the default landing tab) — **the central project hub** for everything project-scoped. Top row: create a project (`pjCreate` → `POST /project/new`, lays down the dir + `project.json` immediately, `status:"neu"`, `origin:"manual"`) · open existing ones (`pjRefreshList` from `/projects?detail=1`, **Galerie ⤢** = `openProjectGallery`). When a project is active (`#pj-active-wrap` shown), the cards are grouped under `.pj-group-h` headers: **📋 Projektdaten & Notizen** (Organisation/status/tags/notes → `/project/<id>/meta` + evolution/lineage; Projekt-Dokumente = per-project RAG via `/project/<id>/rag/add` + attachments via `/project/<id>/attachments`) · **📄 Auswertung & Bericht** (the **PDF-Bericht card** `#pj-report-card` with `#btn_report`/`#btn_report_agentic` → `generateReport(mode)` + `#report_status`/`#report_rag`; the **gespeicherte 3D-Läufe** card `#e3_save_name`/`#e3_saved_list` → `_e3SaveRun`/`_e3LoadRun`/`_e3DeleteSaved`, project-scoped under `<projekt>/em3d_runs/`) · collapsed `<details>` **🧰 Globale Werkzeuge & Daten** (global Wissensbasis `openRag` + LLM-Trainingsdaten `refreshTrainingStats`/`#training-stats`). **Active-project plumbing:** `window._activeProject` is the client truth; **`pjSetActive` also POSTs `/project/<id>/activate`** (lightweight — sets server `_state["project_dir"]`/`project_id` WITHOUT loading results) so report + em3d (which read `_state`) target the chosen project, then refreshes the report card (`pjUpdateReportCard`), the saved-3D list, and the training stats. `buildPayload()`/`_dsnBuildPayload()` attach `payload.project_id = _activeProject.id`, and `/analyse`'s `_run` (+ all em3d handlers via `_em3d_project_dir`) reuse that dir (generalised `reuse_id`) so every calculation/3D-run writes **into** the active project. `loadProjectById` calls `pjSetActive` too. `generateReport` prefers `_activeProject.id` (falls back to `/status`). The Tab-3 (Betrieb) project-management block was removed; `#project_name`/`#project_load` survive as hidden elements only to keep variant/param-table/applyPayload JS wired. The results-tab `🗂 Projektakte` `<details>` panel (`renderAkte`) still mirrors the same project contextually. The rest of the layout sits over `#workspace` = `#panel-area` (active panel) + draggable `#vsplit` + persistent `#preview-pane` (live `#simCanvas`, hidden on results/compare) + draggable `#hsplit` + `#footer` (staged-workflow buttons `#btn_cad_preview` (🧊 CAD ansehen → `startCadPreview`) · `#btn_smoke` (🧪 Smoke-Test → `startSmokeTest`) · `#btn_analyse` (⚙ Echte Berechnung), all sharing the `_wfModal`/`_pollWf` overlay helpers for the first two, plus `#analysis-progress`; drag `#hsplit` taller to reveal the full `#progress-log`). Inputs grouped into `.tab-panel`s; the `results` tab is gated `disabled` until an analysis finishes. `#vsplit`/`#hsplit` (`initSplitters`) resize preview width / footer height and call the canvas `resize()` live. The preview overlay has a pause button (`#ov_play` → global `toggleSim`/`_syncSimUI`, mirrors the Live-tab `#btn_play_pause`) so rotation can be stopped from any input tab. **Globales Speichern** (`#btn-global-save` in der Topbar + `#save-modal`): EIN Speicherknopf öffnet ein Vorschau-/Auswahl-Fenster (`openSaveModal`/`saveModalCommit`/`_buildSaveItems`), das **kontextabhängig** alles Speicherbare als abwählbare Positionen listet — **Projektdaten & Notizen** (`/project/<id>/meta`, liest `pj_*` bzw. bei passendem `akte-body.pid` die `akte_*`-Felder und schreibt beim Speichern in BEIDE zurück), **Bewertung** (`/project/<id>/rating`, gut/schlecht-Select), **3D-Feld-Lauf** (`/em3d/save`, sichtbar via `window._e3HasResult`, gesetzt in `_renderEm3d`/`_renderEm3dSweep`), **Varianten-Set** (`/variants/save`, wenn `variants.length`). Jede Zeile zeigt eine Vorschau + Häkchen (+ optional Name/Bewertung), Commit speichert alle angehakten nacheinander mit ✓/❌ je Zeile. Die alten Einzel-Speicherknöpfe (Projektdaten/Akte/3D-Lauf/Varianten) zeigen jetzt alle auf `openSaveModal()`; `pjSaveMeta`/`saveAkteMeta`/`_e3SaveRun`/`saveVariantSet` bleiben als Funktionen bestehen, die Buttons rufen aber das Modal |
 | `ema_pipeline.py` | Pipeline orchestrator (`run_pipeline`) + material tables + all chart builders |
 | `ema_topology.py` | Single source of truth for rotor magnet placement (`magnet_legs`, `Leg`, topology labels) — consumed by `ema_freecad` + `ema_analysis`; mirrored by JS `magnetLegs` in `ema.html` |
 | `ema_freecad.py` | FreeCAD script generators (rotor, full motor, rotor FEM); interior pockets + surface arc magnets from `magnet_legs`; parametric hairpin end-windings (`conductorsPerSlot`/`coilPitch`, collision-free radial-split crowns) |
@@ -1403,6 +1530,7 @@ dict passed to the FEM script.
 | `ema_oilspray.py` / `blender_runner.py` | **Experimentelle Spritzöl-Kühlung am Wickelkopf** (Blender/Mantaflow-FLIP) — s. Architektur-Abschnitt. `run_oilspray` (STL-Ausschnitt → Mantaflow-Bake → Benetzungs-/Tropfen-Kennwerte → Video/Charts, `_persist` nach results.json); `blender_runner` = Subprozess-Wrapper (bevorzugt portablen blender.org-Build; `BLENDER_OK`, `abort_current`). Server `/oilspray`(+`/status`,`/abort`), UI-Tab **💧 Spritzöl-Kühlung**. **Qualitativ — kein Wärmeübergang.** Braucht `blender` (portabel, Mantaflow-tauglich) + FreeCAD (STL). Test: `test_oilspray.py` (ohne Blender). Wickelkopf-STL via `ema_freecad.build_winding_head_stl_script` (`hairpin_slot_limit`) |
 | `ema_cfd.py` / `openfoam_runner.py` | **Quantitative Spritzöl-Wickelkopfkühlung (OpenFOAM VOF / interFoam)** — On-Demand-Pfad NEBEN dem qualitativen Mantaflow-💧 (teilt den Wickelkopf-STL-Export `ema_oilspray._export_winding_stl`, `include_core=False`). `run_cfd` = `_prep_case` (STL → auf Meter skalieren via vtk → Domäne → `build_case_dicts` schreiben → blockMesh → surfaceFeatureExtract → snappyHexMesh) → `_solve` (interFoam) → `_parse` (foamToVTK → windinghead-Rand-VTP je Zeitschritt → **flächengewichtete Benetzung** `wetted_fraction` + **effektiver HTC** `htc_model`) → `_persist_cfd_summary` (schlank nach results.json["cfd"]). **`build_case_dicts(cfg)`** ist REIN (alle OpenFOAM-Dicts als Text) → ohne OpenFOAM testbar; **`meshQualityControls` inline** (kein `#includeEtc` — das zog den etc-FoamFile-Header in den Sub-Dict und brach snappy). Öl kommt als Curtain vom +Y-Rand (Ring-Seite, −Y-Geschwindigkeit aus `jet_velocity`=Cd·√(2Δp/ρ)), Schwerkraft −Y, Wickelkopf = no-slip-Wand (STL via snappy), Atmosphäre = Ablauf. **HTC-Modell (Stufe 1, dokumentiert):** interFoam ist ISOTHERM → `htc_model` = Prallstrahl-Nusselt `Nu=0.585·Re^0.5·Pr^0.4`, `h=Nu·k/L_char`, flächengemittelt mit der gerechneten Benetzung, geklemmt 100…8000 W/m²·K. **3D-Öloberfläche (Browser):** `_oil_isosurface` tract die VOF-Grenzfläche `alpha.oil=0.5` (aus `internal.vtu`, Skalar `Umag`), `_cfd_video` rendert sie je Zeitschritt offscreen (feste Kamera/|U|-Skala) → `frames_cfd/anim.mp4`, `export_browser_cfd` schreibt Öl-Isofläche + Wickelkopf als schlanke float32-.vtp (`_write_vtp`) → Route `/cfd/vtp?part=oil|solid`; UI `_renderCfd` zeigt `<video>` + vtk.js-Viewer `_cfdViewer`. `openfoam_runner` = Subprozess-Wrapper (sourct `etc/bashrc`; `OPENFOAM_OK`, `run_blockmesh/surface_features/snappy/solver/foamtovtk`, `abort_current` via SIGTERM wie `elmer_runner`). Server `/cfd`(+`/status`,`/abort`,`/vtp`), Job-Typ `cfd`, `/project/<id>/video/cfd`, UI-Tab **🌊 OpenFOAM (quant.)** (`_cfdBuildPayload`/`startCfd`/`_pollCfd`/`_renderCfd`/`_cfdViewer`/`queueCfd`, HTC prominent + Scope-Banner). **`_cfdBuildPayload` baut auf `_oilBuildPayload()` auf** → der 🌊-Tab **erbt die GESAMTEN 💧-Einstellungen** (Geometrie + Öl + Ring/Düsen/Ausschnitt/Druck); `payload.cfd` übernimmt daraus `pressure_bar`/`nozzle_d_mm`/`section_slots` und ergänzt NUR die OpenFOAM-spezifischen Felder (`end_time`/`n_cells`/`refine`/`viscosity`/`make_video`). Der Tab zeigt nur diese OpenFOAM-Parameter + eine Live-Zusammenfassung der übernommenen 💧-Werte (`_cfdSyncInherited`, an `switchTab('cfd')`) + Knopf „💧 Spritzöl-Einstellungen öffnen". Jobs (`queueCfd`→⏳ Jobs, Ergebnis-Knopf `openJobCfd`) und Ergebnisse (`_renderCfd`) laufen im Tab. **HTC-Kopplung:** `ema_pipeline` liest bei `cooling=="oil"` results.json["cfd"]["htc_eff"] + wetted_area und gibt sie an `ema_thermal.run_thermal_analysis(htc_oil=…, wetted_area_m2=…)` → `conductances` ergänzt einen direkten Wicklung→Kühlmittel-Pfad `G_w_cool=htc·A_wh` (opt-in; htc_oil=0 ⇒ bit-identisch zum Preset); `results["summary"]["htc_source"]`="cfd"/"preset". Bericht: `_ensure_kuehlung_section` + `_single_md_tables` + Kühlungs-Experte ziehen `results["cfd"]`. **v1-Scope:** VOF/isotherm; CHT (`chtMultiRegionFoam`, konjugierter HTC) wäre die Folgestufe. Test: `test_cfd.py` (Case-Dicts + jet/HTC + Benetzung + Thermik-Kopplung, ohne OpenFOAM) |
 | `ema_spraytest.py` | **🧪 Spray-Test-Prüfstand** — iteratives Spray-Tuning (Mensch wählt, Evolution mutiert). Vereinfachter Blender/Mantaflow-Prüfstand OHNE FreeCAD/Motor: EINE Düse sprüht **horizontal** (+x, Schwerkraft −z) als **Freistrahl — Standard zeigt NUR das Spray** (Kamera-Nahaufnahme auf Mündung+Strahl); die 3 Kupferstäbe (Aufprallziele, weitere Übersichts-Kamera) sind per `spec["show_rods"]`/UI-Häkchen `#st_rods` zuschaltbar (in round.json persistiert, `run_beauty` erbt es aus der Runde). Pro Runde n (Default 10) Varianten der 5 Spray-Physik-Parameter (`SPRAY_PARAMS`: pressure_bar/jet_cone_deg/surface_tension(log)/viscosity(log)/nozzle_d_mm) als kurze Loop-Videos. **Anlagen-Grenzen (Nutzer-Vorgabe: Druck 0,1–3 bar; Düsen-Ø 0,5–3,0 mm ab 2026-07-28)** — in `SPRAY_PARAMS`, den UI-min/max (🧪 `st_e_p`/`st_e_noz` + 💧 `oil_pressure`/`oil_nozzle_d`) UND den `ema_oilspray`-Klemmen; `stAdopt` klemmt übernommene Alt-Werte auf die Feldgrenzen. `sample_round`: Runde 1 = Latin-Hypercube-Streuung + Default-Anker; Runde ≥2 = Kreuzung zweier markierter Eltern + Gauß-Mutation im normierten Raum (σ=0.25·0.7^(r−2), Dedup). Eltern werden NICHT neu gebacken (Video-Referenz auf die Altrunde, `video_path` löst rekursiv auf). `run_round` bäckt Kinder **sequenziell** (blender_runner kann nur einen Prozess) in je eigene Verzeichnisse, Abbruch zwischen Varianten behält die Teilrunde. Store global `~/cae_projekte/_spraytest/rounds/<rid>/` (projektunabhängig; `list_rounds` sortiert nach **Zeitstempel**, nicht rid — sonst läge eine neue Runde 1 hinter einer alten Runde 2). Sim-Settings je Runde: **EIN Auflösungsfeld** `spec["resolution"]` 32–512 (`RES_RANGE`, UI `#st_res` + Preset-Knöpfe 48/64/96/160/320/500; das alte `quality`-Preset bleibt als Fallback für Alt-Runden; Bake-Timeout skaliert quadratisch mit), **Frames** (24–120) + **Zeitlupe** (`slowmo` 1–50 ⇒ time_scale=1/slowmo) je Runde einstellbar. **💾 Spray-Favoriten** (`favorites.json` im Store, `save_favorite`/`list_favorites`/`delete_favorite`, Server `GET/POST /spraytest/favorites` + `/spraytest/favorites/<fid>/delete`): guter Strahl wird benannt gespeichert ({name, params, sim, src}) — Karte „💾 Gespeicherte Sprays" im 🧪-Tab + **Dropdown `#oil_fav_sel` im 💧-Tab** (`stApplyFavorite`/`oilApplyFavorite` schreibt Druck/Kegel/σ/ν/Düsen-Ø in die Öl-Felder). **Realismus-Paket im Bench-Skript** (gegen „unrealistische Tropfen"): die Einzeltropfen kommen aus dem **feinen Upres-Flüssigkeitsmesh** — `mesh_particle_radius` 1.4 (Default 2.0 = dicke Blobs), **Upres `mesh_scale=2` NUR bei RES<192** (bei hoher Auflösung ⇒ 1024³-Mesh-Gitter ⇒ ~29 GB RSS ⇒ Kernel-OOM-Kill, real passiert bei 512; ohne Upres braucht 512 nur ~3 GB), Generator IMPROVED, `use_fractions` (glatte Stab-Kollision), Substeps skalieren mit RES. `blender_runner` meldet einen Signal-Kill (OOM ⇒ SIGKILL) jetzt als RAM-Fehler statt fälschlich als „abgebrochen" (nur `_ABORTED` zählt als Nutzer-Abbruch); ein OOM-Ausfall bricht damit auch die Runde nicht mehr ab, sondern nur die eine Variante. **`n=1` + `spec["exact_params"]`** = 🎯 Einzel-Strahl (exakt diese 5 Parameter, eine Kachel; UI-Karte „🎯 Einzelnen Strahl backen" mit „↙ Werte aus 💧-Tab holen", `stStartSingle`/`stSingleFromOil`). **Gotcha (ausgiebig verifiziert, NICHT wieder aktivieren):** die Mantaflow-**Sekundärpartikel** (Spray/Foam/Bubble) sind in diesem Blender-4.2-Build **kaputt** — ohne `cache_resumable` werden NULL Partikel erzeugt (leere particles-Cache-Dateien), MIT resumable laden sie als **domänenfüllender Positions-Müll** (Staub über den ganzen Quader statt an der Flüssigkeit); die `use_*_particles`-Flags stehen deshalb bewusst auf False. `run_beauty(rid,vid,opts)` = **✨ Schönheits-Render** EINER Variante (Default 256er-Domain, 60 Frames, 1280×960) nach `<rid>/<vid>/beauty/`; `video_path(rid,vid,beauty=True)` löst auch Eltern-Referenzen rekursiv auf. Server `_spraytest_state` + `POST /spraytest`, `POST /spraytest/beauty`, `/spraytest/status\|abort\|rounds\|round/<rid>(/marked\|/delete)\|video/<rid>/<vid>(?beauty=1)` (teilt sich die Blender-Sequenzialität mit `/oilspray` → 409 wenn einer läuft). UI-Tab **🧪 Spray-Test** (`panel-spraytest`, `st*`-JS): Kachel-Raster mit ⭐-Markierung (persistiert), Tropfen-**Sparkline** je Kachel (`_stSparkline`, Serie `n_islands` aus round.json), **Klick aufs Video = Großansicht-Modal** (`stOpenBig`: ⭐/✔/✨ + Original↔Beauty-Umschalter), „✨ Schön rendern" je Kachel (`stBeauty`), „➡ Nächste Runde aus Markierten", „✔ Übernehmen" schreibt die Parameter in die 💧-Öl-Felder (`oil_pressure/oil_jet_cone/oil_surft/oil_visc/oil_nozzle_d`). Test: `test_spraytest.py` (ohne Blender) |
+| `ema_ki_training.py` | **Einblick ins Surrogat-Training** (`physics_surrogate/`) — reiner LESEzugriff: `list_runs()` parst `checkpoints/<lauf>/history.csv` + `*.meta.json` (Epochen, bestes `val_rmse_Br_rel_peak` gegen das 0,03-Abnahmetor, Stunden, aktiv/pausiert via mtime bzw. `PAUSE`-Flag), `log_tail()` liest `train.log`, `service_status()` fragt `GET :5300/health`, `chart(names, x="epoch"\|"progress")` rendert drei Panels (rel. L2 auf A mit Training/Validierung, Abnahme-Tor mit Grenzlinie, Lernrate log). **Kein Torch-Import, kein Start eines Trainings** — das läuft in eigener venv/Dienst. `x="progress"` normiert auf den Anteil des Kosinus-Zeitplans; das ist der einzig zulässige Vergleich zwischen Läufen VERSCHIEDENER Gesamtlänge (bei gleicher Epoche vergleicht man sonst einen ausgekühlten mit einem Lauf bei 120-facher Lernrate). Server: `/ki_training/runs\|chart\|log/<name>`; UI-Tab **🧠 KI-Training** (`panel-ki`, `kiActivate`/`kiRefreshChart`/`kiLoadLog`) |
 | `em3d_perf_check.py` | **Performance-Check der 3D-Elmer-Berechnung** (Standalone-CLI): fährt die Netzfeinheit stufenweise hoch (Zellgrößen-Skalierung) und misst je Stufe **Knotenzahl, Zeit (Mesh/ElmerGrid/Solve) + Peak-RAM** (via `/usr/bin/time -v`), schreibt `em3d_perf.csv`/`.json` inkrementell. `--calibrate` (nur meshen), `--max-nodes`/`--timeout`/`--ram-stop`/`--factors`. Datengrundlage für `EM3D_NODE_CEILING` + die RAM/Zeit-Schätzung des Ziel-Knoten-Reglers |
 
 ## Reference docs (read these for domain detail before changing physics)
@@ -1414,6 +1542,20 @@ dict passed to the FEM script.
 
 ## Gotchas
 
+- **The venv must NOT be on the FreeCAD subprocess's PATH** (`freecad_runner.child_env`,
+  fixed 12.08.2026). `venv/bin/gmsh` is the pip package's console wrapper with a
+  `#!/usr/bin/env python` shebang; the pixi env FreeCAD runs in has only `python3`, so
+  it dies with "env: python: not found". FreeCAD's `GmshTools` takes the FIRST `gmsh`
+  on PATH, gets that wrapper, and `create_mesh()` returns **no warning** while
+  producing a mesh with **0 nodes** — the structural FEM then has nothing to solve,
+  CalculiX writes no `.frd`, and `renderDeformation` silently shows the *analytical*
+  rotating-disc fallback (a smooth annulus with **no magnets and no magnet pockets** —
+  which reads as "the FEM forgot the pockets", not as "the FEM never ran"). Measured on
+  the same script: 0 nodes with the venv on PATH, 744 without; the real rotor then
+  meshes to 341 821 nodes and solves. `child_env()` drops `sys.prefix/bin` +
+  `$VIRTUAL_ENV/bin` and prepends `CCX_DIR`. The 0-node symptom is now also named in
+  the Verformung tab (`#deform-source-note`, shown whenever `deformation.source ==
+  "analytical"`, incl. the `attempts` list).
 - FreeCAD scripts run in a separate process with **no shared Python state** — pass
   everything via the generated script string and read results back through stdout markers.
 - Opening a headlessly-saved `.FCStd` in GUI FreeCAD leaves ViewProviders detached;

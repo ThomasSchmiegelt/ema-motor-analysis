@@ -206,6 +206,7 @@
     <button class="tab-btn"        id="tbtn-oil"     onclick="switchTab('oil')">💧 Spritzöl-Kühlung</button>
     <button class="tab-btn"        id="tbtn-cfd"     onclick="switchTab('cfd')">🌊 OpenFOAM (quant.)</button>
     <button class="tab-btn"        id="tbtn-spraytest" onclick="switchTab('spraytest')">🧪 Spray-Test</button>
+    <button class="tab-btn"        id="tbtn-ki"      onclick="switchTab('ki')">🧠 KI-Training</button>
     <button class="tab-btn"        id="tbtn-jobs"    onclick="switchTab('jobs')">⏳ Jobs<span id="jobs-badge" style="display:none;margin-left:5px;background:#e67e22;color:#fff;border-radius:9px;padding:0 6px;font-size:.68rem"></span></button>
     <button class="tab-btn"        id="tbtn-results" onclick="switchTab('results')" disabled>📊 FEM-Ergebnisse</button>
     <button class="tab-btn"        id="tbtn-compare" onclick="switchTab('compare')">⚖ Vergleich</button>
@@ -2489,6 +2490,57 @@
 <!-- ════════ TAB: Bericht ════════ -->
 <!-- Bericht-Tab entfernt → Bericht-Karte lebt jetzt in Tab ① Projekt (#pj-report-card) -->
 
+<!-- ════════ TAB: 🧠 KI-Training (Physik-Surrogat, physics_surrogate/) ════════ -->
+<!-- NUR Betrachter: das Training läuft in einer eigenen venv (Torch/CUDA) und einem
+     eigenen Dienst auf :5300. Hier werden die Trainingsverläufe gesichtet und der
+     Zustand des Dienstes gezeigt — gestartet wird von hier nichts. -->
+<div class="tab-panel" id="panel-ki">
+  <h3 style="margin-top:0">🧠 KI-Training (Physik-Surrogat)</h3>
+  <div style="font-size:.78rem;color:#9ab;max-width:860px;margin-bottom:12px;line-height:1.5">
+    Ein neuronales Netz lernt das <b>2D-Magnetfeld</b> des FDM-Lösers nach, um die
+    Hoch-N-Vorschau von Sekunden/Minuten auf Millisekunden zu bringen. Der Tab zeigt die
+    Trainingsverläufe aus <code>physics_surrogate/checkpoints/</code> —
+    <b>gerechnet wird hier nichts</b>, Training und Inferenz laufen in einem eigenen
+    Projekt mit eigener Umgebung.
+  </div>
+
+  <div id="ki-service" style="margin-bottom:14px"></div>
+
+  <div class="section-h">Trainingsläufe</div>
+  <div id="ki-runs" style="margin-bottom:12px">
+    <div style="color:#777;font-size:.8rem">wird geladen …</div>
+  </div>
+
+  <div class="section-h">Verläufe vergleichen</div>
+  <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:8px">
+    <label style="font-size:.78rem;color:#aaa">x-Achse:</label>
+    <select id="ki_xaxis" onchange="kiRefreshChart()"
+            style="background:#3c3c3c;color:#fff;border:1px solid #555;border-radius:3px;padding:4px;font-size:.78rem">
+      <option value="epoch">Epoche</option>
+      <option value="progress">Anteil des Zeitplans [%]</option>
+    </select>
+    <button onclick="kiActivate()" style="padding:5px 12px;font-size:.78rem;text-transform:none">⟳ Aktualisieren</button>
+    <span id="ki_chart_msg" style="font-size:.75rem;color:#888"></span>
+  </div>
+  <div style="font-size:.74rem;color:#8a7;max-width:860px;line-height:1.5;margin-bottom:8px;
+              border-left:3px solid #4a6;padding-left:10px">
+    ⚠ <b>Läufe mit Kosinus-Lernrate nie bei gleicher Epoche vergleichen</b>, wenn ihre
+    Gesamtlänge verschieden ist: ein 40-Epochen-Lauf ist bei Epoche 37 fertig ausgekühlt
+    (Lernrate ≈ 0), ein 100-Epochen-Lauf steht dort noch bei der 120-fachen Rate. Dafür
+    ist die x-Achse umschaltbar — und die Lernrate steht im dritten Feld daneben.
+  </div>
+  <img id="ki-chart" class="chart-img" src="" alt="Trainingsverläufe" style="display:none"/>
+
+  <div class="section-h" style="margin-top:16px">Protokoll</div>
+  <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px">
+    <select id="ki_log_run" onchange="kiLoadLog()"
+            style="background:#3c3c3c;color:#fff;border:1px solid #555;border-radius:3px;padding:4px;font-size:.78rem"></select>
+    <span style="font-size:.74rem;color:#777">letzte Zeilen aus <code>train.log</code></span>
+  </div>
+  <pre id="ki-log" style="background:#0d0d15;border:1px solid #333;border-radius:5px;padding:10px;
+       max-height:280px;overflow:auto;font-size:.72rem;color:#9ab;white-space:pre-wrap"></pre>
+</div>
+
 <!-- ════════ TAB: ⏳ Jobs (Server-Warteschlange) ════════ -->
 <div class="tab-panel" id="panel-jobs">
   <h3 style="margin-top:0">⏳ Job-Warteschlange (Server)</h3>
@@ -2619,7 +2671,7 @@
           <div class="anim-ctrl">
             <label style="font-size:.78rem;color:#aaa;min-width:60px">Modus:</label>
             <select id="field-mode-select" onchange="selectFieldMode(this.value)" style="flex:1;background:#3c3c3c;color:#fff;border:1px solid #555;border-radius:3px;padding:4px;font-size:.8rem"></select>
-            <span id="field-video-links" style="font-size:.75rem"></span>
+            <span id="field-mode-hint" style="font-size:.72rem;color:#777"></span>
           </div>
           <div class="anim-ctrl" id="rpm-row">
             <label style="font-size:.78rem;color:#aaa;min-width:60px">Drehzahl:</label>
@@ -2637,6 +2689,14 @@
           <div style="font-size:.75rem;color:#666;text-align:center">
             Magnetfeld inkl. Statorstrom-Verteilung (FDM, NdFeB-Äquivalentstrom)<br/>
             Bei höheren Drehzahlen wird Feldschwächung (i_d) sichtbar
+          </div>
+
+          <!-- Videos: EIN Player je berechnetem Modus (Rotor-Rotation / Stromwinkel /
+               Last-Rampe). Vorher gab es hier nur Download-Links, weshalb die beiden
+               Standstill-Modi im Ergebnis-Tab praktisch unsichtbar waren. -->
+          <div id="field-videos" style="width:100%;display:none;flex-direction:column;gap:14px;margin-top:6px">
+            <div class="section-h">🎬 Feld-Videos</div>
+            <div id="field-videos-list" style="display:flex;flex-direction:column;gap:14px"></div>
           </div>
         </div>
       </div>
@@ -2666,6 +2726,14 @@
 
       <!-- EM speed sweep -->
       <div id="rtab-emcurve" class="rtab-content">
+        <!-- Leistungs-/Drehmomentkennfeld: was die Maschine KANN (nicht die
+             angeforderte Last). Steht bewusst vor der EMK-Kennlinie. -->
+        <div id="power-wrap" style="display:none;margin-bottom:16px">
+          <div class="section-h">⚡ Drehmoment- und Leistungskennfeld</div>
+          <div id="power-metrics" class="summary-grid" style="margin-bottom:10px"></div>
+          <img id="power-img" class="chart-img" src="" alt="Leistungskennfeld"/>
+          <div id="power-note" style="font-size:.73rem;color:#666;margin-top:6px"></div>
+        </div>
         <img id="emcurve-img" class="chart-img" src="" alt="EM-Kennlinie" style="margin-bottom:12px"/>
         <div class="section-h">EM-Daten über Drehzahlbereich</div>
         <table class="data-table" id="em-table"><thead><tr>
@@ -2701,6 +2769,7 @@
       <!-- FEM deformation -->
       <div id="rtab-deform" class="rtab-content">
         <div style="display:flex;flex-direction:column;gap:14px">
+          <div id="deform-source-note" style="display:none"></div>
           <div id="deform-burst-banner" style="display:none"></div>
           <div>
             <div class="section-h">Verformung bei ausgewählter Drehzahl</div>
@@ -3219,14 +3288,14 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','cfd','spraytest','jobs','results','compare'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','cfd','spraytest','ki','jobs','results','compare'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
   projekt:'panel-projekt',
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
   designer:'panel-designer', import:'panel-import', em3d:'panel-em3d', oil:'panel-oil',
-  cfd:'panel-cfd', spraytest:'panel-spraytest', jobs:'panel-jobs',
+  cfd:'panel-cfd', spraytest:'panel-spraytest', ki:'panel-ki', jobs:'panel-jobs',
   results:'tab-results', compare:'tab-compare'
 };
 
@@ -3249,6 +3318,7 @@ function switchTab(name) {
   if (PREVIEW_TABS.has(name)) requestAnimationFrame(() => requestAnimationFrame(() => {
     if (typeof resize === 'function') resize();
   }));
+  if (name === 'ki' && typeof kiActivate === 'function') kiActivate();
   if (name === 'projekt' && typeof pjActivate === 'function') pjActivate();
   if (name === 'calc' && typeof initParamStudy === 'function') initParamStudy();
   if (name === 'designer' && typeof dsnActivate === 'function')
@@ -3306,6 +3376,130 @@ window.addEventListener('load', () => {
     switchTab('projekt');   // Standard-Einstieg: Projekt-Tab
   }
 });
+
+// ── 🧠 KI-Training-Tab: Trainingsverläufe des Physik-Surrogats ────────────────
+// Reiner Betrachter (GET /ki_training/*). Ausgewählte Läufe werden serverseitig zu
+// EINEM Vergleichs-Chart gerendert (matplotlib, wie überall sonst im Programm) —
+// deshalb hält der Client nur die Auswahl.
+let _kiRuns = [], _kiSel = new Set();
+
+async function kiActivate() {
+  const box = document.getElementById('ki-runs');
+  try {
+    const d = await fetch('/ki_training/runs').then(r => r.json());
+    kiRenderService(d.service, d.available, d.dir);
+    if (!d.available) {
+      box.innerHTML = `<div style="color:#c88;font-size:.8rem">Kein Trainings-Unterprojekt gefunden
+        (<code>${escHtml(d.dir || '')}</code>). Der Tab bleibt leer — das ist kein Fehler.</div>`;
+      document.getElementById('ki-chart').style.display = 'none';
+      return;
+    }
+    _kiRuns = d.runs || [];
+    // Vorauswahl: die vier zuletzt angefassten Läufe (mehr wird im Chart unleserlich)
+    if (!_kiSel.size) _kiRuns.slice(0, 4).forEach(r => _kiSel.add(r.name));
+    kiRenderRuns();
+    const sel = document.getElementById('ki_log_run');
+    const cur = sel.value;
+    sel.innerHTML = _kiRuns.map(r => `<option value="${escHtml(r.name)}">${escHtml(r.name)}</option>`).join('');
+    if (cur && _kiRuns.some(r => r.name === cur)) sel.value = cur;
+    kiLoadLog();
+    kiRefreshChart();
+  } catch (e) {
+    box.innerHTML = `<div style="color:#c88;font-size:.8rem">Server nicht erreichbar: ${escHtml(e.message)}</div>`;
+  }
+}
+
+function kiRenderService(svc, available, dir) {
+  const el = document.getElementById('ki-service');
+  if (!el) return;
+  const up  = svc && svc.up;
+  const h   = (svc && svc.health) || {};
+  const col = up ? '#27ae60' : '#e67e22';
+  // Der zweite Satz beantwortet die eigentliche Frage: ist die KI im Programm nutzbar?
+  const note = up
+    ? 'Der Dienst läuft. Ein Modell wird ausgeliefert, sobald ein Lauf die Abnahme besteht.'
+    : 'Der Dienst läuft nicht — das Programm rechnet dann wie immer mit dem exakten '
+      + 'FDM-Löser. Start: <code>cd physics_surrogate &amp;&amp; ./start.sh</code>';
+  el.innerHTML = `<div class="fem-box" style="border-left:3px solid ${col}">
+    <div class="row"><span class="k">Surrogat-Dienst (:5300)</span>
+      <span class="v" style="color:${col}">${up ? 'erreichbar' : 'aus'}</span></div>
+    ${up ? `<div class="row"><span class="k">Gerät</span><span class="v">${escHtml(String(h.device || '–'))}</span></div>
+            <div class="row"><span class="k">Modell Stufe 1 (2D-FDM)</span><span class="v">${
+              ((h.models || {}).fdm || {}).available
+                ? escHtml(String(h.models.fdm.checkpoint)) : 'kein Checkpoint'}</span></div>` : ''}
+    <div style="font-size:.75rem;color:#9ab;margin-top:6px;line-height:1.5">${note}</div>
+  </div>`;
+}
+
+function kiRenderRuns() {
+  const box = document.getElementById('ki-runs');
+  if (!_kiRuns.length) { box.innerHTML = '<div style="color:#777;font-size:.8rem">Noch keine Trainingsläufe.</div>'; return; }
+  const num = (v, d) => (v == null ? '–' : (+v).toFixed(d));
+  box.innerHTML = `<table class="data-table" style="width:100%">
+    <thead><tr>
+      <th style="width:34px"></th><th>Lauf</th><th>Zustand</th><th>Epochen</th>
+      <th>rel. L2 (A)</th><th>RMSE Br/Peak</th><th>bestes Tor</th><th>Tiefe</th><th>Std.</th><th>zuletzt</th>
+    </tr></thead><tbody>
+    ${_kiRuns.map(r => {
+      const st = r.active ? '<span style="color:#2980b9">läuft</span>'
+               : r.paused ? '<span style="color:#e67e22">pausiert</span>'
+               : '<span style="color:#7f8c8d">gestoppt</span>';
+      const gate = r.best_gate
+        ? `<span style="color:${r.gate_passed ? '#27ae60' : '#e0a060'}">${num(r.best_gate.value, 4)}</span>`
+          + `<span style="color:#666"> (E${r.best_gate.epoch})</span>`
+        : '–';
+      return `<tr>
+        <td><input type="checkbox" ${_kiSel.has(r.name) ? 'checked' : ''}
+             onchange="kiToggle('${escHtml(r.name)}', this.checked)"/></td>
+        <td><b>${escHtml(r.name)}</b></td>
+        <td>${st}</td>
+        <td>${r.epochs}</td>
+        <td>${num(r.last.val_rel_l2_A, 4)}</td>
+        <td>${num(r.last.val_rmse_Br_rel_peak, 4)}</td>
+        <td>${gate}</td>
+        <td>${r.model.model_depth || '–'}</td>
+        <td>${num(r.hours, 1)}</td>
+        <td style="color:#777">${escHtml(r.modified)}</td>
+      </tr>`;
+    }).join('')}
+    </tbody></table>
+    <div style="font-size:.74rem;color:#666;margin-top:6px">
+      Abnahme-Tor ist <b>RMSE Br/Peak &lt; 0,03</b> — der Fehler auf der Luftspaltkurve,
+      aus der das Moment kommt. <code>rel. L2 (A)</code> ist die schwächere Größe
+      (98 % der Feldenergie von A liegen im Rotor).
+    </div>`;
+}
+
+function kiToggle(name, on) {
+  if (on) _kiSel.add(name); else _kiSel.delete(name);
+  kiRefreshChart();
+}
+
+async function kiRefreshChart() {
+  const img = document.getElementById('ki-chart');
+  const msg = document.getElementById('ki_chart_msg');
+  if (!_kiSel.size) { img.style.display = 'none'; msg.textContent = 'kein Lauf ausgewählt'; return; }
+  msg.textContent = 'zeichne …';
+  const q = new URLSearchParams({ runs: [..._kiSel].join(','),
+                                  x: document.getElementById('ki_xaxis').value });
+  try {
+    const d = await fetch('/ki_training/chart?' + q).then(r => r.json());
+    if (d.error) { msg.textContent = '❌ ' + d.error; return; }
+    img.src = 'data:image/png;base64,' + d.chart_b64;
+    img.style.display = '';
+    msg.textContent = '';
+  } catch (e) { msg.textContent = '❌ ' + e.message; }
+}
+
+async function kiLoadLog() {
+  const name = document.getElementById('ki_log_run').value;
+  const pre  = document.getElementById('ki-log');
+  if (!name) { pre.textContent = ''; return; }
+  try {
+    const d = await fetch('/ki_training/log/' + encodeURIComponent(name)).then(r => r.json());
+    pre.textContent = d.log || '(kein train.log)';
+  } catch (e) { pre.textContent = '❌ ' + e.message; }
+}
 
 // ── ⏳ Jobs-Tab: Server-Warteschlange (persistent, browser-unabhängig) ──────────
 // Jobs werden über POST /jobs/add eingereiht und vom Server sequenziell abgearbeitet;
@@ -4073,6 +4267,10 @@ let _fieldMode    = 'rotate';     // bucket: rotate | react | load
 let _modeMeta     = {};           // bucket → meta {mode,label,sweep_label,sweep_values,...}
 
 const _MODE_BUCKET = { rotate: 'rotate', current_angle: 'react', load_ramp: 'load' };
+// Rückfall-Beschriftung für Altprojekte, deren results.json noch keine
+// `field_modes`-Metadaten trägt (nur `videos`).
+const _MODE_LABEL  = { rotate: 'Rotor-Rotation', react: 'Stromwinkel (Ankerrückwirkung)',
+                       load: 'Last-Rampe' };
 
 function _frameFlatIndex(rpm, frameIdx) {
   const ri = _rpmList.indexOf(rpm);
@@ -4102,8 +4300,16 @@ function showFrame(n) {
   sld.value = n;
 }
 
+const _MODE_HINT = {
+  rotate: 'Rotor dreht sich über eine Polteilung',
+  react:  'Rotor steht, Stromwinkel β läuft 0…90°',
+  load:   'Rotor steht, Last läuft 0…Volllast',
+};
+
 function selectFieldMode(bucket) {
   _fieldMode = bucket;
+  const hint = document.getElementById('field-mode-hint');
+  if (hint) hint.textContent = _MODE_HINT[bucket] || '';
   document.getElementById('rpm-row').style.display = (bucket === 'rotate') ? '' : 'none';
   const sld = document.getElementById('anim-slider');
   sld.max = Math.max(0, _modeFrameCount() - 1);
@@ -4235,6 +4441,7 @@ async function loadProjectById(pid) {
     renderCadImages(data.cad_images);
     renderAirgap(data.em);
     renderEmCurve(data.em);
+    renderPower(data.power);
     renderStress(data.structural_fem, data.structural_sweep, data.structural_sweep_chart_b64);
     renderConnection(data.connection);
     renderDeformation(data.deformation, data.structural_fem);
@@ -7695,11 +7902,44 @@ function _renderEm3d(res) {
                           : 'Magnetfeld (Leerlauf) — die Ströme oben sind der berechnete Betriebspunkt.')
        + `</div></div>`;
   }
+  // Modelltreue des Netzes: die Magnettaschen (Luftkappen um jeden vergrabenen Magneten)
+  // sind in der 2D-FDM-Lösung IMMER da; im 3D-Netz kann der Selbstheil-Monitor sie
+  // abschalten. Ohne diese Zeile war „waren die Taschen überhaupt drin?" im UI nicht
+  // beantwortbar — deshalb steht sie hier, auch wenn alles in Ordnung ist.
+  if (res.mesh && res.mesh.n_magnets != null) {
+    const npk = res.mesh.n_pockets;
+    const okpk = npk > 0;
+    h += `<div style="font-size:.78rem;color:#9aa;margin:6px 0">🧲 Netz: `
+       + `${res.mesh.n_magnets} Magnete · `
+       + (npk == null ? 'Magnettaschen: unbekannt (Netz vor dieser Version gebaut)'
+                      : (okpk ? `<span style="color:#8c8">${npk} Magnettaschen</span>`
+                                + (res.mesh.pocket_clear_mm ? ` (Spalt ${res.mesh.pocket_clear_mm} mm)` : '')
+                              : `<span style="color:#e8a">keine Magnettaschen</span> — die Magnete sitzen `
+                                + `im 3D-Modell in massivem Eisen, die 2D-FDM-Lösung hat Luftkappen. `
+                                + `Das ist nicht nur optisch: die Kappen sind der Streupfad an den Magnetenden, `
+                                + `ohne sie weicht das Luftspaltfeld deutlich ab (an dieser Maschine gemessen +75 % Grundwelle). `
+                                + `Knoten-Ziel erhöhen und neu rechnen`))
+       + (res.mesh.n_barriers ? ` · ${res.mesh.n_barriers} Flussbarrieren` : '')
+       + `</div>`;
+  }
   if (c.B_gap_2D != null) {
+    const exc2 = c.excitation === 'loaded' ? 'Lastpunkt' : 'Leerlauf';
     h += `<table style="font-size:.8rem;border-collapse:collapse;margin:6px 0">
       <tr><th style="text-align:left;padding:3px 10px">Kennwert</th><th style="padding:3px 10px">2D-FDM</th><th style="padding:3px 10px">3D-Elmer</th></tr>
-      <tr><td style="padding:3px 10px">B_gap [T]</td><td style="text-align:center">${c.B_gap_2D}</td><td style="text-align:center">${c.B_gap_3D_mid}</td></tr>
-      </table>`;
+      <tr><td style="padding:3px 10px">B_gap [T] (${exc2})</td><td style="text-align:center">${c.B_gap_2D}</td><td style="text-align:center">${c.B_gap_3D_mid}</td></tr>`
+      + (c.phase_shift_mech_deg != null
+          ? `<tr><td style="padding:3px 10px">Polfolge θ [° mech]</td>`
+            + `<td style="text-align:center" colspan="2">`
+            + (c.orientation_ok ? `<span style="color:#8c8">✓ deckungsgleich</span>` : `<span style="color:#e88">✗ verdreht</span>`)
+            + ` (Versatz ${c.phase_shift_mech_deg > 0 ? '+' : ''}${c.phase_shift_mech_deg}°, zulässig ±${c.phase_tol_mech_deg}°)</td></tr>`
+          : '')
+      + `</table>`
+      + (c.phase_shift_mech_deg != null
+          ? `<div style="font-size:.74rem;color:#889;margin:-2px 0 8px">Beide Lösungen stehen bei `
+            + `Rotorwinkel 0°; die Toleranz ist die Staffelung, die es nur im 3D-Modell gibt. `
+            + `Ein Vergleich gegen einen <i>Animationsframe</i> der EM-Feld-Ansicht zeigt dagegen `
+            + `immer eine Verdrehung — der Frame steht bei einem anderen Rotorwinkel.</div>`
+          : '');
   }
   (res.images || []).forEach(im => {
     // Das statische „3D-Feld |B| (aufgeschnitten)" ist doppelt zum interaktiven Browser-
@@ -9189,6 +9429,7 @@ async function loadResults() {
   renderCadImages(data.cad_images);
   renderAirgap(data.em);
   renderEmCurve(data.em);
+  renderPower(data.power);
   renderStress(data.structural_fem, data.structural_sweep, data.structural_sweep_chart_b64);
     renderConnection(data.connection);
   renderDeformation(data.deformation, data.structural_fem);
@@ -9532,6 +9773,10 @@ function renderSummary(s) {
     metric('Luftspalt B_peak',   s.B_gap_T.toFixed(3) + ' T',          'analytisch'),
     metric('Kt',                 s.Kt_Nm_per_A.toFixed(3) + ' Nm/A',   '1 Wdg/Nut'),
     metric('Maxwell-Moment',     s.T_maxwell_Nm.toFixed(1) + ' Nm',    'FDM'),
+    metric('Maximalleistung',    s.P_max_kW != null ? s.P_max_kW.toFixed(0) + ' kW' : '–',
+                                 s.P_max_rpm != null ? 'bei ' + s.P_max_rpm.toLocaleString() + ' U/min' : 'Tab 🔄 EM-Kennlinie'),
+    metric('Max. Drehmoment',    s.T_peak_max_Nm != null ? s.T_peak_max_Nm.toFixed(0) + ' Nm' : '–',
+                                 'Umrichtergrenze, ungesättigt'),
     metric('Max. Drehzahl',      s.max_safe_rpm.toLocaleString() + ' U/min', 'SF ≥ 1.5'),
     metric('Masse Rotor',        s.mass_g.toFixed(1) + ' g',            s.rotor_lam || ''),
     metric('Füllgrad Hairpin',   ((s.fill_factor || 0) * 100).toFixed(1) + ' %', 'Leiter/Nutquerschnitt'),
@@ -9594,14 +9839,42 @@ function renderField(em) {
       fmSel.appendChild(opt);
     });
   }
-  const vids = em.videos || {};
-  const vEl = document.getElementById('field-video-links');
-  if (vEl) {
-    vEl.innerHTML = Object.keys(vids).map(b =>
-      `<a href="/project/current/video/${b}" style="color:#0cf;margin-left:8px">⬇ ${b}.mp4</a>`).join('');
-  }
+  renderFieldVideos(em.videos || {}, modes);
   _fieldMode = 'rotate';
   selectFieldMode('rotate');
+}
+
+// Ein <video>-Player je gerechnetem Feld-Modus. Die Reihenfolge folgt
+// `field_modes` (rotate → Stromwinkel → Last-Rampe), damit der Beschriftungstext
+// derselbe ist wie im Modus-Auswahlfeld darüber.
+function renderFieldVideos(vids, modes) {
+  const wrap = document.getElementById('field-videos');
+  const list = document.getElementById('field-videos-list');
+  if (!wrap || !list) return;
+  const stamp = window._resultsStamp || Date.now();
+  const seen  = new Set();
+  const items = [];
+  (modes || []).forEach(m => {
+    const b = _MODE_BUCKET[m.mode] || 'rotate';
+    if (vids[b] && !seen.has(b)) { seen.add(b); items.push([b, m.label || m.mode]); }
+  });
+  // Videos ohne passenden field_modes-Eintrag (Altprojekt) trotzdem zeigen
+  Object.keys(vids).forEach(b => {
+    if (!seen.has(b)) { seen.add(b); items.push([b, _MODE_LABEL[b] || b]); }
+  });
+
+  if (!items.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
+  wrap.style.display = 'flex';
+  list.innerHTML = items.map(([b, label]) => {
+    const url = `/project/current/video/${b}?t=${stamp}`;
+    return `<div>
+      <div style="font-size:.8rem;color:#7db9e8;margin-bottom:4px">${escHtml(label)}</div>
+      <video controls loop muted playsinline preload="metadata" src="${url}"
+             style="width:100%;max-width:700px;background:#000;border-radius:6px;border:1px solid #333"></video>
+      <div><a href="${url}" download="feld_${b}.mp4"
+              style="color:#0cf;font-size:.75rem">⬇ ${escHtml(label)} als MP4</a></div>
+    </div>`;
+  }).join('');
 }
 
 function _deformImgUrl(file) {
@@ -9633,7 +9906,7 @@ function renderDeformation(deform, fem) {
     // FEM produced no result (e.g. CalculiX failed for this geometry) → no
     // deformation plot. Show a clear message instead of an empty/broken image.
     if (imgEl0) { imgEl0.removeAttribute('src'); imgEl0.alt = ''; }
-    ['deform-burst-banner','deform-video-wrap'].forEach(id => {
+    ['deform-burst-banner','deform-video-wrap','deform-source-note'].forEach(id => {
       const e = document.getElementById(id); if (e) e.style.display = 'none';
     });
     const reason = (fem && fem.solver_status && fem.solver_status !== 'OK')
@@ -9645,6 +9918,31 @@ function renderDeformation(deform, fem) {
       Verformungsbilder und Video benötigen ein gültiges CalculiX-Ergebnis.
       Die analytische <b>Festigkeitskennlinie</b> (Tab „🏗 Festigkeit") ist davon unabhängig verfügbar.</div></div>`;
     return;
+  }
+
+  // Quelle des Bildes benennen. Der analytische Rückfall ist ein rotierender
+  // Vollring (Lamé) — er hat KEINE Magnete und KEINE Magnettaschen, weil es in
+  // diesem Modell gar keine gibt. Ohne diesen Hinweis sieht es aus, als würde die
+  // FEM die Taschen übersehen; tatsächlich ist die FEM gar nicht gelaufen.
+  const srcBox = document.getElementById('deform-source-note');
+  if (srcBox) {
+    if (deform.source === 'analytical') {
+      const why = (fem && Array.isArray(fem.attempts) && fem.attempts.length)
+        ? ' Versuche: ' + fem.attempts.map(escHtml).join(' · ') : '';
+      srcBox.style.display = '';
+      srcBox.innerHTML = `<div class="fem-box" style="border-left:3px solid #e0a060">
+        <div style="color:#e0c090;font-size:.8rem;line-height:1.5">
+        ⚠ <b>Analytischer Ersatz</b> — die CalculiX-FEM hat für diese Geometrie kein
+        Ergebnis geliefert, deshalb zeigt das Bild das Modell der <b>rotierenden
+        Vollscheibe</b> (Lamé). Das ist ein glatter Ring <b>ohne Magnete und ohne
+        Magnettaschen</b>: die gibt es in diesem Modell nicht — es fehlt also nichts
+        an der Darstellung, es fehlt das FEM-Ergebnis. Damit fehlt auch die
+        Spannungsüberhöhung an den dünnen Eisenstegen über den Taschen.${why}<br/>
+        Abhilfe: „🔁 Stufen nachrechnen" → <b>Festigkeit</b>, ggf. mit gröberem/feinerem
+        Struktur-Netz.</div></div>`;
+    } else {
+      srcBox.style.display = 'none';
+    }
   }
 
   // Burst-speed banner
@@ -9851,6 +10149,43 @@ function renderCadImages(imgs) {
 function renderAirgap(em) {
   if (!em || !em.airgap_chart_b64) return;
   document.getElementById('airgap-img').src = 'data:image/png;base64,' + em.airgap_chart_b64;
+}
+
+// Leistungskennfeld (results.power). Bewusst mit ausgeschriebenen Annahmen —
+// die Kurve sieht genauer aus, als sie ist (ungesättigte Ld/Lq, feste
+// Umrichtergrenzen, keine Verluste abgezogen).
+function renderPower(pw) {
+  const wrap = document.getElementById('power-wrap');
+  if (!wrap) return;
+  if (!pw || pw.error || !pw.chart_b64) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = '';
+  document.getElementById('power-img').src = 'data:image/png;base64,' + pw.chart_b64;
+  document.getElementById('power-metrics').innerHTML = [
+    metric('Maximalleistung', pw.P_max_kW.toFixed(0) + ' kW',
+           'bei ' + (+pw.P_max_rpm).toLocaleString() + ' U/min'),
+    metric('Dauerleistung',   pw.P_cont_max_kW.toFixed(0) + ' kW',
+           pw.cont_limited_by === 'kuehlung' ? 'kühlungsbegrenzt' : 'strombegrenzt (= Spitze)'),
+    metric('Max. Drehmoment', pw.T_peak_max_Nm.toFixed(0) + ' Nm',
+           'bis ' + (+pw.rpm_base).toLocaleString() + ' U/min (Eckdrehzahl)'),
+    metric('Grenzdrehzahl',   (+pw.rpm_max).toLocaleString() + ' U/min', 'strukturell sicher, SF ≥ 1.5'),
+  ].join('');
+  const cont = (pw.cont_limited_by === 'kuehlung')
+    ? `Die Dauerlinie ist durch die Kühlung begrenzt (M_dauer = ${pw.T_rated_Nm} Nm).`
+    : `Dauer- und Spitzenlinie fallen zusammen: die Kühlung erlaubt mehr Moment `
+      + `(${pw.T_rated_Nm} Nm) als der Umrichter bei ${pw.i_max_A} A liefert.`;
+  document.getElementById('power-note').innerHTML =
+    `Wellenleistung aus ψ_pm, L_d/L_q und den Umrichtergrenzen `
+    + `<b>${pw.v_dc_V} V / ${pw.i_max_A} A</b> (Ströme wie Kt auf <b>1 Wdg/Nut</b> bezogen). `
+    + cont + ` `
+    + `<b>Grenzen der Aussage:</b> L_d/L_q sind ungesättigt (der FDM rechnet linear), `
+    + `das echte Moment bei Volllast liegt darunter; Verluste sind nicht abgezogen `
+    + `(Wellenleistung, nicht Umrichter-Eingang).`
+    + (pw.limited_by_rpm
+       ? ` ⚠ Die Leistung steigt bis zur Grenzdrehzahl weiter an — die <b>Festigkeit</b> begrenzt hier, nicht die Elektrik.`
+       : '');
 }
 
 function renderEmCurve(em) {

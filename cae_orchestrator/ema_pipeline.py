@@ -957,6 +957,60 @@ def _em_sweep_chart(sweep: list) -> str:
     return _fig_b64(fig)
 
 
+def _power_chart(env: dict) -> str:
+    """Torque + power over speed (peak / continuous) — the capability envelope.
+
+    Both curves share one x-axis with twin y-axes, because the two facts a reader
+    wants are "how much torque up to which speed" and "where does the power peak",
+    and separating them into two panels breaks the visual link at the base speed.
+    """
+    rpm  = np.asarray(env["rpm"], float)
+    T_pk = np.asarray(env["T_peak_Nm"], float)
+    T_co = np.asarray(env["T_cont_Nm"], float)
+    P_pk = np.asarray(env["P_peak_kW"], float)
+    P_co = np.asarray(env["P_cont_kW"], float)
+
+    fig, ax = plt.subplots(figsize=(9, 3.6), facecolor="#111")
+    ax.set_facecolor("#1a1a2e")
+    ax.tick_params(colors="#888", labelsize=8)
+    for sp in ax.spines.values(): sp.set_color("#444")
+    ax.set_xlabel("Drehzahl [U/min]", color="#aaa", fontsize=8)
+    ax.set_ylabel("Drehmoment [Nm]", color="#ff9f43", fontsize=8)
+    ax.plot(rpm, T_pk, color="#ff9f43", lw=2, label="M Spitze")
+    if not np.allclose(T_co, T_pk):
+        ax.plot(rpm, T_co, color="#ff9f43", lw=1.4, ls="--", label="M Dauer (Kühlung)")
+    ax.tick_params(axis="y", colors="#ff9f43")
+
+    ax2 = ax.twinx()
+    ax2.set_facecolor("none")
+    ax2.set_ylabel("Leistung [kW]", color="#00d4ff", fontsize=8)
+    ax2.tick_params(axis="y", colors="#00d4ff", labelsize=8)
+    for sp in ax2.spines.values(): sp.set_color("#444")
+    ax2.plot(rpm, P_pk, color="#00d4ff", lw=2, label="P Spitze")
+    if not np.allclose(P_co, P_pk):
+        ax2.plot(rpm, P_co, color="#00d4ff", lw=1.4, ls="--", label="P Dauer")
+
+    ax2.plot([env["P_max_rpm"]], [env["P_max_kW"]], "o", color="#00d4ff", ms=6)
+    ax2.annotate(f"{env['P_max_kW']:.0f} kW @ {env['P_max_rpm']:.0f} 1/min",
+                 (env["P_max_rpm"], env["P_max_kW"]), textcoords="offset points",
+                 xytext=(6, 8), color="#00d4ff", fontsize=8)
+    ax.axvline(env["rpm_base"], color="#666", ls=":", lw=1)
+    ax.annotate(f"Eckdrehzahl {env['rpm_base']:.0f}", (env["rpm_base"], 0.06),
+                xycoords=("data", "axes fraction"), textcoords="offset points",
+                xytext=(4, 0), color="#888", fontsize=7)
+
+    h1, l1 = ax.get_legend_handles_labels()
+    h2, l2 = ax2.get_legend_handles_labels()
+    leg = ax.legend(h1 + h2, l1 + l2, loc="lower center", ncol=4, fontsize=7,
+                    facecolor="#1a1a2e", edgecolor="#444")
+    for t in leg.get_texts(): t.set_color("#ccc")
+    ax.set_title(f"Drehmoment-/Leistungskennfeld  (Grenzen {env['v_dc_V']:.0f} V, "
+                 f"{env['i_max_A']:.0f} A, 1 Wdg/Nut, ungesättigt)",
+                 color="white", fontsize=9)
+    fig.tight_layout()
+    return _fig_b64(fig)
+
+
 def _drivecycle_chart(cyc: dict, drv: dict, res: dict) -> str:
     """4-panel chart: v(t), motor operating points, cumulative energy, loss split."""
     import matplotlib.gridspec as gs
@@ -1740,8 +1794,12 @@ def run_pipeline(data: dict, state: dict, frames: list,
             # vmax for a consistent colormap across all frames (from loaded base field)
             _iq0, _id0 = ema_analysis.estimate_dq_currents(
                 geom, rpm_base, load_nm, b_gap_t=perf["B_gap_T"], rpm_base=rpm_base)
+            # saturate=True like the frames themselves — sonst leitet der Farbdeckel
+            # aus einem LINEAREN Feld ab, das im Rotor 3…18 T zeigt (µr=500 ohne
+            # Sättigungsknie), und die Frames werden gegen eine Skala normiert, die
+            # es in der gezeigten Lösung gar nicht gibt.
             _em_ref = ema_analysis.run_em_analysis(
-                geom, N=frame_res, rotor_angle=0.0, iq=_iq0, id_=_id0)
+                geom, N=frame_res, rotor_angle=0.0, iq=_iq0, id_=_id0, saturate=True)
             _B_ref  = _em_ref["B_mag"]
             # consistent display ceiling for all frames; user override wins
             vmax_ref = field_bmax if field_bmax > 0 else _field_vmax(_B_ref)
@@ -1792,6 +1850,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
                     for ang in angles:
                         b64 = _field_frame(geom, float(ang), N=frame_res, iq=iq, id_=id_,
                                            rpm=float(rpm), vmax_clip=vmax_ref,
+                                           saturate=True,
                                            b_ceiling=field_bmax, magnet_outlines=True)
                         _persist("rotate", sub, b64)
                         solved += 1
@@ -1815,7 +1874,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
                     b64 = _field_frame(geom, 0.0, N=frame_res, iq=Is_full * math.cos(b),
                                        id_=-Is_full * math.sin(b), rpm=rpm_ref,
                                        vmax_clip=vmax_ref, b_ceiling=field_bmax,
-                                       magnet_outlines=True)
+                                       saturate=True, magnet_outlines=True)
                     _persist("react", sub, b64)
                 modes_meta.append({"mode": "current_angle", "label": "Stromwinkel (Ankerrückwirkung)",
                                    "frames": n_frames, "sweep_label": "β [°]",
@@ -1830,7 +1889,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
                     b64 = _field_frame(geom, 0.0, N=frame_res, iq=fr * iq_full,
                                        id_=fr * id_full, rpm=rpm_ref,
                                        vmax_clip=vmax_ref, b_ceiling=field_bmax,
-                                       magnet_outlines=True)
+                                       saturate=True, magnet_outlines=True)
                     _persist("load", sub, b64)
                 modes_meta.append({"mode": "load_ramp", "label": "Last-Rampe",
                                    "frames": n_frames, "sweep_label": "Last [%]",
@@ -2135,6 +2194,30 @@ def run_pipeline(data: dict, state: dict, frames: list,
             _log(state, f"⚠ EM-Advanced fehlgeschlagen: {_ae}", 96)
             results["em_advanced"] = {"error": str(_ae)}
 
+        # ── 7c. Torque/power envelope — "was kann die Maschine maximal?" ──────
+        # Deliberately placed HERE: it needs em_advanced (ψ/Ld/Lq), the cooling-based
+        # rated torque and the structurally safe speed, i.e. all three domains. All
+        # inputs are already computed, so this costs milliseconds.
+        try:
+            _T_rated = float((results.get("thermal") or {}).get("T_rated_Nm")
+                             or (results.get("connection") or {}).get("T_rated_Nm") or 0.0)
+            env = ema_analysis.power_envelope(
+                geom, results.get("em_advanced") or {},
+                rpm_max=max_safe_rpm, T_rated_Nm=_T_rated)
+            results["power"] = env
+            if "error" not in env:
+                env_b64 = _power_chart(env)
+                _save_png_b64(env_b64, os.path.join(proj, "charts", "power.png"))
+                results["power"]["chart_b64"] = env_b64
+                _log(state,
+                     f"✓ Leistung: P_max ≈ {env['P_max_kW']:.0f} kW @ {env['P_max_rpm']:.0f} U/min | "
+                     f"T_max ≈ {env['T_peak_max_Nm']:.0f} Nm bis {env['rpm_base']:.0f} U/min", 96)
+            else:
+                _log(state, f"⚠ Leistungskennlinie: {env['error']}", 96)
+        except Exception as _pe:
+            _log(state, f"⚠ Leistungskennlinie fehlgeschlagen: {_pe}", 96)
+            results["power"] = {"error": str(_pe)}
+
         # ── 8. Drive-cycle analysis (optional; selectively re-runnable) ───────
         if _do("drivecycle") and cycle_kind != "off":
             vehicle    = {**ema_drivecycle.DEFAULT_VEHICLE, **vehicle_in}
@@ -2276,6 +2359,10 @@ def run_pipeline(data: dict, state: dict, frames: list,
             "T_maxwell_Nm":    perf.get("T_maxwell_Nm", 0),
             "lcm_slots_poles": perf["lcm_slots_poles"],
             "max_safe_rpm":    max_safe_rpm,
+            "P_max_kW":        (results.get("power") or {}).get("P_max_kW"),
+            "P_max_rpm":       (results.get("power") or {}).get("P_max_rpm"),
+            "P_cont_max_kW":   (results.get("power") or {}).get("P_cont_max_kW"),
+            "T_peak_max_Nm":   (results.get("power") or {}).get("T_peak_max_Nm"),
             "structural_ok":   structural_ok,
             "safety_factor_fem": fem_r.get("safety_factor"),
             "fem_rpm":         fem_r.get("rpm"),
