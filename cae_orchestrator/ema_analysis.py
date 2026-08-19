@@ -1159,43 +1159,94 @@ def power_envelope(geom: dict, adv: dict, rpm_max: float,
 
 
 def _saturate_field(mu_base, J, geom, sc, ctr, N, target_peak_T,
-                    iters: int = 4, P: float = 8.0, relax: float = 0.5):
-    """Nonlinear B-H saturation pass for the DISPLAY field.
+                    iters: int = 24, P: float = 8.0, relax: float = 0.15,
+                    tol: float = 0.01, ramp: int = 12, info: dict | None = None):
+    """Nonlinear B-H saturation pass for the DISPLAY field — damped fixed point.
 
-    The base FDM is linear (constant µr=500), so iron shows unphysical >2 T at
-    tooth/corner cells. This fixed-point pass lowers µ where the physically-scaled
-    |B| exceeds the steel knee ``B_SAT_IRON`` (Fröhlich-type law), so flux
-    redistributes as real iron would and |B| caps near saturation. Returns
-    ``(A_raw, phys_scale)`` — the caller multiplies the field by ``phys_scale`` for
-    Tesla. Operates only on iron cells (µ_base>1.5; magnets/air untouched). Returns
-    ``(None, None)`` on any failure so the caller keeps the linear field.
+    The base FDM is linear (constant µr=500), so iron shows unphysical >2 T. This
+    pass lowers µ where the physically-scaled |B| exceeds the steel knee
+    ``B_SAT_IRON`` (Fröhlich-type law), so flux redistributes as real iron would.
+    Returns ``(A_raw, phys_scale)`` — the caller multiplies by ``phys_scale`` for
+    Tesla. Iron cells only (µ_base>1.5). ``(None, None)`` on failure, so the caller
+    keeps the linear field.
+
+    **Why the naive form did not converge (measured 2026-08-13).** The predecessor
+    ran 4 undamped steps, relaxing µ arithmetically and re-deriving the calibration
+    from the air-gap peak every step. That is a limit cycle, not slow convergence:
+    p98(iron) came out 11,97 / 5,52 / 2,80 / 2,19 / 1,94 T at iters = 1/2/3/4/6 and
+    kept moving, the maximum wandered non-monotonically (111 / 34 / 12 / 14 / 16 T).
+    Three separate causes, all fixed here:
+
+    1. **Overshoot on the first step.** Applying the Fröhlich law to the LINEAR field
+       (iron at 3…18 T, i.e. ratio ≫ 1) collapses essentially all iron to µ≈3 in one
+       step — the machine becomes "all air" and the iteration never recovers. Cured
+       by a homotopy: the effective knee starts at 8·B_SAT_IRON and falls
+       geometrically to the true value over ``ramp`` steps, so each step is a small
+       perturbation of the previous solution.
+    2. **Arithmetic relaxation is asymmetric.** µ spans 1…500, so ``0.5·µ + 0.5·µ_t``
+       is dominated by the larger value: gentle downwards, violent upwards; relaxing
+       ν = 1/µ is exactly the other way round. Relaxation is therefore done in
+       **log µ** (geometric mean), which damps both directions equally.
+    3. **The calibration was inside the loop.** ``scale = target/peak`` re-pinned the
+       air-gap peak every step. But saturation genuinely moves that peak — and by a
+       lot: the raw peak rises ~4× (4,6 → 19) once the bridges stop shorting the
+       magnet, which is the physically correct behaviour of an IPM rotor. Re-pinning
+       it each step closes a positive feedback loop (more saturation → lower peak →
+       larger scale → more saturation). The calibration is kept — the display must
+       stay anchored to `_analytical_Bgap` like everything else in this module — but
+       it is now relaxed in **log scale** with the same weight, which damps the loop
+       instead of driving it.
+
+    Cost: convergence needs ~20 steps instead of 4, i.e. ~4× the solves. Callers that
+    only need a quick picture can lower ``iters``; ``info`` reports what was actually
+    achieved so nobody has to guess again.
     """
     try:
         iron = mu_base > 1.5
         lbl  = _material_labels(mu_base)   # from the LINEAR mu — mu itself changes below
         mu   = mu_base.copy()
-        # Still the LINEAR mu here, shared with run_em_analysis's own solves at
-        # this rotor angle — so this one belongs in the cache.  The iterates below
-        # do not: each is a fresh field-dependent mu that no later solve can hit.
+        # Still the LINEAR mu here, shared with run_em_analysis's own solves at this
+        # rotor angle — so this one belongs in the cache. The iterates below do not.
         A    = _solve_fdm(mu, J)
-        scale = 1.0
-        for _ in range(max(1, iters)):
+        Br, _bt, _th, _bx, _by = _sample_airgap(A, geom, sc, ctr, N, mu=mu_base)
+        pk   = max(float(np.max(np.abs(Br))), 1e-9)
+        log_s = math.log(max(target_peak_T, 1e-9) / pk)
+        res, used, B_prev = float("inf"), 0, None
+        for k in range(max(1, iters)):
+            used = k + 1
+            # Homotopie: Knie startet hoch (kaum Sättigung) und fällt auf den echten Wert
+            f = 8.0 ** (1.0 - min(k, ramp) / ramp) if ramp else 1.0
             # Material-aware curl: with the plain central difference the boundary
             # cells read several times the true |B|, the Fröhlich law then knocks mu
             # down there, and the pass "saturates" cells that were never saturated.
-            Bx, By = _curl_a(A, lbl)
-            Bmag = np.hypot(Bx, By)
-            Br, _bt, _th, _bx, _by = _sample_airgap(A, geom, sc, ctr, N, mu=mu_base)
-            pk = float(np.max(np.abs(Br)))
-            scale = (target_peak_T / pk) if pk > 1e-9 else scale
-            ratio  = np.clip(Bmag * scale / max(B_SAT_IRON, 1e-3), 0.0, 50.0)
-            mu_new = 1.0 + (MU_R_IRON - 1.0) / (1.0 + ratio ** P)        # μ drops past the knee
-            mu_upd = np.where(iron, relax * mu_new + (1.0 - relax) * mu, mu_base)
+            Bmag = np.hypot(*_curl_a(A, lbl))
+            ratio  = np.clip(Bmag * math.exp(log_s) / max(B_SAT_IRON * f, 1e-3), 0.0, 50.0)
+            mu_tgt = 1.0 + (MU_R_IRON - 1.0) / (1.0 + ratio ** P)
+            mu_upd = np.where(iron,
+                              np.exp((1.0 - relax) * np.log(mu) + relax * np.log(mu_tgt)),
+                              mu_base)
             if not np.all(np.isfinite(mu_upd)):
                 break
             mu = mu_upd.astype(np.float32)
             A  = _solve_fdm(mu, J, cache=False)
-        return A, scale
+            Br, _bt, _th, _bx, _by = _sample_airgap(A, geom, sc, ctr, N, mu=mu_base)
+            pk = max(float(np.max(np.abs(Br))), 1e-9)
+            log_t = math.log(max(target_peak_T, 1e-9) / pk)
+            log_s = (1.0 - relax) * log_s + relax * log_t
+            # Residuum = relative Aenderung des ANGEZEIGTEN Feldes im Eisen. Eine
+            # Maximumsnorm auf log(mu) waere zu streng: einzelne Zellen kippen am
+            # Knie hin und her, waehrend das Bild laengst steht. Gemessen wird also
+            # das, was der Nutzer sieht.
+            B_now = np.hypot(*_curl_a(A, lbl)) * math.exp(log_s)
+            if B_prev is not None:
+                d = B_now[iron] - B_prev[iron]
+                res = float(np.linalg.norm(d) / max(np.linalg.norm(B_now[iron]), 1e-30))
+            B_prev = B_now
+            if f <= 1.0 and res < tol:          # erst nach Ende der Homotopie abbrechen
+                break
+        if info is not None:
+            info.update(iters=used, residual=res, converged=bool(res < tol))
+        return A, math.exp(log_s)
     except Exception:
         return None, None
 

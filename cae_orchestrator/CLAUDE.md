@@ -1089,6 +1089,45 @@ quantitative `Br_gap/Bt_gap` (torque) keep the rigorous linear split.
 Independently, `_field_frame`/`_field_vmax` clip the heatmap + colour-bar to
 `IRON_B_SAT_DISPLAY` (2.1 T) so even linear frames never show an unphysical scale.
 
+**Saettigungsdurchgang konvergent gemacht (13.08.2026).** Der Vorgaenger lief 4
+ungedaempfte Schritte und war kein langsam konvergierendes, sondern ein
+**grenzzyklisches** Verfahren: p98(Eisen) kam bei iters = 1/2/3/4/6 auf
+11,97 / 5,52 / 2,80 / 2,19 / 1,94 T heraus und wanderte weiter, das Maximum
+unstetig (111 / 34 / 12 / 14 / 16 T). Drei Ursachen, alle in `_saturate_field`
+behoben:
+
+1. **Ueberschuss im ersten Schritt.** Die Froehlich-Kurve auf das LINEARE Feld
+   angewandt (Eisen bei 3…18 T) kippt praktisch alles Eisen in einem Schritt auf
+   µ≈3 — die Maschine wird „ganz Luft". Kur: Homotopie, das wirksame Knie startet
+   bei 8·`B_SAT_IRON` und faellt geometrisch ueber `ramp`=12 Schritte auf den
+   echten Wert, jeder Schritt ist damit eine kleine Stoerung des vorigen.
+2. **Arithmetische Relaxation ist unsymmetrisch.** µ spannt 1…500, also ist
+   `0,5·µ + 0,5·µ_t` vom groesseren Wert dominiert: sanft nach unten, brutal nach
+   oben; Relaxation auf ν = 1/µ ist genau andersherum. Jetzt in **log µ**
+   (geometrisches Mittel), das daempft beide Richtungen gleich.
+3. **Die Kalibrierung sass in der Schleife.** `scale = target/peak` pinnte den
+   Luftspalt-Spitzenwert jeden Schritt neu. Saettigung verschiebt den aber massiv:
+   der ROHE Spitzenwert steigt ~4x (4,6 -> 19), sobald die Stege den Magneten
+   nicht mehr kurzschliessen — das ist das korrekte Verhalten eines IPM-Rotors.
+   Neu-Pinnen schliesst daraus eine positive Rueckkopplung (mehr Saettigung ->
+   kleinerer Peak -> groesserer scale -> mehr Saettigung). Die Kalibrierung bleibt
+   (die Anzeige muss wie alles hier an `_analytical_Bgap` haengen), wird aber in
+   **log scale** mit demselben Gewicht relaxiert und daempft die Schleife.
+
+Abbruchkriterium ist jetzt die relative Aenderung des ANGEZEIGTEN Feldes im Eisen
+zwischen zwei Iterierten (`tol`=1e-2), nicht eine Maximumsnorm auf log µ — einzelne
+Zellen kippen am Knie hin und her, waehrend das Bild laengst steht. `info` meldet
+`iters`/`residual`/`converged`, damit niemand wieder raten muss.
+
+Gemessen (N=300, Delta-IPM): Abbruch bei Iteration 25, Residuum 9,2e-3, p98 2,583 T,
+max 6,07 T, `B_gap` 0,6358 T gegen Ziel 0,629 (1,1 %) — der Anker wird also wieder
+getroffen. Ab Iteration 16 stehen die Werte (2,558 -> 2,582 -> 2,583 T).
+**Kosten: 9,8 s statt 2,0 s je Frame bei N=300, also ~5x.** Fuer die 1152
+Animations-Frames eines Laufs waeren das ~3 h. Der naechste Schritt waere, das
+konvergierte µ je Betriebspunkt EINMAL zu rechnen und ueber die Frames
+wiederzuverwenden (bei `react`/`load_ramp` steht der Rotor ohnehin still) — nicht
+umgesetzt.
+
 **Rotor-|B| war unbrauchbar hoch — zwei getrennte Ursachen (13.08.2026).** Auslöser
 war die Nutzerbeobachtung „die Flussdichten im Rotor kommen mir viel zu hoch vor".
 Beides nachgemessen an `20260812_073601`, Rotoreisen ohne Welle:
