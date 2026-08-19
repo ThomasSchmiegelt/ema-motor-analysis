@@ -25,6 +25,19 @@ Umweg, nicht die Abkürzung.
 cd ~/ai-workspace/cae_orchestrator && python3 cae_cli.py health
 ```
 
+Einen Lauf **nie** über einen selbstgeschriebenen Payload starten — der hat rund 90
+Schlüssel. Eine bestehende Auslegung übernehmen und einzeln ändern:
+
+```bash
+python3 cae_cli.py run cad --from-project last --wait \
+        --set slotDepth=30 --set p=8 --set project_name=Variante_A
+```
+
+`--set` prüft gegen `/param_schema` und **weist ab, statt zu klemmen**; `--dry-run`
+zeigt den fertigen Payload, ohne etwas zu starten. Die Schemagrenzen sagen allerdings
+nicht, ob eine Geometrie *baubar* ist — nach jeder Geometrieänderung erst `run cad`
+(~1 min), dann die teure Stufe.
+
 ## Harte Grenzen — nicht verhandelbar
 
 * **Nichts hier redet über `localhost` hinaus.** Kein Auth, kein TLS, absichtlich

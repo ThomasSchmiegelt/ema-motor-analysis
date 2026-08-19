@@ -60,12 +60,35 @@ Das CLI entfernt Base64-Daten selbstständig und kürzt bei 12 000 Zeichen
 
 ## Rechenläufe starten
 
-Ein Lauf braucht einen Payload. Der einfachste Weg ist, den eines bestehenden
-Projekts zu übernehmen und nur zu ändern, was gefragt ist:
+Ein Lauf braucht einen Payload mit rund 90 Schlüsseln. **Nie von Hand schreiben** —
+eine bestehende Auslegung übernehmen und mit `--set` nur ändern, was gefragt ist:
 
 ```bash
-python3 cae_cli.py run analyse --from-project 20260813_140556_... --wait
+python3 cae_cli.py run analyse --from-project last --wait          # unverändert nachrechnen
+python3 cae_cli.py run cad     --from-project last --dry-run \
+        --set slotDepth=30 --set p=8 --set magShape=v              # erst zeigen …
+python3 cae_cli.py run cad     --from-project last --wait \
+        --set slotDepth=30 --set p=8 --set project_name=Variante_A #  … dann bauen
 ```
+
+* `--from-project last` nimmt die jüngste **gerechnete** Auslegung (die mit `meta.json`).
+* `--set KEY=WERT`, beliebig oft. Der Wert wird als JSON gelesen — `12`, `1.5`, `true`,
+  `[1,2]` bleiben Typen, alles Übrige ist Text (`magShape=v` ohne Anführungszeichen).
+* Wohin der Wert gehört, entscheidet `cae_cli.py` selbst (`geom` oder obere Ebene).
+  Verschachteltes per Punktpfad: `--set vehicle.mass_kg=1750`.
+* **Ein unbekannter Name wird abgewiesen**, mit Vorschlag bei Tippfehlern. Ein Name,
+  der nicht durchkommt, ist nicht gesetzt worden — nie so tun, als sei er es.
+* Grenzverletzungen werden **abgewiesen, nicht geklemmt** (Exit-Code 2, nichts gestartet).
+  `--force` hebt die Prüfung auf, `--dry-run` baut den Payload und zeigt ihn, ohne
+  irgendetwas zu starten.
+* Immer `--set project_name=…` mitgeben, wenn eine Variante entsteht — sonst trägt sie
+  den Namen der Vorlage.
+
+**Die Grenzen aus `geom` sagen NICHT, ob eine Geometrie baubar ist.** Sie sind die
+Suchbox des Optimierers und weit größer als das Baubare (gemessen: blind gezogen sind
+nur ~4 % baubar; `slotDepth` erlaubt 60 mm bei ~44 mm Statorwand). Nach jeder
+Geometrieänderung deshalb **zuerst `run cad --wait`** (~1 min) — schlägt der fehl,
+lohnt der Analyselauf über Stunden nicht.
 
 | Stufe | Was | Dauer | Voraussetzung |
 |---|---|---|---|
@@ -78,7 +101,9 @@ python3 cae_cli.py run analyse --from-project 20260813_140556_... --wait
 | `smoke` | Selbsttest | ~15 s | — |
 
 `--wait` blockiert bis zum Ende (Vorgabe 7200 s). **Ohne `--wait` läuft der Lauf
-serverseitig weiter** — mit `status` oder `wait` wieder anhängen. Nur EINE
+serverseitig weiter** — der Startaufruf nennt dann die Statusroute zum Wiederanhängen
+(`wait --status-path …`). Jede Stufe hat ihre eigene; `status` allein zeigt nur die
+volle Pipeline, bei einem CAD- oder 3D-Lauf steht dort weiter `idle`. Nur EINE
 Pipeline gleichzeitig; ein zweiter Start gibt HTTP 409.
 
 Bei langen Läufen nicht in einer engen Schleife pollen — `wait` macht das mit
@@ -105,6 +130,8 @@ Referenz mit allen Routen nach Themen: `references/routes.md`.
 * **Nie `pixi self-update`** — 0.68+ zerstört die schreibgeschützte FreeCAD-Umgebung.
 * Nichts im Repo redet über `localhost` hinaus. Keine Gegenstelle außerhalb setzen.
 * Läufe nicht abbrechen, ohne zu fragen — manche kosten Stunden.
+* Keinen Payload von Hand zusammensetzen und keinen abgewiesenen `--set` als gesetzt
+  ausgeben. Wenn ein Parameter fehlt: `geom <text>` fragen, nicht raten.
 
 ## Zahlen, die man kennen sollte
 

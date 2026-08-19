@@ -178,30 +178,233 @@ def _load_payload(args) -> dict:
     if args.payload:
         return json.loads(args.payload)
     if args.from_project:
-        meta = os.path.expanduser(f"~/cae_projekte/{args.from_project}/meta.json")
-        with open(meta, encoding="utf-8") as f:
-            return json.load(f)["payload"]
+        pid = _newest_project() if args.from_project == "last" else args.from_project
+        meta = os.path.join(PROJECTS_ROOT, pid, "meta.json")
+        try:
+            with open(meta, encoding="utf-8") as f:
+                return json.load(f)["payload"]
+        except FileNotFoundError:
+            raise SystemExit(_die(f"Kein meta.json fuer Projekt '{pid}' — "
+                                  f"'projects' zeigt die vorhandenen.", EXIT_USAGE))
     raise SystemExit(_die("Kein Payload: --payload, --payload-file oder --from-project "
                           "angeben.", EXIT_USAGE))
 
 
+# ── Parameter setzen (--set) ────────────────────────────────────────────────────
+#
+# Der Payload eines Laufs hat ~90 Schlüssel (63 davon in ``geom``); ihn von Hand zu
+# schreiben ist für ein Modell die verlässlichste Art, einen Lauf zu verderben.
+# Deshalb: eine bestehende Auslegung als Grundlage nehmen und einzelne Werte ändern.
+#
+# Zwei Wissensquellen, bewusst verschieden behandelt:
+#   * ``/param_schema`` — der kuratierte Satz mit Grenzen, Typen und Auswahllisten.
+#     Wer dort steht, wird GEPRUEFT und automatisch nach ``geom`` bzw. auf die obere
+#     Ebene einsortiert (Feld ``in_geom``).
+#   * der Grundpayload selbst — alles Weitere (``magLayers``, ``airGap``, ``poleArcFrac``
+#     …). Kein Schema, also keine Grenzen; gesetzt wird dort, wo der Schlüssel schon
+#     liegt. Erfundene Namen fallen genau hier durch.
+#
+# Grenzverletzungen werden ABGEWIESEN, nicht stillschweigend geklemmt: ein geklemmter
+# Wert sieht für den Aufrufer wie ein angenommener aus, und der Bericht rechnet dann
+# eine andere Maschine als die bestellte. ``--force`` hebt die Pruefung auf.
+
+PROJECTS_ROOT = os.path.expanduser("~/cae_projekte")
+
+# Der Schemaname ist NICHT ueberall der Payloadname: /param_schema spiegelt das
+# Vokabular von ``ema_text2ema.SCHEMA`` (Text -> Entwurf), der Payload das der Pipeline.
+# Gegen ein reales meta.json geprueft weicht genau EIN Schluessel ab:
+#   axialLen — ``ema_pipeline`` liest ``data["axial_len"]`` (:1547, :1619) von der oberen
+#   Ebene. ``geom["axialLen"]`` existiert als Spiegel und wird nur als Rueckfall gelesen
+#   (``server.py:2093``); ohne diese Tabelle landete der Wert in einem toten Schluessel.
+_ALIAS  = {"axialLen": "axial_len"}            # Schemaname -> Payloadname
+_MIRROR = {"axial_len": ("geom", "axialLen")}  # Payloadname -> mitzufuehrender Spiegel
+
+_SCHEMA_CACHE: dict | None = None
+
+
+def param_schema(url: str) -> dict:
+    """{key: spec} aus /param_schema, einmal je Prozess geholt."""
+    global _SCHEMA_CACHE
+    if _SCHEMA_CACHE is None:
+        code, body = request("GET", "/param_schema", url=url)
+        if code >= 400:
+            raise SystemExit(_die(f"Parameterschema nicht lesbar (HTTP {code})", EXIT_REMOTE))
+        _SCHEMA_CACHE = {p["key"]: p for p in (body or {}).get("params", [])}
+    return _SCHEMA_CACHE
+
+
+def _parse_value(raw: str):
+    """JSON zuerst — so bleiben 12, 1.5, true, null und [1,2] das, was sie sind.
+    Alles Uebrige ist Text (``magShape=v`` muss ohne Anfuehrungszeichen gehen)."""
+    try:
+        return json.loads(raw)
+    except ValueError:
+        return raw
+
+
+def _check_value(key: str, val, spec: dict):
+    """(bereinigter Wert, Fehlertext|None) gegen eine Schema-Zeile."""
+    if spec.get("kind") == "num":
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            return val, f"{key}: Zahl erwartet, '{val}' bekommen"
+        if spec.get("int"):
+            if float(val) != int(val):
+                return val, f"{key}: ganze Zahl erwartet, {val} bekommen"
+            val = int(val)
+        lo, hi = spec.get("lo"), spec.get("hi")
+        if lo is not None and val < lo:
+            return val, f"{key}: {val} liegt unter der Untergrenze {lo}"
+        if hi is not None and val > hi:
+            return val, f"{key}: {val} liegt ueber der Obergrenze {hi}"
+        return val, None
+    opts = [o.get("value") for o in (spec.get("options") or [])]
+    if opts and val not in opts:
+        return val, f"{key}: '{val}' unbekannt. Zulaessig: {', '.join(map(str, opts))}"
+    return val, None
+
+
+def _locate(key: str, payload: dict, schema: dict):
+    """(Container, Name) — wohin der Wert gehoert; None, wenn der Name nirgends vorkommt."""
+    if "." in key:                                    # expliziter Pfad, z. B. vehicle.mass_kg
+        parts = key.split(".")
+        node = payload
+        for part in parts[:-1]:
+            if not isinstance(node, dict) or part not in node:
+                return None
+            node = node[part]
+        return (node, parts[-1]) if isinstance(node, dict) else None
+    spec = schema.get(key)
+    if spec is not None:
+        geom = payload.setdefault("geom", {})
+        want, other = (geom, payload) if spec.get("in_geom") else (payload, geom)
+        if key not in want and key in other:
+            return "drift"          # Schema und Payload sind sich uneins — s. _ALIAS
+        return want, key
+    if key in payload:
+        return payload, key
+    geom = payload.get("geom")
+    if isinstance(geom, dict) and key in geom:
+        return geom, key
+    return None
+
+
+def apply_sets(payload: dict, assignments, url: str, force: bool = False):
+    """``--set`` anwenden. Sammelt ALLE Fehler, statt beim ersten abzubrechen —
+    ein Agent soll in einem Durchgang erfahren, was falsch war."""
+    import difflib
+    schema = param_schema(url) if assignments else {}
+    applied, errors = [], []
+    for item in assignments or []:
+        if "=" not in item:
+            errors.append(f"'{item}': erwartet wird KEY=WERT")
+            continue
+        key, raw = item.split("=", 1)
+        key = key.strip()
+        spec_key = key                       # unter diesem Namen wird geprueft …
+        key = _ALIAS.get(key, key)           # … unter diesem geschrieben
+        target = _locate(key, payload, schema) if key == spec_key else (payload, key)
+        if target == "drift":
+            errors.append(f"'{key}': das Schema legt den Wert woanders ab, als der "
+                          f"Payload ihn fuehrt — mit Punktpfad eindeutig setzen "
+                          f"(geom.{key}=… oder einen anderen Grundpayload waehlen).")
+            continue
+        if target is None:
+            pool = sorted(set(schema) | set(payload) | set(payload.get("geom") or {}))
+            near = difflib.get_close_matches(key, pool, n=3, cutoff=0.6)
+            errors.append(f"'{key}' steht weder im Schema noch im Grundpayload"
+                          + (f" — gemeint war {', '.join(near)}?" if near
+                             else " — 'geom' zeigt die bekannten Parameter"))
+            continue
+        container, name = target
+        val = _parse_value(raw)
+        # Auch der Punktpfad wird geprueft: 'geom.slotDepth=999' soll nicht stiller
+        # an der Schemapruefung vorbeikommen als 'slotDepth=999'. Wer das braucht,
+        # nimmt --force.
+        spec = schema.get(spec_key.rsplit(".", 1)[-1])
+        if spec is not None and not force:
+            val, err = _check_value(spec_key, val, spec)
+            if err:
+                errors.append(err)
+                continue
+        old = container.get(name, "<nicht gesetzt>")
+        container[name] = val
+        note = f"{spec_key} -> {name}" if spec_key != name else None
+        mirror = _MIRROR.get(name)
+        if mirror and isinstance(payload.get(mirror[0]), dict) \
+                and mirror[1] in payload[mirror[0]]:
+            payload[mirror[0]][mirror[1]] = val
+            note = f"{note or name} (+ {mirror[0]}.{mirror[1]})"
+        applied.append({"key": spec_key, "alt": old, "neu": val,
+                        "geprueft": spec is not None, "notiz": note})
+    return applied, errors
+
+
+def _newest_project() -> str:
+    """Juengstes Projekt MIT meta.json — fuer ``--from-project last``.
+
+    Die meta.json ist der Filter, nicht die Zierde: nur die volle Pipeline schreibt sie.
+    Ein CAD-Vorschaulauf hinterlaesst ein Projektverzeichnis ohne Payload, und ohne
+    diese Bedingung waehlte 'last' nach jedem ``run cad`` einen Ordner, aus dem sich
+    kein Lauf ableiten laesst."""
+    try:
+        cands = [d for d in os.listdir(PROJECTS_ROOT)
+                 if not d.startswith("_")
+                 and os.path.exists(os.path.join(PROJECTS_ROOT, d, "meta.json"))]
+    except OSError:
+        cands = []
+    if not cands:
+        raise SystemExit(_die(
+            f"Kein Projekt mit meta.json unter {PROJECTS_ROOT} — 'last' braucht eine "
+            f"gerechnete Auslegung als Grundlage, eine CAD-Vorschau genuegt nicht.",
+            EXIT_USAGE))
+    return max(cands, key=lambda d: os.path.getmtime(os.path.join(PROJECTS_ROOT, d)))
+
+
+# stage -> (Startroute, Statusroute). Die Statusroute ist NICHT ableitbar: jede Stufe
+# hat ihren eigenen Zustand im Server (``_cad_state``, ``_em3d_state`` …), und nur die
+# volle Pipeline meldet sich unter ``/status``. Wer hier ``/status`` fuer alle nimmt,
+# bekommt beim CAD-Lauf den Zustand der Pipeline zurueck — also "idle" — und haelt den
+# Lauf faelschlich fuer fertig.
 RUN_ROUTES = {
-    "analyse":   "/analyse",      # volle Pipeline: CAD, 2D-Feld, Struktur, Thermik, Zyklus
-    "cad":       "/cad_preview",  # nur die Geometrie bauen
-    "em3d":      "/em3d",         # 3D-Elmer-Feld
-    "em3d_sweep": "/em3d_sweep",
-    "cfd":       "/cfd",          # OpenFOAM-Kühlung
-    "oilspray":  "/oilspray",     # Blender/Mantaflow-Ölnebel
-    "smoke":     "/smoke_test",
+    "analyse":    ("/analyse",     "/status"),   # volle Pipeline: CAD, 2D-Feld, Struktur, Thermik, Zyklus
+    "cad":        ("/cad_preview", "/cad_preview/status"),   # nur die Geometrie bauen
+    "em3d":       ("/em3d",        "/em3d/status"),          # 3D-Elmer-Feld
+    "em3d_sweep": ("/em3d_sweep",  "/em3d/status"),
+    "cfd":        ("/cfd",         "/cfd/status"),           # OpenFOAM-Kühlung
+    "oilspray":   ("/oilspray",    "/oilspray/status"),      # Blender/Mantaflow-Ölnebel
+    "smoke":      ("/smoke_test",  "/smoke_test/status"),
 }
 
 
 def cmd_run(args) -> int:
-    path = RUN_ROUTES.get(args.stage)
-    if path is None:
+    route = RUN_ROUTES.get(args.stage)
+    if route is None:
         return _die(f"Unbekannte Stufe '{args.stage}'. Bekannt: "
                     f"{', '.join(sorted(RUN_ROUTES))}", EXIT_USAGE)
+    path, status_path = route
     payload = _load_payload(args)
+
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen — nichts gestartet.",
+                    EXIT_USAGE)
+    for a in applied:
+        mark = "" if a["geprueft"] else "  (ohne Schema, ungeprueft)"
+        if a.get("notiz"):
+            mark += f"  [{a['notiz']}]"
+        print(f"  {a['key']}: {a['alt']} -> {a['neu']}{mark}")
+    if applied and args.stage not in ("cad", "smoke"):
+        geom_touched = any(a["geprueft"] or "." in a["key"] for a in applied)
+        if geom_touched:
+            print("  Hinweis: die Schemagrenzen sagen NICHT, ob die Geometrie baubar "
+                  "ist. Bei geaenderter Geometrie zuerst 'run cad --wait' (~1 min).")
+    if getattr(args, "dry_run", False):
+        print(f"[Probelauf — {path} NICHT aufgerufen]")
+        return emit(payload, args)
+
     code, body = request("POST", path, payload, url=args.url)
     if code >= 400:
         emit(body, args)
@@ -209,25 +412,39 @@ def cmd_run(args) -> int:
     print(json.dumps({"gestartet": args.stage, "route": path, **(body or {})},
                      ensure_ascii=False))
     if args.wait:
-        return _wait(args, status_path="/em3d/status" if args.stage.startswith("em3d")
-                     else "/cfd/status" if args.stage == "cfd"
-                     else "/oilspray/status" if args.stage == "oilspray"
-                     else "/status")
+        return _wait(args, status_path=status_path)
+    print(f"Laeuft. Fortschritt: cae_cli.py wait --status-path {status_path}")
     return EXIT_OK
 
 
+# ``idle`` ist zweideutig: es heisst "nichts laeuft" — und das ist unmittelbar nach dem
+# Start genauso wahr wie lange nach dem Ende. Wer es sofort als Abschluss liest, meldet
+# einen vierstuendigen Lauf nach 0 s als fertig. Deshalb gilt idle erst als Abschluss,
+# nachdem einmal ein laufender Zustand gesehen wurde; davor ist es nur ein Hinweis
+# darauf, dass der Start nicht gegriffen hat (Meldung nach ``_IDLE_GRACE_S``).
+_DONE_STATES = ("done", "error", "fertig", "abgebrochen")
+_IDLE_GRACE_S = 30.0
+
+
 def _wait(args, status_path="/status") -> int:
-    t0, last = time.time(), None
+    t0, last, seen_running = time.time(), None, False
     while time.time() - t0 < args.timeout:
         code, st = request("GET", status_path, url=args.url)
         s = st.get("status")
         if s != last:
             print(f"[{time.time()-t0:6.0f}s] {s} {st.get('progress', '')}%", flush=True)
             last = s
-        if s in ("done", "error", "idle", "fertig", "abgebrochen"):
+        if s not in _DONE_STATES + ("idle", None):
+            seen_running = True
+        if s in _DONE_STATES or (s == "idle" and seen_running):
             for line in (st.get("log") or [])[-args.log_lines:]:
                 print(f"  {line}")
-            return EXIT_OK if s != "error" else EXIT_REMOTE
+            if st.get("error"):
+                print(f"FEHLER: {st['error']}", file=sys.stderr)
+            return EXIT_REMOTE if (s == "error" or st.get("error")) else EXIT_OK
+        if s == "idle" and not seen_running and time.time() - t0 > _IDLE_GRACE_S:
+            return _die(f"{status_path} steht nach {_IDLE_GRACE_S:.0f}s noch auf 'idle' "
+                        f"— der Lauf ist offenbar nicht angesprungen.", EXIT_REMOTE)
         time.sleep(args.poll)
     return _die(f"Kein Abschluss innerhalb {args.timeout}s (Zustand '{last}'). "
                 f"Der Lauf läuft weiter — erneut mit 'wait' anhängen.", EXIT_TIMEOUT)
@@ -299,6 +516,21 @@ def cmd_routes(args) -> int:
     return EXIT_OK
 
 
+def _add_globals(sp) -> None:
+    """Dieselben Schalter auch NACH dem Verb annehmen. Ohne das quittiert argparse
+    ``run analyse --full`` mit einer nackten usage-Zeile — der haeufigste Fehlgriff,
+    wenn ein Modell die Reihenfolge raet. ``SUPPRESS`` ist wesentlich: ein nicht
+    angegebener Schalter setzt dann NICHTS und ueberschreibt den Wert des
+    Hauptparsers nicht mit seinem eigenen Vorgabewert."""
+    sp.add_argument("--url", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
+    sp.add_argument("--full", action="store_true", default=argparse.SUPPRESS,
+                    help=argparse.SUPPRESS)
+    sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
+                    help=argparse.SUPPRESS)
+    sp.add_argument("--log-lines", type=int, default=argparse.SUPPRESS,
+                    help=argparse.SUPPRESS)
+
+
 # ── Argumentbaum ────────────────────────────────────────────────────────────────
 
 def build_parser() -> argparse.ArgumentParser:
@@ -313,13 +545,16 @@ def build_parser() -> argparse.ArgumentParser:
     sub = p.add_subparsers(dest="cmd", required=True)
 
     s = sub.add_parser("status", help="Zustand der laufenden Pipeline")
+    _add_globals(s)
     s.set_defaults(fn=cmd_status)
 
     s = sub.add_parser("health", help="Was ist erreichbar und rechenbar?")
+    _add_globals(s)
     s.set_defaults(fn=cmd_health)
 
     s = sub.add_parser("geom", help="Parameterschema (Namen, Grenzen, Vorgaben)")
     s.add_argument("name", nargs="?", help="nur Parameter, die diesen Text enthalten")
+    _add_globals(s)
     s.set_defaults(fn=cmd_geom)
 
     s = sub.add_parser("run", help="Rechenstufe starten")
@@ -327,26 +562,38 @@ def build_parser() -> argparse.ArgumentParser:
     g = s.add_mutually_exclusive_group()
     g.add_argument("--payload", help="JSON direkt")
     g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
-    g.add_argument("--from-project", help="Payload aus ~/cae_projekte/<id>/meta.json")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar. Geprueft gegen "
+                        "'geom'. Punktpfade erlaubt (vehicle.mass_kg=1600)")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--dry-run", action="store_true",
+                   help="Payload nur bauen und zeigen, nichts starten")
     s.add_argument("--wait", action="store_true", help="bis zum Abschluss warten")
     s.add_argument("--timeout", type=int, default=7200)
     s.add_argument("--poll", type=float, default=5.0)
+    _add_globals(s)
     s.set_defaults(fn=cmd_run)
 
     s = sub.add_parser("wait", help="auf den Abschluss eines laufenden Vorgangs warten")
     s.add_argument("--status-path", default="/status")
     s.add_argument("--timeout", type=int, default=7200)
     s.add_argument("--poll", type=float, default=5.0)
+    _add_globals(s)
     s.set_defaults(fn=cmd_wait)
 
     s = sub.add_parser("results", help="Ergebnisse lesen (Abschnitt wählen!)")
     s.add_argument("section", nargs="?", help="Punktpfad, z. B. em.performance")
     s.add_argument("--project", help="aus ~/cae_projekte/<id>/results.json statt live")
     s.add_argument("--sections", action="store_true", help="nur die Abschnittsnamen")
+    _add_globals(s)
     s.set_defaults(fn=cmd_results)
 
     s = sub.add_parser("projects", help="gespeicherte Projekte auflisten")
     s.add_argument("--limit", type=int, default=30)
+    _add_globals(s)
     s.set_defaults(fn=cmd_projects)
 
     s = sub.add_parser("raw", help="beliebige Route aufrufen (Notausgang)")
@@ -354,10 +601,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("path")
     s.add_argument("--data", help="JSON-Rumpf")
     s.add_argument("--timeout", type=int, default=TIMEOUT_S)
+    _add_globals(s)
     s.set_defaults(fn=cmd_raw)
 
     s = sub.add_parser("routes", help="alle Routen auflisten")
     s.add_argument("--grep", help="filtern")
+    _add_globals(s)
     s.set_defaults(fn=cmd_routes)
     return p
 
