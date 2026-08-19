@@ -76,7 +76,13 @@ else
 
     echo "Starte Orchestrator (Log: $LOG) …"
     [ "$BROWSER" -eq 0 ] && export CAE_NO_BROWSER=1
-    ( cd "$ORCH" && nohup ./start.sh >"$LOG" 2>&1 & )
+    # setsid --fork loest den Server aus Sitzung UND Elternschaft des Skripts. Ohne das bleibt
+    # er ein KIND von start_agent.sh (gemessen: PPID des Servers zeigte auf das Skript),
+    # das Skript wartet beim Beenden auf ihn, und `./start_agent.sh | tee start.log`
+    # haengt fuer immer — der Server laeuft, die Shell kommt nie zurueck. Das </dev/null
+    # kappt die letzte geerbte Leitung. Nebeneffekt, der ebenso zaehlt: Strg-C im
+    # aufrufenden Terminal beendet den Server nicht mehr mit.
+    ( cd "$ORCH" && setsid --fork nohup ./start.sh >"$LOG" 2>&1 </dev/null & )
 
     for i in $(seq 1 60); do
         health && break

@@ -3021,8 +3021,9 @@
           <button id="btn_cmp_report_triple" onclick="makeComparisonReportTriple()" style="background:#2c5f8e;padding:8px 14px;font-size:.78rem">🔬 3 Modelle nacheinander</button>
           <label style="font-size:.74rem;color:#888">Modell:
             <select id="cmp_model" style="background:#0f0f1a;border:1px solid #444;color:#eee;padding:5px 6px;border-radius:4px;font-size:.74rem">
-              <option value="ministral-3:14b" selected>ministral-3:14b (schnell)</option>
-              <option value="gemma4:26b">gemma4:26b (stärker, langsamer)</option>
+              <option value="qwen3.8:latest" selected>qwen3.8 (27B, Standard)</option>
+              <option value="ministral-3:14b">ministral-3:14b (schneller)</option>
+              <option value="gemma4:26b">gemma4:26b</option>
               <option value="gemma4:e4b">gemma4:e4b</option>
               <option value="medgemma:27b">medgemma:27b</option>
             </select>
@@ -3820,7 +3821,7 @@ async function makeComparisonReport(agentic = false) {
   btn.disabled = true;
   st.textContent = agentic ? '⏳ 6 Experten analysieren die Varianten…' : '⏳ Bericht wird erzeugt…';
   try {
-    const model = (document.getElementById('cmp_model') || {}).value || 'ministral-3:14b';
+    const model = (document.getElementById('cmp_model') || {}).value || 'qwen3.8:latest';
     const r = await fetch('/compare/report', { method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ ids, agentic, model }) }).then(x => x.json());
@@ -3858,7 +3859,7 @@ function _pollReportDone() {
 async function makeComparisonReportTriple() {
   const ids = [...document.querySelectorAll('.cmp-checkbox:checked')].map(cb => cb.value);
   if (ids.length < 2) { alert('Mindestens 2 Projekte wählen'); return; }
-  const models = ['gemma4:e4b', 'ministral-3:14b', 'gemma4:26b'];
+  const models = ['qwen3.8:latest', 'ministral-3:14b', 'gemma4:26b'];
   const btn = document.getElementById('btn_cmp_report_triple');
   const st  = document.getElementById('cmp-report-status');
   const box = document.getElementById('cmp-triple-links');
@@ -9665,10 +9666,8 @@ async function generateReport(mode = 'standard') {
 
   const isAgentic = (mode === 'agentic');
   const label     = isAgentic
-    ? '⏳ 6 Experten laufen (ministral-3 ~3–5 min)…'
-    : '⏳ Bericht läuft (ministral-3 ~30–60 s)…';
-  const modelMain  = 'ministral-3:14b';
-  const modelExpert= 'ministral-3:14b';
+    ? '⏳ 6 Experten laufen…'
+    : '⏳ Bericht läuft…';
 
   btn.disabled = true;
   btn.textContent = label;
@@ -9683,8 +9682,10 @@ async function generateReport(mode = 'standard') {
                           { method: 'POST',
                             headers: {'Content-Type': 'application/json'},
                             body: JSON.stringify({
-                              model:        modelMain,
-                              expert_model: modelExpert,
+                              // kein model/expert_model: der Server setzt seinen
+                              // Standard (ema_report.DEFAULT_MODEL, per CAE_LLM_MODEL
+                              // umstellbar) — sonst haette das Frontend eine zweite,
+                              // still veraltende Quelle fuer dieselbe Entscheidung.
                               mode:         mode,
                             }) });
     if (!r.ok) {

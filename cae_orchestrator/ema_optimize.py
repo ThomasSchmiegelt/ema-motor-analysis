@@ -4,7 +4,7 @@ The user fixes hard CONSTRAINTS (must hold), FREE parameters with ranges (may be
 changed), and an OBJECTIVE metric (maximise / minimise / hit a target). Each
 candidate design is scored by a FreeCAD/FEM-FREE fast evaluator (~0.5 s): EM field
 at low resolution → analytical Kt / torque, steady-state LPTN thermal, analytical
-structural sweep, analytical mass. A local LLM (ministral-3:14b) reads the
+structural sweep, analytical mass. A local LLM (see ema_report.DEFAULT_MODEL) reads the
 (params→metrics) history and proposes the next batch of candidates; deterministic
 clamping + feasibility filtering keep it safe. The best feasible design is returned
 so the caller can run the FULL pipeline once on the winner.
@@ -188,6 +188,7 @@ def _fitness(metrics, objective, constraints):
 
 def _ollama_chat(messages, timeout=120):
     body = json.dumps({"model": DEFAULT_MODEL, "messages": messages, "stream": False,
+                       "think": False,          # s. ema_report.call_ollama
                        "options": {"temperature": 0.6, "num_ctx": 12288, "num_predict": 900}}).encode()
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,
                                  headers={"Content-Type": "application/json"})

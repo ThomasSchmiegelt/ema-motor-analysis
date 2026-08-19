@@ -92,7 +92,7 @@ ema_pipeline.run_pipeline()
          ema_training.upsert() → LLM-Trainingsfile
 ```
 
-Der Bericht (`ema_report.py`, Ministral-3:14b via Ollama → Markdown → `pandoc` →
+Der Bericht (`ema_report.py`, lokales LLM via Ollama → Markdown → `pandoc` →
 `pdflatex` → `bericht.pdf`) und die echte 3D-Feldberechnung (`ema_em3d.py`, Elmer
 FEM) sind **eigene, separat angestoßene** Hintergrund-Jobs (`POST
 /project/<id>/report`, `POST /em3d`) — keine Pipeline-Stufen von `run_pipeline`.
@@ -642,7 +642,7 @@ Feldberechnung), `em3d_runs/<id>/` (gespeicherte 3D-Läufe) und `rag/index.json`
 ### 10.1 Modell
 
 ```python
-DEFAULT_MODEL = "ministral-3:14b"
+DEFAULT_MODEL = os.environ.get("CAE_LLM_MODEL", "qwen3.8:latest")
 ```
 
 Ministral ist das einzige LLM in dieser Kette. Es wird ausschließlich für

@@ -6,14 +6,19 @@ instance) and their outputs are later assembled into the full report.
 """
 
 from __future__ import annotations
-import json, math, re, urllib.request
+import json, math, os, re, urllib.request
 from typing import Callable
 
 from ema_topology import TOPOLOGY_LABELS
+from ema_report import DEFAULT_MODEL
 
 
 OLLAMA_URL   = "http://localhost:11434"
-EXPERT_MODEL = "ministral-3:14b"
+# Die Experten duerfen ein eigenes Modell bekommen (CAE_EXPERT_MODEL, etwa ein
+# kleineres fuer die sechs sequentiellen Laeufe); ohne das ist es dasselbe wie fuer
+# den Bericht. Der Import ist zyklusfrei: ema_report laedt ema_experts erst in der
+# Funktion, nicht auf Modulebene.
+EXPERT_MODEL = os.environ.get("CAE_EXPERT_MODEL") or DEFAULT_MODEL
 
 
 # ── Paragraph normaliser (same logic as ema_report._normalize_paragraphs) ───
@@ -76,6 +81,7 @@ def _call(prompt: str, model: str = EXPERT_MODEL, timeout: int = 300) -> str:
         "model":  model,
         "prompt": prompt,
         "stream": False,
+        "think":  False,          # s. ema_report.call_ollama
         "options": {
             "temperature": 0.3,
             "num_predict": 4096,

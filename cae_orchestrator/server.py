@@ -22,6 +22,10 @@ _fix_fontconfig_env()
 
 from flask import Flask, request, jsonify, send_from_directory, send_file, Response
 
+# Standardmodell der Toolchain — EINE Quelle (ema_report), damit ein Modellwechsel
+# nicht an fuenf Routen einzeln nachgezogen werden muss. Ueber CAE_LLM_MODEL setzbar.
+from ema_report import DEFAULT_MODEL as LLM_MODEL
+
 app = Flask(__name__, static_folder=os.path.dirname(__file__))
 
 WORKSPACE = os.path.join(os.path.dirname(__file__), "workspace")
@@ -1418,7 +1422,7 @@ def design_ai_start():
     brief = body.get("brief", "") or body.get("description", "")
     n     = int(body.get("n", 3))
     max_regen = int(body.get("max_regen", 2))
-    model = body.get("model") or "ministral-3:14b"
+    model = body.get("model") or LLM_MODEL
     _design_state.update({"status": "running", "progress": 0, "log": [],
                           "result": None, "error": None})
 
@@ -1460,7 +1464,7 @@ def design_ai_ranged_start():
     brief  = body.get("brief", "") or ""
     n      = int(body.get("n", 3))
     max_regen = int(body.get("max_regen", 2))
-    model  = body.get("model") or "ministral-3:14b"
+    model  = body.get("model") or LLM_MODEL
     _design_state.update({"status": "running", "progress": 0, "log": [],
                           "result": None, "error": None})
 
@@ -1638,7 +1642,7 @@ def param_study_report():
         return jsonify({"error": "Studienbericht läuft bereits"}), 409
     if not (_study_state.get("result")):
         return jsonify({"error": "Keine Parameterstudie vorhanden — erst eine Studie rechnen"}), 400
-    model = (request.get_json(silent=True) or {}).get("model") or "ministral-3:14b"
+    model = (request.get_json(silent=True) or {}).get("model") or LLM_MODEL
     study   = _study_state["result"]
     payload = _study_state.get("payload") or {}
     _study_report_state.update({"status": "running", "progress": 0, "log": [],
@@ -2482,7 +2486,7 @@ def make_report(pid: str):
         return jsonify({"error": "Berichtgenerierung läuft bereits"}), 409
 
     body          = request.get_json(silent=True) or {}
-    model         = body.get("model", "ministral-3:14b")
+    model         = body.get("model", LLM_MODEL)
     mode          = body.get("mode", "standard")          # "standard" | "agentic"
     expert_model  = body.get("expert_model", None)        # defaults to model
 
@@ -2781,7 +2785,7 @@ def compare_report():
     if len(ids) < 2:
         return jsonify({"error": "Mindestens 2 Projekte wählen"}), 400
     ids = ids[:10]
-    model = body.get("model", "ministral-3:14b")
+    model = body.get("model", LLM_MODEL)
     agentic = bool(body.get("agentic")) or body.get("mode") == "agentic"
 
     import time

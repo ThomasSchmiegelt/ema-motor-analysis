@@ -1,6 +1,6 @@
 """LLM chat over analysis results / variant comparisons.
 
-Thin wrapper around Ollama's /api/chat (model ministral-3:14b, same as the report
+Thin wrapper around Ollama's /api/chat (same model as the report,
 generator). The relevant numeric/text result fields are packed into a compact JSON
 system prompt — base64 images, animation frames and long numeric arrays are stripped
 so the context stays small. There is no LLM in the analysis pipeline; this is purely
@@ -50,6 +50,7 @@ def _ollama_chat(messages, model: str = DEFAULT_MODEL, timeout: int = 300) -> st
         "model": model,
         "messages": messages,
         "stream": False,
+        "think": False,           # s. ema_report.call_ollama
         "options": {"temperature": 0.3, "num_ctx": 14336, "num_predict": 2048},
     }).encode("utf-8")
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,

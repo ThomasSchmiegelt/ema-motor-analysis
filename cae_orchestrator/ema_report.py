@@ -2,7 +2,7 @@
 
 Pipeline:
   project_dir/results.json + meta.json  →  compact context dict
-  context  →  prompt to ministral-3:14b (Ollama, OpenAI-compat REST)
+  context  →  prompt to the local LLM (Ollama, OpenAI-compat REST)
   LLM markdown  →  post-process to insert ![…](…) image refs
   markdown  →  pandoc + pdflatex  →  project_dir/bericht.pdf
 
@@ -20,7 +20,12 @@ from ema_topology import TOPOLOGY_LABELS
 
 
 OLLAMA_URL = "http://localhost:11434"
-DEFAULT_MODEL = "ministral-3:14b"
+
+# EIN Ort fuer das Standardmodell der gesamten Toolchain: ema_chat, ema_text2ema,
+# ema_optimize, ema_design_ai und server.py holen es hier ab, ema_experts leitet es
+# ab. Ueber CAE_LLM_MODEL umstellbar, ohne eine Zeile Code anzufassen — praktisch,
+# weil ein Modellwechsel sonst an sieben Stellen nachgezogen werden muesste.
+DEFAULT_MODEL = os.environ.get("CAE_LLM_MODEL", "qwen3.8:latest")
 
 
 # ── Context extraction ──────────────────────────────────────────────────────
@@ -392,11 +397,17 @@ Beginne direkt mit `# Auslegungsbericht: {ctx.get('label', '')}` ohne weitere Vo
 def call_ollama(prompt: str, model: str = DEFAULT_MODEL,
                  base_url: str = OLLAMA_URL, timeout: int = 600) -> str:
     """Single non-streaming call to Ollama's /api/generate."""
-    # /no_think suppresses Qwen3 reasoning chain; ignored by other models.
+    # think=False schaltet die Denkkette denkfaehiger Modelle ab (qwen3.x); andere
+    # Modelle ignorieren das Feld (gegen ministral-3:14b und gemma4:26b geprueft).
+    # Zwei Gruende: gemessen 6x schneller (1,7 s statt 10 s auf einen Einzeiler), und
+    # die Denkkette faellt bei Ollama in ein EIGENES Feld — laeuft num_predict darin
+    # leer, bliebe "response" leer und der Ruecksprung unten lieferte englischen
+    # Denktext als Berichtstext aus.
     body = json.dumps({
         "model":   model,
         "prompt":  prompt,
         "stream":  False,
+        "think":   False,
         "options": {
             "temperature": 0.4,
             "num_predict": 8192,

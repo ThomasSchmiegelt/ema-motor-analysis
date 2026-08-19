@@ -1,5 +1,5 @@
 """Text → EMA: derive an IPM-motor parameter set from a free-text application
-description via the local LLM (ministral-3:14b), then validate/clamp it to a safe,
+description via the local LLM (see ema_report.DEFAULT_MODEL), then validate/clamp it to a safe,
 self-consistent geometry. First stage only — no RAG / no web research yet; this is
 deliberately a deterministic schema fill so the result always loads into the UI.
 
@@ -137,6 +137,7 @@ def derive(description: str, timeout: int = 180) -> dict:
         "model": DEFAULT_MODEL,
         "messages": [{"role": "user", "content": _prompt(description, context)}],
         "stream": False,
+        "think": False,           # s. ema_report.call_ollama
         "options": {"temperature": 0.4, "num_ctx": 8192, "num_predict": 1200},
     }).encode("utf-8")
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,

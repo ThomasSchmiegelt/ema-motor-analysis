@@ -479,7 +479,7 @@ zufällig gezogen. So geht's:
    **0,5–3 mm** begrenzt (Werte außerhalb werden hineingeklammert).
 3. **Anzahl Varianten** (1–99, Standard 3) wählen und **✨ KI entwerfen** klicken.
 4. Pro Variante werden die vier Maße (inkl. Luftspalt) **zufällig gezogen und fest
-   gesetzt**; die KI (lokales Modell `ministral-3:14b`, mit Referenzmaschinen aus der
+   gesetzt**; die KI (lokales Modell `qwen3.8:latest`, mit Referenzmaschinen aus der
    Wissensbasis geerdet) ergänzt Polzahl, Nutzahl und Material und **zeichnet Magnete +
    Flussbarrieren** passend dazu. Stator-Innen- und Rotor-Außendurchmesser ergeben sich aus
    dem gezogenen Luftspalt.
@@ -829,7 +829,7 @@ Berechnung, Ergebnisse werden automatisch in den Vergleich übernommen.
 | **Standard** | LLM schreibt Prosa um deterministische Tabellen (Parameter-Tabelle mit ●-Markierung für abweichende Werte, Kennwert-Tabelle, Einfluss-Analyse Δ%) |
 | **Agentisch (6-Experten-Recherche)** | Deterministisches Skelett (Methodik, alle Tabellen, Overlay-Charts, Bild-Galerien pro Variante) + 6 Experten vergleichen alle Varianten mit Vor-/Nachteilen. Deterministische Sicherheitsbewertung (FEM SF ≥ 1,5, Magnet ≤ 150 °C, Wicklung ≤ 180 °C) |
 
-Der **LLM-Modell** für den Bericht ist im Vergleich-Tab wählbar (ministral-3:14b /
+Der **LLM-Modell** für den Bericht ist im Vergleich-Tab wählbar (qwen3.8:latest /
 gemma4:26b / andere installierte Ollama-Modelle).
 
 Die **LLM-Trainingsdaten** (Übersicht, Download als SFT-/VLM-JSONL) liegen zentral im
@@ -1035,7 +1035,7 @@ Es gibt keinen `#report`-Anker mehr — der Bericht liegt auf `#projekt`.
 | Problem | Lösung |
 |---|---|
 | **„FreeCADCmd nicht gefunden"** | Pfade in `start.sh`, `freecad_runner.py` und `server.py` prüfen (siehe README, „Pfade anpassen"). Es muss der **1.1.x-Quellcode-Build** sein, nicht `/opt/freecad-1.1` |
-| **Bericht / Chat / Text→Auslegung / Optimierung reagiert nicht** | Ollama läuft nicht: `ollama serve` starten; Modell prüfen: `ollama list` (benötigt `ministral-3:14b`). Für Wissensbasis/RAG-Embeddings: `nomic-embed-text` (`ollama pull nomic-embed-text`) |
+| **Bericht / Chat / Text→Auslegung / Optimierung reagiert nicht** | Ollama läuft nicht: `ollama serve` starten; Modell prüfen: `ollama list` (benötigt `qwen3.8:latest`; ein anderes lässt sich ohne Codeänderung über `CAE_LLM_MODEL` setzen). Für Wissensbasis/RAG-Embeddings: `nomic-embed-text` (`ollama pull nomic-embed-text`) |
 | **PDF-Bericht schlägt fehl** | `pandoc` und `pdflatex` installieren: `sudo apt install pandoc texlive-latex-base texlive-fonts-recommended texlive-latex-extra` |
 | **Magnete „fehlen" im Querschnitt** | Bei Oberflächen-Topologien (SPM/Halbach) gibt es keine Taschen — das ist korrekt (Magnete sitzen auf der Oberfläche) |
 | **Magnete laufen sehr heiß / sehr kalt** | Kühlung, Last und Drehzahl prüfen. Die Magnete sind thermisch an die Statorbohrung gekoppelt (Wärmeeintrag aus dem Kupfer) |

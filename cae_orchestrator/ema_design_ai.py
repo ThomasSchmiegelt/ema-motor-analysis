@@ -1,7 +1,7 @@
 """KI-gestützter Entwurf kompletter IPM-Maschinen für den Designer-Tab.
 
 Der parallele „KI-Auslegungs"-Pfad: aus einer Anwendungs-Beschreibung entwirft das
-lokale LLM (ministral-3:14b) eine ODER mehrere **komplette** Maschinen — Hauptmaße,
+lokale LLM (s. ema_report.DEFAULT_MODEL) eine ODER mehrere **komplette** Maschinen — Hauptmaße,
 Polzahl, Material, Betriebspunkt **und** eine frei gezeichnete Halbpol-Geometrie
 (Magnetpositionen + Flussbarrieren im Canvas-Format). Die Geometrie wird anschließend
 auf den Designer-Canvas gezeichnet (`DESIGN.magnets`/`DESIGN.barriers`), kann editiert
@@ -332,6 +332,7 @@ def _ollama(messages, model, timeout):
     # for the larger combined params+magnets+barriers schema (free-text JSON from a
     # local model is otherwise frequently broken: decimal commas, comments, math).
     body = json.dumps({"model": model, "messages": messages, "stream": False,
+                       "think": False,          # s. ema_report.call_ollama
                        "format": "json",
                        "options": {"temperature": 0.35, "num_ctx": 8192,
                                    "num_predict": 1600}}).encode("utf-8")

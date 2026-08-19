@@ -171,7 +171,7 @@ Kühltypen mit kalibrierten h_eff-Werten: Natürliche Konvektion, Zwangsluft, Wa
 | Werkzeug | Hinweis |
 |---|---|
 | [Ollama](https://ollama.com) | lokal laufend auf `localhost:11434` |
-| `ministral-3:14b` | `ollama pull ministral-3:14b` |
+| `qwen3.8:latest` | `ollama pull qwen3.8` — Standardmodell für Bericht/Chat/KI-Auslegung |
 | `nomic-embed-text` | `ollama pull nomic-embed-text` — für die Wissensbasis (RAG) |
 | pandoc | `sudo apt install pandoc` |
 | pdflatex | `sudo apt install texlive-latex-base texlive-fonts-recommended` |
@@ -184,7 +184,7 @@ Kühltypen mit kalibrierten h_eff-Werten: Natürliche Konvektion, Zwangsluft, Wa
 | `gmsh`, `vtk` | Python-Pakete, in `requirements.txt` enthalten |
 | Blender (💧 Spritzöl-Kühlung) | **Portabler blender.org-Build** nötig — der `apt`-Build stürzt bei der Fluidsimulation headless ab. `mkdir -p ~/blender_portable && cd ~/blender_portable && curl -O https://download.blender.org/release/Blender4.2/blender-4.2.9-linux-x64.tar.xz && tar xf blender-4.2.9-linux-x64.tar.xz` (oder Pfad via `$EMA_BLENDER`) |
 
-Die gesamte Analyse-Pipeline (FDM-Feldsolver, Thermik, Fahrzyklus, FEM) läuft vollständig ohne LLM, RAG oder Elmer. Ollama wird nur für die komfortbasierten Zusatzfunktionen aufgerufen — Bericht (`ema_report.py`, `ema_experts.py`), Ergebnis-Chat (`ema_chat.py`), Text→Auslegung (`ema_text2ema.py`), KI-Auslegung/Optimierung (`ema_design_ai.py`, `ema_design_optimize.py`, `ema_optimize.py`) und die Wissensbasis (`ema_rag.py`) — immer mit dem Modell `ministral-3:14b` (bzw. `nomic-embed-text` für Embeddings), im Code fest eingestellt. Ohne Ollama bleiben alle physikalischen Berechnungen voll nutzbar. Ohne Elmer läuft alles außer dem Tab „🧲 3D-Feld" normal (die 3D-Modell-Vorschau ohne Feldlösung funktioniert auch ohne Elmer).
+Die gesamte Analyse-Pipeline (FDM-Feldsolver, Thermik, Fahrzyklus, FEM) läuft vollständig ohne LLM, RAG oder Elmer. Ollama wird nur für die komfortbasierten Zusatzfunktionen aufgerufen — Bericht (`ema_report.py`, `ema_experts.py`), Ergebnis-Chat (`ema_chat.py`), Text→Auslegung (`ema_text2ema.py`), KI-Auslegung/Optimierung (`ema_design_ai.py`, `ema_design_optimize.py`, `ema_optimize.py`) und die Wissensbasis (`ema_rag.py`) — immer mit dem Modell aus `ema_report.DEFAULT_MODEL` (Vorgabe `qwen3.8:latest`, über die Umgebungsvariable `CAE_LLM_MODEL` umstellbar; `nomic-embed-text` bleibt das Embedding-Modell für RAG). Ohne Ollama bleiben alle physikalischen Berechnungen voll nutzbar. Ohne Elmer läuft alles außer dem Tab „🧲 3D-Feld" normal (die 3D-Modell-Vorschau ohne Feldlösung funktioniert auch ohne Elmer).
 
 ---
 
