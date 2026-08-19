@@ -53,7 +53,8 @@ baut sie selbst (s. `pikogk/EXPERIENCE_REPORT.md` und die `install.sh`-Skripte).
 | Elmer FEM | 3D-Magnetostatik | LGPL-2.1 (Solver: GPL) |
 | OpenFOAM (ESI, v2406) | VOF-Zweiphasenströmung | GPL-3.0 |
 | Blender | Mantaflow-FLIP-Fluidsimulation | GPL-3.0 |
-| Ollama + verwendete Modelle | lokale LLM-Dienste | Ollama MIT; Modelle mit je eigenen Bedingungen |
+| Ollama + verwendete Modelle | lokale LLM-Dienste | Ollama MIT; Modelle mit je eigenen Bedingungen (das Standardmodell `qwen-gross`/`qwen3.8` = Qwen3.5 27B weist in seinen GGUF-Metadaten `general.license = apache-2.0` aus) |
+| PI — [`@earendil-works/pi-coding-agent`](https://github.com/earendil-works/pi) | Agenten-Harness für die Bedienung per lokalem Modell (`start_agent.sh`) | MIT |
 | .NET 9 Runtime/SDK | Laufzeit des `pikogk`-Dienstes | MIT |
 
 **Zu PicoGK im Besonderen:** Die Unterverzeichnisse `pikogk/PicoGK/`,
