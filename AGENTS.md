@@ -22,6 +22,7 @@ Verben, die Laufzeiten, die Exit-Codes und die Fallen. `curl` gegen `:5000` ist 
 Umweg, nicht die Abkürzung.
 
 ```bash
+./start_agent.sh                    # Wurzel: Orchestrator + PI mit dem lokalen Modell
 cd ~/ai-workspace/cae_orchestrator && python3 cae_cli.py health
 ```
 

@@ -75,7 +75,13 @@ echo "Starte Server auf http://localhost:$PORT ..."
 echo "Drücke Ctrl+C zum Beenden."
 echo ""
 
-# Auto-open browser after short delay (background)
-( sleep 1.5 && xdg-open "http://localhost:$PORT" ) &
+# Auto-open browser after short delay (background).
+# CAE_NO_BROWSER=1 unterdrückt das — für Start aus einem Skript heraus (start_agent.sh)
+# oder auf einer Maschine ohne Sitzung. Bewusst eine Variable und kein PATH-Trick mit
+# einem attrappenhaften xdg-open: der verzögerte Aufruf hier läuft NACH dem Ende des
+# aufrufenden Skripts, eine dort aufgeräumte Attrappe käme also zu spät.
+if [ -z "${CAE_NO_BROWSER:-}" ]; then
+    ( sleep 1.5 && xdg-open "http://localhost:$PORT" ) &
+fi
 
 exec python server.py

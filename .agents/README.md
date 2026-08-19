@@ -14,16 +14,33 @@ export PATH="$HOME/.npm-global/bin:$PATH"      # in ~/.bashrc aufnehmen
 # 2) Modelle eintragen — liegt bereits unter ~/.pi/agent/models.json
 #    (Ollama als OpenAI-kompatibler Anbieter, qwen3.8 + qwen3.5:9b)
 
-# 3) Orchestrator starten
-cd ~/ai-workspace/cae_orchestrator && ./start.sh
+# 3) Modelle eintragen — liegt bereits unter ~/.pi/agent/models.json
 ```
 
 ## Benutzen
 
+Ein Skript startet die ganze Kette:
+
 ```bash
 cd ~/ai-workspace
-pi --provider ollama --model qwen3.8:latest                      # interaktiv
-pi --provider ollama --model qwen3.8:latest -p "<Frage>"          # einmalig
+./start_agent.sh                                  # Server (falls nötig) + PI, interaktiv
+./start_agent.sh -p "Wie hoch ist B_gap im neuesten Projekt?"   # eine Frage
+./start_agent.sh --kein-browser                   # ohne Browserfenster
+./start_agent.sh --nur-server                     # nur den Orchestrator
+```
+
+Es prüft Ollama, **nagelt das Modell auf seine ID fest** (`qwen3.8:latest` /
+`22130167c4c2` — ein `ollama pull` unter gleichem Namen tauscht sonst still die
+Gewichte), startet den Orchestrator nur, wenn `:5000` nicht antwortet, räumt einen
+belegten Port über `fuser` frei und wartet auf die Erreichbarkeit, bevor PI
+losläuft. Alle weiteren Argumente gehen unverändert an `pi`.
+
+Von Hand geht es genauso — nur aus `~/ai-workspace` heraus, sonst findet PI weder
+`AGENTS.md` noch `.agents/skills/`:
+
+```bash
+export PATH="$HOME/.npm-global/bin:$PATH"
+pi --provider ollama --model qwen3.8:latest
 ```
 
 Im Sitzungsbetrieb wechselt `/model` (oder `Strg-L`) das Modell — `qwen3.5:9b` ist
