@@ -11,7 +11,7 @@ import json
 import re
 import urllib.request
 
-from ema_report import OLLAMA_URL, DEFAULT_MODEL
+from ema_report import OLLAMA_URL, DEFAULT_MODEL, DEFAULT_NUM_CTX
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 _MAX_CTX_CHARS = 12000
@@ -51,7 +51,8 @@ def _ollama_chat(messages, model: str = DEFAULT_MODEL, timeout: int = 300) -> st
         "messages": messages,
         "stream": False,
         "think": False,           # s. ema_report.call_ollama
-        "options": {"temperature": 0.3, "num_ctx": 14336, "num_predict": 2048},
+        "options": {"temperature": 0.3, "num_ctx": DEFAULT_NUM_CTX,
+                    "num_predict": 2048},
     }).encode("utf-8")
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,
                                  headers={"Content-Type": "application/json"})

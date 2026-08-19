@@ -15,9 +15,14 @@ There is **no LLM in the analysis pipeline itself** — it is pure numerical/phy
 code (numpy + external solvers). Ollama is only invoked for report prose, with the
 model from **`ema_report.DEFAULT_MODEL`** — the single source for the whole toolchain
 (`ema_chat`, `ema_text2ema`, `ema_optimize`, `ema_design_ai` and `server.py` import it,
-`ema_experts.EXPERT_MODEL` derives from it). Default `qwen3.8:latest` (Qwen3.5 27B
-Q4_K_M), switchable per environment via `CAE_LLM_MODEL` / `CAE_EXPERT_MODEL` without
-touching code. Every request sends `think: false`: thinking-capable models return their
+`ema_experts.EXPERT_MODEL` derives from it). Default `qwen-gross:latest` (Qwen3.5 27B
+Q4_K_M, 64k context baked into the Modelfile), switchable per environment via
+`CAE_LLM_MODEL` / `CAE_EXPERT_MODEL` without touching code. **`ema_report.DEFAULT_NUM_CTX`
+(65536, env `CAE_LLM_NUM_CTX`) is the matching single source for `num_ctx`** — an explicit
+`num_ctx` in the request options overrides the Modelfile, so leaving the old per-caller
+values (8192…14336) in place would have silently clamped the model back down; and Ollama
+reloads the 17 GB model on every `num_ctx` change (measured 7.1 s vs 0.5 s), so one value
+for all callers also removes the reload churn when switching report -> chat -> design. Every request sends `think: false`: thinking-capable models return their
 reasoning in a **separate** Ollama field, so a `num_predict` exhausted by the chain
 would leave `response` empty and the fallback in `call_ollama` would emit English
 reasoning as report text — and it is ~6× faster (measured 1.7 s vs 10 s on a one-liner).
@@ -65,7 +70,7 @@ server, skipped when `:5000` is down).
   use it**. Everything routes through `pixi run --manifest-path ~/freecad_1.1_quellcode/pixi.toml -- build/release/bin/FreeCAD[Cmd] …` so the working 1.1.x build + its conda env are picked up.
 - **CalculiX** (`ccx`) bundled in that same pixi env at `~/freecad_1.1_quellcode/.pixi/envs/default/bin/ccx`.
 - **pixi** on PATH.
-- *Optional (PDF reports only):* Ollama at `localhost:11434` with `qwen3.8:latest`, plus `pandoc` and `pdflatex`.
+- *Optional (PDF reports only):* Ollama at `localhost:11434` with `qwen-gross:latest`, plus `pandoc` and `pdflatex`.
 - *Optional (🌊 quantitative Spritzöl-Kühlung):* **OpenFOAM v2406** (ESI) unter `/usr/lib/openfoam/openfoam2406`
   (`interFoam`/`blockMesh`/`snappyHexMesh`/`surfaceFeatureExtract`/`foamToVTK`), via `etc/bashrc`
   gesourct (`$OPENFOAM_BASHRC` überschreibt). Ohne OpenFOAM 503t `/cfd`; Mesh/HTC/Thermik-Kopplung
@@ -946,7 +951,7 @@ takes the user value when set.
   ≤ 180 °C) and is authoritative over the LLM text; the LLM gets `_PROSE_GUARDRAILS` (losses
   ≠ power, don't invent numbers, never recommend a variant flagged NICHT einsetzbar) plus the
   verdict in its ranking context, and the loss key is relabelled `verlustleistung_abwaerme_W`.
-  Model is selectable from the Vergleich tab (`#cmp_model`: qwen3.8:latest / ministral-3:14b / …),
+  Model is selectable from the Vergleich tab (`#cmp_model`: qwen-gross:latest / qwen3.8:latest / ministral-3:14b / …),
   passed as `model` to `/compare/report`.
 - **Bewertung gut/schlecht + Trainingsfile**: every finished analysis appends a JSONL line
   to `ema_training` (see file map). The Ergebnis-Tab shows a rating block (`renderRating`/
@@ -1642,6 +1647,6 @@ dict passed to the FEM script.
   everything via the generated script string and read results back through stdout markers.
 - Opening a headlessly-saved `.FCStd` in GUI FreeCAD leaves ViewProviders detached;
   `server.py:/open_freecad` re-applies visibility on a `QTimer` (see comment there).
-- Report model comes from `ema_report.DEFAULT_MODEL` (`qwen3.8:latest`, env
-  `CAE_LLM_MODEL`); Ollama is reached directly via `urllib.request` (no SDK). The
+- Report model comes from `ema_report.DEFAULT_MODEL` (`qwen-gross:latest`, env
+  `CAE_LLM_MODEL`), context length from `DEFAULT_NUM_CTX` (env `CAE_LLM_NUM_CTX`); Ollama is reached directly via `urllib.request` (no SDK). The
   analysis pipeline runs fully without Ollama.

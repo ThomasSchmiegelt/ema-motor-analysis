@@ -9,8 +9,8 @@
 # Alles Weitere wird unveraendert an `pi` durchgereicht (z. B. --model).
 set -euo pipefail
 
-MODEL="qwen3.8:latest"
-MODEL_ID="22130167c4c2"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
+MODEL="qwen-gross:latest"
+MODEL_ID="6b9d840acbf5"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
 PORT=5000
 OLLAMA_URL="http://localhost:11434"
 

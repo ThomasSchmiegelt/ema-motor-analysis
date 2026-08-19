@@ -30,7 +30,7 @@ import urllib.request
 
 import ema_text2ema as T2E
 import ema_topology as TOPO
-from ema_report import OLLAMA_URL, DEFAULT_MODEL
+from ema_report import OLLAMA_URL, DEFAULT_MODEL, DEFAULT_NUM_CTX
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -334,7 +334,7 @@ def _ollama(messages, model, timeout):
     body = json.dumps({"model": model, "messages": messages, "stream": False,
                        "think": False,          # s. ema_report.call_ollama
                        "format": "json",
-                       "options": {"temperature": 0.35, "num_ctx": 8192,
+                       "options": {"temperature": 0.35, "num_ctx": DEFAULT_NUM_CTX,
                                    "num_predict": 1600}}).encode("utf-8")
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,
                                  headers={"Content-Type": "application/json"})

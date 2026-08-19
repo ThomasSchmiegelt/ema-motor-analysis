@@ -12,7 +12,7 @@ import json
 import re
 import urllib.request
 
-from ema_report import OLLAMA_URL, DEFAULT_MODEL
+from ema_report import OLLAMA_URL, DEFAULT_MODEL, DEFAULT_NUM_CTX
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -138,7 +138,8 @@ def derive(description: str, timeout: int = 180) -> dict:
         "messages": [{"role": "user", "content": _prompt(description, context)}],
         "stream": False,
         "think": False,           # s. ema_report.call_ollama
-        "options": {"temperature": 0.4, "num_ctx": 8192, "num_predict": 1200},
+        "options": {"temperature": 0.4, "num_ctx": DEFAULT_NUM_CTX,
+                    "num_predict": 1200},
     }).encode("utf-8")
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,
                                  headers={"Content-Type": "application/json"})

@@ -20,7 +20,7 @@ import urllib.request
 
 import ema_analysis
 import ema_thermal
-from ema_report import OLLAMA_URL, DEFAULT_MODEL
+from ema_report import OLLAMA_URL, DEFAULT_MODEL, DEFAULT_NUM_CTX
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
@@ -189,7 +189,8 @@ def _fitness(metrics, objective, constraints):
 def _ollama_chat(messages, timeout=120):
     body = json.dumps({"model": DEFAULT_MODEL, "messages": messages, "stream": False,
                        "think": False,          # s. ema_report.call_ollama
-                       "options": {"temperature": 0.6, "num_ctx": 12288, "num_predict": 900}}).encode()
+                       "options": {"temperature": 0.6, "num_ctx": DEFAULT_NUM_CTX,
+                                   "num_predict": 900}}).encode()
     req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,
                                  headers={"Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=timeout) as r:

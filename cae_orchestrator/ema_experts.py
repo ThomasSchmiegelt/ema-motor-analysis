@@ -10,7 +10,7 @@ import json, math, os, re, urllib.request
 from typing import Callable
 
 from ema_topology import TOPOLOGY_LABELS
-from ema_report import DEFAULT_MODEL
+from ema_report import DEFAULT_MODEL, DEFAULT_NUM_CTX
 
 
 OLLAMA_URL   = "http://localhost:11434"
@@ -85,7 +85,7 @@ def _call(prompt: str, model: str = EXPERT_MODEL, timeout: int = 300) -> str:
         "options": {
             "temperature": 0.3,
             "num_predict": 4096,
-            "num_ctx":     12288,
+            "num_ctx":     DEFAULT_NUM_CTX,
         },
     }).encode()
     req = urllib.request.Request(

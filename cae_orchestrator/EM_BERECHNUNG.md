@@ -642,10 +642,11 @@ Feldberechnung), `em3d_runs/<id>/` (gespeicherte 3D-Läufe) und `rag/index.json`
 ### 10.1 Modell
 
 ```python
-DEFAULT_MODEL = os.environ.get("CAE_LLM_MODEL", "qwen3.8:latest")
+DEFAULT_MODEL   = os.environ.get("CAE_LLM_MODEL",   "qwen-gross:latest")
+DEFAULT_NUM_CTX = int(os.environ.get("CAE_LLM_NUM_CTX", "65536"))
 ```
 
-Ministral ist das einzige LLM in dieser Kette. Es wird ausschließlich für
+Das ist das einzige LLM in dieser Kette. Es wird ausschließlich für
 die Textgenerierung des Berichts verwendet — alle Berechnungen davor sind
 rein numerisch.
 

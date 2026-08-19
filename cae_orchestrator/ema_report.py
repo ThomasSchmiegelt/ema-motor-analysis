@@ -25,7 +25,20 @@ OLLAMA_URL = "http://localhost:11434"
 # ema_optimize, ema_design_ai und server.py holen es hier ab, ema_experts leitet es
 # ab. Ueber CAE_LLM_MODEL umstellbar, ohne eine Zeile Code anzufassen — praktisch,
 # weil ein Modellwechsel sonst an sieben Stellen nachgezogen werden muesste.
-DEFAULT_MODEL = os.environ.get("CAE_LLM_MODEL", "qwen3.8:latest")
+DEFAULT_MODEL = os.environ.get("CAE_LLM_MODEL", "qwen-gross:latest")
+
+# Ebenso EIN Ort fuer die Kontextlaenge, aus zwei Gruenden:
+#   1. ``num_ctx`` in den Optionen ueberschreibt den Wert aus dem Modelfile. Ohne
+#      diese Konstante haetten die Aufrufer den 64k-Kontext von ``qwen-gross``
+#      still wieder auf 8k…14k zurueckgeklemmt — der Modellwechsel waere wirkungslos.
+#   2. Ollama laedt das Modell bei JEDER Aenderung von ``num_ctx`` neu (gemessen:
+#      7,1 s gegen 0,5 s bei gleichem Wert). Vier verschiedene Werte wie bisher
+#      bedeuteten einen 17-GB-Reload bei jedem Wechsel Bericht -> Chat -> Entwurf.
+# 64 k belegt zusammen mit den Gewichten 22,5 von 24 GB und laeuft noch zu 100 %
+# auf der GPU (die qwen3.5-Architektur ist hybrid: nur jede 4. Lage ist volle
+# Attention, ``full_attention_interval=4``, der Rest SSM mit konstantem Zustand —
+# deshalb kostet der KV-Cache nur ~64 kB/Token statt ~260 kB).
+DEFAULT_NUM_CTX = int(os.environ.get("CAE_LLM_NUM_CTX", "65536"))
 
 
 # ── Context extraction ──────────────────────────────────────────────────────
@@ -411,7 +424,7 @@ def call_ollama(prompt: str, model: str = DEFAULT_MODEL,
         "options": {
             "temperature": 0.4,
             "num_predict": 8192,
-            "num_ctx":     14336,
+            "num_ctx":     DEFAULT_NUM_CTX,
         },
     }).encode("utf-8")
     req = urllib.request.Request(

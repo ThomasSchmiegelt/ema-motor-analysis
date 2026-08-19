@@ -3021,7 +3021,8 @@
           <button id="btn_cmp_report_triple" onclick="makeComparisonReportTriple()" style="background:#2c5f8e;padding:8px 14px;font-size:.78rem">🔬 3 Modelle nacheinander</button>
           <label style="font-size:.74rem;color:#888">Modell:
             <select id="cmp_model" style="background:#0f0f1a;border:1px solid #444;color:#eee;padding:5px 6px;border-radius:4px;font-size:.74rem">
-              <option value="qwen3.8:latest" selected>qwen3.8 (27B, Standard)</option>
+              <option value="qwen-gross:latest" selected>qwen-gross (27B, 64k Kontext, Standard)</option>
+              <option value="qwen3.8:latest">qwen3.8 (27B, gleiche Gewichte, 32k)</option>
               <option value="ministral-3:14b">ministral-3:14b (schneller)</option>
               <option value="gemma4:26b">gemma4:26b</option>
               <option value="gemma4:e4b">gemma4:e4b</option>
@@ -3821,7 +3822,7 @@ async function makeComparisonReport(agentic = false) {
   btn.disabled = true;
   st.textContent = agentic ? '⏳ 6 Experten analysieren die Varianten…' : '⏳ Bericht wird erzeugt…';
   try {
-    const model = (document.getElementById('cmp_model') || {}).value || 'qwen3.8:latest';
+    const model = (document.getElementById('cmp_model') || {}).value || 'qwen-gross:latest';
     const r = await fetch('/compare/report', { method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ ids, agentic, model }) }).then(x => x.json());
@@ -3859,7 +3860,7 @@ function _pollReportDone() {
 async function makeComparisonReportTriple() {
   const ids = [...document.querySelectorAll('.cmp-checkbox:checked')].map(cb => cb.value);
   if (ids.length < 2) { alert('Mindestens 2 Projekte wählen'); return; }
-  const models = ['qwen3.8:latest', 'ministral-3:14b', 'gemma4:26b'];
+  const models = ['qwen-gross:latest', 'ministral-3:14b', 'gemma4:26b'];
   const btn = document.getElementById('btn_cmp_report_triple');
   const st  = document.getElementById('cmp-report-status');
   const box = document.getElementById('cmp-triple-links');
