@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<package format="1" xmlns="https://wiki.freecad.org/Package_Metadata">
+  <name>ConnectionDetection</name>
+  <description>Geometric detection of part-to-part connections in imported STEP assemblies, as a reusable basis for multi-body FEM (CalculiX) and future tolerance-chain analysis.</description>
+  <version>0.1.0</version>
+  <date>2026-07-25</date>
+  <maintainer email="thomas.schmiegelt@googlemail.com">Thomas Schmiegelt</maintainer>
+  <license>LGPL-2.1-or-later</license>
+  <url type="repository" branch="main"></url>
+  <freecadmin>1.0</freecadmin>
+  <depend type="python">rtree</depend>
+  <content>
+    <workbench>
+      <name>ConnectionDetection</name>
+      <subdirectory>./</subdirectory>
+    </workbench>
+  </content>
+</package>

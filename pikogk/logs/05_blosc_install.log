@@ -1,0 +1,29 @@
+[ 28%] Built target blosc_shared
+[ 56%] Built target blosc_shared_testing
+[ 83%] Built target blosc_static
+[ 84%] Built target test_api
+[ 85%] Built target test_bitshuffle_leftovers
+[ 86%] Built target test_compress_roundtrip
+[ 87%] Built target test_compressor
+[ 88%] Built target test_forksafe
+[ 89%] Built target test_getitem
+[ 90%] Built target test_maxout
+[ 91%] Built target test_noinit
+[ 92%] Built target test_nolock
+[ 93%] Built target test_nthreads
+[ 94%] Built target test_shuffle_roundtrip_avx2
+[ 95%] Built target test_shuffle_roundtrip_generic
+[ 96%] Built target test_shuffle_roundtrip_sse2
+[ 97%] Built target filegen
+[ 99%] Built target fuzz_compress
+[100%] Built target fuzz_decompress
+[100%] Built target bench
+Install the project...
+-- Install configuration: "Release"
+-- Installing: /home/thomas/ai-project/pikogk/local-install/lib/pkgconfig/blosc.pc
+-- Installing: /home/thomas/ai-project/pikogk/local-install/include/blosc.h
+-- Installing: /home/thomas/ai-project/pikogk/local-install/include/blosc-export.h
+-- Installing: /home/thomas/ai-project/pikogk/local-install/lib/libblosc.so.1.21.7
+-- Installing: /home/thomas/ai-project/pikogk/local-install/lib/libblosc.so.1
+-- Installing: /home/thomas/ai-project/pikogk/local-install/lib/libblosc.so
+-- Installing: /home/thomas/ai-project/pikogk/local-install/lib/libblosc.a

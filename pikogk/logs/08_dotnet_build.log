@@ -1,0 +1,13 @@
+  Wiederherzustellende Projekte werden ermittelt...
+  "/home/thomas/ai-project/pikogk/PicoGK/PicoGK.csproj" wiederhergestellt (in "2,98 Sek.").
+  "/home/thomas/ai-project/pikogk/PicoGK_Examples/PicoGKExamples.csproj" wiederhergestellt (in "2,98 Sek.").
+  PicoGK -> /home/thomas/ai-project/pikogk/PicoGK/bin/Debug/net9.0/PicoGK.dll
+  Das Paket "/home/thomas/ai-project/pikogk/PicoGK/bin/Debug/PicoGK.2.2.0.nupkg" wurde erfolgreich erstellt.
+  Das Paket "/home/thomas/ai-project/pikogk/PicoGK/bin/Debug/PicoGK.2.2.0.snupkg" wurde erfolgreich erstellt.
+  PicoGKExamples -> /home/thomas/ai-project/pikogk/PicoGK_Examples/bin/Debug/net9.0/PicoGKExamples.dll
+
+Der Buildvorgang wurde erfolgreich ausgeführt.
+    0 Warnung(en)
+    0 Fehler
+
+Verstrichene Zeit 00:00:07.33

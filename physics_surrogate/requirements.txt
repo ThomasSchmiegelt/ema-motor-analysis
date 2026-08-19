@@ -1,0 +1,19 @@
+# Python-Abhängigkeiten des Surrogat-Dienstes (pip, eigenes venv).
+#
+# BEWUSST GETRENNT vom Flask-venv des `cae_orchestrator`: dort ist kein Torch, und das
+# soll so bleiben — der Analyse-Chain darf nicht von CUDA/Torch abhängen.
+#
+# NICHT installiert wird die Extra `nvidia-physicsnemo[cu13]`: die zieht cuML, cuPy,
+# NVIDIA-DALI und pylibraft (RAPIDS, mehrere GB) für GPU-Dataframes/Datenpipelines, die
+# ein UNet-Trainingsloop nicht braucht. Torch ist bereits Kern-Abhängigkeit von
+# `nvidia-physicsnemo`. Die Extra `[sym]` (= sympy) wird erst für den Physics-Loss
+# (∇×H=J, Ausbaustufe) gebraucht.
+#
+# Torch-Wheels bringen ihre eigene CUDA-Runtime mit; der Treiber dieser Maschine
+# (580.105.08) trägt sowohl CUDA 12 als auch 13, die System-nvcc (12.0) ist irrelevant.
+nvidia-physicsnemo==2.1.1   # ex-Modulus, Apache-2.0; bringt hydra-core/omegaconf/torch mit
+torch>=2.10                 # von physicsnemo gefordert; hier explizit, damit sichtbar
+flask>=3.0.0                # Inferenzdienst auf :5300
+numpy>=1.26.0
+scipy>=1.11.0               # der geteilte Encoder importiert ema_analysis (splu-Referenz)
+matplotlib>=3.8.0           # Vorschau-PNG im selben Stil wie ema_pipeline._field_frame

@@ -1,20 +1,61 @@
-venv/
+# ── ai-workspace Monorepo .gitignore ──────────────────────────────────────────
+# Es wird NUR Quellcode versioniert. Laufzeitdaten, Build-Artefakte und native
+# Binaries bleiben auf der Platte (der laufende Dienst nutzt sie), gehen aber NICHT
+# in Git. Ein frischer Clone auf einem anderen Rechner müsste die nativen Teile
+# (pikogk picogk.so / c-blosc) neu bauen — bewusst außerhalb dieses POC-Scopes.
+
+# ── Python (cae_orchestrator, connection_detection) ──
 __pycache__/
-workspace/
 *.pyc
-*.FCStd
-*.FCBak
-*.FCMacro
-*.step
-*.brep
-*.unv
-*.geo
-*.cvg
-*.dat
-*.sta
-*.frd
-*.inp
-cad_images/
-charts/
-frames/
-~/cae_projekte/
+venv/
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# ── cae_orchestrator: Laufzeit-/Zwischenartefakte (liegen ohnehin in ~/cae_projekte) ──
+cae_orchestrator/**/__pycache__/
+
+# ── physics_surrogate: Modelle + Trainingsdaten (GB-Größe, reproduzierbar) ──
+# ACHTUNG: .gitignore kennt KEINE Kommentare am Zeilenende — ein "# …" hinter dem
+# Muster wird Teil des Pfads und die Regel greift stillschweigend nicht mehr.
+# (Genau so sind hier einmal 17 GB Datensatz durchgerutscht.)
+# trainierte Gewichte (aus datasets/ reproduzierbar)
+physics_surrogate/checkpoints/
+# NPZ-Trainingsdaten (aus den Lösern regenerierbar, ~17 GB)
+physics_surrogate/datasets/
+# Auswertungs-/Laufausgaben je Training
+physics_surrogate/outputs/
+
+# ── .NET (pikogk) Build-Ausgaben ──
+pikogk/**/bin/
+pikogk/**/obj/
+pikogk/**/.vs/
+
+# ── pikogk: Laufzeitdaten + native Build-Artefakte (NICHT versionieren) ──
+pikogk/PicoGKWebApi/data/          # 11 G generierte STL-Instanzen (Laufzeit-Store)
+pikogk/PicoGKWebApi/output/        # Render-/Export-Ausgaben
+pikogk/PicoGKRuntime/Dist/         # gebaute native Runtime (picogk.so + Abhängigkeiten)
+pikogk/local-install/              # gebautes c-blosc-Install-Präfix
+pikogk/c-blosc/                    # vendored Third-Party-Build (rebuildbar)
+pikogk/logs/                       # Prüfstands-/Testläufe
+pikogk/.dotnet/                    # falls .NET SDK je hierher zeigt
+pikogk/dotnet-install.sh           # Installer-Skript (kein Source)
+
+# ── OS / Editor ──
+.DS_Store
+*.swp
+
+# pikogk-Unterprojekte sind EIGENE Git-Repos (Leap71/Blosc + eigenes PicoGKWebApi) —
+# nicht in den Monorepo einbetten; behalten ihre .git-Historie auf der Platte.
+pikogk/PicoGK/
+pikogk/PicoGKRuntime/
+pikogk/PicoGKWebApi/
+pikogk/PicoGK_Examples/
+pikogk/c-blosc/
+
+# lego: Laufzeitdaten (LDraw-Bibliothek, Kollisionsnetze, Wine-Prefix, Downloads)
+lego/data/
+lego/.venv/
+
+# pikogk: Laufzeit-Logs
+pikogk/logs/

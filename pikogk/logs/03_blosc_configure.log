@@ -1,0 +1,23 @@
+Configuring for Blosc version: 1.21.7.dev
+-- The C compiler identification is GNU 13.3.0
+-- The ASM compiler identification is GNU
+-- Found assembler: /usr/bin/cc
+-- Detecting C compiler ABI info
+-- Detecting C compiler ABI info - done
+-- Check for working C compiler: /usr/bin/cc - skipped
+-- Detecting C compile features
+-- Detecting C compile features - done
+-- Using LZ4 internal sources.
+-- Using zlib internal sources.
+-- Using ZSTD internal sources.
+-- No build type specified. Defaulting to 'Release'.
+-- Building for system processor x86_64
+-- Adding run-time support for SSE2
+-- Adding run-time support for AVX2
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD
+-- Performing Test CMAKE_HAVE_LIBC_PTHREAD - Success
+-- Found Threads: TRUE  
+-- Adding support for assembly sources in ZSTD
+-- Configuring done (0.4s)
+-- Generating done (0.0s)
+-- Build files have been written to: /home/thomas/ai-project/pikogk/c-blosc/build
