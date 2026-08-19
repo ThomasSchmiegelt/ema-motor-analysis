@@ -7,6 +7,7 @@
 #   ./start_agent.sh --nur-server         nur den Orchestrator, kein PI
 #   ./start_agent.sh --weiter             letzte Sitzung dieses Verzeichnisses fortsetzen
 #   ./start_agent.sh --sitzung <id>       eine bestimmte Sitzung fortsetzen (Teil-UUID reicht)
+#   ./start_agent.sh <id>                 dasselbe — eine nackte, bekannte Kennung genuegt
 #   ./start_agent.sh --sitzungen          die letzten Sitzungen auflisten und beenden
 #
 # Alles Weitere wird unveraendert an `pi` durchgereicht (z. B. --model).
@@ -34,6 +35,9 @@ for a in "$@"; do
         --sitzungen)    LISTE=1 ;;
         --sitzung)      erwarte_id=1 ;;
         --sitzung=*)    SITZUNG="${a#--sitzung=}" ;;
+        --)             ;;   # ueblicher Trenner "ab hier keine eigenen Optionen mehr".
+                             # NICHT weiterreichen: `pi` kennt ihn nicht und bricht mit
+                             # "Unknown option: --" ab, nachdem alles andere schon lief.
         *)              ARGS+=("$a") ;;
     esac
 done
@@ -163,14 +167,44 @@ fi
 # und --continue griffe in die falsche Ablage, denn PI sortiert Sitzungen nach cwd.
 cd "$ROOT"
 
+# Hat der Aufrufer PIs eigene Sitzungsflaggen benutzt, gilt seine Wahl unangetastet:
+# nichts hinzufuegen, nichts herausloesen (sonst risse die Erkennung unten den Wert aus
+# `--session <id>` heraus und `--session` verschluckte das naechste Argument), und auch
+# keinen Hinweis auf die letzte Sitzung zeigen, der dann falsch waere.
+eigene_wahl=0
+for a in ${ARGS[@]+"${ARGS[@]}"}; do
+    case "$a" in --session|--session=*|--session-id|--session-id=*|--continue|-c|--resume|-r|--fork|--fork=*|--no-session) eigene_wahl=1 ;; esac
+done
+
+# Eine nackte Sitzungskennung als Argument ist die naheliegende Eingabe — PI schreibt
+# beim Beenden selbst "To resume this session: pi --session <uuid>", und der Griff
+# danach landet leicht bei `./start_agent.sh -- <uuid>` oder `./start_agent.sh <uuid>`.
+# Erkannt wird sie NICHT ueber ein Muster, sondern durch Abgleich mit den wirklich
+# vorhandenen Sitzungen: was keine ist, geht unveraendert an `pi` weiter.
+if [ -z "$SITZUNG" ] && [ "$WEITER" -eq 0 ] && [ "$eigene_wahl" -eq 0 ] \
+   && [ "$NUR_SERVER" -eq 0 ] && [ ${#ARGS[@]} -gt 0 ]; then
+    bekannte="$(sitzungen 999 | cut -f1)"
+    rest=()
+    for a in "${ARGS[@]}"; do
+        if [ -z "$SITZUNG" ] && [ ${#a} -ge 8 ] && grep -qF -- "$a" <<<"$bekannte" 2>/dev/null; then
+            SITZUNG="$a"
+        else
+            rest+=("$a")
+        fi
+    done
+    [ -n "$SITZUNG" ] && ARGS=(${rest[@]+"${rest[@]}"})
+fi
+
 if [ -n "$SITZUNG" ]; then
-    ARGS=(--session "$SITZUNG" "${ARGS[@]}")
+    ARGS=(--session "$SITZUNG" ${ARGS[@]+"${ARGS[@]}"})
     echo "Setze Sitzung $SITZUNG fort."
+elif [ "$eigene_wahl" -eq 1 ]; then
+    :                       # PI entscheidet — nichts hinzufuegen, nichts anmerken
 elif [ "$WEITER" -eq 1 ]; then
     letzte="$(sitzungen 1)"
     [ -n "$letzte" ] || die "Keine fortsetzbare Sitzung in $ROOT — dann einfach ohne --weiter starten."
     IFS=$'\t' read -r s_id s_zeit s_titel <<<"$letzte"
-    ARGS=(--continue "${ARGS[@]}")
+    ARGS=(--continue ${ARGS[@]+"${ARGS[@]}"})
     echo "Setze fort: $s_id  ($s_zeit)  $s_titel"
 else
     # Bewusst NICHT von selbst fortsetzen: ein frischer Start muss der Normalfall
@@ -187,4 +221,4 @@ fi
 echo ""
 echo "=== PI mit $MODEL — Skill 'cae-orchestrator' geladen ==="
 echo ""
-exec pi --provider ollama --model "$MODEL" "${ARGS[@]}"
+exec pi --provider ollama --model "$MODEL" ${ARGS[@]+"${ARGS[@]}"}

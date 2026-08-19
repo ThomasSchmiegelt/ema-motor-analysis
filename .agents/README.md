@@ -30,6 +30,7 @@ cd ~/ai-workspace
 ./start_agent.sh --weiter                         # letzte Sitzung fortsetzen
 ./start_agent.sh --sitzungen                      # Sitzungen auflisten
 ./start_agent.sh --sitzung 01a01998               # bestimmte Sitzung (Teil-UUID reicht)
+./start_agent.sh 01a01998                         # dasselbe, nackte Kennung genuegt
 ```
 
 Es prüft Ollama, **nagelt das Modell auf seine ID fest** (`qwen-gross:latest` /
@@ -59,7 +60,19 @@ sortiert sie **nach Arbeitsverzeichnis** — deshalb startet `start_agent.sh` PI
 ./start_agent.sh --sitzungen        # id, Zeitpunkt, erste Frage — neueste zuerst
 ./start_agent.sh --weiter           # die neueste fortsetzen  (pi --continue)
 ./start_agent.sh --sitzung 01a01998 # eine bestimmte          (pi --session)
+./start_agent.sh 01a01998           # dasselbe, ohne Flagge
+./start_agent.sh -- 01a01998        # dasselbe; `--` wird geschluckt, nicht durchgereicht
 ```
+
+Die nackte Kennung wird **nicht** über ein Muster erkannt, sondern durch Abgleich mit den
+wirklich vorhandenen Sitzungen — was keine ist, geht unverändert an `pi`. PIs eigene
+Flaggen (`--session`, `--continue`, `-c`, `--resume`, `--fork`, `--no-session`) bleiben
+dabei unangetastet: dann entscheidet PI, und das Skript sagt und ändert nichts.
+
+Der Grund für die Bequemlichkeit: PI schreibt beim Beenden selbst
+`To resume this session: pi --session <uuid>`. Der Griff danach landet leicht bei
+`./start_agent.sh -- <uuid>` — und `--` kennt `pi` nicht, es brach mit
+`Unknown option: --` ab, nachdem Server und Modellprüfung schon gelaufen waren.
 
 Wie PI das Arbeitsverzeichnis in den Ordnernamen kodiert, ist nirgends zugesagt; das
 Skript rät es deshalb **nicht**, sondern liest die erste Zeile jeder Sitzungsdatei — die
