@@ -27,6 +27,29 @@ Each subproject has **its own CLAUDE.md or docs** — read those before working 
 - `pikogk/INTEGRATION.md` — HTTP contract for calling the PicoGK web API from another
   program.
 
+## Agent layer (root-level, spans the whole repo)
+
+Besides the browser UI, the toolchain is drivable by a **local** LLM through
+[PI](https://pi.dev) (`@earendil-works/pi-coding-agent`) + Ollama. This lives at the root
+because it is not part of any one subproject:
+
+| Path | What |
+|---|---|
+| `start_agent.sh` | one command: checks Ollama, pins the model **by ID** (a `ollama pull` under the same name silently swaps the weights), starts the orchestrator only if `:5000` is silent, waits for it, then `exec pi`. Session handling: `--weiter` / `--sitzung <id>` / `--sitzungen`; a bare known session id and a lone `--` are accepted too, PI's own session flags pass through untouched |
+| `.agents/README.md` | setup + what the agent sees; PI binds tools as **Skill = CLI + README**, deliberately not MCP |
+| `.agents/skills/cae-orchestrator/SKILL.md` | the skill the model reads — the authority on how `cae_cli.py` is meant to be used |
+| `cae_orchestrator/cae_cli.py` | the CLI itself (stdlib only), nine verbs over HTTP on `:5000` |
+
+Two things that are easy to get wrong when touching this:
+
+- **PI sorts sessions by cwd**, so `start_agent.sh` always `exec`s from the repo root —
+  otherwise `--continue` would reach into another directory's sessions, and PI would find
+  neither `AGENTS.md` nor `.agents/skills/`.
+- **The model and its context length come from `ema_report`** (`DEFAULT_MODEL`,
+  `DEFAULT_NUM_CTX`), not from `start_agent.sh`. The script only pins which model PI
+  itself talks to; both default to `qwen-gross:latest` / 65536 and are overridable via
+  `CAE_LLM_MODEL` / `CAE_LLM_NUM_CTX`.
+
 ## How the pieces interact
 
 - `pikogk` (port 5266) and Ollama (port 11434) run as standalone local HTTP services;

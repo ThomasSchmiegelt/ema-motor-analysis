@@ -7,7 +7,7 @@ Diese Notiz beschreibt, was zu beachten ist, wenn **ein anderes Programm** (z. B
 `PicoGKWebApi` ist kein Hintergrunddienst/systemd-Service, sondern ein manuell gestarteter Prozess:
 
 ```bash
-~/ai-project/pikogk/start.sh
+~/ai-workspace/pikogk/start.sh
 ```
 
 Das rufende Programm startet ihn **nicht automatisch mit** — es muss vorher (in einem eigenen Terminal, `nohup`, tmux, o. ä.) laufen. Sinnvoll ist ein kurzer Erreichbarkeits-Check vor der eigentlichen Nutzung:

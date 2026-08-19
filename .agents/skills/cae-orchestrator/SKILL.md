@@ -50,7 +50,8 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 Abschnitt abrufen.** Erst die Abschnitte zeigen, dann gezielt eintauchen:
 
 ```bash
-python3 cae_cli.py results --sections --project 20260813_140556_...
+python3 cae_cli.py results --sections --project last          # welche Abschnitte gibt es?
+python3 cae_cli.py results summary --project last
 python3 cae_cli.py results em.performance --project 20260813_140556_...
 ```
 
@@ -139,6 +140,13 @@ python3 cae_cli.py routes --grep oilspray
 python3 cae_cli.py raw GET /project/20260813_140556_.../oilspray
 python3 cae_cli.py raw POST /chat --data '{"message":"Wie hoch ist das Moment?"}'
 ```
+
+**Manche Routen arbeiten auf dem Serverzustand, nicht auf einer Projektkennung** — `/chat`
+gehört dazu und antwortet ohne geladenes Projekt mit
+`"Kein Projekt geladen — erst eine Analyse ausführen oder ein Projekt laden"`. Das ist
+keine Störung, sondern die Vorbedingung: erst `run analyse --wait` oder ein Laden über die
+Oberfläche. Für Zahlen aus einem beliebigen Projekt ist ohnehin
+`results <abschnitt> --project <id>` der direkte Weg — ohne Umweg über ein Sprachmodell.
 
 Referenz mit allen Routen nach Themen: `references/routes.md`.
 

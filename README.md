@@ -18,6 +18,39 @@ eingeschränkten User **`cae`** (kein sudo).
 rufen sie über `localhost` (`:5266` bzw. `:11434`) — Aufrufort egal. `connection_detection`
 teilt sich die FreeCAD-Toolchain mit `cae_orchestrator`.
 
+## Agentenbedienung (lokales Modell, kein Cloud-Zugang)
+
+Die Toolkette lässt sich außer im Browser auch von einem **lokalen** Sprachmodell
+bedienen — über [PI](https://pi.dev) (`@earendil-works/pi-coding-agent`) und Ollama.
+Eine Zeile startet beides:
+
+```bash
+./start_agent.sh                          # Orchestrator (falls nötig) + PI, interaktiv
+./start_agent.sh -p "Wie hoch ist B_gap im neuesten Projekt?"
+./start_agent.sh --weiter                 # letzte Sitzung fortsetzen
+./start_agent.sh --sitzungen              # Sitzungen dieses Ordners auflisten
+```
+
+Das Skript prüft Ollama, **nagelt das Modell auf seine ID fest** (ein `ollama pull` unter
+gleichem Namen tauscht sonst still die Gewichte), startet den Server nur, wenn `:5000`
+nicht antwortet, und wartet auf dessen Erreichbarkeit, bevor PI läuft.
+
+| Teil | Wo | Was |
+|---|---|---|
+| `start_agent.sh` | Wurzel | Startkette + Sitzungsverwaltung |
+| `.agents/` | Wurzel | Skill-Definition für PI (`skills/cae-orchestrator/SKILL.md`) und Einrichtung |
+| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die der Agent benutzt — neun Verben über HTTP auf `:5000` |
+
+**Warum eine CLI und kein MCP-Server:** ein lokales Modell kann die ~135 HTTP-Routen des
+Orchestrators nicht als 135 Werkzeugschemata im Kontext halten. PI bindet Werkzeuge
+deshalb als *Skill = CLI + README*; `cae_cli.py` filtert Base64-Nutzlasten heraus, kappt
+die Ausgabe und trägt den Zustand im Exit-Code. Details in `.agents/README.md`.
+
+**Modell:** `qwen-gross:latest` (Qwen3.5 27B Q4_K_M, 64 k Kontext) — dasselbe Modell, das
+auch Bericht, Chat und KI-Auslegung im Orchestrator benutzen. Eine Quelle dafür:
+`ema_report.DEFAULT_MODEL` / `DEFAULT_NUM_CTX`, umstellbar über `CAE_LLM_MODEL` bzw.
+`CAE_LLM_NUM_CTX` ohne Codeänderung.
+
 ## Geteilte Toolchain (systemweit / /opt, nicht in diesem Repo)
 
 - FreeCAD-1.1-Quellbuild + CalculiX → `/opt/cae-tools/freecad_1.1_quellcode` (Symlink `~/freecad_1.1_quellcode`)

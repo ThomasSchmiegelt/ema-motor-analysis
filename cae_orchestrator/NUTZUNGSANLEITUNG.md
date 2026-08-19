@@ -20,7 +20,7 @@ Elmer FEM durchführen (Endeffekte, Schrägung, 3D-Visualisierung → Tab „�
 ## 1. Starten
 
 ```bash
-cd ~/ai-project/cae_orchestrator
+cd ~/ai-workspace/cae_orchestrator
 ./start.sh
 ```
 
@@ -955,6 +955,62 @@ und ≥ 2 Projekte angehakt sind — zum **Vergleich**. Antworten stützen sich 
 - RAG-Kontext aus der Wissensbasis (best-effort).
 
 Benötigt Ollama.
+
+### Bedienung ohne Browser: Kommandozeile und Agent
+
+Alles, was die Oberfläche kann, hängt an HTTP-Routen auf `:5000`. `cae_cli.py` macht sie
+von der Kommandozeile aus bedienbar — gedacht für Skripte **und** für ein lokales
+Sprachmodell, das die Toolkette selbst bedient.
+
+```bash
+cd ~/ai-workspace/cae_orchestrator
+python3 cae_cli.py health                      # laeuft der Server?
+python3 cae_cli.py projects                    # Projekte auflisten
+python3 cae_cli.py results --project last --sections    # welche Abschnitte gibt es?
+python3 cae_cli.py results summary --project last      # Kennwerte des juengsten Projekts
+python3 cae_cli.py run analyse --from-project last --wait
+```
+
+**Varianten rechnen, ohne den Payload zu schreiben.** Ein Lauf braucht rund 90 Schlüssel;
+statt sie zusammenzusetzen, erbt man eine gerechnete Auslegung und ändert einzelne Werte:
+
+```bash
+python3 cae_cli.py run cad --from-project last --dry-run \
+        --set slotDepth=30 --set p=8 --set magShape=v          # erst zeigen …
+python3 cae_cli.py run analyse --from-project last --wait \
+        --set slotDepth=30 --set project_name=Variante_A       #  … dann rechnen
+```
+
+`--set` prüft gegen dieselbe Parameterliste, die auch die Parameter-Tabelle speist
+(`/param_schema`): 26 Hauptparameter + 22 Feinparameter, jeweils mit Typ, Grenzen und
+Auswahlliste. **Grenzverletzungen werden abgewiesen, nicht geklemmt** — ein geklemmter
+Wert sähe wie ein angenommener aus, und der Bericht rechnete dann eine andere Maschine
+als die bestellte. Unbekannte Namen fallen mit Tippfehler-Vorschlag durch:
+
+```
+FEHLER: poleArkFrac steht weder im Schema noch im Grundpayload — gemeint war poleArcFrac?
+FEHLER: magLayers: 5 liegt ueber der Obergrenze 4
+```
+
+`python3 cae_cli.py raw GET /param_schema` zeigt alle Parameter samt Beschreibung. Bei
+den Feinparametern steht dort auch die **Topologiebindung** (`poleArcFrac` wirkt nur bei
+`spm`/`halbach`, `magLayers` nur bei `pmasynrm`, `magAsym` nur bei `vasym` …) — auf einer
+anderen Topologie wird der Wert angenommen und tut nichts.
+
+**Mit Sprachmodell:** ein Skript in der Repo-Wurzel startet Server und Agent zusammen.
+
+```bash
+cd ~/ai-workspace
+./start_agent.sh                              # interaktive Sitzung
+./start_agent.sh -p "Wie hoch ist B_gap im neuesten Projekt?"
+./start_agent.sh --weiter                     # letzte Sitzung fortsetzen
+./start_agent.sh --sitzungen                  # Sitzungen auflisten
+./start_agent.sh --sitzung 01a01998           # eine bestimmte fortsetzen
+```
+
+Ohne Flagge wird **nicht** fortgesetzt, sondern frisch gestartet — nur ein Hinweis auf
+die letzte Sitzung erscheint. Das ist Absicht: sonst schleppt jede neue Frage den Verlauf
+der vorigen mit. Einrichtung und Hintergrund in `.agents/README.md`.
 
 ---
 

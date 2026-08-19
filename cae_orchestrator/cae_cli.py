@@ -466,7 +466,12 @@ def cmd_wait(args) -> int:
 
 def cmd_results(args) -> int:
     if args.project:
-        p = os.path.expanduser(f"~/cae_projekte/{args.project}/results.json")
+        # 'last' bedeutet hier dasselbe wie bei ``run --from-project last``. Ohne diese
+        # Zeile hiess dieselbe Kennung an zwei Stellen Verschiedenes: dort das juengste
+        # Projekt, hier ein Verzeichnis namens "last" — und die Fehlermeldung ("existiert
+        # nicht") half nicht weiter, weil sie den Tippfehler nahelegte statt der Ursache.
+        pid = _newest_project() if args.project == "last" else args.project
+        p = os.path.join(PROJECTS_ROOT, pid, "results.json")
         if not os.path.exists(p):
             return _die(f"{p} existiert nicht", EXIT_USAGE)
         with open(p, encoding="utf-8") as f:
@@ -596,7 +601,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("results", help="Ergebnisse lesen (Abschnitt wählen!)")
     s.add_argument("section", nargs="?", help="Punktpfad, z. B. em.performance")
-    s.add_argument("--project", help="aus ~/cae_projekte/<id>/results.json statt live")
+    s.add_argument("--project", help="aus ~/cae_projekte/<id>/results.json statt live; "
+                                     "'last' = juengstes Projekt mit meta.json")
     s.add_argument("--sections", action="store_true", help="nur die Abschnittsnamen")
     _add_globals(s)
     s.set_defaults(fn=cmd_results)

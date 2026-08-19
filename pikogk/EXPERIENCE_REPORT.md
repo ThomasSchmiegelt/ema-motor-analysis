@@ -117,7 +117,7 @@ Nach diesen drei Anpassungen (zwei Config-Werte, ein Verzeichnis — **kein einz
 ## 7. Repro-Verzeichnis
 
 ```
-~/ai-project/pikogk/
+~/ai-workspace/pikogk/
 ├── PicoGK/                  # C#-Wrapper (geklont, Config.cs 1 Zeile geändert)
 ├── PicoGKRuntime/            # C++-Kern + Submodule (GLFW, imgui, openvdb)
 │   └── Dist/picogk.so        # fertig gebaute Runtime-Bibliothek
@@ -142,7 +142,7 @@ Optionaler Aufsatz auf Schritt 1-3 (Linux-Build, einfache Geometrie, STL-Export)
 
 **Bekannte Nebenwirkung:** Da `Library.Go()` intern immer einen echten GLFW/OpenGL-Viewer öffnet, poppt beim Start von `start.sh` zusätzlich zur Browser-Oberfläche ein natives Desktop-Fenster auf (unvermeidbar mit der aktuellen PicoGK-API, kein Blocker für den PoC).
 
-**Start:** `~/ai-project/pikogk/start.sh` → öffnet `http://localhost:5266`.
+**Start:** `~/ai-workspace/pikogk/start.sh` → öffnet `http://localhost:5266`.
 
 ## 10. Zusatz: Freitext-Geometriebeschreibung per Ollama (Stufe 1: parametrisch)
 
