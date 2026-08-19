@@ -822,6 +822,14 @@ Tabellarischer Editor: Spalte 1 = Baseline aus dem aktuellen Formular, bis zu 10
 weitere Spalten mit geänderten Parametern. **„Alle Spalten rechnen"** → sequentielle
 Berechnung, Ergebnisse werden automatisch in den Vergleich übernommen.
 
+Standardmäßig stehen die **26 Hauptparameter** in der Tabelle. Das Kästchen
+**„Feinparameter zeigen"** blendet 22 weitere ein: Leiter je Nut, Nutbreitenverhältnis,
+Magnetlagen und -abstand, Polbedeckung, Magnete je Pol, zweiter V-Winkel, Asymmetrie,
+Tangentiallänge, Klebespalt, Magnetisierungsrichtung, Taschendefinition, Flusssperren
+und Wuchtbohrungen. Sie sind bewusst zugeklappt, weil die meisten davon **nur für
+bestimmte Topologien** wirken — welche, steht jeweils in der Zeilenbeschriftung
+(z. B. „Polbedeckung … (nur spm, halbach)").
+
 #### Vergleichsbericht (PDF)
 
 | Modus | Beschreibung |

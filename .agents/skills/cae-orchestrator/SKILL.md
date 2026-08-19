@@ -84,6 +84,27 @@ python3 cae_cli.py run cad     --from-project last --wait \
 * Immer `--set project_name=…` mitgeben, wenn eine Variante entsteht — sonst trägt sie
   den Namen der Vorlage.
 
+**Was `--set` kennt: 26 Hauptparameter + 22 Feinparameter.** Die Feinparameter sind die
+Stellschrauben unterhalb der Grundgeometrie — Wicklung (`conductorsPerSlot`,
+`slotWidthRatio`), Magnetlagen und Polkontur (`magLayers`, `magLayerGap`, `poleArcFrac`,
+`segPerPole`, `magAngle2`, `magAsym`, `magTangLen`, `magGapMm`, `magOrient`), Magnettasche
+(`pocketMode`, `pocketOuterD`, `pocketInnerD`), Flusssperren (`genFluxBarrierD/Q`,
+`fluxBarrierDepth`, `fluxBarrierWidth`) und Wuchtbohrungen (`genBalanceBolts`,
+`balanceBoltCircleD`, `balanceBoltOffsetDeg`, `balanceBoltThread`). Alle mit Grenzen,
+Typ und Auswahlliste — `python3 cae_cli.py raw GET /param_schema` zeigt sie samt `desc`.
+
+* **Viele Feinparameter gelten nur für bestimmte Topologien**, und das steht in ihrem
+  `desc`: `poleArcFrac` nur `spm`/`halbach`, `magLayers` nur `pmasynrm`, `magAsym` nur
+  `vasym`, `magAngle2` nur `vv`, `magTangLen` nur `u`/`delta`, `pocket*` nur `v`.
+  Auf einer anderen Topologie wird der Wert **angenommen und tut nichts** — vor dem
+  Setzen also `desc` lesen, sonst wird eine unveränderte Maschine als geändert gemeldet.
+* Schalter sind **echte Booleans**: `--set genFluxBarrierQ=true`. `1`, `0` oder `ja`
+  werden abgewiesen (die Pipeline prüft mit `bool(...)`, wo jeder Text wahr wäre).
+
+**Nicht im Schema, aber im Payload:** reine CAD-Schalter (`genBearingA`, `splineTeeth`,
+`windingHeadStyle` …). Die gehen weiterhin durch, wenn sie in der Vorlage stehen — aber
+ohne Grenzen und ohne Typprüfung. Was das Feld beeinflusst, steht im Schema.
+
 **Die Grenzen aus `geom` sagen NICHT, ob eine Geometrie baubar ist.** Sie sind die
 Suchbox des Optimierers und weit größer als das Baubare (gemessen: blind gezogen sind
 nur ~4 % baubar; `slotDepth` erlaubt 60 mm bei ~44 mm Statorwand). Nach jeder

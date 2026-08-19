@@ -199,10 +199,13 @@ def _load_payload(args) -> dict:
 # Zwei Wissensquellen, bewusst verschieden behandelt:
 #   * ``/param_schema`` — der kuratierte Satz mit Grenzen, Typen und Auswahllisten.
 #     Wer dort steht, wird GEPRUEFT und automatisch nach ``geom`` bzw. auf die obere
-#     Ebene einsortiert (Feld ``in_geom``).
-#   * der Grundpayload selbst — alles Weitere (``magLayers``, ``airGap``, ``poleArcFrac``
-#     …). Kein Schema, also keine Grenzen; gesetzt wird dort, wo der Schlüssel schon
-#     liegt. Erfundene Namen fallen genau hier durch.
+#     Ebene einsortiert (Feld ``in_geom``). Seit der Schemaerweiterung deckt er auch
+#     die Feinparameter ab (``adv``: magLayers, poleArcFrac, conductorsPerSlot,
+#     Flusssperren, Wuchtbohrungen …) — genau die, die vorher nur deshalb durchgingen,
+#     weil sie zufaellig schon im Grundpayload standen: ohne Grenze, ohne Typ.
+#   * der Grundpayload selbst — alles Weitere (reine CAD-Schalter wie ``genBearingA``
+#     oder ``splineTeeth``). Kein Schema, also keine Grenzen; gesetzt wird dort, wo der
+#     Schluessel schon liegt. Erfundene Namen fallen genau hier durch.
 #
 # Grenzverletzungen werden ABGEWIESEN, nicht stillschweigend geklemmt: ein geklemmter
 # Wert sieht für den Aufrufer wie ein angenommener aus, und der Bericht rechnet dann
@@ -244,6 +247,13 @@ def _parse_value(raw: str):
 
 def _check_value(key: str, val, spec: dict):
     """(bereinigter Wert, Fehlertext|None) gegen eine Schema-Zeile."""
+    if spec.get("kind") == "bool":
+        # Nur echte Booleans. "true"/1 waeren bequem, aber ``genFluxBarrierQ=1`` liest
+        # sich wie eine Anzahl — und die Pipeline prueft mit ``bool(...)``, wo jede
+        # nichtleere Zeichenkette wahr ist. Ein Tippfehler wuerde dann still wirken.
+        if not isinstance(val, bool):
+            return val, f"{key}: true oder false erwartet, '{val}' bekommen"
+        return val, None
     if spec.get("kind") == "num":
         if isinstance(val, bool) or not isinstance(val, (int, float)):
             return val, f"{key}: Zahl erwartet, '{val}' bekommen"

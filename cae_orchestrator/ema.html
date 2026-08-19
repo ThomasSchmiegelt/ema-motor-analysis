@@ -3005,6 +3005,10 @@
                   style="background:#456;padding:7px 14px;font-size:.78rem">➕ Warteschlange</button>
           <span style="width:1px;height:20px;background:#444"></span>
           <button onclick="paramTableToVariants()" style="background:#444;padding:7px 12px;font-size:.78rem">→ als Varianten übernehmen</button>
+          <label style="font-size:.75rem;color:#999;display:flex;align-items:center;gap:5px;cursor:pointer"
+                 title="Magnetlagen, Polbedeckung, Leiter je Nut, Flusssperren, Wuchtbohrungen — alles, was die Rechnung liest, aber selten variiert wird">
+            <input type="checkbox" id="ptab_adv" onchange="renderParamTable()"/> Feinparameter zeigen
+          </label>
         </div>
         <div id="ptab-wrap" style="overflow-x:auto;max-height:420px">
           <div style="color:#666;font-size:.82rem;padding:14px">Noch keine Tabelle — „Tabelle aus Entwurf erzeugen" klicken.</div>
@@ -4079,7 +4083,8 @@ async function refreshVariantSets() {
 
 // ── Parameter table (column variation) ───────────────────────────────────────
 // Spalte 1 = Ausgangswerte; jede weitere Spalte ist eine editierbare Variante.
-let _ptabSchema = null;            // [{key,desc,kind,in_geom,lo,hi,int,options,def}]
+let _ptabSchema = null;            // [{key,desc,kind,in_geom,adv,lo,hi,int,options,def}]
+let _ptabRows   = [];             // die gerade sichtbaren Zeilen (Feinparameter zuschaltbar)
 let _ptabCols   = [];             // [{name, values:{key:val}}]  (col 0 = Basis)
 
 // Map a schema key into the full /analyse payload (geom vs. top-level vs. axial_len)
@@ -4114,7 +4119,8 @@ async function buildParamTable() {
     });
     _ptabCols = [{ name: 'Ausgangswerte', values: vals }];
     renderParamTable();
-    st.textContent = `${_ptabSchema.length} Parameter geladen`;
+    const nAdv = _ptabSchema.filter(sp => sp.adv).length;
+    st.textContent = `${_ptabSchema.length - nAdv} Parameter geladen (+ ${nAdv} Feinparameter)`;
   } catch (e) { st.textContent = '❌ ' + e.message; }
 }
 
@@ -4142,6 +4148,11 @@ function _ptabCell(spec, ci, val) {
     return `<select ${ro ? 'disabled' : ''} onchange="_ptabSet('${spec.key}',${ci},this.value)"
               style="width:100%;background:${ro ? '#15151f' : '#0f0f1a'};border:1px solid #333;color:#ddd;padding:3px;border-radius:3px;font-size:.74rem">${opts}</select>`;
   }
+  if (spec.kind === 'bool') {
+    // .checked, nicht .value — ein Kontrollkaestchen liefert sonst immer "on".
+    return `<input type="checkbox" ${val === true || val === 'true' ? 'checked' : ''} ${ro ? 'disabled' : ''}
+              onchange="_ptabSet('${spec.key}',${ci},this.checked)" style="width:16px;height:16px"/>`;
+  }
   const step = spec.int ? '1' : 'any';
   return `<input type="number" step="${step}" value="${val ?? ''}" ${ro ? 'readonly' : ''}
             min="${spec.lo ?? ''}" max="${spec.hi ?? ''}"
@@ -4168,7 +4179,9 @@ function renderParamTable() {
   });
   head += '</tr>';
   let body = '';
-  _ptabSchema.forEach(spec => {
+  const adv = (document.getElementById('ptab_adv') || {}).checked;
+  _ptabRows = _ptabSchema.filter(sp => adv || !sp.adv);
+  _ptabRows.forEach(spec => {
     body += `<tr><td style="font-size:.76rem;color:#bbb">${escHtml(spec.desc)}</td>`;
     _ptabCols.forEach((c, ci) => {
       body += `<td style="text-align:center">${_ptabCell(spec, ci, c.values[spec.key])}</td>`;

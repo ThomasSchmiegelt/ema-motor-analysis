@@ -3170,6 +3170,10 @@ def param_schema():
                 out.append({"value": k, "label": k})
         return out
 
+    orient_labels = {"transverse": "Lange Seite N/S (quer magnetisiert)",
+                     "longitudinal": "Kurze Seite N/S (längs, 90° gedreht)"}
+    pocket_labels = {"position": "Position (Radius) + Länge",
+                     "diameter": "Durchmesser (Außen-Ø / Innen-Ø) + Winkel"}
     enum_opts = {
         "magShape":    _opts(getattr(T2E, "_SHAPE", []), labelmap=topo_labels),
         "rotor_lam":   _opts(getattr(T2E, "_LAM", []),  table=LAMINATES),
@@ -3177,19 +3181,23 @@ def param_schema():
         "hairpin_mat": _opts(getattr(T2E, "_HAIR", []), table=HAIRPIN_MATS),
         "magnet":      _opts(getattr(T2E, "_MAG", []),  table=MAGNETS),
         "cooling":     _opts(getattr(T2E, "_COOL", []), labelmap=cool_labels),
+        "magOrient":   _opts(getattr(T2E, "_ORIENT", []), labelmap=orient_labels),
+        "pocketMode":  _opts(getattr(T2E, "_POCKET", []), labelmap=pocket_labels),
     }
-    # geom keys vs. top-level payload keys (für den Frontend-Payload-Bau)
-    geom_keys = {"statorOD", "statorID", "rotorOD", "shaftD", "shaftBoreD",
-                 "slots", "slotDepth", "p", "magShape", "magAngle", "magDepthRel",
-                 "magWidth", "magThick", "magDist", "nAx", "nCirc"}
+    # geom vs. obere Ebene kommt aus dem Schema selbst (``spec["geom"]``). Frueher stand
+    # die Menge hier ein zweites Mal von Hand — ein neuer Schluessel war dann im Schema
+    # bekannt und beim Payload-Bau unbekannt und landete still auf der falschen Ebene.
     params = []
     for key, spec in T2E.SCHEMA.items():
         p = {"key": key, "desc": spec.get("desc", key),
              "kind": spec.get("kind", "num"),
-             "in_geom": key in geom_keys}
+             "in_geom": bool(spec.get("geom")),
+             "adv": bool(spec.get("adv"))}
         if spec.get("kind") == "num":
             p.update({"lo": spec.get("lo"), "hi": spec.get("hi"),
                       "def": spec.get("def"), "int": bool(spec.get("int"))})
+        elif spec.get("kind") == "bool":
+            p["def"] = bool(spec.get("def"))
         else:
             p["options"] = enum_opts.get(key, _opts(spec.get("opts", [])))
             p["def"] = spec.get("def")

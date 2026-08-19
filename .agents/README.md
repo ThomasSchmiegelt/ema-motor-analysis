@@ -27,6 +27,9 @@ cd ~/ai-workspace
 ./start_agent.sh -p "Wie hoch ist B_gap im neuesten Projekt?"   # eine Frage
 ./start_agent.sh --kein-browser                   # ohne Browserfenster
 ./start_agent.sh --nur-server                     # nur den Orchestrator
+./start_agent.sh --weiter                         # letzte Sitzung fortsetzen
+./start_agent.sh --sitzungen                      # Sitzungen auflisten
+./start_agent.sh --sitzung 01a01998               # bestimmte Sitzung (Teil-UUID reicht)
 ```
 
 Es prüft Ollama, **nagelt das Modell auf seine ID fest** (`qwen-gross:latest` /
@@ -45,6 +48,27 @@ pi --provider ollama --model qwen-gross:latest
 
 Im Sitzungsbetrieb wechselt `/model` (oder `Strg-L`) das Modell — `qwen3.5:9b` ist
 die schnelle Variante für einfache Abfragen.
+
+## Sitzungen fortsetzen
+
+PI legt jede Sitzung als JSONL unter `~/.pi/agent/sessions/<kodiertes cwd>/` ab und
+sortiert sie **nach Arbeitsverzeichnis** — deshalb startet `start_agent.sh` PI immer aus
+`~/ai-workspace`, sonst zeigte `--continue` auf die Sitzungen eines anderen Ordners.
+
+```bash
+./start_agent.sh --sitzungen        # id, Zeitpunkt, erste Frage — neueste zuerst
+./start_agent.sh --weiter           # die neueste fortsetzen  (pi --continue)
+./start_agent.sh --sitzung 01a01998 # eine bestimmte          (pi --session)
+```
+
+Wie PI das Arbeitsverzeichnis in den Ordnernamen kodiert, ist nirgends zugesagt; das
+Skript rät es deshalb **nicht**, sondern liest die erste Zeile jeder Sitzungsdatei — die
+trägt `cwd` im Klartext — und filtert danach.
+
+**Ohne Flag wird nicht fortgesetzt**, sondern nur die letzte Sitzung als Hinweis
+angezeigt. Ein frischer Start bleibt der Normalfall: sonst schleppte jede neue Frage den
+Verlauf der vorigen mit, und bei 64 k Kontext fällt das erst auf, wenn vorne etwas
+herausfällt.
 
 ## Was der Agent sieht
 

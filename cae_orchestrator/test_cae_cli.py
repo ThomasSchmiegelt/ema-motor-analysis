@@ -28,6 +28,13 @@ SCHEMA = {
                   "lo": 30, "hi": 300, "def": 80, "int": False},
     "load_nm":   {"key": "load_nm", "kind": "num", "in_geom": False,
                   "lo": 0, "hi": 2000, "def": 5, "int": False},
+    # Feinparameter (adv) — seit der Schemaerweiterung gepruefte Schluessel
+    "poleArcFrac":     {"key": "poleArcFrac", "kind": "num", "in_geom": True, "adv": True,
+                        "lo": 0.5, "hi": 0.98, "def": 0.83, "int": False},
+    "genFluxBarrierQ": {"key": "genFluxBarrierQ", "kind": "bool", "in_geom": True,
+                        "adv": True, "def": False},
+    "magOrient":       {"key": "magOrient", "kind": "enum", "in_geom": True, "adv": True,
+                        "options": [{"value": "transverse"}, {"value": "longitudinal"}]},
 }
 
 
@@ -146,6 +153,65 @@ def test_run_routes_have_status_paths():
     print("✓ run_routes: Start- und Statusroute je Stufe getrennt gefuehrt")
 
 
+def test_adv_params():
+    """Feinparameter werden wie jeder andere Schemaschluessel gepflegt.
+
+    Der Punkt der Erweiterung: ``poleArcFrac`` stand in keinem Payload und fiel als
+    Tippfehler durch; ``magLayers`` stand zufaellig drin und ging UNGEPRUEFT durch —
+    beides falsch. Jetzt entscheidet das Schema, nicht der Zufall."""
+    _stub_schema()
+    pl, applied, errors = _apply(["poleArcFrac=0.9", "genFluxBarrierQ=true",
+                                  "magOrient=longitudinal"])
+    assert not errors, errors
+    assert pl["geom"]["poleArcFrac"] == 0.9
+    assert pl["geom"]["genFluxBarrierQ"] is True            # echtes Bool, keine "true"
+    assert pl["geom"]["magOrient"] == "longitudinal"
+    # ein Schluessel, den es vorher im Payload gar nicht gab, wird angelegt statt abgewiesen
+    assert "poleArcFrac" not in _payload()["geom"]
+
+    _, _, errors = _apply(["poleArcFrac=1.5"])
+    assert errors and "Obergrenze" in errors[0], errors
+    _, _, errors = _apply(["magOrient=quer"])
+    assert errors and "transverse" in errors[0], errors
+    print("✓ adv: Feinparameter gepflegt, Grenzen und Auswahllisten greifen")
+
+
+def test_bool_kind_is_strict():
+    """``genFluxBarrierQ=1`` wird abgewiesen — absichtlich.
+
+    Die Pipeline liest den Schalter mit ``bool(...)``, und dort ist jede nichtleere
+    Zeichenkette wahr. Waere 1/"ja"/"an" erlaubt, wirkte ein Tippfehler still."""
+    _stub_schema()
+    for schlecht in ["genFluxBarrierQ=1", "genFluxBarrierQ=0", "genFluxBarrierQ=ja"]:
+        _, _, errors = _apply([schlecht])
+        assert errors and "true oder false" in errors[0], (schlecht, errors)
+    for gut, soll in [("genFluxBarrierQ=true", True), ("genFluxBarrierQ=false", False)]:
+        pl, _, errors = _apply([gut])
+        assert not errors, errors
+        assert pl["geom"]["genFluxBarrierQ"] is soll
+    print("✓ bool: nur true/false, kein 1/0/ja — sonst wirkt ein Tippfehler still")
+
+
+def test_schema_has_no_second_geom_table():
+    """``in_geom`` kommt aus dem Schema selbst, nicht aus einer Liste in server.py.
+
+    Solange beide Seiten dieselbe Menge fuehrten, konnte ein neuer Schluessel im Schema
+    bekannt und beim Payload-Bau unbekannt sein — der Wert landete dann still eine
+    Ebene zu hoch. Prueft die Quelle, nicht die Route (laeuft ohne Server)."""
+    import ema_text2ema as T2E
+    alt = {"statorOD", "statorID", "rotorOD", "shaftD", "shaftBoreD", "slots",
+           "slotDepth", "p", "magShape", "magAngle", "magDepthRel", "magWidth",
+           "magThick", "magDist", "nAx", "nCirc"}
+    basis = {k for k, v in T2E.SCHEMA.items() if v.get("geom") and not v.get("adv")}
+    assert basis == alt, f"Basis-geom hat sich verschoben: {basis ^ alt}"
+    assert all("geom" in v for v in T2E.SCHEMA.values() if v.get("adv")), \
+        "jeder Feinparameter braucht eine ausdrueckliche Ebene"
+    # Text->Auslegung darf von der Erweiterung nichts merken
+    assert len(T2E._validate({})) == len(alt) + 10, "adv darf nicht in den Entwurf sickern"
+    print(f"✓ ebenen: in_geom aus EINER Quelle, {sum(1 for v in T2E.SCHEMA.values() if v.get('adv'))} "
+          f"Feinparameter halten Text->Auslegung heraus")
+
+
 def test_schema_vs_payload():
     """Gegen den laufenden Server: jeder Schemaschlüssel muss im Payload ankommen.
 
@@ -188,5 +254,8 @@ if __name__ == "__main__":
     test_dotted_path_is_still_checked()
     test_value_parsing()
     test_run_routes_have_status_paths()
+    test_adv_params()
+    test_bool_kind_is_strict()
+    test_schema_has_no_second_geom_table()
     test_schema_vs_payload()
     print("\nALLE CAE-CLI-TESTS BESTANDEN ✅")

@@ -5,6 +5,9 @@
 #   ./start_agent.sh -p "Wie viele …"     eine Frage, dann Ende
 #   ./start_agent.sh --kein-browser       Server ohne Browserfenster starten
 #   ./start_agent.sh --nur-server         nur den Orchestrator, kein PI
+#   ./start_agent.sh --weiter             letzte Sitzung dieses Verzeichnisses fortsetzen
+#   ./start_agent.sh --sitzung <id>       eine bestimmte Sitzung fortsetzen (Teil-UUID reicht)
+#   ./start_agent.sh --sitzungen          die letzten Sitzungen auflisten und beenden
 #
 # Alles Weitere wird unveraendert an `pi` durchgereicht (z. B. --model).
 set -euo pipefail
@@ -20,14 +23,72 @@ LOG="${TMPDIR:-/tmp}/cae_server_$USER.log"
 
 export PATH="$HOME/.npm-global/bin:$PATH"   # pi liegt hier, weil ohne sudo installiert
 
-BROWSER=1; NUR_SERVER=0; ARGS=()
+BROWSER=1; NUR_SERVER=0; WEITER=0; LISTE=0; SITZUNG=""; ARGS=()
+erwarte_id=""
 for a in "$@"; do
+    if [ -n "$erwarte_id" ]; then SITZUNG="$a"; erwarte_id=""; continue; fi
     case "$a" in
         --kein-browser) BROWSER=0 ;;
         --nur-server)   NUR_SERVER=1 ;;
+        --weiter)       WEITER=1 ;;
+        --sitzungen)    LISTE=1 ;;
+        --sitzung)      erwarte_id=1 ;;
+        --sitzung=*)    SITZUNG="${a#--sitzung=}" ;;
         *)              ARGS+=("$a") ;;
     esac
 done
+[ -n "$erwarte_id" ] && { echo "FEHLER: --sitzung braucht eine Kennung (--sitzungen zeigt sie)" >&2; exit 1; }
+
+# ── Sitzungen dieses Verzeichnisses ─────────────────────────────────────────
+# PI legt sie unter ~/.pi/agent/sessions/<kodiertes cwd>/ ab. Wie das cwd kodiert
+# wird, ist nirgends zugesagt; die ERSTE Zeile jeder Datei traegt es aber im Klartext.
+# Danach wird gefiltert, statt den Verzeichnisnamen aus dem Pfad zu raten.
+sitzungen() {           # $1 = Anzahl; Ausgabe je Zeile: id <TAB> Zeitpunkt <TAB> erste Frage
+    python3 - "$HOME/.pi/agent/sessions" "$ROOT" "${1:-1}" 2>/dev/null <<'PYSESS'
+import glob, json, os, sys
+basis, cwd, n = sys.argv[1], sys.argv[2], int(sys.argv[3])
+treffer = []
+for f in glob.glob(os.path.join(basis, "*", "*.jsonl")):
+    try:
+        with open(f, encoding="utf-8") as fh:
+            kopf = json.loads(fh.readline())
+            if kopf.get("type") != "session" or kopf.get("cwd") != cwd:
+                continue
+            titel = ""
+            for zeile in fh:
+                try:
+                    d = json.loads(zeile)
+                except ValueError:
+                    continue
+                m = d.get("message")
+                if d.get("type") == "message" and isinstance(m, dict) and m.get("role") == "user":
+                    for c in m.get("content") or []:
+                        if isinstance(c, dict) and c.get("type") == "text":
+                            titel = " ".join(str(c.get("text", "")).split())[:64]
+                            break
+                if titel:
+                    break
+    except (OSError, ValueError, KeyError):
+        continue
+    treffer.append((os.path.getmtime(f), kopf["id"],
+                    kopf.get("timestamp", "")[:16].replace("T", " "), titel))
+for _, sid, ts, titel in sorted(treffer, reverse=True)[:n]:
+    print(f"{sid}\t{ts}\t{titel}")
+PYSESS
+}
+
+if [ "$LISTE" -eq 1 ]; then
+    aus="$(sitzungen 15)"
+    [ -n "$aus" ] || { echo "Noch keine PI-Sitzung in $ROOT."; exit 0; }
+    echo "Sitzungen in $ROOT (neueste zuerst):"
+    echo ""
+    printf '%s\n' "$aus" | while IFS=$'\t' read -r sid ts titel; do
+        printf '  %s  %s  %s\n' "$sid" "$ts" "$titel"
+    done
+    echo ""
+    echo "Fortsetzen: ./start_agent.sh --sitzung <id>   |   letzte: ./start_agent.sh --weiter"
+    exit 0
+fi
 
 ok()   { echo "[OK] $*"; }
 warn() { echo "[--] $*"; }
@@ -98,8 +159,31 @@ if [ "$NUR_SERVER" -eq 1 ]; then
 fi
 
 # ── 4. PI ───────────────────────────────────────────────────────────────────
-# Aus dem Wurzelverzeichnis, sonst findet PI weder AGENTS.md noch .agents/skills/.
+# Aus dem Wurzelverzeichnis, sonst findet PI weder AGENTS.md noch .agents/skills/ —
+# und --continue griffe in die falsche Ablage, denn PI sortiert Sitzungen nach cwd.
 cd "$ROOT"
+
+if [ -n "$SITZUNG" ]; then
+    ARGS=(--session "$SITZUNG" "${ARGS[@]}")
+    echo "Setze Sitzung $SITZUNG fort."
+elif [ "$WEITER" -eq 1 ]; then
+    letzte="$(sitzungen 1)"
+    [ -n "$letzte" ] || die "Keine fortsetzbare Sitzung in $ROOT — dann einfach ohne --weiter starten."
+    IFS=$'\t' read -r s_id s_zeit s_titel <<<"$letzte"
+    ARGS=(--continue "${ARGS[@]}")
+    echo "Setze fort: $s_id  ($s_zeit)  $s_titel"
+else
+    # Bewusst NICHT von selbst fortsetzen: ein frischer Start muss der Normalfall
+    # bleiben, sonst schleppt jede neue Frage den Verlauf der vorigen mit — und bei
+    # 64 k Kontext faellt das erst auf, wenn vorne etwas herausfaellt. Nur der Hinweis.
+    letzte="$(sitzungen 1)"
+    if [ -n "$letzte" ]; then
+        IFS=$'\t' read -r s_id s_zeit s_titel <<<"$letzte"
+        warn "Letzte Sitzung: $s_id  ($s_zeit)  $s_titel"
+        warn "Fortsetzen mit: ./start_agent.sh --weiter    (alle: --sitzungen)"
+    fi
+fi
+
 echo ""
 echo "=== PI mit $MODEL — Skill 'cae-orchestrator' geladen ==="
 echo ""
