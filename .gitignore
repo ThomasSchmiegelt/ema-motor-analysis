@@ -32,14 +32,26 @@ pikogk/**/obj/
 pikogk/**/.vs/
 
 # ── pikogk: Laufzeitdaten + native Build-Artefakte (NICHT versionieren) ──
-pikogk/PicoGKWebApi/data/          # 11 G generierte STL-Instanzen (Laufzeit-Store)
-pikogk/PicoGKWebApi/output/        # Render-/Export-Ausgaben
-pikogk/PicoGKRuntime/Dist/         # gebaute native Runtime (picogk.so + Abhängigkeiten)
-pikogk/local-install/              # gebautes c-blosc-Install-Präfix
-pikogk/c-blosc/                    # vendored Third-Party-Build (rebuildbar)
-pikogk/logs/                       # Prüfstands-/Testläufe
-pikogk/.dotnet/                    # falls .NET SDK je hierher zeigt
-pikogk/dotnet-install.sh           # Installer-Skript (kein Source)
+# 11 G generierte STL-Instanzen (Laufzeit-Store)
+pikogk/PicoGKWebApi/data/
+# Render-/Export-Ausgaben
+pikogk/PicoGKWebApi/output/
+# gebaute native Runtime (picogk.so + Abhängigkeiten)
+pikogk/PicoGKRuntime/Dist/
+# gebautes c-blosc-Install-Präfix.
+# AUSNAHME: libblosc.{a,so.1.21.7} darunter sind ABSICHTLICH versioniert —
+# sie werden mitverbreitet und tragen eine Lizenzpflicht (THIRD-PARTY-NOTICES.md:20).
+# Bereits getrackte Dateien bleibt diese Regel wirkungslos gegenueber; sie greift nur
+# fuer neu hinzukommende Build-Artefakte in diesem Praefix.
+pikogk/local-install/
+# vendored Third-Party-Build (rebuildbar)
+pikogk/c-blosc/
+# Prüfstands-/Testläufe
+pikogk/logs/
+# falls .NET SDK je hierher zeigt
+pikogk/.dotnet/
+# Installer-Skript (kein Source)
+pikogk/dotnet-install.sh
 
 # ── OS / Editor ──
 .DS_Store
@@ -59,3 +71,9 @@ lego/.venv/
 
 # pikogk: Laufzeit-Logs
 pikogk/logs/
+
+# ── Sicherungsarchive (gehoeren nie ins Repo) ──
+# Anlass: eine 283-MB-Sicherung lag ungeignort im Arbeitsbaum; GitHub lehnt Dateien
+# ueber 100 MB ab, und ein Commit davor haette die Historie dauerhaft aufgeblaeht.
+*_sicherung_*.zip
+*.backup.zip
