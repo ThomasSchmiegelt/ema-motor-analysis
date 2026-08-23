@@ -42,6 +42,29 @@ als die Namen vermuten lassen:
 * Freiheitsgrade je Familie: `axle` → `rot[0]` Drehung + `yaw` Verschiebung (LDU),
   `hinge` → `yaw` Winkel, `ball` → `rot[0..2]`. Siehe `articulation/pose.py`.
 
+## Probentext: ungerade Zeilenzahl, gesetzter Wurzelknoten
+
+Das Textformat ist Zeile 0 = Wurzelknoten `a`, danach **Paare** aus Knoten- und
+Kantenzeile. Eine vollstaendige Probe hat damit immer eine **ungerade** Zeilenzahl.
+Zwei Fehler daraus haben je eine ganze Generierung wertlos gemacht (beide gefixt,
+13.08.2026 — an `data/out_pt.jsonl` und `data/out.jsonl` nachgemessen):
+
+* **Abbruch auf gerader Zeilenzahl.** `StopAfterNewlines` erzwingt EOS nach N
+  Zeilenumbruechen; bei geradem N haengt der letzte Knoten ohne Kante und
+  `parse_sample` verwirft die **komplette** Probe (`dangling node without edge`) —
+  59 gute Zeilen fallen wegen einer halben. War 0/16 parsebar; N wird jetzt intern
+  auf ungerade aufgerundet ⇒ 15/16.
+* **Fehlender Wurzelknoten im Bedingungsmodus.** Der `--prompts_file`-Pfad gab dem
+  Modell nur die Bildunterschrift und schrieb `text = generated`. Das Modell setzt
+  eine *begonnene* Probe fort: ohne gesetztes `a` faengt es bei `b` an, jede Kante
+  auf `a` haengt in der Luft, 0/4 parsebar. Der Wurzelknoten (`--prompt`, Standard
+  `a`) gehoert in **beide** Modi in den Prompt UND vor den Probentext; die
+  Bildunterschrift ist Kontext und gehoert **nicht** in den Text.
+
+`eval/score_samples.py` kuerzt beim Einlesen trotzdem auf die letzte vollstaendige
+Form (nur kuerzen, nie ergaenzen) und weist die Quote **roh vs. repariert** getrennt
+aus — sonst geht ein Abbruchfehler des Erzeugers als Modellqualitaet durch.
+
 ## Technic-Geometrie, die man sonst dreimal falsch macht
 
 * Ein Technic-Balken hat seine Loecher entlang **Z**, die Lochachse zeigt in **Y**.
@@ -69,6 +92,20 @@ kaputt — das ist genau der Fehler, der beim Aufbau zuerst auftrat.
 `sweep.check()` nimmt direkt verbundene Teilepaare aus: ein Pin *soll* im Loch
 stecken. Die Netze sind zusaetzlich um 0.25 LDU nach innen versetzt.
 
+`range_of_motion` prueft den **ganzen** Graphen: eine Durchdringung irgendwo im
+Modell setzt die Beweglichkeit **jedes** Gelenks auf 0. Bei erzeugten Proben ist das
+der Normalfall (13 bzw. 28 durchdringende Paare im Mittel), deshalb fuehrt
+`eval/score_samples.py` `n_collisions_rest` mit — ohne diese Zahl sieht eine
+Beweglichkeit von 0 nach kaputtem Massstab aus statt nach kaputtem Entwurf.
+
+**Bekannte Schwaeche des Massstabs (gemessen, noch offen).** `depth` und `mobility`
+sind auf 1.0 gedeckelt (`min(x/ziel, 1)`). Eine erzeugte Probe aus zwei langen
+Ketten duenner Stangen (22 + 8 Gelenke, 236° mittlere Spanne) zieht damit beide
+Teilnoten auf Anschlag und kommt auf **0.24** — mehr als die handgebaute Referenzhand
+(0.16), obwohl sie eine Peitsche ist und keine Hand. Eine Obergrenze fuer die
+Kettenlaenge oder eine Bestrafung ueberlanger Ketten fehlt. Wer das anfasst: die
+Referenzhand muss ihre 0.16 behalten und der Kamm seine 0.00.
+
 ## Studio 2.0 unter Wine
 
 Eigener Prefix in `data/wine-studio`, nie `~/.wine`. Installiert unter
@@ -81,6 +118,7 @@ reisst unter `set -o pipefail` das Skript ab (SIGPIPE) — `mapfile` benutzen.
 
 ## Offen
 
+* Massstab gegen ueberlange Ketten haerten (s. oben, „Bekannte Schwaeche").
 * `corpus/` — OMR-Sets (Direktdownload liefert 404, braucht Scraper ueber die
   Set-Seiten) und Studio-Exporte zu Pfadtext.
 * `train/` — LoRA auf `kulits/BrickNet-1.7B-PT`; 0.6B/1.7B laufen bequem auf der 3090.

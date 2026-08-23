@@ -29,9 +29,17 @@ from transformers import AutoModelForCausalLM, AutoTokenizer, LogitsProcessorLis
 
 
 class StopAfterNewlines:
+    """Force EOS after ``target`` generated newlines.
+
+    ``target`` is rounded UP to an odd number. A BrickNet sample is the root node
+    line followed by (node, edge) pairs, so a complete sample always has an odd line
+    count; stopping on an even one leaves a node without its edge and ``parse_sample``
+    rejects the whole sample with ``dangling node without edge``.
+    """
+
     def __init__(self, newline_id: int, target: int, eos_id: int, prompt_len: int):
         self.newline_id = newline_id
-        self.target = target
+        self.target = target + 1 if target % 2 == 0 else target
         self.eos_id = eos_id
         self.prompt_len = prompt_len
 
@@ -63,9 +71,8 @@ def main() -> None:
     p.add_argument("--top_k", type=int, default=20)
     p.add_argument("--top_p", type=float, default=0.95)
     p.add_argument("--dtype", default="bfloat16", help="Model dtype (e.g. bfloat16, float16, float32).")
-    mode = p.add_mutually_exclusive_group()
-    mode.add_argument("--prompt", default="a", help="Fixed prompt for unconditional generation (default: 'a').")
-    mode.add_argument("--prompts_file", default=None, help="JSONL with per-sample captions (field: 'caption').")
+    p.add_argument("--prompt", default="a", help="Root node label seeded into the prompt, both modes (default: 'a').")
+    p.add_argument("--prompts_file", default=None, help="JSONL with per-sample captions (field: 'caption').")
     p.add_argument("--num_samples", type=int, default=100, help="Number of samples (unconditional mode only).")
     p.add_argument("--n_per_prompt", type=int, default=1, help="Completions per caption (prompts_file mode only).")
     p.add_argument("--seed", type=int, default=None, help="Base random seed (default: unseeded).")
@@ -95,17 +102,21 @@ def main() -> None:
     nl_id = tok.encode("\n", add_special_tokens=False)[0]
     pad_id = tok.pad_token_id
 
+    # The model continues a sample that has already begun: the root node label must be
+    # in the prompt, and it belongs to the sample text. Without that seed the model
+    # starts at node 'b' and every edge referring to 'a' dangles, so nothing parses.
+    seed_ids = tok.encode(args.prompt, add_special_tokens=False)
+    assert seed_ids, f"prompt {args.prompt!r} encodes to zero tokens"
+
     if args.prompts_file:
         captions = _load_prompts(args.prompts_file)
         work = []
         for i, c in enumerate(captions):
-            caption_ids = tok.encode(c, add_special_tokens=False) + [nl_id]
+            prompt_ids = tok.encode(c, add_special_tokens=False) + [nl_id] + seed_ids
             for k in range(args.n_per_prompt):
-                work.append((i, k, caption_ids))
+                work.append((i, k, prompt_ids))
     else:
-        prompt_ids = tok.encode(args.prompt, add_special_tokens=False)
-        assert prompt_ids, f"prompt {args.prompt!r} encodes to zero tokens"
-        work = [(i, 0, prompt_ids) for i in range(args.num_samples)]
+        work = [(i, 0, seed_ids) for i in range(args.num_samples)]
 
     gen_kwargs = dict(
         max_new_tokens=args.max_new_tokens,
@@ -139,10 +150,9 @@ def main() -> None:
 
             for i, (gid, sample, toks) in enumerate(batch):
                 generated = tok.decode(out[i][max_len:], skip_special_tokens=True)
-                if args.prompts_file:
-                    text = generated
-                else:
-                    text = args.prompt + generated
+                # The caption (conditional mode) is context, not sample text — only the
+                # seeded root node label is prepended.
+                text = args.prompt + generated
                 f.write(json.dumps({"id": gid, "sample": sample, "text": text}) + "\n")
             f.flush()
             print(f"GPU{accelerator.local_process_index}: {batch_start + len(batch)}/{len(local_work)}", flush=True)

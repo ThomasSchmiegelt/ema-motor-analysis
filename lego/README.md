@@ -39,6 +39,8 @@ articulation/
   sweep.py                  Bewegungsbereich + Kollisionspruefung je Pose
   score.py                  Funktionsnote gegen die ORCA-Zielkinematik
   reference_hand.py         handgebaute Greifhand zur Kalibrierung der Bewertung
+scripts/generate.py         Proben erzeugen (Qwen3 + BrickNet-LoRA, frei oder nach Vorgabe)
+eval/score_samples.py       Proben -> Graph -> Funktionsnote, mit Parsequote
 corpus/                     (offen) OMR-Sets + Studio-Exporte -> Pfadtext
 train/                      (offen) LoRA-Fine-Tuning auf Qwen3
 data/                       LDraw, Kollisionsnetze, Wine-Prefix — nicht versioniert
@@ -63,6 +65,18 @@ g = pose.load_ldr("data/reference_hand.ldr")
 print(score.score(g).report())
 ```
 
+Erzeugen und bewerten (die vortrainierten BrickNet-Adapter, ohne eigenes Training):
+
+```bash
+python scripts/generate.py --model Qwen/Qwen3-0.6B \
+  --lora kulits/BrickNet-0.6B-PT --lora kulits/BrickNet-0.6B-SFT \
+  --output data/gen_sft.jsonl --prompts_file data/prompts.jsonl \
+  --n_per_prompt 4 --stop_after_newlines 60
+
+python -m eval.score_samples --input data/gen_sft.jsonl \
+  --report data/eval_gen_sft.jsonl --best-ldr data/best_sft.ldr
+```
+
 Studio 2.0 (Betrachter, Bauanleitung, Teileliste):
 
 ```bash
@@ -80,12 +94,33 @@ WINEPREFIX="$PWD/data/wine-studio" DISPLAY=:1 \
 | Artikulationsmechanik (Pin-Gelenk stellen und schwenken) | verifiziert |
 | ORCA-Zielkinematik | 17 DoF extrahiert |
 | Bewertung + Referenzhand | kalibriert (Kamm 0.00 vs. Greifhand 0.16) |
+| Kette Erzeugen -> Parsen -> Bewerten | steht (`eval/score_samples.py`) |
 | Korpus (OMR + Studio-Exporte) | offen |
 | Fine-Tuning | offen |
 
 Die Referenzhand erreicht 4 Ketten, 107 Grad mittlere Beweglichkeit (91 % von ORCAs
 medianer Beugespanne) und 22 % Greifschluss. Bewusst niedrig: sie ist ein grober
 Pruefstein, kein Entwurfsziel.
+
+## Erster Messwert: die vortrainierten Adapter, ungetunt
+
+Je 16 Proben mit `BrickNet-0.6B` (13.08.2026, `--stop_after_newlines 60`, Saat 1):
+
+| | frei (PT) | nach Vorgabe (PT+SFT) |
+|---|---|---|
+| parsebar | 15/16 | 8/16 |
+| Gelenke je Probe | 7.7 | 16.8 |
+| durchdringende Teilepaare in Ruhe | 13.1 | 28.4 |
+| kollisionsfrei in Ruhe | 0/15 | 2/8 |
+| Funktionsnote > 0 | 0 | 2 |
+
+Die verbleibenden Parsefehler sind **inhaltlich**, nicht formal: das Modell steckt
+Konnektoren zusammen, die das Teil nicht hat (`part 6526 has no open/None
+connectors`). Und der beste Wert (0.24 auf „a five-fingered hand") ist **kein
+besseres Ergebnis als die Referenzhand**, sondern eine Luecke im Massstab: die Probe
+besteht aus zwei langen Ketten duenner Stangen, die die gedeckelten Teilnoten
+„Gelenktiefe" und „Beweglichkeit" auf Anschlag ziehen. Eine Peitsche, keine Hand —
+s. `CLAUDE.md`, „Bekannte Schwaeche des Massstabs".
 
 ## Quellen und Lizenzen
 
