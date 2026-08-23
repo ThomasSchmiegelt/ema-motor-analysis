@@ -42,6 +42,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `run <stufe>` | Rechnung starten |
 | `wait` | auf Abschluss warten |
 | `routes [--grep x]` | alle 135 Serverrouten auflisten |
+| `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
 | `raw GET/POST <pfad>` | beliebige Route — Notausgang für alles Übrige |
 
 ## Ergebnisse lesen — die wichtigste Regel
@@ -105,6 +106,32 @@ Typ und Auswahlliste — `python3 cae_cli.py raw GET /param_schema` zeigt sie sa
 **Nicht im Schema, aber im Payload:** reine CAD-Schalter (`genBearingA`, `splineTeeth`,
 `windingHeadStyle` …). Die gehen weiterhin durch, wenn sie in der Vorlage stehen — aber
 ohne Grenzen und ohne Typprüfung. Was das Feld beeinflusst, steht im Schema.
+
+### Vor `run cad`: `rotor-check`
+
+Die teure Schleife ist „Geometrie ändern → 40 s FreeCAD → Fehler". `rotor-check`
+rechnet dieselbe Frage in Millisekunden vor, rein zweidimensional und **ohne den
+Server**:
+
+```bash
+python3 cae_cli.py rotor-check --from-project last
+python3 cae_cli.py rotor-check --from-project last --set magLayerGap=4 --set magDist=6
+python3 cae_cli.py rotor-check --payload-file entwurf.json --web 2.5
+```
+
+Geprüft wird dreierlei: überschneiden sich Magnettaschen, bleibt zwischen ihnen der
+Mindeststeg (Vorgabe `ema_topology.BRIDGE_MM` = 2 mm, überschreibbar mit `--web`),
+und liegt jede Tasche vollständig zwischen Wellenbohrung und Rotorrand. Exit **0**
+heißt bestanden, **1** heißt abgelehnt — mit Begründung je Fund.
+
+Zwei Dinge, die dabei zu wissen sind:
+
+* **`--set` braucht doch den Server**, weil die Zuweisung gegen `/param_schema`
+  geprüft wird. Ohne `--set` läuft das Verb vollständig lokal.
+* **Es prüft nicht alles.** Wuchtbohrungen und Flussbarrieren sind noch nicht
+  abgedeckt; ein bestandener `rotor-check` schließt einen Durchbruch dort nicht aus.
+  Dieselbe Prüfung läuft ohnehin als Tor in `run cad` und `run analyse` — das Verb
+  nimmt sie nur vor.
 
 **Die Grenzen aus `geom` sagen NICHT, ob eine Geometrie baubar ist.** Sie sind die
 Suchbox des Optimierers und weit größer als das Baubare (gemessen: blind gezogen sind

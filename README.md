@@ -39,7 +39,7 @@ nicht antwortet, und wartet auf dessen Erreichbarkeit, bevor PI läuft.
 |---|---|---|
 | `start_agent.sh` | Wurzel | Startkette + Sitzungsverwaltung |
 | `.agents/` | Wurzel | Skill-Definition für PI (`skills/cae-orchestrator/SKILL.md`) und Einrichtung |
-| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die der Agent benutzt — neun Verben über HTTP auf `:5000` |
+| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die der Agent benutzt — zehn Verben über HTTP auf `:5000` (`rotor-check` rechnet lokal) |
 
 **Warum eine CLI und kein MCP-Server:** ein lokales Modell kann die ~135 HTTP-Routen des
 Orchestrators nicht als 135 Werkzeugschemata im Kontext halten. PI bindet Werkzeuge

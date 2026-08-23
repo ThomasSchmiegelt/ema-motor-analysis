@@ -11,6 +11,89 @@ from matplotlib.lines import Line2D
 
 from freecad_runner import run_freecad_script
 from ema_freecad   import build_full_motor_script, build_rotor_fem_script
+from ema_rotorcheck import rotor_layout_check, rotor_stress_check, _bore_hoop_mpa
+
+
+def _gate_rotor_layout(data: dict, state: dict | None = None,
+                       fatal: bool = True) -> None:
+    """Hard pre-CAD gate: reject rotor layouts whose magnet pockets collide,
+    breach the bore/rim or leave webs thinner than the manufacturing minimum.
+    Runs pure 2-D math on ema_topology records (milliseconds) and covers all
+    entry points that build geometry (cad_preview + full analyse).
+
+    ``fatal=False`` downgrades the rejection to a logged warning.  Used when an
+    EXISTING project is only partially recomputed: its geometry was built before
+    this gate existed, is already on disk and is not rebuilt — refusing the run
+    there would lock the user out of recomputing thermal/drivecycle on a project
+    that is otherwise perfectly loadable."""
+    geom = (data or {}).get("geom") or {}
+    if not geom:
+        return
+    chk = rotor_layout_check(geom)
+    if state is not None:
+        lay = chk["layout"]
+        verdict = "OK" if chk["ok"] else "ABGELEHNT"
+        _log(state, f"\U0001F6E1 Rotorlayout-Check: {lay['label']}, "
+                    f"{lay['pockets_total']} Taschen, "
+                    f"minimaler Abstand {lay['min_web_found_mm']} mm "
+                    f"(mind. {lay['min_web_req_mm']} mm) - {verdict}", 5)
+    if not chk["ok"]:
+        msg = "Rotorlayout-Check fehlgeschlagen: " + "; ".join(chk["fatal"])
+        if fatal:
+            raise RuntimeError(msg)
+        _log(state, "\u26A0 " + msg + " (Nachrechnen laeuft trotzdem weiter — "
+                    "die Geometrie auf der Platte wird nicht neu gebaut.)", 5)
+    for w in chk.get("warnings", []):
+        if state is not None:
+            _log(state, "\u26A0 " + w, 5)
+
+
+def _gate_rotor_stress(data: dict, state: dict | None = None,
+                       fatal: bool = True) -> None:
+    """Hard pre-CAD centrifugal gate.  Reports BOTH 2-D plane states and gates on the
+    CONSERVATIVE (plane-strain) bore hoop stress at n_max.
+
+    Physical note (kept on the log so the number is never misread): a real IPM rotor
+    has finite axial length and magnet pockets, so it sits BETWEEN the thin-disc
+    (plane stress, optimistic) and the continuous-cylinder (plane strain, conservative)
+    bounds.  Both are exact for their respective 2-D problems; the definitive, binding
+    safety factor needs the 3-D FEM on the real rotor (Stage C). Pure math (msec).
+
+    ``fatal=False``: see ``_gate_rotor_layout`` — warn instead of refuse when an
+    existing project is only partially recomputed."""
+    geom = (data or {}).get("geom") or {}
+    if not geom:
+        return
+    mat = LAMINATES.get(data.get("rotor_lam", "m270_35a"),
+                        LAMINATES["m270_35a"])
+    tgt  = data.get("target") or {}
+    nmax = float(tgt.get("n_max", data.get("rpm_to", 20000.0)))
+    st = rotor_stress_check(geom, mat, {"n_max": nmax})
+    if state is not None:
+        icon = {"PASS": "\u2705", "WARN": "\u26A0\uFE0F", "FAIL": "\u274C"}[st["level"]]
+        mname = mat.get("label") or "rotor"
+        _log(state,
+             f"\U0001F6E1 Rotor-Festigkeit ({nmax:.0f} U/min, {mname}):  "
+             f"Scheibe  \u03C3 {st['sigma_bore_plane_stress_MPa']:6.1f} MPa (SF {st['sf_plane_stress']:.2f}) | "
+             f"Zylinder \u03C3 {st['sigma_bore_conservative_MPa']:6.1f} MPa (SF {st['safety_factor']:.2f}) | "
+             f"Peak (Kt={st['kt_pocket']:.1f}) \u03C3 {st['sigma_peak_MPa']:.1f} MPa (SF {st['safety_factor_peak']:.2f}) | "
+             f"Fliessgrenze {st['yield_mpa']:.0f} MPa {icon} {st['level']}", 5)
+        _log(state, "   Tier-1 = Machbarkeits-Screen (hard-fail nur bei SF_peak < 1.0); "
+                    "bindend ist Tier-2: 3D-FEM-P99 vs. Fliessgrenze (Stage 5).", 5)
+    if st["safety_factor_peak"] < 1.0:
+        _mkmsg = (
+            f"Rotor-Festigkeitsgate nicht bestanden: Peak-Spannung (2D-Ring x Kt={st['kt_pocket']}) "
+            f"{st['sigma_peak_MPa']:.1f} MPa an der Bohrung bei {nmax:.0f} U/min "
+            f"gibt SF {st['safety_factor_peak']:.2f} < 1.0 - Rotor fliesst sicher. "
+            f"(Fliess {st['yield_mpa']:.0f} MPa) Geometrie verkleinern (rotorOD/Aufnahme) "
+            f"oder n_max senken, dann neu laufen lassen.")
+        if fatal:
+            raise RuntimeError(_mkmsg)
+        _log(state, "\u26A0 " + _mkmsg + " (Nachrechnen laeuft trotzdem weiter.)", 5)
+    elif state is not None and not st["ok"]:
+        _log(state, f"   ⚠ Tier-1: SF_peak {st['safety_factor_peak']:.2f} unter Ziel "
+                    f"{st['sf_target']:.1f}, aber machbar -> entscheidet Tier-2 (3D-FEM).", 5)
+
 import ema_analysis
 import ema_thermal
 import ema_drivecycle
@@ -263,11 +346,18 @@ def _parse_frd_full(frd_path: str, yield_mpa: float = 0.0) -> dict:
 
     max_vm = max(valid.values())
     max_d  = max(disp_mag.values()) if disp_mag else 0.0
+    # P99 = notch-toleranter Gate-Wert: das Rohmaximum an scharfen
+    # Taschenkanten ist eine Gitter-Singularitaet; P99 ist der vertretbare
+    # "schlechteste reale" Wert (verifiziert c2: FEM-P99 392 MPa ~ Kt x Lame 398).
+    _sv   = sorted(valid.values())
+    _i    = min(len(_sv) - 1, len(_sv) - 1 - len(_sv) // 100)
+    notch_peak = _sv[_i]
     sf = round(yield_mpa / max_vm, 2) if yield_mpa > 0 and max_vm > 0 else None
 
     return {
         "solver_status":       "OK",
         "max_von_mises_MPa":   round(max_vm, 2),
+        "notch_peak_MPa":      round(notch_peak, 2),
         "mean_von_mises_MPa":  round(sum(valid.values()) / len(valid), 2),
         "max_displacement_mm": round(max_d, 4),
         "max_displacement_um": round(max_d * 1e3, 3),
@@ -1424,11 +1514,13 @@ def _struct_sweep(geom: dict, mat: dict, rpms: list | None = None) -> list:
     out = []
     for rpm in (rpms or RPM_SWEEP):
         omega = rpm * 2 * math.pi / 60
-        C     = rho * omega**2 / 8
-        # Max tangential stress at inner bore (Lamé solution)
-        sigma_t = C * ((3 + nu) * R**2 + (1 + nu) * r**2) / 1e6  # MPa
-        sigma   = sigma_t * Kt
-        sf      = Sy / sigma if sigma > 1e-3 else 9999
+        # Exact rotating-annulus solution (Lamé) in the CONSERVATIVE plane-strain
+        # state — single source of truth ema_rotorcheck._bore_hoop_mpa (verified
+        # <0.2 % against independent FEM).  Old /8 + (3+nu)R²+(1+nu)r² form
+        # under-estimated by ~2x — fixed.
+        sig_bore = _bore_hoop_mpa(r, R, rho, omega, nu / (1.0 - nu))
+        sigma    = sig_bore * Kt
+        sf       = Sy / sigma if sigma > 1e-3 else 9999
         out.append({"rpm": rpm,
                     "sigma_max_MPa": round(sigma, 2),
                     "safety_factor": round(sf, 2)})
@@ -1546,6 +1638,8 @@ def build_cad_preview(data: dict, state: dict, project_dir: str) -> dict:
     geom  = data["geom"]
     axial = float(data.get("axial_len", 80.0))
 
+    _gate_rotor_layout(data, state)
+    _gate_rotor_stress(data, state)
     _log(state, "⚙ Erzeuge Motorgeometrie in FreeCAD…", 10)
     fcstd = os.path.join(project_dir, "motor.FCStd")
     code  = build_full_motor_script(geom, axial, fcstd)
@@ -1578,6 +1672,12 @@ def build_cad_preview(data: dict, state: dict, project_dir: str) -> dict:
 
 _THERMAL_TIME_S = 1800  # 30 min — long enough for housing to approach steady
 
+# Bindender Struktur-Sicherheitsbeiwert (Tier-2-Gate). EINE Quelle: der Wert steht
+# an zwei weit auseinanderliegenden Stellen im Lauf (FEM-Auswertung und
+# Drehzahl-Derating) und wanderte als Literal auch in gespeicherte results.json —
+# eine getrennt gepflegte Kopie wäre still auseinandergelaufen.
+SF_TARGET = 1.3
+
 
 def run_pipeline(data: dict, state: dict, frames: list,
                   workspace: str, project_dir: str | None = None,
@@ -1603,6 +1703,15 @@ def run_pipeline(data: dict, state: dict, frames: list,
     partial = stages is not None
     def _do(name: str) -> bool:
         return (stages is None) or (name in stages)
+
+    # Rotor-Tore VOR allem anderen — sie kosten Millisekunden und sparen im
+    # Fehlerfall den 40-s-FreeCAD-Lauf. ``state`` wird durchgereicht, damit die
+    # Diagnosezeile im Fortschrittsprotokoll steht und der Nutzer nicht nur einen
+    # nackten Traceback sieht. Im Teil-Nachrechnen wird nur gewarnt, nicht
+    # abgewiesen: die Geometrie liegt dort fertig auf der Platte und wird gar nicht
+    # neu gebaut — ein hartes Tor würde ein ladbares Altprojekt unrechenbar machen.
+    _gate_rotor_layout(data, state, fatal=not partial)
+    _gate_rotor_stress(data, state, fatal=not partial)
 
     # Projektakte: Lauf startet → Status laufend (billig, kein base64). Soft.
     try:
@@ -1940,16 +2049,30 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 fem_r = {k: v for k, v in frd_full.items() if not k.startswith("_")}
 
             if fem_r and fem_r.get("max_von_mises_MPa"):
-                sig  = fem_r["max_von_mises_MPa"]
-                sf_v = fem_r.get("safety_factor") or (mat["yield_mpa"] / sig if sig > 0 else None)
-                fem_r.update({"safety_factor": round(sf_v, 2) if sf_v else None,
+                # Tier-2-Gate (bindend): Peak = max(FEM-P99, 2D-Ring x Kt).
+                # Rohmaximum (sichere Taschen-Ecke) wird NICHT als Gate verwendet.
+                _notch = fem_r.get("notch_peak_MPa")
+                _st5   = rotor_stress_check(geom, mat, {"n_max": rpm_fem})
+                _pk_an = float(_st5["sigma_peak_MPa"])
+                _pk_fm = float(_notch) if _notch else 0.0
+                peak  = max(_pk_fm, _pk_an)
+                sf_v  = mat["yield_mpa"] / peak if peak > 0 else None
+                fem_r.update({"safety_factor": round(sf_v, 3) if sf_v else None,
                               "yield_mpa": mat["yield_mpa"],
                               "material":  mat["label"],
-                              "rpm":       rpm_fem})
+                              "rpm":       rpm_fem,
+                              "stress_peak_gate_MPa": round(peak, 1),
+                              "stress_peak_fem_p99_MPa": round(_pk_fm, 1),
+                              "stress_peak_analytic_MPa": round(_pk_an, 1),
+                              "structural_sf_target": SF_TARGET})
                 u_um = fem_r.get("max_displacement_um", "?")
                 _log(state,
-                     f"✓ FEM: σ_v,max = {sig:.1f} MPa | SF = {sf_v:.2f} | "
-                     f"u_max = {u_um} µm", 88)
+                     f"✓ FEM (Tier-2): Peak = max(P99 {_pk_fm or 0:.1f}, Ring×Kt {_pk_an:.1f}) = "
+                     f"{peak:.1f} MPa → SF = {sf_v:.2f} (Ziel ≥ {SF_TARGET}) | u_max = {u_um} µm", 88)
+                if fem_r.get("max_von_mises_MPa"):
+                    _log(state,
+                         f"   (Rohmax {fem_r['max_von_mises_MPa']:.0f} MPa = Gitter-Singularitaet an "
+                         f"scharfer Taschen-Ecke - kein Gate-Wert)", 88)
             else:
                 _raw = res_fem.get("fem_result", {}) or {}
                 _att = _raw.get("attempts") or []
@@ -1983,7 +2106,8 @@ def run_pipeline(data: dict, state: dict, frames: list,
                               and fem_r.get("max_von_mises_MPa"))
                 if fem_ok:
                     arrays      = _deform_extract(frd_full)
-                    sigma_solve = float(fem_r.get("max_von_mises_MPa") or 0.0)
+                    sigma_solve = float(fem_r.get("stress_peak_gate_MPa")
+                                       or fem_r.get("max_von_mises_MPa") or 0.0)
                     title_pref  = "FEM-Verformung"
                     deform_result["source"] = "fem"
                 else:
@@ -2068,32 +2192,33 @@ def run_pipeline(data: dict, state: dict, frames: list,
         _save_png_b64(struct_chart_b64, os.path.join(proj, "charts", "structural_sweep.png"))
         results["structural_sweep_chart_b64"] = struct_chart_b64
         max_safe_rpm = next(
-            (s["rpm"] for s in reversed(struct_sweep) if s["safety_factor"] >= 1.5),
+            (s["rpm"] for s in reversed(struct_sweep) if s["safety_factor"] >= SF_TARGET),
             struct_sweep[0]["rpm"]
         )
         # ── Derate by the FEM result ──────────────────────────────────────────
         # The analytical Lamé rotating-disc model does NOT capture the stress
         # concentration at the thin iron bridges over the magnet pockets — the
-        # CalculiX FEM does. Reporting the (over-optimistic) analytical safe speed
-        # alone produced "max_safe_rpm = rpm_to" even when the FEM safety factor was
-        # 0.21 (rotor yields at the rated speed). Since stress ∝ rpm² and the solve
-        # is linear, the FEM-anchored safe speed (SF=1.5) is rpm_solve·√(SF_fem/1.5).
-        # Always report the MORE CONSERVATIVE of the two so the table is honest.
+        # CalculiX FEM does (and the Kt-factor approximates it, now on the
+        # CORRECT plane-strain annulus formula). Since stress ∝ rpm² and the
+        # solve is linear, the FEM-anchored safe speed (SF = target) is
+        # rpm_solve·√(SF_fem/target). Always report the MORE CONSERVATIVE of the
+        # two so the table is honest. Binding target for SF is 1.3 (requirement),
+        # so "max. sichere Drehzahl" = speed where SF just reaches 1.3.
         sf_fem  = fem_r.get("safety_factor")
         rpm_fem = fem_r.get("rpm")
         structural_ok = True
         if sf_fem and rpm_fem and sf_fem > 0:
-            max_safe_rpm_fem = rpm_fem * math.sqrt(sf_fem / 1.5)
+            max_safe_rpm_fem = rpm_fem * math.sqrt(sf_fem / SF_TARGET)
             if max_safe_rpm_fem < max_safe_rpm:
                 _log(state, f"⚠ FEM derated max. sichere Drehzahl: analytisch "
                             f"{max_safe_rpm:.0f} → FEM {max_safe_rpm_fem:.0f} U/min "
                             f"(SF_FEM={sf_fem:.2f} @ {rpm_fem:.0f})", 92)
             max_safe_rpm = min(max_safe_rpm, max_safe_rpm_fem)
-            # structurally OK only if the FEM safety factor at the operating max
-            # speed already meets SF ≥ 1.5
-            structural_ok = bool(rpm_fem <= max_safe_rpm + 1)
+            # structurally OK only if the notch-tolerant FEM safety factor at the
+            # operating max speed already meets the SF >= 1.3 requirement
+            structural_ok = bool(sf_fem >= SF_TARGET)
         results["structural_ok"]      = structural_ok
-        results["max_safe_rpm_fem"]   = (round(rpm_fem * math.sqrt(sf_fem / 1.5))
+        results["max_safe_rpm_fem"]   = (round(rpm_fem * math.sqrt(sf_fem / SF_TARGET))
                                          if (sf_fem and rpm_fem and sf_fem > 0) else None)
         _log(state, f"✓ Strukturkennlinie: max. sichere Drehzahl ≈ {max_safe_rpm:.0f} U/min"
                     f"{'' if structural_ok else ' ⚠ FEM: Versagen im Betriebsbereich'}", 93)

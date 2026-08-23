@@ -153,6 +153,63 @@ def test_run_routes_have_status_paths():
     print("✓ run_routes: Start- und Statusroute je Stufe getrennt gefuehrt")
 
 
+def test_rotor_check_verb_is_registered():
+    """Das zehnte Verb muss im Parser stehen — und die Doku muss es kennen.
+
+    ``rotor-check`` kam nach der Doku in den Baum: README, SKILL.md und dieser Test
+    kannten es nicht. Ein Verb, das nur ``--help`` kennt, existiert fuer den Agenten
+    nicht, denn der liest die Skill-Datei, nicht die Hilfe."""
+    parser = cae_cli.build_parser()
+    sub = [a for a in parser._actions if hasattr(a, "choices") and isinstance(a.choices, dict)]
+    assert sub, "kein Unterbefehls-Parser gefunden"
+    verbs = set(sub[0].choices)
+    assert "rotor-check" in verbs, sorted(verbs)
+    assert callable(getattr(cae_cli, "cmd_rotor_check", None)), "cmd_rotor_check fehlt"
+    # Die Skill-Datei ist die einzige Quelle, aus der das lokale Modell Verben lernt.
+    skill = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..",
+                         ".agents", "skills", "cae-orchestrator", "SKILL.md")
+    if os.path.exists(skill):
+        with open(skill, encoding="utf-8") as f:
+            assert "rotor-check" in f.read(), \
+                "SKILL.md kennt rotor-check nicht — der Agent sieht das Verb nicht"
+    print(f"✓ rotor-check: im Parser registriert ({len(verbs)} Verben) und dokumentiert")
+
+
+def test_rotor_check_runs_without_server():
+    """Ohne ``--set`` darf ``rotor-check`` das Schema NICHT abrufen.
+
+    ``apply_sets`` holt ``/param_schema`` nur, wenn es etwas zu pruefen gibt. Genau
+    darauf beruht die Zusage 'laeuft ohne CAD und ohne Server' — sie waere still
+    falsch, wenn der Pfad doch HTTP anfasst."""
+    from ema_rotorcheck import rotor_layout_check
+
+    def _explodiere(*a, **k):
+        raise AssertionError("param_schema() darf hier nicht gerufen werden")
+
+    alt = cae_cli.param_schema
+    cae_cli.param_schema = _explodiere
+    try:
+        pl = _payload()
+        applied, errors = cae_cli.apply_sets(pl, [], url="<ungenutzt>")
+        assert applied == [] and errors == [], (applied, errors)
+    finally:
+        cae_cli.param_schema = alt
+
+    # Und der Check selbst rechnet rein lokal.
+    geom = {"statorOD": 280, "statorID": 190, "rotorOD": 188.6, "shaftD": 60,
+            "slots": 36, "p": 3, "magShape": "delta", "magAngle": 94,
+            "magAngle2": 94, "magDepthRel": 0.3, "magWidth": 37, "magThick": 6,
+            "magDist": 13.5, "magLayers": 3, "magLayerGap": 13.5,
+            "poleArcFrac": 0.83, "magGapMm": 0.1, "airGap": 0.7}
+    chk = rotor_layout_check(geom)
+    assert set(("ok", "fatal", "layout")) <= set(chk), sorted(chk)
+    assert chk["ok"] is True, chk["fatal"]
+    # Exit-Code-Vertrag: 0 = OK, 1 = abgelehnt.
+    kaputt = rotor_layout_check(dict(geom, magLayerGap=0.0, magDist=0.0))
+    assert kaputt["ok"] is False and kaputt["fatal"]
+    print("✓ rotor-check: lokal, ohne HTTP, Ablehnung begruendet")
+
+
 def test_adv_params():
     """Feinparameter werden wie jeder andere Schemaschluessel gepflegt.
 
@@ -254,6 +311,8 @@ if __name__ == "__main__":
     test_dotted_path_is_still_checked()
     test_value_parsing()
     test_run_routes_have_status_paths()
+    test_rotor_check_verb_is_registered()
+    test_rotor_check_runs_without_server()
     test_adv_params()
     test_bool_kind_is_strict()
     test_schema_has_no_second_geom_table()

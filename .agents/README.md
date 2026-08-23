@@ -95,7 +95,7 @@ herausfällt.
 **Warum ein CLI und nicht MCP:** PI bindet Werkzeuge bewusst als „CLI mit README"
 ein. Das passt hier auch inhaltlich — ein lokales Modell kann 135 Routen nicht als
 135 Werkzeugschemata halten, wohl aber `cae_cli.py run em3d --wait` aufrufen und die
-Antwort lesen. Der Alltagspfad hat neun Verben, `raw` deckt den Rest ab.
+Antwort lesen. Der Alltagspfad hat zehn Verben, `raw` deckt den Rest ab.
 
 ## Modell
 

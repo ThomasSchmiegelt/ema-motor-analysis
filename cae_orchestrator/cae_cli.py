@@ -427,6 +427,36 @@ def cmd_run(args) -> int:
     return EXIT_OK
 
 
+def cmd_rotor_check(args) -> int:
+    """2D-Layoutgate lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
+    Exit: 0 = Layout OK, 1 = Check abgelehnt (defekte Geometrie)."""
+    payload = _load_payload(args)
+
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    for a in applied:
+        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+
+    geom = payload.get("geom") or {}
+    if not geom:
+        return _die("Keine Geometrie im Payload — rotor-check braucht geom.", EXIT_USAGE)
+
+    from ema_rotorcheck import rotor_layout_check
+    chk = rotor_layout_check(geom, min_web_mm=getattr(args, "web", None))
+    emit(chk, args)
+    if chk["ok"]:
+        print("ERGEBNIS: Layout OK — keine Kollision, Stege ueber Grenze, Taschen im Ring.")
+        return 0
+    print("ERGEBNIS: ABGELEHNT:")
+    for m in chk["fatal"]:
+        print("  ✗ " + m)
+    return 1
+
+
 # ``idle`` ist zweideutig: es heisst "nichts laeuft" — und das ist unmittelbar nach dem
 # Start genauso wahr wie lange nach dem Ende. Wer es sofort als Abschluss liest, meldet
 # einen vierstuendigen Lauf nach 0 s als fertig. Deshalb gilt idle erst als Abschluss,
@@ -591,6 +621,22 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--poll", type=float, default=5.0)
     _add_globals(s)
     s.set_defaults(fn=cmd_run)
+
+    s = sub.add_parser("rotor-check",
+                       help="2D Rotorlayout-Check (Taschen: Kollision/Stege/Containment) — ohne CAD, in ms")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar (Geometrie-Test)")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--web", type=float, default=None,
+                   help="Mindeststege in mm (Vorgabe: ema_topology.BRIDGE_MM = 2.0)")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_rotor_check)
 
     s = sub.add_parser("wait", help="auf den Abschluss eines laufenden Vorgangs warten")
     s.add_argument("--status-path", default="/status")

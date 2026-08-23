@@ -4,6 +4,7 @@ import math
 import json
 
 from ema_topology import magnet_legs, leg_records
+import ema_purge
 
 
 def build_em_rotor_script(geom: dict, axial_len: float, save_path: str) -> str:
@@ -1164,7 +1165,7 @@ def build_rotor_fem_script(fcstd_path: str, rpm: float,
     density_kg_m3 = float(str(density_str).split()[0])
     density_t_mm3 = density_kg_m3 / 1e12  # 1 kg/m³ = 1e-12 t/mm³
 
-    return f"""\
+    return (f"""\
 import FreeCAD as App
 import ObjectsFem
 import json, os, sys, traceback
@@ -1229,6 +1230,8 @@ _omega2 = _omega ** 2                  # rad²/s² (CalculiX CENTRIF unit)
 _rho    = {density_t_mm3:.6e}          # t/mm³  (CalculiX density unit)
 _work   = os.path.join(r"{save_dir}", "ccx_rotor")
 os.makedirs(_work, exist_ok=True)
+""" + ema_purge._STANDALONE
+        + f"""
 
 def _set_opts(_cl):
     # Quality flags help Gmsh build solvable tets on the thin pocket bridges:
@@ -1290,6 +1293,10 @@ for _ai, _cl0 in enumerate(_ladder):
         fea.write_inp_file()
         _inp = fea.inp_file_name
         _patch_inp(_inp)
+        try:                                            # flache/invertierte Tets entfernen (bewiesene Fix, .inp-Textebene)
+            purge_slivers_inp(_inp)
+        except Exception as _pe:
+            print("SLIVER_PURGE_ERR: " + repr(_pe))
         _frd = (os.path.splitext(_inp)[0] + ".frd") if _inp else ""
         try:
             if _frd and os.path.exists(_frd): os.remove(_frd)   # avoid stale FRD from a prior try
@@ -1312,3 +1319,4 @@ else:
     print("FEM_RESULT:" + json.dumps({{"solver_status": "FAILED", "attempts": _attempts[:8]}}) + "\\n")
 sys.stdout.flush()
 """
+)
