@@ -16,7 +16,9 @@ not restate subproject detail.
 |---|---|---|---|
 | `cae_orchestrator/` | Browser CAE for IPM motors: geometry → EM field → structural FEM → thermal → drive-cycle, PDF report | Python/Flask + FreeCAD/CalculiX/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
 | `connection_detection/` | FreeCAD workbench: geometric connection detection in STEP assemblies (basis for multi-body CalculiX) | Python FreeCAD addon (`rtree`) | `FreeCADCmd cli.py -- input.step -o out.json` |
-| `pikogk/` | PicoGK geometry kernel + HTTP API (voxel/implicit geometry, LLM-driven "skill" generation) | .NET 9 + native `picogk.so` | `cd pikogk && ./start.sh` → http://localhost:5266 |
+| `pikogk/` | PicoGK geometry kernel + HTTP API (voxel/implicit geometry, LLM-driven "skill" generation; domain = combustion cylinder heads) | .NET 9 + native `picogk.so` | `cd pikogk && ./start.sh` → http://localhost:5266 |
+| `physics_surrogate/` | ML surrogate for the 2D-FDM field stage (PhysicsNeMo/Torch). **Stalled mid-stage-1**: 17 GB dataset + 4 trained checkpoints, best `rmse_Br_rel_peak` 0.054 against a 0.03 gate; `/predict/*` returns a hardcoded 503 and there is no inference client | Python + Torch/CUDA | `cd physics_surrogate && ./start.sh` → http://localhost:5300 |
+| `lego/` | LLM-generated functional LEGO Technic mechanisms, scored against ORCA hand kinematics | Python + BrickNet | — (CLI) |
 
 Each subproject has **its own CLAUDE.md or docs** — read those before working there:
 - `cae_orchestrator/CLAUDE.md` — extremely detailed (pipeline stages, endpoints, magnet
@@ -52,11 +54,25 @@ Two things that are easy to get wrong when touching this:
 
 ## How the pieces interact
 
-- `pikogk` (port 5266) and Ollama (port 11434) run as standalone local HTTP services;
-  `cae_orchestrator` and other scripts call them via `localhost` regardless of the
-  caller's own working directory.
-- `connection_detection` shares the FreeCAD toolchain with `cae_orchestrator` but is
-  otherwise independent (no HTTP link between them).
+**Read this before believing any "toolchain" wording elsewhere.** End to end there is
+**one** carrying product (`cae_orchestrator`) plus four independent satellites. Measured,
+not assumed:
+
+- **`cae_orchestrator` → Ollama (11434): real.** Report, chat, AI design, optimiser,
+  RAG embeddings. Without it all physics still works; only the LLM routes 503.
+- **`cae_orchestrator` → `physics_surrogate` (5300): read-only.** `ema_ki_training.py`
+  polls `/health` and plots `history.csv` for the 🧠 tab. There is **no** inference path:
+  `service/app.py` returns a hardcoded 503 on `/predict/*`, and the `ema_surrogate.py`
+  client its own README advertises does not exist. The real coupling runs the other way —
+  `gen_fdm_dataset.py` imports the orchestrator's genuine `_rasterise` via `PYTHONPATH`.
+- **`cae_orchestrator` ↔ `pikogk` (5266): does not exist.** Grepping the orchestrator for
+  `5266`/`pikogk` returns nothing. `pikogk/INTEGRATION.md` documents the HTTP contract in
+  anticipation of a link that was never built; the domains are disjoint anyway.
+- **`connection_detection`: standalone, and its output is currently a dead end.** It
+  produces a `ConnectionGraph` JSON carrying `tie`/`contact` labels for multi-body
+  CalculiX, but no `.inp` writer consumes it anywhere in this repo. It shares the FreeCAD
+  toolchain with `cae_orchestrator` and nothing else.
+- **`lego`: standalone.** No service, no port, no dependency on any sibling.
 - Nothing in this repo talks to the network beyond `localhost` — no auth/TLS anywhere,
   intentionally (local PoC scope).
 

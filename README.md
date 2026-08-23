@@ -1,8 +1,12 @@
 # ai-workspace
 
-Monorepo für die zusammengehörige E-Maschinen-CAE-Toolkette. Drei Teilprojekte, die
-über lokale HTTP-Dienste (`localhost`) zusammenspielen — betrieben unter dem
-eingeschränkten User **`cae`** (kein sudo).
+Monorepo für die E-Maschinen-CAE-Toolkette — betrieben unter dem eingeschränkten
+User **`cae`** (kein sudo), alles auf `localhost`.
+
+**Ehrlich vorweg, damit die Tabelle nicht mehr verspricht als sie hält:** getragen
+wird die Kette von `cae_orchestrator`. Die übrigen Ordner sind eigenständige
+Teilprojekte in unterschiedlichem Reifegrad, die *heute* nicht miteinander
+verdrahtet sind — siehe die Spalte „Verbindung".
 
 ## Teilprojekte
 
@@ -10,13 +14,19 @@ eingeschränkten User **`cae`** (kein sudo).
 |---|---|---|---|
 | `cae_orchestrator/` | Browser-CAE für IPM-Motoren (Geometrie → EM-Feld → FEM → Thermik → Fahrzyklus, PDF-Bericht) | Python/Flask + FreeCAD/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
 | `connection_detection/` | FreeCAD-Workbench: Verbindungserkennung in STEP-Baugruppen (Basis für Multi-Body-CalculiX) | Python-FreeCAD-Addon (`rtree`) | via `FreeCADCmd cli.py -- input.step -o out.json` |
-| `pikogk/` | PicoGK-Geometriekernel mit HTTP-API (Voxel-/Implicit-Geometrie, „Engine-Head"-Skills) | .NET 9 + native `picogk.so` | `cd pikogk && ./start.sh` → http://localhost:5266 |
+| `pikogk/` | PicoGK-Geometriekernel mit HTTP-API (Voxel-/Implicit-Geometrie, „Engine-Head"-Skills für Zylinderköpfe) | .NET 9 + native `picogk.so` | `cd pikogk && ./start.sh` → http://localhost:5266 |
+| `physics_surrogate/` | ML-Surrogat für die 2D-FDM-Feldstufe (PhysicsNeMo/Torch) | Python + Torch/CUDA | `cd physics_surrogate && ./start.sh` → http://localhost:5300 |
+| `lego/` | LEGO-Technic-Mechaniken per LLM, bewertet an ORCA-Handkinematik | Python + BrickNet | — (CLI) |
 
-## Zusammenspiel
+## Zusammenspiel — was wirklich verdrahtet ist
 
-`pikogk` und Ollama laufen als **lokale HTTP-Dienste**; `cae_orchestrator` (und Skripte)
-rufen sie über `localhost` (`:5266` bzw. `:11434`) — Aufrufort egal. `connection_detection`
-teilt sich die FreeCAD-Toolchain mit `cae_orchestrator`.
+| Verbindung | Stand |
+|---|---|
+| `cae_orchestrator` → **Ollama** `:11434` | **vorhanden** — Bericht, Chat, KI-Auslegung, Zielwertoptimierung, RAG-Embeddings |
+| `cae_orchestrator` → **physics_surrogate** `:5300` | **nur lesend** — der Tab 🧠 KI-Training zeigt Trainingsläufe und pollt `/health` (`ema_ki_training.py`). Einen Inferenzpfad gibt es nicht: `/predict/*` antwortet fest mit 503, ein `ema_surrogate.py` existiert nicht. Umgekehrt benutzt der Datensatzgenerator die **echte** Rasterisierung des Orchestrators über `PYTHONPATH` |
+| `cae_orchestrator` ↔ **pikogk** `:5266` | **nicht vorhanden.** Im Orchestrator steht kein einziger Verweis auf `:5266` oder `pikogk`. `pikogk/INTEGRATION.md` beschreibt den HTTP-Vertrag *für den Fall*, dass die Kopplung einmal gebaut wird — sie ist es nicht. Auch fachlich disjunkt: Zylinderköpfe gegen IPM-E-Maschinen |
+| `cae_orchestrator` ↔ **connection_detection** | **nicht vorhanden.** Der JSON-Export trägt `tie`/`contact`-Marken für Multi-Body-CalculiX, aber der Verbraucher ist nirgends geschrieben — der Export endet heute in der Datei. Geteilt wird nur die FreeCAD-Toolchain |
+| `lego/` | eigenständig, kein Dienst, keine Abhängigkeit zu den übrigen |
 
 ## Agentenbedienung (lokales Modell, kein Cloud-Zugang)
 

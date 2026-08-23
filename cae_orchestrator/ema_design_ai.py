@@ -10,7 +10,8 @@ und über das bestehende `dsnBuild()` → `/analyse` gerechnet werden.
 Wiederverwendung:
   * `ema_text2ema.SCHEMA` + `_validate` für den parametrischen (Maß-)Teil — garantiert
     in sich stimmige, ladbare Hauptmaße (radiale Ordnung, ~0,7 mm Spalt, slots≈6p).
-  * `ema_rag.context_for(brief, category="maschinen")` zur Erdung an Referenzmaschinen.
+  * `ema_rag.context_for(brief, category=None)` zur Erdung an Referenzmaschinen —
+    ueber die GANZE Wissensbasis, die bewusst nicht partitioniert ist.
   * `ema_topology.magnet_legs` + `_max_magnet_width` für die geometrische Validierung
     der freien Magnete und für den **Fallback**: liefert das LLM keine brauchbare
     Freihand-Geometrie, wird aus der parametrischen Topologie ein gültiger Halbpol
@@ -479,7 +480,11 @@ def design_variants(brief: str, n: int = 3, model: str = DEFAULT_MODEL,
     context = ""
     try:
         import ema_rag
-        context = ema_rag.context_for(brief, category="maschinen", k=4)
+        # category=None: die Wissensbasis ist EINE geteilte Ablage (ema_rag.py:31-35),
+        # `category` ist nur noch ein freier Merkzettel des Nutzers. Der frueher hier
+        # stehende Filter "maschinen" traf auf KEIN einziges Dokument — der Kontext war
+        # damit immer leer und die Erdung an Referenzmaschinen lief still ins Nichts.
+        context = ema_rag.context_for(brief, category=None, k=4)
     except Exception:
         context = ""
 
@@ -587,7 +592,7 @@ def design_variants_ranged(ranges: dict, n: int = 3, model: str = DEFAULT_MODEL,
     try:
         import ema_rag
         q = (brief or "").strip() or "IPM Hochdrehzahl Auslegung"
-        context = ema_rag.context_for(q, category="maschinen", k=4)
+        context = ema_rag.context_for(q, category=None, k=4)   # s. o.: kein Filter
     except Exception:
         context = ""
 
