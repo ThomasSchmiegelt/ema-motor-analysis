@@ -368,6 +368,45 @@ anderen Drehzahlen werden über die **rpm²-Skalierung** abgeleitet (Fliehkraft 
 lineare FEM → linearer Zusammenhang). Daraus ergeben sich die Bilder bei Nennlast,
 Maximaldrehzahl und Berstdrehzahl (dort SF → 1) ohne weitere Solver-Läufe.
 
+##### Rechensatz & Löser
+
+Das Auswahlfeld **Rechensatz & Löser** entscheidet, wer die Festigkeit rechnet:
+
+| Auswahl | Was passiert | Zeit* | Verformungsbilder |
+|---|---|---:|---|
+| **FreeCAD + CalculiX** (Vorgabe) | der gewachsene Weg: FreeCAD baut das Netz, CalculiX löst | Minuten + ~40 s Start | **ja** |
+| **Eigener Satz, Polsektor, CalculiX** | Gmsh vernetzt **einen Pol** aus derselben Magnetgeometrie wie das 2D-Feld; die zyklische Symmetrie wird mitgerechnet | ~1 s | nein |
+| **Eigener Satz, Vollrotor, Z88Aurora** | derselbe Netzkern, gelöst von Z88 | ~3 s | nein |
+| **Eigener Satz, Vollrotor, CalculiX *und* Z88** | dasselbe Netz zweimal, mit Gegenüberstellung | ~7 s | nein |
+
+\* gemessen an der Beispielmaschine (Delta-IPM, 3 Polpaare): der FreeCAD-Weg erzeugt
+797.275 Elemente, der Polsektor 13.669.
+
+**Die Verformungsbilder und das Rampenvideo hängen am FreeCAD-Rechensatz** — sie
+brauchen Knotenkoordinaten aus der `.frd`. Bei den drei anderen Auswahlen fällt die
+Verformungsstufe auf die analytische Näherung zurück; das Fortschrittsprotokoll sagt
+es ausdrücklich. Wer die Bilder braucht, bleibt bei der Vorgabe.
+
+**Was „beide" belegt — und was nicht.** Im Ergebnis erscheint dann die Tabelle
+*Zwei Löser, ein Netz*:
+
+| Größe | CalculiX | Z88 | Abw. |
+|---|---:|---:|---:|
+| σ_v Mittel | 57,15 MPa | 57,15 MPa | 0,00 % |
+| σ_v P99 (der Wert, auf den das Tor stellt) | 128,89 MPa | 128,90 MPa | 0,01 % |
+| Ringspannung an der Bohrung | 161,57 MPa | 161,62 MPa | 0,03 % |
+
+Das prüft **Löser und Rechensatz** — zwei unabhängige Programme kommen auf dieselbe
+Zahl. Es prüft **nicht** das Netz und nicht das Modell: ein Netz, das beide gleich
+falsch sehen, sehen beide gleich falsch. Als dritte, davon unabhängige Zahl steht die
+analytische Ringformel daneben (frei rotierender Ring **ohne** Magnettaschen, deshalb
+liegt der gerechnete Wert erwartungsgemäß etwas darüber).
+
+**Z88 kann keinen Polsektor.** Es kennt weder zyklische Symmetrie noch schiefe
+Symmetrieebenen, und die Schnittebenen eines Pols liegen nicht auf Koordinatenachsen.
+Deshalb rechnen die Z88-Auswahlen immer den vollen Rotor — was für den Vergleich
+ohnehin richtig ist, denn dann sehen beide Löser bitgleich dasselbe Netz.
+
 #### Zielwertoptimierung
 
 Button **🎯 Zielwertoptimierung öffnen** — siehe Abschnitt 4.
@@ -997,6 +1036,44 @@ den Feinparametern steht dort auch die **Topologiebindung** (`poleArcFrac` wirkt
 `spm`/`halbach`, `magLayers` nur bei `pmasynrm`, `magAsym` nur bei `vasym` …) — auf einer
 anderen Topologie wird der Wert angenommen und tut nichts.
 
+**Festigkeit und Topologieoptimierung von der Kommandozeile.** Beide rechnen
+**lokal** — ohne Server, ohne FreeCAD; das Netz entsteht in Sekunden:
+
+```bash
+python3 cae_cli.py struktur --from-project last --solver ccx              # ~2 s
+python3 cae_cli.py struktur --from-project last --solver beide --voll     # ~7 s
+python3 cae_cli.py topopt   --from-project last --iterationen 25          # ~20 s
+```
+
+`struktur --solver beide` druckt die Gegenüberstellung samt der analytischen Formel.
+Nützliche Schalter: `--mesh 6` (Netzweite in mm), `--ordnung 2` (Tet10, genauer,
+nur CalculiX), `--rpm 20000`, `--out <ordner>` (Rechensatz behalten statt verwerfen).
+
+`topopt` fährt die **Topologieoptimierung des Rotorblechs**: `--verfahren sko`
+(Vorgabe, spannungsgetrieben — für ein Blech das passende, denn es versagt durch
+Fließen an den Stegen, nicht durch Nachgiebigkeit) oder `simp` (Nachgiebigkeit unter
+Volumenschranke). Die drei Sperrbereiche sind Parameter und keine Konstanten:
+
+```bash
+python3 cae_cli.py topopt --from-project last \
+        --fest-bohrung 3 --fest-rand 2 --fest-tasche 1.5
+```
+
+Sie halten **Wellensitz**, **Rotoraußenrand** und einen **Saum um jede Magnettasche**
+vom Verfahren fern. Ohne sie rechnet es die Flusspfade weg, und das Ergebnis ist
+magnetisch wertlos. Wer den Taschensaum verkleinert, sieht genau, was das Verfahren
+an den Stegen tun *würde* — und entscheidet dann selbst.
+
+**Was dabei herauskommt, ist ein Dichtefeld, kein Bauteil.** Ein Blechschnitt hat
+Fertigungs-, Fluss- und Steifigkeitsbedingungen, die in keinem Dichtefeld stehen.
+Die `ableseempfehlung` im Ergebnis nennt darum den Radialbereich, in dem das Eisen
+mechanisch wenig trägt — ein Hinweis, wo eine zusätzliche Flussbarriere vertretbar
+*wäre*, **nach** einer EM-Rechnung und nicht davor.
+
+> **Z88Arion** wäre das naheliegende Werkzeug für Topologieoptimierung. Es gibt es
+> **nicht für Linux** — nur für Windows, und dort als reines Fenster-Programm ohne
+> Stapelbetrieb. Deshalb läuft das Verfahren hier selbstgebaut auf CalculiX bzw. Z88.
+
 **Mit Sprachmodell:** ein Skript in der Repo-Wurzel startet Server und Agent zusammen.
 
 ```bash
@@ -1012,6 +1089,26 @@ Ohne Flagge wird **nicht** fortgesetzt, sondern frisch gestartet — nur ein Hin
 die letzte Sitzung erscheint. Das ist Absicht: sonst schleppt jede neue Frage den Verlauf
 der vorigen mit. Einrichtung und Hintergrund in `.agents/README.md`.
 
+**Zweiter Agent zur Auswahl: Hermes.** Dieselbe Toolkette, dasselbe lokale Modell,
+derselbe Skill — nur ein anderer Agentenkopf:
+
+```bash
+./start_hermes.sh                             # interaktive Sitzung
+./start_hermes.sh -z "Wie hoch ist B_gap im neuesten Projekt?"
+./start_hermes.sh --nur-pruefen               # nur der Netznachweis, startet nichts
+```
+
+Beide beantworten dieselbe Frage mit derselben Zahl (geprüft: **0,806 T**, beide mit
+dem Hinweis, dass die Zahl aus der analytischen Luftspaltformel stammt und nicht aus
+dem Feldbild). Möglich ist das, weil beide **dieselbe Datei** lesen — nichts wird
+kopiert oder verlinkt, also können sie nicht auseinanderlaufen.
+
+`start_hermes.sh` **misst** vor jedem Start, dass Hermes ausschließlich das lokale
+Ollama anspricht, und bricht sonst ab. Das ist kein Übereifer: Hermes' mitgelieferte
+Voreinstellung zeigt auf einen Cloud-Dienst, und zwei bekannte Fehler im Programm
+lassen die Ollama-Einstellung still dorthin durchfallen. Eine Einstellungsdatei ist
+darum kein Beleg — gemessen wird, wohin der Prozess wirklich verbindet.
+
 ---
 
 ## 5. Berechnungsmethoden (Kurzfassung)
@@ -1022,6 +1119,8 @@ der vorigen mit. Einrichtung und Hintergrund in `.agents/README.md`.
 | **Elektromagnetik (3D, optional)** | 3D-FEM (Elmer, Gmsh-Netz, Kantenelemente) | Magnetostatik (`WhitneyAVSolver`, MUMPS-Direktlöser); Magnete via Magnetisierung Br/µ0; echte finite Länge → Endeffekte + Skew + 2D-Vergleich. v1: linear, Open-Circuit. Eigener On-Demand-Job (Tab „🧲 3D-Feld") |
 | **Leistung** | Analytisch (dq-Modell, MTPA, Feldschwächung) | Drehmoment, EMK, Verluste, Wirkungsgrad über der Drehzahl |
 | **Strukturmechanik** | 3D-FEM (CalculiX, Gmsh-Netz) | Einmalig bei Maximaldrehzahl; Verformung/Spannung bei anderen Drehzahlen via rpm²-Skalierung (Fliehkraft ∝ ω²). Berstdrehzahl = rpm bei SF→1. Nur der Rotor wird vernetzt |
+| **Strukturmechanik (zweiter Weg)** | 3D-FEM auf **eigenem Rechensatz**, wahlweise CalculiX **oder Z88Aurora V5** | Gmsh vernetzt einen Polsektor (zyklische Symmetrie) oder den Vollrotor aus derselben Magnetgeometrie wie das 2D-Feld; die CalculiX-Eingabedatei wird selbst geschrieben. Beide Löser auf **einem** Netz stimmen gemessen auf 0,00–0,05 % überein. Keine Verformungsbilder |
+| **Topologieoptimierung** | SKO (spannungsgetrieben) bzw. SIMP/OC, auf dem Polsektor | Steuert eine relative Dichte je Element, aus der **beide** Materialgrößen folgen (E **und** Masse — bei einer Volumenlast wäre alles andere falsch). Sperrbereiche für Wellensitz, Rotorrand und Taschensaum. Ergebnis ist ein **Dichtefeld, kein Bauteil** |
 | **Thermik** | 0D-LPTN (6-Knoten-Netzwerk) | Stationär + transient 30 min; kühlungsabhängige h-Werte |
 | **Fahrzyklus** | Analytisch (Antriebsstrangmodell) | Geschwindigkeit → Fahrwiderstände → Motorbetriebspunkt → Verluste/Temperatur pro Zeitschritt |
 | **Wellenverbindung** | Analytisch (Lamé, Flankenpressung) | Kein FEM; Press/Keilwelle/P3G jeweils nach Norm |
@@ -1037,7 +1136,12 @@ der vorigen mit. Einrichtung und Hintergrund in `.agents/README.md`.
 |---|---|
 | Geometrie (FreeCAD) + STEP | ~10–40 s |
 | EM-Feld + Animation (300 px, 36 Frames × 16 RPMs) | ~30 s – 2 min |
-| Festigkeits-FEM (CalculiX, 3 mm Netz) | ~30–120 s |
+| Festigkeits-FEM (FreeCAD + CalculiX, 3 mm Netz) | ~30–120 s |
+| Festigkeit, eigener Satz, Polsektor (CalculiX) | **~1 s** (0,4 s vernetzt + 0,35 s gelöst) |
+| Festigkeit, eigener Satz, Vollrotor (CalculiX) | ~3 s |
+| Festigkeit, eigener Satz, Vollrotor (Z88Aurora) | ~3,5 s |
+| Festigkeit, beide Löser mit Gegenüberstellung | ~7 s |
+| Topologieoptimierung (SKO, Polsektor) | ~0,8 s je Iteration, Konvergenz nach ~20 → **~20 s** |
 | Verformungsbilder + Video | ~10–30 s |
 | Thermik + Fahrzyklen | wenige Sekunden |
 | Einzelbild 5000 px (Multigrid) | mehrere Minuten |
