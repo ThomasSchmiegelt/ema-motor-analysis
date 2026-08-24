@@ -277,6 +277,79 @@ Output is assembled into a `results` dict and persisted to
 `<project_dir>/results.json` + `meta.json`. Charts are stored both inline (base64
 in `results`) and as files under `charts/`.
 
+### Handy-Pfad (`ema_mobil.py` / `ema_mobil.html`, Routen `/m…`)
+
+Zweiter, bewusst schmaler Bedienweg: **Maße → Halbpol zeichnen → vier Betriebspunkte
+mit dem 2D-FDM-Löser**. Kein CAD, keine Festigkeit, keine Thermik, kein Fahrzyklus,
+kein Bericht. Der Löser läuft immer auf dem Rechner — das Handy ist Eingabe- und
+Anzeigegerät.
+
+**Warum eine eigene Seite statt `ema.html` responsiv zu machen:** `ema.html` hat auf
+643 kB **null** `@media`-Regeln, ein Layout aus Splittern und festen Seitenbereichen,
+und sein Designer hört nur auf Maus-Ereignisse (`dsnMouseDown` …). Geteilt wird nicht
+Code, sondern das **Datenmodell** (`customLegs`) und der **Löser**.
+
+Routen (alle in `server.py`, umgesetzt in `ema_mobil`): `GET /m` (Seite) ·
+`GET /m/<datei>` (Manifest/Service Worker/Symbole, **ohne** Token — sonst keine
+App-Installation) · `GET /m/schema` · `POST /m/punkte` (NDJSON-Strom, eine Zeile je
+fertigem Punkt) · `GET /m/zugang` (nur von `127.0.0.1`).
+
+**Zugang:** ein gemeinsames Token in `~/cae_projekte/_session/mobil_token` (überdauert
+Neustarts, Zurücksetzen = Datei löschen), als `?t=` oder `X-Mobil-Token`, Vergleich mit
+`hmac.compare_digest`. `server.py` gibt beim Start Adresse + **QR-Code** aus
+(`ema_mobil.zugang_text`, via `segno`; ohne die Bibliothek nur die URL). Die **übrigen
+Routen bleiben offen** — sie abzusichern würde `ema.html` und `cae_cli.py` brechen.
+
+**Vier Dinge, die gemessen und nicht geraten wurden:**
+
+1. **`out_px` muss durchgereicht werden.** `render_preview_frame` hat den harten Boden
+   `out_px = min(5000, max(1000, N))`. Gemessen bei N=180: 640 px → 2,33 s / **459 kB**,
+   800 px → 640 kB, 1000 px → 889 kB. Die Rechenzeit hängt fast nur an `N`, die
+   Übertragung fast nur an `out_px`; deshalb ruft `ema_mobil` `_field_frame` direkt.
+   Vorgabe 640 px ⇒ vier Punkte in ~9 s und **1,7 MB** statt 3,6 MB.
+2. **`N` gedeckelt auf 260** (`N_MAX`). Gemessen: N=140 → 1,23 s · N=200 → 2,84 s ·
+   N=300 → 7,60 s je Punkt; ein Vierersatz bei 300 wäre 30 s.
+3. **Kein `rpm_base` an `estimate_dq_currents`.** `render_preview_frame` setzt
+   `rpm_base=rpm` — für EIN Bild richtig, für einen Sweep falsch (jeder Punkt läge
+   per Definition an der Eckdrehzahl).
+4. **Die Vorgabepunkte fahren eine Momenten-Drehzahl-Linie, nicht vier Drehzahlen bei
+   gleichem Moment.** Das 2D-Feld bei festem Rotorwinkel hängt nur von (i_q, i_d) ab,
+   und die kommen **unterhalb der Eckdrehzahl allein aus dem Moment**. Für die
+   Beispielmaschine liegt die Eckdrehzahl bei ~43 000 min⁻¹ (800 V) — 1000…20000 min⁻¹
+   bei konstant 5 Nm ergibt viermal i_q 125,5 / i_d −65,1, also **vier identische
+   Bilder**. `PUNKTE_DEFAULT` = 300/200/80/40 Nm über 1000/5000/15000/20000 min⁻¹; die
+   Startzeile des Stroms meldet `rpm_base`/`alle_unter_eck`/`gleiche_last`, damit die
+   App warnen kann statt den Nutzer rätseln zu lassen.
+
+**Die gefährlichste Stelle** ist die Umrechnung Halbpol → `customLegs`: sie existiert
+**zweimal** (JavaScript in `ema_mobil.html`, Python in `ema_mobil.py`), beide
+zeichengetreu aus `ema.html:5570-5590`. Laufen sie auseinander, rechnen Handy und
+Schreibtisch aus derselben Zeichnung verschiedene Maschinen — und beide Ergebnisse
+sehen plausibel aus. `test_mobil.py` führt die JS-Fassung mit `node` aus und vergleicht
+sie mit der Python-Fassung.
+
+**Serverseitige Vervollständigung der Geometrie:** `pruefe_anfrage` legt die
+Client-Geometrie über `basis_geom()` (Vorgaben aus `ema_text2ema.SCHEMA`). Ohne das
+scheitert der Lauf mit `KeyError: 'magThick'` — `ema_topology.magnet_legs` liest auch
+bei `magShape:"custom"` parametrische Werte, und die App kennt nur ihre zehn Felder.
+Der Schreibtischpfad kommt nicht in die Lage, weil er über eine bereits vollständige
+`GEOM` legt (`ema.html:5593`). Gefunden beim End-to-End-Lauf, nicht von den Unit-Tests.
+
+**`airGap` ist kein Schemaparameter** und kann keiner sein: die Statorbohrung folgt aus
+Rotor und Spalt (`statorID = rotorOD + 2·airGap`, so auch `ema.html:dsnDims`). Die App
+fragt den Spalt und zeigt die Bohrung als abgeleiteten Wert; `FELDER_ABGELEITET` trägt
+die Grenzen.
+
+**Offline (PWA):** `mobil/manifest.webmanifest` + `mobil/sw.js`. Hülle *cache first*,
+`/m/schema` *network first mit Rückfall*, **`/m/punkte` nie gecacht** — ein
+zwischengespeichertes Rechenergebnis wäre eine Lüge über eine geänderte Geometrie. Der
+Entwurf liegt in `localStorage`; ohne Verbindung wird die Rechnung vorgemerkt und auf
+Tastendruck nachgeholt, nicht selbsttätig.
+
+Test: `test_mobil.py` (Legs-Gleichheit JS↔Python, Token, Routen inkl. 401/403/409,
+Nutzlastgrenzen, dünne Geometrie, eine echte Punktrechnung, Vorgabepunkte ergeben
+verschiedene Arbeitspunkte) — ohne Server, ohne FreeCAD.
+
 ### Canvas Designer (`ema.html` tab `designer`)
 
 Free-form rotor designer: a standalone tab where the user enters the main dimensions
@@ -1615,6 +1688,7 @@ dict passed to the FEM script.
 | `ema_pipeline.py` | Pipeline orchestrator (`run_pipeline`) + material tables + all chart builders |
 | `ema_topology.py` | Single source of truth for rotor magnet placement (`magnet_legs`, `Leg`, topology labels) — consumed by `ema_freecad` + `ema_analysis`; mirrored by JS `magnetLegs` in `ema.html` |
 | `ema_freecad.py` | FreeCAD script generators (rotor, full motor, rotor FEM); interior pockets + surface arc magnets from `magnet_legs`; parametric hairpin end-windings (`conductorsPerSlot`/`coilPitch`, collision-free radial-split crowns) |
+| `ema_mobil.py` / `ema_mobil.html` / `mobil/` | **Handy-Pfad** (Routen `/m…`): Maße → Halbpol zeichnen → vier Betriebspunkte mit dem 2D-FDM-Löser, als installierbare Web-App (PWA). Token-geschützt (einzige Routengruppe), QR-Code beim Serverstart. `rechne_punkte` streamt NDJSON (erste Kachel nach ~3 s statt ~12 s), reicht `out_px` durch (gegen den 1000-px-Boden von `render_preview_frame`) und rechnet EINEN `B_gap`-Vorlauf für alle Punkte. `legs_aus_halbpol` ist die Python-Zwillingsfassung der JS-Umrechnung in der Seite — `test_mobil.py` hält beide über `node` bitgleich. `basis_geom()` füllt die dünne Client-Geometrie aus `ema_text2ema.SCHEMA` auf (sonst `KeyError: 'magThick'`). Details + die vier gemessenen Entwurfsentscheidungen im Abschnitt „Handy-Pfad" |
 | `ema_rotorcheck.py` | **Pre-CAD rotor gates, pure 2-D algebra (ms).** `rotor_layout_check` (pocket collision, minimum web `BRIDGE_MM`, containment in the `[bore, rim]` annulus — models the real stadium/obround cut incl. the `magGapMm` glue gap) and `rotor_stress_check` (exact rotating-annulus bore hoop stress in BOTH plane states via `_bore_hoop_mpa`, gate on the conservative plane-strain value × `KT_POCKET`=1.5). Consumed by `ema_pipeline` (stage 0) and `cae_cli.py rotor-check`. Does **not** cover balance bolts or flux barriers |
 | `ema_purge.py` | Removes degenerate C3D4 tets from the CalculiX `.inp` so `ccx` stops refusing meshes over a handful of flat tets in the thin iron bridges. Exists **twice**: as a module and as `_STANDALONE` text spliced into the generated FreeCAD script (no import possible there) — `test_rotorcheck.py` pins the two together. Refuses to touch the file if >5 % of tets are flagged (that pattern means a parser glitch, never a real mesh) |
 | `freecad_runner.py` | FreeCAD subprocess wrapper + marker parsing + generic FEM script builder |

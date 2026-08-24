@@ -11,3 +11,4 @@ pyamg>=5.0      # iterativer AMG-Solver für sehr hohe FDM-Auflösung (>2500 px)
 pypdf>=4.0      # PDF-Textextraktion für die Wissensbasis (RAG); nur dafür benötigt
 gmsh>=4.12      # 3D-Mesh (OCC) für die Elmer-3D-Magnetfeldberechnung (ema_em3d)
 vtk>=9.0        # 3D-Visualisierung (offscreen) + VTU-Auswertung der Elmer-Ergebnisse
+segno            # QR-Code fuer den Handy-Zugang (reines Python)

@@ -41,8 +41,14 @@ nicht, ob eine Geometrie *baubar* ist — nach jeder Geometrieänderung erst `ru
 
 ## Harte Grenzen — nicht verhandelbar
 
-* **Nichts hier redet über `localhost` hinaus.** Kein Auth, kein TLS, absichtlich
-  (lokaler Machbarkeitsnachweis). Keine externe Gegenstelle einbauen.
+* **Nichts hier redet über das Heimnetz hinaus.** Keine externe Gegenstelle einbauen.
+  Aber die frühere Formulierung „nichts über `localhost` hinaus" war **falsch** —
+  gemessen bindet der Server auf `0.0.0.0` (`server.py:3617`) und setzt
+  `Access-Control-Allow-Origin: *` (`:3605`). Er ist damit für jeden im selben WLAN
+  erreichbar, ohne Auth und ohne TLS. Das ist für den lokalen Machbarkeitsnachweis
+  bewusst so; **neu** ist, dass der Handy-Pfad (`/m…`) als einzige Routengruppe ein
+  Token verlangt (`ema_mobil.py`). Die übrigen Routen bleiben offen — sie abzusichern
+  wäre eine eigene Entscheidung und würde `ema.html` und `cae_cli.py` brechen.
 * **`/opt/freecad-1.1` niemals benutzen** — das ist in Wahrheit 1.2 und hat einen
   Darstellungsfehler. Das richtige FreeCAD liegt unter `~/freecad_1.1_quellcode`
   (pixi), CalculiX (`ccx`) in derselben Umgebung.

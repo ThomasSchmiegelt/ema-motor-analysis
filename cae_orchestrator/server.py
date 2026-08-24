@@ -3602,10 +3602,121 @@ ema_jobs.init({
 })
 
 
+
+# ── Handy-Pfad (ema_mobil.py) ─────────────────────────────────────────────────
+#
+# Eigene, schmale Oberflaeche fuer Handys: Masse eingeben, Halbpol zeichnen, vier
+# Betriebspunkte mit dem 2D-FDM-Loeser rechnen. Warum eine zweite Seite statt ema.html
+# responsiv zu machen, steht im Modulkopf von ema_mobil.py.
+#
+# ALS EINZIGE Routen dieses Servers verlangen sie ein Token. Die uebrigen bleiben offen
+# wie bisher — sie jetzt abzusichern waere eine eigene Entscheidung und wuerde ema.html
+# und cae_cli.py brechen.
+
+def _mobil_token_pruefen():
+    """None wenn in Ordnung, sonst die fertige 401-Antwort."""
+    import ema_mobil
+    t = request.args.get("t") or request.headers.get("X-Mobil-Token")
+    if ema_mobil.token_ok(t):
+        return None
+    return jsonify({"error": "Zugang verweigert — Token fehlt oder ist falsch. "
+                             "Die Einstiegsadresse steht beim Serverstart im Terminal "
+                             "(QR-Code)."}), 401
+
+
+@app.route("/m")
+def mobil_index():
+    fehler = _mobil_token_pruefen()
+    if fehler:
+        return fehler
+    return send_from_directory(os.path.dirname(__file__), "ema_mobil.html")
+
+
+@app.route("/m/<path:datei>")
+def mobil_datei(datei):
+    """Manifest, Service Worker und Symbole.
+
+    Ohne Token, und das ist Absicht: der Service Worker wird vom Browser OHNE die
+    Abfrageparameter der Seite geladen, ein Token-Zwang wuerde die Installation als
+    App verhindern. Die Dateien tragen keine Daten — nur Huelle.
+    """
+    import ema_mobil
+    sicher = os.path.basename(datei)          # kein Verzeichniswechsel
+    pfad = os.path.join(ema_mobil.MOBIL_DIR, sicher)
+    if not os.path.isfile(pfad):
+        return jsonify({"error": "nicht gefunden"}), 404
+    antwort = send_from_directory(ema_mobil.MOBIL_DIR, sicher)
+    if sicher == "sw.js":
+        # Der Service Worker darf NIE aus dem Cache kommen, sonst laesst sich eine
+        # kaputte Fassung nicht mehr ersetzen.
+        antwort.headers["Cache-Control"] = "no-cache"
+        antwort.headers["Service-Worker-Allowed"] = "/"
+    return antwort
+
+
+@app.route("/m/schema")
+def mobil_schema():
+    fehler = _mobil_token_pruefen()
+    if fehler:
+        return fehler
+    import ema_mobil
+    return jsonify(ema_mobil.schema_ausschnitt(param_schema().get_json()))
+
+
+@app.route("/m/punkte", methods=["POST", "OPTIONS"])
+def mobil_punkte():
+    """Vier Betriebspunkte rechnen — eine NDJSON-Zeile je fertigem Punkt.
+
+    Zeilenweise statt gesammelt, damit die erste Kachel nach ~3 s auf dem Handy steht
+    und nicht erst nach ~12 s.
+    """
+    if request.method == "OPTIONS":
+        return "", 200
+    fehler = _mobil_token_pruefen()
+    if fehler:
+        return fehler
+    # Ein Handylauf darf einem laufenden Schreibtischlauf nicht Speicher und Kerne
+    # wegnehmen — dieselbe Regel wie /preview_field.
+    if _state["status"] == "running":
+        return jsonify({"error": "Am Rechner laeuft gerade eine Berechnung. "
+                                 "Bitte abwarten."}), 409
+
+    import ema_mobil
+    anfrage, meldung = ema_mobil.pruefe_anfrage(request.get_json(force=True, silent=True) or {})
+    if meldung:
+        return jsonify({"error": meldung}), 400
+
+    def strom():
+        try:
+            for satz in ema_mobil.rechne_punkte(anfrage):
+                yield json.dumps(satz, ensure_ascii=False) + "\n"
+        except Exception as e:                      # noqa: BLE001
+            yield json.dumps({"art": "fehler", "fehler": str(e)[:300]},
+                             ensure_ascii=False) + "\n"
+
+    return Response(strom(), mimetype="application/x-ndjson",
+                    headers={"Cache-Control": "no-store",
+                             "X-Accel-Buffering": "no"})
+
+
+@app.route("/m/zugang")
+def mobil_zugang():
+    """Einstiegsadresse samt Token — NUR von diesem Rechner aus abrufbar.
+
+    Sonst koennte sich jeder im WLAN das Token abholen und die Sperre waere eine
+    Attrappe.
+    """
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return jsonify({"error": "nur lokal abrufbar"}), 403
+    import ema_mobil
+    return jsonify({"url": ema_mobil.einstieg_url(), "token": ema_mobil.token(),
+                    "lan": ema_mobil.lan_adresse()})
+
+
 @app.after_request
 def cors(r):
     r.headers["Access-Control-Allow-Origin"] = "*"
-    r.headers["Access-Control-Allow-Headers"] = "Content-Type"
+    r.headers["Access-Control-Allow-Headers"] = "Content-Type, X-Mobil-Token"
     return r
 
 
@@ -3614,4 +3725,9 @@ if __name__ == "__main__":
     print("E-Maschinen Analyse-Server")
     print("→  http://localhost:5000")
     print("=" * 50)
+    try:
+        import ema_mobil
+        print(ema_mobil.zugang_text(5000))
+    except Exception as _e:
+        print(f"  (Handy-Zugang nicht verfuegbar: {_e})")
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)

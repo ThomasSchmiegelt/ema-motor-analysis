@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1"/>
+<meta name="theme-color" content="#12141c"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="EMA"/>
+<link rel="manifest" href="manifest.webmanifest"/>
+<link rel="apple-touch-icon" href="icon-192.png"/>
+<title>E-Maschine — Vorentwurf</title>
+<style>
+/* Bewusst systemeigene Schriften: die App muss offline starten, und ein
+   Netz-Schriftdienst wäre genau dann nicht da. */
+:root{
+  --grund:#12141c; --flaeche:#191c26; --tief:#0d0f16; --erhoben:#222634;
+  --schrift:#e8eaf0; --schrift2:#a9afbe; --schrift3:#7a8194;
+  --linie:#2c3140; --akzent:#3fc7e0; --akzent-tief:#12313a;
+  --nord:#e05c4b; --sued:#4a90d9; --gut:#5fbf92; --warn:#dfb55a; --fehler:#e8705f;
+  --sicher-o:env(safe-area-inset-top); --sicher-u:env(safe-area-inset-bottom);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%}
+body{
+  margin:0;background:var(--grund);color:var(--schrift);
+  font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  overscroll-behavior:none;
+}
+.mono{font-family:ui-monospace,"SF Mono",Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+
+/* ── Gerüst ─────────────────────────────────────────── */
+#app{display:flex;flex-direction:column;height:100dvh}
+header{
+  padding:calc(8px + var(--sicher-o)) 12px 0;background:var(--flaeche);
+  border-bottom:1px solid var(--linie);flex:none;
+}
+.schritte{display:flex;gap:4px}
+.schritte button{
+  flex:1;background:none;border:0;border-bottom:2px solid transparent;
+  color:var(--schrift3);font:600 11px/1 system-ui;letter-spacing:.04em;
+  padding:8px 2px 9px;text-transform:uppercase;cursor:pointer;
+}
+.schritte button .n{display:block;font-size:15px;margin-bottom:3px;letter-spacing:0}
+.schritte button[aria-selected="true"]{color:var(--akzent);border-bottom-color:var(--akzent)}
+.schritte button:disabled{opacity:.35}
+
+main{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch}
+.blatt{display:none;padding:14px 12px 8px}
+.blatt.an{display:block}
+
+footer{
+  flex:none;padding:8px 12px calc(8px + var(--sicher-u));
+  background:var(--flaeche);border-top:1px solid var(--linie);
+  display:flex;gap:8px;align-items:center;
+}
+
+/* ── Bausteine ──────────────────────────────────────── */
+h2{margin:0 0 3px;font-size:19px;font-weight:600;letter-spacing:-.01em}
+.hint{margin:0 0 14px;color:var(--schrift3);font-size:13.5px;line-height:1.4}
+.karte{background:var(--flaeche);border:1px solid var(--linie);border-radius:10px;padding:12px;margin-bottom:10px}
+
+.feld{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--linie)}
+.feld:last-child{border-bottom:0}
+.feld label{flex:1;font-size:14px;color:var(--schrift2);min-width:0}
+.feld label small{display:block;color:var(--schrift3);font-size:11px}
+.feld input{
+  width:104px;flex:none;background:var(--tief);border:1px solid var(--linie);
+  border-radius:7px;color:var(--schrift);padding:9px 10px;font-size:16px;text-align:right;
+  font-family:ui-monospace,monospace;font-variant-numeric:tabular-nums;
+}
+.feld input:focus{outline:2px solid var(--akzent);outline-offset:-1px;border-color:transparent}
+.feld input.schlecht{border-color:var(--fehler);background:#2a1614}
+
+button.tat{
+  flex:1;background:var(--akzent);color:#04222a;border:0;border-radius:10px;
+  padding:14px;font:600 16px system-ui;cursor:pointer;
+}
+button.tat:disabled{background:var(--erhoben);color:var(--schrift3)}
+button.neben{
+  flex:none;background:var(--erhoben);color:var(--schrift);border:1px solid var(--linie);
+  border-radius:10px;padding:14px 16px;font:600 15px system-ui;cursor:pointer;
+}
+button.klein{
+  background:var(--erhoben);color:var(--schrift);border:1px solid var(--linie);
+  border-radius:8px;padding:9px 12px;font:600 13px system-ui;cursor:pointer;
+}
+button.klein[aria-pressed="true"]{background:var(--akzent-tief);border-color:var(--akzent);color:var(--akzent)}
+
+/* ── Zeichenfläche ──────────────────────────────────── */
+#zeichnung{
+  width:100%;aspect-ratio:1;display:block;background:var(--tief);
+  border:1px solid var(--linie);border-radius:10px;touch-action:none;
+}
+.werkzeuge{display:flex;gap:6px;margin:10px 0 8px;flex-wrap:wrap}
+.regler{display:flex;align-items:center;gap:9px;padding:5px 0}
+.regler span{width:52px;flex:none;font-size:11.5px;color:var(--schrift3);text-transform:uppercase;letter-spacing:.05em}
+.regler input[type=range]{flex:1;min-width:0;accent-color:var(--akzent);height:26px}
+.regler b{width:56px;flex:none;text-align:right;font:500 13px ui-monospace,monospace;font-variant-numeric:tabular-nums}
+
+/* ── Punkte ─────────────────────────────────────────── */
+.punkt{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--linie)}
+.punkt:last-child{border-bottom:0}
+.punkt .nr{width:20px;flex:none;color:var(--schrift3);font:600 12px ui-monospace,monospace}
+.punkt input{
+  flex:1;min-width:0;background:var(--tief);border:1px solid var(--linie);border-radius:7px;
+  color:var(--schrift);padding:9px 10px;font:16px ui-monospace,monospace;text-align:right;
+  font-variant-numeric:tabular-nums;
+}
+.punkt .eh{width:32px;flex:none;color:var(--schrift3);font-size:12px}
+
+/* ── Ergebnis ───────────────────────────────────────── */
+#kacheln{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.kachel{background:var(--flaeche);border:1px solid var(--linie);border-radius:10px;overflow:hidden;position:relative}
+.kachel.gross{grid-column:1/-1}
+.kachel img{width:100%;display:block;background:var(--tief);aspect-ratio:1;object-fit:contain}
+.kachel .kopf{padding:7px 9px 3px;font:600 13px ui-monospace,monospace}
+.kachel .zeile{padding:0 9px 8px;font:11.5px ui-monospace,monospace;color:var(--schrift3);line-height:1.5}
+.kachel .warte{
+  aspect-ratio:1;display:flex;align-items:center;justify-content:center;
+  color:var(--schrift3);font-size:12px;background:var(--tief);
+}
+.kachel.fehlerhaft{border-color:var(--fehler)}
+.kachel .fm{padding:9px;font-size:12px;color:var(--fehler);line-height:1.4}
+
+.balken{height:3px;background:var(--erhoben);border-radius:2px;overflow:hidden;margin:2px 0 12px}
+.balken i{display:block;height:100%;background:var(--akzent);width:0;transition:width .25s}
+
+.melde{
+  padding:10px 12px;border-radius:9px;font-size:13.5px;line-height:1.45;margin-bottom:10px;
+  border:1px solid;display:none;
+}
+.melde.an{display:block}
+.melde.info{background:var(--akzent-tief);border-color:var(--akzent);color:var(--akzent)}
+.melde.warn{background:#332a10;border-color:var(--warn);color:var(--warn)}
+.melde.fehler{background:#361d1a;border-color:var(--fehler);color:var(--fehler)}
+
+.fuss{margin:16px 0 4px;padding-top:12px;border-top:1px solid var(--linie);
+      color:var(--schrift3);font-size:11.5px;line-height:1.5}
+</style>
+</head>
+<body>
+<div id="app">
+
+<header>
+  <div class="schritte" role="tablist">
+    <button role="tab" aria-selected="true"  data-s="0"><span class="n">1</span>Maße</button>
+    <button role="tab" aria-selected="false" data-s="1"><span class="n">2</span>Querschnitt</button>
+    <button role="tab" aria-selected="false" data-s="2"><span class="n">3</span>Punkte</button>
+    <button role="tab" aria-selected="false" data-s="3"><span class="n">4</span>Ergebnis</button>
+  </div>
+</header>
+
+<main>
+  <div id="melde-global" class="melde"></div>
+
+  <!-- ① Maße -->
+  <section class="blatt an" data-s="0">
+    <h2>Hauptmaße</h2>
+    <p class="hint">Grenzen und Vorgaben kommen vom Rechner (<span class="mono">/param_schema</span>) — es gibt keine zweite Parametertabelle, die auseinanderlaufen könnte.</p>
+    <div class="karte" id="masse"></div>
+    <div class="karte">
+      <div class="feld">
+        <label>Magnetwerkstoff</label>
+        <select id="magnet" style="flex:none;background:var(--tief);border:1px solid var(--linie);border-radius:7px;color:var(--schrift);padding:9px 8px;font-size:15px">
+          <option value="ndfeb_n35">NdFeB N35</option>
+          <option value="ndfeb_n42">NdFeB N42</option>
+          <option value="ndfeb_n50" selected>NdFeB N50</option>
+          <option value="ferrit_y30">Ferrit Y30</option>
+        </select>
+      </div>
+    </div>
+  </section>
+
+  <!-- ② Querschnitt -->
+  <section class="blatt" data-s="1">
+    <h2>Querschnitt zeichnen</h2>
+    <p class="hint">Sie zeichnen <strong>einen halben Pol</strong> (der hellere Keil). Der Rest wird gespiegelt und über alle Pole wiederholt — genau wie am Schreibtisch.</p>
+    <canvas id="zeichnung"></canvas>
+    <div class="werkzeuge">
+      <button class="klein" id="w-neu">＋ Magnet</button>
+      <button class="klein" id="w-pol">Polung N/S</button>
+      <button class="klein" id="w-weg">Löschen</button>
+      <button class="klein" id="w-alle">Alle löschen</button>
+    </div>
+    <div class="karte" id="magregler" style="display:none">
+      <div class="regler"><span>Radius</span><input type="range" id="r-r"><b id="v-r"></b></div>
+      <div class="regler"><span>Versatz</span><input type="range" id="r-off"><b id="v-off"></b></div>
+      <div class="regler"><span>Neigung</span><input type="range" id="r-ang"><b id="v-ang"></b></div>
+      <div class="regler"><span>Länge</span><input type="range" id="r-len"><b id="v-len"></b></div>
+      <div class="regler"><span>Dicke</span><input type="range" id="r-thick"><b id="v-thick"></b></div>
+    </div>
+    <p class="hint" id="magzahl"></p>
+  </section>
+
+  <!-- ③ Punkte -->
+  <section class="blatt" data-s="2">
+    <h2>Vier Betriebspunkte</h2>
+    <p class="hint">Je Punkt Drehzahl und Lastmoment. Gerechnet wird das 2D-Feld an Rotorwinkel&nbsp;0°.</p>
+    <div class="melde an warn" style="font-size:12.5px">
+      <strong>Das Moment bewegt das Bild, nicht die Drehzahl.</strong> Unterhalb der Eckdrehzahl
+      hängen die Ströme allein am Moment — erst darüber erzwingt die Spannungsgrenze
+      Feldschwächung. Vier Drehzahlen bei gleichem Moment ergeben deshalb vier
+      <em>identische</em> Felder. Die Vorgabe fährt daher eine Momenten-Drehzahl-Linie ab.
+    </div>
+    <div class="karte" id="punkte"></div>
+    <div class="karte">
+      <div class="feld">
+        <label>Auflösung<small>höher = schärfer und deutlich langsamer</small></label>
+        <input id="N" type="number" inputmode="numeric"/>
+      </div>
+      <div class="feld">
+        <label>Bildbreite<small>Pixel je Kachel</small></label>
+        <input id="outpx" type="number" inputmode="numeric"/>
+      </div>
+    </div>
+    <p class="hint" id="zeitschaetzung"></p>
+  </section>
+
+  <!-- ④ Ergebnis -->
+  <section class="blatt" data-s="3">
+    <h2>Ergebnis</h2>
+    <div class="balken"><i id="fortschritt"></i></div>
+    <div id="melde-lauf" class="melde"></div>
+    <div id="kacheln"></div>
+    <p class="fuss">
+      2D-FDM, im Löser linear · <span class="mono">B_gap</span> ist analytisch verankert,
+      das Feldbild dient der Anschauung · keine Festigkeit, keine Thermik, kein Fahrzyklus.
+      Für die vollständige Kette die Oberfläche am Rechner benutzen.
+    </p>
+  </section>
+</main>
+
+<footer>
+  <button class="neben" id="zurueck">◀</button>
+  <button class="tat" id="weiter">Weiter</button>
+</footer>
+
+</div>
+
+<script>
+'use strict';
+// ── Zugang ────────────────────────────────────────────────────────────────────
+// Das Token steht beim ersten Aufruf in der Adresse und wird gemerkt, damit der
+// Startbildschirm-Eintrag (start_url ohne Parameter) weiter funktioniert.
+const TOKEN = (() => {
+  const u = new URLSearchParams(location.search).get('t');
+  if (u) { try { localStorage.setItem('ema_token', u); } catch (e) {} return u; }
+  try { return localStorage.getItem('ema_token') || ''; } catch (e) { return ''; }
+})();
+const kopf = () => ({ 'Content-Type': 'application/json', 'X-Mobil-Token': TOKEN });
+
+// ── Zustand ───────────────────────────────────────────────────────────────────
+const SPEICHER = 'ema_mobil_entwurf_v1';
+const Z = {
+  masse: {}, magnete: [], barrieren: [],
+  punkte: [{rpm:1000,load_nm:300},{rpm:5000,load_nm:200},{rpm:15000,load_nm:80},{rpm:20000,load_nm:40}],
+  magnet: 'ndfeb_n50', N: 180, out_px: 640, schritt: 0, sel: null
+};
+let SCHEMA = null, GRENZEN = { N_MAX:260, N_DEFAULT:180, OUT_PX_MAX:1200, OUT_PX_DEF:640 };
+let LAEUFT = false, VORGEMERKT = false;
+
+function sichern() {
+  try {
+    localStorage.setItem(SPEICHER, JSON.stringify({
+      masse:Z.masse, magnete:Z.magnete, barrieren:Z.barrieren,
+      punkte:Z.punkte, magnet:Z.magnet, N:Z.N, out_px:Z.out_px }));
+  } catch (e) {}
+}
+function laden() {
+  try {
+    const r = JSON.parse(localStorage.getItem(SPEICHER) || 'null');
+    if (r && typeof r === 'object') Object.assign(Z, r);
+  } catch (e) {}
+}
+
+// ── Meldungen ─────────────────────────────────────────────────────────────────
+function melden(wo, art, text) {
+  const el = document.getElementById(wo);
+  if (!text) { el.className = 'melde'; el.textContent = ''; return; }
+  el.className = 'melde an ' + art; el.textContent = text;
+}
+
+// ── Schritte ──────────────────────────────────────────────────────────────────
+function zeigeSchritt(s) {
+  Z.schritt = Math.max(0, Math.min(3, s));
+  document.querySelectorAll('.blatt').forEach(b =>
+    b.classList.toggle('an', +b.dataset.s === Z.schritt));
+  document.querySelectorAll('.schritte button').forEach(b =>
+    b.setAttribute('aria-selected', (+b.dataset.s === Z.schritt) ? 'true' : 'false'));
+  document.querySelector('main').scrollTop = 0;
+  const w = document.getElementById('weiter');
+  w.textContent = Z.schritt === 2 ? 'Rechnen' : (Z.schritt === 3 ? 'Neu rechnen' : 'Weiter');
+  document.getElementById('zurueck').style.visibility = Z.schritt ? 'visible' : 'hidden';
+  if (Z.schritt === 1) { groesseAnpassen(); zeichnen(); }
+  if (Z.schritt === 2) zeitSchaetzen();
+}
+document.querySelectorAll('.schritte button').forEach(b =>
+  b.addEventListener('click', () => zeigeSchritt(+b.dataset.s)));
+document.getElementById('zurueck').addEventListener('click', () => zeigeSchritt(Z.schritt - 1));
+document.getElementById('weiter').addEventListener('click', () => {
+  if (Z.schritt === 2 || Z.schritt === 3) rechnen(); else zeigeSchritt(Z.schritt + 1);
+});
+
+// ── ① Maße ────────────────────────────────────────────────────────────────────
+const BESCHRIFTUNG = {
+  statorOD:'Stator außen', rotorOD:'Rotor außen', airGap:'Luftspalt',
+  shaftD:'Welle', slots:'Nuten', p:'Polpaare', slotDepth:'Nuttiefe',
+  conductorsPerSlot:'Leiter je Nut', magGapMm:'Klebespalt',
+  axialLen:'Blechpaketlänge'
+};
+// Die Statorbohrung wird NICHT eingegeben, sondern abgeleitet — genau wie im
+// Schreibtisch-Designer (ema.html:dsnDims). Sonst kann der Nutzer eine Bohrung
+// eintragen, die zum Rotor nicht passt, und der Luftspalt ist stillschweigend ein
+// anderer als angegeben.
+const statorID = () => (+Z.masse.rotorOD || 0) + 2 * (+Z.masse.airGap || 0);
+const EINHEIT = { slots:'', p:'', conductorsPerSlot:'', airGap:'mm', magGapMm:'mm' };
+
+function baueMasse() {
+  const wrap = document.getElementById('masse');
+  wrap.innerHTML = '';
+  for (const k of (SCHEMA ? SCHEMA.felder : Object.keys(BESCHRIFTUNG))) {
+    const sp = (SCHEMA && SCHEMA.params[k]) || {};
+    if (!(k in Z.masse)) Z.masse[k] = (sp.def !== undefined ? sp.def : 0);
+    const eh = (k in EINHEIT) ? EINHEIT[k] : 'mm';
+    const spanne = (sp.lo !== undefined && sp.hi !== undefined)
+      ? `${sp.lo}…${sp.hi}${eh ? ' ' + eh : ''}` : (eh || '');
+    const d = document.createElement('div');
+    d.className = 'feld';
+    d.innerHTML = `<label>${BESCHRIFTUNG[k] || k}<small>${spanne}</small></label>`;
+    const i = document.createElement('input');
+    i.type = 'number'; i.inputMode = 'decimal'; i.value = Z.masse[k]; i.id = 'm_' + k;
+    i.addEventListener('input', () => {
+      const v = parseFloat(i.value);
+      const schlecht = !isFinite(v) ||
+        (sp.lo !== undefined && v < sp.lo) || (sp.hi !== undefined && v > sp.hi);
+      i.classList.toggle('schlecht', schlecht);
+      if (isFinite(v)) { Z.masse[k] = v; sichern(); bohrungZeigen(); if (Z.schritt === 1) zeichnen(); }
+    });
+    d.appendChild(i); wrap.appendChild(d);
+  }
+  const ab = document.createElement('div');
+  ab.className = 'feld';
+  ab.innerHTML = `<label>Stator Bohrung<small>abgeleitet: Rotor + 2 × Luftspalt</small></label>
+                  <b id="v-statorID" class="mono" style="width:104px;text-align:right;color:var(--schrift3)"></b>`;
+  wrap.appendChild(ab);
+  bohrungZeigen();
+}
+function bohrungZeigen() {
+  const b = document.getElementById('v-statorID');
+  if (b) b.textContent = statorID().toFixed(1) + ' mm';
+}
+function masseFehler() {
+  if (!SCHEMA) return null;
+  for (const k of SCHEMA.felder) {
+    const sp = SCHEMA.params[k] || {}, v = Z.masse[k];
+    if (!isFinite(v)) return `${BESCHRIFTUNG[k] || k}: keine Zahl.`;
+    if (sp.lo !== undefined && v < sp.lo) return `${BESCHRIFTUNG[k] || k} ${v} < ${sp.lo}.`;
+    if (sp.hi !== undefined && v > sp.hi) return `${BESCHRIFTUNG[k] || k} ${v} > ${sp.hi}.`;
+  }
+  if (Z.masse.shaftD >= Z.masse.rotorOD) return 'Welle muss kleiner sein als der Rotor.';
+  if (statorID() >= Z.masse.statorOD)
+    return `Bohrung ${statorID().toFixed(1)} mm (Rotor + 2 × Luftspalt) passt nicht in Stator außen ${Z.masse.statorOD} mm.`;
+  const wand = (Z.masse.statorOD - statorID()) / 2;
+  if (Z.masse.slotDepth > wand - 3)
+    return `Nuttiefe ${Z.masse.slotDepth} mm lässt kein Rückenjoch: die Statorwand ist nur ${wand.toFixed(1)} mm.`;
+  return null;
+}
+
+// ── ② Zeichnung ───────────────────────────────────────────────────────────────
+// Koordinaten wie im Schreibtisch-Designer: pol-lokal in mm, x radial nach außen,
+// y tangential; ein Magnet läuft von l=0 (bei r) bis l=len entlang seiner Achse,
+// Dicke thick quer dazu. Ecken exakt wie ema.html:_dsnMagCorners.
+const cv = document.getElementById('zeichnung');
+const ctx = cv.getContext('2d');
+let ANSICHT = { cx:0, cy:0, skala:1 };
+
+function groesseAnpassen() {
+  const b = cv.clientWidth || 320, dpr = Math.min(2, window.devicePixelRatio || 1);
+  cv.width = Math.round(b * dpr); cv.height = Math.round(b * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ANSICHT.cx = b / 2; ANSICHT.cy = b / 2;
+  ANSICHT.skala = (b * 0.46) / Math.max(1, (Z.masse.statorOD || 200) / 2);
+}
+const s2 = (x, y) => [ANSICHT.cx + x * ANSICHT.skala, ANSICHT.cy - y * ANSICHT.skala];
+const dreh = (a, x, y) => [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
+
+function ecken(m, pa) {
+  const a = m.ang * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), h = m.thick / 2;
+  const P = (l, t) => dreh(pa, m.r + l * c - t * s, m.off + l * s + t * c);
+  return [P(0,-h), P(m.len,-h), P(m.len,h), P(0,h)];
+}
+function poly(ec, fuell, rand, lw) {
+  ctx.beginPath();
+  ec.forEach(([x,y], i) => { const [sx,sy] = s2(x,y); i ? ctx.lineTo(sx,sy) : ctx.moveTo(sx,sy); });
+  ctx.closePath();
+  if (fuell) { ctx.fillStyle = fuell; ctx.fill(); }
+  if (rand) { ctx.strokeStyle = rand; ctx.lineWidth = lw || 1; ctx.stroke(); }
+}
+function kreis(r, fuell, rand) {
+  ctx.beginPath(); ctx.arc(ANSICHT.cx, ANSICHT.cy, r * ANSICHT.skala, 0, 2*Math.PI);
+  if (fuell) { ctx.fillStyle = fuell; ctx.fill(); }
+  if (rand) { ctx.strokeStyle = rand; ctx.lineWidth = 1; ctx.stroke(); }
+}
+function pole() { return Math.max(2, Math.round((Z.masse.p || 3) * 2)); }
+
+function zeichnen() {
+  if (!cv.clientWidth) return;
+  const P = pole(), halb = Math.PI / P;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  kreis(Z.masse.statorOD/2, '#15151f', '#2e5f8a');
+  kreis(statorID()/2,       null,      '#33415a');
+  kreis(Z.masse.rotorOD/2,  '#1b2330', '#4a5568');
+  // Bearbeitungskeil: der halbe Pol, den der Nutzer zeichnet
+  ctx.beginPath(); ctx.moveTo(ANSICHT.cx, ANSICHT.cy);
+  ctx.arc(ANSICHT.cx, ANSICHT.cy, Z.masse.rotorOD/2 * ANSICHT.skala, 0, -halb, true);
+  ctx.closePath(); ctx.fillStyle = 'rgba(63,199,224,0.10)'; ctx.fill();
+  ctx.strokeStyle = 'rgba(63,199,224,0.45)'; ctx.lineWidth = 1; ctx.stroke();
+  kreis(Z.masse.shaftD/2, '#0d0d14', '#555');
+
+  for (let p = 0; p < P; p++) {
+    const pa = p * 2*Math.PI / P, ps = (p % 2 === 0) ? 1 : -1, herr = (p === 0);
+    Z.magnete.forEach((m, i) => {
+      const farbe = (m.pol * ps) > 0 ? 'var(--nord)' : 'var(--sued)';
+      const c = (m.pol * ps) > 0 ? '#e05c4b' : '#4a90d9';
+      poly(ecken(m, pa), herr ? c : c + 'bb',
+           (herr && i === Z.sel) ? '#ffd34d' : '#0008', (herr && i === Z.sel) ? 2 : 0.5);
+      if (!(Math.abs(m.off) < 0.5 && Math.abs(m.ang) < 2)) {
+        poly(ecken({r:m.r, off:-m.off, ang:-m.ang, len:m.len, thick:m.thick}, pa),
+             c + 'bb', '#0008', 0.5);
+      }
+    });
+  }
+  document.getElementById('magzahl').textContent =
+    Z.magnete.length ? `${Z.magnete.length} Magnet(e) je halbem Pol · ${Z.magnete.length * 2 * P} im ganzen Rotor (gespiegelt und gemustert)`
+                     : 'Noch kein Magnet. „＋ Magnet" legt einen an; danach mit dem Finger schieben.';
+}
+
+// Auswahl treffen (in pol-lokalen mm, Trefferzone wie ema.html:_dsnHitMag)
+function trifft(m, x, y) {
+  const a = m.ang * Math.PI/180, c = Math.cos(a), s = Math.sin(a);
+  const lx =  (x - m.r) * c + (y - m.off) * s;
+  const tx = -(x - m.r) * s + (y - m.off) * c;
+  return lx >= -1.5 && lx <= m.len + 1.5 && Math.abs(tx) <= m.thick/2 + 2.5;
+}
+function ausEreignis(ev) {
+  const rect = cv.getBoundingClientRect();
+  const sx = ev.clientX - rect.left, sy = ev.clientY - rect.top;
+  return [(sx - ANSICHT.cx) / ANSICHT.skala, (ANSICHT.cy - sy) / ANSICHT.skala];
+}
+let ZIEH = null;
+cv.addEventListener('pointerdown', ev => {
+  ev.preventDefault(); cv.setPointerCapture(ev.pointerId);
+  const [x, y] = ausEreignis(ev);
+  let treffer = null;
+  for (let i = Z.magnete.length - 1; i >= 0; i--) if (trifft(Z.magnete[i], x, y)) { treffer = i; break; }
+  Z.sel = treffer;
+  if (treffer !== null) {
+    const m = Z.magnete[treffer];
+    ZIEH = { i: treffer, dr: m.r - x, doff: m.off - y };
+  }
+  reglerZeigen(); zeichnen();
+});
+cv.addEventListener('pointermove', ev => {
+  if (!ZIEH) return;
+  ev.preventDefault();
+  const [x, y] = ausEreignis(ev), m = Z.magnete[ZIEH.i];
+  m.r   = Math.max(1, x + ZIEH.dr);
+  m.off = y + ZIEH.doff;
+  reglerWerte(); zeichnen();
+});
+const zieh_ende = () => { if (ZIEH) { ZIEH = null; sichern(); } };
+cv.addEventListener('pointerup', zieh_ende);
+cv.addEventListener('pointercancel', zieh_ende);
+
+// Werteleiste — auf einem Handy verlässlicher als Anfasser an den Ecken
+const REGLER = [
+  ['r',     'r-r',     'v-r',     () => [ (Z.masse.shaftD||60)/2, (Z.masse.rotorOD||188)/2, 0.5 ], 'mm'],
+  ['off',   'r-off',   'v-off',   () => [ -(Z.masse.rotorOD||188)/4, (Z.masse.rotorOD||188)/4, 0.5 ], 'mm'],
+  ['ang',   'r-ang',   'v-ang',   () => [ -90, 90, 1 ], '°'],
+  ['len',   'r-len',   'v-len',   () => [ 2, (Z.masse.rotorOD||188)/2, 0.5 ], 'mm'],
+  ['thick', 'r-thick', 'v-thick', () => [ 1, 30, 0.5 ], 'mm'],
+];
+function reglerZeigen() {
+  const k = document.getElementById('magregler');
+  k.style.display = (Z.sel === null) ? 'none' : 'block';
+  if (Z.sel === null) return;
+  for (const [feld, rid, , spanne] of REGLER) {
+    const [lo, hi, st] = spanne(), r = document.getElementById(rid);
+    r.min = lo; r.max = hi; r.step = st;
+  }
+  reglerWerte();
+}
+function reglerWerte() {
+  if (Z.sel === null) return;
+  const m = Z.magnete[Z.sel];
+  for (const [feld, rid, vid, , eh] of REGLER) {
+    document.getElementById(rid).value = m[feld];
+    document.getElementById(vid).textContent = (+m[feld]).toFixed(1) + ' ' + eh;
+  }
+}
+for (const [feld, rid, vid, , eh] of REGLER) {
+  document.getElementById(rid).addEventListener('input', e => {
+    if (Z.sel === null) return;
+    Z.magnete[Z.sel][feld] = parseFloat(e.target.value);
+    document.getElementById(vid).textContent = parseFloat(e.target.value).toFixed(1) + ' ' + eh;
+    zeichnen(); sichern();
+  });
+}
+document.getElementById('w-neu').addEventListener('click', () => {
+  const rr = (Z.masse.rotorOD || 188) / 2;
+  Z.magnete.push({ r: rr * 0.55, off: rr * 0.10, ang: 25, len: rr * 0.38, thick: 6, pol: 1 });
+  Z.sel = Z.magnete.length - 1; reglerZeigen(); zeichnen(); sichern();
+});
+document.getElementById('w-pol').addEventListener('click', () => {
+  if (Z.sel === null) return;
+  Z.magnete[Z.sel].pol = -Z.magnete[Z.sel].pol; zeichnen(); sichern();
+});
+document.getElementById('w-weg').addEventListener('click', () => {
+  if (Z.sel === null) return;
+  Z.magnete.splice(Z.sel, 1); Z.sel = null; reglerZeigen(); zeichnen(); sichern();
+});
+document.getElementById('w-alle').addEventListener('click', () => {
+  if (!Z.magnete.length || !confirm('Alle Magnete löschen?')) return;
+  Z.magnete = []; Z.sel = null; reglerZeigen(); zeichnen(); sichern();
+});
+window.addEventListener('resize', () => { if (Z.schritt === 1) { groesseAnpassen(); zeichnen(); } });
+
+// ── ③ Punkte ──────────────────────────────────────────────────────────────────
+function bauePunkte() {
+  const w = document.getElementById('punkte'); w.innerHTML = '';
+  Z.punkte.forEach((p, i) => {
+    const d = document.createElement('div'); d.className = 'punkt';
+    d.innerHTML = `<span class="nr">${i+1}</span>`;
+    for (const [feld, eh, schritt] of [['rpm','min⁻¹',100], ['load_nm','Nm',1]]) {
+      const inp = document.createElement('input');
+      inp.type = 'number'; inp.inputMode = 'decimal'; inp.step = schritt; inp.value = p[feld];
+      inp.addEventListener('input', () => {
+        const v = parseFloat(inp.value);
+        if (isFinite(v)) { p[feld] = v; sichern(); zeitSchaetzen(); }
+      });
+      const e = document.createElement('span'); e.className = 'eh'; e.textContent = eh;
+      d.appendChild(inp); d.appendChild(e);
+    }
+    w.appendChild(d);
+  });
+  const nI = document.getElementById('N'), oI = document.getElementById('outpx');
+  nI.value = Z.N; nI.min = 60; nI.max = GRENZEN.N_MAX;
+  oI.value = Z.out_px; oI.min = 200; oI.max = GRENZEN.OUT_PX_MAX;
+  nI.addEventListener('input', () => { const v = parseInt(nI.value); if (isFinite(v)) { Z.N = v; sichern(); zeitSchaetzen(); } });
+  oI.addEventListener('input', () => { const v = parseInt(oI.value); if (isFinite(v)) { Z.out_px = v; sichern(); } });
+}
+function zeitSchaetzen() {
+  // Gemessen auf dem Rechner: N=140 -> 1,23 s · N=200 -> 2,84 s · N=300 -> 7,60 s.
+  // Das ist ungefähr N^2,7; als grobe Erwartung reicht das allemal.
+  const je = 1.23 * Math.pow(Z.N / 140, 2.7);
+  const g = je * Z.punkte.length + 0.9;
+  document.getElementById('zeitschaetzung').textContent =
+    `Erwartet: rund ${g < 60 ? Math.round(g) + ' s' : Math.round(g/60) + ' min'} für ${Z.punkte.length} Punkte `
+    + `(≈ ${je.toFixed(1)} s je Punkt bei ${Z.N} px). Der Deckel liegt bei ${GRENZEN.N_MAX} px.`;
+}
+
+// ── ④ Rechnen ─────────────────────────────────────────────────────────────────
+function nutzlast() {
+  return {
+    geom: Object.assign({}, Z.masse, {
+      statorID: statorID(),
+      magShape: 'custom',
+      customLegs: legsAusHalbpol(Z.magnete),
+      customBarriers: [],
+      genFluxBarrierQ: false, genFluxBarrierD: false, genBalanceBolts: false
+    }),
+    axial_len: Z.masse.axialLen, magnet: Z.magnet,
+    punkte: Z.punkte, N: Z.N, out_px: Z.out_px, rotor_angle_deg: 0
+  };
+}
+// ZEICHENGETREU aus ema.html:5570-5590. Läuft das auseinander, rechnen Handy und
+// Schreibtisch aus derselben Zeichnung stillschweigend verschiedene Maschinen.
+// test_mobil.py nagelt die Gleichheit an einem Festwert fest.
+function legsAusHalbpol(magnete) {
+  const legs = [], gesehen = new Set();
+  const auf = m => Math.abs(m.off) < 0.5 && Math.abs(m.ang) < 2;
+  const add = (r, off, ang, len, thick, sign) => {
+    const k = `${r.toFixed(1)}|${off.toFixed(1)}|${ang.toFixed(1)}|${len.toFixed(1)}`;
+    if (gesehen.has(k)) return; gesehen.add(k);
+    legs.push({ r_pos:r, offset:off, tilt_deg:ang, length:len, thickness:thick, mag_sign:sign });
+  };
+  for (const m of magnete) {
+    add(m.r, m.off, m.ang, m.len, m.thick, m.pol);
+    if (!auf(m)) add(m.r, -m.off, -m.ang, m.len, m.thick, m.pol);
+  }
+  return legs;
+}
+
+function kachelnVorbereiten() {
+  const w = document.getElementById('kacheln'); w.innerHTML = '';
+  Z.punkte.forEach((p, i) => {
+    const d = document.createElement('div'); d.className = 'kachel'; d.id = 'k' + i;
+    d.innerHTML = `<div class="kopf">${p.load_nm} Nm · ${p.rpm.toLocaleString('de-DE')} min⁻¹</div>
+                   <div class="warte">wartet …</div>
+                   <div class="zeile">&nbsp;</div>`;
+    d.addEventListener('click', () => d.classList.toggle('gross'));
+    w.appendChild(d);
+  });
+}
+
+async function rechnen() {
+  if (LAEUFT) return;
+  const mf = masseFehler();
+  if (mf) { zeigeSchritt(0); melden('melde-global', 'fehler', mf); return; }
+  if (!Z.magnete.length) { zeigeSchritt(1); melden('melde-global', 'warn',
+    'Ohne Magnet gibt es kein Erregerfeld. Mindestens einen Magneten zeichnen.'); return; }
+  melden('melde-global', '', '');
+
+  zeigeSchritt(3);
+  kachelnVorbereiten();
+  melden('melde-lauf', 'info', 'Rechnet auf dem Rechner …');
+  document.getElementById('fortschritt').style.width = '0%';
+  LAEUFT = true; document.getElementById('weiter').disabled = true;
+
+  let fertig = 0;
+  try {
+    const antwort = await fetch('/m/punkte', {
+      method: 'POST', headers: kopf(), body: JSON.stringify(nutzlast())
+    });
+    if (!antwort.ok) {
+      const t = await antwort.json().catch(() => ({}));
+      throw new Error(t.error || ('HTTP ' + antwort.status));
+    }
+    // NDJSON: eine Zeile je fertigem Punkt — die erste Kachel steht nach ~3 s da,
+    // nicht erst nach ~12 s.
+    const leser = antwort.body.getReader(), deko = new TextDecoder();
+    let rest = '';
+    for (;;) {
+      const { done, value } = await leser.read();
+      if (done) break;
+      rest += deko.decode(value, { stream: true });
+      let nl;
+      while ((nl = rest.indexOf('\n')) >= 0) {
+        const zeile = rest.slice(0, nl).trim(); rest = rest.slice(nl + 1);
+        if (!zeile) continue;
+        const satz = JSON.parse(zeile);
+        if (satz.art === 'start') {
+          const eck = satz.rpm_base ? ` · Eckdrehzahl ≈ ${Number(satz.rpm_base).toLocaleString('de-DE')} min⁻¹` : '';
+          if (satz.alle_unter_eck && satz.gleiche_last) {
+            melden('melde-lauf', 'warn',
+              `Alle Punkte liegen unter der Eckdrehzahl (≈ ${Number(satz.rpm_base).toLocaleString('de-DE')} min⁻¹) `
+              + 'und tragen dasselbe Moment — die vier Felder werden identisch. Für einen sichtbaren '
+              + 'Unterschied das Moment je Punkt verändern.');
+          } else {
+            melden('melde-lauf', 'info',
+              `Vorlauf ${satz.vorlauf_s}s · B_gap ${satz.b_gap_T} T · ${satz.N} px${eck} · rechne ${satz.n_punkte} Punkte …`);
+          }
+        } else if (satz.art === 'punkt') {
+          zeigeKachel(satz); fertig++;
+          document.getElementById('fortschritt').style.width = (100 * fertig / Z.punkte.length) + '%';
+        } else if (satz.art === 'fehler') {
+          zeigeFehlerKachel(satz); fertig++;
+          document.getElementById('fortschritt').style.width = (100 * fertig / Z.punkte.length) + '%';
+        }
+      }
+    }
+    melden('melde-lauf', fertig ? 'info' : 'warn',
+      fertig ? `Fertig — ${fertig} von ${Z.punkte.length} Punkten gerechnet. Kachel antippen vergrößert sie.`
+             : 'Es kam kein Ergebnis zurück.');
+    VORGEMERKT = false;
+  } catch (e) {
+    const offline = !navigator.onLine || /Failed to fetch|NetworkError|load failed/i.test(String(e.message));
+    if (offline) {
+      VORGEMERKT = true;
+      melden('melde-lauf', 'warn',
+        'Kein Kontakt zum Rechner. Der Entwurf ist gespeichert — sobald wieder Verbindung besteht, '
+        + 'oben auf „Neu rechnen" tippen.');
+    } else {
+      melden('melde-lauf', 'fehler', 'Fehlgeschlagen: ' + e.message);
+    }
+  } finally {
+    LAEUFT = false; document.getElementById('weiter').disabled = false;
+  }
+}
+
+function zeigeKachel(s) {
+  const d = document.getElementById('k' + s.i);
+  if (!d) return;
+  d.classList.remove('fehlerhaft');
+  d.innerHTML =
+    `<div class="kopf">${s.load_nm} Nm · ${s.rpm.toLocaleString('de-DE')} min⁻¹</div>
+     <img alt="Feldbild bei ${s.load_nm} Nm und ${s.rpm} min⁻¹" src="data:image/png;base64,${s.png_b64}"/>
+     <div class="zeile">B_gap ${s.B_gap_T} T<br>
+       i_q ${s.iq} A · i_d ${s.id} A · ${s.dauer_s}s</div>`;
+  d.addEventListener('click', () => d.classList.toggle('gross'));
+}
+function zeigeFehlerKachel(s) {
+  const d = document.getElementById('k' + s.i);
+  if (!d) return;
+  d.classList.add('fehlerhaft');
+  d.innerHTML = `<div class="kopf">${(s.rpm||0).toLocaleString('de-DE')} min⁻¹</div>
+                 <div class="fm">✗ ${s.fehler}</div>`;
+}
+
+window.addEventListener('online', () => {
+  if (VORGEMERKT) melden('melde-lauf', 'info', 'Verbindung ist wieder da — „Neu rechnen" tippen.');
+});
+
+// ── Start ─────────────────────────────────────────────────────────────────────
+let _hatteGespeichertes = false;
+async function start() {
+  _hatteGespeichertes = !!(() => { try { return localStorage.getItem(SPEICHER); } catch (e) { return null; } })();
+  laden();
+  document.getElementById('magnet').value = Z.magnet;
+  document.getElementById('magnet').addEventListener('change', e => { Z.magnet = e.target.value; sichern(); });
+
+  if (!TOKEN) {
+    melden('melde-global', 'fehler',
+      'Kein Zugangstoken. Die App über den QR-Code aufrufen, der beim Serverstart im Terminal steht.');
+  }
+  try {
+    const r = await fetch('/m/schema', { headers: kopf() });
+    if (r.status === 401) throw new Error('Token abgelehnt — QR-Code erneut scannen.');
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    SCHEMA = await r.json();
+    GRENZEN = SCHEMA.grenzen || GRENZEN;
+    if (!_hatteGespeichertes && Array.isArray(SCHEMA.punkte_default) && SCHEMA.punkte_default.length)
+      Z.punkte = SCHEMA.punkte_default.map(p => ({ rpm: p.rpm, load_nm: p.load_nm }));
+    if (!Z.N)      Z.N = GRENZEN.N_DEFAULT;
+    if (!Z.out_px) Z.out_px = GRENZEN.OUT_PX_DEF;
+  } catch (e) {
+    melden('melde-global', navigator.onLine ? 'fehler' : 'warn',
+      navigator.onLine ? ('Rechner nicht erreichbar: ' + e.message)
+                       : 'Offline — der gespeicherte Entwurf ist da, gerechnet wird bei Verbindung.');
+  }
+  baueMasse(); bauePunkte(); zeigeSchritt(Z.schritt || 0);
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('sw.js', { scope: '/m' }).catch(() => {});
+  }
+}
+start();
+</script>
+</body>
+</html>

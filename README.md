@@ -61,6 +61,28 @@ auch Bericht, Chat und KI-Auslegung im Orchestrator benutzen. Eine Quelle dafür
 `ema_report.DEFAULT_MODEL` / `DEFAULT_NUM_CTX`, umstellbar über `CAE_LLM_MODEL` bzw.
 `CAE_LLM_NUM_CTX` ohne Codeänderung.
 
+## Bedienung am Handy (`/m`)
+
+Ein schmaler zweiter Bedienweg für unterwegs: **Maße eingeben → Halbpol zeichnen →
+vier Betriebspunkte mit dem 2D-FDM-Löser rechnen**. Gerechnet wird immer auf dem
+Rechner (der Löser ist Python/NumPy); das Handy ist Eingabe- und Anzeigegerät.
+
+Beim Serverstart steht die Einstiegsadresse samt **QR-Code** im Terminal:
+
+```
+http://192.168.178.49:5000/m?t=<Token>
+```
+
+Handy ins **gleiche** WLAN (nicht ins Gast-WLAN der Fritz!Box — das ist gegen das
+Heimnetz abgeschottet), QR scannen, „Zum Startbildschirm hinzufügen" → App-Symbol.
+Die Seite läuft danach auch ohne Verbindung an, hält den Entwurf lokal und rechnet,
+sobald der Rechner wieder erreichbar ist.
+
+Gemessen an der Beispielmaschine: **vier Punkte in ~9 s, 1,7 MB** (N=180, 640 px).
+Als einzige Routengruppe verlangt `/m…` ein Token; die übrigen Routen bleiben offen
+wie bisher. Grenzen des Pfads: nur 2D-Feld — kein CAD, keine Festigkeit, keine
+Thermik, kein Fahrzyklus, kein Bericht.
+
 ## Geteilte Toolchain (systemweit / /opt, nicht in diesem Repo)
 
 - FreeCAD-1.1-Quellbuild + CalculiX → `/opt/cae-tools/freecad_1.1_quellcode` (Symlink `~/freecad_1.1_quellcode`)
