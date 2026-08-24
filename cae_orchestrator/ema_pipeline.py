@@ -1679,6 +1679,89 @@ _THERMAL_TIME_S = 1800  # 30 min — long enough for housing to approach steady
 SF_TARGET = 1.3
 
 
+def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
+                           solver: str, mesh_mm: float, state: dict) -> dict:
+    """Rotor-Festigkeit ueber ``ema_deck`` statt ueber FreeCAD — und wahlweise mit Z88.
+
+    Gibt einen Ergebnisblock in DERSELBEN Form zurueck wie der FreeCAD-Pfad, damit das
+    Tier-2-Tor darunter unveraendert weiterlaeuft:
+    ``max_von_mises_MPa`` (Rohmaximum) und ``notch_peak_MPa`` (P99, der kerbtolerante
+    Wert, auf den das Tor stellt).
+
+    Der Polsektor bleibt CalculiX vorbehalten — Z88 kennt weder zyklische Symmetrie
+    noch schiefe Symmetrieebenen. Bei ``z88`` und ``beide`` wird deshalb der volle
+    Rotor vernetzt, und dann rechnen beide Loeser bitgleich dasselbe Netz.
+    """
+    import ema_deck as _deck
+
+    sektor = (solver == "ccx")
+    netz = _deck.baue(geom, mesh_mm=mesh_mm, ordnung=1, sektoren=1 if sektor else 0)
+    _log(state, f"   Netz: {netz.n_knoten:,} Knoten / {netz.n_elemente:,} Tet4, "
+                f"{'ein Polsektor' if sektor else 'voller Rotor'}", 79)
+
+    arbeit = os.path.join(proj, "eigener_satz")
+    os.makedirs(arbeit, exist_ok=True)
+    aus: dict = {"solver_status": "OK", "rechensatz": "eigen", "rpm": rpm,
+                 "netz_knoten": netz.n_knoten, "netz_elemente": netz.n_elemente,
+                 "netz_sektor": bool(sektor), "struct_mesh_mm": mesh_mm}
+
+    k_ccx = k_z88 = None
+    if solver in ("ccx", "beide"):
+        pfad = _deck.schreibe_inp(netz, mat, rpm, os.path.join(arbeit, "rotor.inp"))
+        r = _deck.loese_ccx(pfad)
+        if r["solver_status"] != "OK":
+            return {"solver_status": "FAILED", "rechensatz": "eigen", "rpm": rpm,
+                    "log": str(r.get("meldung", ""))[:1500]}
+        k_ccx = _deck.kennzahlen(netz, _deck.lies_dat_spannungen(r["dat"]),
+                                 mat["yield_mpa"])
+
+    if solver in ("z88", "beide"):
+        import ema_z88 as _z88
+        ok, warum = _z88.verfuegbar()
+        if not ok:
+            _log(state, f"⚠ Z88 nicht einsatzbereit ({warum}) — nur CalculiX", 79)
+        else:
+            zp = os.path.join(arbeit, "z88")
+            _z88.schreibe_satz(netz, mat, rpm, zp)
+            rz = _z88.loese(zp, netz=netz)
+            if rz["solver_status"] == "OK":
+                k_z88 = _z88.kennzahlen_aus_lauf(netz, zp, mat["yield_mpa"])
+                k_z88["solver"] = rz["solver"]
+            else:
+                _log(state, f"⚠ Z88 ohne Ergebnis: {rz.get('meldung', '')}", 79)
+
+    fuehrend = k_ccx or k_z88
+    if not fuehrend:
+        return {"solver_status": "FAILED", "rechensatz": "eigen", "rpm": rpm,
+                "log": "kein Loeser hat Spannungen geliefert"}
+
+    aus.update({"max_von_mises_MPa": fuehrend["stress_peak_MPa"],
+                "notch_peak_MPa": fuehrend["stress_p99_MPa"],
+                "mean_von_mises_MPa": fuehrend["stress_mean_MPa"],
+                "bore_hoop_median_MPa": fuehrend.get("bore_hoop_median_MPa"),
+                "node_count": netz.n_knoten,
+                "solver_verwendet": "CalculiX" if k_ccx else "Z88"})
+    if fuehrend.get("max_displacement_um") is not None:
+        aus["max_displacement_um"] = fuehrend["max_displacement_um"]
+        aus["max_displacement_mm"] = fuehrend.get("max_displacement_mm")
+
+    if k_ccx and k_z88:
+        vergleich = {"calculix": k_ccx, "z88": k_z88}
+        for schl in ("stress_peak_MPa", "stress_p99_MPa", "bore_hoop_median_MPa"):
+            a, b = k_ccx.get(schl), k_z88.get(schl)
+            if a and b:
+                vergleich[f"abweichung_{schl}_pct"] = round(100 * abs(a - b) / abs(a), 3)
+        vergleich["hinweis"] = ("Gleiches Netz, gleiche Last, zwei unabhaengige Loeser. "
+                                "Das prueft Loeser und Rechensatz — NICHT das Netz und "
+                                "nicht das Modell.")
+        aus["loeservergleich"] = vergleich
+        schlimmste = max((v for k, v in vergleich.items()
+                          if k.startswith("abweichung_")), default=0.0)
+        _log(state, f"✓ CalculiX gegen Z88 auf demselben Netz: hoechste Abweichung "
+                    f"{schlimmste:.2f} %", 87)
+    return aus
+
+
 def run_pipeline(data: dict, state: dict, frames: list,
                   workspace: str, project_dir: str | None = None,
                   stages: set | None = None):
@@ -1747,6 +1830,19 @@ def run_pipeline(data: dict, state: dict, frames: list,
 
     # Structural-analysis settings (mirrors the magnetic-analysis controls)
     struct_mesh_mm = float(data.get("struct_mesh_mm", 3.0))    # Gmsh char. length [mm]; smaller = finer
+    # Welcher Rechensatz und welcher Loeser die Struktur-Stufe rechnet.
+    #   "freecad" – der gewachsene Weg (FreeCAD baut das Netz, CalculiX loest). Vorgabe,
+    #               und der EINZIGE, der die Verformungsbilder und das Rampenvideo
+    #               speist (die brauchen Knotenkoordinaten aus der .frd).
+    #   "ccx"     – eigener Rechensatz (ema_deck), Polsektor, CalculiX. Sekunden statt
+    #               Minuten, aber ohne Verformungsbilder (5b faellt auf die
+    #               analytische Naeherung zurueck — der Pfad existiert schon).
+    #   "z88"     – eigener Rechensatz, voller Rotor, Z88Aurora.
+    #   "beide"   – eigener Rechensatz, voller Rotor, BEIDE Loeser und die
+    #               Gegenueberstellung in results["structural_fem"]["loeservergleich"].
+    struct_solver  = str(data.get("struct_solver", "freecad")).lower()
+    if struct_solver not in ("freecad", "ccx", "z88", "beide"):
+        struct_solver = "freecad"
     struct_video   = bool(data.get("struct_video",   True))    # render deformation ramp video
     struct_frames  = int(data.get("struct_frames",   30))      # video frame count
     struct_img_px  = int(min(5000, max(800, data.get("struct_img_px", 3000))))  # single-image px
@@ -2034,7 +2130,40 @@ def run_pipeline(data: dict, state: dict, frames: list,
         # structural_fem result; frd_full is then unavailable so 5b uses the analytical
         # fallback (or, if a real FEM image already exists, 5b is skipped too).
         frd_full = None
-        if _do("structural"):
+        if _do("structural") and struct_solver != "freecad":
+            _log(state, f"🏗 Strukturanalyse bei {rpm_fem:.0f} U/min "
+                        f"(eigener Rechensatz, {struct_solver}, "
+                        f"Netz {struct_mesh_mm:.1f} mm)...", 78)
+            try:
+                fem_r = _struktur_eigener_satz(geom, mat, rpm_fem, proj, struct_solver,
+                                               struct_mesh_mm, state)
+            except Exception as _e:
+                fem_r = {"solver_status": "FAILED", "rechensatz": "eigen",
+                         "rpm": rpm_fem, "log": f"{type(_e).__name__}: {_e}"}
+                _log(state, f"⚠ eigener Rechensatz gescheitert: {_e}", 88)
+            frd_full = None          # keine .frd -> 5b nimmt die analytische Naeherung
+            if fem_r.get("max_von_mises_MPa"):
+                _notch = fem_r.get("notch_peak_MPa")
+                _st5   = rotor_stress_check(geom, mat, {"n_max": rpm_fem})
+                _pk_an = float(_st5["sigma_peak_MPa"])
+                _pk_fm = float(_notch) if _notch else 0.0
+                peak   = max(_pk_fm, _pk_an)
+                sf_v   = mat["yield_mpa"] / peak if peak > 0 else None
+                fem_r.update({"safety_factor": round(sf_v, 3) if sf_v else None,
+                              "yield_mpa": mat["yield_mpa"],
+                              "material":  mat["label"],
+                              "stress_peak_gate_MPa": round(peak, 1),
+                              "stress_peak_fem_p99_MPa": round(_pk_fm, 1),
+                              "stress_peak_analytic_MPa": round(_pk_an, 1),
+                              "structural_sf_target": SF_TARGET})
+                _log(state,
+                     f"✓ FEM (Tier-2, eigener Satz): Peak = max(P99 {_pk_fm:.1f}, "
+                     f"Ring×Kt {_pk_an:.1f}) = {peak:.1f} MPa → SF = {sf_v:.2f} "
+                     f"(Ziel ≥ {SF_TARGET})", 88)
+                _log(state, "   (keine Verformungsbilder — die brauchen den "
+                            "FreeCAD-Rechensatz)", 88)
+            results["structural_fem"] = fem_r
+        elif _do("structural"):
             _log(state, f"🏗 Strukturanalyse bei {rpm_fem:.0f} U/min "
                         f"(FreeCAD + CalculiX, Netz {struct_mesh_mm:.1f} mm)...", 78)
             code_fem = build_rotor_fem_script(fcstd, rpm_fem, _mat_fc(mat), proj,

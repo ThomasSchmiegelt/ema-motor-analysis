@@ -884,6 +884,25 @@
       <small style="grid-column:1/-1;font-size:.7rem;color:#666">Gmsh-Elementgröße (quadratische Tetraeder). Kleiner = feiner; löst Spannungsspitzen an den Magnettaschen-Stegen besser auf. CalculiX rechnet einmalig bei Maximaldrehzahl, andere Drehzahlen werden über rpm²-Skalierung abgeleitet.</small>
     </div>
     <div class="input-group">
+      <label>Rechensatz &amp; Löser</label>
+      <select id="struct_solver" style="grid-column:2/-1">
+        <option value="freecad" selected>FreeCAD + CalculiX — Standard, mit Verformungsbildern</option>
+        <option value="ccx">Eigener Satz, Polsektor, CalculiX — Sekunden statt Minuten</option>
+        <option value="z88">Eigener Satz, Vollrotor, Z88Aurora</option>
+        <option value="beide">Eigener Satz, Vollrotor, CalculiX <b>und</b> Z88 — mit Gegenüberstellung</option>
+      </select>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">
+        <b>FreeCAD + CalculiX</b> ist der gewachsene Weg und der einzige, der die
+        Verformungsbilder und das Rampenvideo speist — die brauchen Knotenkoordinaten
+        aus der .frd. Die drei anderen bauen das Netz selbst (Gmsh, aus derselben
+        Magnetgeometrie wie das 2D-Feld) und rechnen in Sekunden, liefern dafür keine
+        Verformungsbilder; Stufe 5b fällt dann auf die analytische Näherung zurück.
+        <b>Beide</b> rechnet dasselbe Netz zweimal — das prüft Löser und Rechensatz,
+        nicht das Netz und nicht das Modell. Z88 kann keinen Polsektor (weder zyklische
+        Symmetrie noch schiefe Symmetrieebenen), deshalb dort der volle Rotor.
+      </small>
+    </div>
+    <div class="input-group">
       <label>Einzelbild-Auflösung</label>
       <select id="struct_img_px" style="grid-column:2/-1">
         <option value="1500">1500 px</option>
@@ -8936,6 +8955,7 @@ async function buildPayload() {
     frame_resolution: +document.getElementById('frame_resolution').value,
     field_bmax:       +(document.getElementById('field_bmax')?.value || 0),
     struct_mesh_mm:   +document.getElementById('struct_mesh_mm').value,
+    struct_solver:    document.getElementById('struct_solver')?.value || 'freecad',
     struct_img_px:    +document.getElementById('struct_img_px').value,
     struct_video:     document.getElementById('struct_video').checked,
     struct_frames:    +document.getElementById('struct_frames').value,
@@ -10216,6 +10236,38 @@ function renderEmCurve(em) {
   ).join('');
 }
 
+function renderLoeservergleich(v) {
+  // Zeigt CalculiX gegen Z88 auf DEMSELBEN Netz. Beschriftet ausdruecklich, was der
+  // Vergleich prueft und was nicht — dieselbe Trennung wie ueberall sonst im Werkzeug:
+  // eine Zahl bekommt gesagt, woher sie kommt.
+  if (!v || !v.calculix || !v.z88) return '';
+  const zeilen = [
+    ['σ_v Spitze',            'stress_peak_MPa',      'MPa'],
+    ['σ_v P99 (Torwert)',     'stress_p99_MPa',       'MPa'],
+    ['Ringspannung Bohrung',  'bore_hoop_median_MPa', 'MPa'],
+  ];
+  let html = `<div style="margin-top:10px;border-top:1px solid #333;padding-top:8px">
+    <div style="font-size:.8rem;color:#8ad;margin-bottom:6px">
+      Zwei Löser, ein Netz</div>
+    <table style="width:100%;font-size:.76rem;border-collapse:collapse">
+    <tr style="color:#888"><th style="text-align:left">Größe</th>
+      <th style="text-align:right">CalculiX</th><th style="text-align:right">Z88</th>
+      <th style="text-align:right">Abw.</th></tr>`;
+  for (const [name, schl, einheit] of zeilen) {
+    const a = v.calculix[schl], b = v.z88[schl];
+    if (a == null || b == null) continue;
+    const abw = v['abweichung_' + schl + '_pct'];
+    html += `<tr><td>${name}</td>
+      <td style="text-align:right">${a.toFixed(2)} ${einheit}</td>
+      <td style="text-align:right">${b.toFixed(2)} ${einheit}</td>
+      <td style="text-align:right;color:${abw > 5 ? '#e74c3c' : '#7c7'}">
+        ${abw != null ? abw.toFixed(2) + ' %' : '–'}</td></tr>`;
+  }
+  html += `</table><div style="font-size:.7rem;color:#666;margin-top:6px">
+    ${v.hinweis || ''}</div></div>`;
+  return html;
+}
+
 function renderStress(fem, sweep, chartB64) {
   if (chartB64)
     document.getElementById('stress-img').src = 'data:image/png;base64,' + chartB64;
@@ -10235,6 +10287,12 @@ function renderStress(fem, sweep, chartB64) {
       row('Material', fem.material || '–'),
       row('Streckgrenze', fem.yield_mpa + ' MPa'),
     ].join('');
+    if (fem.rechensatz === 'eigen')
+      box.innerHTML += row('Rechensatz',
+        `eigener Satz (${fem.solver_verwendet || '?'}, ` +
+        `${fem.netz_sektor ? 'Polsektor' : 'Vollrotor'}, ` +
+        `${(fem.netz_elemente || 0).toLocaleString('de-DE')} Tets)`);
+    box.innerHTML += renderLoeservergleich(fem.loeservergleich);
   } else {
     box.innerHTML = `<div class="row"><span class="k">Status</span>
       <span class="v sf-warn">⚠ Nicht verfügbar</span></div>

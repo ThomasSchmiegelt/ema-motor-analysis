@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import sys
 import time
@@ -427,6 +428,164 @@ def cmd_run(args) -> int:
     return EXIT_OK
 
 
+def _geom_und_material(args):
+    """Payload -> (geom, mat, rpm). Gemeinsam fuer 'struktur' und 'topopt'."""
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        raise SystemExit(_die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE))
+    for a in applied:
+        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+
+    geom = payload.get("geom") or {}
+    if not geom:
+        raise SystemExit(_die("Keine Geometrie im Payload.", EXIT_USAGE))
+
+    from ema_pipeline import LAMINATES
+    mat = LAMINATES.get(payload.get("rotor_lam", "m270_35a"),
+                        LAMINATES["m270_35a"])
+    rpm = float(getattr(args, "rpm", None)
+                or (payload.get("target") or {}).get("n_max") or 15000.0)
+    return geom, mat, rpm
+
+
+def cmd_struktur(args) -> int:
+    """Rotor-Festigkeit auf dem EIGENEN Rechensatz — ohne FreeCAD, in Sekunden.
+
+    Wahlweise mit CalculiX, mit Z88 oder mit beiden. 'beide' rechnet dasselbe Netz
+    zweimal und stellt die Zahlen gegenueber; das prueft Loeser und Rechensatz,
+    NICHT das Netz und nicht das Modell.
+    Exit: 0 = gerechnet, 1 = ein Loeser hat nicht geliefert."""
+    import tempfile
+
+    geom, mat, rpm = _geom_und_material(args)
+    import ema_deck as D
+
+    sektor = args.solver == "ccx" and not args.voll
+    try:
+        netz = D.baue(geom, mesh_mm=args.mesh, ordnung=args.ordnung,
+                      sektoren=1 if sektor else 0)
+    except Exception as e:                                  # gmsh meldet vielerlei
+        return _die(f"Vernetzung fehlgeschlagen: {e}", EXIT_REMOTE)
+
+    print(f"  Netz: {netz.n_knoten:,} Knoten, {netz.n_elemente:,} Tet"
+          f"{4 if args.ordnung == 1 else 10}, "
+          f"{'ein Polsektor' if sektor else 'voller Rotor'}, {rpm:.0f} min-1")
+
+    ordner = args.out or tempfile.mkdtemp(prefix="cae_struktur_")
+    os.makedirs(ordner, exist_ok=True)
+    ergebnis = {"netz": {"knoten": netz.n_knoten, "elemente": netz.n_elemente,
+                         "sektor": bool(sektor), "mesh_mm": args.mesh,
+                         "ordnung": args.ordnung},
+                "rpm": rpm, "werkstoff": mat["label"], "ordner": ordner}
+
+    if args.solver in ("ccx", "beide"):
+        pfad = D.schreibe_inp(netz, mat, rpm, os.path.join(ordner, "rotor.inp"))
+        r = D.loese_ccx(pfad, kerne=args.kerne)
+        if r["solver_status"] != "OK":
+            return _die(f"CalculiX: {r.get('meldung', r['solver_status'])}", EXIT_REMOTE)
+        ergebnis["calculix"] = D.kennzahlen(
+            netz, D.lies_dat_spannungen(r["dat"]), mat["yield_mpa"])
+
+    if args.solver in ("z88", "beide"):
+        import ema_z88 as Z
+        ok, warum = Z.verfuegbar()
+        if not ok:
+            return _die(f"Z88 nicht einsatzbereit: {warum}", EXIT_REMOTE)
+        if sektor:
+            return _die("Z88 kann keinen Polsektor rechnen (weder zyklische Symmetrie "
+                        "noch schiefe Symmetrieebenen). --voll angeben.", EXIT_USAGE)
+        zp = os.path.join(ordner, "z88")
+        Z.schreibe_satz(netz, mat, rpm, zp, kerne=args.kerne)
+        r = Z.loese(zp, netz=netz)
+        if r["solver_status"] != "OK":
+            return _die(f"Z88: {r.get('meldung', r['solver_status'])}", EXIT_REMOTE)
+        ergebnis["z88"] = Z.kennzahlen_aus_lauf(netz, zp, mat["yield_mpa"])
+        ergebnis["z88"]["solver"] = r["solver"]
+
+    # Die analytische Formel als dritte, unabhaengige Zahl.
+    from ema_rotorcheck import _bore_hoop_mpa
+    w = 2 * math.pi * rpm / 60.0
+    a_m, b_m = netz.r_shaft / 1e3, netz.r_rot / 1e3
+    nu = float(mat["nu"])
+    ergebnis["analytisch"] = {
+        "bore_hoop_eb_spannung_MPa": round(
+            _bore_hoop_mpa(a_m, b_m, mat["density"], w, nu), 2),
+        "bore_hoop_eb_verzerrung_MPa": round(
+            _bore_hoop_mpa(a_m, b_m, mat["density"], w, nu / (1 - nu)), 2),
+        "hinweis": "frei rotierender Ring OHNE Magnettaschen"}
+
+    emit(ergebnis, args)
+    if args.solver == "beide":
+        c, z = ergebnis["calculix"], ergebnis["z88"]
+        print("\n  Groesse                        CalculiX          Z88      Abw.")
+        for schl in ("stress_peak_MPa", "stress_p99_MPa",
+                     "bore_hoop_median_MPa", "safety_factor_p99"):
+            if schl in c and schl in z:
+                d = 100 * abs(c[schl] - z[schl]) / max(abs(c[schl]), 1e-9)
+                print(f"  {schl:28s} {c[schl]:10.2f} {z[schl]:12.2f} {d:7.2f} %")
+        print("  Gleiches Netz, gleiche Last: das prueft die Loeser, nicht das Modell.")
+    return EXIT_OK
+
+
+def cmd_topopt(args) -> int:
+    """Topologieoptimierung des Rotorblechs (SKO oder SIMP) auf dem Polsektor.
+
+    Ergebnis ist ein DICHTEFELD, kein Bauteil. Exit: 0 = gelaufen."""
+    import tempfile
+
+    geom, mat, rpm = _geom_und_material(args)
+    import ema_deck as D
+    import ema_topopt as T
+
+    try:
+        netz = D.baue(geom, mesh_mm=args.mesh, ordnung=1,
+                      sektoren=0 if args.solver == "z88" else 1)
+    except Exception as e:
+        return _die(f"Vernetzung fehlgeschlagen: {e}", EXIT_REMOTE)
+
+    fest = T.sperrbereiche(netz, geom, bohrung_mm=args.fest_bohrung,
+                           rand_mm=args.fest_rand, tasche_mm=args.fest_tasche)
+    print(f"  Netz: {netz.n_elemente:,} Tets, davon {len(fest):,} gesperrt "
+          f"({100*len(fest)/netz.n_elemente:.0f} %) -> "
+          f"{netz.n_elemente-len(fest):,} optimierbar")
+    if len(fest) >= netz.n_elemente:
+        return _die("Die Sperrbereiche decken alles ab — --fest-* verkleinern.",
+                    EXIT_USAGE)
+
+    ordner = args.out or tempfile.mkdtemp(prefix="cae_topopt_")
+
+    def melde(z):
+        print(f"  Iter {z['iteration']:3d}  Volumenanteil {z['volumenanteil']:.3f}"
+              f"  Spitze {z['stress_peak_MPa']:7.1f} MPa  {z['sekunden']:.2f}s")
+
+    try:
+        if args.verfahren == "sko":
+            r = T.sko(netz, geom, mat, rpm, ordner, iterationen=args.iterationen,
+                      vol_ziel=args.vol_ziel, loeser=args.solver, kerne=args.kerne,
+                      sperr=fest, melde=melde)
+        else:
+            r = T.simp(netz, geom, mat, rpm, ordner,
+                       vol_ziel=args.vol_ziel if args.vol_ziel is not None else 0.6,
+                       iterationen=args.iterationen, loeser=args.solver,
+                       kerne=args.kerne, sperr=fest, melde=melde)
+    except T.TopOptFehler as e:
+        return _die(str(e), EXIT_REMOTE)
+
+    lese = T.ableseempfehlung(netz, geom, r)
+    aus = {"verfahren": r["verfahren"], "loeser": r["loeser"], "rpm": rpm,
+           "iterationen": len(r["verlauf"]), "verlauf": r["verlauf"],
+           "sigma_ref_MPa": r.get("sigma_ref_MPa"), "ordner": ordner,
+           "ableseempfehlung": lese}
+    emit(aus, args)
+    print(f"\n  {lese['empfehlung']}")
+    print(f"  {lese['hinweis']}")
+    return EXIT_OK
+
+
 def cmd_rotor_check(args) -> int:
     """2D-Layoutgate lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
     Exit: 0 = Layout OK, 1 = Check abgelehnt (defekte Geometrie)."""
@@ -637,6 +796,59 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Mindeststege in mm (Vorgabe: ema_topology.BRIDGE_MM = 2.0)")
     _add_globals(s)
     s.set_defaults(fn=cmd_rotor_check)
+
+    s = sub.add_parser("struktur",
+                       help="Rotor-Festigkeit auf dem eigenen Rechensatz (ccx | z88 | beide) — ohne FreeCAD")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar")
+    s.add_argument("--force", action="store_true", help="Schemagrenzen nicht pruefen")
+    s.add_argument("--solver", choices=["ccx", "z88", "beide"], default="ccx",
+                   help="Loeser. 'beide' rechnet dasselbe Netz zweimal und vergleicht")
+    s.add_argument("--voll", action="store_true",
+                   help="voller Rotor statt Polsektor (bei z88/beide zwingend)")
+    s.add_argument("--mesh", type=float, default=6.0, help="Netzweite in mm (Vorgabe 6)")
+    s.add_argument("--ordnung", type=int, choices=[1, 2], default=1,
+                   help="1 = Tet4 (schnell), 2 = Tet10 (genauer, nur ccx)")
+    s.add_argument("--rpm", type=float, default=None,
+                   help="Drehzahl (Vorgabe: target.n_max aus dem Payload)")
+    s.add_argument("--kerne", type=int, default=4, help="CPU-Kerne")
+    s.add_argument("--out", default=None, help="Arbeitsverzeichnis behalten")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_struktur)
+
+    s = sub.add_parser("topopt",
+                       help="Topologieoptimierung des Rotorblechs (SKO/SIMP) — Ergebnis ist ein Dichtefeld")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT")
+    s.add_argument("--force", action="store_true")
+    s.add_argument("--verfahren", choices=["sko", "simp"], default="sko",
+                   help="sko = spannungsgetrieben (Vorgabe, fuer ein Blech das passende), "
+                        "simp = Nachgiebigkeit unter Volumenschranke")
+    s.add_argument("--solver", choices=["ccx", "z88"], default="ccx")
+    s.add_argument("--mesh", type=float, default=6.0, help="Netzweite in mm")
+    s.add_argument("--iterationen", type=int, default=30)
+    s.add_argument("--vol-ziel", type=float, default=None, dest="vol_ziel",
+                   help="Volumenanteil, bei dem abgebrochen wird (SIMP: Schranke)")
+    s.add_argument("--rpm", type=float, default=None)
+    s.add_argument("--fest-bohrung", type=float, default=3.0, dest="fest_bohrung",
+                   help="Sperrsaum am Wellensitz in mm")
+    s.add_argument("--fest-rand", type=float, default=2.0, dest="fest_rand",
+                   help="Sperrsaum am Rotoraussenrand in mm")
+    s.add_argument("--fest-tasche", type=float, default=1.5, dest="fest_tasche",
+                   help="Sperrsaum um jede Magnettasche in mm")
+    s.add_argument("--kerne", type=int, default=4)
+    s.add_argument("--out", default=None)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_topopt)
 
     s = sub.add_parser("wait", help="auf den Abschluss eines laufenden Vorgangs warten")
     s.add_argument("--status-path", default="/status")

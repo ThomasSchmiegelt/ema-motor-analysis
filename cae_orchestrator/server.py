@@ -1,6 +1,6 @@
 """E-Maschinen Analyse-Server: serves ema.html + full analysis pipeline."""
 
-import json, os, threading, time, urllib.error
+import json, os, queue, threading, time, urllib.error
 
 
 def _fix_fontconfig_env():
@@ -3661,6 +3661,165 @@ def mobil_schema():
         return fehler
     import ema_mobil
     return jsonify(ema_mobil.schema_ausschnitt(param_schema().get_json()))
+
+
+# ── Eigener Rechensatz: Festigkeit und Topologieoptimierung ohne FreeCAD ─────
+# Beide Routen rechnen SYNCHRON im Anfrage-Thread (Sekunden, nicht Minuten) und
+# ruehren _state nicht an — sie sind reines Anfrage/Antwort wie /preview_field.
+# Sie weisen aber wie dieses einen laufenden Pipeline-Lauf ab, damit ein Klick im
+# Browser einem echten Lauf nicht Kerne und Speicher wegnimmt.
+
+def _eigener_satz_payload():
+    """(geom, mat, rpm, daten) aus dem Anfragekoerper — oder (None, Fehlerantwort)."""
+    from ema_pipeline import LAMINATES
+    d = request.get_json(force=True, silent=True) or {}
+    geom = d.get("geom") or {}
+    if not geom:
+        return None, (jsonify({"error": "geom fehlt"}), 400)
+    mat = LAMINATES.get(d.get("rotor_lam", "m270_35a"), LAMINATES["m270_35a"])
+    rpm = float(d.get("rpm") or (d.get("target") or {}).get("n_max") or 15000.0)
+    return (geom, mat, rpm, d), None
+
+
+@app.route("/struktur_eigen", methods=["POST", "OPTIONS"])
+def struktur_eigen():
+    """Rotor-Festigkeit auf dem eigenen Rechensatz — ccx, z88 oder beide.
+
+    ``solver="beide"`` rechnet dasselbe Netz zweimal und gibt die Gegenueberstellung
+    zurueck. Das prueft Loeser und Rechensatz, nicht das Netz und nicht das Modell.
+    """
+    if request.method == "OPTIONS":
+        return "", 200
+    if _state["status"] == "running":
+        return jsonify({"error": "Es laeuft bereits eine Berechnung."}), 409
+    geladen, fehler = _eigener_satz_payload()
+    if fehler:
+        return fehler
+    geom, mat, rpm, d = geladen
+
+    solver = str(d.get("solver", "ccx")).lower()
+    if solver not in ("ccx", "z88", "beide"):
+        return jsonify({"error": "solver muss ccx, z88 oder beide sein"}), 400
+    mesh = max(1.0, min(20.0, float(d.get("mesh_mm", 6.0))))
+
+    import ema_pipeline as P
+    proj = d.get("project_dir") or os.path.join(PROJECTS_ROOT, "_eigener_satz")
+    os.makedirs(proj, exist_ok=True)
+    try:
+        aus = P._struktur_eigener_satz(geom, mat, rpm, proj, solver, mesh,
+                                       {"log": [], "progress": 0})
+    except Exception as e:                                  # noqa: BLE001
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
+
+    import math
+
+    from ema_rotorcheck import _bore_hoop_mpa
+    w = 2.0 * math.pi * rpm / 60.0
+    nu = float(mat["nu"])
+    aus["analytisch"] = {
+        "bore_hoop_eb_spannung_MPa": round(_bore_hoop_mpa(
+            float(geom["shaftD"]) / 2e3, float(geom["rotorOD"]) / 2e3,
+            mat["density"], w, nu), 2),
+        "bore_hoop_eb_verzerrung_MPa": round(_bore_hoop_mpa(
+            float(geom["shaftD"]) / 2e3, float(geom["rotorOD"]) / 2e3,
+            mat["density"], w, nu / (1 - nu)), 2),
+        "hinweis": "frei rotierender Ring OHNE Magnettaschen"}
+    return jsonify(aus)
+
+
+@app.route("/topopt", methods=["POST", "OPTIONS"])
+def topopt_lauf():
+    """Topologieoptimierung — eine NDJSON-Zeile je Iteration.
+
+    Zeilenweise, weil ein Lauf 20–60 s dauert und der Verlauf das Interessante ist:
+    man sieht dem Volumenanteil und der Spitzenspannung beim Konvergieren zu.
+    """
+    if request.method == "OPTIONS":
+        return "", 200
+    if _state["status"] == "running":
+        return jsonify({"error": "Es laeuft bereits eine Berechnung."}), 409
+    geladen, fehler = _eigener_satz_payload()
+    if fehler:
+        return fehler
+    geom, mat, rpm, d = geladen
+
+    verfahren = str(d.get("verfahren", "sko")).lower()
+    if verfahren not in ("sko", "simp"):
+        return jsonify({"error": "verfahren muss sko oder simp sein"}), 400
+    solver = str(d.get("solver", "ccx")).lower()
+    if solver not in ("ccx", "z88"):
+        return jsonify({"error": "solver muss ccx oder z88 sein"}), 400
+    mesh  = max(1.0, min(20.0, float(d.get("mesh_mm", 6.0))))
+    iters = max(1, min(80, int(d.get("iterationen", 30))))
+
+    def strom():
+        import ema_deck as D
+        import ema_topopt as T
+        try:
+            netz = D.baue(geom, mesh_mm=mesh, ordnung=1,
+                          sektoren=0 if solver == "z88" else 1)
+            fest = T.sperrbereiche(
+                netz, geom, bohrung_mm=float(d.get("fest_bohrung", 3.0)),
+                rand_mm=float(d.get("fest_rand", 2.0)),
+                tasche_mm=float(d.get("fest_tasche", 1.5)))
+            yield json.dumps({"art": "start", "elemente": netz.n_elemente,
+                              "knoten": netz.n_knoten, "gesperrt": len(fest),
+                              "sektor": solver != "z88"}, ensure_ascii=False) + "\n"
+            if len(fest) >= netz.n_elemente:
+                yield json.dumps({"art": "fehler", "fehler":
+                                  "Die Sperrbereiche decken alles ab."},
+                                 ensure_ascii=False) + "\n"
+                return
+
+            ordner = os.path.join(PROJECTS_ROOT, "_topopt")
+            fn = T.sko if verfahren == "sko" else T.simp
+            zusatz = ({"vol_ziel": d.get("vol_ziel")} if verfahren == "sko"
+                      else {"vol_ziel": float(d.get("vol_ziel") or 0.6)})
+
+            # sko/simp melden je Iteration ueber einen Rueckruf, und ein Generator kann
+            # aus einem Rueckruf heraus nicht yielden. Also laeuft die Optimierung in
+            # einem eigenen Thread und schiebt die Meldungen durch eine Queue — sonst
+            # kaemen alle Zeilen erst NACH dem Lauf an, und der Stream waere reine
+            # Zierde. Der Fortschritt ist genau das Interessante: man sieht dem
+            # Volumenanteil beim Konvergieren zu.
+            post = queue.Queue()
+
+            def rechnen():
+                try:
+                    post.put(("fertig", fn(netz, geom, mat, rpm, ordner,
+                                           iterationen=iters, loeser=solver,
+                                           sperr=fest, melde=lambda z: post.put(("iter", z)),
+                                           **zusatz)))
+                except Exception as e:                      # noqa: BLE001
+                    post.put(("fehler", f"{type(e).__name__}: {e}"))
+
+            faden = threading.Thread(target=rechnen, daemon=True)
+            faden.start()
+            r = None
+            while True:
+                art, nutz = post.get()
+                if art == "iter":
+                    yield json.dumps({"art": "iteration", **nutz},
+                                     ensure_ascii=False) + "\n"
+                elif art == "fehler":
+                    yield json.dumps({"art": "fehler", "fehler": nutz},
+                                     ensure_ascii=False) + "\n"
+                    return
+                else:
+                    r = nutz
+                    break
+            lese = T.ableseempfehlung(netz, geom, r)
+            yield json.dumps({"art": "fertig", "verfahren": r["verfahren"],
+                              "loeser": r["loeser"], "iterationen": len(r["verlauf"]),
+                              "sigma_ref_MPa": r.get("sigma_ref_MPa"),
+                              "ableseempfehlung": lese},
+                             ensure_ascii=False) + "\n"
+        except Exception as e:                              # noqa: BLE001
+            yield json.dumps({"art": "fehler", "fehler": f"{type(e).__name__}: {e}"},
+                             ensure_ascii=False) + "\n"
+
+    return Response(strom(), mimetype="application/x-ndjson",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.route("/m/punkte", methods=["POST", "OPTIONS"])

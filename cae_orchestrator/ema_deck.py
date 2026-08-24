@@ -130,7 +130,12 @@ def baue(geom: dict, mesh_mm: float = 3.0, ordnung: int = 1,
     recs  = [r for r in leg_records(magnet_legs(geom)[0])
              if r["placement"] == "interior"]      # Oberflächenmagnete schneiden nichts
 
-    gmsh.initialize()
+    # interruptible=False ist Pflicht, NICHT Geschmackssache: gmsh setzt sonst beim
+    # Start einen Signalhandler, und das geht nur im Hauptthread. Aus einem
+    # Flask-Worker heraus scheitert die Vernetzung dann mit „signal only works in
+    # main thread of the main interpreter" — also genau dann, wenn die Route im
+    # Browser benutzt wird, und nie im Test.
+    gmsh.initialize(interruptible=False)
     try:
         gmsh.option.setNumber("General.Terminal", 0)
         occ = gmsh.model.occ

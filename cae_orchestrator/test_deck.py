@@ -94,6 +94,32 @@ def test_netz_volumen():
             check(f"Vollrotor = {n.poles} x Sektor ({v*100:.3f} %)", v < 1e-6)
 
 
+def test_vernetzen_im_nebenthread():
+    """Gmsh muss auch aus einem Flask-Worker heraus vernetzen koennen.
+
+    ``gmsh.initialize()`` setzt ohne ``interruptible=False`` einen Signalhandler, und
+    das geht nur im Hauptthread. Der Fehler tritt AUSSCHLIESSLICH auf, wenn die Route
+    im Browser benutzt wird — im Test lief alles im Hauptthread und war gruen.
+    """
+    print("1b. Vernetzen aus einem Nebenthread (Flask-Worker)")
+    import threading
+    ergebnis = {}
+
+    def arbeit():
+        try:
+            n = D.baue(GEOM, mesh_mm=MESH, ordnung=1, sektoren=1)
+            ergebnis["elemente"] = n.n_elemente
+        except Exception as e:                       # noqa: BLE001
+            ergebnis["fehler"] = f"{type(e).__name__}: {e}"
+
+    t = threading.Thread(target=arbeit)
+    t.start()
+    t.join(timeout=300)
+    check(f"Vernetzung im Nebenthread laeuft durch "
+          f"({ergebnis.get('elemente', 0)} Tets)", "elemente" in ergebnis,
+          ergebnis.get("fehler", "Thread haengt"))
+
+
 def test_taschen_wirken():
     print("2. Die Magnettaschen werden wirklich geschnitten")
     voll = D.baue(GEOM_LEER, mesh_mm=MESH, ordnung=1, sektoren=1)
@@ -352,7 +378,8 @@ def test_materialstufen():
 
 
 if __name__ == "__main__":
-    for t in (test_netz_volumen, test_taschen_wirken, test_fliehkraft_quadratur,
+    for t in (test_netz_volumen, test_vernetzen_im_nebenthread,
+              test_taschen_wirken, test_fliehkraft_quadratur,
               test_fliehkraft_skaliert, test_inp_form, test_ccx_loest,
               test_z88_satz, test_beide_loeser, test_materialstufen):
         t()
