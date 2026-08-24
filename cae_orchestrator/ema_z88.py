@@ -100,13 +100,19 @@ def _umgebung() -> dict:
 # ── Satz schreiben ────────────────────────────────────────────────────────────
 
 def schreibe_satz(netz: _deck.Netz, mat: dict, rpm: float, pfad: str,
-                  e_je_element: dict | None = None, kerne: int = 4) -> str:
+                  rho_je_element: dict | None = None, simp_p: float = 1.0,
+                  kerne: int = 4) -> str:
     """Vollständigen Z88-Satz in ``pfad`` schreiben; gibt ``pfad`` zurück.
 
-    ``e_je_element`` ordnet Elementnummern einen eigenen E-Modul zu (Topologie-
-    optimierung). Die Werte werden über ``ema_deck._materialstufen`` in höchstens
-    ``N_MATERIALSTUFEN`` Gruppen gebündelt — je Gruppe entsteht eine Materialdatei,
-    und ``Z88MAT.TXT`` bekommt eine Zeile je Element, die darauf zeigt.
+    ``rho_je_element`` ordnet Elementnummern eine **relative Dichte** zu (Topologie-
+    optimierung). Daraus folgt ``E = E0 · rho^simp_p`` je Materialstufe — und, weil
+    Z88s Materialdatei gar keine Dichte kennt, zusätzlich eine **Skalierung der
+    Fliehkraft-Knotenkräfte** mit demselben ``rho``. Nur den E-Modul zu senken wäre
+    bei einer Volumenlast falsch (s. ``ema_deck.zentrifugal_lasten``).
+
+    Die Stufen kommen aus ``ema_deck._materialstufen``; je Stufe entsteht eine
+    Materialdatei, und ``Z88MAT.TXT`` fasst aufeinanderfolgende Elemente derselben
+    Stufe zu von/bis-Bereichen zusammen.
     """
     if netz.sektoren:
         raise Z88Fehler(
@@ -115,11 +121,11 @@ def schreibe_satz(netz: _deck.Netz, mat: dict, rpm: float, pfad: str,
     os.makedirs(pfad, exist_ok=True)
 
     _schreibe_i1(netz, os.path.join(pfad, "z88i1.txt"))
-    _schreibe_i2(netz, mat, rpm, os.path.join(pfad, "z88i2.txt"))
+    _schreibe_i2(netz, mat, rpm, os.path.join(pfad, "z88i2.txt"), rho_je_element)
     with open(os.path.join(pfad, "z88i5.txt"), "w") as f:
         f.write("0\n")                                   # keine Flächenlasten
 
-    _schreibe_material(netz, mat, pfad, e_je_element)
+    _schreibe_material(netz, mat, pfad, rho_je_element, simp_p)
 
     typ = _deck.Z88_TYP[netz.ordnung]
     with open(os.path.join(pfad, "z88elp.txt"), "w") as f:
@@ -150,13 +156,15 @@ def _schreibe_i1(netz: _deck.Netz, datei: str) -> None:
         f.write("\n".join(z) + "\n")
 
 
-def _schreibe_i2(netz: _deck.Netz, mat: dict, rpm: float, datei: str) -> None:
+def _schreibe_i2(netz: _deck.Netz, mat: dict, rpm: float, datei: str,
+                 rho_je_element: dict | None = None) -> None:
     """Randbedingungen: ``Knoten FG Art Wert`` — Art 1 = Kraft, Art 2 = Verschiebung.
 
     Fliehkraft als konsistente Knotenkräfte, ebener Verzerrungszustand über beide
     Stirnflächen, dazu die drei Starrkörperfesseln aus ``ema_deck``.
     """
-    lasten = _deck.zentrifugal_lasten(netz, float(mat["density"]), rpm)
+    lasten = _deck.zentrifugal_lasten(netz, float(mat["density"]), rpm,
+                                      rho_je_element=rho_je_element)
     z = []
     for kn in sorted(set(netz.nset_stirn_a) | set(netz.nset_stirn_b)):
         z.append(f"{kn} 3 2 0")
@@ -173,24 +181,24 @@ def _schreibe_i2(netz: _deck.Netz, mat: dict, rpm: float, datei: str) -> None:
 
 
 def _schreibe_material(netz: _deck.Netz, mat: dict, pfad: str,
-                       e_je_element: dict | None) -> None:
+                       rho_je_element: dict | None, simp_p: float = 1.0) -> None:
     """``Z88MAT.TXT`` + je Stufe eine Materialdatei ``E nue`` (Leerzeichen!)."""
     nu     = float(mat["nu"])
-    stufen = _deck._materialstufen(netz, float(mat["E"]), e_je_element,
-                                   n_stufen=N_MATERIALSTUFEN)
+    e0     = float(mat["E"])
+    stufen = _deck._materialstufen(netz, rho_je_element, n_stufen=N_MATERIALSTUFEN)
     zeilen = []
     if len(stufen) == 1:
-        e_wert, _elems = stufen[0]
+        rho_rel, _elems = stufen[0]
         name = "z88werkstoff_0.txt"
         with open(os.path.join(pfad, name), "w") as f:
-            f.write(f"{e_wert:.9g} {nu:.9g}\n")
+            f.write(f"{e0 * rho_rel ** simp_p:.9g} {nu:.9g}\n")
         zeilen.append(f"1 {netz.n_elemente} {name} 1")
     else:
         stufe_je_element = {}
-        for k, (e_wert, elems) in enumerate(stufen):
+        for k, (rho_rel, elems) in enumerate(stufen):
             name = f"z88werkstoff_{k}.txt"
             with open(os.path.join(pfad, name), "w") as f:
-                f.write(f"{max(e_wert, 1e-3):.9g} {nu:.9g}\n")
+                f.write(f"{max(e0 * rho_rel ** simp_p, 1e-3):.9g} {nu:.9g}\n")
             for eid in elems:
                 stufe_je_element[eid] = name
         # Aufeinanderfolgende Elemente derselben Stufe zu einem von/bis-Bereich raffen.

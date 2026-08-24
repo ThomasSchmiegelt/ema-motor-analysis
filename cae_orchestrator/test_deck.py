@@ -323,20 +323,20 @@ def test_beide_loeser():
 
 
 def test_materialstufen():
-    print("9. E-Modul je Element — der Zugang fuer die Topologieoptimierung")
+    print("9. Dichte je Element — der Zugang fuer die Topologieoptimierung")
     n = D.baue(GEOM, mesh_mm=MESH, ordnung=1, sektoren=0)
-    e_je = {eid: (50000.0 if eid % 2 else 200000.0) for eid in n.elemente}
-    stufen = D._materialstufen(n, MAT["E"], e_je, n_stufen=24)
+    rho = {eid: (0.25 if eid % 2 else 1.0) for eid in n.elemente}
+    stufen = D._materialstufen(n, rho, n_stufen=24)
     check(f"zwei Stufen erkannt ({len(stufen)})", len(stufen) == 2)
     check("jedes Element genau einer Stufe zugeordnet",
           sum(len(e) for _w, e in stufen) == n.n_elemente
           and len({eid for _w, e in stufen for eid in e}) == n.n_elemente)
     with tempfile.TemporaryDirectory() as d:
-        p = D.schreibe_inp(n, MAT, RPM, os.path.join(d, "r.inp"), e_je_element=e_je)
+        p = D.schreibe_inp(n, MAT, RPM, os.path.join(d, "r.inp"), rho_je_element=rho)
         t = open(p).read()
         check("zwei *MATERIAL-Bloecke im .inp", t.count("*MATERIAL,") == 2)
         check("Eall bleibt fuer die Fliehkraft erhalten", "ELSET=Eall" in t)
-        Z.schreibe_satz(n, MAT, RPM, os.path.join(d, "z88"), e_je_element=e_je)
+        Z.schreibe_satz(n, MAT, RPM, os.path.join(d, "z88"), rho_je_element=rho)
         check("zwei Z88-Materialdateien",
               sum(1 for f in os.listdir(os.path.join(d, "z88"))
                   if f.startswith("z88werkstoff_")) == 2)

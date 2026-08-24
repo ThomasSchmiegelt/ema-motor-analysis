@@ -161,7 +161,7 @@ def baue(geom: dict, mesh_mm: float = 3.0, ordnung: int = 1,
         koerper = occ.extrude(flaeche, 0, 0, L)
         occ.synchronize()
 
-        vol_occ = sum(occ.getMass(d, t) for d, t in koerper if d == 3)
+        vol_occ = float(sum(occ.getMass(d, t) for d, t in koerper if d == 3))
 
         fa, fb = ([], [])
         if sektoren:
@@ -220,7 +220,11 @@ def _ernte(gmsh, ordnung, r_rot, r_shaft, L, poles, sektoren, fa, fb, vol_occ) -
     streng aufsteigende Nummern ohne Lücken (Theorie-Handbuch, 2./3. Eingabegruppe).
     """
     tags, koords, _ = gmsh.model.mesh.getNodes()
-    roh = {int(t): (koords[3 * i], koords[3 * i + 1], koords[3 * i + 2])
+    # float() ist NICHT kosmetisch: gmsh liefert numpy.float64, und die reisen sonst
+    # durch Lasten, Kennzahlen und Optimierung bis in results.json — wo der
+    # stdlib-JSON-Kodierer sie nicht schreiben kann und der Lauf am Ende scheitert.
+    roh = {int(t): (float(koords[3 * i]), float(koords[3 * i + 1]),
+                    float(koords[3 * i + 2]))
            for i, t in enumerate(tags)}
 
     gtyp = _GMSH_TET4 if ordnung == 1 else _GMSH_TET10
@@ -355,7 +359,8 @@ def _detj(xyz, dN) -> float:
                + J[0][2] * (J[1][0] * J[2][1] - J[1][1] * J[2][0]))
 
 
-def zentrifugal_lasten(netz: Netz, dichte_kg_m3: float, rpm: float) -> dict:
+def zentrifugal_lasten(netz: Netz, dichte_kg_m3: float, rpm: float,
+                       rho_je_element: dict | None = None) -> dict:
     """Knotenkräfte [N] aus der Fliehkraft — ``{knoten: (fx, fy, fz)}``.
 
     Z88 kennt keine Rotationslast (das ``OMEGA`` in ``z88r`` ist der
@@ -370,6 +375,12 @@ def zentrifugal_lasten(netz: Netz, dichte_kg_m3: float, rpm: float) -> dict:
     stellen, sondern muss eine Größe nehmen, die die Verteilung mitträgt —
     ``zentrifugal_arbeit`` tut das.
 
+    ``rho_je_element`` skaliert die **Masse** je Element (Topologieoptimierung). Das ist
+    nicht optional, sondern der Kern: wer nur den E-Modul senkt und die Dichte stehen
+    lässt, hängt volle Masse an weiches Material — die verbleibenden steifen Bereiche
+    tragen dann alles und die Spannung läuft davon (gemessen: 1822 MPa gegen eine
+    Fließgrenze von 340 MPa, bevor das hier eingebaut war).
+
     Einheiten: Netz in mm, ``dichte_kg_m3`` in kg/m³ → ρ in t/mm³ (das mm/N/MPa/t-System,
     das auch CalculiX benutzt), Ergebnis in N.
     """
@@ -381,7 +392,10 @@ def zentrifugal_lasten(netz: Netz, dichte_kg_m3: float, rpm: float) -> dict:
              for L, w in regel]
 
     lasten = {i: [0.0, 0.0, 0.0] for i in netz.knoten}
-    for ids in netz.elemente.values():
+    for eid, ids in netz.elemente.items():
+        anteil = 1.0 if rho_je_element is None else float(rho_je_element.get(eid, 1.0))
+        if anteil <= 0.0:
+            continue
         xyz = [netz.knoten[i] for i in ids]
         for N, dN, w in vorab:
             det = _detj(xyz, dN)
@@ -389,7 +403,7 @@ def zentrifugal_lasten(netz: Netz, dichte_kg_m3: float, rpm: float) -> dict:
                 continue
             gx = sum(n * q[0] for n, q in zip(N, xyz))
             gy = sum(n * q[1] for n, q in zip(N, xyz))
-            skal = w * det / 6.0                       # Referenzvolumen des Tetraeders
+            skal = w * det / 6.0 * anteil              # Referenzvolumen des Tetraeders
             bx, by = ow2 * gx * skal, ow2 * gy * skal
             for n, i in zip(N, ids):
                 lasten[i][0] += n * bx
@@ -441,12 +455,15 @@ def zentrifugal_summe_analytisch(netz: Netz, dichte_kg_m3: float, rpm: float) ->
 # ── CalculiX-Schreiber ────────────────────────────────────────────────────────
 
 def schreibe_inp(netz: Netz, mat: dict, rpm: float, pfad: str,
-                 e_je_element: dict | None = None) -> str:
+                 rho_je_element: dict | None = None, simp_p: float = 1.0) -> str:
     """CalculiX-Rechensatz schreiben; gibt den Dateipfad zurück.
 
-    ``e_je_element`` (optional) ordnet Elementnummern einen eigenen E-Modul zu — der
-    Zugang für die Topologieoptimierung. Die Werte werden in Stufen zusammengefasst,
-    damit nicht je Element ein eigenes ``*MATERIAL`` entsteht.
+    ``rho_je_element`` (optional) ordnet Elementnummern eine **relative Dichte**
+    ``rho ∈ (0, 1]`` zu — der Zugang für die Topologieoptimierung. Daraus folgen
+    **beide** Materialgrößen: ``E = E0 · rho^simp_p`` und ``Dichte = rho0 · rho``.
+    Nur den E-Modul zu senken wäre bei einer Volumenlast falsch (s.
+    ``zentrifugal_lasten``). Die Werte werden in Stufen zusammengefasst, damit nicht
+    je Element ein eigenes ``*MATERIAL`` entsteht.
 
     **Zyklische Symmetrie über ``*EQUATION``, nicht über ``*CYCLICSYMMETRYMODEL``.**
     Gmsh liefert die Knotenpaare der beiden Schnittflächen exakt (``netz.paare``);
@@ -461,7 +478,7 @@ def schreibe_inp(netz: Netz, mat: dict, rpm: float, pfad: str,
     nu     = float(mat["nu"])
     e0     = float(mat["E"])
 
-    stufen = _materialstufen(netz, e0, e_je_element)
+    stufen = _materialstufen(netz, rho_je_element)
 
     z = []
     z.append("** Rotor-Fliehkraft, erzeugt von ema_deck.py (ohne FreeCAD)")
@@ -477,16 +494,16 @@ def schreibe_inp(netz: Netz, mat: dict, rpm: float, pfad: str,
     for eid in sorted(netz.elemente):
         z.append(f"{eid}, " + ", ".join(str(n) for n in netz.elemente[eid]))
 
-    for stufe, (e_wert, elems) in enumerate(stufen):
+    for stufe, (rho_rel, elems) in enumerate(stufen):
         if len(stufen) > 1:
             z.append(f"*ELSET, ELSET=E{stufe}")
             z.extend(_id_zeilen(elems))
         elset = f"E{stufe}" if len(stufen) > 1 else "Eall"
         z.append(f"*MATERIAL, NAME=M{stufe}")
         z.append("*ELASTIC")
-        z.append(f"{e_wert:.6g}, {nu:.6g}")
+        z.append(f"{max(e0 * rho_rel ** simp_p, e0 * 1e-9):.6g}, {nu:.6g}")
         z.append("*DENSITY")
-        z.append(f"{rho_t:.9g}")
+        z.append(f"{rho_t * rho_rel:.9g}")
         z.append(f"*SOLID SECTION, ELSET={elset}, MATERIAL=M{stufe}")
 
     z.append("*NSET, NSET=Nstirn")
@@ -592,28 +609,29 @@ def _id_zeilen(ids, je_zeile: int = 8):
             for i in range(0, len(ids), je_zeile)]
 
 
-def _materialstufen(netz: Netz, e0: float, e_je_element: dict | None,
+def _materialstufen(netz: Netz, rho_je_element: dict | None,
                     n_stufen: int = 24):
-    """Elemente nach E-Modul in höchstens ``n_stufen`` Gruppen bündeln.
+    """Elemente nach relativer Dichte in höchstens ``n_stufen`` Gruppen bündeln.
 
-    Ohne ``e_je_element`` gibt es genau eine Stufe. Mit — also in der
+    Ohne ``rho_je_element`` gibt es genau eine Stufe mit ``rho = 1``. Mit — also in der
     Topologieoptimierung — wird quantisiert, weil sonst je Element ein eigenes
-    ``*MATERIAL`` bzw. eine eigene Z88-Materialdatei entstünde.
+    ``*MATERIAL`` bzw. eine eigene Z88-Materialdatei entstünde. Rückgabe:
+    ``[(rho_der_stufe, [elementnummern]), …]``.
     """
-    if not e_je_element:
-        return [(e0, sorted(netz.elemente))]
+    if not rho_je_element:
+        return [(1.0, sorted(netz.elemente))]
 
-    e_min = min(e_je_element.values())
-    e_max = max(e_je_element.values())
-    if e_max - e_min < 1e-9:
-        return [(e_max, sorted(netz.elemente))]
+    lo = min(rho_je_element.values())
+    hi = max(rho_je_element.values())
+    if hi - lo < 1e-9:
+        return [(hi, sorted(netz.elemente))]
 
     eimer = {}
     for eid in sorted(netz.elemente):
-        e = float(e_je_element.get(eid, e0))
-        k = min(n_stufen - 1, int((e - e_min) / (e_max - e_min) * n_stufen))
+        r = float(rho_je_element.get(eid, 1.0))
+        k = min(n_stufen - 1, int((r - lo) / (hi - lo) * n_stufen))
         eimer.setdefault(k, []).append(eid)
-    return [(e_min + (k + 0.5) * (e_max - e_min) / n_stufen, sorted(elems))
+    return [(lo + (k + 0.5) * (hi - lo) / n_stufen, sorted(elems))
             for k, elems in sorted(eimer.items())]
 
 
