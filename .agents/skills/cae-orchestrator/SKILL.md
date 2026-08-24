@@ -41,9 +41,34 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `results [pfad]` | Ergebnisse lesen — **immer mit Abschnitt** |
 | `run <stufe>` | Rechnung starten |
 | `wait` | auf Abschluss warten |
-| `routes [--grep x]` | alle 135 Serverrouten auflisten |
+| `routes [--grep x]` | alle Serverrouten auflisten |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
+| `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver beide` (Vollrotor, ~7 s, mit Gegenüberstellung) |
+| `topopt` | Topologieoptimierung des Rotorblechs. `--verfahren sko` (Vorgabe) oder `simp`. 20–60 s. Ergebnis ist ein **Dichtefeld, kein Bauteil** |
 | `raw GET/POST <pfad>` | beliebige Route — Notausgang für alles Übrige |
+
+### `struktur` und `topopt` — wann welches
+
+Beide rechnen **lokal**, ohne den Server und ohne FreeCAD; sie bauen das Netz selbst
+(Gmsh) aus derselben Magnetgeometrie, aus der auch das 2D-Feld kommt.
+
+```bash
+python3 cae_cli.py struktur --from-project last --solver ccx            # ~2 s
+python3 cae_cli.py struktur --from-project last --solver beide --voll   # ~7 s
+python3 cae_cli.py topopt   --from-project last --iterationen 25        # ~20 s
+```
+
+* **`--solver beide`** rechnet dasselbe Netz zweimal, mit CalculiX und mit Z88Aurora,
+  und stellt die Zahlen samt der analytischen Ringformel gegenüber. Gemessene
+  Abweichung an der Beispielmaschine: **unter 0,1 %**. Wer gefragt wird, was das
+  belegt, sagt: es prüft **Löser und Rechensatz**, nicht das Netz und nicht das
+  Modell. Ein Netz, das beide gleich falsch sehen, sehen beide gleich falsch.
+* **Z88 kann keinen Polsektor** — es kennt weder zyklische Symmetrie noch schiefe
+  Symmetrieebenen. Bei `--solver z88` und `beide` deshalb `--voll` angeben.
+* **`topopt` liefert ein Dichtefeld, kein Bauteil.** Die `ableseempfehlung` im
+  Ergebnis nennt den Radialbereich, in dem das Eisen mechanisch wenig trägt. Das ist
+  ein Hinweis, wo eine Flussbarriere vertretbar *wäre* — **nach** einer EM-Rechnung,
+  nicht davor. Wer daraus eine Geometrieempfehlung macht, sagt das dazu.
 
 ## Ergebnisse lesen — die wichtigste Regel
 

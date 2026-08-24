@@ -31,15 +31,29 @@ verdrahtet sind — siehe die Spalte „Verbindung".
 ## Agentenbedienung (lokales Modell, kein Cloud-Zugang)
 
 Die Toolkette lässt sich außer im Browser auch von einem **lokalen** Sprachmodell
-bedienen — über [PI](https://pi.dev) (`@earendil-works/pi-coding-agent`) und Ollama.
-Eine Zeile startet beides:
+bedienen — wahlweise über [PI](https://pi.dev) (`@earendil-works/pi-coding-agent`)
+oder über **Hermes Agent** (Nous Research). Beide laufen auf demselben Ollama-Modell
+und lesen **denselben** Skill aus `.agents/skills/` — es wird nichts kopiert und
+nichts verlinkt, also können sie nicht auseinanderlaufen. Je eine Zeile startet die
+ganze Kette:
 
 ```bash
 ./start_agent.sh                          # Orchestrator (falls nötig) + PI, interaktiv
 ./start_agent.sh -p "Wie hoch ist B_gap im neuesten Projekt?"
 ./start_agent.sh --weiter                 # letzte Sitzung fortsetzen
 ./start_agent.sh --sitzungen              # Sitzungen dieses Ordners auflisten
+
+./start_hermes.sh                         # dasselbe mit Hermes
+./start_hermes.sh -z "Wie hoch ist B_gap im neuesten Projekt?"
+./start_hermes.sh --nur-pruefen           # nur der Nachweis, dass nichts nach draußen geht
 ```
+
+Beide beantworten dieselbe Frage mit derselben Zahl (gemessen: **0,806 T**, beide
+samt Herkunftshinweis auf die analytische Luftspaltformel). `start_hermes.sh`
+**misst** vor jedem Start, dass Hermes ausschließlich `127.0.0.1:11434` anspricht —
+dessen mitgelieferte Vorgabe zeigt auf OpenRouter, und zwei offene Fehler im Projekt
+lassen `provider: ollama` still dorthin durchfallen. Einzelheiten in
+`.agents/README.md`.
 
 Das Skript prüft Ollama, **nagelt das Modell auf seine ID fest** (ein `ollama pull` unter
 gleichem Namen tauscht sonst still die Gewichte), startet den Server nur, wenn `:5000`
@@ -49,7 +63,8 @@ nicht antwortet, und wartet auf dessen Erreichbarkeit, bevor PI läuft.
 |---|---|---|
 | `start_agent.sh` | Wurzel | Startkette + Sitzungsverwaltung |
 | `.agents/` | Wurzel | Skill-Definition für PI (`skills/cae-orchestrator/SKILL.md`) und Einrichtung |
-| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die der Agent benutzt — zehn Verben über HTTP auf `:5000` (`rotor-check` rechnet lokal) |
+| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — zwölf Verben über HTTP auf `:5000` (`rotor-check`, `struktur` und `topopt` rechnen lokal) |
+| `start_hermes.sh` | Wurzel | zweiter Agentenkopf: **Hermes Agent**, gleiches Modell, gleicher Skill, mit gemessenem Netznachweis |
 
 **Warum eine CLI und kein MCP-Server:** ein lokales Modell kann die ~135 HTTP-Routen des
 Orchestrators nicht als 135 Werkzeugschemata im Kontext halten. PI bindet Werkzeuge
@@ -60,6 +75,55 @@ die Ausgabe und trägt den Zustand im Exit-Code. Details in `.agents/README.md`.
 auch Bericht, Chat und KI-Auslegung im Orchestrator benutzen. Eine Quelle dafür:
 `ema_report.DEFAULT_MODEL` / `DEFAULT_NUM_CTX`, umstellbar über `CAE_LLM_MODEL` bzw.
 `CAE_LLM_NUM_CTX` ohne Codeänderung.
+
+## Festigkeit ohne FreeCAD, zweiter Löser, Topologieoptimierung
+
+Neben dem gewachsenen Weg (FreeCAD baut das Netz, CalculiX löst) gibt es einen
+**eigenen Rechensatz**: Gmsh vernetzt aus derselben Magnetgeometrie, aus der auch das
+2D-Feld kommt, und der CalculiX-Satz wird selbst geschrieben. Zwei Gründe:
+
+1. Eine **Topologieoptimierung** braucht je Element einen eigenen E-Modul. FreeCADs
+   `.inp`-Schreiber kann das nicht.
+2. Ein **Polsektor** statt des ganzen Rotors — und kein FreeCAD-Start in der Schleife.
+
+Gemessen an derselben Maschine (Delta-IPM, 3 Polpaare):
+
+| | Elemente | Zeit |
+|---|---:|---:|
+| FreeCAD + CalculiX, Vollrotor | 797.275 | Minuten, davor ~40 s FreeCAD-Start |
+| eigener Satz, Polsektor | 13.669 | 0,4 s vernetzt, 0,35 s gelöst |
+| eigener Satz, Vollrotor | 37.066 | 1,2 s vernetzt, 1,5 s (ccx) / 2,1 s (Z88) |
+
+**Z88Aurora V5** (`/opt/z88aurora`) rechnet als zweiter, unabhängiger Löser dasselbe
+Netz. Auf gleicher Last und gleichem Netz:
+
+| Größe | CalculiX | Z88 | Abw. |
+|---|---:|---:|---:|
+| σ_v Mittel | 57,15 MPa | 57,15 MPa | 0,00 % |
+| σ_v P99 (Torwert) | 128,89 MPa | 128,90 MPa | 0,01 % |
+| Ringspannung Bohrung | 161,57 MPa | 161,62 MPa | 0,03 % |
+| größte Verschiebung | 40,59 µm | 40,60 µm | — |
+
+Das prüft **Löser und Rechensatz**, nicht das Netz und nicht das Modell.
+
+```bash
+cd cae_orchestrator
+python3 cae_cli.py struktur --from-project last --solver beide --voll
+python3 cae_cli.py topopt   --from-project last --iterationen 25
+```
+
+Im Browser stehen beide unter *Strukturanalyse* („Rechensatz & Löser"), in der
+Pipeline über `struct_solver` (`freecad` bleibt die Vorgabe). **Nur der
+FreeCAD-Rechensatz speist die Verformungsbilder und das Rampenvideo** — die brauchen
+Knotenkoordinaten aus der `.frd`.
+
+Die **Topologieoptimierung** (SKO, wahlweise SIMP/OC) läuft auf dem Polsektor,
+~0,8 s je Iteration, Konvergenz nach ~20 Iterationen. Sie liefert ein **Dichtefeld,
+kein Bauteil**: ein Blechschnitt hat Fertigungs-, Fluss- und Steifigkeits­bedingungen,
+die kein Dichtefeld kennt. Was herauskommt, ist der Radialbereich, in dem das Eisen
+mechanisch wenig trägt — ein Hinweis, wo eine Flussbarriere vertretbar *wäre*, nach
+einer EM-Rechnung und nicht davor. **Z88Arion** wäre das naheliegende Werkzeug dafür,
+gibt es aber nicht für Linux (nur Windows, und dort ohne Stapelbetrieb).
 
 ## Bedienung am Handy (`/m`)
 
@@ -85,7 +149,9 @@ Thermik, kein Fahrzyklus, kein Bericht.
 
 ## Geteilte Toolchain (systemweit / /opt, nicht in diesem Repo)
 
-- FreeCAD-1.1-Quellbuild + CalculiX → `/opt/cae-tools/freecad_1.1_quellcode` (Symlink `~/freecad_1.1_quellcode`)
+- FreeCAD-1.1-Quellbuild + CalculiX → `/opt/cae-tools/freecad_1.1_quellcode` (Symlink `~/freecad_1.1_quellcode`). `ccx` 2.23 wird von dort auch **ohne** FreeCAD aufgerufen
+- **Z88Aurora V5** → `/opt/z88aurora` (2,8 GB, nur die Stapel-Löser werden benutzt). `z88r` findet sein eigenes MKL nicht — `LD_LIBRARY_PATH` auf `/opt/z88aurora/bin/ubuntu64` ist der ganze Trick. **Z88Arion gibt es nicht für Linux**
+- Gmsh — das benutzte ist das **Python-Modul im venv** (4.15.2, aus `requirements.txt`); `/usr/bin/gmsh` (4.12.1) liegt daneben und wird nicht gebraucht
 - Portables Blender → `/opt/cae-tools/blender_portable` (Symlink `~/blender_portable`)
 - OpenFOAM v2406 (`/usr/lib/openfoam`), Elmer, CUDA, pandoc/pdflatex — systemweit
 - Ollama-Dienst auf `localhost:11434`

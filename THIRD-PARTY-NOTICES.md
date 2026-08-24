@@ -66,6 +66,29 @@ Sollte PicoGK künftig doch mit ausgeliefert werden (Quellcode oder `picogk.so`)
 greift Apache-2.0 §4 vollständig: Lizenz beilegen, `NOTICE` weiterreichen und
 Änderungen kennzeichnen.
 
+### Z88Aurora V5 (Universität Bayreuth)
+
+**Vorausgesetzt, nicht mitverbreitet.** Liegt lokal unter `/opt/z88aurora` (2,8 GB)
+und wird ausschließlich als **externes Programm** aufgerufen (`z88r` im Stapelbetrieb).
+Dieses Repo enthält keinen Z88-Quellcode und keine Z88-Binärdatei; `ema_z88.py` schreibt
+nur Eingabedateien im offenen Z88-Format und liest die Ausgabedateien.
+
+Z88Aurora ist Freeware der Universität Bayreuth (Lehrstuhl für Konstruktionslehre und
+CAD, Prof. Frank Rieg); der darunterliegende Kern **Z88OS** steht unter der GNU GPL.
+Wer die Toolchain nachbaut, lädt Z88Aurora selbst von <https://z88.de/> — die dortigen
+Nutzungsbedingungen gelten. Enthaltene Fremdkomponenten von Z88 (u. a. Intel MKL,
+PARDISO, TetGen, Netgen, OpenCASCADE) reisen mit **jener** Installation, nicht mit
+diesem Repo.
+
+**Z88Arion** (Topologieoptimierung) wird **nicht** benutzt — es gibt keinen Linux-Bau.
+
+### Gmsh
+
+**Vorausgesetzt, nicht mitverbreitet.** Benutzt wird das Python-Modul `gmsh` (4.15.2)
+im venv des Orchestrators, installiert ueber `requirements.txt`; `/usr/bin/gmsh` (4.12.1)
+liegt daneben und wird nicht gebraucht. Gmsh steht unter der GNU GPL v2+
+mit Ausnahmen; siehe <https://gmsh.info/>.
+
 ## Subprojekt `lego/`
 
 Die Quellen dieses Subprojekts sind in `lego/README.md` unter „Quellen und

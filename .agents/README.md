@@ -110,6 +110,75 @@ Kontext packen, als der Server behält, und der Überhang fiele still weg.
 Der große Kontext ist hier nützlich, weil `results.json` auch nach dem Filtern noch
 umfangreich ist.
 
+## Zweiter Agentenkopf: Hermes
+
+Neben PI läuft **Hermes Agent** (Nous Research) auf demselben Modell und demselben
+Skill. Zweck ist der Vergleich der *Agenten*, nicht zweier Werkzeugbindungen —
+deshalb bekommt Hermes **kein MCP**, sondern dieselbe CLI wie PI.
+
+```bash
+./start_hermes.sh                    # interaktiv
+./start_hermes.sh -z "Wie hoch ist B_gap im neuesten Projekt?"
+./start_hermes.sh --nur-pruefen      # nur der Netznachweis, startet nichts
+```
+
+**Ein Skill, zwei Köpfe — ohne Kopie.** `hermes skills trust <repo>` lädt die
+repo-eigenen Skills aus `./.agents/skills/`, also **genau dem Verzeichnis, das PI
+schon benutzt**. Es wird nichts symlinkt und nichts kopiert; beide lesen dieselbe
+Datei, und sie können nicht auseinanderlaufen.
+
+Einmalig:
+
+```bash
+curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- \
+     --skip-browser --skip-computer-use --skip-setup --non-interactive
+hermes config set model.provider   ollama
+hermes config set model.base_url   http://localhost:11434/v1
+hermes config set model.default    qwen-gross:latest
+hermes config set model.context_length 65536
+hermes skills trust ~/ai-workspace
+```
+
+Installiert wird nach `~/.hermes` (2,0 GB) und `~/.local/bin/hermes` — **ohne sudo**.
+`--skip-browser` spart Playwright/Chromium (das einzige, was root bräuchte),
+`--skip-computer-use` den Fremdtreiber aus einem dritten Repo.
+
+### Warum `start_hermes.sh` den Netzzugang misst statt ihn zu behaupten
+
+Hermes' **mitgelieferte Vorgabe** ist `provider: auto` mit
+`base_url: https://openrouter.ai/api/v1`. Dazu kommen zwei offene Fehler im Projekt
+(NousResearch/hermes-agent #57255 und #14676): `provider: ollama` fällt bei einer
+`base_url` mit `/v1` still auf `custom` durch, und ein blankes `custom` ohne
+aufgelöste `base_url` zeigt auf OpenRouter. Auf einer Maschine, deren Prinzip
+„nichts über das Heimnetz hinaus" ist, wäre das ein stiller Abfluss.
+
+Die Konfigurationsdatei ist deshalb kein ausreichender Beleg. Vor jedem Start prüft
+das Skript drei Dinge:
+
+1. `provider`, `base_url` und `default` in `~/.hermes/config.yaml`;
+2. dass in `~/.hermes/.env` **kein** OpenRouter-/OpenAI-/Anthropic-/Nous-Schlüssel steht;
+3. **gemessen**: ein echter Aufruf, dabei werden die Verbindungen des
+   `hermes`-Prozesses mit `ss -tnp` mitgeschrieben. Alles außer `127.0.0.1:11434`
+   bricht ab — und **keine** beobachtete Verbindung bricht ebenfalls ab, denn eine
+   leere Messung belegt nichts.
+
+Gemessen am 24.08.2026: 12 Beobachtungen, alle auf `127.0.0.1:11434`, keine
+Gegenstelle außerhalb.
+
+### Beide Köpfe, dieselbe Frage
+
+```
+Frage:  „Wie hoch ist B_gap im neuesten Projekt?"
+PI      → B_gap = 0.806 T, mit Hinweis auf die analytische Herkunft
+Hermes  → B_gap = 0,806 T, mit demselben Hinweis
+Kontrolle aus results.json: 0.806
+```
+
+Beide greifen selbstständig zum Skill und geben den Herkunftshinweis mit — die
+Ehrlichkeitsregel steht an einer Stelle und wirkt in beiden. (Hermes hat dabei ein
+falsches Projektverzeichnis benannt und die richtige Zahl genannt; eine
+Zuordnungsungenauigkeit des lokalen Modells, kein Werkzeugfehler.)
+
 ## Nachgewiesen
 
 Beide Abfragen liefen gegen den laufenden Server, das Modell hat selbstständig zum

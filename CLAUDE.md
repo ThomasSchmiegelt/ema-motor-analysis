@@ -40,7 +40,8 @@ because it is not part of any one subproject:
 | `start_agent.sh` | one command: checks Ollama, pins the model **by ID** (a `ollama pull` under the same name silently swaps the weights), starts the orchestrator only if `:5000` is silent, waits for it, then `exec pi`. Session handling: `--weiter` / `--sitzung <id>` / `--sitzungen`; a bare known session id and a lone `--` are accepted too, PI's own session flags pass through untouched |
 | `.agents/README.md` | setup + what the agent sees; PI binds tools as **Skill = CLI + README**, deliberately not MCP |
 | `.agents/skills/cae-orchestrator/SKILL.md` | the skill the model reads — the authority on how `cae_cli.py` is meant to be used |
-| `cae_orchestrator/cae_cli.py` | the CLI itself (stdlib only), nine verbs over HTTP on `:5000` |
+| `cae_orchestrator/cae_cli.py` | the CLI itself, twelve verbs; most go over HTTP on `:5000`, while `rotor-check`, `struktur` and `topopt` compute locally |
+| `start_hermes.sh` | **second agent head**: Hermes Agent (Nous Research), same Ollama model, same skill. `hermes skills trust <repo>` loads `./.agents/skills/` — the very directory PI uses, so nothing is copied or symlinked and the two cannot drift. Its `--nur-pruefen` **measures** (via `ss -tnp`) that Hermes only talks to `127.0.0.1:11434`: the shipped default points at OpenRouter, and two open upstream bugs (#57255, #14676) make `provider: ollama` fall through to it silently |
 
 Two things that are easy to get wrong when touching this:
 
@@ -79,8 +80,14 @@ not assumed:
 ## Shared toolchain (system-wide, outside this repo — do not try to vendor/rebuild it)
 
 - FreeCAD 1.1.x built from source under `~/freecad_1.1_quellcode` (via pixi) + CalculiX
-  (`ccx`) in the same pixi env. **`/opt/freecad-1.1` is actually 1.2 with a
-  visualisation bug — never use it.**
+  (`ccx` 2.23) in the same pixi env. **`/opt/freecad-1.1` is actually 1.2 with a
+  visualisation bug — never use it.** `ccx` is also called directly, without FreeCAD.
+- **Z88Aurora V5** under `/opt/z88aurora` (2,8 GB, owned by `thomas`, world-readable).
+  Only the batch solvers are used (`z88r -c -parao|-siccg|…`). Two traps: `z88r` needs
+  `LD_LIBRARY_PATH=/opt/z88aurora/bin/ubuntu64` because its own MKL is not in the
+  RPATH, and it needs **two** runs — `-t` writes `Z88R.DYN`, which `-c` then reads.
+  **Z88Arion has no Linux build** (Windows only, GUI only, no batch mode).
+- Gmsh — the one actually used is the **Python module in the orchestrator venv** (4.15.2, from `requirements.txt`). `/usr/bin/gmsh` (4.12.1) sits alongside and is not needed.
 - Portable Blender under `~/blender_portable`.
 - OpenFOAM v2406 (`/usr/lib/openfoam`), Elmer, CUDA, pandoc/pdflatex — installed system-wide.
 - Ollama at `localhost:11434`.
@@ -113,6 +120,21 @@ No linters/CI configured. Full architecture (request/state flow, the ~470-line
 pipeline in `ema_pipeline.py`, magnet topology system, 3D Elmer EM field, canvas
 designer, AI design generation) is documented in `cae_orchestrator/CLAUDE.md` — that
 file is the authority, not this one.
+
+**Second structural path (`ema_deck.py` / `ema_z88.py` / `ema_topopt.py`).** Besides
+the FreeCAD route there is an own deck: Gmsh (Python API) meshes one pole sector — or
+the full rotor — from the same `ema_topology.magnet_legs` the 2-D FDM uses, and the
+CalculiX input file is written here rather than by FreeCAD. It exists because
+topology optimisation needs a **per-element Young's modulus**, which FreeCAD's writer
+cannot emit, and because 13.669 elements meshed in 0,4 s beat 797.275 elements plus a
+40 s FreeCAD start. **Z88Aurora V5** (`/opt/z88aurora`, batch solvers only) runs the
+same mesh as an independent second opinion — measured agreement 0,00–0,05 %.
+Selected via `struct_solver` (`freecad` | `ccx` | `z88` | `beide`); `freecad` remains
+the default and is the only one that feeds the deformation images and ramp video.
+Three things that are easy to get wrong there are documented in the module headers:
+Z88 has **no centrifugal load** (its `OMEGA` is the SOR relaxation factor), its
+material file is **space-separated** (a comma silently yields nu=0), and
+`gmsh.initialize()` needs `interruptible=False` or it fails inside a Flask worker.
 
 ### `connection_detection/` (Python, FreeCAD addon)
 Pure-geometry pipeline (`pipeline.py`): broad phase (bbox + `rtree`) → fine phase

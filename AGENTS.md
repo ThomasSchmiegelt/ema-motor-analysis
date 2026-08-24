@@ -23,8 +23,13 @@ Umweg, nicht die Abkürzung.
 
 ```bash
 ./start_agent.sh                    # Wurzel: Orchestrator + PI mit dem lokalen Modell
+./start_hermes.sh                   # dasselbe mit Hermes — gleiches Modell, gleicher Skill
 cd ~/ai-workspace/cae_orchestrator && python3 cae_cli.py health
 ```
+
+Es gibt **zwei** Agentenköpfe und **einen** Skill. Hermes lädt ihn über
+`hermes skills trust <repo>` direkt aus `./.agents/skills/` — dem Verzeichnis, das PI
+schon benutzt. Nichts wird kopiert; sie können nicht auseinanderlaufen.
 
 Einen Lauf **nie** über einen selbstgeschriebenen Payload starten — der hat rund 90
 Schlüssel. Eine bestehende Auslegung übernehmen und einzeln ändern:
@@ -49,6 +54,13 @@ nicht, ob eine Geometrie *baubar* ist — nach jeder Geometrieänderung erst `ru
   bewusst so; **neu** ist, dass der Handy-Pfad (`/m…`) als einzige Routengruppe ein
   Token verlangt (`ema_mobil.py`). Die übrigen Routen bleiben offen — sie abzusichern
   wäre eine eigene Entscheidung und würde `ema.html` und `cae_cli.py` brechen.
+* **Z88Arion gibt es nicht für Linux** — nur Windows, und dort ohne Stapelbetrieb.
+  Nicht danach suchen und nicht unter Wine erzwingen wollen. Die Topologieoptimierung
+  läuft stattdessen in `ema_topopt.py` auf `z88r` bzw. `ccx`.
+* **`z88r` braucht zwei Läufe und `LD_LIBRARY_PATH`.** `-t` schreibt `Z88R.DYN`, das
+  `-c` dann liest; und das eigene MKL steht nicht im RPATH. Beides erledigt
+  `ema_z88.loese`, von Hand aufgerufen scheitert es sonst mit unverständlicher
+  Meldung.
 * **`/opt/freecad-1.1` niemals benutzen** — das ist in Wahrheit 1.2 und hat einen
   Darstellungsfehler. Das richtige FreeCAD liegt unter `~/freecad_1.1_quellcode`
   (pixi), CalculiX (`ccx`) in derselben Umgebung.
@@ -67,6 +79,11 @@ laufen serverseitig weiter, wenn der Aufrufer weggeht. Nicht in engen Schleifen
 pollen, nichts ungefragt abbrechen.
 
 ## Zahlen ehrlich zuordnen
+
+Ein **Löservergleich** (`struktur --solver beide`) prüft Löser und Rechensatz, nicht
+das Netz und nicht das Modell — zwei Löser auf demselben Netz sehen dieselben
+Netzfehler. Eine **Topologieoptimierung** liefert ein Dichtefeld, kein Bauteil; die
+`ableseempfehlung` ist ein Hinweis für eine spätere EM-Rechnung, keine Geometrie.
 
 Das 2D-FDM-Feld wird auf eine **analytische** Luftspaltformel kalibriert. `Kt`,
 `B_gap` und die Eisenverluste kommen aus dieser Formel, nicht aus dem Feldbild; das
