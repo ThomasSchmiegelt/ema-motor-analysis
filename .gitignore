@@ -78,4 +78,15 @@ pikogk/logs/
 *_sicherung_*.zip
 *.backup.zip
 server.out
+
+# ── Vom Agentenstart erzeugt ──
+# Wird bei jedem Start neu geschrieben; versioniert waere sie nur Rauschen.
 AGENTS.projekt.md
+
+# ── Persoenliche Wiederaufnahme-Skripte ──
+# Enthalten die lokale Claude-Code-Sitzungskennung (`claude --resume <uuid>`) und
+# gehoeren damit niemandem ausser dem Rechner, auf dem sie liegen. Sie lagen vier Mal
+# im Repo (Wurzel, cae_orchestrator, lego, pikogk) und waren auf GitHub oeffentlich.
+# Das Muster ohne Schraegstrich greift auf jeder Ebene.
+# ACHTUNG: kein Kommentar hinter das Muster -- das macht die Regel still wirkungslos.
+restart.sh
