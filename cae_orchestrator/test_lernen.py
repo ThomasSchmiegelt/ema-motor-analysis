@@ -167,10 +167,79 @@ def test_gemessen_und_erfahrung_getrennt():
           "## Gemessen" in t and "## Erfahrungen" in t)
 
 
+def test_referenzwerte_bleiben_getrennt():
+    print("6. Recherchierte Werte rutschen NICHT zu den gerechneten")
+    with tempfile.TemporaryDirectory() as d:
+        conn = DB.oeffne(os.path.join(d, "t.db"))
+        wurzel = os.path.join(d, "p"); os.makedirs(wurzel)
+        _bau(wurzel, "20260801_100000_a", 3.0, 130.0)
+        DB.importiere_alle(conn, wurzel)
+
+        for zitat, url, warum in (
+                ("kurz", "https://x.y/a", "Zitat zu kurz"),
+                ("Ein ordentlich langes Zitat mit der Zahl 1,8 mm darin", "x.y", "keine http-Adresse")):
+            try:
+                DB.referenz_hinzufuegen(conn, "stegbreite_mm", 1.8, "mm", zitat, url)
+                check(f"abgewiesen: {warum}", False, "wurde angenommen")
+            except DB.OhneQuelle:
+                check(f"abgewiesen: {warum}", True)
+
+        DB.referenz_hinzufuegen(conn, "stegbreite_mm", 1.8, "mm",
+                                "Typische Stegbreiten liegen bei IPM-Rotoren zwischen 1,5 und 2,0 mm.",
+                                "https://example.org/p", "Quelle", projekt_id="20260801_100000_a")
+        check("mit Quelle und Zitat angenommen",
+              len(DB.referenzen(conn, "20260801_100000_a")) == 1)
+
+        # DER KERN: der recherchierte Wert darf in kennwerte NICHT auftauchen.
+        in_kennwerte = conn.execute(
+            "SELECT COUNT(*) c FROM kennwerte WHERE groesse='stegbreite_mm'").fetchone()["c"]
+        check("er steht NICHT in kennwerte", in_kennwerte == 0,
+              "sonst faende ihn db vergleich wie einen eigenen Rechenwert")
+        check("kein Kennwert traegt die Methode 'recherche'",
+              conn.execute("SELECT COUNT(*) c FROM kennwerte WHERE methode='recherche'"
+                           ).fetchone()["c"] == 0)
+        # und db vergleich darf ihn nicht als Spalte finden
+        v = DB.vergleiche(conn, ["stegbreite_mm"])
+        check("db vergleich liefert dafuer keinen Wert",
+              all(z["stegbreite_mm"] is None for z in v))
+
+        md = DB.referenz_tabelle(conn, "20260801_100000_a")
+        check("die Berichtstabelle sagt 'nicht nachgerechnet'", "nicht nachgerechnet" in md)
+        check("und nennt die Belegstelle", "Typische Stegbreiten" in md)
+        check("und verlinkt die Quelle", "https://example.org/p" in md)
+        conn.close()
+
+
+def test_ablage_unter_dem_projekt():
+    print("7. Quellen liegen unter dem Projekt, Zahlen nur mit Beleg")
+    with tempfile.TemporaryDirectory() as d:
+        proj = os.path.join(d, "20260801_100000_a")
+        os.makedirs(proj)
+        json.dump({"label": "a"}, open(os.path.join(proj, "meta.json"), "w"))
+        # Kein Netz noetig: mit auszug= wird nichts geholt.
+        erg = R.speichere(proj, "https://example.org/q",
+                          notiz="Pruefung", auszug="Ein Auszug mit Text.",
+                          werte=[{"groesse": "x_mm", "wert": 2.0, "einheit": "mm",
+                                  "zitat": "kurz"}])
+        check("Quellendatei angelegt", os.path.isfile(
+            os.path.join(proj, "recherche", "quellen.jsonl")))
+        check("Bilderordner angelegt", os.path.isdir(
+            os.path.join(proj, "recherche", "bilder")))
+        check("Wert mit zu kurzem Zitat abgewiesen",
+              erg["werte_uebernommen"] == 0 and erg["werte_abgewiesen"])
+        q = R.quellen(proj)
+        check("die Quelle ist trotzdem abgelegt", len(q) == 1 and q[0]["notiz"] == "Pruefung")
+        md = R.quellen_markdown(proj)
+        check("der Berichtsabschnitt sagt, dass es Fremdquellen sind",
+              "nicht Teil der Rechnung" in md)
+        check("leeres Projekt gibt leeren Abschnitt", R.quellen_markdown(d) == "")
+
+
 if __name__ == "__main__":
     for t in (test_fremdtext_markiert, test_erfahrung_braucht_beleg,
               test_gemessene_regel_findet_die_netzweite, test_veralten,
-              test_gemessen_und_erfahrung_getrennt):
+              test_gemessen_und_erfahrung_getrennt,
+              test_referenzwerte_bleiben_getrennt, test_ablage_unter_dem_projekt):
         t()
     print()
     if _sprung:

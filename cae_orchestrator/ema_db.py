@@ -213,6 +213,26 @@ def oeffne(pfad: str = DB_PFAD) -> sqlite3.Connection:
         ok       INTEGER,
         meldung  TEXT,
         PRIMARY KEY (lauf_id, tor));
+    -- Recherchierte REFERENZWERTE. Bewusst eine EIGENE Tabelle und nicht ein
+    -- weiterer Eintrag in `kennwerte`: dort steht, was diese Toolchain GERECHNET
+    -- hat. Ein Wert aus dem Internet ist etwas anderes -- er kann richtig sein,
+    -- aber er ist nicht nachgerechnet. Stuende er in derselben Tabelle, faende ihn
+    -- `db vergleich` und die Berichtstabelle wie einen eigenen, und die Trennung,
+    -- um derentwillen die Datenbank ueberhaupt gebaut wurde, waere hin.
+    CREATE TABLE IF NOT EXISTS referenzwerte (
+        ref_id     INTEGER PRIMARY KEY,
+        projekt_id TEXT,                     -- NULL = allgemein, nicht laufbezogen
+        groesse    TEXT NOT NULL,
+        wert_num   REAL,
+        wert_text  TEXT,
+        einheit    TEXT,
+        zitat      TEXT NOT NULL,            -- die Belegstelle im Originaltext
+        quelle_url TEXT NOT NULL,
+        quelle_titel TEXT,
+        abgerufen  TEXT,
+        notiz      TEXT);
+    CREATE INDEX IF NOT EXISTS idx_ref_groesse ON referenzwerte(groesse);
+    CREATE INDEX IF NOT EXISTS idx_ref_projekt ON referenzwerte(projekt_id);
     CREATE INDEX IF NOT EXISTS idx_kennwerte_groesse ON kennwerte(groesse);
     CREATE INDEX IF NOT EXISTS idx_kennwerte_methode ON kennwerte(methode);
     """)
@@ -620,3 +640,73 @@ def fuer_bericht(projekt_pfad: str) -> str:
         return md
     except Exception:                                    # noqa: BLE001
         return ""
+
+
+# ── Recherchierte Referenzwerte ───────────────────────────────────────────────
+
+class OhneQuelle(ValueError):
+    pass
+
+
+def referenz_hinzufuegen(conn: sqlite3.Connection, groesse: str, wert, einheit: str,
+                         zitat: str, quelle_url: str, quelle_titel: str = "",
+                         projekt_id: str | None = None, notiz: str = "") -> int:
+    """Einen recherchierten Wert ablegen — **nur mit Quelle und Zitat**.
+
+    Beides ist Pflicht, und zwar aus demselben Grund wie der Belegzwang in
+    ``ema_lernen``: ein Zahlenwert ohne Belegstelle ist von einer erfundenen Zahl
+    nicht zu unterscheiden. Das Zitat muss den Wert enthalten oder ihn wenigstens
+    erkennbar stuetzen; geprueft wird, dass es ueberhaupt eines gibt und nicht bloss
+    die Zahl noch einmal wiederholt.
+    """
+    if not (quelle_url or "").startswith(("http://", "https://")):
+        raise OhneQuelle("Ein Referenzwert braucht eine Quellen-Adresse (http/https).")
+    zitat = (zitat or "").strip()
+    if len(zitat) < 20:
+        raise OhneQuelle(
+            "Kein Zitat. Ein recherchierter Wert ohne Belegstelle ist von einer "
+            "erfundenen Zahl nicht zu unterscheiden — die Textstelle mitgeben, "
+            "aus der der Wert stammt.")
+    n, t = _zahl(wert)
+    cur = conn.execute(
+        "INSERT INTO referenzwerte (projekt_id, groesse, wert_num, wert_text, einheit,"
+        " zitat, quelle_url, quelle_titel, abgerufen, notiz) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (projekt_id, groesse, n, t, einheit, zitat, quelle_url, quelle_titel,
+         time.strftime("%Y-%m-%dT%H:%M:%S"), notiz))
+    conn.commit()
+    return cur.lastrowid
+
+
+def referenzen(conn: sqlite3.Connection, projekt_id: str | None = None,
+               groesse: str | None = None) -> list:
+    """Recherchierte Werte lesen. Ohne Projekt: auch die allgemeinen."""
+    wo, args = [], []
+    if projekt_id:
+        wo.append("(projekt_id = ? OR projekt_id IS NULL)"); args.append(projekt_id)
+    if groesse:
+        wo.append("groesse = ?"); args.append(groesse)
+    sql = "SELECT * FROM referenzwerte"
+    if wo:
+        sql += " WHERE " + " AND ".join(wo)
+    return [dict(r) for r in conn.execute(sql + " ORDER BY groesse, abgerufen", args)]
+
+
+def referenz_tabelle(conn: sqlite3.Connection, projekt_id: str | None = None) -> str:
+    """Markdown der Referenzwerte — fuer den Bericht, klar getrennt von den eigenen."""
+    refs = referenzen(conn, projekt_id)
+    if not refs:
+        return ""
+    z = ["### Recherchierte Vergleichswerte (Fremdquellen, nicht nachgerechnet)", "",
+         "| Groesse | Wert | Quelle |", "|---|---|---|"]
+    for r in refs:
+        wert = (f"{r['wert_num']:.4g} {r['einheit'] or ''}".strip()
+                if r["wert_num"] is not None else (r["wert_text"] or "—"))
+        titel = r["quelle_titel"] or r["quelle_url"]
+        z.append(f"| {r['groesse']} | {wert} | [{titel[:60]}]({r['quelle_url']}) |")
+    z += ["", "Diese Werte stammen aus fremden Veroeffentlichungen und wurden von "
+              "dieser Toolchain **nicht nachgerechnet**. Sie dienen der Einordnung, "
+              "nicht als Ergebnis. Die Belegstellen:", ""]
+    for r in refs:
+        z.append(f"* **{r['groesse']}** — „{r['zitat'][:220]}“ "
+                 f"({r['quelle_url']}, abgerufen {(r['abgerufen'] or '')[:10]})")
+    return "\n".join(z) + "\n"

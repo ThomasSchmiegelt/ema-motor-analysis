@@ -363,6 +363,11 @@ Füge die Zeile `[TABELLE:kennwerte]` GENAU EINMAL direkt nach der Zusammenfassu
 (Abschnitt 1) ein — dort wird die vollständige Parameter- und Kennwerttabelle
 eingesetzt.
 
+Füge die Zeile `[TABELLE:quellen]` GENAU EINMAL ganz am Ende ein, falls
+Fremdquellen herangezogen wurden. Dort erscheinen recherchierte Vergleichswerte
+mit Belegstelle und Abbildungen. **Diese Werte sind NICHT nachgerechnet** —
+benutze sie im Text nur zur Einordnung und niemals als Ergebnis.
+
 Füge ausserdem die Zeile `[TABELLE:herkunft]` GENAU EINMAL im Abschnitt zu den
 Berechnungsmethoden ein. Dort erscheint aus der Rechnungsdatenbank, aus welchem
 Verfahren jeder Kennwert stammt — analytische Formel, 2D-FDM-Feld, 3D-FEM,
@@ -742,7 +747,8 @@ def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
     md_raw   = _ensure_kuehlung_section(md_raw, ctx)       # Spritzöl-Kühlung + Bilder
     md_final = insert_images(md_raw, ctx["_img_map"])
     md_final = insert_tables(md_final, {"kennwerte": _single_md_tables(ctx),
-                                        "herkunft":  _herkunft_tabelle(project_dir)})
+                                        "herkunft":  _herkunft_tabelle(project_dir),
+                                        "quellen":   _quellen_tabelle(project_dir)})
     _evo = _evolution_links_md(ctx)
     if _evo:
         md_final = md_final.rstrip() + "\n\n" + _evo + "\n"
@@ -813,7 +819,8 @@ def generate_report_agentic(
     md_main = _ensure_kuehlung_section(md_main, ctx)       # Spritzöl-Kühlung + Bilder
     md_main = insert_images(md_main, ctx["_img_map"])
     md_main = insert_tables(md_main, {"kennwerte": _single_md_tables(ctx),
-                                      "herkunft":  _herkunft_tabelle(project_dir)})
+                                      "herkunft":  _herkunft_tabelle(project_dir),
+                                      "quellen":   _quellen_tabelle(project_dir)})
 
     # Append expert section (with images + paragraph normalisation)
     expert_md = assemble_expert_section(expert_out, img_map=ctx["_img_map"])
@@ -1175,6 +1182,38 @@ def _herkunft_tabelle(project_dir: str) -> str:
         return ""
 
 
+def _quellen_tabelle(project_dir: str) -> str:
+    """Recherchierte Fremdquellen — Vergleichswerte, Belegstellen, Abbildungen.
+
+    Steht **getrennt** von den eigenen Kennwerten, und zwar an eigener Stelle im
+    Bericht. Ein recherchierter Wert kann richtig sein, ist aber nicht nachgerechnet;
+    er neben ein Rechenergebnis zu setzen, als waere er gleichwertig, waere genau der
+    Fehler, den die Herkunftsspalte sonst verhindert.
+
+    Weich: ohne abgelegte Quellen entfaellt der Block ersatzlos.
+    """
+    # Wie bei _herkunft_tabelle: erst pruefen, dass es das Projekt gibt. Sonst
+    # liefert referenz_tabelle die ALLGEMEINEN Referenzwerte (projekt_id IS NULL)
+    # auch fuer einen Pfad, den es nicht gibt.
+    if not os.path.isdir(str(project_dir)):
+        return ""
+    teile = []
+    try:
+        import ema_db
+        conn = ema_db.oeffne()
+        teile.append(ema_db.referenz_tabelle(
+            conn, os.path.basename(str(project_dir).rstrip("/"))))
+        conn.close()
+    except Exception:                                    # noqa: BLE001
+        pass
+    try:
+        import ema_recherche
+        teile.append(ema_recherche.quellen_markdown(project_dir))
+    except Exception:                                    # noqa: BLE001
+        pass
+    return "\n\n".join(t for t in teile if t)
+
+
 def _single_md_tables(ctx: dict) -> str:
     """Comprehensive, deterministic parameter+result table for the single-project
     report. ALL numeric values of the report live here (the prose stays qualitative
@@ -1329,6 +1368,7 @@ def insert_tables(md: str, table_map: dict) -> str:
     md = _TAB_RE.sub(_repl, md)
 
     titles = {"herkunft": "Ergebniskennwerte und ihre Herkunft",
+              "quellen": "Herangezogene Fremdquellen",
               "parameter": "Parameter-Vergleich (Eingaben)",
               "kennwerte": "Ergebnis-Kennwerte",
               "einfluss":  "Einfluss der Parameteränderungen"}

@@ -120,6 +120,34 @@ gerechnete Zahl ersetzen und gehört in einen Bericht nur **mit Quellenangabe**.
 eine Behauptung aus dem Netz übernimmt, sagt dazu, dass sie von dort stammt — dieselbe
 Regel wie bei „diese Zahl ist analytisch, nicht gerechnet".
 
+**Was wesentlich ist, unter dem Projekt ablegen** — dann steht es später im Bericht:
+
+```bash
+python3 cae_cli.py recherche merke --projekt last \
+  --adresse https://… \
+  --notiz "wofuer herangezogen" \
+  --bild https://…/abbildung.png \
+  --wert "stegbreite_mm=1.8 mm :: Typische Stegbreiten liegen bei IPM-Rotoren zwischen 1,5 und 2,0 mm."
+python3 cae_cli.py recherche quellen --projekt last
+```
+
+Das legt Text und Bilder unter `<projekt>/recherche/` ab und schreibt die genannten
+Werte in die Datenbank — **in die Tabelle `referenzwerte`, nicht zu den gerechneten
+Kennwerten.** Ein recherchierter Wert kann richtig sein, ist aber nicht nachgerechnet;
+`db vergleich` und die Kennwerttabelle finden ihn deshalb nicht.
+
+Zwei Pflichten, sonst wird abgewiesen:
+
+* **`--wert` braucht die Belegstelle** nach `::`. Eine Zahl ohne Zitat ist von einer
+  erfundenen nicht zu unterscheiden.
+* **Zahlen niemals selbst aus dem Fließtext klauben.** Nur übernehmen, was man
+  wörtlich zitieren kann. Ein Regelausdruck über Fließtext verwechselt früher oder
+  später eine Seitenzahl mit einer Stegbreite, und es fällt niemandem auf, weil das
+  Ergebnis plausibel aussieht.
+
+Heruntergeladene **Abbildungen bleiben fremdes Werk** — die Quelladresse wird
+mitgespeichert und im Bericht genannt; die Rechtelage vor einer Weitergabe klären.
+
 ## Ergebnisse lesen — die wichtigste Regel
 
 `results.json` ist mehrere MB groß und enthält eingebettete PNGs. **Nie ohne

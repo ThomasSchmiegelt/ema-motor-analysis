@@ -499,7 +499,72 @@ def cmd_recherche(args) -> int:
             print(R.als_text(d, "hole"))
         return EXIT_OK
 
+    if args.was == "merke":
+        adresse = args.adresse or (args.frage[0] if args.frage else None)
+        if not args.projekt or not adresse:
+            return _die("'recherche merke' braucht --projekt und --adresse.", EXIT_USAGE)
+        pfad = _projekt_pfad(args.projekt)
+        if not pfad:
+            return _die(f"Projekt nicht gefunden: {args.projekt}", EXIT_USAGE)
+        werte = []
+        for w in (args.wert or []):
+            # Form:  groesse=wert einheit :: Zitat
+            try:
+                kopf, zitat = w.split("::", 1)
+                links, rechts = kopf.split("=", 1)
+                stueck = rechts.strip().split(None, 1)
+                werte.append({"groesse": links.strip(),
+                              "wert": float(stueck[0].replace(",", ".")),
+                              "einheit": stueck[1] if len(stueck) > 1 else "",
+                              "zitat": zitat.strip()})
+            except (ValueError, IndexError):
+                return _die(f"--wert falsch aufgebaut: {w!r}\n"
+                            "  Erwartet: \"groesse=ZAHL EINHEIT :: die Belegstelle\"",
+                            EXIT_USAGE)
+        try:
+            import ema_recherche as R
+            erg = R.speichere(pfad, adresse, notiz=args.notiz or "",
+                              bilder=args.bild or [], werte=werte)
+        except Exception as e:                              # noqa: BLE001
+            return _die(f"Ablegen fehlgeschlagen: {e}", EXIT_REMOTE)
+        if erg.get("fehler"):
+            return _die(f"{erg['fehler']} ({erg.get('adresse')})", EXIT_REMOTE)
+        emit(erg, args)
+        print(f"  abgelegt unter {erg['abgelegt']}")
+        print(f"  Bilder: {sum(1 for b in erg['bilder'] if b.get('datei'))} geladen, "
+              f"Werte: {erg['werte_uebernommen']} in die Datenbank")
+        for a in erg["werte_abgewiesen"]:
+            print(f"  ABGEWIESEN: {a}")
+        return EXIT_OK
+
+    if args.was == "quellen":
+        if not args.projekt:
+            return _die("'recherche quellen' braucht --projekt.", EXIT_USAGE)
+        pfad = _projekt_pfad(args.projekt)
+        if not pfad:
+            return _die(f"Projekt nicht gefunden: {args.projekt}", EXIT_USAGE)
+        import ema_recherche as R
+        q = R.quellen(pfad)
+        if not q:
+            return _die("Fuer dieses Projekt ist nichts abgelegt.", EXIT_REMOTE)
+        emit(q, args)
+        if not getattr(args, "json", False):
+            print(R.quellen_markdown(pfad))
+        return EXIT_OK
+
     return _die(f"unbekannt: {args.was}", EXIT_USAGE)
+
+
+def _projekt_pfad(kennung: str) -> str | None:
+    """Projekt-Id oder 'last' -> Pfad unter ~/cae_projekte."""
+    wurzel = os.path.expanduser("~/cae_projekte")
+    if kennung == "last":
+        kand = sorted(d for d in os.listdir(wurzel)
+                      if not d.startswith("_")
+                      and os.path.isfile(os.path.join(wurzel, d, "meta.json")))
+        return os.path.join(wurzel, kand[-1]) if kand else None
+    p = os.path.join(wurzel, kennung)
+    return p if os.path.isdir(p) else None
 
 
 def cmd_db(args) -> int:
@@ -969,11 +1034,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("recherche",
                        help="Internetrecherche: Websuche und Seitenabruf (fuer die Agenten)")
-    s.add_argument("was", choices=["suche", "hole"])
+    s.add_argument("was", choices=["suche", "hole", "merke", "quellen"])
     s.add_argument("frage", nargs="*", help="Suchbegriffe bzw. die Adresse")
     s.add_argument("--treffer", type=int, default=5, help="Zahl der Suchtreffer (max 10)")
     s.add_argument("--zeichen", type=int, default=6000,
                    help="Hoechstlaenge des geholten Textes")
+    s.add_argument("--projekt", help="Projekt-Id oder 'last' (fuer merke/quellen)")
+    s.add_argument("--adresse", help="die abzulegende Seite (fuer merke)")
+    s.add_argument("--notiz", help="wofuer die Quelle herangezogen wurde")
+    s.add_argument("--bild", action="append", metavar="ADRESSE",
+                   help="Bildadresse zum Mitladen, mehrfach angebbar")
+    s.add_argument("--wert", action="append", metavar="G=ZAHL EINHEIT :: ZITAT",
+                   help="entnommener Referenzwert MIT Belegstelle, mehrfach angebbar")
     _add_globals(s)
     s.set_defaults(fn=cmd_recherche)
 

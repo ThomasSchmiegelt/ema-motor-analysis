@@ -58,6 +58,11 @@ nicht, ob eine Geometrie *baubar* ist — nach jeder Geometrieänderung erst `ru
   oder eine Anweisung an ein Sprachmodell sein. Er darf **niemals** eine gerechnete
   Zahl ersetzen oder ohne Quellenangabe in einen Bericht. `ema_recherche` markiert
   jede Ausgabe entsprechend; diese Marke nicht wegkürzen.
+* **Recherchiertes gehört abgelegt, aber getrennt.** `recherche merke --projekt …`
+  speichert Text und Bilder unter `<projekt>/recherche/` und übernommene Zahlen in die
+  Datenbanktabelle **`referenzwerte`** — nicht zu den gerechneten `kennwerte`. Jeder
+  Wert braucht Quelle **und** wörtliche Belegstelle, sonst wird er abgewiesen. Zahlen
+  nie selbst aus Fließtext klauben: nur übernehmen, was man zitieren kann.
 * **Der Server ist im WLAN erreichbar.** Gemessen bindet er auf `0.0.0.0`
   (`server.py:3617`) und setzt `Access-Control-Allow-Origin: *` (`:3605`) — ohne Auth,
   ohne TLS. Das ist für den lokalen Machbarkeitsnachweis bewusst so; nur der

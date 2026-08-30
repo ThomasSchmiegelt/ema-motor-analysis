@@ -108,3 +108,172 @@ def als_text(daten, art: str) -> str:
             f"Titel : {daten['titel']}\n"
             + (f"Datum : {daten['datum']}\n" if daten["datum"] else "")
             + "\n" + daten["text"] + kuerz)
+
+
+# ── Unter dem Projekt ablegen ─────────────────────────────────────────────────
+
+import re as _re
+import urllib.parse as _up
+import urllib.request as _ur
+
+# Bildabruf: bewusst eng. Nur was der Agent AUSDRUECKLICH nennt, nur diese Formate,
+# und ein Deckel — ein Recherchelauf soll kein Bilderarchiv anlegen.
+BILD_ENDUNGEN = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg")
+BILD_MAX_BYTE = 4 * 1024 * 1024
+BILD_MAX_ZAHL = 6
+KOPF = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) cae-orchestrator/recherche"}
+
+
+def _ordner(projekt_pfad: str) -> str:
+    d = os.path.join(projekt_pfad, "recherche")
+    os.makedirs(os.path.join(d, "bilder"), exist_ok=True)
+    return d
+
+
+def bilder_im_text(html_oder_url: str, basis: str = "") -> list:
+    """Bildadressen aus einer HTML-Seite sammeln (nur zum Vorschlagen, lädt nichts)."""
+    treffer = []
+    for m in _re.finditer(r'<img[^>]+src=["\']([^"\']+)["\']', html_oder_url, _re.I):
+        u = _up.urljoin(basis, m.group(1))
+        if u.lower().split("?")[0].endswith(BILD_ENDUNGEN):
+            treffer.append(u)
+    # Reihenfolge erhalten, Doppelte raus
+    gesehen, aus = set(), []
+    for u in treffer:
+        if u not in gesehen:
+            gesehen.add(u); aus.append(u)
+    return aus[:20]
+
+
+def hole_bild(adresse: str, ziel_ordner: str) -> dict:
+    """Ein Bild herunterladen. Gibt ``{datei, adresse, bytes}`` oder ``{fehler}``.
+
+    Urheberrecht: heruntergeladene Bilder bleiben fremdes Werk. Sie liegen hier zur
+    eigenen Anschauung; wer sie in einen Bericht nimmt, der weitergegeben wird, muss
+    die Rechtelage selbst klaeren. Die Quelladresse wird darum immer mitgespeichert.
+    """
+    try:
+        req = _ur.Request(adresse, headers=KOPF)
+        with _ur.urlopen(req, timeout=25) as r:
+            roh = r.read(BILD_MAX_BYTE + 1)
+    except Exception as e:                                   # noqa: BLE001
+        return {"adresse": adresse, "fehler": f"{type(e).__name__}: {e}"}
+    if len(roh) > BILD_MAX_BYTE:
+        return {"adresse": adresse, "fehler": f"groesser als {BILD_MAX_BYTE//1024//1024} MB"}
+    name = os.path.basename(_up.urlparse(adresse).path) or "bild"
+    name = _re.sub(r"[^A-Za-z0-9._-]", "_", name)[:80]
+    if not name.lower().endswith(BILD_ENDUNGEN):
+        name += ".png"
+    ziel = os.path.join(ziel_ordner, name)
+    n = 1
+    while os.path.exists(ziel):
+        stamm, endung = os.path.splitext(name)
+        ziel = os.path.join(ziel_ordner, f"{stamm}_{n}{endung}"); n += 1
+    with open(ziel, "wb") as f:
+        f.write(roh)
+    return {"datei": ziel, "adresse": adresse, "bytes": len(roh)}
+
+
+def speichere(projekt_pfad: str, adresse: str, notiz: str = "",
+              auszug: str = "", bilder: list | None = None,
+              werte: list | None = None) -> dict:
+    """Eine Quelle unter dem Projekt ablegen — Text, Bilder, und die genannten Werte.
+
+    ``werte`` ist eine Liste ``[{groesse, wert, einheit, zitat}]``. Sie wandert
+    **zusaetzlich** in die Rechnungsdatenbank, aber in die Tabelle ``referenzwerte``
+    und nicht zu den gerechneten Kennwerten (siehe ``ema_db``).
+
+    **Zahlen werden NICHT automatisch aus dem Text gefischt.** Wer einen Wert
+    uebernimmt, nennt ihn und die Textstelle, aus der er stammt. Ein Regelausdruck,
+    der Zahlen aus Fliesstext klaubt, verwechselt frueher oder spaeter eine
+    Seitenzahl mit einer Stegbreite — und niemand merkt es, weil das Ergebnis
+    plausibel aussieht.
+    """
+    if not os.path.isdir(projekt_pfad):
+        raise FileNotFoundError(f"Projekt nicht gefunden: {projekt_pfad}")
+    d = _ordner(projekt_pfad)
+    seite = hole(adresse) if not auszug else {"adresse": adresse, "titel": "",
+                                              "datum": "", "text": auszug,
+                                              "zeichen": len(auszug), "gekuerzt": False}
+    if seite.get("fehler"):
+        return seite
+
+    geladen = []
+    for u in (bilder or [])[:BILD_MAX_ZAHL]:
+        geladen.append(hole_bild(u, os.path.join(d, "bilder")))
+
+    satz = {"zeit": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "adresse": adresse, "titel": seite.get("titel", ""),
+            "datum": seite.get("datum", ""), "notiz": notiz,
+            "auszug": (seite.get("text") or "")[:MAX_ZEICHEN],
+            "zeichen_gesamt": seite.get("zeichen", 0),
+            "bilder": geladen, "werte": werte or []}
+    with open(os.path.join(d, "quellen.jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps(satz, ensure_ascii=False) + "\n")
+
+    # Werte in die Datenbank — in referenzwerte, NICHT zu den gerechneten Kennwerten.
+    uebernommen, abgewiesen = 0, []
+    if werte:
+        try:
+            import ema_db
+            conn = ema_db.oeffne()
+            pid = os.path.basename(projekt_pfad.rstrip("/"))
+            for w in werte:
+                try:
+                    ema_db.referenz_hinzufuegen(
+                        conn, w["groesse"], w.get("wert"), w.get("einheit", ""),
+                        w.get("zitat", ""), adresse, seite.get("titel", ""),
+                        projekt_id=pid, notiz=notiz)
+                    uebernommen += 1
+                except (ema_db.OhneQuelle, KeyError) as e:
+                    abgewiesen.append(f"{w.get('groesse', '?')}: {e}")
+            conn.close()
+        except Exception as e:                               # noqa: BLE001
+            abgewiesen.append(f"Datenbank: {e}")
+
+    _notiere("speichere", adresse, f"{len(geladen)} Bilder, {uebernommen} Werte")
+    return {"abgelegt": os.path.join(d, "quellen.jsonl"),
+            "titel": satz["titel"], "bilder": geladen,
+            "werte_uebernommen": uebernommen, "werte_abgewiesen": abgewiesen}
+
+
+def quellen(projekt_pfad: str) -> list:
+    """Die unter einem Projekt abgelegten Quellen."""
+    f = os.path.join(projekt_pfad, "recherche", "quellen.jsonl")
+    if not os.path.isfile(f):
+        return []
+    aus = []
+    with open(f, encoding="utf-8") as fh:
+        for z in fh:
+            z = z.strip()
+            if z:
+                try:
+                    aus.append(json.loads(z))
+                except ValueError:
+                    pass
+    return aus
+
+
+def quellen_markdown(projekt_pfad: str) -> str:
+    """Der Quellenabschnitt fuer den Bericht — mit Bildern und Herkunftsvermerk."""
+    q = quellen(projekt_pfad)
+    if not q:
+        return ""
+    z = ["### Herangezogene Fremdquellen", "",
+         "Die folgenden Veroeffentlichungen wurden zur Einordnung herangezogen. Sie "
+         "sind **nicht Teil der Rechnung** und wurden nicht nachgerechnet.", ""]
+    for i, s in enumerate(q, 1):
+        z.append(f"{i}. **{s['titel'] or s['adresse']}** — {s['adresse']}"
+                 + (f" (Stand {s['datum']})" if s.get("datum") else ""))
+        if s.get("notiz"):
+            z.append(f"   * Wofuer herangezogen: {s['notiz']}")
+        for w in s.get("werte", []):
+            z.append(f"   * Entnommen: {w.get('groesse')} = {w.get('wert')} "
+                     f"{w.get('einheit', '')} — „{(w.get('zitat') or '')[:160]}“")
+        for b in s.get("bilder", []):
+            if b.get("datei"):
+                z.append(f"\n![Abbildung aus {s['titel'] or s['adresse']}]"
+                         f"({b['datei']})\n")
+                z.append(f"   *Quelle der Abbildung: {b['adresse']} — fremdes Werk, "
+                         f"Rechtelage vor einer Weitergabe klaeren.*")
+    return "\n".join(z) + "\n"
