@@ -2404,6 +2404,7 @@
       <label style="font-size:.79rem;color:#aaa;display:block;margin-bottom:3px">Zyklus</label>
       <select id="sel_cycle">
         <option value="wltp3" selected>WLTP Class 3b (approximiert)</option>
+        <option value="stadtland">🏘 Stadt/Land (Alltagsprofil, 12 % Stillstand)</option>
         <option value="vollast">🏎 Autobahn-Vollgas 220 km/h</option>
         <option value="anhaenger">⛰ Anhänger-Alpenpass (~8–10 % Steigung)</option>
         <option value="both">🔀 Alle drei Zyklen (WLTP + Autobahn + Anhänger)</option>
@@ -10774,7 +10775,12 @@ function escHtml(s) {
     }
     if (shape === "u") {
       const w = Math.min(G.magWidth, _maxMagnetWidth(rPos, dH, hA, Rrot, eb));
-      const barR = Math.max(rPos - magH - BRIDGE, Rbore + magH/2 + 1.0);
+      // Der Steg wird zwischen TASCHEN gemessen, nicht zwischen Magnetkoerpern:
+      // jede Tasche ist rundum einen Klebespalt groesser und der Armfuss traegt eine
+      // runde Endkappe. Mit nur BRIDGE blieben 1,75 mm gegen 2,00 mm Mindestdicke.
+      // Spiegel zu ema_topology._build_u -- beide zusammen aendern.
+      const gapU = Math.max(0.05, Math.min(0.3, G.magGapMm != null ? G.magGapMm : 0.1));
+      const barR = Math.max(rPos - magH - 2*gapU - BRIDGE*1.15, Rbore + magH/2 + 1.0);
       let barLen = tang > 0 ? tang : 2*dH;
       barLen = Math.min(barLen, 2*(dH + w*Math.sin(hA)*0.5));
       return [ leg({offset:+dH, tilt:+hA, length:w, magSign:+1}),
@@ -10842,8 +10848,13 @@ function escHtml(s) {
       return out;
     }
     if (shape === "spoke") {
-      const rStart = Rshaft + 1.0;
-      const length = Math.max(Rrot - Rshaft - 2*BRIDGE, 5.0);
+      // Die Tasche endet nicht am Magneten: an beiden Enden sitzt eine Kappe vom
+      // Radius magThick/2 + Spalt. Mit Rshaft + 1.0 schnitt sie ab 1,8 mm Dicke in
+      // die Bohrung. Spiegel zu ema_topology._build_spoke.
+      const gapS = Math.max(0.05, Math.min(0.3, G.magGapMm != null ? G.magGapMm : 0.1));
+      const saumS = BRIDGE + magH/2 + gapS;
+      const rStart = Rshaft + saumS;
+      const length = Math.max(Rrot - saumS - rStart, 5.0);
       return [leg({rPos:rStart, tilt:0, length:length, magMode:"tangential", magSign:+1})];
     }
     // bar / fallback: single tangential flat magnet

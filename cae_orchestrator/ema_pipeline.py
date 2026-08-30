@@ -1853,7 +1853,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
     rpm_thermal = float(data.get("rpm_thermal",   rpm_to))     # design point for steady-state
 
     # Drive-cycle inputs (optional)
-    cycle_kind   = str(data.get("cycle",          "wltp3"))    # "wltp3" | "csv" | "off"
+    cycle_kind   = str(data.get("cycle",          "wltp3"))    # "wltp3" | "stadtland" | "vollast" | "anhaenger" | "csv" | "off"
     cycle_csv    = data.get("cycle_csv",          "")
     vehicle_in   = data.get("vehicle",            {}) or {}
 
@@ -2569,6 +2569,9 @@ def run_pipeline(data: dict, state: dict, frames: list,
                     veh_primary = vehicle
                 elif cycle_kind == "vollast":
                     cyc_primary = ema_drivecycle.fullload_cycle()
+                    veh_primary = vehicle
+                elif cycle_kind == "stadtland":
+                    cyc_primary = ema_drivecycle.stadtland_cycle()
                     veh_primary = vehicle
                 elif cycle_kind == "anhaenger":
                     cyc_primary = ema_drivecycle.trailer_mountain_cycle(tr_grade)

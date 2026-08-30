@@ -180,9 +180,18 @@ def _build_u(geom: dict):
     half_ang = math.radians(float(geom["magAngle"]) / 2)
     mag_w = min(float(geom["magWidth"]),
                 _max_magnet_width(r_pos, d_half, half_ang, r_rot, BRIDGE_MM + mag_h / 2))
-    # Bottom bar one thickness + bridge BELOW the arm feet (r_pos) → radial gap,
-    # provably disjoint from the arms regardless of its tangential length.
-    bar_r = max(r_pos - mag_h - BRIDGE_MM, r_bore + mag_h / 2 + 1.0)
+    # Bottom bar BELOW the arm feet (r_pos) → radial gap, disjoint from the arms
+    # regardless of its tangential length.  The clearance has to be reserved between
+    # POCKETS, not between magnet bodies: each pocket is one CAD gap wider than its
+    # magnet on every side, and the arm foot carries a round end cap of the same
+    # radius.  Reserving only ``mag_h + BRIDGE_MM`` left a **1.75 mm** web against
+    # the 2.00 mm minimum of ``rotor_layout_check`` — measured, and independent of
+    # magThick, magAngle and magWidth, i.e. the U-cup never passed the layout gate
+    # at any parameter setting.  The 15 % on the bridge covers the difference
+    # between the cap-to-cap and the box-to-box measure (~0.05 mm).
+    gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
+    bar_r = max(r_pos - mag_h - 2 * gap - BRIDGE_MM * 1.15,
+                r_bore + mag_h / 2 + 1.0)
     tang = float(geom.get("magTangLen", 0))
     bar_len = tang if tang > 0 else 2 * d_half
     bar_len = min(bar_len, 2 * (d_half + mag_w * math.sin(half_ang) * 0.5))
@@ -342,8 +351,14 @@ def _build_spoke(geom: dict):
     r_rot = geom["rotorOD"] / 2
     r_shaft = geom["shaftD"] / 2
     mag_h = float(geom["magThick"])
-    r_start = r_shaft + 1.0
-    length = max(r_rot - r_shaft - 2 * BRIDGE_MM, 5.0)
+    # Die Tasche endet nicht am Magneten: sie traegt an beiden Enden eine runde
+    # Kappe vom Radius ``mag_h/2 + Spalt``.  Mit ``r_start = r_shaft + 1.0`` schnitt
+    # diese Kappe fuer jede Dicke ab 1,8 mm in die Wellenbohrung — bei den ueblichen
+    # 6 mm um 2,1 mm.  Der Saum reserviert Steg UND Kappe an beiden Enden.
+    gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
+    saum = BRIDGE_MM + mag_h / 2 + gap
+    r_start = r_shaft + saum
+    length = max(r_rot - saum - r_start, 5.0)
     legs = [Leg(r_start, 0.0, 0.0, length, mag_h, "tangential", +1)]
     meta = MotorTopoMeta("spoke", TOPOLOGY_LABELS["spoke"], n_legs_per_pole=1,
                          flux_focusing=True, eta_hint=1.0, salient_xi_hint=1.6)

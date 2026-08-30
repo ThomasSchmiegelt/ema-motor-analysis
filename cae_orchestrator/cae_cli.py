@@ -842,6 +842,66 @@ def cmd_rotor_check(args) -> int:
     return 1
 
 
+def cmd_screen(args) -> int:
+    """Konfigurationen grob durchspielen, bevor eine teuer gerechnet wird.
+
+    Das loest ein Verhalten, das der Vorauswahl im Weg stand: mit ``--from-project last``
+    beginnt jede Rechnung beim letzten Stand und aendert daran einzelne Werte. Polzahl,
+    Nutzahl und Magnetanordnung des ERSTEN Entwurfs bleiben so stehen, obwohl gerade sie
+    den Entwurf praegen. ``screen`` sieht sie sich zuerst an -- analytisch, in Sekunden.
+
+    Exit: 0 = mindestens eine brauchbare Konfiguration, 1 = keine.
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    for a in applied:
+        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    if not payload.get("geom"):
+        return _die("Keine Geometrie im Payload — screen braucht geom.", EXIT_USAGE)
+
+    import ema_screen as SC
+
+    ziel = args.ziel
+    if ziel == "auto":
+        quelle = args.auftrag or (payload.get("design_brief") or "")
+        erkannt = SC.ziel_aus_text(quelle)
+        ziel = erkannt["ziel"]
+        belege = erkannt["belege_guenstig"] + erkannt["belege_leistung"]
+        if erkannt["sicher"]:
+            print(f"Ziel aus dem Auftrag erkannt: {ziel} (Belegwoerter: {', '.join(belege)})")
+        else:
+            # Ohne Belege ist "ausgewogen" eine ANNAHME, keine Erkennung. Das muss
+            # dastehen -- sonst sieht eine Rangliste nach einer Absicht aus, die
+            # niemand geaeussert hat.
+            print(f"Kein Zielwort im Auftrag gefunden — angenommen: {ziel}. "
+                  f"Mit --ziel guenstig|leistung festlegen.")
+
+    achsen = dict(SC.ACHSEN_VORGABE)
+    for name, roh in (("p", args.pole), ("slots", args.nuten),
+                      ("magShape", args.formen), ("conductorsPerSlot", args.leiter)):
+        if roh:
+            werte = [w.strip() for w in roh.split(",") if w.strip()]
+            achsen[name] = werte if name == "magShape" else [int(w) for w in werte]
+
+    erg = SC.screene(payload, ziel, achsen=achsen, n_max=args.n_max, grenze=args.grenze)
+    if args.json:
+        # Die Verworfenen sind der laengste Teil und im JSON-Modus selten das Ziel;
+        # ohne --alle wuerde eine Agentenantwort daran ihren Kontext verlieren.
+        schlank = dict(erg)
+        if not args.alle:
+            schlank["verworfen"] = erg["verworfen"][:20]
+            schlank["rangliste"] = erg["rangliste"][:args.zeige]
+        emit(schlank, args)
+    else:
+        print(SC.bestenliste_text(erg, args.zeige))
+    return 0 if erg["brauchbar"] else 1
+
+
 # ``idle`` ist zweideutig: es heisst "nichts laeuft" — und das ist unmittelbar nach dem
 # Start genauso wahr wie lange nach dem Ende. Wer es sofort als Abschluss liest, meldet
 # einen vierstuendigen Lauf nach 0 s als fertig. Deshalb gilt idle erst als Abschluss,
@@ -1022,6 +1082,36 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Mindeststege in mm (Vorgabe: ema_topology.BRIDGE_MM = 2.0)")
     _add_globals(s)
     s.set_defaults(fn=cmd_rotor_check)
+
+    s = sub.add_parser("screen",
+                       help="viele Konfigurationen (Pole/Nuten/Magnetform/Leiter) grob durchspielen und rangieren")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    s.add_argument("--ziel", choices=["auto", "guenstig", "leistung", "ausgewogen"],
+                   default="auto",
+                   help="Auslegungsziel; auto liest es aus --auftrag bzw. dem design_brief")
+    s.add_argument("--auftrag", default="",
+                   help="Auslegungsauftrag im Klartext (Quelle fuer --ziel auto)")
+    s.add_argument("--pole", help="Polpaarzahlen, z.B. 2,3,4,5")
+    s.add_argument("--nuten", help="Nutzahlen, z.B. 24,36,48,60")
+    s.add_argument("--formen", help="Magnetanordnungen, z.B. v,vasym,spoke")
+    s.add_argument("--leiter", help="Leiter je Nut, z.B. 4,6,8")
+    s.add_argument("--n_max", type=float, default=None,
+                   help="Hoechstdrehzahl fuer das Fliehkrafttor (Vorgabe: aus dem Payload)")
+    s.add_argument("--zeige", type=int, default=12, help="Laenge der Bestenliste")
+    s.add_argument("--alle", action="store_true",
+                   help="im JSON-Modus auch alle Verworfenen ausgeben")
+    s.add_argument("--grenze", type=int, default=400,
+                   help="Obergrenze der Kombinationen (Schutz vor versehentlichen Riesenlaeufen)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter der Basis aendern, mehrfach angebbar")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_screen)
 
     s = sub.add_parser("lernen",
                        help="was die Toolchain aus ihren eigenen Laeufen weiss (gemessen + belegte Erfahrungen)")

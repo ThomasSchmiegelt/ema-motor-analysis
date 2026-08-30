@@ -220,6 +220,102 @@ def fullload_cycle() -> dict:
     return _VOLLAST_CACHE["data"]
 
 
+# ── Stadt/Land-Zyklus ─────────────────────────────────────────────────────────
+#
+# Warum eigener Zyklus: WLTP-3b endet mit einer Hochgeschwindigkeitsphase bis
+# 131 km/h, der Vollast-Zyklus faehrt Autobahn. Zwischen beiden fehlte genau das,
+# was ein Fahrzeug im Alltag ueberwiegend tut — Stadtverkehr mit vielen Halten und
+# Landstrasse mit maessigem Tempo. Fuer die E-Maschine ist das ein ANDERER
+# Belastungsfall: viele Anfahrvorgaenge bei hohem Moment und niedriger Drehzahl
+# (Kupferverluste, Wicklungstemperatur) statt Dauerlauf im Feldschwaechbereich
+# (Eisenverluste, Magnettemperatur). Eine Auslegung, die im WLTP gut aussieht,
+# kann hier an der Wicklung scheitern.
+
+STADTLAND_PHASES = [
+    {"name": "Stadt kalt",     "t_end": 300,  "v_max":  50.0, "v_avg": 19.0},
+    {"name": "Stadt dicht",    "t_end": 620,  "v_max":  50.0, "v_avg": 16.0},
+    {"name": "Ortsausgang",    "t_end": 700,  "v_max":  70.0, "v_avg": 48.0},
+    {"name": "Landstrasse",    "t_end": 1100, "v_max": 100.0, "v_avg": 78.0},
+    {"name": "Ortsdurchfahrt", "t_end": 1300, "v_max":  50.0, "v_avg": 32.0},
+]
+STADTLAND_TOTAL_T = 1300
+
+
+def _build_stadtland() -> np.ndarray:
+    """1300 s Stadt- und Landstrassenprofil mit echten Stillstaenden.
+
+    Die Stadtphasen enthalten HALTE (v = 0 ueber mehrere Sekunden) — Ampeln und
+    Vorfahrt. Das ist der Punkt: ein Anfahrvorgang aus dem Stand verlangt das
+    Losbrechmoment bei Drehzahl null, wo die Maschine keinerlei Eigenkuehlung durch
+    Drehzahl hat. Ein Zyklus ohne Halte wuerde diesen Fall nie erzeugen.
+    """
+    rng = np.random.default_rng(20260830)
+    v = np.zeros(STADTLAND_TOTAL_T + 1, dtype=float)
+    t_prev = 0
+
+    for phase in STADTLAND_PHASES:
+        t_start, t_end = t_prev, phase["t_end"]
+        v_peak, v_avg  = phase["v_max"], phase["v_avg"]
+        stadt = v_peak <= 70.0
+
+        i = t_start
+        while i < t_end:
+            seg_dur = int(rng.integers(25, 70) if stadt else rng.integers(60, 140))
+            seg_end = min(i + seg_dur, t_end)
+            seg_len = seg_end - i
+            v_now   = v[i - 1] if i > 0 else 0.0
+
+            if stadt:
+                mode = rng.choice(["halt", "anfahren", "rollen"], p=[0.28, 0.42, 0.30])
+            else:
+                mode = rng.choice(["halt", "anfahren", "rollen"], p=[0.04, 0.26, 0.70])
+
+            if mode == "halt":
+                # Bremsen bis Stillstand, dann stehen. Rekuperation faellt beim
+                # Verzoegern an, das Losbrechmoment beim naechsten Segment.
+                t_br = max(3, int(seg_len * 0.35))
+                t_st = max(2, seg_len - t_br)
+                seg = np.concatenate([np.linspace(v_now, 0.0, t_br),
+                                      np.zeros(t_st)])
+            elif mode == "anfahren":
+                v_ziel = float(rng.uniform(0.75, 1.0) * v_peak)
+                t_acc  = max(6, int(seg_len * (0.55 if stadt else 0.35)))
+                t_cru  = max(1, seg_len - t_acc)
+                seg = np.concatenate([np.linspace(v_now, v_ziel, t_acc),
+                                      np.full(t_cru, v_ziel)])
+            else:  # rollen mit leichten Schwankungen
+                v_ziel = float(rng.uniform(0.70, 0.95) * v_peak)
+                t_an   = max(4, int(seg_len * 0.25))
+                seg = np.concatenate([
+                    np.linspace(v_now, v_ziel, t_an),
+                    v_ziel + rng.normal(0.0, v_ziel * 0.04, max(1, seg_len - t_an))])
+
+            v[i:seg_end] = np.clip(seg[:seg_len], 0.0, v_peak)
+            i = seg_end
+        t_prev = t_end
+
+    v = np.clip(v, 0.0, None)
+    v[-1] = 0.0                       # der Zyklus endet im Stand
+    return v
+
+
+_STADTLAND_CACHE: dict = {}
+
+
+def stadtland_cycle() -> dict:
+    """Stadt/Land-Zyklus als t[s], v[km/h] samt Phaseninfo."""
+    if "data" not in _STADTLAND_CACHE:
+        v_kmh = _build_stadtland()
+        _STADTLAND_CACHE["data"] = {
+            "t":        np.arange(len(v_kmh)).astype(float),
+            "v_kmh":    v_kmh,
+            "name":     "Stadt/Land (Alltagsprofil)",
+            "phases":   STADTLAND_PHASES,
+            "duration": STADTLAND_TOTAL_T,
+        }
+    return _STADTLAND_CACHE["data"]
+
+
 # ── Anhänger-Alpenpass-Zyklus ─────────────────────────────────────────────────
 
 # Speed limit for trailer operation (German Tempo-100-Zulassung).

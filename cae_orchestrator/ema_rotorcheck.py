@@ -79,7 +79,15 @@ def _obb_rect_distance(A, B):
         b0, b1 = _proj(PB, ax)
         ovs.append(min(a1, b1) - max(a0, b0))   # >0 overlap, <0 separation
     if any(o < 0 for o in ovs):
-        return min(-o for o in ovs if o < 0)
+        # Separated: every separating axis yields a LOWER bound on the true
+        # distance, so take the TIGHTEST one.  This used to be ``min(...)``, the
+        # loosest bound -- for two long, thin pockets crossed at a steep angle it
+        # reported **0.51 mm** where the real clearance is **17.11 mm** (measured,
+        # 33x too small).  The gate then killed layouts that were never tight, which
+        # is why several rotor topologies could not be built at any parameter
+        # setting.  ``max`` is still a lower bound (it never over-reports a web), so
+        # the gate stays on the safe side -- it just stops rejecting sound designs.
+        return max(-o for o in ovs if o < 0)
     return -min(ovs)                            # penetration (negative)
 
 

@@ -77,3 +77,4 @@ pikogk/logs/
 # ueber 100 MB ab, und ein Commit davor haette die Historie dauerhaft aufgeblaeht.
 *_sicherung_*.zip
 *.backup.zip
+server.out
