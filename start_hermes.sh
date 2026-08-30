@@ -8,6 +8,11 @@
 #   ./start_hermes.sh --nur-pruefen       nur der Nachweis, dass nichts nach draussen geht
 #   ./start_hermes.sh --kein-browser      Server ohne Browserfenster starten
 #   ./start_hermes.sh --nur-server        nur den Orchestrator, kein Hermes
+#   ./start_hermes.sh --projekt <id>      an ein CAE-Projekt binden ('letztes' = juengstes)
+#   ./start_hermes.sh --kein-projekt      ohne Projektbindung (gemeinsamer Speicher)
+#   ./start_hermes.sh --neu               ohne Rueckfrage eine neue Sitzung
+#   ./start_hermes.sh --weiter            ohne Rueckfrage die letzte Sitzung fortsetzen
+#   ./start_hermes.sh --nur-vorbereiten   Projektbindung + Kontext erzeugen, dann Ende
 #
 # Alles Weitere wird unveraendert an `hermes` durchgereicht.
 #
@@ -34,15 +39,26 @@ LOG="${TMPDIR:-/tmp}/cae_server_$USER.log"
 
 export PATH="$HOME/.local/bin:$PATH"   # hermes liegt hier (Installation ohne sudo)
 
-BROWSER=1; NUR_SERVER=0; NUR_PRUEFEN=0; ARGS=()
+BROWSER=1; NUR_SERVER=0; NUR_PRUEFEN=0; NUR_VORB=0; PROJEKT=""; OHNE_PROJEKT=0
+SITZUNGSWAHL=""; ARGS=(); erwarte_projekt=""
 for a in "$@"; do
+    if [ -n "$erwarte_projekt" ]; then PROJEKT="$a"; erwarte_projekt=""; continue; fi
     case "$a" in
         --kein-browser) BROWSER=0 ;;
         --nur-server)   NUR_SERVER=1 ;;
         --nur-pruefen)  NUR_PRUEFEN=1 ;;
+        --nur-vorbereiten) NUR_VORB=1 ;;
+        --kein-projekt) OHNE_PROJEKT=1 ;;
+        --projekt)      erwarte_projekt=1 ;;
+        --projekt=*)    PROJEKT="${a#--projekt=}" ;;
+        --neu)          SITZUNGSWAHL="neu" ;;
+        --weiter)       SITZUNGSWAHL="weiter" ;;
         *)              ARGS+=("$a") ;;
     esac
 done
+[ -n "$erwarte_projekt" ] && { echo "FEHLER: --projekt braucht eine Kennung" >&2; exit 1; }
+
+PROJEKTE="$HOME/cae_projekte"
 
 ok()   { echo "[OK] $*"; }
 warn() { echo "[--] $*"; }
@@ -136,7 +152,9 @@ fi
 # ── 4. Orchestrator ─────────────────────────────────────────────────────────
 health() { curl -sf --max-time 3 "http://localhost:$PORT/status" >/dev/null; }
 
-if health; then
+if [ "$NUR_VORB" -eq 1 ]; then
+    warn "Nur-Vorbereiten: der Orchestrator wird nicht gestartet."
+elif health; then
     ok "Orchestrator laeuft bereits auf :$PORT"
 else
     if fuser -s "$PORT/tcp" 2>/dev/null; then
@@ -170,6 +188,164 @@ fi
 # kopiert oder verlinkt: PI und Hermes lesen dieselbe Datei.
 cd "$ROOT"
 
+# ── 5a. Projektbindung ──────────────────────────────────────────────────────
+# Hermes' eingebauter Speicher ist EINE Datei fuer die ganze Maschine
+# (~/.hermes/memories/MEMORY.md, gedeckelt auf 2200 Zeichen) — es gibt in der
+# Konfiguration keinen Weg, ihn je Projekt zu fuehren. Ohne Gegenmassnahme
+# vermischen sich damit die Erinnerungen aus verschiedenen Auslegungen: was der
+# Agent ueber den Alpenpass-Antrieb gelernt hat, liest er beim Stadtantrieb als
+# Tatsache wieder.
+#
+# Der Hebel ist HERMES_HOME. Es verschiebt die GANZE Hermes-Ablage — und das ist
+# zu viel: eine je Projekt kopierte config.yaml ist genau die Drift, die dieses
+# Repo beim Skill bewusst vermeidet (PI und Hermes lesen EINE Skill-Datei, keine
+# Kopie). Deshalb wird die Ablage aufgeteilt: das Geteilte wird VERLINKT
+# (config.yaml, .env, skills — eine Quelle, keine Kopie), projekteigen sind nur
+# memories/ und sessions/. Nachgemessen: die verlinkte Konfiguration wird
+# gelesen (model.default kommt als qwen-gross:latest zurueck), der Sitzungs-
+# speicher ist leer und damit projekteigen.
+# Das `|| true` ist nicht kosmetisch: findet `ls` nichts, gibt es 2 zurueck, die
+# Funktion reicht das durch, und unter `set -e` bricht schon die Zuweisung ab — die
+# eigene Fehlermeldung ("Kein Projekt zu ... gefunden") kaeme nie zum Vorschein.
+# Gemessen: Abbruch mit Code 2 und LEERER Ausgabe.
+projekt_pfad() {
+    local kennung="$1"
+    if [ "$kennung" = "letztes" ] || [ -z "$kennung" ]; then
+        ls -d "$PROJEKTE"/2* 2>/dev/null | sort | tail -1 || true
+    elif [ -d "$PROJEKTE/$kennung" ]; then
+        echo "$PROJEKTE/$kennung"
+    else
+        ls -d "$PROJEKTE"/*"$kennung"* 2>/dev/null | sort | tail -1 || true
+    fi
+}
+
+PROJ_DIR=""
+if [ "$OHNE_PROJEKT" -eq 0 ]; then
+    PROJ_DIR="$(projekt_pfad "${PROJEKT:-letztes}")"
+    if [ -z "$PROJ_DIR" ] || [ ! -d "$PROJ_DIR" ]; then
+        if [ -n "$PROJEKT" ]; then
+            die "Kein Projekt zu '$PROJEKT' in $PROJEKTE gefunden."
+        fi
+        warn "Noch kein Projekt in $PROJEKTE — Hermes laeuft mit gemeinsamem Speicher."
+    fi
+fi
+
+if [ -n "$PROJ_DIR" ] && [ -d "$PROJ_DIR" ]; then
+    HH="$PROJ_DIR/_agent/hermes"
+    mkdir -p "$HH/memories" "$HH/sessions"
+    # Geteiltes verlinken statt kopieren. -f, damit ein Wechsel der Quelle greift.
+    for geteilt in config.yaml .env skills; do
+        [ -e "$HOME/.hermes/$geteilt" ] || continue
+        ln -sfn "$HOME/.hermes/$geteilt" "$HH/$geteilt"
+    done
+    export HERMES_HOME="$HH"
+    ok "Projekt: $(basename "$PROJ_DIR")  (Erinnerungen + Sitzungen unter _agent/hermes/)"
+
+    # ── Projektkontext: ERZEUGT, nicht kopiert ──────────────────────────────
+    # Die Bitte war, eine Kopie der Master-AGENTS.md ins Projektverzeichnis zu
+    # legen und mit der zu arbeiten. Eine Kopie waere aber genau der Fehler, den
+    # dieses Repo beim Skill vermeidet: sie laeuft still auseinander, und dann
+    # arbeiten zwei Agenten nach zwei Regelwerken, die beide plausibel aussehen.
+    # Zweitens findet weder PI noch Hermes eine AGENTS.md im Projektordner — beide
+    # lesen sie im Arbeitsverzeichnis, und das MUSS die Repo-Wurzel bleiben (PI
+    # sortiert Sitzungen nach cwd).
+    # Also andersherum: die Master-AGENTS.md bleibt die eine, unveraenderte Quelle,
+    # und daneben entsteht bei JEDEM Start frisch eine Ergaenzung mit den Fakten
+    # DIESES Projekts. Weil sie jedes Mal neu geschrieben wird, kann sie nicht
+    # driften; sie ist nicht versioniert und nicht von Hand zu aendern.
+    kontext="$ROOT/AGENTS.projekt.md"
+    {
+        echo "# Aktuelles Projekt — ERZEUGT von start_hermes.sh, nicht von Hand aendern"
+        echo
+        echo "Diese Datei wird bei jedem Agentenstart neu geschrieben. Die Regeln stehen"
+        echo "in AGENTS.md; hier stehen nur die Fakten des Projekts, an dem gerade"
+        echo "gearbeitet wird."
+        echo
+        echo "- Kennung: \`$(basename "$PROJ_DIR")\`"
+        echo "- Verzeichnis: \`$PROJ_DIR\`"
+        echo "- Erinnerungen/Sitzungen dieses Projekts: \`$PROJ_DIR/_agent/hermes/\`"
+        echo "- Stand: $(date '+%d.%m.%Y %H:%M')"
+        echo
+        if [ -f "$PROJ_DIR/results.json" ]; then
+            echo "Bereits gerechnet (aus results.json):"
+            "$ROOT/.agents/projektstand.py" "$PROJ_DIR/results.json" \
+                2>/dev/null || echo "- (results.json nicht lesbar)"
+        else
+            echo "Noch nichts gerechnet — es gibt keine results.json."
+        fi
+    } > "$kontext"
+    ok "Projektkontext erzeugt: AGENTS.projekt.md"
+fi
+
+# ── 5b. Neue oder alte Sitzung? ─────────────────────────────────────────────
+# Hermes kann beides (`--continue`, `--resume <id>`), fragte aber nie danach — und
+# was nicht gefragt wird, wird nicht benutzt: eine neue Sitzung faengt bei null an,
+# obwohl nebenan eine mit dem ganzen Verlauf liegt. Gefragt wird NUR interaktiv und
+# nur, wenn nichts anderes vorgegeben ist; -z/--continue/--resume und ein fehlendes
+# Terminal muessen sich unveraendert verhalten, sonst blockiert ein Skriptaufruf.
+eigene_wahl=0
+for a in ${ARGS[@]+"${ARGS[@]}"}; do
+    case "$a" in
+        -z|--continue|--continue=*|--resume|--resume=*|-z*) eigene_wahl=1 ;;
+    esac
+done
+
+# `hermes sessions list` gibt nur eine Menschentabelle aus — kein JSON, keine Option
+# dafuer. Der Sitzungsspeicher ist eine SQLite-Datei, deren Schema hier aber nichts zu
+# suchen hat: daran gebunden bricht das Skript beim naechsten Hermes-Update still.
+# Also die Tabelle lesen, aber nur an dem, was sicher ist -- die Kennung steht als
+# letztes Feld und hat ein festes Muster (JJJJMMTT_HHMMSS_hex). Das `\r` muss weg:
+# ueber ein Pseudoterminal (etwa `script`) endet jede Zeile auf CR, und das ueberschreibt
+# beim Ausgeben den Zeilenanfang -- aus "E-Motor Konzept entwerfen" wurde "or Konzep".
+sitzungen_hermes() {           # $1 = Anzahl; je Zeile: id <TAB> Titel <TAB> Alter
+    hermes sessions list --limit "${1:-10}" 2>/dev/null | awk -v n="${1:-10}" '
+        { gsub(/\r/, "") }
+        $NF ~ /^[0-9]{8}_[0-9]{6}_[0-9a-f]+$/ {
+            id = $NF
+            alter = (NF >= 3) ? $(NF-2) " " $(NF-1) : ""
+            titel = ""
+            for (i = 1; i <= NF - 4; i++) titel = titel (i > 1 ? " " : "") $i
+            if (titel == "") titel = "(ohne Titel)"
+            print id "\t" titel "\t" alter
+            if (++c >= n) exit
+        }'
+}
+
+if [ "$eigene_wahl" -eq 0 ] && [ "$NUR_SERVER" -eq 0 ]; then
+    # Am Terminal wird gefragt, sonst nicht: ein Skript- oder Cron-Aufruf darf nicht
+    # auf eine Eingabe warten. -z ist oben schon als eigene Wahl erkannt.
+    [ -z "$SITZUNGSWAHL" ] && [ -t 0 ] && [ -t 1 ] && {
+        liste="$(sitzungen_hermes 5)"
+        if [ -n "$liste" ]; then
+            echo
+            echo "Sitzungen in diesem Projekt:"
+            i=0; ids=()
+            while IFS=$'\t' read -r id titel alter; do
+                i=$((i+1)); ids+=("$id")
+                # Zeichen zaehlen, nicht Bytes — sonst zerschneidet die Kuerzung
+                # Umlaute mitten im UTF-8-Zeichen. GNU `cut -c` taugt dafuer nicht.
+                t="${titel:-—}"
+                printf "  %d) %-34s  %s\n" "$i" "${t:0:34}" "$alter"
+            done <<< "$liste"
+            echo "  n) neue Sitzung"
+            read -r -p "Fortsetzen [1-$i] oder neu [n]? (Vorgabe: n) " wahl || wahl="n"
+            case "$wahl" in
+                ''|n|N|neu) SITZUNGSWAHL="neu" ;;
+                *) if [ "$wahl" -ge 1 ] 2>/dev/null && [ "$wahl" -le "$i" ]; then
+                       SITZUNGSWAHL="id:${ids[$((wahl-1))]}"
+                   else
+                       warn "'$wahl' ist keine der angebotenen Sitzungen — neue Sitzung."
+                       SITZUNGSWAHL="neu"
+                   fi ;;
+            esac
+        fi
+    }
+    case "$SITZUNGSWAHL" in
+        weiter)  ARGS=(--continue ${ARGS[@]+"${ARGS[@]}"}) ;;
+        id:*)    ARGS=(--resume "${SITZUNGSWAHL#id:}" ${ARGS[@]+"${ARGS[@]}"}) ;;
+    esac
+fi
+
 # NICHT `hermes skills list | grep -q`: grep -q schliesst die Leitung beim ersten
 # Treffer, hermes bekommt SIGPIPE, und mit `pipefail` gilt die ganze Pipeline als
 # gescheitert — die Warnung erschien dann, obwohl der Skill geladen war.
@@ -177,6 +353,12 @@ skill_liste="$(hermes skills list 2>/dev/null || true)"
 if ! grep -q 'cae-orchestrator' <<<"$skill_liste"; then
     warn "Der Skill cae-orchestrator ist nicht sichtbar — einmalig freigeben:"
     warn "    hermes skills trust $ROOT"
+fi
+
+if [ "$NUR_VORB" -eq 1 ]; then
+    echo
+    ok "Vorbereitet. Aufruf waere: hermes --model $MODEL ${ARGS[*]-}"
+    exit 0
 fi
 
 echo

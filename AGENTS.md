@@ -14,6 +14,28 @@ Monorepo einer CAE-Toolchain für E-Maschinen. Drei eigenständige Teilprojekte,
 
 Ollama läuft auf `:11434`.
 
+## Woran du gerade arbeitest
+
+Neben dieser Datei liegt **`AGENTS.projekt.md`**. Sie wird bei **jedem** Agentenstart
+neu geschrieben und traegt die Fakten des Projekts, an dem gerade gearbeitet wird —
+Kennung, Verzeichnis, welche Kennwerte schon da sind und **welche Stufen noch nicht
+gerechnet sind**. Lies sie zuerst.
+
+Diese Datei hier ist die eine, unveraenderte Regelquelle und wird **nicht** in
+Projektverzeichnisse kopiert. Eine Kopie liefe still auseinander, und dann arbeiteten
+zwei Agentenkoepfe nach zwei Regelwerken, die beide plausibel aussehen — derselbe
+Fehler, den dieses Repo beim Skill bewusst vermeidet (PI und Hermes lesen EINE
+`SKILL.md`, keine Kopie). Projektspezifisch ist deshalb nur die erzeugte Ergaenzung,
+und die kann nicht driften, weil sie jedes Mal neu entsteht.
+
+**Hermes fuehrt Erinnerungen und Sitzungen je Projekt** (`<projekt>/_agent/hermes/`,
+ueber `HERMES_HOME`; `config.yaml`, `.env` und die Skills sind dorthin **verlinkt**,
+nicht kopiert). Sein eingebauter Speicher waere sonst EINE Datei fuer die ganze
+Maschine — was der Agent ueber eine Auslegung gelernt hat, laese er bei der naechsten
+als Tatsache wieder. **PI hat das nicht:** PI sortiert seine Sitzungen nach
+Arbeitsverzeichnis, und das muss die Repo-Wurzel bleiben, sonst findet PI weder diese
+Datei noch die Skills.
+
 ## Die wichtigste Regel
 
 **Bediene den Orchestrator über sein CLI, nicht über HTTP von Hand.** Dafür gibt es

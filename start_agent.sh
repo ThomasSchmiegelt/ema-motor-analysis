@@ -167,13 +167,53 @@ fi
 # und --continue griffe in die falsche Ablage, denn PI sortiert Sitzungen nach cwd.
 cd "$ROOT"
 
+# ── Projektkontext: ERZEUGT, nicht kopiert ──────────────────────────────────
+# Dieselbe Datei, die start_hermes.sh schreibt, mit demselben Erzeuger — damit
+# beide Agentenkoepfe denselben Projektstand sehen. AGENTS.md bleibt die eine,
+# unveraenderte Regelquelle; kopiert wird sie NICHT (eine Kopie laeuft still
+# auseinander, und dann arbeiten zwei Agenten nach zwei Regelwerken).
+#
+# PI bekommt KEINE projekteigene Sitzungsablage: PI sortiert Sitzungen nach cwd,
+# und das cwd muss die Repo-Wurzel bleiben — sonst findet PI weder AGENTS.md noch
+# .agents/skills/. Das ist der Unterschied zu Hermes, wo HERMES_HOME die Ablage
+# verschieben kann, ohne das Arbeitsverzeichnis anzufassen.
+PROJ_DIR="$(ls -d "$HOME/cae_projekte"/2* 2>/dev/null | sort | tail -1)"
+if [ -n "$PROJ_DIR" ] && [ -d "$PROJ_DIR" ]; then
+    {
+        echo "# Aktuelles Projekt — ERZEUGT beim Agentenstart, nicht von Hand aendern"
+        echo
+        echo "Diese Datei wird bei jedem Agentenstart neu geschrieben. Die Regeln stehen"
+        echo "in AGENTS.md; hier stehen nur die Fakten des Projekts, an dem gerade"
+        echo "gearbeitet wird."
+        echo
+        echo "- Kennung: \`$(basename "$PROJ_DIR")\`"
+        echo "- Verzeichnis: \`$PROJ_DIR\`"
+        echo "- Stand: $(date '+%d.%m.%Y %H:%M')"
+        echo
+        if [ -f "$PROJ_DIR/results.json" ]; then
+            echo "Bereits gerechnet (aus results.json):"
+            "$ROOT/.agents/projektstand.py" "$PROJ_DIR/results.json" \
+                2>/dev/null || echo "- (results.json nicht lesbar)"
+        else
+            echo "Noch nichts gerechnet — es gibt keine results.json."
+        fi
+    } > "$ROOT/AGENTS.projekt.md"
+fi
+
 # Hat der Aufrufer PIs eigene Sitzungsflaggen benutzt, gilt seine Wahl unangetastet:
 # nichts hinzufuegen, nichts herausloesen (sonst risse die Erkennung unten den Wert aus
 # `--session <id>` heraus und `--session` verschluckte das naechste Argument), und auch
 # keinen Hinweis auf die letzte Sitzung zeigen, der dann falsch waere.
 eigene_wahl=0
+# Eine Einmalfrage (-p) ist bereits die Entscheidung "eine Frage, dann Ende" — dort
+# nach einer fortzusetzenden Sitzung zu fragen, wuerde einen Aufruf blockieren, der
+# gerade NICHT auf eine Antwort warten soll.
+EINMALFRAGE=0
 for a in ${ARGS[@]+"${ARGS[@]}"}; do
-    case "$a" in --session|--session=*|--session-id|--session-id=*|--continue|-c|--resume|-r|--fork|--fork=*|--no-session) eigene_wahl=1 ;; esac
+    case "$a" in
+        --session|--session=*|--session-id|--session-id=*|--continue|-c|--resume|-r|--fork|--fork=*|--no-session) eigene_wahl=1 ;;
+        -p|--prompt|--prompt=*|-p*) EINMALFRAGE=1 ;;
+    esac
 done
 
 # Eine nackte Sitzungskennung als Argument ist die naheliegende Eingabe — PI schreibt
@@ -206,10 +246,43 @@ elif [ "$WEITER" -eq 1 ]; then
     IFS=$'\t' read -r s_id s_zeit s_titel <<<"$letzte"
     ARGS=(--continue ${ARGS[@]+"${ARGS[@]}"})
     echo "Setze fort: $s_id  ($s_zeit)  $s_titel"
+elif [ -t 0 ] && [ -t 1 ] && [ "$EINMALFRAGE" -eq 0 ]; then
+    # Am Terminal wird GEFRAGT statt nur hingewiesen. Der Hinweis stand hier vorher
+    # schon ("Fortsetzen mit: --weiter"), aber ein Hinweis am Ende einer Startausgabe
+    # wird ueberlesen, und dann faengt jede Frage wieder bei null an, obwohl nebenan
+    # die Sitzung mit dem ganzen Verlauf liegt.
+    #
+    # Die Vorgabe bleibt trotzdem NEU (Eingabetaste = neu): ein fortgesetzter Verlauf
+    # schleppt den vorigen mit, und bei 64 k Kontext faellt das erst auf, wenn vorne
+    # etwas herausfaellt. Automatisch fortsetzen waere darum falsch — fragen ist der
+    # Mittelweg. Nicht gefragt wird ohne Terminal (Skriptaufruf) und nicht bei -p.
+    liste="$(sitzungen 5)"
+    if [ -n "$liste" ]; then
+        echo
+        echo "Sitzungen in diesem Verzeichnis:"
+        i=0; ids=()
+        while IFS=$'\t' read -r s_id s_zeit s_titel; do
+            i=$((i+1)); ids+=("$s_id")
+            # `%-30.30s` kuerzt nach BYTES und zerschneidet dabei Umlaute mitten im
+            # UTF-8-Zeichen ("e-maschine f<?>"). GNU `cut -c` hilft nicht, es ist
+            # trotz des Namens ebenfalls bytebasiert; bashs Teilzeichenkette dagegen
+            # zaehlt in einer UTF-8-Umgebung Zeichen.
+            t="${s_titel:-—}"
+            printf "  %d) %-30s  %s\n" "$i" "${t:0:30}" "$s_zeit"
+        done <<< "$liste"
+        echo "  n) neue Sitzung"
+        read -r -p "Fortsetzen [1-$i] oder neu [n]? (Vorgabe: n) " wahl || wahl="n"
+        case "$wahl" in
+            ''|n|N|neu) ;;
+            *) if [ "$wahl" -ge 1 ] 2>/dev/null && [ "$wahl" -le "$i" ]; then
+                   ARGS=(--session "${ids[$((wahl-1))]}" ${ARGS[@]+"${ARGS[@]}"})
+                   echo "Setze Sitzung ${ids[$((wahl-1))]} fort."
+               else
+                   warn "'$wahl' ist keine der angebotenen Sitzungen — neue Sitzung."
+               fi ;;
+        esac
+    fi
 else
-    # Bewusst NICHT von selbst fortsetzen: ein frischer Start muss der Normalfall
-    # bleiben, sonst schleppt jede neue Frage den Verlauf der vorigen mit — und bei
-    # 64 k Kontext faellt das erst auf, wenn vorne etwas herausfaellt. Nur der Hinweis.
     letzte="$(sitzungen 1)"
     if [ -n "$letzte" ]; then
         IFS=$'\t' read -r s_id s_zeit s_titel <<<"$letzte"
