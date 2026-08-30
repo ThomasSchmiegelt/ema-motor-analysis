@@ -73,8 +73,37 @@ und wird ausschließlich als **externes Programm** aufgerufen (`z88r` im Stapelb
 Dieses Repo enthält keinen Z88-Quellcode und keine Z88-Binärdatei; `ema_z88.py` schreibt
 nur Eingabedateien im offenen Z88-Format und liest die Ausgabedateien.
 
-Z88Aurora ist Freeware der Universität Bayreuth (Lehrstuhl für Konstruktionslehre und
-CAD, Prof. Frank Rieg); der darunterliegende Kern **Z88OS** steht unter der GNU GPL.
+**Z88Aurora®** ist Freeware des **Lehrstuhls für Konstruktionslehre und CAD (LCAD),
+Universität Bayreuth, Universitätsstr. 30, 95447 Bayreuth**, verfasst und herausgegeben
+von **Prof. Dr.-Ing. Frank Rieg**. „Z88" ist eine eingetragene Marke (Nr. 30 2009 064 238)
+von Prof. Dr.-Ing. Frank Rieg. Der darunterliegende Kern **Z88OS** steht unter der GNU GPL.
+
+Die Lizenzvereinbarung liegt der Software bei (Theorie-Handbuch, Abschnitt „License").
+Die für dieses Repo maßgeblichen Punkte:
+
+* **§1 Nutzungsrecht** — erlaubt die Nutzung „on any computer in multiple number of
+  installations". Eine Einschränkung auf nichtkommerzielle Nutzung enthält die
+  Vereinbarung **nicht**.
+* **§2 Urheberrecht** — „There is no right to use trademarks, pictures, documentation
+  … without naming LCAD." Daher die vollständige Nennung oben; wer Abbildungen oder
+  Textstellen aus der Z88-Dokumentation übernimmt, nennt LCAD ebenfalls.
+* **§3** — kein Vermieten, kein Verleasen, **kein Reverse Engineering, Dekompilieren
+  oder Disassemblieren**. Ausdrücklich: „there is no warranty for accuracy of the
+  given results."
+* **§4/§5** — keine Gewährleistung, keine Haftung für Folgeschäden.
+* **§7** — deutsches Recht.
+
+> **Offenlegung zum Entstehen von `ema_z88.py`:** Drei Dateiformate (`Z88MAN.TXT`,
+> die Materialdatei und der Aufrufvertrag von `z88r`) sind in der mitgelieferten
+> Dokumentation **nicht beschrieben**. Sie wurden aus den Zeichenketten der Binärdateien
+> (`strings`) und aus Fehlversuchen erschlossen — also durch Beobachten des Programms
+> im Betrieb, nicht durch Dekompilieren oder Disassemblieren. Ob das unter §3 fällt, ist
+> eine Rechtsfrage und keine technische; wer Z88 in einem geschäftlichen Zusammenhang
+> einsetzt, sollte sie klären. In Deutschland erlaubt §69d Abs. 3 UrhG das Beobachten,
+> Untersuchen und Testen eines Programms zum Ermitteln seiner Ideen und Grundsätze und
+> ist vertraglich nicht abdingbar; §69e UrhG regelt die Dekompilierung zur
+> Interoperabilität gesondert. Das ist ein Hinweis, keine Rechtsberatung.
+
 Wer die Toolchain nachbaut, lädt Z88Aurora selbst von <https://z88.de/> — die dortigen
 Nutzungsbedingungen gelten. Enthaltene Fremdkomponenten von Z88 (u. a. Intel MKL,
 PARDISO, TetGen, Netgen, OpenCASCADE) reisen mit **jener** Installation, nicht mit

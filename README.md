@@ -176,7 +176,7 @@ at server start.
 ## Shared toolchain (system-wide, not in this repo)
 
 - FreeCAD 1.1 source build + CalculiX (`ccx` 2.23); `ccx` is also called directly, without FreeCAD
-- **Z88Aurora V5** (batch solvers only). `z88r` needs `LD_LIBRARY_PATH` set to its own MKL and **two** runs — `-t` writes `Z88R.DYN`, which `-c` then reads. **Z88Arion has no Linux build**
+- **Z88Aurora®** V5 — freeware of the Chair for Engineering Design and CAD (LCAD), University of Bayreuth, by Prof. Dr.-Ing. Frank Rieg; batch solvers only. `z88r` needs `LD_LIBRARY_PATH` set to its own MKL and **two** runs — `-t` writes `Z88R.DYN`, which `-c` then reads. **Z88Arion has no Linux build**
 - Gmsh (the Python module in the orchestrator venv), OpenFOAM v2406, Elmer, CUDA, pandoc/pdflatex
 - Ollama at `localhost:11434`
 
