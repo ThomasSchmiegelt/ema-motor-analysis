@@ -590,6 +590,10 @@ def screene(basis: dict, ziel: str = "ausgewogen", achsen: dict | None = None,
             zeile["s_koerper"] = pas["s_koerper"]
             zeile["s_lage"] = pas["s_lage"]
             zeile["magDepthRel"] = pas["magDepthRel"]
+            # Die EINGEPASSTE Geometrie muss mit heraus. Ohne sie ist eine Zeile,
+            # deren Magnet verkleinert wurde, nicht nachbaubar -- s. `uebernahme`.
+            zeile["geom"] = {k: pas["geom"].get(k)
+                             for k in UEBERNAHME_GEOM if k in pas["geom"]}
             zeile["steg_min_mm"] = min(x for x in (pas["steg_im_pol"],
                                                    pas["steg_zw_polen"])
                                        if x is not None) if any(
@@ -617,6 +621,7 @@ def screene(basis: dict, ziel: str = "ausgewogen", achsen: dict | None = None,
         gut.sort(key=lambda z: -z["punkte"])
 
     return {"ziel": ziel, "gewichte": GEWICHTE[ziel], "n_max": n_max,
+            "basis_geom": dict(basis["geom"]),
             "geprueft": len(zeilen), "brauchbar": len(gut),
             "achsen": {k: achsen[k] for k in namen},
             "rangliste": gut,
@@ -626,22 +631,89 @@ def screene(basis: dict, ziel: str = "ausgewogen", achsen: dict | None = None,
                         "muss danach.")}
 
 
+# Geometriegroessen, die die Einpassung veraendern darf. Nur diese koennen sich
+# zwischen Basis und Empfehlung unterscheiden, also nur diese muessen mitgegeben werden.
+UEBERNAHME_GEOM = ("magWidth", "magThick", "magTangLen", "magDist",
+                   "magLayerGap", "magDepthRel")
+
+
+def uebernahme(zeile: dict, basis_geom: dict) -> list[str]:
+    """Die ``--set``-Zuweisungen, die aus der Basis GENAU diese Variante machen.
+
+    Das ist keine Bequemlichkeit, sondern der Punkt, an dem die Vorauswahl bisher in
+    die Irre fuehrte. Passt eine Bauform nicht in den Pol, verkleinert ``einpassen``
+    den Magneten -- und ohne diese Zahlen ist die Empfehlung **nicht reproduzierbar**:
+    wer nur ``p``, ``slots`` und ``magShape`` uebernimmt, baut eine andere Maschine,
+    und das Layouttor lehnt sie zu Recht ab.
+
+    Gemessen an einem echten Agentenlauf: die Vorauswahl empfahl p=5 mit V-Anordnung,
+    der Agent pruefte mit ``rotor-check --set p=5 --set magShape=v`` nach, bekam
+    "Kollision, Ueberlappung 6,20 mm" -- und meldete dem Nutzer, die eigene Empfehlung
+    sei unbaubar. Sie war baubar, nur mit ``magWidth`` 21,8 statt 32, ``magThick``
+    4,09 statt 6 und ``magDist`` 6,48 statt 13,5. Keine dieser Zahlen stand in der
+    Ausgabe.
+    """
+    g = zeile.get("geom") or {}
+    sets = [f"p={zeile['p']}", f"slots={zeile['slots']}",
+            f"magShape={zeile['magShape']}",
+            f"conductorsPerSlot={zeile['conductorsPerSlot']}"]
+    for k in UEBERNAHME_GEOM:
+        neu_wert, alt_wert = g.get(k), basis_geom.get(k)
+        if neu_wert is None or alt_wert is None:
+            continue
+        if abs(float(neu_wert) - float(alt_wert)) > 1e-6:
+            sets.append(f"{k}={round(float(neu_wert), 4)}")
+    return sets
+
+
+def uebernahme_befehl(zeile: dict, basis_geom: dict, verb: str = "rotor-check") -> str:
+    return (f"python3 cae_cli.py {verb} --from-project last "
+            + " ".join("--set " + s for s in uebernahme(zeile, basis_geom)))
+
+
 def bestenliste_text(erg: dict, n: int = 12) -> str:
-    """Rangliste als Text — die Teilnoten mit, sonst ist die Reihenfolge Magie."""
+    """Rangliste als Text — die Teilnoten mit, sonst ist die Reihenfolge Magie.
+
+    Die Spalte **Mag** ist der Magnetmassstab der Einpassung. Sie stand frueher nicht
+    hier, obwohl der Agenten-Skill sie ausdruecklich nennt -- ein Wert unter 1,00
+    heisst, dass diese Variante nur mit verkleinertem Magneten in den Pol passt, und
+    das gehoert in dieselbe Zeile wie die Momentkonstante, die daran haengt.
+    """
     g = erg["gewichte"]
+    basis_geom = erg.get("basis_geom") or {}
     z = [f"Ziel: {erg['ziel']}  (Gewichte: "
          + ", ".join(f"{k} {v:.2f}" for k, v in g.items()) + ")",
          f"{erg['brauchbar']} von {erg['geprueft']} Konfigurationen brauchbar, "
          f"n_max = {erg['n_max']:.0f} 1/min", "",
-         f"  {'#':>2s} {'Pole':>4s} {'Nuten':>5s} {'q':>5s} {'Topologie':14s} "
-         f"{'Ltr':>3s} {'B_gap':>6s} {'Kt':>7s} {'kgV':>5s} {'SF':>5s} {'kg':>6s} {'EUR':>6s} {'Pkt':>5s}"]
-    z.append("  " + "-" * 96)
+         f"  {'#':>2s} {'p':>2s} {'Pole':>4s} {'Nuten':>5s} {'q':>5s} {'Topologie':10s} "
+         f"{'Ltr':>3s} {'B_gap':>6s} {'Kt':>7s} {'kgV':>5s} {'SF':>5s} "
+         f"{'kg':>6s} {'EUR':>6s} {'Mag':>5s} {'Pkt':>5s}"]
+    z.append("  " + "-" * 100)
     for i, r in enumerate(erg["rangliste"][:n], 1):
-        z.append(f"  {i:2d} {r['poles']:4d} {r['slots']:5d} {r['q']:5.2f} "
-                 f"{r['magShape']:14s} {r['conductorsPerSlot']:3d} "
+        mag = r.get("s_koerper")
+        z.append(f"  {i:2d} {r['p']:2d} {r['poles']:4d} {r['slots']:5d} {r['q']:5.2f} "
+                 f"{r['magShape']:10s} {r['conductorsPerSlot']:3d} "
                  f"{r['B_gap_T']:6.3f} {r['Kt_Nm_per_A']:7.4f} "
                  f"{r.get('lcm_slots_poles', 0):5d} {r['safety_factor']:5.2f} "
-                 f"{r['gesamt_kg']:6.1f} {r['kosten_EUR']:6.0f} {r['punkte']:5.3f}")
+                 f"{r['gesamt_kg']:6.1f} {r['kosten_EUR']:6.0f} "
+                 f"{(f'{mag:5.2f}' if isinstance(mag, (int, float)) else '    -')} "
+                 f"{r['punkte']:5.3f}")
+
+    # Wer den Magneten verkleinern musste, muss das SAGEN -- und zwar so, dass man es
+    # nachbauen kann. Das ist die Lehre aus dem Agentenlauf, in dem die eigene
+    # Empfehlung fuer unbaubar gehalten wurde, weil die Masse fehlten.
+    geschrumpft = [(i, r) for i, r in enumerate(erg["rangliste"][:n], 1)
+                   if isinstance(r.get("s_koerper"), (int, float))
+                   and r["s_koerper"] < 0.999]
+    if geschrumpft:
+        z += ["", "  Mag < 1,00 heisst: passt nur mit VERKLEINERTEM Magneten in den Pol.",
+              "  Die veraenderten Masse stehen unten — ohne sie ist die Zeile nicht nachbaubar."]
+
+    if erg["rangliste"] and basis_geom:
+        z += ["", "  Uebernahme (Platz 1 — die Geometriewerte sind Teil der Empfehlung):",
+              "    " + uebernahme_befehl(erg["rangliste"][0], basis_geom, "rotor-check"),
+              "    " + uebernahme_befehl(erg["rangliste"][0], basis_geom, "run analyse")]
+
     if erg["verworfen"]:
         gruende = {}
         for v in erg["verworfen"]:

@@ -198,6 +198,58 @@ txt = S.bestenliste_text(erg, 5)
 pruefe("Ziel:" in txt and "brauchbar" in txt, "Kopfzeile mit Ziel und Ausbeute")
 pruefe(all(k in txt for k in ("kt", "kosten", "rundlauf")), "Gewichte stehen im Text")
 
+# ── 4b. Nachbaubarkeit — der Fund aus dem Agentenlauf ────────────────────────
+
+print("\n16. Jede Empfehlung ist mit ihren eigenen --set-Werten nachbaubar")
+# Das ist die wichtigste Zusage dieses Moduls, und sie war verletzt. Ein echter
+# Agentenlauf nahm die Empfehlung (p=5, V-Anordnung), pruefte sie mit
+# `rotor-check --set p=5 --set magShape=v` nach, bekam "Kollision, Ueberlappung
+# 6,20 mm" -- und meldete dem Nutzer, die eigene Empfehlung sei unbaubar. Sie war
+# baubar, nur mit verkleinertem Magneten; die dafuer noetigen Masse standen nirgends.
+achsen_nb = {"p": [2, 3, 4, 5], "slots": [24, 36], "conductorsPerSlot": [4],
+             "magShape": ["v", "u", "spoke", "vv", "pmasynrm", "delta", "vasym", "bar"]}
+erg_nb = S.screene(BASIS, "ausgewogen", achsen=achsen_nb)
+pruefe(erg_nb["brauchbar"] > 0, f"{erg_nb['brauchbar']} Empfehlungen zu pruefen")
+pruefe(bool(erg_nb.get("basis_geom")), "die Basisgeometrie liegt dem Ergebnis bei")
+
+nicht_nachbaubar = []
+for r in erg_nb["rangliste"]:
+    sets = S.uebernahme(r, erg_nb["basis_geom"])
+    g = dict(BASIS_GEOM)
+    for zuweisung in sets:
+        schluessel, wert = zuweisung.split("=", 1)
+        g[schluessel] = float(wert) if "." in wert else (
+            wert if not wert.lstrip("-").isdigit() else int(wert))
+    if not rotor_layout_check(g)["ok"]:
+        nicht_nachbaubar.append((r["magShape"], r["p"], sets))
+pruefe(not nicht_nachbaubar,
+       f"alle {len(erg_nb['rangliste'])} bestehen das echte Tor ({nicht_nachbaubar[:2]})")
+
+geschrumpft = [r for r in erg_nb["rangliste"] if r.get("s_koerper", 1) < 0.999]
+pruefe(geschrumpft, f"{len(geschrumpft)} Zeilen mussten den Magneten verkleinern")
+fehlend = [r["magShape"] for r in geschrumpft
+           if not any(s.startswith(("magWidth=", "magThick=", "magDist="))
+                      for s in S.uebernahme(r, erg_nb["basis_geom"]))]
+pruefe(not fehlend,
+       f"jede verkleinerte Zeile gibt die geaenderten Magnetmasse mit ({fehlend[:3]})")
+
+txt_nb = S.bestenliste_text(erg_nb, 8)
+pruefe("Mag" in txt_nb.split("\n")[3],
+       "der Magnetmassstab steht als Spalte in der Rangliste")
+pruefe("Uebernahme" in txt_nb and "--set magShape=" in txt_nb,
+       "der Uebernahmebefehl steht unter der Tabelle")
+if geschrumpft:
+    pruefe("VERKLEINERTEM Magneten" in txt_nb,
+           "eine Verkleinerung wird im Klartext benannt, nicht nur als Zahl")
+
+print("\n17. Ohne Aenderung keine ueberfluessigen --set")
+r_gleich = S.bewerte(BASIS, 12000.0)
+r_gleich.update({"geom": {}, "s_koerper": 1.0})
+sets_gleich = S.uebernahme(r_gleich, BASIS_GEOM)
+pruefe(all(s.split("=")[0] in ("p", "slots", "magShape", "conductorsPerSlot")
+           for s in sets_gleich),
+       f"unveraenderte Geometrie erzeugt keine Geometrie-Zuweisungen: {sets_gleich}")
+
 # ── 5. Stadt/Land-Zyklus ─────────────────────────────────────────────────────
 
 print("\n15. Stadt/Land-Zyklus")

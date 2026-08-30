@@ -842,6 +842,22 @@ def cmd_rotor_check(args) -> int:
     return 1
 
 
+# Die baubaren Magnetanordnungen. Aus ema_topology geholt statt abgeschrieben, damit
+# die Liste nicht veraltet -- ein Agent, der eine erfundene Bauform uebergibt, bekommt
+# sonst erst am Ende eine unverstaendliche Meldung. Der Import ist lokal gehalten, weil
+# der Rest der CLI ohne die schweren Module auskommen soll.
+def _magshapes() -> list[str]:
+    try:
+        from ema_topology import _BUILDERS
+        return [k for k in _BUILDERS if k != "custom"]
+    except Exception:                                        # noqa: BLE001
+        return ["v", "vasym", "bar", "u", "vv", "delta", "pmasynrm", "spm",
+                "halbach", "spoke"]
+
+
+_MAGSHAPES = _magshapes()
+
+
 def cmd_screen(args) -> int:
     """Konfigurationen grob durchspielen, bevor eine teuer gerechnet wird.
 
@@ -1006,7 +1022,7 @@ def cmd_routes(args) -> int:
     return EXIT_OK
 
 
-def _add_globals(sp) -> None:
+def _add_globals(sp, json_hilfe: str | None = None) -> None:
     """Dieselben Schalter auch NACH dem Verb annehmen. Ohne das quittiert argparse
     ``run analyse --full`` mit einer nackten usage-Zeile — der haeufigste Fehlgriff,
     wenn ein Modell die Reihenfolge raet. ``SUPPRESS`` ist wesentlich: ein nicht
@@ -1015,8 +1031,12 @@ def _add_globals(sp) -> None:
     sp.add_argument("--url", default=argparse.SUPPRESS, help=argparse.SUPPRESS)
     sp.add_argument("--full", action="store_true", default=argparse.SUPPRESS,
                     help=argparse.SUPPRESS)
+    # Normalerweise ausgeblendet (ein Schalter, den jedes Verb hat, muss nicht in jeder
+    # Hilfe stehen). Wo die Hilfe aber auf einen "JSON-Modus" VERWEIST, muss er
+    # auffindbar sein: in einem echten Agentenlauf suchte das Modell ihn in
+    # `screen --help`, fand ihn nicht und wich auf einen rohen HTTP-Aufruf aus.
     sp.add_argument("--json", action="store_true", default=argparse.SUPPRESS,
-                    help=argparse.SUPPRESS)
+                    help=json_hilfe or argparse.SUPPRESS)
     sp.add_argument("--log-lines", type=int, default=argparse.SUPPRESS,
                     help=argparse.SUPPRESS)
 
@@ -1095,9 +1115,14 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Auslegungsziel; auto liest es aus --auftrag bzw. dem design_brief")
     s.add_argument("--auftrag", default="",
                    help="Auslegungsauftrag im Klartext (Quelle fuer --ziel auto)")
-    s.add_argument("--pole", help="Polpaarzahlen, z.B. 2,3,4,5")
-    s.add_argument("--nuten", help="Nutzahlen, z.B. 24,36,48,60")
-    s.add_argument("--formen", help="Magnetanordnungen, z.B. v,vasym,spoke")
+    # Der Schalter nimmt POLPAARE (p), die Rangliste zeigt zusaetzlich die Polzahl
+    # (2p) -- beide Spalten stehen jetzt nebeneinander, weil genau diese Verwechslung
+    # in einem Agentenlauf zu "--pole 2,3 ergibt Pole 6 und 4? seltsam" gefuehrt hat.
+    s.add_argument("--polpaare", "--pole", dest="pole",
+                   help="Polpaarzahlen p, z.B. 2,3,4,5 (die Maschine hat dann 2p Pole)")
+    s.add_argument("--nuten", help="Statornutzahlen, z.B. 24,36,48,60")
+    s.add_argument("--formen",
+                   help="Magnetanordnungen, mit Komma: " + ", ".join(_MAGSHAPES))
     s.add_argument("--leiter", help="Leiter je Nut, z.B. 4,6,8")
     s.add_argument("--n_max", type=float, default=None,
                    help="Hoechstdrehzahl fuer das Fliehkrafttor (Vorgabe: aus dem Payload)")
@@ -1110,7 +1135,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="einzelnen Parameter der Basis aendern, mehrfach angebbar")
     s.add_argument("--force", action="store_true",
                    help="Grenzen und Typen aus dem Schema nicht pruefen")
-    _add_globals(s)
+    _add_globals(s, json_hilfe="vollstaendig als JSON — je Zeile mit der EINGEPASSTEN "
+                               "Geometrie, aus der sich die Variante nachbauen laesst")
     s.set_defaults(fn=cmd_screen)
 
     s = sub.add_parser("lernen",

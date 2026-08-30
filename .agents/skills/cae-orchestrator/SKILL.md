@@ -224,8 +224,22 @@ python3 cae_cli.py screen --from-project last --ziel leistung \
         --pole 3,4,5 --nuten 36,48 --formen v,vasym,spoke --leiter 4,6
 ```
 
-Das kostet ~20 s gegen 30 min bis 4 h für einen vollen Lauf. Was oben steht, übernimmst du
-mit `run analyse --set p=… --set slots=… --set magShape=…` und rechnest es richtig.
+Das kostet ~20 s gegen 30 min bis 4 h für einen vollen Lauf.
+
+**Übernimm NICHT von Hand.** Unter der Rangliste steht ein fertiger Befehl — benutze
+genau den. Der Grund steht in Spalte `Mag`: passt eine Bauform nicht in den Pol,
+verkleinert die Vorauswahl den Magneten, und dann gehören `magWidth`, `magThick` und
+`magDist` **zur Empfehlung dazu**. Wer nur `p`, `slots` und `magShape` überträgt, baut eine
+andere Maschine, und `rotor-check` lehnt sie zu Recht ab.
+
+Das ist kein theoretisches Risiko: genau so ist es passiert. Ein Lauf empfahl p=5 mit
+V-Anordnung, prüfte mit `rotor-check --set p=5 --set magShape=v` nach, bekam „Kollision,
+Überlappung 6,20 mm" und meldete dem Nutzer, die eigene Empfehlung sei unbaubar. Sie war
+baubar — mit `magWidth` 21,8 statt 32, `magThick` 4,09 statt 6 und `magDist` 6,48 statt
+13,5.
+
+Mit `--json` kommt die eingepasste Geometrie je Zeile mit, wenn du selbst auswählen
+willst statt Platz 1 zu nehmen.
 
 **Drei Dinge, die du dabei nicht verwechseln darfst:**
 
@@ -236,9 +250,12 @@ mit `run analyse --set p=… --set slots=… --set magShape=…` und rechnest es
    analytische Formel kennt beide nicht). Die Nutzahl wird über das kgV aus Nut- und
    Polzahl (Rundlauf) und den Fertigungsaufwand bewertet. Wer sie elektromagnetisch
    beurteilen will, braucht den Feldlauf.
-3. Passt eine Bauform nicht in den Pol, wird der Magnet **verkleinert** — das steht als
-   `s_koerper` in jeder Zeile. Ein Wert von 0,64 heißt: diese Variante ist nur mit einem
-   um gut ein Drittel kleineren Magneten baubar. Nenne das, wenn du sie empfiehlst.
+3. Passt eine Bauform nicht in den Pol, wird der Magnet **verkleinert** — Spalte `Mag`
+   (im JSON `s_koerper`). Ein Wert von 0,64 heißt: diese Variante ist nur mit einem um gut
+   ein Drittel kleineren Magneten baubar. Nenne das, wenn du sie empfiehlst, und nimm die
+   Maße aus dem Übernahmebefehl mit.
+4. `--polpaare` nimmt **Polpaare p**, die Rangliste zeigt daneben die **Polzahl 2p**.
+   `--polpaare 2,3` ergibt also Maschinen mit 4 und 6 Polen — das ist kein Fehler.
 
 ### Vor `run cad`: `rotor-check`
 
