@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Monorepo for a connected E-machine (electric motor) CAE toolchain: three independent
 subprojects that talk to each other over local HTTP services (`localhost`), run under
 a restricted user **`cae`** (no sudo). It was assembled from previously separate repos
-(see root `README.md` for the full picture) — each subproject still has its own
+(see root `README.md` — English; `README.de.md` — German — for the full picture) — each subproject still has its own
 history, conventions, and often its own `CLAUDE.md` / docs. **Read the subproject's own
 docs before working in it** — this file only covers cross-cutting/root context; it does
 not restate subproject detail.

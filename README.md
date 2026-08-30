@@ -1,183 +1,196 @@
 # ai-workspace
 
-Monorepo für die E-Maschinen-CAE-Toolkette — betrieben unter dem eingeschränkten
-User **`cae`** (kein sudo), alles auf `localhost`.
+*[Deutsche Fassung →](README.de.md)*
 
-**Ehrlich vorweg, damit die Tabelle nicht mehr verspricht als sie hält:** getragen
-wird die Kette von `cae_orchestrator`. Die übrigen Ordner sind eigenständige
-Teilprojekte in unterschiedlichem Reifegrad, die *heute* nicht miteinander
-verdrahtet sind — siehe die Spalte „Verbindung".
+A connected CAE toolchain for electric machines (IPM traction motors): geometry →
+electromagnetic field → structural FEM → thermal → drive cycle → PDF report. Runs
+locally under a restricted user, driven from a browser, a command line, or a **local**
+language model.
 
-## Teilprojekte
+**Honest up front, so the table promises no more than it delivers:** the chain is
+carried by `cae_orchestrator`. The other folders are independent subprojects at
+different stages of maturity that are *not* wired to each other today — see the
+"Wiring" column.
 
-| Ordner | Was | Stack | Start |
+## Subprojects
+
+| Folder | What | Stack | Start |
 |---|---|---|---|
-| `cae_orchestrator/` | Browser-CAE für IPM-Motoren (Geometrie → EM-Feld → FEM → Thermik → Fahrzyklus, PDF-Bericht) | Python/Flask + FreeCAD/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
-| `connection_detection/` | FreeCAD-Workbench: Verbindungserkennung in STEP-Baugruppen (Basis für Multi-Body-CalculiX) | Python-FreeCAD-Addon (`rtree`) | via `FreeCADCmd cli.py -- input.step -o out.json` |
-| `pikogk/` | PicoGK-Geometriekernel mit HTTP-API (Voxel-/Implicit-Geometrie, „Engine-Head"-Skills für Zylinderköpfe) | .NET 9 + native `picogk.so` | `cd pikogk && ./start.sh` → http://localhost:5266 |
-| `physics_surrogate/` | ML-Surrogat für die 2D-FDM-Feldstufe (PhysicsNeMo/Torch) | Python + Torch/CUDA | `cd physics_surrogate && ./start.sh` → http://localhost:5300 |
-| `lego/` | LEGO-Technic-Mechaniken per LLM, bewertet an ORCA-Handkinematik | Python + BrickNet | — (CLI) |
+| `cae_orchestrator/` | Browser CAE for IPM motors (geometry → EM field → FEM → thermal → drive cycle, PDF report) | Python/Flask + FreeCAD/CalculiX/Z88/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
+| `connection_detection/` | FreeCAD workbench: geometric connection detection in STEP assemblies | Python FreeCAD add-on (`rtree`) | `FreeCADCmd cli.py -- input.step -o out.json` |
+| `pikogk/` | PicoGK geometry kernel with an HTTP API (voxel/implicit geometry, LLM-generated "skills") | .NET 9 + native `picogk.so` | `cd pikogk && ./start.sh` → http://localhost:5266 |
+| `physics_surrogate/` | ML surrogate for the 2D-FDM field stage (PhysicsNeMo/Torch) | Python + Torch/CUDA | `cd physics_surrogate && ./start.sh` → http://localhost:5300 |
+| `lego/` | LLM-generated LEGO Technic mechanisms, scored against ORCA hand kinematics | Python + BrickNet | — (CLI) |
 
-## Zusammenspiel — was wirklich verdrahtet ist
+## Wiring — what actually exists
 
-| Verbindung | Stand |
+| Connection | State |
 |---|---|
-| `cae_orchestrator` → **Ollama** `:11434` | **vorhanden** — Bericht, Chat, KI-Auslegung, Zielwertoptimierung, RAG-Embeddings |
-| `cae_orchestrator` → **physics_surrogate** `:5300` | **nur lesend** — der Tab 🧠 KI-Training zeigt Trainingsläufe und pollt `/health` (`ema_ki_training.py`). Einen Inferenzpfad gibt es nicht: `/predict/*` antwortet fest mit 503, ein `ema_surrogate.py` existiert nicht. Umgekehrt benutzt der Datensatzgenerator die **echte** Rasterisierung des Orchestrators über `PYTHONPATH` |
-| `cae_orchestrator` ↔ **pikogk** `:5266` | **nicht vorhanden.** Im Orchestrator steht kein einziger Verweis auf `:5266` oder `pikogk`. `pikogk/INTEGRATION.md` beschreibt den HTTP-Vertrag *für den Fall*, dass die Kopplung einmal gebaut wird — sie ist es nicht. Auch fachlich disjunkt: Zylinderköpfe gegen IPM-E-Maschinen |
-| `cae_orchestrator` ↔ **connection_detection** | **nicht vorhanden.** Der JSON-Export trägt `tie`/`contact`-Marken für Multi-Body-CalculiX, aber der Verbraucher ist nirgends geschrieben — der Export endet heute in der Datei. Geteilt wird nur die FreeCAD-Toolchain |
-| `lego/` | eigenständig, kein Dienst, keine Abhängigkeit zu den übrigen |
+| `cae_orchestrator` → **Ollama** `:11434` | **present** — report, chat, AI design, target-value optimiser, RAG embeddings |
+| `cae_orchestrator` → **physics_surrogate** `:5300` | **read-only** — the 🧠 tab polls `/health` and plots `history.csv`. There is **no** inference path: `/predict/*` returns a hardcoded 503, and the `ema_surrogate.py` client its own README advertises does not exist |
+| `cae_orchestrator` ↔ **pikogk** `:5266` | **absent.** Grepping the orchestrator for `5266`/`pikogk` returns nothing. `pikogk/INTEGRATION.md` documents the contract for a link that was never built |
+| `cae_orchestrator` ↔ **connection_detection** | **absent.** The JSON export carries `tie`/`contact` labels for multi-body CalculiX, but no consumer is written anywhere in this repo |
+| `lego/` | standalone — no service, no port, no dependency on a sibling |
 
-## Agentenbedienung (lokales Modell, kein Cloud-Zugang)
+## What makes this different: every number says where it came from
 
-Die Toolkette lässt sich außer im Browser auch von einem **lokalen** Sprachmodell
-bedienen — wahlweise über [PI](https://pi.dev) (`@earendil-works/pi-coding-agent`)
-oder über **Hermes Agent** (Nous Research). Beide laufen auf demselben Ollama-Modell
-und lesen **denselben** Skill aus `.agents/skills/` — es wird nichts kopiert und
-nichts verlinkt, also können sie nicht auseinanderlaufen. Je eine Zeile startet die
-ganze Kette:
+The same quantity can be obtained at several levels of sharpness, and the choice is a
+trade between time and confidence. **Which level produced a number is recorded per
+value**, not guessed afterwards:
 
-```bash
-./start_agent.sh                          # Orchestrator (falls nötig) + PI, interaktiv
-./start_agent.sh -p "Wie hoch ist B_gap im neuesten Projekt?"
-./start_agent.sh --weiter                 # letzte Sitzung fortsetzen
-./start_agent.sh --sitzungen              # Sitzungen dieses Ordners auflisten
+| Quantity | fast | sharper | sharpest |
+|---|---|---|---|
+| Air-gap field, torque | analytic formula (ms) | 2D FDM (seconds) | 3D Elmer FEM (minutes) |
+| Rotor strength | rotating-ring formula × Kt (ms) | own deck, pole sector (~1 s) | FreeCAD + CalculiX, full rotor (minutes) |
+| Solver check | — | — | CalculiX **and** Z88Aurora on one mesh |
+| Sheet cross-section | parameter study | topology optimisation (~20 s) | — |
 
-./start_hermes.sh                         # dasselbe mit Hermes
-./start_hermes.sh -z "Wie hoch ist B_gap im neuesten Projekt?"
-./start_hermes.sh --nur-pruefen           # nur der Nachweis, dass nichts nach draußen geht
-```
+Two values that sit side by side in the same result set and are **not** equivalent:
 
-Beide beantworten dieselbe Frage mit derselben Zahl (gemessen: **0,806 T**, beide
-samt Herkunftshinweis auf die analytische Luftspaltformel). `start_hermes.sh`
-**misst** vor jedem Start, dass Hermes ausschließlich `127.0.0.1:11434` anspricht —
-dessen mitgelieferte Vorgabe zeigt auf OpenRouter, und zwei offene Fehler im Projekt
-lassen `provider: ollama` still dorthin durchfallen. Einzelheiten in
-`.agents/README.md`.
+* `B_gap_T` comes from the **analytic** air-gap formula — not from the field picture.
+* `T_maxwell_Nm` comes from the **solved 2D-FDM field** (Maxwell stress tensor).
 
-Das Skript prüft Ollama, **nagelt das Modell auf seine ID fest** (ein `ollama pull` unter
-gleichem Namen tauscht sonst still die Gewichte), startet den Server nur, wenn `:5000`
-nicht antwortet, und wartet auf dessen Erreichbarkeit, bevor PI läuft.
+Without that distinction a report would claim a field computation that never happened.
+The rule runs through the whole tool: report prose is stripped of numbers
+(`_strip_value_numbers`) and the figures appear only in deterministic tables — each
+with its origin.
 
-| Teil | Wo | Was |
-|---|---|---|
-| `start_agent.sh` | Wurzel | Startkette + Sitzungsverwaltung |
-| `.agents/` | Wurzel | Skill-Definition für PI (`skills/cae-orchestrator/SKILL.md`) und Einrichtung |
-| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — zwölf Verben über HTTP auf `:5000` (`rotor-check`, `struktur` und `topopt` rechnen lokal) |
-| `start_hermes.sh` | Wurzel | zweiter Agentenkopf: **Hermes Agent**, gleiches Modell, gleicher Skill, mit gemessenem Netznachweis |
+## Computation database
 
-**Warum eine CLI und kein MCP-Server:** ein lokales Modell kann die ~135 HTTP-Routen des
-Orchestrators nicht als 135 Werkzeugschemata im Kontext halten. PI bindet Werkzeuge
-deshalb als *Skill = CLI + README*; `cae_cli.py` filtert Base64-Nutzlasten heraus, kappt
-die Ausgabe und trägt den Zustand im Exit-Code. Details in `.agents/README.md`.
+Every run writes into one SQLite file (`~/cae_projekte/_db/rechnungen.db`): input
+parameters, key figures **with the method that produced each one**, images, gates. It
+does **not** replace `results.json` — it is a queryable index over it and can be
+rebuilt from disk at any time.
 
-**Modell:** `qwen-gross:latest` (Qwen3.5 27B Q4_K_M, 64 k Kontext) — dasselbe Modell, das
-auch Bericht, Chat und KI-Auslegung im Orchestrator benutzen. Eine Quelle dafür:
-`ema_report.DEFAULT_MODEL` / `DEFAULT_NUM_CTX`, umstellbar über `CAE_LLM_MODEL` bzw.
-`CAE_LLM_NUM_CTX` ohne Codeänderung.
-
-## Festigkeit ohne FreeCAD, zweiter Löser, Topologieoptimierung
-
-Neben dem gewachsenen Weg (FreeCAD baut das Netz, CalculiX löst) gibt es einen
-**eigenen Rechensatz**: Gmsh vernetzt aus derselben Magnetgeometrie, aus der auch das
-2D-Feld kommt, und der CalculiX-Satz wird selbst geschrieben. Zwei Gründe:
-
-1. Eine **Topologieoptimierung** braucht je Element einen eigenen E-Modul. FreeCADs
-   `.inp`-Schreiber kann das nicht.
-2. Ein **Polsektor** statt des ganzen Rotors — und kein FreeCAD-Start in der Schleife.
-
-Gemessen an derselben Maschine (Delta-IPM, 3 Polpaare):
-
-| | Elemente | Zeit |
-|---|---:|---:|
-| FreeCAD + CalculiX, Vollrotor | 797.275 | Minuten, davor ~40 s FreeCAD-Start |
-| eigener Satz, Polsektor | 13.669 | 0,4 s vernetzt, 0,35 s gelöst |
-| eigener Satz, Vollrotor | 37.066 | 1,2 s vernetzt, 1,5 s (ccx) / 2,1 s (Z88) |
-
-**Z88Aurora V5** (`/opt/z88aurora`) rechnet als zweiter, unabhängiger Löser dasselbe
-Netz. Auf gleicher Last und gleichem Netz:
-
-| Größe | CalculiX | Z88 | Abw. |
-|---|---:|---:|---:|
-| σ_v Mittel | 57,15 MPa | 57,15 MPa | 0,00 % |
-| σ_v P99 (Torwert) | 128,89 MPa | 128,90 MPa | 0,01 % |
-| Ringspannung Bohrung | 161,57 MPa | 161,62 MPa | 0,03 % |
-| größte Verschiebung | 40,59 µm | 40,60 µm | — |
-
-Das prüft **Löser und Rechensatz**, nicht das Netz und nicht das Modell.
+Measured on a real stock: 35 runs, of which 14 complete and **21 aborted**. The whole
+numeric history fits in **208 kB**, against 20 GB of project data — because a
+`results.json` is 1.7 MB, of which 884 kB are base64 images while the actual key-figure
+set is 0.9 kB.
 
 ```bash
 cd cae_orchestrator
-python3 cae_cli.py struktur --from-project last --solver beide --voll
-python3 cae_cli.py topopt   --from-project last --iterationen 25
+python3 cae_cli.py db import                       # read ~/cae_projekte
+python3 cae_cli.py db liste
+python3 cae_cli.py db guete --lauf last            # what was computed, and how sharply
+python3 cae_cli.py db vergleich                    # one row per run, origin per column
 ```
 
-Im Browser stehen beide unter *Strukturanalyse* („Rechensatz & Löser"), in der
-Pipeline über `struct_solver` (`freecad` bleibt die Vorgabe). **Nur der
-FreeCAD-Rechensatz speist die Verformungsbilder und das Rampenvideo** — die brauchen
-Knotenkoordinaten aus der `.frd`.
+Aborted runs stay visible instead of being silently skipped — otherwise the database
+would look more complete than the stock is.
 
-Die **Topologieoptimierung** (SKO, wahlweise SIMP/OC) läuft auf dem Polsektor,
-~0,8 s je Iteration, Konvergenz nach ~20 Iterationen. Sie liefert ein **Dichtefeld,
-kein Bauteil**: ein Blechschnitt hat Fertigungs-, Fluss- und Steifigkeits­bedingungen,
-die kein Dichtefeld kennt. Was herauskommt, ist der Radialbereich, in dem das Eisen
-mechanisch wenig trägt — ein Hinweis, wo eine Flussbarriere vertretbar *wäre*, nach
-einer EM-Rechnung und nicht davor. **Z88Arion** wäre das naheliegende Werkzeug dafür,
-gibt es aber nicht für Linux (nur Windows, und dort ohne Stapelbetrieb).
+## What the toolchain has learned from its own runs
 
-## Bedienung am Handy (`/m`)
-
-Ein schmaler zweiter Bedienweg für unterwegs: **Maße eingeben → Halbpol zeichnen →
-vier Betriebspunkte mit dem 2D-FDM-Löser rechnen**. Gerechnet wird immer auf dem
-Rechner (der Löser ist Python/NumPy); das Handy ist Eingabe- und Anzeigegerät.
-
-Beim Serverstart steht die Einstiegsadresse samt **QR-Code** im Terminal:
-
-```
-http://192.168.178.49:5000/m?t=<Token>
+```bash
+python3 cae_cli.py lernen zeige
 ```
 
-Handy ins **gleiche** WLAN (nicht ins Gast-WLAN der Fritz!Box — das ist gegen das
-Heimnetz abgeschottet), QR scannen, „Zum Startbildschirm hinzufügen" → App-Symbol.
-Die Seite läuft danach auch ohne Verbindung an, hält den Entwurf lokal und rechnet,
-sobald der Rechner wieder erreichbar ist.
+Two sources, kept strictly apart:
 
-Gemessen an der Beispielmaschine: **vier Punkte in ~9 s, 1,7 MB** (N=180, 640 px).
-Als einzige Routengruppe verlangt `/m…` ein Token; die übrigen Routen bleiben offen
-wie bisher. Grenzen des Pfads: nur 2D-Feld — kein CAD, keine Festigkeit, keine
-Thermik, kein Fahrzyklus, kein Bericht.
+* **Measured** — derived from the database on every call. Nobody writes it, nobody can
+  colour it. It found a real defect immediately: of 11 runs with `struct_mesh_mm = 2`,
+  exactly **one** produced a structural-FEM value; the rest ran into the timeout
+  unnoticed.
+* **Experience** — notes deposited by an agent or a human, accepted **only with
+  evidence** (a run id, a measured number, a command output). Without evidence they are
+  refused. A store that accepts unverified impressions fills with folklore, and the next
+  model reads it as fact.
 
-## Geteilte Toolchain (systemweit / /opt, nicht in diesem Repo)
+No model is trained here. "Learned" means: derived from the tool's own stock and
+available next time.
 
-- FreeCAD-1.1-Quellbuild + CalculiX → `/opt/cae-tools/freecad_1.1_quellcode` (Symlink `~/freecad_1.1_quellcode`). `ccx` 2.23 wird von dort auch **ohne** FreeCAD aufgerufen
-- **Z88Aurora V5** → `/opt/z88aurora` (2,8 GB, nur die Stapel-Löser werden benutzt). `z88r` findet sein eigenes MKL nicht — `LD_LIBRARY_PATH` auf `/opt/z88aurora/bin/ubuntu64` ist der ganze Trick. **Z88Arion gibt es nicht für Linux**
-- Gmsh — das benutzte ist das **Python-Modul im venv** (4.15.2, aus `requirements.txt`); `/usr/bin/gmsh` (4.12.1) liegt daneben und wird nicht gebraucht
-- Portables Blender → `/opt/cae-tools/blender_portable` (Symlink `~/blender_portable`)
-- OpenFOAM v2406 (`/usr/lib/openfoam`), Elmer, CUDA, pandoc/pdflatex — systemweit
-- Ollama-Dienst auf `localhost:11434`
+## Two solvers on one mesh
 
-## Laufzeitdaten (NICHT versioniert)
+Besides the FreeCAD route there is an own deck: Gmsh meshes one pole sector — or the
+full rotor — from the same magnet geometry the 2D field uses, and the CalculiX input
+file is written directly. **Z88Aurora V5** solves the same mesh as an independent second
+opinion.
 
-- `cae_orchestrator` schreibt Projekte nach `~/cae_projekte` (`~ = /home/cae`).
-- `pikogk` schreibt generierte Geometrie nach `pikogk/PicoGKWebApi/data/` (gitignored).
+| Quantity | CalculiX | Z88 | Δ |
+|---|---:|---:|---:|
+| von Mises, mean | 57.15 MPa | 57.15 MPa | 0.00 % |
+| von Mises, P99 (the gated value) | 128.89 MPa | 128.90 MPa | 0.01 % |
+| Bore hoop stress | 161.57 MPa | 161.62 MPa | 0.03 % |
+| max displacement | 40.59 µm | 40.60 µm | — |
 
-## Hinweis native Teile
+This checks **solver and deck** — not the mesh and not the model. A mesh both see wrongly,
+both see wrongly. Speed: 797,275 elements plus a 40 s FreeCAD start become **13,669
+elements meshed in 0.4 s**.
 
-Dieses Repo versioniert **im Wesentlichen Quellcode**. Die gebaute native `pikogk.so`
-liegt auf der Platte (gitignored) und wird vom laufenden Dienst genutzt. Ein Clone auf
-einem anderen Rechner müsste sie neu bauen (siehe `pikogk/EXPERIENCE_REPORT.md`).
+That deck also carries the **topology optimisation** (SKO, optionally SIMP/OC, ~0.8 s per
+iteration): it needs a per-element Young's modulus, which FreeCAD's writer cannot emit.
+The result is a **density field, not a part** — a sheet cross-section has manufacturing,
+flux and stiffness constraints no density field knows.
 
-Ausnahme, weil daran Lizenzpflichten hängen: einige **gebaute Fremd-Binärdateien** sind
-versioniert und gehen bei jedem Klon mit (`libblosc` aus c-blosc, `libtbb`,
-`libboost_iostreams`, das gebündelte `vtk.js`). Sie sind in `THIRD-PARTY-NOTICES.md`
-aufgeführt — wer weitere hinzufügt, trägt sie dort nach.
+## Two agent heads, one skill
 
-## Lizenz
+The chain is drivable by a **local** model — via [PI](https://pi.dev) or **Hermes Agent**
+(Nous Research). Both run on the same Ollama model and read the **same** skill from
+`.agents/skills/`; nothing is copied or symlinked, so they cannot drift.
 
-Der hier entwickelte Code steht unter der **MIT-Lizenz** (`LICENSE`).
+```bash
+./start_agent.sh                          # PI
+./start_hermes.sh                         # Hermes
+./start_hermes.sh --nur-pruefen           # prove it only talks to local Ollama
+```
 
-Fremdkomponenten behalten ihre eigenen Lizenzen. `THIRD-PARTY-NOTICES.md` trennt dabei,
-was **mitverbreitet** wird (im Repo enthalten — Lizenztext und Copyright-Vermerk müssen
-mitreisen) und was lediglich **vorausgesetzt** wird (lokal installiert oder selbst gebaut,
-nicht Teil dieses Repos). Dazu zählt insbesondere **PicoGK** von LEAP 71 (Apache-2.0):
-das `pikogk`-Subprojekt bindet es ein, enthält aber keinen PicoGK-Quellcode.
+Both answer the same question with the same number (measured: **0.806 T**, both with the
+note that it comes from the analytic formula). `start_hermes.sh` **measures** before every
+start that Hermes only contacts `127.0.0.1:11434` — its shipped default points at a cloud
+endpoint, and two known upstream bugs make the local setting fall through to it silently.
+
+**Why a CLI and not MCP:** a local model cannot hold ~135 HTTP routes as 135 tool schemas
+in its context. Tools are bound as *skill = CLI + README*.
+
+## Research — and its boundary
+
+The agents may look things up on the internet (`cae_cli.py recherche suche|hole`). What
+comes back is marked as **foreign text**: it may be wrong, outdated, or contain
+instructions aimed at a language model. It may **never** replace a computed number.
+
+What matters can be filed under the project — text, images, and extracted values:
+
+```bash
+python3 cae_cli.py recherche merke --projekt last --adresse https://… \
+  --wert "web_mm=1.8 mm :: quoted passage the value comes from"
+```
+
+Values land in a **separate** table `referenzwerte`, never among the computed
+`kennwerte`. A researched value may be correct, but it was not recomputed. Source and a
+verbatim quotation are mandatory; numbers are never scraped from prose automatically.
+
+**Computation stays local.** Nothing is uploaded, no calculation is outsourced.
+
+## Phone (`/m`)
+
+A deliberately narrow second path: enter dimensions → draw a half pole → compute four
+operating points with the 2D-FDM solver, as an installable web app (PWA). Measured on the
+example machine: **four points in ~9 s, 1.7 MB**. The entry URL with a QR code is printed
+at server start.
+
+## Shared toolchain (system-wide, not in this repo)
+
+- FreeCAD 1.1 source build + CalculiX (`ccx` 2.23); `ccx` is also called directly, without FreeCAD
+- **Z88Aurora V5** (batch solvers only). `z88r` needs `LD_LIBRARY_PATH` set to its own MKL and **two** runs — `-t` writes `Z88R.DYN`, which `-c` then reads. **Z88Arion has no Linux build**
+- Gmsh (the Python module in the orchestrator venv), OpenFOAM v2406, Elmer, CUDA, pandoc/pdflatex
+- Ollama at `localhost:11434`
+
+## Runtime data (never versioned)
+
+`cae_orchestrator` writes projects to `~/cae_projekte`, the database to
+`~/cae_projekte/_db`. `pikogk` writes generated geometry to gitignored folders. The
+built native `picogk.so` is a build artifact — a fresh clone must rebuild it (see
+`pikogk/EXPERIENCE_REPORT.md`).
+
+## Note on network exposure
+
+The server binds `0.0.0.0` and sets `Access-Control-Allow-Origin: *` — it is reachable
+from the same WLAN **without auth and without TLS**. That is deliberate for a local
+proof of concept; only the phone path `/m…` requires a token. Do not expose this to an
+untrusted network.
+
+## Licence
+
+Code developed here is **MIT** (`LICENSE`). Third-party components keep their own
+licences; `THIRD-PARTY-NOTICES.md` separates what is **redistributed** from what is
+merely **required** (locally installed or self-built) — including **PicoGK** by LEAP 71
+(Apache-2.0) and **Z88Aurora** (University of Bayreuth).
