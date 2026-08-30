@@ -45,6 +45,9 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
 | `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver beide` (Vollrotor, ~7 s, mit Gegenüberstellung) |
 | `topopt` | Topologieoptimierung des Rotorblechs. `--verfahren sko` (Vorgabe) oder `simp`. 20–60 s. Ergebnis ist ein **Dichtefeld, kein Bauteil** |
+| `db <was>` | **Rechnungsdatenbank**: `import` · `liste` · `zeige --lauf X` · `guete --lauf X` · `vergleich`. Kennwerte **mit Herkunft je Größe** |
+| `lernen <was>` | **was aus dem eigenen Bestand folgt**: `zeige` · `merke --regel … --beleg …` · `pruefe` |
+| `recherche <was>` | **Internet**: `suche <begriffe>` · `hole <adresse>` |
 | `raw GET/POST <pfad>` | beliebige Route — Notausgang für alles Übrige |
 
 ### `struktur` und `topopt` — wann welches
@@ -69,6 +72,53 @@ python3 cae_cli.py topopt   --from-project last --iterationen 25        # ~20 s
   Ergebnis nennt den Radialbereich, in dem das Eisen mechanisch wenig trägt. Das ist
   ein Hinweis, wo eine Flussbarriere vertretbar *wäre* — **nach** einer EM-Rechnung,
   nicht davor. Wer daraus eine Geometrieempfehlung macht, sagt das dazu.
+
+### Zuerst nachsehen, was schon bekannt ist
+
+```bash
+python3 cae_cli.py lernen zeige      # gemessene Regeln + belegte Erfahrungen
+python3 cae_cli.py db liste          # welche Laeufe es gibt
+python3 cae_cli.py db guete --lauf last
+```
+
+`lernen zeige` zählt aus den vorhandenen Läufen aus, was tatsächlich funktioniert hat —
+etwa bei welcher Netzweite die Struktur-FEM Werte geliefert hat. **Vor der Wahl einer
+Einstellung dort nachsehen**, statt sie zu raten.
+
+Wer etwas Überraschendes herausfindet, legt es ab — **mit Beleg**:
+
+```bash
+python3 cae_cli.py lernen merke \
+  --regel "struct_mesh_mm=2 laeuft hier in die Zeitueberschreitung" \
+  --beleg "3 Laeufe 20260827_*: solver_status FAILED; Kontrolllauf bei 3 mm 414 s"
+```
+
+Ohne Beleg wird die Notiz abgewiesen (Exit 2). Eine Regel ohne Beleg ist ein Gerücht
+mit Zeitstempel — und das nächste Modell liest sie als Tatsache.
+
+### Herkunft: welche Zahl von welchem Verfahren
+
+`db zeige` und `db vergleich` geben je Kennwert das Verfahren mit: `analytisch`,
+`fdm2d`, `fem3d`, `lptn`, `zyklus`, `geometrisch`, `tabelle`, `abgeleitet`. Das ist
+nicht Zierde — `B_gap_T` kommt aus der **analytischen** Luftspaltformel, `T_maxwell_Nm`
+dagegen aus dem **gelösten FDM-Feld**. Beide stehen im selben Kennwertsatz nebeneinander
+und wären ohne diese Spalte nicht zu unterscheiden.
+
+Besonders zu beachten: **`structural_basis`** sagt, ob die Festigkeitsaussage auf einer
+FEM-Rechnung beruht (`fem`) oder nur auf der Ringformel (`analytisch`), weil die FEM
+nichts geliefert hat. Ein grünes `structural_ok` allein sagt das nicht.
+
+### Internetrecherche
+
+```bash
+python3 cae_cli.py recherche suche "IPM Rotor Stegbreite Auslegung" --treffer 5
+python3 cae_cli.py recherche hole https://…
+```
+
+Beides liefert **Fremdtext**, der als solcher markiert ist. Er darf **nie** eine
+gerechnete Zahl ersetzen und gehört in einen Bericht nur **mit Quellenangabe**. Wer
+eine Behauptung aus dem Netz übernimmt, sagt dazu, dass sie von dort stammt — dieselbe
+Regel wie bei „diese Zahl ist analytisch, nicht gerechnet".
 
 ## Ergebnisse lesen — die wichtigste Regel
 

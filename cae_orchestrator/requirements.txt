@@ -12,3 +12,5 @@ pypdf>=4.0      # PDF-Textextraktion für die Wissensbasis (RAG); nur dafür ben
 gmsh>=4.12      # 3D-Mesh (OCC): Elmer-3D-Magnetfeld (ema_em3d) UND der eigene Rechensatz (ema_deck)
 vtk>=9.0        # 3D-Visualisierung (offscreen) + VTU-Auswertung der Elmer-Ergebnisse
 segno            # QR-Code fuer den Handy-Zugang (reines Python)
+ddgs             # Websuche ohne Schluessel (ema_recherche) — Agenten-Recherche
+trafilatura      # Artikeltext aus HTML (ema_recherche); ohne sie nur Suche, kein Abruf

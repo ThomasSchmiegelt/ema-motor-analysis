@@ -301,6 +301,18 @@ def importiere_projekt(conn: sqlite3.Connection, projektpfad: str,
             n, t = _zahl(meta[k])
             conn.execute("INSERT OR REPLACE INTO parameter VALUES (?,?,?,?,?)",
                          (lauf_id, k, n, t, "lauf"))
+    # Die Stellschrauben des LAUFS, nicht der Maschine. Sie liegen nur im payload,
+    # entscheiden aber, ob eine Stufe ueberhaupt durchkommt — an struct_mesh_mm=2
+    # sind drei Laeufe in die Zeitueberschreitung gelaufen. Ohne sie in der Datenbank
+    # kann niemand den Zusammenhang finden.
+    for k in ("struct_mesh_mm", "struct_solver", "struct_deck", "struct_img_px",
+              "struct_video", "struct_frames", "fdm_resolution", "frame_resolution",
+              "rotor_lam", "stator_lam"):
+        v = (meta.get("payload") or {}).get(k)
+        if v is not None:
+            n, t = _zahl(v)
+            conn.execute("INSERT OR REPLACE INTO parameter VALUES (?,?,?,?,?)",
+                         (lauf_id, k, n, t, "lauf"))
 
     # Kennwerte mit Herkunft
     fem = results.get("structural_fem") or {}

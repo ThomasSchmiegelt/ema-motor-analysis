@@ -428,6 +428,80 @@ def cmd_run(args) -> int:
     return EXIT_OK
 
 
+def cmd_lernen(args) -> int:
+    """Selbstlernfunktion: gemessene Regeln aus dem eigenen Bestand + belegte Erfahrungen.
+
+    Exit: 0 = ok, 2 = Erfahrung ohne Beleg abgewiesen."""
+    import ema_lernen as L
+
+    if args.was == "zeige":
+        if getattr(args, "json", False):
+            return emit({"gemessen": L.gemessene_regeln(),
+                         "erfahrungen": L.erfahrungen()}, args)
+        print(L.als_text())
+        return EXIT_OK
+
+    if args.was == "merke":
+        if not args.regel or not args.beleg:
+            return _die("'lernen merke' braucht --regel und --beleg. "
+                        "Eine Erfahrung ohne Beleg wird nicht angenommen.", EXIT_USAGE)
+        try:
+            satz = L.merke(args.regel, args.beleg, quelle=args.quelle or "")
+        except L.OhneBeleg as e:
+            return _die(str(e), EXIT_USAGE)
+        emit(satz, args)
+        print(f"  gemerkt: {satz['regel']}")
+        return EXIT_OK
+
+    if args.was == "pruefe":
+        p = L.pruefe()
+        emit(p, args)
+        if not getattr(args, "json", False):
+            print(f"  Bestand: {p['laeufe_jetzt']} Laeufe · "
+                  f"{len(p['frisch'])} Erfahrungen frisch · "
+                  f"{len(p['nachzupruefen'])} nachzupruefen")
+            for x in p["nachzupruefen"]:
+                print(f"    • {x['regel'][:70]} ({x['neue_laeufe_seither']} Laeufe seither)")
+        return EXIT_OK
+
+    return _die(f"unbekannt: {args.was}", EXIT_USAGE)
+
+
+def cmd_recherche(args) -> int:
+    """Internetrecherche — Websuche und Seitenabruf. Exit: 0 = ok, 1 = nichts gefunden."""
+    import ema_recherche as R
+
+    if args.was == "suche":
+        if not args.frage:
+            return _die("'recherche suche' braucht eine Frage.", EXIT_USAGE)
+        try:
+            t = R.suche(" ".join(args.frage), treffer=args.treffer)
+        except Exception as e:                              # noqa: BLE001
+            return _die(f"Suche fehlgeschlagen: {e}", EXIT_REMOTE)
+        if not t:
+            return _die("Keine Treffer.", EXIT_REMOTE)
+        emit(t, args)
+        if not getattr(args, "json", False):
+            print(R.als_text(t, "suche"))
+        return EXIT_OK
+
+    if args.was == "hole":
+        if not args.frage:
+            return _die("'recherche hole' braucht eine Adresse.", EXIT_USAGE)
+        try:
+            d = R.hole(args.frage[0], max_zeichen=args.zeichen)
+        except Exception as e:                              # noqa: BLE001
+            return _die(f"Abruf fehlgeschlagen: {e}", EXIT_REMOTE)
+        if d.get("fehler"):
+            return _die(f"{d['fehler']} ({d['adresse']})", EXIT_REMOTE)
+        emit(d, args)
+        if not getattr(args, "json", False):
+            print(R.als_text(d, "hole"))
+        return EXIT_OK
+
+    return _die(f"unbekannt: {args.was}", EXIT_USAGE)
+
+
 def cmd_db(args) -> int:
     """Rechnungsdatenbank: importieren, auflisten, zeigen, vergleichen, Guete.
 
@@ -883,6 +957,25 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Mindeststege in mm (Vorgabe: ema_topology.BRIDGE_MM = 2.0)")
     _add_globals(s)
     s.set_defaults(fn=cmd_rotor_check)
+
+    s = sub.add_parser("lernen",
+                       help="was die Toolchain aus ihren eigenen Laeufen weiss (gemessen + belegte Erfahrungen)")
+    s.add_argument("was", choices=["zeige", "merke", "pruefe"])
+    s.add_argument("--regel", help="die Erfahrung in einem Satz")
+    s.add_argument("--beleg", help="woran sie nachpruefbar ist — Lauf-Kennung, Zahl, Ausgabe")
+    s.add_argument("--quelle", help="woher (z. B. Projekt-Id oder Befehl)")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_lernen)
+
+    s = sub.add_parser("recherche",
+                       help="Internetrecherche: Websuche und Seitenabruf (fuer die Agenten)")
+    s.add_argument("was", choices=["suche", "hole"])
+    s.add_argument("frage", nargs="*", help="Suchbegriffe bzw. die Adresse")
+    s.add_argument("--treffer", type=int, default=5, help="Zahl der Suchtreffer (max 10)")
+    s.add_argument("--zeichen", type=int, default=6000,
+                   help="Hoechstlaenge des geholten Textes")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_recherche)
 
     s = sub.add_parser("db",
                        help="Rechnungsdatenbank: Eingaben, Kennwerte MIT Herkunft, Bilder, Guete")
