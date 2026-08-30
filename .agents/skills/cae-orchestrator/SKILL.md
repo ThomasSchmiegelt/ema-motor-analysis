@@ -47,7 +47,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver beide` (Vollrotor, ~7 s, mit Gegenüberstellung) |
 | `topopt` | Topologieoptimierung des Rotorblechs. `--verfahren sko` (Vorgabe) oder `simp`. 20–60 s. Ergebnis ist ein **Dichtefeld, kein Bauteil** |
 | `db <was>` | **Rechnungsdatenbank**: `import` · `liste` · `zeige --lauf X` · `guete --lauf X` · `vergleich`. Kennwerte **mit Herkunft je Größe** |
-| `lernen <was>` | **was aus dem eigenen Bestand folgt**: `zeige` · `merke --regel … --beleg …` · `pruefe` |
+| `lernen <was>` | **was aus dem eigenen Bestand folgt**: `zeige` · `merke --regel … --beleg …` · `pruefe` · **`probieren`** = geplanter Versuch: jede Bauform ueber jede Polzahl, mit `--merken` landen die Befunde als belegte Regeln im Speicher |
 | `recherche <was>` | **Internet**: `suche <begriffe>` · `hole <adresse>` |
 | `raw GET/POST <pfad>` | beliebige Route — Notausgang für alles Übrige |
 
@@ -210,6 +210,30 @@ Typ und Auswahlliste — `python3 cae_cli.py raw GET /param_schema` zeigt sie sa
 **Nicht im Schema, aber im Payload:** reine CAD-Schalter (`genBearingA`, `splineTeeth`,
 `windingHeadStyle` …). Die gehen weiterhin durch, wenn sie in der Vorlage stehen — aber
 ohne Grenzen und ohne Typprüfung. Was das Feld beeinflusst, steht im Schema.
+
+### `lernen probieren` — den Raum einmal kartieren
+
+`screen` waehlt aus, `lernen probieren` **kartiert**. Es faehrt jede Bauform ueber jede
+Polzahl ab und haelt fest, was dabei herauskommt:
+
+```bash
+python3 cae_cli.py lernen probieren --from-project last --merken
+```
+
+Drei Arten von Befund, alle nachpruefbar:
+
+1. **Baubarkeit je Bauform** — bei welchen Polzahlen sie in voller Magnetgroesse passt,
+   ab wann der Magnet verkleinert werden muss (mit Massstab), und wo sie gar nicht geht.
+   Das ist Geometrie; ein Feldlauf kann es nicht umstossen.
+2. **Welche Achse eine Kennzahl gar nicht bewegt.** Beispiel aus dem echten Versuch:
+   `Kt` und `B_gap` haengen auf der analytischen Stufe weder von der Nutzahl noch von der
+   Leiterzahl ab, und **V und U sind dort ununterscheidbar** (gleiche Kt, gleiche B_gap).
+   Das musst du nicht selbst herausfinden — steht nach dem Versuch in `lernen zeige`.
+3. **Welche Nut/Pol-Paarungen wicklungsfaehig sind** — reine Arithmetik.
+
+Mit `--merken` gehen die Befunde als belegte Regeln in den Lernspeicher; ohne `--merken`
+werden sie nur angezeigt. **Rangfolgen werden nie gemerkt** — die haengen am Verfahren,
+und das ist hier analytisch.
 
 ### Ganz am Anfang: `screen`
 

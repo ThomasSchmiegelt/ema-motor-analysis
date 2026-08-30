@@ -153,6 +153,71 @@ def merke(regel: str, beleg: str, quelle: str = "", conn=None) -> dict:
     return satz
 
 
+def aus_versuch(befund: dict, quelle: str = "versuch", conn=None) -> list:
+    """Aus einem geplanten Versuch (``ema_screen.durchprobieren``) Regeln ableiten.
+
+    Der Unterschied zu ``merke`` von Hand: hier schreibt kein Sprachmodell auf, was es
+    zu wissen glaubt -- die Saetze werden aus dem Versuchsergebnis **erzeugt**, und der
+    Beleg ist der Versuch selbst, mit Zahlen. Das ist die einzige Art, wie dieser
+    Speicher automatisch wachsen darf, ohne sich mit Folklore zu fuellen.
+
+    Aufgenommen wird nur, was **Geometrie oder Arithmetik** ist -- ob eine Tasche in
+    den Pol passt, ob sich eine Wicklung symmetrisch legen laesst, welche Achse eine
+    Kennzahl auf der analytischen Stufe ueberhaupt bewegt. Diese Aussagen kann ein
+    spaeterer Feldlauf nicht umstossen. Rangfolgen und Guetezahlen werden **nicht**
+    gemerkt: die haengen am Verfahren, und das ist auf dieser Stufe analytisch.
+    """
+    n = befund.get("geprueft", 0)
+    saetze = []
+
+    # 1. Baubarkeit je Bauform — die haltbarste Aussage des ganzen Versuchs.
+    for form in sorted(befund.get("karte", {})):
+        k = befund["karte"][form]
+        voll, klein, nix = k["volle_groesse"], k["nur_verkleinert"], k["gar_nicht"]
+        if not (voll or klein or nix):
+            continue
+        teile = []
+        if voll:
+            teile.append("in voller Magnetgroesse bei p=" + ",".join(map(str, voll)))
+        if klein:
+            teile.append("nur verkleinert bei " +
+                         ", ".join(f"p={p} (Massstab {m:.2f})" for p, m in klein))
+        if nix:
+            teile.append("gar nicht bei p=" + ",".join(map(str, nix)))
+        saetze.append((
+            f"Bauform '{form}' ist mit dieser Rotorgroesse {'; '.join(teile)} baubar.",
+            f"Geplanter Versuch ueber {n} Kombinationen, 2-D-Layouttor "
+            f"(Mindeststeg {2.0} mm) auf jeder einzelnen. Karte: {json.dumps(k)}"))
+
+    # 2. Welche Achse eine Kennzahl auf dieser Stufe NICHT bewegt.
+    for kennzahl, achsen in (befund.get("unbewegt") or {}).items():
+        fest = sorted(a for a, konstant in achsen.items() if konstant)
+        if fest:
+            saetze.append((
+                f"Auf der analytischen Stufe haengt {kennzahl} NICHT von "
+                f"{' und '.join(fest)} ab. Wer danach unterscheiden will, braucht den "
+                f"Feldlauf.",
+                f"Geplanter Versuch, {n} Kombinationen: bei fester Polpaarzahl und "
+                f"Bauform ist {kennzahl} ueber alle Werte von {', '.join(fest)} "
+                f"identisch (0 abweichende Gruppen)."))
+
+    # 3. Bauformen, die auf dieser Stufe ununterscheidbar sind.
+    for gruppe in befund.get("ununterscheidbar") or []:
+        saetze.append((
+            f"Die Bauformen {', '.join(gruppe)} liefern auf der analytischen Stufe "
+            f"dieselbe Kt und dieselbe B_gap -- sie sind dort nicht zu trennen.",
+            f"Geplanter Versuch ueber {n} Kombinationen: bei gleicher Polpaarzahl "
+            f"stimmen Kt und B_gap auf 6 Nachkommastellen ueberein."))
+
+    aufgenommen = []
+    for regel, beleg in saetze:
+        try:
+            aufgenommen.append(merke(regel, beleg, quelle=quelle, conn=conn))
+        except OhneBeleg as e:                                # noqa: PERF203
+            aufgenommen.append({"abgewiesen": str(e), "regel": regel})
+    return aufgenommen
+
+
 def erfahrungen() -> list:
     if not os.path.isfile(ERFAHRUNGEN):
         return []

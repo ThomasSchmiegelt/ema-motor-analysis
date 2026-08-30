@@ -453,6 +453,41 @@ def cmd_lernen(args) -> int:
         print(f"  gemerkt: {satz['regel']}")
         return EXIT_OK
 
+    if args.was == "probieren":
+        # Der geplante Versuch. Bisher lernte dieses Modul nur aus dem, was zufaellig
+        # gerechnet wurde -- was nie jemand ausprobiert hat, konnte es nicht wissen.
+        # Hier wird der Raum absichtlich abgefahren: jede Bauform ueber jede Polzahl.
+        import ema_screen as SC
+
+        payload = _load_payload(args)
+        if not payload.get("geom"):
+            return _die("Keine Geometrie im Payload — probieren braucht geom.", EXIT_USAGE)
+        achsen = dict(SC.VERSUCH_ACHSEN)
+        for name, roh in (("p", args.pole), ("slots", args.nuten),
+                          ("magShape", args.formen)):
+            if roh:
+                werte = [w.strip() for w in roh.split(",") if w.strip()]
+                achsen[name] = werte if name == "magShape" else [int(w) for w in werte]
+
+        befund = SC.durchprobieren(payload, achsen=achsen, n_max=args.n_max)
+        if getattr(args, "json", False):
+            emit(befund, args)
+        else:
+            print(SC.versuch_text(befund))
+
+        if args.merken:
+            aufgenommen = L.aus_versuch(befund, quelle=args.quelle or "lernen probieren")
+            neu_n = sum(1 for a in aufgenommen if "abgewiesen" not in a)
+            print(f"\n  {neu_n} Regeln in den Lernspeicher aufgenommen "
+                  f"(sichtbar mit 'lernen zeige').")
+            for a in aufgenommen:
+                if "abgewiesen" in a:
+                    print(f"    abgewiesen: {a['abgewiesen']}")
+        else:
+            print("\n  Nichts gemerkt. Mit --merken werden die Befunde als belegte "
+                  "Regeln abgelegt.")
+        return EXIT_OK
+
     if args.was == "pruefe":
         p = L.pruefe()
         emit(p, args)
@@ -856,6 +891,7 @@ def _magshapes() -> list[str]:
 
 
 _MAGSHAPES = _magshapes()
+_VERSUCH_P = [2, 3, 4, 5, 6, 8]
 
 
 def cmd_screen(args) -> int:
@@ -1141,11 +1177,25 @@ def build_parser() -> argparse.ArgumentParser:
 
     s = sub.add_parser("lernen",
                        help="was die Toolchain aus ihren eigenen Laeufen weiss (gemessen + belegte Erfahrungen)")
-    s.add_argument("was", choices=["zeige", "merke", "pruefe"])
+    s.add_argument("was", choices=["zeige", "merke", "pruefe", "probieren"])
     s.add_argument("--regel", help="die Erfahrung in einem Satz")
     s.add_argument("--beleg", help="woran sie nachpruefbar ist — Lauf-Kennung, Zahl, Ausgabe")
     s.add_argument("--quelle", help="woher (z. B. Projekt-Id oder Befehl)")
-    _add_globals(s)
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="probieren: JSON direkt")
+    g.add_argument("--payload-file", help="probieren: Datei mit JSON")
+    g.add_argument("--from-project",
+                   help="probieren: Basis aus ~/cae_projekte/<id>/meta.json ('last')")
+    s.add_argument("--merken", action="store_true",
+                   help="probieren: die Befunde als belegte Regeln ablegen")
+    s.add_argument("--polpaare", "--pole", dest="pole",
+                   help="probieren: Polpaarzahlen, sonst " + str(_VERSUCH_P))
+    s.add_argument("--nuten", help="probieren: Nutzahlen")
+    s.add_argument("--formen", help="probieren: Bauformen, sonst alle: "
+                                    + ", ".join(_MAGSHAPES))
+    s.add_argument("--n_max", type=float, default=None,
+                   help="probieren: Hoechstdrehzahl fuer das Fliehkrafttor")
+    _add_globals(s, json_hilfe="der vollstaendige Befund als JSON")
     s.set_defaults(fn=cmd_lernen)
 
     s = sub.add_parser("recherche",

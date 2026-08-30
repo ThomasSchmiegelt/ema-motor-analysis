@@ -671,6 +671,147 @@ def uebernahme_befehl(zeile: dict, basis_geom: dict, verb: str = "rotor-check") 
             + " ".join("--set " + s for s in uebernahme(zeile, basis_geom)))
 
 
+# ── Systematischer Versuch: alle Anordnungen, alle Polzahlen ─────────────────
+
+# Die Achsen des Versuchs. Breiter als ACHSEN_VORGABE, weil hier nicht ausgewaehlt,
+# sondern KARTIERT wird -- es soll herauskommen, was ueberhaupt geht, nicht was am
+# besten ist.
+VERSUCH_ACHSEN = {
+    "p":                 [2, 3, 4, 5, 6, 8],
+    "slots":             [24, 36, 48, 60, 72],
+    "magShape":          ["v", "vasym", "bar", "u", "vv", "delta", "pmasynrm", "spoke"],
+    "conductorsPerSlot": [4, 6],
+}
+
+
+def durchprobieren(basis: dict, achsen: dict | None = None,
+                   n_max: float | None = None) -> dict:
+    """Alle Bauformen ueber alle Polzahlen durchspielen und den Befund festhalten.
+
+    Das ist ein **geplanter Versuch**, kein Beobachten: ``ema_lernen`` leitet seine
+    Regeln sonst aus dem ab, was zufaellig gerechnet wurde, und was nie jemand
+    ausprobiert hat, kann es nicht wissen. Hier wird der Raum absichtlich abgefahren.
+
+    Was dabei herauskommt, ist **Geometrie und Arithmetik** -- passt die Tasche in den
+    Pol, laesst sich die Wicklung symmetrisch legen, wie weit muss der Magnet
+    schrumpfen. Das sind Aussagen, die ein Feldlauf nicht umstossen kann. Was hier
+    NICHT herauskommt, ist die elektromagnetische Guete: die analytische Stufe kennt
+    weder Nutzahl noch Windungszahl, und genau das wird als eigener Befund gemeldet,
+    damit es niemand ein zweites Mal muehsam selbst herausfindet.
+    """
+    achsen = achsen or VERSUCH_ACHSEN
+    kombis = 1
+    for w in achsen.values():
+        kombis *= len(w)
+    erg = screene(basis, "ausgewogen", achsen=achsen, n_max=n_max,
+                  grenze=max(kombis, 400))
+    alle = erg["rangliste"] + erg["verworfen"]
+
+    # ── 1. Bauform x Polzahl: geht es, und wenn ja, zu welchem Preis ──────────
+    je_form: dict = {}
+    for z in alle:
+        form, pp = z.get("magShape"), z.get("p")
+        if not form or pp is None:
+            continue
+        eintrag = je_form.setdefault(form, {}).setdefault(pp, {
+            "geprueft": 0, "brauchbar": 0, "massstaebe": [], "gruende": []})
+        eintrag["geprueft"] += 1
+        if z.get("ok"):
+            eintrag["brauchbar"] += 1
+            if isinstance(z.get("s_koerper"), (int, float)):
+                eintrag["massstaebe"].append(z["s_koerper"])
+        else:
+            eintrag["gruende"].append((z.get("grund") or "")[:60])
+
+    karte = {}
+    for form, je_p in je_form.items():
+        voll, geschrumpft, nichts = [], [], []
+        for pp, e in sorted(je_p.items()):
+            if not e["brauchbar"]:
+                nichts.append(pp)
+            elif e["massstaebe"] and min(e["massstaebe"]) > 0.999:
+                voll.append(pp)
+            else:
+                geschrumpft.append((pp, round(min(e["massstaebe"] or [1.0]), 2)))
+        karte[form] = {"volle_groesse": voll, "nur_verkleinert": geschrumpft,
+                       "gar_nicht": nichts}
+
+    # ── 2. Welche Achse bewegt welche Kennzahl ueberhaupt? ────────────────────
+    # Der eigentliche Erkenntnisgewinn. Ein Agentenlauf hat sich das haendisch
+    # erarbeitet ("V und U sind analytisch identisch") -- das gehoert gemessen und
+    # aufgeschrieben, nicht jedes Mal neu erschlossen.
+    gut = erg["rangliste"]
+    unbewegt = {}
+    for kennzahl in ("Kt_Nm_per_A", "B_gap_T"):
+        for achse in ("slots", "conductorsPerSlot"):
+            gruppen: dict = {}
+            for z in gut:
+                schluessel = tuple(z[k] for k in ("p", "magShape") if k in z)
+                gruppen.setdefault(schluessel, set()).add(round(z[kennzahl], 6))
+            konstant = all(len(v) <= 1 for v in gruppen.values())
+            unbewegt.setdefault(kennzahl, {})[achse] = konstant
+
+    # Welche Bauformen sind auf dieser Stufe ununterscheidbar?
+    signatur: dict = {}
+    for z in gut:
+        signatur.setdefault((z["p"], round(z["Kt_Nm_per_A"], 6),
+                             round(z["B_gap_T"], 6)), set()).add(z["magShape"])
+    ununterscheidbar = sorted({tuple(sorted(v)) for v in signatur.values() if len(v) > 1})
+
+    # ── 3. Wicklung: reine Arithmetik, gilt ohne jede Rechnung ────────────────
+    paarungen = [(sl, 2 * pp)
+                 for pp in achsen.get("p", []) for sl in achsen.get("slots", [])
+                 if wicklung_moeglich(sl, 2 * pp)]
+
+    return {"geprueft": erg["geprueft"], "brauchbar": erg["brauchbar"],
+            "achsen": {k: achsen[k] for k in achsen},
+            "karte": karte, "unbewegt": unbewegt,
+            "ununterscheidbar": [list(t) for t in ununterscheidbar],
+            "wicklungspaare": paarungen,
+            "basis_geom": erg.get("basis_geom", {}),
+            "rangliste": erg["rangliste"][:10],
+            "hinweis": ("Geplanter Versuch auf der ANALYTISCHEN Stufe. Die Aussagen zu "
+                        "Baubarkeit und Wicklung sind Geometrie und Arithmetik und "
+                        "gelten unabhaengig vom Feldlauf; die Kennzahlen nicht.")}
+
+
+def versuch_text(b: dict) -> str:
+    """Der Befund als Text — das, was ein Agent am Sitzungsanfang lesen soll."""
+    z = [f"Systematischer Versuch: {b['brauchbar']} von {b['geprueft']} Kombinationen baubar",
+         ""]
+    z.append("## Welche Bauform bei welcher Polpaarzahl")
+    z.append("")
+    z.append(f"  {'Bauform':10s} {'volle Magnetgroesse':22s} {'nur verkleinert':26s} {'gar nicht':10s}")
+    z.append("  " + "-" * 74)
+    for form in sorted(b["karte"]):
+        k = b["karte"][form]
+        voll = ",".join(str(x) for x in k["volle_groesse"]) or "—"
+        klein = ",".join(f"{p}({m:.2f})" for p, m in k["nur_verkleinert"]) or "—"
+        nix = ",".join(str(x) for x in k["gar_nicht"]) or "—"
+        z.append(f"  {form:10s} {voll:22s} {klein:26s} {nix:10s}")
+    z += ["", "  Zahl in Klammern = kleinster noetiger Magnetmassstab bei dieser Polpaarzahl.", ""]
+
+    z.append("## Was die analytische Stufe NICHT unterscheiden kann")
+    z.append("")
+    for kennzahl, achsen in b["unbewegt"].items():
+        fest = [a for a, konstant in achsen.items() if konstant]
+        if fest:
+            z.append(f"  {kennzahl} ist unabhaengig von: {', '.join(fest)}")
+    for gruppe in b["ununterscheidbar"]:
+        z.append(f"  gleiche Kt UND gleiche B_gap: {', '.join(gruppe)}")
+    z += ["", "  Wer diese Groessen unterscheiden will, braucht den Feldlauf ('run analyse').", ""]
+
+    z.append("## Symmetrische Drehstromwicklung (reine Arithmetik)")
+    z.append("")
+    je_pol: dict = {}
+    for sl, po in b["wicklungspaare"]:
+        je_pol.setdefault(po, []).append(sl)
+    for po in sorted(je_pol):
+        z.append(f"  {po:3d} Pole: {', '.join(str(s) for s in sorted(je_pol[po]))} Nuten")
+    z += ["", "  " + b["hinweis"]]
+    return "\n".join(z)
+
+
 def bestenliste_text(erg: dict, n: int = 12) -> str:
     """Rangliste als Text — die Teilnoten mit, sonst ist die Reihenfolge Magie.
 

@@ -14,6 +14,7 @@ darum vor allem drei Zusagen fest:
 """
 
 import math
+import os
 import sys
 
 import ema_drivecycle as DC
@@ -249,6 +250,76 @@ sets_gleich = S.uebernahme(r_gleich, BASIS_GEOM)
 pruefe(all(s.split("=")[0] in ("p", "slots", "magShape", "conductorsPerSlot")
            for s in sets_gleich),
        f"unveraenderte Geometrie erzeugt keine Geometrie-Zuweisungen: {sets_gleich}")
+
+# ── 4c. Der geplante Versuch (Selbstlernmodus) ───────────────────────────────
+
+print("\n18. Systematischer Versuch ueber alle Bauformen und Polzahlen")
+achsen_v = {"p": [2, 3, 5], "slots": [36, 48], "conductorsPerSlot": [4],
+            "magShape": ["v", "u", "spoke", "bar"]}
+bef = S.durchprobieren(BASIS, achsen=achsen_v)
+pruefe(bef["geprueft"] == 24, f"24 Kombinationen abgefahren ({bef['geprueft']})")
+pruefe(set(bef["karte"]) == {"v", "u", "spoke", "bar"},
+       f"jede Bauform kartiert: {sorted(bef['karte'])}")
+for form, k in bef["karte"].items():
+    alle_p = sorted(k["volle_groesse"] + [x[0] for x in k["nur_verkleinert"]]
+                    + k["gar_nicht"])
+    pruefe(alle_p == [2, 3, 5],
+           f"{form}: jede Polzahl genau einmal eingeordnet ({alle_p})")
+
+pruefe(bef["unbewegt"]["Kt_Nm_per_A"]["slots"] is True,
+       "gemessen: Kt haengt auf dieser Stufe nicht von der Nutzahl ab")
+pruefe(any("u" in g and "v" in g for g in bef["ununterscheidbar"]),
+       f"gemessen: V und U sind analytisch ununterscheidbar ({bef['ununterscheidbar']})")
+pruefe(all(S.wicklung_moeglich(sl, po) for sl, po in bef["wicklungspaare"]),
+       "die gemeldeten Wicklungspaare erfuellen das Kriterium wirklich")
+
+# Die Kartierung muss mit dem echten Tor uebereinstimmen — sonst lernt der Speicher
+# etwas Falsches, und das ist schlimmer als nichts zu lernen.
+falsch = []
+for form, k in bef["karte"].items():
+    for pp in k["volle_groesse"]:
+        r = S.einpassen(dict(BASIS_GEOM, magShape=form), pp)
+        if not (r["ok"] and r["s_koerper"] > 0.999 and rotor_layout_check(r["geom"])["ok"]):
+            falsch.append((form, pp, "als voll gemeldet"))
+    for pp in k["gar_nicht"]:
+        if S.einpassen(dict(BASIS_GEOM, magShape=form), pp)["ok"]:
+            falsch.append((form, pp, "als unbaubar gemeldet, ist aber baubar"))
+pruefe(not falsch, f"die Karte stimmt mit dem echten Tor ueberein ({falsch[:2]})")
+
+txt_v = S.versuch_text(bef)
+for stueck in ("volle Magnetgroesse", "NICHT unterscheiden",
+               "Drehstromwicklung", "ANALYTISCHEN Stufe"):
+    pruefe(stueck in txt_v, f"Befundtext nennt '{stueck}'")
+
+print("\n19. Der Lernspeicher nimmt nur Belegtes auf")
+import tempfile
+
+import ema_lernen as L
+
+# In eine WEGWERFDATEI schreiben. Der erste Anlauf dieses Tests hing am echten
+# Speicher unter ~/cae_projekte/_lernen/ und hat dort Testsaetze hinterlassen -- ein
+# Test, der die Daten des Nutzers veraendert, ist selbst ein Fehler.
+_echt = L.ERFAHRUNGEN
+L.ERFAHRUNGEN = os.path.join(tempfile.mkdtemp(), "erfahrungen.jsonl")
+saetze = []
+for regel, beleg in [
+        ("Bauform 'v' ist bei p=2,3 in voller Groesse baubar.",
+         "Geplanter Versuch ueber 24 Kombinationen, Layouttor auf jeder einzelnen."),
+        ("zu kurz", "Beleg mit 123 Zahlen drin und lang genug"),
+        ("Eine ausreichend lange und nachvollziehbare Regelaussage.", "ohne Zahl")]:
+    try:
+        L.merke(regel, beleg, quelle="test", conn=None)
+        saetze.append("angenommen")
+    except L.OhneBeleg:
+        saetze.append("abgewiesen")
+    except Exception:                                        # noqa: BLE001
+        saetze.append("fehler")
+pruefe(saetze[0] == "angenommen", "belegte Regel wird angenommen")
+pruefe(saetze[1] == "abgewiesen", "zu kurze Regel wird abgewiesen")
+pruefe(saetze[2] == "abgewiesen", "Beleg ohne Zahl wird abgewiesen")
+pruefe(os.path.isfile(L.ERFAHRUNGEN) and L.ERFAHRUNGEN != _echt,
+       "geschrieben wurde in die Wegwerfdatei, nicht in den echten Speicher")
+L.ERFAHRUNGEN = _echt
 
 # ── 5. Stadt/Land-Zyklus ─────────────────────────────────────────────────────
 
