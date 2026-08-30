@@ -768,3 +768,99 @@ def kennzahlen(netz: Netz, spannungen: dict, yield_mpa: float = 0.0,
     if yield_mpa > 0 and p99 > 0:
         aus["safety_factor_p99"] = round(yield_mpa / p99, 2)
     return aus
+
+
+# ── Gegenprobe: sind die Magnettaschen im vernetzten Modell? ──────────────────
+
+def volumen_aus_inp(pfad: str) -> tuple[float, int, int]:
+    """(Volumen [mm³], Knoten, Elemente) aus einer CalculiX-``.inp`` — egal wer sie schrieb.
+
+    Liest ausschliesslich Text, kein FreeCAD, kein Loeser. Damit laesst sich pruefen,
+    was tatsaechlich vernetzt und geloest wurde, statt dem zu glauben, was gezeichnet
+    wurde.
+    """
+    kn, el, modus = {}, [], None
+    with open(pfad, errors="ignore") as f:
+        for L in f:
+            t = L.strip()
+            if t.startswith("*"):
+                u = t.upper()
+                modus = "N" if u.startswith("*NODE") else ("E" if u.startswith("*ELEMENT") else None)
+                continue
+            if not t or modus is None:
+                continue
+            feld = [x.strip() for x in t.split(",") if x.strip()]
+            if modus == "N" and len(feld) >= 4:
+                try:
+                    kn[int(feld[0])] = (float(feld[1]), float(feld[2]), float(feld[3]))
+                except ValueError:
+                    pass
+            elif modus == "E" and len(feld) >= 5 and feld[0].isdigit():
+                try:
+                    el.append([int(x) for x in feld[1:]])
+                except ValueError:
+                    pass
+
+    def _v(ids):
+        try:
+            a, b, c, d = (kn[i] for i in ids[:4])
+        except KeyError:
+            return 0.0
+        u = (b[0]-a[0], b[1]-a[1], b[2]-a[2])
+        v = (c[0]-a[0], c[1]-a[1], c[2]-a[2])
+        w = (d[0]-a[0], d[1]-a[1], d[2]-a[2])
+        return abs(u[0]*(v[1]*w[2]-v[2]*w[1]) - u[1]*(v[0]*w[2]-v[2]*w[0])
+                   + u[2]*(v[0]*w[1]-v[1]*w[0])) / 6.0
+
+    return sum(_v(e) for e in el if len(e) >= 4), len(kn), len(el)
+
+
+def pruefe_taschen(geom: dict, inp_pfad: str, mesh_mm: float = 12.0) -> dict:
+    """Sind die Magnettaschen im **vernetzten** Modell — oder nur in der Zeichnung?
+
+    Warum das nicht ueber die CAD-Bilder geht: ``ema_pipeline._save_cad_images``
+    zeichnet den Querschnitt mit matplotlib aus ``geom`` und ``magnet_legs``. Die
+    FreeCAD-Geometrie kommt aus **derselben** Quelle. Geht FreeCADs Boolescher Schnitt
+    still daneben, zeigt das Bild trotzdem Taschen — es kann den Fehler gar nicht
+    sehen. Das Volumen dessen, was tatsaechlich vernetzt wurde, kann es.
+
+    Verglichen wird dreifach:
+
+    * ``volumen_netz``    — aus der ``.inp``, die der Loeser bekommen hat
+    * ``volumen_taschen`` — parametrisch MIT Taschen, ueber OpenCASCADE (``baue``)
+    * ``volumen_ring``    — voller Kreisring OHNE Taschen, analytisch
+
+    Gemessen an ``20260827_170019_Alpenpass_2500kg_V-IPM``: Netz 2.695.674 mm³,
+    parametrisch 2.768.590 mm³ (2,6 %), voller Ring 3.013.098 mm³ (10,5 %). Die
+    2,6 % sind erklaerbar und haben das richtige Vorzeichen: FreeCAD schneidet
+    Langlochtaschen mit Klebespalt (``magGapMm``) plus die Wuchtbohrungen, ``baue``
+    nur schlichte Rechtecke — FreeCAD nimmt also etwas MEHR weg.
+    """
+    v_netz, n_kn, n_el = volumen_aus_inp(inp_pfad)
+    netz = baue(geom, mesh_mm=mesh_mm, ordnung=1, sektoren=0)
+    v_tasch = netz.volumen_occ_mm3
+    v_ring  = math.pi * (netz.r_rot ** 2 - netz.r_shaft ** 2) * netz.axial_len
+
+    d_tasch = abs(v_netz - v_tasch) / v_tasch if v_tasch else 9e9
+    d_ring  = abs(v_netz - v_ring) / v_ring if v_ring else 9e9
+
+    if d_tasch < 0.05:
+        befund, ok = "taschen_vorhanden", True
+    elif d_ring < 0.02:
+        befund, ok = "taschen_fehlen", False
+    else:
+        befund, ok = "unklar", None
+
+    return {
+        "ok": ok, "befund": befund,
+        "volumen_netz_mm3":    round(v_netz, 0),
+        "volumen_taschen_mm3": round(v_tasch, 0),
+        "volumen_ring_mm3":    round(v_ring, 0),
+        "abw_zu_taschen_pct":  round(100 * d_tasch, 2),
+        "abw_zu_ring_pct":     round(100 * d_ring, 2),
+        "taschenanteil_pct":   round(100 * (v_ring - v_tasch) / v_ring, 1) if v_ring else None,
+        "netz_knoten": n_kn, "netz_elemente": n_el,
+        "hinweis": ("Die CAD-Bilder taugen dafuer NICHT — sie werden aus denselben "
+                    "Parametern gezeichnet wie die Geometrie und wuerden einen "
+                    "misslungenen Schnitt nicht zeigen."),
+    }

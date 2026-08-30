@@ -203,10 +203,43 @@ def test_vergleich_traegt_herkunft():
         conn.close()
 
 
+def test_berichtstabelle():
+    print("7. Die Berichtstabelle traegt die Herkunft — und erfindet keine Laeufe")
+    with tempfile.TemporaryDirectory() as d:
+        wurzel = os.path.join(d, "projekte")
+        os.makedirs(wurzel)
+        p = _bau_projekt(wurzel, "20260801_100000_A",
+                         summary={"B_gap_T": 0.8, "T_maxwell_Nm": 300.0,
+                                  "structural_ok": True, "safety_factor_fem": None,
+                                  "T_winding_C": 90.0})
+        conn = DB.oeffne(os.path.join(d, "test.db"))
+        DB.importiere_alle(conn, wurzel)
+        md = DB.bericht_tabelle(conn, "20260801_100000_A")
+        check("Herkunftsspalte vorhanden", "Woher die Zahl kommt" in md)
+        check("analytisch und Feld sind unterscheidbar",
+              "analytische Formel" in md and "2D-FDM-Feld" in md,
+              "sonst behauptet die Doku eine Feldrechnung, die es nicht gab")
+        check("Wahrheitswerte lesbar statt 1/0",
+              "| structural_ok | ja |" in md, md[md.find("structural_ok"):][:40])
+        check("fehlender Wert wird benannt statt verschwiegen",
+              "Ohne Wert geblieben" in md and "safety_factor_fem" in md)
+        check("die Quelle steht darunter", "Rechnungsdatenbank" in md)
+        conn.close()
+
+    # Der Fehler, der beim Bau auffiel: ein nicht vorhandener Pfad legte ueber
+    # importiere_projekt einen leeren "abgebrochenen" Lauf an — ein Phantom.
+    vorher = len(DB.liste(DB.oeffne(), nur_vollstaendig=False))
+    leer = DB.fuer_bericht("/gibt/es/ganz/sicher/nicht")
+    nachher = len(DB.liste(DB.oeffne(), nur_vollstaendig=False))
+    check("nicht vorhandener Pfad gibt leer zurueck", leer == "")
+    check(f"und legt KEINEN Phantomlauf an ({vorher} -> {nachher})", vorher == nachher)
+
+
 if __name__ == "__main__":
     for t in (test_register_vollstaendig, test_analytisch_vs_feld,
               test_import_wiederholbar, test_abgebrochene_sichtbar,
-              test_guete_trennt_verfahren, test_vergleich_traegt_herkunft):
+              test_guete_trennt_verfahren, test_vergleich_traegt_herkunft,
+              test_berichtstabelle):
         t()
     print()
     if _fails:

@@ -2176,6 +2176,31 @@ def run_pipeline(data: dict, state: dict, frames: list,
             if frd_path and frd_path != "MISSING" and fem_r.get("solver_status") == "FRD_READY":
                 frd_full = _parse_frd_full(frd_path, yield_mpa=mat["yield_mpa"])
                 fem_r = {k: v for k, v in frd_full.items() if not k.startswith("_")}
+                # Gegenprobe: sind die Magnettaschen in dem, was der Loeser bekam?
+                # Ueber die CAD-Bilder ginge das NICHT — die werden aus denselben
+                # Parametern gezeichnet wie die Geometrie und koennten einen
+                # misslungenen Booleschen Schnitt gar nicht zeigen. Das Volumen der
+                # geloesten .inp kann es. Weich: nur ein Vermerk, kein Abbruch.
+                try:
+                    import ema_deck as _deck
+                    _inp = os.path.splitext(frd_path)[0] + ".inp"
+                    if os.path.isfile(_inp):
+                        _tc = _deck.pruefe_taschen(dict(geom, axialLen=axial), _inp)
+                        fem_r["taschen_check"] = _tc
+                        if _tc["ok"]:
+                            _log(state, f"✓ Magnettaschen im vernetzten Modell bestaetigt "
+                                        f"(Netz {_tc['volumen_netz_mm3']:.0f} mm³ gegen "
+                                        f"parametrisch {_tc['volumen_taschen_mm3']:.0f} mm³, "
+                                        f"{_tc['abw_zu_taschen_pct']:.1f} %)", 87)
+                        elif _tc["befund"] == "taschen_fehlen":
+                            _log(state, "⚠ Das vernetzte Modell ist der VOLLE RING — die "
+                                        "Magnettaschen fehlen in der FEM-Geometrie!", 87)
+                        else:
+                            _log(state, f"⚠ Taschenpruefung unklar: Netz weicht "
+                                        f"{_tc['abw_zu_taschen_pct']:.1f} % von der Parametrik "
+                                        f"und {_tc['abw_zu_ring_pct']:.1f} % vom vollen Ring ab", 87)
+                except Exception as _tce:                # noqa: BLE001
+                    _log(state, f"   (Taschenpruefung uebersprungen: {_tce})", 87)
 
             if fem_r and fem_r.get("max_von_mises_MPa"):
                 # Tier-2-Gate (bindend): Peak = max(FEM-P99, 2D-Ring x Kt).
@@ -2205,16 +2230,41 @@ def run_pipeline(data: dict, state: dict, frames: list,
             else:
                 _raw = res_fem.get("fem_result", {}) or {}
                 _att = _raw.get("attempts") or []
+                _err = (res_fem.get("stderr") or "").strip()
+                # Den GRUND festhalten. Vorher wurde nur stdout gespeichert — und
+                # genau der ist bei einer Zeitueberschreitung leer, waehrend der
+                # Grund in stderr steht (freecad_runner.py:145). Gemessen an drei
+                # Alpenpass-Laeufen vom 27.08.: attempts=[], log="", kein Hinweis,
+                # obwohl schlicht der 1200-s-Deckel gerissen war.
+                _grund = ("zeitueberschreitung" if "Timeout" in _err
+                          else ("kein_rotor" if "no Rotor" in (res_fem.get("stdout") or "")
+                                else ("solver" if _att else "unbekannt")))
                 fem_r = {"solver_status": "FAILED",
+                         "fehlgrund": _grund,
                          "attempts": _att,
-                         "log": res_fem.get("stdout", "")[-1500:],
+                         "log": (res_fem.get("stdout", "") or "")[-1500:],
+                         "fehlertext": _err[-500:],
+                         "struct_mesh_mm": struct_mesh_mm,
                          "rpm": rpm_fem}
                 frd_full = None
-                _log(state,
-                     f"⚠ CalculiX ohne Ergebnis trotz {len(_att) or 'mehrerer'} Netz-Versuche "
-                     "– analytische Näherung (Lamé) wird verwendet", 88)
+                if _grund == "zeitueberschreitung":
+                    _log(state,
+                         f"⚠ CalculiX ABGEBROCHEN: Zeitueberschreitung bei Netz "
+                         f"{struct_mesh_mm} mm. Feinere Netze kosten ueberproportional "
+                         f"Zeit (gemessen: 3 mm ≈ 7 min, 2 mm deutlich mehr als 20 min).", 88)
+                    _log(state, "   Abhilfe: groeberes Netz — oder struct_solver='ccx', "
+                                "der eigene Rechensatz rechnet denselben Fall in Sekunden.", 88)
+                else:
+                    _log(state,
+                         f"⚠ CalculiX ohne Ergebnis ({_grund}"
+                         + (f", {len(_att)} Netz-Versuche" if _att else ", kein Netz-Versuch")
+                         + ")", 88)
+                if _err:
+                    _log(state, f"   Meldung: {_err[:200]}", 88)
                 for _a in _att[:4]:
                     _log(state, f"   • {_a}", 88)
+                _log(state, "   → Verformung und Spannung kommen aus der analytischen "
+                            "Naeherung (Lamé), NICHT aus der FEM.", 88)
             results["structural_fem"] = fem_r
         else:
             fem_r = results.get("structural_fem", {}) or {}
@@ -2618,6 +2668,11 @@ def run_pipeline(data: dict, state: dict, frames: list,
             "P_cont_max_kW":   (results.get("power") or {}).get("P_cont_max_kW"),
             "T_peak_max_Nm":   (results.get("power") or {}).get("T_peak_max_Nm"),
             "structural_ok":   structural_ok,
+            # WORAUF die Festigkeitsaussage beruht. Ohne das steht ein gruenes
+            # structural_ok auch dann da, wenn die FEM gar nicht gelaufen ist —
+            # gemessen der Fall in allen drei Alpenpass-Laeufen vom 27.08.
+            "structural_basis": ("fem" if fem_r.get("max_von_mises_MPa")
+                                 else "analytisch"),
             "safety_factor_fem": fem_r.get("safety_factor"),
             "fem_rpm":         fem_r.get("rpm"),
             "fem_sigma_vm_MPa": fem_r.get("max_von_mises_MPa"),

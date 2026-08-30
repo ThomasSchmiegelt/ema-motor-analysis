@@ -100,6 +100,9 @@ HERKUNFT: dict[str, dict] = {
                              detail="analytischer Festigkeits-Sweep; von der FEM gedeckelt, WENN sie lief",
                              quelle="ema_pipeline.py:2323/2345", bedingt="fem3d"),
     "structural_ok":    dict(einheit="",      methode="abgeleitet", detail="Toraussage der Festigkeitsstufe"),
+    "structural_basis": dict(einheit="",      methode="abgeleitet",
+                             detail="worauf die Festigkeitsaussage beruht: 'fem' = gerechnet, "
+                                    "'analytisch' = die FEM lieferte nichts, es gilt die Ringformel"),
     "safety_factor_fem":dict(einheit="",      methode="fem3d",
                              detail="Fliessgrenze / max(FEM-P99, Ringformel*Kt) — der bindende Torwert"),
     "fem_rpm":          dict(einheit="1/min", methode="fem3d",   detail="Drehzahl, bei der die FEM gerechnet hat"),
@@ -119,9 +122,9 @@ HERKUNFT: dict[str, dict] = {
                              quelle="ema_pipeline.py:2592"),
 
     # Thermik
-    "T_winding_C":      dict(einheit="degC",  methode="lptn", detail="Knoten Wicklung, stationaer"),
-    "T_magnet_C":       dict(einheit="degC",  methode="lptn", detail="Knoten Magnet, stationaer"),
-    "T_housing_C":      dict(einheit="degC",  methode="lptn", detail="Knoten Gehaeuse, stationaer"),
+    "T_winding_C":      dict(einheit="°C",  methode="lptn", detail="Knoten Wicklung, stationaer"),
+    "T_magnet_C":       dict(einheit="°C",  methode="lptn", detail="Knoten Magnet, stationaer"),
+    "T_housing_C":      dict(einheit="°C",  methode="lptn", detail="Knoten Gehaeuse, stationaer"),
     "P_total_W":        dict(einheit="W",     methode="abgeleitet", detail="Summe der Verlustanteile"),
     "cooling":          dict(einheit="",      methode="tabelle",    detail="gewaehltes Kuehlungs-Preset"),
     "htc_source":       dict(einheit="",      methode="tabelle",
@@ -325,6 +328,18 @@ def importiere_projekt(conn: sqlite3.Connection, projektpfad: str,
     conn.execute("INSERT OR REPLACE INTO tore VALUES (?,?,?,?)",
                  (lauf_id, "festigkeit", 1 if results.get("structural_ok") else 0,
                   fem.get("solver_status")))
+    # Das Taschentor: war die Magnetgeometrie ueberhaupt im vernetzten Modell?
+    tc = fem.get("taschen_check") or {}
+    if tc:
+        conn.execute("INSERT OR REPLACE INTO tore VALUES (?,?,?,?)",
+                     (lauf_id, "magnettaschen",
+                      1 if tc.get("ok") else 0,
+                      f"{tc.get('befund')}: Netz {tc.get('volumen_netz_mm3')} mm3, "
+                      f"{tc.get('abw_zu_taschen_pct')} % zur Parametrik"))
+    if fem.get("fehlgrund"):
+        conn.execute("INSERT OR REPLACE INTO tore VALUES (?,?,?,?)",
+                     (lauf_id, "fem_gelaufen", 0,
+                      f"{fem['fehlgrund']}: {(fem.get('fehlertext') or '')[:120]}"))
     conn.commit()
     return lauf_id
 
@@ -471,3 +486,125 @@ def importiere_alle(conn: sqlite3.Connection, wurzel: str | None = None) -> dict
         else:
             teil += 1
     return {"vollstaendig": voll, "abgebrochen": teil, "unlesbar": fehler}
+
+
+# ── Berichtsunterstuetzung ────────────────────────────────────────────────────
+
+# Reihenfolge und Beschriftung der Kennwerte im Bericht. Wer eine Groesse ergaenzt,
+# traegt sie auch in HERKUNFT ein — sonst erscheint sie ohne Herkunft, und genau das
+# soll die Datenbank ja verhindern.
+BERICHT_GRUPPEN = [
+    ("Elektromagnetik", ["B_gap_T", "Kt_Nm_per_A", "T_maxwell_Nm", "lcm_slots_poles"]),
+    ("Leistung",        ["P_max_kW", "P_max_rpm", "P_cont_max_kW", "T_peak_max_Nm"]),
+    ("Festigkeit",      ["max_safe_rpm", "structural_ok", "structural_basis",
+                         "safety_factor_fem", "fem_rpm", "fem_sigma_vm_MPa"]),
+    ("Thermik",         ["T_winding_C", "T_magnet_C", "T_housing_C", "P_total_W",
+                         "cooling", "htc_source"]),
+    ("Fahrzyklus",      ["cycle_name", "cycle_kWh100km", "cycle_eta",
+                         "anhaenger_kWh100km", "anhaenger_T_max_Nm"]),
+    ("Werkstoff und Masse", ["rotor_lam", "stator_lam", "magnet", "hairpin",
+                             "mass_g", "fill_factor", "P_fe_W_est"]),
+]
+
+_METHODE_KURZ = {
+    "analytisch":  "analytische Formel",
+    "fdm2d":       "2D-FDM-Feld",
+    "fem3d":       "3D-FEM",
+    "lptn":        "Waermenetzwerk",
+    "zyklus":      "Fahrzyklus",
+    "geometrisch": "Geometrie",
+    "tabelle":     "Tabellenwert",
+    "abgeleitet":  "abgeleitet",
+    "unbekannt":   "**ohne Herkunft**",
+}
+
+
+def _md_wert(k: dict) -> str:
+    if k["wert_num"] is None and k["wert_text"] is None:
+        return "—"
+    # Wahrheitswerte tragen BEIDES (1.0 und "ja"), damit man danach filtern UND sie
+    # lesen kann. Im Bericht gilt der Text — "structural_ok = 1" liest niemand.
+    if k["wert_text"] in ("ja", "nein"):
+        return k["wert_text"]
+    if k["wert_text"] is not None and k["wert_num"] is None:
+        return str(k["wert_text"])
+    v = k["wert_num"]
+    if k["einheit"] == "" and float(v).is_integer() and abs(v) < 1e6:
+        return f"{int(v)}"
+    txt = f"{v:.4g}"
+    return f"{txt} {k['einheit']}" if k["einheit"] else txt
+
+
+def bericht_tabelle(conn: sqlite3.Connection, lauf: str | int) -> str:
+    """Markdown-Tabelle der Kennwerte **mit Herkunftsspalte** — aus der Datenbank.
+
+    Das ist der Punkt, an dem die Dokumentation datenbankgestuetzt wird: die Zahlen
+    kommen aus der Datenbank, und jede traegt sichtbar, aus welchem Verfahren sie
+    stammt. Die Auswertung darum herum schreibt weiter das Sprachmodell — es sieht
+    diese Tabelle, darf aber laut Prompt keine Zahlen in den Fliesstext nehmen.
+
+    Leere Groessen werden ausgelassen; eine Gruppe ohne einen einzigen Wert entfaellt.
+    Ein Kennwert, der ERWARTET war und fehlt (etwa die Festigkeit, wenn der Loeser
+    nichts lieferte), erscheint mit „—" statt zu verschwinden — sonst sieht ein
+    halber Lauf aus wie ein ganzer.
+    """
+    d = zeige(conn, lauf)
+    if not d:
+        return ""
+    nach_name = {k["groesse"]: k for k in d["kennwerte"]}
+
+    zeilen = ["### Ergebniskennwerte und ihre Herkunft", "",
+              "| Kennwert | Wert | Woher die Zahl kommt |", "|---|---|---|"]
+    for gruppe, groessen in BERICHT_GRUPPEN:
+        vorhanden = [g for g in groessen if g in nach_name]
+        if not vorhanden:
+            continue
+        zeilen.append(f"| **{gruppe}** | | |")
+        for g in vorhanden:
+            k = nach_name[g]
+            herkunft = _METHODE_KURZ.get(k["methode"], k["methode"])
+            zusatz = []
+            if k["loeser"]:
+                zusatz.append(k["loeser"])
+            if k["aufloesung"]:
+                zusatz.append(k["aufloesung"])
+            if zusatz:
+                herkunft += " (" + ", ".join(zusatz) + ")"
+            zeilen.append(f"| {g} | {_md_wert(k)} | {herkunft} |")
+
+    lauf_r = d["lauf"]
+    zeilen += ["", f"Quelle: Rechnungsdatenbank, Lauf `{lauf_r['projekt_id']}`"
+                   f"{', gerechnet ' + lauf_r['zeitpunkt'][:10] if lauf_r['zeitpunkt'] else ''}."]
+    if lauf_r["stufen"]:
+        zeilen.append(f"Gerechnete Stufen: {lauf_r['stufen'].replace(',', ', ')}.")
+    fehlend = [g for _gr, gs in BERICHT_GRUPPEN for g in gs
+               if g in nach_name and nach_name[g]["wert_num"] is None
+               and nach_name[g]["wert_text"] is None]
+    if fehlend:
+        zeilen.append(f"**Ohne Wert geblieben:** {', '.join(fehlend)} — die zugehoerige "
+                      f"Stufe hat nichts geliefert.")
+    return "\n".join(zeilen) + "\n"
+
+
+def fuer_bericht(projekt_pfad: str) -> str:
+    """Bequemer Einstieg fuer ``ema_report``: Projekt notfalls nachtragen, Tabelle liefern.
+
+    Weich gehalten — schlaegt irgendetwas fehl, kommt ein leerer String zurueck und der
+    Bericht laeuft ohne diesen Block weiter. Eine Datenbank darf keinen Bericht
+    verhindern.
+    """
+    # Erst pruefen, DANN nachtragen. Ohne diese Schranke legte ein Aufruf mit einem
+    # nicht vorhandenen Pfad ueber importiere_projekt einen leeren "abgebrochenen"
+    # Lauf in der Datenbank an — ein Phantom, das nie gerechnet wurde.
+    if not os.path.isfile(os.path.join(str(projekt_pfad), "results.json")):
+        return ""
+    try:
+        conn = oeffne()
+        pid = os.path.basename(str(projekt_pfad).rstrip("/"))
+        if not conn.execute("SELECT 1 FROM laeufe WHERE projekt_id=?", (pid,)).fetchone():
+            importiere_projekt(conn, projekt_pfad)
+        md = bericht_tabelle(conn, pid)
+        conn.close()
+        return md
+    except Exception:                                    # noqa: BLE001
+        return ""

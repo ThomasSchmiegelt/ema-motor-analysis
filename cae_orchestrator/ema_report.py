@@ -363,6 +363,12 @@ Füge die Zeile `[TABELLE:kennwerte]` GENAU EINMAL direkt nach der Zusammenfassu
 (Abschnitt 1) ein — dort wird die vollständige Parameter- und Kennwerttabelle
 eingesetzt.
 
+Füge ausserdem die Zeile `[TABELLE:herkunft]` GENAU EINMAL im Abschnitt zu den
+Berechnungsmethoden ein. Dort erscheint aus der Rechnungsdatenbank, aus welchem
+Verfahren jeder Kennwert stammt — analytische Formel, 2D-FDM-Feld, 3D-FEM,
+Wärmenetzwerk, Fahrzyklus oder Tabellenwert. Beziehe dich im Text QUALITATIV
+darauf: welche Aussagen tragfähig sind und welche auf einer Näherung beruhen.
+
 Schreibe einen strukturierten, sachlichen Bericht in Markdown mit genau diesen Abschnitten:
 
 1. **Zusammenfassung** — 3–5 Sätze zur Gesamtbewertung (qualitativ, ohne Zahlen)
@@ -735,7 +741,8 @@ def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
     md_raw   = _ensure_em3d_section(md_raw, ctx)           # eigener 3D-Abschnitt + Bilder
     md_raw   = _ensure_kuehlung_section(md_raw, ctx)       # Spritzöl-Kühlung + Bilder
     md_final = insert_images(md_raw, ctx["_img_map"])
-    md_final = insert_tables(md_final, {"kennwerte": _single_md_tables(ctx)})
+    md_final = insert_tables(md_final, {"kennwerte": _single_md_tables(ctx),
+                                        "herkunft":  _herkunft_tabelle(project_dir)})
     _evo = _evolution_links_md(ctx)
     if _evo:
         md_final = md_final.rstrip() + "\n\n" + _evo + "\n"
@@ -805,7 +812,8 @@ def generate_report_agentic(
     md_main = _ensure_em3d_section(md_main, ctx)           # eigener 3D-Abschnitt + Bilder
     md_main = _ensure_kuehlung_section(md_main, ctx)       # Spritzöl-Kühlung + Bilder
     md_main = insert_images(md_main, ctx["_img_map"])
-    md_main = insert_tables(md_main, {"kennwerte": _single_md_tables(ctx)})
+    md_main = insert_tables(md_main, {"kennwerte": _single_md_tables(ctx),
+                                      "herkunft":  _herkunft_tabelle(project_dir)})
 
     # Append expert section (with images + paragraph normalisation)
     expert_md = assemble_expert_section(expert_out, img_map=ctx["_img_map"])
@@ -1147,6 +1155,26 @@ def to_rag_markdown(prose_md: str, ctx: dict | None = None) -> str:
     return f"# {title}\n\n{intro}\n\n{body}\n"
 
 
+def _herkunft_tabelle(project_dir: str) -> str:
+    """Kennwerte MIT Herkunft — aus der Rechnungsdatenbank, nicht aus results.json.
+
+    Der Bericht trennt seit jeher Zahlen (deterministische Tabellen) von Prosa (das
+    Sprachmodell, dem ``_strip_value_numbers`` jede Zahl aus dem Fliesstext nimmt).
+    Diese Tabelle setzt an derselben Stelle an und ergaenzt das Fehlende: **woher
+    jede Zahl kommt**. Ohne sie stehen ``B_gap_T`` (analytische Luftspaltformel) und
+    ``T_maxwell_Nm`` (aus dem geloesten FDM-Feld) gleichwertig nebeneinander, obwohl
+    sie es nicht sind.
+
+    Weich: liefert die Datenbank nichts, faellt der Block ersatzlos weg und der
+    Bericht entsteht wie bisher.
+    """
+    try:
+        import ema_db
+        return ema_db.fuer_bericht(project_dir)
+    except Exception:                                    # noqa: BLE001
+        return ""
+
+
 def _single_md_tables(ctx: dict) -> str:
     """Comprehensive, deterministic parameter+result table for the single-project
     report. ALL numeric values of the report live here (the prose stays qualitative
@@ -1300,7 +1328,8 @@ def insert_tables(md: str, table_map: dict) -> str:
         return ""
     md = _TAB_RE.sub(_repl, md)
 
-    titles = {"parameter": "Parameter-Vergleich (Eingaben)",
+    titles = {"herkunft": "Ergebniskennwerte und ihre Herkunft",
+              "parameter": "Parameter-Vergleich (Eingaben)",
               "kennwerte": "Ergebnis-Kennwerte",
               "einfluss":  "Einfluss der Parameteränderungen"}
     for k, tbl in table_map.items():
