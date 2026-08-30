@@ -43,6 +43,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `wait` | auf Abschluss warten |
 | `routes [--grep x]` | alle Serverrouten auflisten |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
+| `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
 | `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver beide` (Vollrotor, ~7 s, mit Gegenüberstellung) |
 | `topopt` | Topologieoptimierung des Rotorblechs. `--verfahren sko` (Vorgabe) oder `simp`. 20–60 s. Ergebnis ist ein **Dichtefeld, kein Bauteil** |
 | `db <was>` | **Rechnungsdatenbank**: `import` · `liste` · `zeige --lauf X` · `guete --lauf X` · `vergleich`. Kennwerte **mit Herkunft je Größe** |
@@ -209,6 +210,35 @@ Typ und Auswahlliste — `python3 cae_cli.py raw GET /param_schema` zeigt sie sa
 **Nicht im Schema, aber im Payload:** reine CAD-Schalter (`genBearingA`, `splineTeeth`,
 `windingHeadStyle` …). Die gehen weiterhin durch, wenn sie in der Vorlage stehen — aber
 ohne Grenzen und ohne Typprüfung. Was das Feld beeinflusst, steht im Schema.
+
+### Ganz am Anfang: `screen`
+
+**Fang nicht beim letzten Stand an.** `--from-project last` ist bequem und führt in einen
+engen Pfad: Polzahl, Nutzahl und Magnetanordnung des ersten Entwurfs bleiben stehen,
+obwohl gerade sie die Maschine prägen. Wenn eine **neue** Auslegung ansteht, spiel sie
+zuerst durch:
+
+```bash
+python3 cae_cli.py screen --from-project last --auftrag "<der Auslegungsauftrag>"
+python3 cae_cli.py screen --from-project last --ziel leistung \
+        --pole 3,4,5 --nuten 36,48 --formen v,vasym,spoke --leiter 4,6
+```
+
+Das kostet ~20 s gegen 30 min bis 4 h für einen vollen Lauf. Was oben steht, übernimmst du
+mit `run analyse --set p=… --set slots=… --set magShape=…` und rechnest es richtig.
+
+**Drei Dinge, die du dabei nicht verwechseln darfst:**
+
+1. Die Vorauswahl ist **analytisch**. Ihre Kennwerte tragen die Herkunft `analytisch` und
+   sind kein Ersatz für Feldlauf oder FEM. Sie sortiert aus und rangiert — sie entscheidet
+   nichts.
+2. `Kt` und `B_gap` hängen auf dieser Stufe **nicht** von Nutzahl und Leiterzahl ab (die
+   analytische Formel kennt beide nicht). Die Nutzahl wird über das kgV aus Nut- und
+   Polzahl (Rundlauf) und den Fertigungsaufwand bewertet. Wer sie elektromagnetisch
+   beurteilen will, braucht den Feldlauf.
+3. Passt eine Bauform nicht in den Pol, wird der Magnet **verkleinert** — das steht als
+   `s_koerper` in jeder Zeile. Ein Wert von 0,64 heißt: diese Variante ist nur mit einem
+   um gut ein Drittel kleineren Magneten baubar. Nenne das, wenn du sie empfiehlst.
 
 ### Vor `run cad`: `rotor-check`
 

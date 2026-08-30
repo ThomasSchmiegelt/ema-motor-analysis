@@ -15,7 +15,8 @@ different stages of maturity that are *not* wired to each other today — see th
 **Topics:** electric motor · IPM · PMSM · traction motor · motor design · CAE · FEA ·
 finite element analysis · CalculiX · Z88Aurora · FreeCAD · Gmsh · Elmer · OpenFOAM ·
 electromagnetics · 2D FDM field solver · topology optimisation (SKO/SIMP) · centrifugal
-rotor stress · lumped-parameter thermal network · drive cycle (WLTP) · local LLM ·
+rotor stress · lumped-parameter thermal network · drive cycle (WLTP) · design space
+exploration · pole/slot combination · magnet arrangement · local LLM ·
 Ollama · agent skill · PI · Hermes Agent · provenance tracking · SQLite
 
 ## Subprojects
@@ -104,6 +105,52 @@ Two sources, kept strictly apart:
 No model is trained here. "Learned" means: derived from the tool's own stock and
 available next time.
 
+## Screening the configuration before computing one
+
+A full run takes 30 min to 4 h, so in practice every calculation started from the last
+one and changed a value or two. Pole count, slot count and magnet arrangement of the
+*first* draft therefore stayed put — and those are exactly what shapes a machine.
+
+`ema_screen` looks at them first, analytically: **384 configurations in 20 s**, ranked,
+with every rejection stated in words.
+
+```bash
+python3 cae_cli.py screen --from-project last \
+        --auftrag "affordable city drive, low on magnets"
+```
+
+The goal is read from the design brief **with the words that carried it**, so it is never
+a black box (`guenstig` ← *affordable*, *low on magnets*). Cost-oriented and
+performance-oriented briefs weight the same variants differently; the weights are open in
+the code so they can be argued with.
+
+It **sorts out and ranks — it decides nothing.** No field run, no FEM, no thermal: the
+metrics it produces carry the provenance `analytisch`, and whatever it puts on top still
+has to be computed properly.
+
+**Building it turned up three defects that were not in the screener.** It first passed
+only 69 of 384 variants, which would have made it a filter, not a screen:
+
+| Found | Effect |
+|---|---|
+| `_obb_rect_distance` took the **loosest** separating axis (`min`) instead of the tightest | For two long pockets crossed at a steep angle the layout gate reported **0.51 mm of web where 17.11 mm are free** — a factor of 33. The gate had been rejecting sound designs for as long as the tool has existed, not just inside the screener. `max` is still a lower bound, so it never over-reports a web: the gate stays on the safe side |
+| `_build_spoke` seated the magnet 1.0 mm above the bore, ignoring the pocket's end cap of `magThick/2 + gap` | From 1.8 mm thickness the pocket cut **into the shaft bore**. The spoke type was not buildable at any setting |
+| `_build_u` reserved the web between magnet **bodies** instead of between **pockets** | 1.70–1.73 mm against a 2.00 mm minimum, unchanged across every parameter. The U-cup was never buildable either |
+
+After the fixes: **312 of 384 usable, all eight magnet arrangements reachable at all four
+pole counts.** The remaining 72 fail the symmetric three-phase winding criterion — that is
+arithmetic, not geometry.
+
+The fit has **two** knobs, because one cannot work: shrinking the magnet body thickens
+*every* web, while pulling the arrangement tighter thickens the webs *between* poles and
+thins the ones *inside* a pole. Layered arrangements need the opposite — `pmasynrm` is
+legal at 16 mm layer spacing with a 2.71 mm web and fails at 8 mm with 0.01 mm. Every
+reduction is recorded: a screen that quietly shrinks magnets and then ranks by torque
+constant would be deceiving itself.
+
+Drive cycles now include **city/rural** alongside WLTP, full load and motorway: 1300 s,
+18.76 km, 94.9 km/h peak, 12 % standstill (measured).
+
 ## Two solvers on one mesh
 
 Besides the FreeCAD route there is an own deck: Gmsh meshes one pole sector — or the
@@ -136,8 +183,36 @@ The chain is drivable by a **local** model — via [PI](https://pi.dev) or **Her
 ```bash
 ./start_agent.sh                          # PI
 ./start_hermes.sh                         # Hermes
+./start_hermes.sh --projekt Alpenpass     # bind Hermes to one CAE project
 ./start_hermes.sh --nur-pruefen           # prove it only talks to local Ollama
 ```
+
+**New or previous session?** Both heads can resume, but neither used to ask — and what
+is not asked is not used: every question started from zero while the session with the
+whole history sat next to it. Both now show a short menu at a terminal, **defaulting to
+new**. Resuming automatically would be wrong (a carried-over history only becomes visible
+at 65 k context once something falls off the front); asking is the middle ground. Nothing
+is asked without a terminal, on a one-shot `-p`/`-z`, or when the caller set the session
+flags themselves — a scripted call must not block.
+
+**Hermes keeps memories and sessions per project.** Its built-in store is otherwise *one*
+file for the whole machine (`~/.hermes/memories/MEMORY.md`, 2200 characters) with no
+config option to separate them — the agent would read what it learned about one design as
+fact while working on the next. The lever is `HERMES_HOME`, but it moves the *entire*
+store, and a per-project `config.yaml` would be exactly the drift this repo avoids with
+the skill. So it is split: `config.yaml`, `.env` and `skills` are **symlinked** (one
+source), only `memories/` and `sessions/` live under `<project>/_agent/hermes/`. **PI does
+not get this**, and that is not an oversight: PI sorts sessions by working directory, and
+that has to stay the repo root or PI finds neither `AGENTS.md` nor the skills.
+
+**The project context is generated, not copied.** `AGENTS.md` stays the one unchanged
+source of rules and is never copied into a project folder — a copy drifts silently, and
+then two agent heads work from two rulebooks that both look plausible. Instead, every
+start freshly writes `AGENTS.projekt.md` (not versioned) with the facts of the current
+project: identifier, directory, the metrics that exist — and above all **which stages have
+not been computed**. It states explicitly when a strength figure is analytic rather than
+FEM; that looks identical in the output and has slipped through unnoticed three times in
+this repo.
 
 Both answer the same question with the same number (measured: **0.806 T**, both with the
 note that it comes from the analytic formula). `start_hermes.sh` **measures** before every

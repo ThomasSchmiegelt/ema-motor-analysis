@@ -59,8 +59,37 @@ ganze Kette:
 
 ./start_hermes.sh                         # dasselbe mit Hermes
 ./start_hermes.sh -z "Wie hoch ist B_gap im neuesten Projekt?"
+./start_hermes.sh --projekt Alpenpass     # Hermes an ein CAE-Projekt binden
 ./start_hermes.sh --nur-pruefen           # nur der Nachweis, dass nichts nach draußen geht
 ```
+
+**Neue oder alte Sitzung?** Beide Köpfe können fortsetzen, gefragt hat es aber keiner —
+und was nicht gefragt wird, wird nicht benutzt: jede Frage fing bei null an, obwohl
+nebenan die Sitzung mit dem ganzen Verlauf lag. Beide zeigen jetzt am Terminal ein kurzes
+Menü, **Vorgabe neu**. Automatisch fortsetzen wäre falsch — ein mitgeschleppter Verlauf
+fällt bei 65 k Kontext erst auf, wenn vorne etwas herausfällt; fragen ist der Mittelweg.
+Nicht gefragt wird ohne Terminal, bei einer Einmalfrage (`-p`/`-z`) und wenn der Aufrufer
+die Sitzungsflaggen selbst gesetzt hat — ein Skriptaufruf darf nicht blockieren.
+
+**Hermes führt Erinnerungen und Sitzungen je Projekt.** Sein eingebauter Speicher ist
+sonst *eine* Datei für die ganze Maschine (`~/.hermes/memories/MEMORY.md`, 2200 Zeichen),
+und die Konfiguration bietet keinen Weg, ihn zu trennen — der Agent läse bei der nächsten
+Auslegung als Tatsache wieder, was er bei der vorigen gelernt hat. Der Hebel ist
+`HERMES_HOME`, es verschiebt aber die *ganze* Ablage, und eine je Projekt kopierte
+`config.yaml` wäre genau die Drift, die dieses Repo beim Skill vermeidet. Also aufgeteilt:
+`config.yaml`, `.env` und `skills` werden **verlinkt** (eine Quelle), projekteigen sind nur
+`memories/` und `sessions/` unter `<projekt>/_agent/hermes/`. **PI bekommt das nicht**,
+und das ist kein Versäumnis: PI sortiert Sitzungen nach Arbeitsverzeichnis, und das muss
+die Repo-Wurzel bleiben, sonst findet PI weder `AGENTS.md` noch die Skills.
+
+**Der Projektkontext wird erzeugt, nicht kopiert.** `AGENTS.md` bleibt die eine,
+unveränderte Regelquelle und wird nie in ein Projektverzeichnis kopiert — eine Kopie läuft
+still auseinander, und dann arbeiten zwei Agentenköpfe nach zwei Regelwerken, die beide
+plausibel aussehen. Stattdessen entsteht bei jedem Start frisch `AGENTS.projekt.md` (nicht
+versioniert) mit den Fakten des aktuellen Projekts: Kennung, Verzeichnis, vorhandene
+Kennwerte — und vor allem, **welche Stufen noch nicht gerechnet sind**. Sie sagt
+ausdrücklich, wenn eine Festigkeitszahl analytisch statt aus der FEM stammt; das sieht in
+der Ausgabe gleich aus und ist in diesem Repo schon dreimal unbemerkt durchgerutscht.
 
 Beide beantworten dieselbe Frage mit derselben Zahl (gemessen: **0,806 T**, beide
 samt Herkunftshinweis auf die analytische Luftspaltformel). `start_hermes.sh`
@@ -75,10 +104,11 @@ nicht antwortet, und wartet auf dessen Erreichbarkeit, bevor PI läuft.
 
 | Teil | Wo | Was |
 |---|---|---|
-| `start_agent.sh` | Wurzel | Startkette + Sitzungsverwaltung |
+| `start_agent.sh` | Wurzel | Startkette + Sitzungsverwaltung (mit Sitzungsmenü) |
+| `.agents/projektstand.py` | Wurzel | erzeugt den Projektblock für `AGENTS.projekt.md` — beide Köpfe benutzen denselben Erzeuger, sehen also denselben Stand |
 | `.agents/` | Wurzel | Skill-Definition für PI (`skills/cae-orchestrator/SKILL.md`) und Einrichtung |
-| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — zwölf Verben über HTTP auf `:5000` (`rotor-check`, `struktur` und `topopt` rechnen lokal) |
-| `start_hermes.sh` | Wurzel | zweiter Agentenkopf: **Hermes Agent**, gleiches Modell, gleicher Skill, mit gemessenem Netznachweis |
+| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — **sechzehn Verben**: neun über HTTP auf `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), sieben lokal (`rotor-check`, `screen`, `struktur`, `topopt`, `db`, `lernen`, `recherche`) |
+| `start_hermes.sh` | Wurzel | zweiter Agentenkopf: **Hermes Agent**, gleiches Modell, gleicher Skill, mit gemessenem Netznachweis; Projektbindung über `HERMES_HOME` |
 
 **Warum eine CLI und kein MCP-Server:** ein lokales Modell kann die ~135 HTTP-Routen des
 Orchestrators nicht als 135 Werkzeugschemata im Kontext halten. PI bindet Werkzeuge
@@ -176,6 +206,54 @@ Fließtext geklaubt.
 
 **Gerechnet wird weiterhin ausschließlich lokal.** Es wird nichts hochgeladen und keine
 Rechenaufgabe ausgelagert.
+
+## Vorauswahl: erst die Bauform durchspielen, dann eine rechnen
+
+Ein voller Lauf dauert 30 min bis 4 h. In der Praxis begann deshalb jede Rechnung beim
+letzten Stand und änderte daran einen Wert. Polzahl, Nutzahl und Magnetanordnung des
+*ersten* Entwurfs blieben damit stehen — und gerade sie prägen die Maschine.
+
+`ema_screen` sieht sie sich zuerst an, analytisch: **384 Konfigurationen in 20 s**,
+rangiert, und jede Ablehnung im Wortlaut.
+
+```bash
+python3 cae_cli.py screen --from-project last \
+        --auftrag "günstiger Stadtantrieb, magnetarm"
+```
+
+Das Ziel wird aus dem Auslegungsauftrag gelesen — **mit den Wörtern, die es getragen
+haben** (`günstig` ← *günstig*, *magnetarm*), damit die Erkennung keine Blackbox ist. Ein
+kostenorientierter und ein leistungsorientierter Auftrag gewichten dieselben Varianten
+verschieden; die Gewichte stehen offen im Code, damit man ihnen widersprechen kann.
+
+Sie **sortiert aus und rangiert — sie entscheidet nichts.** Kein Feldlauf, keine FEM,
+keine Thermik: die Kennwerte tragen folgerichtig die Herkunft `analytisch`, und was oben
+steht, muss danach richtig gerechnet werden.
+
+**Beim Bauen kamen drei Fehler heraus, die nicht in der Vorauswahl lagen.** Sie ließ
+zunächst nur 69 von 384 Varianten durch — damit wäre sie ein Filter gewesen, keine
+Vorauswahl:
+
+| Befund | Wirkung |
+|---|---|
+| `_obb_rect_distance` nahm unter den trennenden Achsen die **loseste** Schranke (`min`) statt der straffsten | Für zwei lange, schräg gekreuzte Taschen meldete das Layouttor **0,51 mm Steg, wo 17,11 mm frei sind** — Faktor 33. Das Tor hat damit über die gesamte Laufzeit dieses Werkzeugs einwandfreie Entwürfe verworfen, nicht nur in der Vorauswahl. `max` ist weiterhin eine untere Schranke, meldet also nie einen zu dicken Steg: das Tor bleibt auf der sicheren Seite |
+| `_build_spoke` setzte den Magneten 1,0 mm über die Bohrung, ohne die Taschenkappe von `magThick/2 + Spalt` | Ab 1,8 mm Dicke schnitt die Tasche **in die Wellenbohrung**. Der Speichentyp war bei keiner Einstellung baubar |
+| `_build_u` reservierte den Steg zwischen Magnet**körpern** statt zwischen **Taschen** | 1,70–1,73 mm gegen 2,00 mm Mindestdicke, unverändert über jeden Parameter. Die U-Form war ebenfalls nie baubar |
+
+Nach den Fixes: **312 von 384 brauchbar, alle acht Magnetanordnungen bei allen vier
+Polzahlen erreichbar.** Die verbleibenden 72 scheitern am Kriterium für eine symmetrische
+Drehstromwicklung — das ist Arithmetik, nicht Geometrie.
+
+Die Einpassung hat **zwei** Stellschrauben, weil eine nicht reichen kann: den
+Magnetkörper zu verkleinern macht *jeden* Steg dicker, die Anordnung enger zu ziehen macht
+die Stege *zwischen* den Polen dicker und die *innerhalb* eines Pols dünner. Mehrlagige
+Anordnungen verlangen das Gegenteil — `pmasynrm` ist bei 16 mm Lagenabstand mit 2,71 mm
+Steg zulässig und scheitert bei 8 mm an 0,01 mm. Jede Verkleinerung steht im Protokoll:
+eine Vorauswahl, die stillschweigend Magnete schrumpft und danach nach Momentkonstante
+rangiert, würde sich selbst betrügen.
+
+Bei den Fahrzyklen steht neben WLTP, Volllast und Autobahn jetzt **Stadt/Land**: 1300 s,
+18,76 km, Spitze 94,9 km/h, 12 % Standanteil (gemessen).
 
 ## Festigkeit ohne FreeCAD, zweiter Löser, Topologieoptimierung
 
