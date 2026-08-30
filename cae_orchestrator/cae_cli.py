@@ -428,6 +428,93 @@ def cmd_run(args) -> int:
     return EXIT_OK
 
 
+def cmd_db(args) -> int:
+    """Rechnungsdatenbank: importieren, auflisten, zeigen, vergleichen, Guete.
+
+    Rein lokal — liest ~/cae_projekte und schreibt ~/cae_projekte/_db/rechnungen.db.
+    Exit: 0 = ok, 1 = nichts gefunden."""
+    import ema_db as DB
+
+    conn = DB.oeffne()
+
+    if args.was == "import":
+        bilanz = DB.importiere_alle(conn)
+        emit(bilanz, args)
+        print(f"  {bilanz['vollstaendig']} vollstaendige, {bilanz['abgebrochen']} "
+              f"abgebrochene Laeufe eingelesen")
+        return EXIT_OK
+
+    if args.was == "liste":
+        zeilen = [dict(r) for r in DB.liste(conn, nur_vollstaendig=not args.alle)]
+        if not zeilen:
+            return _die("Keine Laeufe in der Datenbank — erst 'db import'.", EXIT_REMOTE)
+        emit(zeilen, args)
+        if not getattr(args, "json", False):
+            for r in zeilen[:args.limit]:
+                fest = {1: "gruen", 0: "rot"}.get(r["fest_ok"], "-")
+                b = f"{r['b_gap']:.3f}" if r["b_gap"] else "-"
+                pm = f"{r['p_max']:.0f}" if r["p_max"] else "-"
+                print(f"  {r['lauf_id']:3d}  {(r['zeitpunkt'] or '')[:10]}  "
+                      f"{(r['projekt_name'] or '')[:30]:32s} B_gap {b:>6s}  "
+                      f"P {pm:>4s} kW  Festigkeit {fest:5s} {r['notiz'] or ''}")
+        return EXIT_OK
+
+    if args.was == "zeige":
+        if not args.lauf:
+            return _die("'db zeige' braucht --lauf <id|projekt_id>.", EXIT_USAGE)
+        d = DB.zeige(conn, args.lauf)
+        if not d:
+            return _die(f"Lauf {args.lauf} nicht gefunden.", EXIT_REMOTE)
+        emit(d, args)
+        return EXIT_OK
+
+    if args.was == "guete":
+        if not args.lauf:
+            return _die("'db guete' braucht --lauf <id|projekt_id>.", EXIT_USAGE)
+        g = DB.guete(conn, args.lauf)
+        if not g:
+            return _die(f"Lauf {args.lauf} nicht gefunden.", EXIT_REMOTE)
+        emit(g, args)
+        if not getattr(args, "json", False):
+            print(f"\n  Stufen gerechnet : {', '.join(g['stufen']) or 'KEINE (abgebrochen)'}")
+            print(f"  Kennwerte je Verfahren:")
+            for m, n in g["kennwerte_je_methode"].items():
+                print(f"    {m:14s} {n:3d}   {DB.METHODEN.get(m, '')}")
+            if g["fem_erwartet"]:
+                print(f"  Festigkeit       : {g['fem_geliefert']}/{g['fem_erwartet']} "
+                      f"Werte geliefert, Loeser {g['fem_loeser'] or '-'}, "
+                      f"{g['fem_aufloesung'] or 'Aufloesung unbekannt'}")
+            print(f"  Bilder vorhanden : {g['bilder_vorhanden']}")
+            print(f"  Tore             : " +
+                  ", ".join(f"{k}={'gruen' if v else 'rot'}" for k, v in g["tore"].items()))
+        return EXIT_OK
+
+    if args.was == "vergleich":
+        groessen = args.groessen or ["B_gap_T", "Kt_Nm_per_A", "P_max_kW",
+                                     "max_safe_rpm", "safety_factor_fem", "mass_g"]
+        zeilen = DB.vergleiche(conn, groessen, args.lauf_liste)
+        if not zeilen:
+            return _die("Keine vergleichbaren Laeufe gefunden.", EXIT_REMOTE)
+        emit(zeilen, args)
+        if not getattr(args, "json", False):
+            kopf = f"  {'Projekt':34s}" + "".join(f"{g[:13]:>15s}" for g in groessen)
+            print(kopf); print("  " + "-" * (len(kopf) - 2))
+            for z in zeilen:
+                zeile = f"  {z['projekt'][:33]:34s}"
+                for g in groessen:
+                    v = z[g]
+                    zeile += f"{v:>15.4g}" if isinstance(v, (int, float)) else f"{str(v)[:13]:>15s}"
+                print(zeile)
+            # Die Herkunft je Spalte dazu — sonst sehen ungleiche Zahlen gleich aus.
+            print("\n  Herkunft der Spalten:")
+            for g in groessen:
+                m = next((z[g + "__methode"] for z in zeilen if z.get(g + "__methode")), "?")
+                print(f"    {g:22s} {m:14s} {DB.METHODEN.get(m, '')}")
+        return EXIT_OK
+
+    return _die(f"unbekannt: {args.was}", EXIT_USAGE)
+
+
 def _geom_und_material(args):
     """Payload -> (geom, mat, rpm). Gemeinsam fuer 'struktur' und 'topopt'."""
     payload = _load_payload(args)
@@ -796,6 +883,21 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Mindeststege in mm (Vorgabe: ema_topology.BRIDGE_MM = 2.0)")
     _add_globals(s)
     s.set_defaults(fn=cmd_rotor_check)
+
+    s = sub.add_parser("db",
+                       help="Rechnungsdatenbank: Eingaben, Kennwerte MIT Herkunft, Bilder, Guete")
+    s.add_argument("was", choices=["import", "liste", "zeige", "guete", "vergleich"],
+                   help="import = ~/cae_projekte einlesen · liste · zeige · guete · vergleich")
+    s.add_argument("--lauf", help="Lauf-Id oder Projekt-Id (fuer zeige/guete)")
+    s.add_argument("--lauf-liste", nargs="*", dest="lauf_liste",
+                   help="Projekt-Ids fuer den Vergleich (ohne Angabe: alle)")
+    s.add_argument("--groessen", nargs="*",
+                   help="Kennwerte fuer den Vergleich (ohne Angabe: die sechs wichtigsten)")
+    s.add_argument("--alle", action="store_true",
+                   help="auch abgebrochene Laeufe auflisten")
+    s.add_argument("--limit", type=int, default=20, help="Zeilen in der Liste")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_db)
 
     s = sub.add_parser("struktur",
                        help="Rotor-Festigkeit auf dem eigenen Rechensatz (ccx | z88 | beide) — ohne FreeCAD")

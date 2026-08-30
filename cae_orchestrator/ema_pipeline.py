@@ -2685,6 +2685,18 @@ def run_pipeline(data: dict, state: dict, frames: list,
             with open(os.path.join(proj, "results.json"), "w") as f:
                 json.dump(results, f, indent=2, ensure_ascii=False)
             _log(state, f"💾 Projekt gespeichert: {proj}", 99)
+            # Rechnungsdatenbank nachfuehren. Weich: sie ist ein INDEX ueber
+            # results.json und laesst sich jederzeit neu aufbauen ('cae_cli.py db
+            # import'), also darf ein Fehler hier den Lauf nie scheitern lassen —
+            # die maßgeblichen Daten liegen zwei Zeilen darueber bereits auf der Platte.
+            try:
+                import ema_db as _db
+                _conn = _db.oeffne()
+                _db.importiere_projekt(_conn, proj)
+                _conn.close()
+                _log(state, "🗃 Rechnungsdatenbank nachgefuehrt", 99)
+            except Exception as _dbe:                        # noqa: BLE001
+                _log(state, f"⚠ Rechnungsdatenbank nicht nachgefuehrt ({_dbe})", 99)
             # Fortlaufendes LLM-Trainingsfile: eine JSONL-Zeile je Berechnung
             # (Geometrie/Material → Kennwerte). Label "gut/schlecht" wird später
             # im Ergebnis-Tab gesetzt. Upsert per Projekt-ID (kein Duplikat beim
