@@ -12,6 +12,12 @@ carried by `cae_orchestrator`. The other folders are independent subprojects at
 different stages of maturity that are *not* wired to each other today — see the
 "Wiring" column.
 
+**Topics:** electric motor · IPM · PMSM · traction motor · motor design · CAE · FEA ·
+finite element analysis · CalculiX · Z88Aurora · FreeCAD · Gmsh · Elmer · OpenFOAM ·
+electromagnetics · 2D FDM field solver · topology optimisation (SKO/SIMP) · centrifugal
+rotor stress · lumped-parameter thermal network · drive cycle (WLTP) · local LLM ·
+Ollama · agent skill · PI · Hermes Agent · provenance tracking · SQLite
+
 ## Subprojects
 
 | Folder | What | Stack | Start |

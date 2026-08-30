@@ -16,6 +16,12 @@ wird die Kette von `cae_orchestrator`. Die übrigen Ordner sind eigenständige
 Teilprojekte in unterschiedlichem Reifegrad, die *heute* nicht miteinander
 verdrahtet sind — siehe die Spalte „Verbindung".
 
+**Stichworte:** E-Maschine · IPM · PMSM · Traktionsmotor · Motorauslegung · CAE · FEM ·
+CalculiX · Z88Aurora · FreeCAD · Gmsh · Elmer · OpenFOAM · Elektromagnetik ·
+2D-FDM-Feldlöser · Topologieoptimierung (SKO/SIMP) · Fliehkraft-Rotorfestigkeit ·
+Wärmenetzwerk · Fahrzyklus (WLTP) · lokales Sprachmodell · Ollama · Agenten-Skill ·
+PI · Hermes Agent · Herkunftsnachweis · SQLite
+
 ## Teilprojekte
 
 | Ordner | Was | Stack | Start |
