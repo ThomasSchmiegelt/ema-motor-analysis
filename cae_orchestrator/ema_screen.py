@@ -244,11 +244,21 @@ def _radial_einpassen(geom: dict, min_web: float) -> tuple[dict, dict]:
 def _passt(geom: dict, min_web: float) -> tuple[bool, dict, dict]:
     g, _ = _radial_einpassen(geom, min_web)
     m = _masse(g, abbruch_unter=min_web - 1e-6)
-    if not math.isfinite(m["rmax"]):
-        return False, g, m
+    if not m["legs"]:
+        return False, g, m                      # gar keine Magnete -- nichts zu pruefen
     r_rot = float(g["rotorOD"]) / 2.0
     r_sh  = float(g["shaftD"]) / 2.0
-    ok = (m["rmax"] <= r_rot + 1e-6 and m["rmin"] >= r_sh - 1e-6
+    # Der Einschluss gilt nur fuer EINGELASSENE Taschen. Reine Oberflaechen-Bauformen
+    # (spm, halbach) haben keine, also bleiben rmin/rmax unendlich -- und genau daran
+    # fiel _passt frueher auf False zurueck. Die Vorauswahl konnte SPM und Halbach
+    # damit nie empfehlen, obwohl ``rotor_layout_check`` sie annimmt: dort stehen
+    # Oberflaechenmagnete in einer eigenen Liste und werden nur gegen die Stege und
+    # einen Ueberstand am Aussenrand geprueft (Warnung, kein Ausschluss). Ohne Tasche
+    # gibt es nichts einzuschliessen; geprueft werden dann die Stege, wie im Tor.
+    radial_ok = True
+    if math.isfinite(m["rmax"]):
+        radial_ok = (m["rmax"] <= r_rot + 1e-6 and m["rmin"] >= r_sh - 1e-6)
+    ok = (radial_ok
           and m["steg_im_pol"] >= min_web - 1e-6
           and m["steg_zw_polen"] >= min_web - 1e-6)
     return ok, g, m

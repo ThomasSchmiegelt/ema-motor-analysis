@@ -105,6 +105,54 @@ Two sources, kept strictly apart:
 No model is trained here. "Learned" means: derived from the tool's own stock and
 available next time.
 
+## Pairwise comparison: what is actually being decided
+
+The screening section below answers "which variant do I take?". One step earlier a
+different question stands: **what does the machine actually depend on?**
+`ema_paarvergleich` puts eight axes — magnet arrangement, conductors per slot, magnet
+/ lamination / conductor material, cooling, diameter, length — option against option,
+all eight in **0.4 s**.
+
+```bash
+python3 cae_orchestrator/cae_cli.py paarvergleich --from-project last
+```
+
+Two outputs, and the second is the more useful one. First the **pairs**: which metric
+speaks for which side, and which does not move between them at all. Second **"what
+moves what"** — the spread of each metric across the options of ONE axis. The order in
+which the decisions have to be made falls out of that instead of being guessed
+(measured on a 260 mm machine):
+
+| Metric | strongest axis | spread | then |
+|---|---|---:|---|
+| Kt | magnet arrangement | 230 % | diameter 59 %, slot count 0 % |
+| continuous torque (S1) | cooling | 550 % | diameter 125 %, length 86 % |
+| safety factor at n_max | lamination | 282 % | diameter 125 % |
+| mass, cost | diameter | 126 % | length 85 % |
+
+**Deliberately no overall score and no winner.** Weighting Kt against cost and mass is
+a goal decision, not a calculation — `screen --ziel` already does it in the open. The
+pairwise comparison puts things side by side; the choice stays with the human.
+
+**One defect the build turned up.** The first draft computed losses with
+`compute_losses(iq, id_)` and thereby claimed **28×** the loss between 2 and 12
+conductors per slot. The reason: the analytical torque relation normalises to **one**
+turn per slot, while phase resistance grows quadratically with conductor count — at
+constant ampere-turns the two cancel. The axis now runs through
+`ema_thermal.design_point_losses`, whose copper anchor is current density × copper
+volume and therefore turn-count independent; what remains is the fill factor, whose
+measured optimum is at 8 conductors per slot.
+
+A second find came with it: `_passt` in the screener rejected **every purely
+surface-mounted arrangement**, because rim-mounted magnets have no interior pocket and
+the radial containment test therefore ran on "infinity". SPM was thus unreachable for
+`screen`, although the layout gate accepts it. Fixed and pinned in the test — together
+with its counterpart: Halbach is still rejected, but for a real reason (its tiles
+overlap by 5.95 mm), and gate and fit agree on that.
+
+All analytical: no field run, no FEM, no thermal simulation. Cooling acts only through
+a table of shear stresses per cooling type, not through a computed heat transfer.
+
 ## Screening the configuration before computing one
 
 A full run takes 30 min to 4 h, so in practice every calculation started from the last
@@ -196,6 +244,41 @@ does not hold there, it says so and writes nothing — a threshold that only fit
 training part is a property of the dataset, not of the rotor. The test pins both cases:
 a threshold planted in the ratings must be recovered (held-out 1.00), and coin-flip
 ratings must let nothing through (training 0.63, held-out 0.48 — refused).
+
+## Draft or detail: how much compute for what
+
+The calculation tab now carries two presets, **📐 Entwurf** (draft) and **🔬 Detail**.
+They set frame count, resolution, speed step and the structural settings; the label
+above them says whether the current state still matches a preset or has become a
+custom one.
+
+What makes a preset defensible here is a measurement (project *Alpenpass*, vasym,
+p=3, 36 slots, saturation on):
+
+| N | seconds | B_gap [T] | Kt | Br fundamental, dev. from N=600 |
+|---:|---:|---:|---:|---:|
+| 120 | 0.54 | 0.477 | 0.031 | −92.0 % |
+| 240 | 4.79 | 0.477 | 0.031 | −52.5 % |
+| **300** | 9.18 | 0.477 | 0.031 | **−2.8 %** |
+| 600 | 68.75 | 0.477 | 0.031 | 0 % |
+
+**B_gap and Kt do not move at all across the range** — they come from the analytical
+anchor, not from the grid, while runtime rises by a factor of 127. What does depend on
+resolution is the **shape** of the air-gap wave, and that has its knee at N=300. A
+draft run therefore loses no metric, only image sharpness — and still no preset sits
+below 300: the report field images render at twice the frame resolution, so the
+draft's 180 px lands at 360.
+
+**The runtime estimate was more than an order of magnitude too low.** It assumed one
+factorisation per rotor angle and a cheap back-substitution per speed. That was right
+while the frames ran linearly; since they run saturated it no longer holds — the
+saturation pass builds a new field-dependent µ per frame that by construction never
+recurs and is therefore deliberately not cached. Measured, the second frame at the
+**same** angle costs 8.97 s against 8.99 s for the first: the cache saves 0.2 %, not
+97 %. The estimate also counted only the rotation, not the two extra visualisations.
+It now uses directly measured seconds per frame (0.74 / 2.86 / 4.64 / 8.61 / 18.72 /
+59.64 s for N = 120…600) and states the number that falls out: **9 minutes for the
+draft, 2.7 hours for detail.**
 
 ## Two solvers on one mesh
 

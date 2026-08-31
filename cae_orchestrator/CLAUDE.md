@@ -62,7 +62,11 @@ recovery, pause/cancel — fake executors, no Flask/solvers), `test_cfd.py`
 (OpenFOAM-VOF cooling: case-dict generation + jet/HTC correlation + wetted fraction +
 thermal HTC-coupling — no OpenFOAM needed), `test_cae_cli.py` (Agent-CLI: `--set`
 placement/validation against a stubbed schema — plus one drift check against the live
-server, skipped when `:5000` is down), `test_bilddaten.py` (Bilddatensatz: Zeichner-
+server, skipped when `:5000` is down), `test_paarvergleich.py` (Paarvergleich:
+Magnetwerkstoff wirkt UND wird zurückgesetzt — auch nach einem Fehler mittendrin —,
+die dokumentierten Invarianten halten (Leiterzahl/Kühlung/Blech bewegen Kt nicht),
+jede baubar gemeldete Option besteht das echte Layouttor, Skalierung geometrisch
+ähnlich bei stehendem Luftspalt), `test_bilddaten.py` (Bilddatensatz: Zeichner-
 Refactor bitgleich, Ziehung in den Schemagrenzen, jeder abgelegte Satz gegen das echte
 Layouttor, Regelsuche gegen eine gelegte Schranke UND gegen Münzwürfe — ohne FreeCAD,
 in einem temporären Ablageort).
@@ -374,6 +378,49 @@ und im Browser über das Feld „Rechensatz & Löser". In der Pipeline schaltet
 `struct_solver`; ohne `.frd` fällt Stufe 5b auf die analytische Näherung zurück (ein
 Pfad, den der Code schon hatte), und das Log sagt es, statt die fehlenden
 Verformungsbilder zu verschweigen.
+
+### Voreinstellungen „Entwurf / Detail" (Berechnungs-Tab)
+
+Zwei Knöpfe über den Analyse-Einstellungen (`applyCalcPreset`, `CALC_PRESETS`) setzen
+Frame-Zahl, Frame-/FDM-Auflösung, Drehzahlschritt und die Struktur-Einstellungen:
+
+| | n_frames | frame_res | fdm_res | rpm_step | struct_solver | Netz | Video |
+|---|---:|---:|---:|---:|---|---:|---|
+| 📐 Entwurf | 12 | 180 | 300 | 1000 | `ccx` | 4 mm | aus |
+| 🔬 Detail | 36 | 300 | 800 | 500 | `freecad` | 2,5 mm | an |
+
+**Die Marke wird aus den Feldern abgeleitet, nicht gemerkt** (`_calcPresetName`) —
+damit stimmt sie auch nach „Projekt als Vorlage" oder einer wiederhergestellten
+Sitzung, und ein einzeln geänderter Wert fällt sofort auf „eigene Einstellung"
+zurück. Die Feld-Darstellungsarten (Ankerrückwirkung, Last-Rampe) fasst keine
+Voreinstellung an: das ist eine Anzeigewahl, keine Genauigkeitsfrage.
+
+**Warum keine Voreinstellung unter N=300 liegt** — gemessen (Alpenpass, vasym, p=3,
+36 Nuten, `saturate=True`): `B_gap` (0,477 T) und `Kt` (0,031) sind über
+N = 120…600 auf die vierte Stelle **identisch**, während die Rechenzeit um Faktor
+127 steigt; sie kommen aus `_analytical_Bgap`, nicht aus dem Gitter. An der
+Auflösung hängt allein die **Form** der Luftspaltwelle: die Grundwelle liegt bei
+N=120 um −92 %, bei N=240 um −52,5 % und ab N=300 um −2,8 % daneben. Der Entwurf
+darf deshalb auf 180 px gehen — die Berichtsbilder rendern über `_emf_N` mit der
+doppelten Auflösung, also bei 360.
+
+**`fdm_resolution` unter 700 ist wirkungslos** und sagt das jetzt auch im Hilfetext:
+`run_pipeline` hebt den Wert für das Luftspaltprofil auf
+`max(fdm_res, AIRGAP_PROFILE_N=700)` an. Wirksam ist dort nur die Stufe 800.
+
+**Der Laufzeitschätzer war um mehr als eine Größenordnung zu niedrig** und ist
+korrigiert. Er rechnete mit EINER Faktorisierung je Rotorwinkel (0,41 s bei N=300)
+plus billiger Rück-Substitution je Drehzahl — richtig, solange die Frames linear
+liefen, überholt seit sie mit `saturate=True` rechnen (s. „Kostenrealität der
+Animation"). Außerdem zählte er nur die Rotation, nicht die je `n_frames` weiteren
+Frames von Ankerrückwirkung und Last-Rampe. Jetzt: gemessene Sekunden je Frame ×
+(`n_rpms·n_frames` + Zusatzdarstellungen), mit dem Hinweis, dass Geometrie/CAD,
+Struktur-FEM und Thermik obendrauf kommen. Ergebnis: **9 Min. für Entwurf, 2,7 Std.
+für Detail** an der Standard-Drehzahlspanne.
+
+**Nebenbefund, mitbehoben:** `applyPayload` stellte `struct_solver` nicht wieder her,
+obwohl `buildPayload` ihn schickt — „Projekt als Vorlage" holte also stillschweigend
+den Löser des zuletzt angesehenen Formulars statt den des Projekts.
 
 ### Handy-Pfad (`ema_mobil.py` / `ema_mobil.html`, Routen `/m…`)
 
@@ -1253,10 +1300,21 @@ Gate: `test_fdm_golden.py::test_lu_cache_bounded` (Budget, Eintrag-je-Winkel,
 Wiederverwendung über Betriebspunkte).
 
 **Kostenrealität der Animation:** 4 der 5 Faktorisierungen je Frame sind die
-Sättigungs-Iterate und **prinzipiell nicht cachebar**. Bei N=600 sind das ~14 s
-je Frame (1008 Frames ≈ 4 h), bei N=300 ~1,5 s. Die hohe Auflösung gehört
-deshalb nicht in die Animation — die Berichtsbilder rendern über
-`_emf_N = min(600, max(300, frame_res·2))` ohnehin getrennt in 600².
+Sättigungs-Iterate und **prinzipiell nicht cachebar**. Ein VOLLER Frame
+(`_field_frame`, Solve + Sättigungsdurchgang + PNG bei `out_px=640`) kostet
+gemessen — Projekt `20260827_170019_Alpenpass`, ein Lauf allein auf der Maschine,
+je drei Frames:
+
+| N | 120 | 180 | 240 | 300 | 400 | 600 |
+|---|---:|---:|---:|---:|---:|---:|
+| s/Frame | 0,74 | 2,86 | 4,64 | 8,61 | 18,72 | 59,64 |
+
+Der zweite Frame am **gleichen** Rotorwinkel kostet 8,97 s gegen 8,99 s beim ersten:
+der LU-Cache spart hier **0,2 %**, nicht 97 % — genau weil die Sättigungs-Iterate
+bewusst ungecacht bleiben. Die hohe Auflösung gehört deshalb nicht in die Animation
+— die Berichtsbilder rendern über `_emf_N = min(600, max(300, frame_res·2))` ohnehin
+getrennt. Diese Tabelle steht als `_FRAMEKOSTEN_S` auch in `ema.html` und trägt dort
+die Laufzeitschätzung (s. „Voreinstellungen Entwurf/Detail").
 Above N≈2500 (`_DIRECT_N_MAX`) the direct factorisation needs too much RAM, so
 `_solve_fdm` dispatches to `_solve_fdm_amg` — CG-accelerated `pyamg`
 smoothed-aggregation AMG (Ruge-Stüben fallback for hard µ-jumps), with the
@@ -1779,7 +1837,7 @@ dict passed to the FEM script.
 | File | Role |
 |---|---|
 | `server.py` | Flask backend: serves `ema.html`, REST API, threaded job state, FreeCAD GUI/STEP launching |
-| `cae_cli.py` | **Agent-Kommandozeile** (Kern stdlib only, kein `requests`): **siebzehn** Verben — `health/status/geom/projects/results/run/wait/routes/raw` über HTTP auf `:5000`, dazu `rotor-check`, `screen`, `bilddaten`, `struktur`, `topopt`, `db`, `lernen` und `recherche`, die **lokal** rechnen (und dafür erst beim Aufruf `ema_deck`/`ema_z88` importieren, damit der Rest schlank bleibt). Gedacht als *Skill* für eine Agent-Harness (PI), nicht als MCP-Server: ein lokales Modell kann 135 Routen nicht als 135 Werkzeugschemata halten. Drei Eigenschaften tragen das: Base64-Nutzlasten (`*_b64`, PNG/VTP/PDF) werden **immer** herausgefiltert und die Ausgabe bei 12 000 Zeichen gekappt (sonst ist der Kontext nach einer Antwort voll), der **Exit-Code** trägt den Zustand (0 ok · 1 Gegenstelle · 2 Bedienfehler · 3 Server aus · 4 Zeitüberschreitung), und `run --set KEY=WERT` ändert einen geerbten Payload parameterweise statt ihn neu zu schreiben. `--set` prüft gegen `/param_schema` (Typ, ganzzahlig, `lo`/`hi`, Auswahllisten), sortiert nach `in_geom` selbst nach `geom` bzw. auf die obere Ebene ein, nimmt Punktpfade (`vehicle.mass_kg=…`) und **weist Grenzverletzungen ab, statt zu klemmen** — ein geklemmter Wert sieht für den Aufrufer wie ein angenommener aus. Unbekannte Namen fallen mit `difflib`-Vorschlag durch. `_ALIAS`/`_MIRROR` fangen die eine echte Namensabweichung: `/param_schema` spricht das Vokabular von `ema_text2ema.SCHEMA` (`axialLen`), die Pipeline liest `data["axial_len"]` (`ema_pipeline.py:1547`) — ohne die Tabelle landete der Wert in einem toten Schlüssel. `RUN_ROUTES` führt Start- **und** Statusroute je Stufe (`/cad_preview/status`, `/em3d/status` …), und `_wait` behandelt `idle` erst nach einem gesehenen Laufzustand als Abschluss — sonst meldet ein vierstündiger Lauf nach 0 s „fertig" |
+| `cae_cli.py` | **Agent-Kommandozeile** (Kern stdlib only, kein `requests`): **achtzehn** Verben — `health/status/geom/projects/results/run/wait/routes/raw` über HTTP auf `:5000`, dazu `paarvergleich`, `rotor-check`, `screen`, `bilddaten`, `struktur`, `topopt`, `db`, `lernen` und `recherche`, die **lokal** rechnen (und dafür erst beim Aufruf `ema_deck`/`ema_z88` importieren, damit der Rest schlank bleibt). Gedacht als *Skill* für eine Agent-Harness (PI), nicht als MCP-Server: ein lokales Modell kann 135 Routen nicht als 135 Werkzeugschemata halten. Drei Eigenschaften tragen das: Base64-Nutzlasten (`*_b64`, PNG/VTP/PDF) werden **immer** herausgefiltert und die Ausgabe bei 12 000 Zeichen gekappt (sonst ist der Kontext nach einer Antwort voll), der **Exit-Code** trägt den Zustand (0 ok · 1 Gegenstelle · 2 Bedienfehler · 3 Server aus · 4 Zeitüberschreitung), und `run --set KEY=WERT` ändert einen geerbten Payload parameterweise statt ihn neu zu schreiben. `--set` prüft gegen `/param_schema` (Typ, ganzzahlig, `lo`/`hi`, Auswahllisten), sortiert nach `in_geom` selbst nach `geom` bzw. auf die obere Ebene ein, nimmt Punktpfade (`vehicle.mass_kg=…`) und **weist Grenzverletzungen ab, statt zu klemmen** — ein geklemmter Wert sieht für den Aufrufer wie ein angenommener aus. Unbekannte Namen fallen mit `difflib`-Vorschlag durch. `_ALIAS`/`_MIRROR` fangen die eine echte Namensabweichung: `/param_schema` spricht das Vokabular von `ema_text2ema.SCHEMA` (`axialLen`), die Pipeline liest `data["axial_len"]` (`ema_pipeline.py:1547`) — ohne die Tabelle landete der Wert in einem toten Schlüssel. `RUN_ROUTES` führt Start- **und** Statusroute je Stufe (`/cad_preview/status`, `/em3d/status` …), und `_wait` behandelt `idle` erst nach einem gesehenen Laufzustand als Abschluss — sonst meldet ein vierstündiger Lauf nach 0 s „fertig" |
 | `test_cae_cli.py` | Tests für `cae_cli` **ohne Server** (gestelltes Schema): Einsortierung, Grenzen/Typen, `--force`, Tippfehler-Abweisung, Alias+Spiegel, Wertparsing, Start-/Statusrouten, Feinparameter (`adv`), strikte Bool-Prüfung und die Einebenen-Quelle für `in_geom`. `test_schema_vs_payload` läuft zusätzlich gegen den laufenden Server und schlägt an, wenn `/param_schema` gegen das Payload-Vokabular driftet (übersprungen, wenn `:5000` aus ist) |
 | `ema_jobs.py` | **Persistente Server-Job-Warteschlange** (`~/cae_projekte/_jobs/queue.json`): EIN Worker-Thread arbeitet eingereihte Jobs (analyse/em3d/em3d_sweep/oilspray) sequenziell ab — Jobs überleben geschlossenen Browser + Server-Neustart (stale `läuft`→`abgebrochen`, Wartende laufen wieder an). Executors werden von `server.py` via `init({type:{run,busy,abort}})` registriert und schreiben in dieselben State-Dicts wie die Direkt-Routen (Live-Fortschritt in den Tab-UIs). Server-Routen `/jobs` + `/jobs/add|<jid>/cancel|clear_done|config`; UI-Tab **⏳ Jobs** + „➕ Warteschlange"-Knöpfe + `_reattachJobs` (Reattach beim Seiten-Laden). Test: `test_jobs.py` |
 | `ema.html` | Single-file vanilla-JS browser UI (no build). Workflow-tab layout: a top tab bar (`switchTab`, tabs `projekt/geo/betrieb/calc/live/designer/import/em3d/oil/cfd/spraytest/ki/jobs/results/compare` (`oil` = 💧 Spritzöl-Kühlung, Blender/Mantaflow; `ki` = 🧠 KI-Training, s. `ema_ki_training.py`; `jobs` = ⏳ Server-Job-Warteschlange, s. `ema_jobs.py`), `#hash` deep-linkable; **there is no `report` tab — the Bericht moved into Tab ①**). The **entry tab is `① Projekt`** (`panel-projekt`, the default landing tab) — **the central project hub** for everything project-scoped. Top row: create a project (`pjCreate` → `POST /project/new`, lays down the dir + `project.json` immediately, `status:"neu"`, `origin:"manual"`) · open existing ones (`pjRefreshList` from `/projects?detail=1`, **Galerie ⤢** = `openProjectGallery`). When a project is active (`#pj-active-wrap` shown), the cards are grouped under `.pj-group-h` headers: **📋 Projektdaten & Notizen** (Organisation/status/tags/notes → `/project/<id>/meta` + evolution/lineage; Projekt-Dokumente = per-project RAG via `/project/<id>/rag/add` + attachments via `/project/<id>/attachments`) · **📄 Auswertung & Bericht** (the **PDF-Bericht card** `#pj-report-card` with `#btn_report`/`#btn_report_agentic` → `generateReport(mode)` + `#report_status`/`#report_rag`; the **gespeicherte 3D-Läufe** card `#e3_save_name`/`#e3_saved_list` → `_e3SaveRun`/`_e3LoadRun`/`_e3DeleteSaved`, project-scoped under `<projekt>/em3d_runs/`) · collapsed `<details>` **🧰 Globale Werkzeuge & Daten** (global Wissensbasis `openRag` + LLM-Trainingsdaten `refreshTrainingStats`/`#training-stats`). **Active-project plumbing:** `window._activeProject` is the client truth; **`pjSetActive` also POSTs `/project/<id>/activate`** (lightweight — sets server `_state["project_dir"]`/`project_id` WITHOUT loading results) so report + em3d (which read `_state`) target the chosen project, then refreshes the report card (`pjUpdateReportCard`), the saved-3D list, and the training stats. `buildPayload()`/`_dsnBuildPayload()` attach `payload.project_id = _activeProject.id`, and `/analyse`'s `_run` (+ all em3d handlers via `_em3d_project_dir`) reuse that dir (generalised `reuse_id`) so every calculation/3D-run writes **into** the active project. `loadProjectById` calls `pjSetActive` too. `generateReport` prefers `_activeProject.id` (falls back to `/status`). The Tab-3 (Betrieb) project-management block was removed; `#project_name`/`#project_load` survive as hidden elements only to keep variant/param-table/applyPayload JS wired. The results-tab `🗂 Projektakte` `<details>` panel (`renderAkte`) still mirrors the same project contextually. The rest of the layout sits over `#workspace` = `#panel-area` (active panel) + draggable `#vsplit` + persistent `#preview-pane` (live `#simCanvas`, hidden on results/compare) + draggable `#hsplit` + `#footer` (staged-workflow buttons `#btn_cad_preview` (🧊 CAD ansehen → `startCadPreview`) · `#btn_smoke` (🧪 Smoke-Test → `startSmokeTest`) · `#btn_analyse` (⚙ Echte Berechnung), all sharing the `_wfModal`/`_pollWf` overlay helpers for the first two, plus `#analysis-progress`; drag `#hsplit` taller to reveal the full `#progress-log`). Inputs grouped into `.tab-panel`s; the `results` tab is gated `disabled` until an analysis finishes. `#vsplit`/`#hsplit` (`initSplitters`) resize preview width / footer height and call the canvas `resize()` live. The preview overlay has a pause button (`#ov_play` → global `toggleSim`/`_syncSimUI`, mirrors the Live-tab `#btn_play_pause`) so rotation can be stopped from any input tab. **Globales Speichern** (`#btn-global-save` in der Topbar + `#save-modal`): EIN Speicherknopf öffnet ein Vorschau-/Auswahl-Fenster (`openSaveModal`/`saveModalCommit`/`_buildSaveItems`), das **kontextabhängig** alles Speicherbare als abwählbare Positionen listet — **Projektdaten & Notizen** (`/project/<id>/meta`, liest `pj_*` bzw. bei passendem `akte-body.pid` die `akte_*`-Felder und schreibt beim Speichern in BEIDE zurück), **Bewertung** (`/project/<id>/rating`, gut/schlecht-Select), **3D-Feld-Lauf** (`/em3d/save`, sichtbar via `window._e3HasResult`, gesetzt in `_renderEm3d`/`_renderEm3dSweep`), **Varianten-Set** (`/variants/save`, wenn `variants.length`). Jede Zeile zeigt eine Vorschau + Häkchen (+ optional Name/Bewertung), Commit speichert alle angehakten nacheinander mit ✓/❌ je Zeile. Die alten Einzel-Speicherknöpfe (Projektdaten/Akte/3D-Lauf/Varianten) zeigen jetzt alle auf `openSaveModal()`; `pjSaveMeta`/`saveAkteMeta`/`_e3SaveRun`/`saveVariantSet` bleiben als Funktionen bestehen, die Buttons rufen aber das Modal |
@@ -1791,6 +1849,7 @@ dict passed to the FEM script.
 | `ema_z88.py` | **Z88Aurora V5 im Stapelbetrieb** (`/opt/z88aurora`, kein GUI, kein `z88inp`). Schreibt `Z88I1/I2/I5/MAT/ELP/INT/MAN.TXT` + `z88.dyn`, fährt `z88r -t` dann `-c` (der Prüflauf schreibt `Z88R.DYN`), liest `Z88O2/O3/O4`. `spannungen_je_element` bringt die Spalten auf die Reihenfolge der CalculiX-`.dat` — die eine Stelle, an der sich die beiden Löser vertauschen ließen. Drei nirgends dokumentierte Formate sind im Modulkopf festgehalten |
 | `ema_topopt.py` | **Topologieoptimierung**: SKO (Vorgabe) + SIMP/OC auf dem Polsektor. Steuert eine relative Dichte, aus der E **und** Masse folgen; Sperrbereiche für Wellensitz/Rand/Taschensaum; Kegelfilter gegen Schachbrettmuster; `ableseempfehlung()` rechnet das Dichtefeld auf die parametrischen Rotorgrößen zurück. Ergebnis ist ein Dichtefeld, **kein Bauteil** |
 | `test_deck.py` / `test_topopt.py` | Netz gegen `occ.getMass`, Quadratur gegen die geschlossene Form am taschenfreien Ring, Gmsh-Tet10-Knotenreihenfolge gegen die echten Koordinaten, Vernetzung aus einem **Nebenthread** (der Flask-Fall), beide Löser auf einem Netz, Dichtekopplung, SKO-Konvergenz |
+| `ema_paarvergleich.py` | **Paarvergleich der Gestaltungsentscheidungen — die Stufe VOR der Geometrie.** Acht Achsen (Magnetanordnung, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Durchmesser, Länge), je Achse jede Option gegen jede, rein analytisch (0,4 s für alle acht). Zwei Ausgaben: die **Paare** (welche Kennzahl spricht für welche Seite, welche bewegt sich gar nicht) und die **Spannweite je Achse** — letztere sagt, welche Entscheidung zuerst ansteht. **Bewusst ohne Gesamtnote**: eine Gewichtung über Kt, Kosten und Masse ist eine Zielentscheidung, und `screen --ziel` macht sie bereits offen. Drei Stellen, an denen es schiefgehen konnte und die deshalb Tests haben: (1) der Magnetwerkstoff wirkt nur über die **Modul-Globalen** `ema_analysis.Br_NdFeB`/`MU_R_MAG` (wie in `run_pipeline`) — ohne das Umsetzen wäre die ganze Achse still wirkungslos, und eine Tabelle mit überall gleichem Kt sieht nach einem Befund aus; sie werden im `finally` zurückgesetzt. (2) Verluste über **`ema_thermal.design_point_losses`**, NICHT `compute_losses(iq, id_)`: dessen Kupferanker ist Stromdichte × Kupfervolumen und damit windungszahl-unabhängig — mit den rohen dq-Strömen behauptete die Hairpin-Achse das **28-Fache** an Verlusten zwischen 2 und 12 Leitern je Nut, weil `compute_performance` auf EINE Windung je Nut normiert, während `R_phase` quadratisch mit der Leiterzahl wächst. (3) Alle Optionen laufen auf **einem gemeinsamen Betriebspunkt** (`load_nm` @ `rpm`); jede an ihrem eigenen Dauermoment zu rechnen wäre kein Vergleich. Der Durchmesser skaliert geometrisch ähnlich — **außer dem Luftspalt**, der fertigungsbedingt stehen bleibt. CLI: `cae_cli.py paarvergleich [--achsen …]` |
 | `ema_bilddaten.py` | **Bilddatensatz zum optischen Bewerten.** Zieht Zufallsgeometrien aus den Grenzen von `ema_text2ema.SCHEMA` (Verhältnisse statt Absolutmaße ⇒ die radiale Ordnung gilt durch Konstruktion), behält nur was `rotor_layout_check` bestätigt (gemessene Ausbeute **27 %**), zeichnet sie unbeschriftet mit `ema_pipeline.render_cross_section` (384 px, 0,138 s / 33 kB je Bild gegen 0,245 s / 172 kB in Berichtsgröße) und legt sie flach ab (`~/cae_projekte/_bilddaten/datensatz.jsonl` + `bilder/`). `bewertungsseite()` schreibt eine eigenständige HTML-Seite (läuft über `file://`, Zwischenstand im `localStorage`, gibt `urteile.json` heraus) — **ohne Maße, Kennzahlen oder Heuristik-Vorschlag**, sonst bekommt man die eigene Vermutung bestätigt statt eines unabhängigen Urteils. `regel_suchen()` sucht eine Schranke über `merkmale()` (Stegbreite, Polbedeckung, Nabenanteil, Zahn/Nut …), einzeln und als Paar, und misst sie auf einem **zurückgehaltenen Drittel** (feste Zuteilung über `sha1(id)`); `merke_regel()` legt sie nur ab, wenn sie dort das bloße Raten schlägt — die Weigerung ist der eigentliche Wert. **Kein CNN**: die Geometrie liegt exakt vor, sie muss nicht aus Pixeln zurückgeschätzt werden. CLI: `cae_cli.py bilddaten erzeugen\|seite\|einlesen\|regel\|stand` |
 | `ema_rotorcheck.py` | **Pre-CAD rotor gates, pure 2-D algebra (ms).** `rotor_layout_check` (pocket collision, minimum web `BRIDGE_MM`, containment in the `[bore, rim]` annulus — models the real stadium/obround cut incl. the `magGapMm` glue gap) and `rotor_stress_check` (exact rotating-annulus bore hoop stress in BOTH plane states via `_bore_hoop_mpa`, gate on the conservative plane-strain value × `KT_POCKET`=1.5). Consumed by `ema_pipeline` (stage 0) and `cae_cli.py rotor-check`. Does **not** cover balance bolts or flux barriers |
 | `ema_purge.py` | Removes degenerate C3D4 tets from the CalculiX `.inp` so `ccx` stops refusing meshes over a handful of flat tets in the thin iron bridges. Exists **twice**: as a module and as `_STANDALONE` text spliced into the generated FreeCAD script (no import possible there) — `test_rotorcheck.py` pins the two together. Refuses to touch the file if >5 % of tets are flagged (that pattern means a parser glitch, never a real mesh) |

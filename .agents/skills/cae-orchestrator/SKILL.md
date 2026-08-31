@@ -43,6 +43,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `wait` | auf Abschluss warten |
 | `routes [--grep x]` | alle Serverrouten auflisten |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
+| `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Acht Achsen (Magnetanordnung, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Durchmesser, Länge), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht**. 0,4 s, rein analytisch |
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
 | `bilddaten <was>` | **Bilddatensatz zum optischen Bewerten**: `erzeugen` · `seite` · `einlesen` · `regel` · `stand`. Zieht zufaellige Rotorquerschnitte, behaelt nur die, die das Layouttor bestehen, und zeichnet sie. **Die Bewertung macht ein Mensch** — du kannst sie nur vorbereiten und hinterher auswerten |
 | `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver beide` (Vollrotor, ~7 s, mit Gegenüberstellung) |
@@ -269,6 +270,47 @@ ist eine Eigenschaft des Datensatzes und keine des Rotors.
 Was NICHT passiert: kein neuronales Netz, keine Heuristik-Vorbelegung der Bilder. Die
 Bewertungsseite zeigt das Bild und sonst nichts — wer eine Vermutung vorschlaegt,
 bekommt sie bestaetigt zurueck.
+
+### Noch davor: `paarvergleich` — worüber überhaupt entschieden wird
+
+`screen` variiert Polzahl, Nutzahl, Bauform und Leiterzahl und gibt eine Rangliste
+heraus. Das beantwortet „welche Variante nehme ich?". Eine Stufe früher steht aber
+eine andere Frage: **woran hängt die Maschine überhaupt?** Magnetanordnung, Zahl der
+Hairpins, Werkstoffe, Kühlung, Durchmesser, Länge — das sind die Entscheidungen, die
+eine Auslegung prägen, und sie fallen der Reihe nach.
+
+```bash
+python3 cae_cli.py paarvergleich --from-project last
+python3 cae_cli.py paarvergleich --from-project last --achsen anordnung,kuehlung,durchmesser
+```
+
+Zwei Ausgaben, und die zweite ist die wichtigere:
+
+1. **Die Paare.** Je Achse jede Option gegen jede, mit der Angabe, welche Kennzahl
+   für welche Seite spricht — und welche sich zwischen beiden **gar nicht** bewegt.
+2. **„Was bewegt was".** Die Spannweite jeder Kennzahl über die Optionen EINER
+   Achse. Daraus fällt die Reihenfolge der Entscheidungen heraus, statt geraten zu
+   werden. Gemessen an einer 260-mm-Maschine: die Magnetanordnung bewegt Kt um
+   **230 %**, der Durchmesser um 59 %, die Nutzahl um 0 %.
+
+**Es gibt hier bewusst keine Gesamtnote und keinen Sieger.** Eine Gewichtung über
+Kt, Kosten und Masse ist eine Zielentscheidung, keine Rechnung — `screen --ziel`
+macht sie bereits offen und nachvollziehbar. Der Paarvergleich stellt gegenüber;
+die Wahl trifft der Mensch. Trag ihm die Achsen vor, die seine Frage betreffen, und
+sag dazu, was sich **nicht** bewegt — das ist oft die nützlichere Hälfte.
+
+Drei Modellgrenzen, die in der Antwort mitgehören:
+
+* Die **Kühlung** wirkt nur über eine Tabelle von Schubspannungen je Kühlart
+  (`COOLING_RATING`), nicht über einen gerechneten Wärmeübergang. Sie bewegt das
+  Dauermoment und sonst nichts.
+* **Nutzahl und Leiterzahl bewegen Kt und B_gap auf dieser Stufe nicht** — die
+  analytische Momentformel kennt weder Windungs- noch Nutzahl. Die Hairpin-Achse
+  ist eine Achse über Widerstand, Verlusten und Aufwand.
+* Beim **Durchmesser** wird geometrisch ähnlich skaliert, der **Luftspalt bleibt
+  aber stehen** — der ist fertigungsbedingt.
+
+Danach erst `screen`, dann `rotor-check`, dann `run`.
 
 ### Ganz am Anfang: `screen`
 

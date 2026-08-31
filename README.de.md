@@ -107,7 +107,7 @@ nicht antwortet, und wartet auf dessen Erreichbarkeit, bevor PI läuft.
 | `start_agent.sh` | Wurzel | Startkette + Sitzungsverwaltung (mit Sitzungsmenü) |
 | `.agents/projektstand.py` | Wurzel | erzeugt den Projektblock für `AGENTS.projekt.md` — beide Köpfe benutzen denselben Erzeuger, sehen also denselben Stand |
 | `.agents/` | Wurzel | Skill-Definition für PI (`skills/cae-orchestrator/SKILL.md`) und Einrichtung |
-| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — **siebzehn Verben**: neun über HTTP auf `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), acht lokal (`rotor-check`, `screen`, `bilddaten`, `struktur`, `topopt`, `db`, `lernen`, `recherche`) |
+| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — **achtzehn Verben**: neun über HTTP auf `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), neun lokal (`paarvergleich`, `rotor-check`, `screen`, `bilddaten`, `struktur`, `topopt`, `db`, `lernen`, `recherche`) |
 | `start_hermes.sh` | Wurzel | zweiter Agentenkopf: **Hermes Agent**, gleiches Modell, gleicher Skill, mit gemessenem Netznachweis; Projektbindung über `HERMES_HOME` |
 
 **Warum eine CLI und kein MCP-Server:** ein lokales Modell kann die ~135 HTTP-Routen des
@@ -207,6 +207,56 @@ Fließtext geklaubt.
 **Gerechnet wird weiterhin ausschließlich lokal.** Es wird nichts hochgeladen und keine
 Rechenaufgabe ausgelagert.
 
+## Paarvergleich: worüber überhaupt entschieden wird
+
+Die Vorauswahl unten beantwortet „welche Variante nehme ich?". Eine Stufe früher
+steht eine andere Frage: **woran hängt die Maschine überhaupt?** `ema_paarvergleich`
+stellt acht Achsen — Magnetanordnung, Leiter je Nut, Magnet-, Blech- und
+Leiterwerkstoff, Kühlung, Durchmesser, Länge — Option gegen Option, alle acht in
+**0,4 s**.
+
+```bash
+python3 cae_orchestrator/cae_cli.py paarvergleich --from-project last
+```
+
+Zwei Ausgaben, und die zweite ist die wichtigere. Erstens die **Paare**: welche
+Kennzahl spricht für welche Seite, und welche bewegt sich zwischen beiden gar nicht.
+Zweitens **„was bewegt was"** — die Spannweite jeder Kennzahl über die Optionen
+EINER Achse. Daraus fällt die Reihenfolge der Entscheidungen heraus, statt geraten
+zu werden (gemessen an einer 260-mm-Maschine):
+
+| Kennzahl | stärkste Achse | Spanne | danach |
+|---|---|---:|---|
+| Kt | Magnetanordnung | 230 % | Durchmesser 59 %, Nutzahl 0 % |
+| Dauermoment (S1) | Kühlung | 550 % | Durchmesser 125 %, Länge 86 % |
+| Sicherheit bei n_max | Elektroblech | 282 % | Durchmesser 125 % |
+| Masse, Kosten | Durchmesser | 126 % | Länge 85 % |
+
+**Bewusst keine Gesamtnote und kein Sieger.** Eine Gewichtung über Kt, Kosten und
+Masse ist eine Zielentscheidung, keine Rechnung — `screen --ziel` macht sie bereits
+offen. Der Paarvergleich stellt gegenüber; die Wahl bleibt beim Menschen.
+
+**Ein Fehler, den das Bauen zutage gefördert hat.** Der erste Entwurf rechnete die
+Verluste mit `compute_losses(iq, id_)` und behauptete damit zwischen 2 und 12 Leitern
+je Nut das **28-Fache** an Verlustleistung. Der Grund: die analytische Momentformel
+normiert auf **eine** Windung je Nut, während der Phasenwiderstand quadratisch mit
+der Leiterzahl wächst — bei gleichen Amperewindungen kürzt sich das heraus. Jetzt
+läuft die Achse über `ema_thermal.design_point_losses`, dessen Kupferanker
+Stromdichte × Kupfervolumen ist und damit windungszahlunabhängig; übrig bleibt der
+Füllfaktor, und der hat sein Optimum gemessen bei 8 Leitern je Nut.
+
+Ein zweiter Fund fiel dabei ab: `_passt` in der Vorauswahl wies **jede reine
+Oberflächen-Bauform** ab, weil aussen aufgesetzte Magnete keine eingelassene Tasche
+haben und die radiale Einschlussprüfung damit auf „unendlich" lief. SPM war für
+`screen` also nie erreichbar, obwohl das Layouttor es annimmt. Behoben und im Test
+festgehalten — zusammen mit dem Gegenstück: Halbach wird weiterhin abgelehnt, aber
+aus einem echten Grund (die Kacheln überlappen sich um 5,95 mm), und Tor und
+Einpassung sind sich darin einig.
+
+Alles analytisch: kein Feldlauf, keine FEM, keine Thermiksimulation. Die Kühlung
+wirkt nur über eine Tabelle von Schubspannungen je Kühlart, nicht über einen
+gerechneten Wärmeübergang.
+
 ## Vorauswahl: erst die Bauform durchspielen, dann eine rechnen
 
 Ein voller Lauf dauert 30 min bis 4 h. In der Praxis begann deshalb jede Rechnung beim
@@ -301,6 +351,43 @@ Schranke, die nur den Lernteil trifft, ist eine Eigenschaft des Datensatzes und 
 des Rotors. Der Test legt beide Faelle fest: eine kuenstlich in die Urteile gelegte
 Schranke muss wiedergefunden werden (Pruefteil 1,00), und bei Muenzwurf-Urteilen darf
 keine Regel durchkommen (Lernteil 0,63, Pruefteil 0,48 — abgewiesen).
+
+## Entwurf oder Detail: wie viel Rechenleistung wofür
+
+Im Berechnungs-Reiter stehen jetzt zwei Voreinstellungen, **📐 Entwurf** und
+**🔬 Detail**. Sie setzen Frame-Zahl, Auflösung, Drehzahlschritt und die
+Struktur-Einstellungen; die Anzeige darüber sagt, ob der aktuelle Stand noch einer
+Voreinstellung entspricht oder schon eine eigene ist.
+
+Der Grund, warum das überhaupt eine Voreinstellung sein darf, ist eine Messung
+(Projekt *Alpenpass*, vasym, p=3, 36 Nuten, Sättigung an):
+
+| N | Sekunden | B_gap [T] | Kt | Br-Grundwelle, Abw. zu N=600 |
+|---:|---:|---:|---:|---:|
+| 120 | 0,54 | 0,477 | 0,031 | −92,0 % |
+| 240 | 4,79 | 0,477 | 0,031 | −52,5 % |
+| **300** | 9,18 | 0,477 | 0,031 | **−2,8 %** |
+| 600 | 68,75 | 0,477 | 0,031 | 0 % |
+
+**B_gap und Kt bewegen sich über den ganzen Bereich nicht** — sie kommen aus der
+analytischen Verankerung, nicht aus dem Gitter, während die Rechenzeit um den Faktor
+127 steigt. An der Auflösung hängt allein die **Form** der Luftspaltwelle, und die
+knickt bei N=300 ein. Ein Entwurfslauf verliert also keinen Kennwert, nur
+Bildschärfe — und darum liegt trotzdem keine Voreinstellung unter 300: die
+Berichtsbilder rendern mit der doppelten Frame-Auflösung, der Entwurf mit 180 px also
+bei 360.
+
+**Der Laufzeitschätzer war dabei um mehr als eine Größenordnung zu niedrig.** Er
+rechnete mit einer Faktorisierung je Rotorwinkel und einer billigen Rück-Substitution
+je Drehzahl. Das war richtig, solange die Frames linear liefen; seit sie mit
+Sättigung rechnen, trägt es nicht mehr — der Sättigungsdurchgang erzeugt je Frame ein
+neues feldabhängiges µ, das per Konstruktion nie wieder vorkommt und deshalb bewusst
+nicht zwischengespeichert wird. Gemessen kostet der zweite Frame am **gleichen**
+Winkel 8,97 s gegen 8,99 s beim ersten: der Zwischenspeicher spart 0,2 %, nicht 97 %.
+Außerdem zählte der Schätzer nur die Rotation, nicht die beiden Zusatzdarstellungen.
+Er rechnet jetzt mit direkt gemessenen Sekunden je Frame (0,74 / 2,86 / 4,64 / 8,61 /
+18,72 / 59,64 s bei N = 120…600) und nennt die Zahl, die dabei herauskommt: **9 Minuten
+für den Entwurf, 2,7 Stunden für Detail.**
 
 ## Festigkeit ohne FreeCAD, zweiter Löser, Topologieoptimierung
 

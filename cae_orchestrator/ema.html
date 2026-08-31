@@ -799,6 +799,31 @@
   <!-- 5. Analyse-Einstellungen -->
   <div class="section">
     <div class="section-title">Analyse-Einstellungen</div>
+    <div class="input-group" style="grid-column:1/-1;margin-bottom:10px">
+      <span style="grid-column:1/-1;color:#aaa;font-size:.76rem;margin-bottom:4px">
+        Voreinstellung: <b id="preset_badge" style="color:#7db9e8">eigene Einstellung</b>
+      </span>
+      <div style="grid-column:1/-1;display:flex;gap:6px;flex-wrap:wrap">
+        <button type="button" id="btn_preset_entwurf" onclick="applyCalcPreset('entwurf')"
+                style="background:#2f4858;padding:7px 14px;font-size:.78rem">📐 Entwurf</button>
+        <button type="button" id="btn_preset_detail" onclick="applyCalcPreset('detail')"
+                style="background:#3a4d2f;padding:7px 14px;font-size:.78rem">🔬 Detail</button>
+      </div>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666;line-height:1.45;margin-top:6px">
+        <b>Entwurf</b> spielt eine Auslegung durch, <b>Detail</b> rechnet die Zahl, die in den
+        Bericht soll. Beide setzen nur die Felder unten &mdash; jedes bleibt danach einzeln
+        änderbar, und die Anzeige oben sagt, ob der aktuelle Stand noch einer Voreinstellung
+        entspricht.<br/>
+        <b>Was sich dabei NICHT ändert:</b> <code>B_gap</code>, <code>Kt</code> und das Moment.
+        Die kommen aus der analytischen Verankerung, nicht aus dem Gitter &mdash; gemessen am
+        Projekt <i>Alpenpass</i> (vasym, p=3, 36&nbsp;Nuten, Sättigung an) sind sie über
+        N&nbsp;=&nbsp;120&hellip;600 auf die vierte Stelle identisch (0,477&nbsp;T / 0,031),
+        während die Rechenzeit um den Faktor&nbsp;127 steigt. An der Auflösung hängt die
+        <b>Form</b> der Luftspaltwelle: ihre Grundwelle liegt bei N=120 um −92&nbsp;%, bei
+        N=240 noch um −52&nbsp;% daneben und trifft ab <b>N=300</b> auf −2,8&nbsp;% &mdash;
+        dort ist der Knick, und darum liegt keine Voreinstellung darunter.
+      </small>
+    </div>
     <div style="font-size:.76rem;color:#666;margin-bottom:8px">Drehzahlbereich für EM- und Strukturkennlinie. FEM läuft automatisch bei RPM-bis (Worst-Case).</div>
     <div class="input-group">
       <label>RPM von</label>
@@ -850,7 +875,7 @@
         <option value="600">600 px — Luftspalt aufgelöst</option>
         <option value="800">800 px — maximal (Luftspalt 2 px)</option>
       </select>
-      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Statisches Feld (einmalig). Direkter Sparse-Solver — exakt bei jeder Auflösung.</small>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Statisches Feld (einmalig). Direkter Sparse-Solver — exakt bei jeder Auflösung. <b>Achtung:</b> die Pipeline hebt diesen Wert für das Luftspaltprofil auf mindestens 700 an (<code>ema_analysis.AIRGAP_PROFILE_N</code>) — ein sub-pixeliger Luftspalt lässt sonst den tangentialen Anteil den radialen überstrahlen. Alles unter 700 ändert hier also <b>nichts</b>; wirksam ist nur 800.</small>
     </div>
     <div class="input-group">
       <label>Frame-Auflösung</label>
@@ -4380,7 +4405,53 @@ function toggleAnim() {
   }
 }
 
-// ── Runtime estimate ───────────────────────────────────────────────────────────
+// ── Laufzeitschätzung ──────────────────────────────────────────────────────────
+//
+// Gemessene Kosten EINES Animations-Frames (ema_pipeline._field_frame mit
+// saturate=True, Projekt 20260827_170019_Alpenpass), Mittel aus drei Frames:
+//
+//   N          120    180    240    300    400    600
+//   Sekunden   0.74   2.86   4.64   8.61   18.72  59.64
+//
+// Der alte Schätzer lag um mehr als eine Größenordnung zu niedrig, aus zwei
+// Gründen — beide waren einmal richtig und sind es seit einer Änderung nicht mehr:
+//
+//  1. Er rechnete mit EINER Faktorisierung je Rotorwinkel (0,41 s bei N=300) und
+//     einer billigen Rück-Substitution je Drehzahl. Seit die Frames mit
+//     saturate=True laufen, trägt das nicht mehr: der Sättigungsdurchgang rechnet
+//     je Frame ein neues feldabhängiges µ, das per Konstruktion nie wieder
+//     vorkommt und deshalb bewusst NICHT gecacht wird. Gemessen kostet der zweite
+//     Frame am GLEICHEN Winkel 8,97 s gegen 8,99 s beim ersten — der Cache spart
+//     0,2 %, nicht 97 %.
+//  2. Er zählte nur die Rotation. Ankerrückwirkung und Last-Rampe rendern je
+//     n_frames weitere Frames desselben Preises.
+//
+// Alle sechs Werte der Auswahlliste sind direkt gemessen (je drei Frames, ein Lauf
+// allein auf der Maschine) — es wird hier nichts fortgeschrieben. Der Exponent
+// dient nur, falls jemand der Auswahlliste einen Wert hinzufügt.
+const _FRAMEKOSTEN_S = { 120: 0.74, 180: 2.86, 240: 4.64, 300: 8.61, 400: 18.72, 600: 59.64 };
+const _FRAMEKOSTEN_EXP = 2.51;
+
+function _frameSekunden(N) {
+  if (_FRAMEKOSTEN_S[N] !== undefined) return { s: _FRAMEKOSTEN_S[N], gemessen: true };
+  const stuetz = Object.keys(_FRAMEKOSTEN_S).map(Number).sort((a, b) => a - b);
+  const gross  = stuetz[stuetz.length - 1];
+  if (N > gross) {
+    return { s: _FRAMEKOSTEN_S[gross] * Math.pow(N / gross, _FRAMEKOSTEN_EXP), gemessen: false };
+  }
+  const klein = stuetz[0];
+  if (N < klein) {
+    return { s: _FRAMEKOSTEN_S[klein] * Math.pow(N / klein, _FRAMEKOSTEN_EXP), gemessen: false };
+  }
+  let lo = klein;
+  for (const w of stuetz) if (w <= N) lo = w;
+  const hi = stuetz.find(w => w >= N);
+  const f  = (Math.log(N) - Math.log(lo)) / (Math.log(hi) - Math.log(lo));
+  return { s: Math.exp(Math.log(_FRAMEKOSTEN_S[lo])
+                       + f * (Math.log(_FRAMEKOSTEN_S[hi]) - Math.log(_FRAMEKOSTEN_S[lo]))),
+           gemessen: false };
+}
+
 function _updateRuntimeEstimate() {
   const rFrom = +(document.getElementById('rpm_from')?.value || 5000);
   const rTo   = +(document.getElementById('rpm_to')?.value   || 20000);
@@ -4388,23 +4459,108 @@ function _updateRuntimeEstimate() {
   const nf    = +(document.getElementById('n_frames')?.value || 36);
   const fres  = +(document.getElementById('frame_resolution')?.value || 120);
   const nRpms = Math.max(1, Math.floor((rTo - rFrom) / Math.max(1, rStep)) + 1);
-  // Direct sparse solver: the operator is factorised ONCE per rotor angle
-  // (nf distinct angles) and only back-substituted per RPM.  Measured at N=300:
-  // factor ~0.41 s (~(N/300)^3), solve ~0.016 s (~(N/300)^2).
-  const factorPer = Math.pow(fres / 300, 3) * 0.41;   // per distinct rotor angle
-  const solvePer  = Math.pow(fres / 300, 2) * 0.016;  // per frame (back-substitution)
-  const total = nf * factorPer + nRpms * nf * solvePer + 30;  // +30 s overhead
+  // Rotation: n_rpms × n_frames.  Ankerrückwirkung und Last-Rampe: je n_frames
+  // (ema_pipeline, Schleife über field_modes).
+  const extra = (document.getElementById('fm_current_angle')?.checked ? nf : 0)
+              + (document.getElementById('fm_load_ramp')?.checked ? nf : 0);
+  const nFrames = nRpms * nf + extra;
+  const k = _frameSekunden(fres);
+  const total = nFrames * k.s;
   const el = document.getElementById('runtime_estimate');
-  if (el) {
-    const min = total / 60;
-    el.textContent = `${nRpms} Drehzahlen × ${nf} Frames = ${nRpms*nf} Solves · ~${min < 1 ? total.toFixed(0) + ' Sek.' : min.toFixed(1) + ' Min.'}`;
-  }
+  if (!el) return;
+  const zeit = total < 90 ? `${total.toFixed(0)} Sek.`
+             : total < 5400 ? `${(total / 60).toFixed(1)} Min.`
+             : `${(total / 3600).toFixed(1)} Std.`;
+  el.innerHTML =
+    `${nRpms} Drehzahlen × ${nf} Frames` + (extra ? ` + ${extra} (Zusatz-Darstellungen)` : '')
+    + ` = <b>${nFrames} Frames</b> × ${k.gemessen ? '' : '~'}${k.s.toFixed(2)} s `
+    + `= <b>${zeit}</b>`
+    + `<br/><span style="color:#888">Nur die Feld-Animation — Geometrie/CAD, Festigkeits-FEM `
+    + `und Thermik kommen obendrauf (Netz-Auflösung unten nennt ihre Minuten).</span>`;
 }
-['rpm_from','rpm_to','rpm_step','n_frames','frame_resolution'].forEach(id => {
+['rpm_from','rpm_to','rpm_step','n_frames','frame_resolution','fm_current_angle','fm_load_ramp'].forEach(id => {
   const el = document.getElementById(id);
   if (el) { el.addEventListener('input', _updateRuntimeEstimate); el.addEventListener('change', _updateRuntimeEstimate); }
 });
 window.addEventListener('load', _updateRuntimeEstimate);
+
+// ── Voreinstellungen: Entwurf / Detail ─────────────────────────────────────────
+//
+// Gemessen am Projekt 20260827_170019_Alpenpass (vasym, p=3, 36 Nuten, Sättigung an),
+// run_em_analysis über die Auflösung:
+//
+//   N            120     150     200     240     300     400     600
+//   Sekunden     0.54    1.13    3.53    4.79    9.18    20.9    68.75
+//   B_gap [T]    0.477   0.477   0.477   0.477   0.477   0.477   0.477
+//   Kt           0.031   0.031   0.031   0.031   0.031   0.031   0.031
+//   Br-Grundwelle -92.0%  -83.7%  -72.1%  -52.5%  -2.8%   +8.2%   0
+//
+// Zwei Befunde tragen die Voreinstellungen:
+//   1. B_gap und Kt hängen NICHT an N — sie kommen aus _analytical_Bgap. Ein
+//      Entwurfslauf verliert also keinen Kennwert, nur Bildschärfe.
+//   2. Die FORM der Luftspaltwelle knickt bei N=300 ein; darunter liegt sie um die
+//      Hälfte daneben. Deshalb geht KEINE Voreinstellung unter 300 — auch der
+//      Entwurf nicht: seine frame_resolution 180 wird für die Berichtsbilder
+//      ohnehin verdoppelt (ema_pipeline: _emf_N = min(600, max(300, 2·frame_res))
+//      = 360), und das statische Feld läuft immer bei ≥ AIRGAP_PROFILE_N = 700.
+//
+// Bewusst NICHT in den Voreinstellungen: die Feld-Darstellungsarten
+// (Ankerrückwirkung, Last-Rampe). Die sind eine Anzeigewahl, keine Genauigkeitsfrage
+// — ein Knopf, der sie stillschweigend abwählt, nähme dem Nutzer etwas weg.
+const CALC_PRESETS = {
+  entwurf: {
+    label: '📐 Entwurf',
+    felder: { n_frames: 12, frame_resolution: 180, fdm_resolution: 300, rpm_step: 1000,
+              struct_solver: 'ccx', struct_mesh_mm: 4, struct_img_px: 1500,
+              struct_video: false, struct_frames: 20 },
+  },
+  detail: {
+    label: '🔬 Detail',
+    felder: { n_frames: 36, frame_resolution: 300, fdm_resolution: 800, rpm_step: 500,
+              struct_solver: 'freecad', struct_mesh_mm: 2.5, struct_img_px: 3000,
+              struct_video: true, struct_frames: 48 },
+  },
+};
+
+function applyCalcPreset(name) {
+  const p = CALC_PRESETS[name];
+  if (!p) return;
+  for (const [id, v] of Object.entries(p.felder)) _setField(id, v);
+  _syncCalcPresetBadge();
+  if (typeof _toast === 'function') _toast(`Voreinstellung ${p.label} übernommen`);
+}
+
+// Die Marke wird aus den FELDERN abgeleitet, nicht gemerkt. Damit stimmt sie auch
+// nach „Projekt als Vorlage" oder einer wiederhergestellten Sitzung — und ein
+// einzeln geänderter Wert fällt sofort auf „eigene Einstellung" zurück, statt eine
+// Voreinstellung zu behaupten, die nicht mehr gilt.
+function _calcPresetName() {
+  for (const [name, p] of Object.entries(CALC_PRESETS)) {
+    const passt = Object.entries(p.felder).every(([id, v]) => {
+      const el = document.getElementById(id);
+      if (!el) return false;
+      return (el.type === 'checkbox') ? el.checked === !!v : String(el.value) === String(v);
+    });
+    if (passt) return name;
+  }
+  return null;
+}
+
+function _syncCalcPresetBadge() {
+  const el = document.getElementById('preset_badge');
+  if (!el) return;
+  const name = _calcPresetName();
+  el.textContent = name ? CALC_PRESETS[name].label : 'eigene Einstellung';
+  el.style.color = name ? (name === 'detail' ? '#8fbe6a' : '#7db9e8') : '#aaa';
+}
+
+['n_frames','frame_resolution','fdm_resolution','rpm_step','struct_solver',
+ 'struct_mesh_mm','struct_img_px','struct_video','struct_frames'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) { el.addEventListener('input', _syncCalcPresetBadge);
+            el.addEventListener('change', _syncCalcPresetBadge); }
+});
+window.addEventListener('load', _syncCalcPresetBadge);
 
 // ── Analysis API ───────────────────────────────────────────────────────────────
 let _pollTimer = null;
@@ -9063,8 +9219,11 @@ function applyPayload(payload) {
   _setField('sel_stator_lam', payload.stator_lam);
   _setField('sel_hairpin',    payload.hairpin_mat);
   _setField('sel_magnet',     payload.magnet);
-  ['n_frames','fdm_resolution','frame_resolution','field_bmax','struct_mesh_mm','struct_img_px',
-   'struct_frames','rpm_from','rpm_to','rpm_step','T_ambient'].forEach(k => _setField(k, payload[k]));
+  // struct_solver stand hier nicht: buildPayload schickt ihn, applyPayload stellte ihn
+  // nicht wieder her — „Projekt als Vorlage" holte also stillschweigend den Löser des
+  // zuletzt angesehenen Formulars statt den des Projekts.
+  ['n_frames','fdm_resolution','frame_resolution','field_bmax','struct_mesh_mm','struct_solver',
+   'struct_img_px','struct_frames','rpm_from','rpm_to','rpm_step','T_ambient'].forEach(k => _setField(k, payload[k]));
   _setField('struct_video', payload.struct_video);
   _setField('sim_load',     payload.load_nm);
   _setField('sel_cooling',  payload.cooling);

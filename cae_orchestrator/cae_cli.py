@@ -907,6 +907,18 @@ def _bd_px() -> int:
 _BD_PX = _bd_px()
 
 
+def _pv_achsen() -> str:
+    try:
+        from ema_paarvergleich import ACHSEN
+        return ", ".join(ACHSEN)
+    except Exception:                                        # noqa: BLE001
+        return ("anordnung, hairpins, magnetwerkstoff, blech, leiterwerkstoff, "
+                "kuehlung, durchmesser, laenge")
+
+
+_PV_ACHSEN = _pv_achsen()
+
+
 def cmd_screen(args) -> int:
     """Konfigurationen grob durchspielen, bevor eine teuer gerechnet wird.
 
@@ -965,6 +977,50 @@ def cmd_screen(args) -> int:
     else:
         print(SC.bestenliste_text(erg, args.zeige))
     return 0 if erg["brauchbar"] else 1
+
+
+def cmd_paarvergleich(args) -> int:
+    """Die Gestaltungsentscheidungen gegeneinanderstellen, BEVOR gezeichnet wird.
+
+    Der Unterschied zu ``screen``: ``screen`` gibt eine Rangliste heraus und
+    beantwortet „welche Variante nehme ich?". Hier geht es eine Stufe frueher um
+    „woran haengt das ueberhaupt?" -- je Achse jede Option gegen jede, mit der
+    Spannweite je Kennzahl. Die sagt, welche Entscheidung zuerst ansteht.
+
+    Exit: 0 = mindestens eine Achse mit zwei brauchbaren Optionen, 1 = keine.
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    for a in applied:
+        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    if not payload.get("geom"):
+        return _die("Keine Geometrie im Payload — paarvergleich braucht geom.", EXIT_USAGE)
+
+    import ema_paarvergleich as PV
+
+    achsen = None
+    if args.achsen:
+        achsen = [a.strip() for a in args.achsen.split(",") if a.strip()]
+        unbekannt = [a for a in achsen if a not in PV.ACHSEN]
+        if unbekannt:
+            return _die(f"Unbekannte Achse(n): {', '.join(unbekannt)}. "
+                        f"Bekannt: {', '.join(PV.ACHSEN)}", EXIT_USAGE)
+    try:
+        erg = PV.vergleiche(payload, achsen=achsen, n_max=args.n_max, rpm=args.rpm,
+                            last_nm=args.last, min_web=args.web)
+    except ValueError as e:
+        return _die(str(e), EXIT_USAGE)
+
+    if getattr(args, "json", False):
+        emit(erg, args)
+    else:
+        print(PV.als_text(erg, paare=not args.ohne_paare, max_paare=args.max_paare))
+    return EXIT_OK if any(a["brauchbar"] >= 2 for a in erg["achsen"].values()) else EXIT_REMOTE
 
 
 def cmd_bilddaten(args) -> int:
@@ -1263,6 +1319,35 @@ def build_parser() -> argparse.ArgumentParser:
     _add_globals(s, json_hilfe="vollstaendig als JSON — je Zeile mit der EINGEPASSTEN "
                                "Geometrie, aus der sich die Variante nachbauen laesst")
     s.set_defaults(fn=cmd_screen)
+
+    s = sub.add_parser("paarvergleich",
+                       help="Gestaltungsentscheidungen gegeneinanderstellen (Anordnung, Hairpins, Material, Kühlung, Durchmesser, Länge) — vor der Geometrie")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    s.add_argument("--achsen",
+                   help="nur diese Achsen, mit Komma. Vorgabe: alle. Bekannt: " + _PV_ACHSEN)
+    s.add_argument("--n_max", type=float, default=None,
+                   help="Hoechstdrehzahl fuer das Fliehkrafttor (Vorgabe: aus dem Payload)")
+    s.add_argument("--rpm", type=float, default=None,
+                   help="Drehzahl des gemeinsamen Betriebspunkts (Vorgabe: rpm_from)")
+    s.add_argument("--last", type=float, default=None,
+                   help="Moment des gemeinsamen Betriebspunkts in Nm (Vorgabe: load_nm)")
+    s.add_argument("--web", type=float, default=None,
+                   help="Mindeststege in mm fuer die Einpassung (Vorgabe: BRIDGE_MM)")
+    s.add_argument("--ohne-paare", dest="ohne_paare", action="store_true",
+                   help="nur die Tabellen zeigen, die Paarliste weglassen")
+    s.add_argument("--max-paare", dest="max_paare", type=int, default=10,
+                   help="wie viele Paare je Achse gezeigt werden (Vorgabe 10)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter der Basis aendern, mehrfach angebbar")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    _add_globals(s, json_hilfe="der vollstaendige Vergleich als JSON — je Achse "
+                               "Optionen, Paare und Spannweiten")
+    s.set_defaults(fn=cmd_paarvergleich)
 
     s = sub.add_parser("bilddaten",
                        help="Rotorquerschnitte zeichnen, optisch bewerten lassen und eine Regel daraus ziehen")

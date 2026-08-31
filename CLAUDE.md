@@ -40,7 +40,7 @@ because it is not part of any one subproject:
 | `start_agent.sh` | one command: checks Ollama, pins the model **by ID** (a `ollama pull` under the same name silently swaps the weights), starts the orchestrator only if `:5000` is silent, waits for it, then `exec pi`. Session handling: `--weiter` / `--sitzung <id>` / `--sitzungen`; a bare known session id and a lone `--` are accepted too, PI's own session flags pass through untouched |
 | `.agents/README.md` | setup + what the agent sees; PI binds tools as **Skill = CLI + README**, deliberately not MCP |
 | `.agents/skills/cae-orchestrator/SKILL.md` | the skill the model reads — the authority on how `cae_cli.py` is meant to be used |
-| `cae_orchestrator/cae_cli.py` | the CLI itself, seventeen verbs: nine over HTTP on `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), eight local (`rotor-check`, `screen`, `bilddaten`, `struktur`, `topopt`, `db`, `lernen`, `recherche`) |
+| `cae_orchestrator/cae_cli.py` | the CLI itself, eighteen verbs: nine over HTTP on `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), nine local (`paarvergleich`, `rotor-check`, `screen`, `bilddaten`, `struktur`, `topopt`, `db`, `lernen`, `recherche`) |
 | `start_hermes.sh` | **second agent head**: Hermes Agent (Nous Research), same Ollama model, same skill. `hermes skills trust <repo>` loads `./.agents/skills/` — the very directory PI uses, so nothing is copied or symlinked and the two cannot drift. Its `--nur-pruefen` **measures** (via `ss -tnp`) that Hermes only talks to `127.0.0.1:11434`: the shipped default points at OpenRouter, and two open upstream bugs (#57255, #14676) make `provider: ollama` fall through to it silently |
 
 Two things that are easy to get wrong when touching this:

@@ -51,7 +51,12 @@ def pruefe(bedingung, text):
 # ── 1. Einpassung stimmt mit dem Tor ueberein ────────────────────────────────
 
 print("1. Einpassung vs. Tor -- kein Fehlurteil")
-formen = [k for k in S.ACHSEN_VORGABE["magShape"]]
+# ALLE Bauformen, nicht nur die der Vorauswahl-Achse: `spm` und `halbach` standen
+# nicht in ACHSEN_VORGABE und waren deshalb von diesem Test nie erfasst -- genau
+# dort wies `_passt` sie pauschal ab, weil rein aussen aufgesetzte Magnete keine
+# eingelassene Tasche haben und rmin/rmax damit unendlich bleiben.
+from ema_topology import _BUILDERS
+formen = [k for k in _BUILDERS if k != "custom"]
 fehl = []
 for shape in formen:
     for p in (2, 3, 4, 5):
@@ -60,15 +65,31 @@ for shape in formen:
         tor = rotor_layout_check(pas["geom"])
         if pas["ok"] != tor["ok"]:
             fehl.append((shape, p, pas["ok"], tor["ok"], (tor["fatal"] or [""])[0][:60]))
-pruefe(not fehl, f"32 Kombinationen: Einpassung und Tor einig ({fehl[:2]})")
+pruefe(not fehl, f"{len(formen)*4} Kombinationen: Einpassung und Tor einig ({fehl[:2]})")
 
 print("\n2. Ausbeute -- jede Bauform bei mehreren Polzahlen erreichbar")
+# Gefordert wird die Erreichbarkeit fuer die Bauformen der Vorauswahl-Achse plus
+# `spm`. `halbach` steht bewusst NICHT darunter: seine Kacheln ueberlappen sich bei
+# dieser Rotorgroesse tatsaechlich (gemessen 5,95 mm, s. u.), und `einpassen` reicht
+# aussen aufgesetzte Magnete unskaliert durch. Das ist ein richtiges Nein, kein
+# Fehlurteil -- Test 1 belegt, dass Tor und Einpassung sich darin einig sind.
 je_form = {}
 for shape in formen:
     je_form[shape] = sum(1 for p in (2, 3, 4, 5)
                          if S.einpassen(dict(BASIS_GEOM, magShape=shape), p)["ok"])
+pruefe(je_form.get("spm", 0) > 0,
+       f"Oberflaechenmagnete (spm) sind erreichbar -- {je_form.get('spm', 0)} von 4 Polzahlen")
+_hb = rotor_layout_check(dict(BASIS_GEOM, magShape="halbach"))
+pruefe(not _hb["ok"] and "Ueberlappung" in (_hb["fatal"] or [""])[0]
+       and _hb["layout"]["min_web_found_mm"] < 0,
+       f"halbach wird wegen echter Kollision abgelehnt, nicht wegen einer Stegregel "
+       f"({_hb['layout']['min_web_found_mm']} mm)")
+_pflicht = set(S.ACHSEN_VORGABE["magShape"]) | {"spm"}
 for shape, n in sorted(je_form.items()):
-    pruefe(n >= 2, f"{shape:9s} bei {n}/4 Polzahlen baubar")
+    if shape in _pflicht:
+        pruefe(n >= 2, f"{shape:9s} bei {n}/4 Polzahlen baubar")
+    else:
+        print(f"  · {shape:9s} bei {n}/4 Polzahlen baubar (nicht gefordert)")
 
 print("\n3. Was eingepasst wurde, steht im Protokoll")
 p_alt = BASIS_GEOM["p"]
