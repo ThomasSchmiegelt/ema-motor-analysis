@@ -219,6 +219,59 @@ projekt_pfad() {
     fi
 }
 
+# ── Projektwahl am Terminal ─────────────────────────────────────────────────
+#
+# PI bindet einfach das juengste Projekt und fragt nur nach der Sitzung. Bei Hermes
+# reicht das nicht: hier haengen ERINNERUNGEN am Projekt (HERMES_HOME), nicht nur
+# ein Kontexttext. Wer versehentlich im falschen Projekt landet, bekommt das
+# Gelernte einer anderen Auslegung als Tatsache serviert -- und merkt es nicht.
+# Die Wahl kostet eine Zeile und verhindert genau das.
+#
+# Gefragt wird NUR am Terminal und nur, wenn weder --projekt noch --kein-projekt
+# gesetzt ist; jeder Skript- oder Cron-Aufruf verhaelt sich unveraendert.
+# Die Vorgabe ist das juengste Projekt, also genau das bisherige Verhalten.
+projekt_menue() {
+    local liste
+    liste="$(ls -d "$PROJEKTE"/2* 2>/dev/null | sort -r | head -8 || true)"
+    [ -n "$liste" ] || return 0
+    echo
+    echo "Projekte in $PROJEKTE (neueste zuerst):"
+    local i=0 pfade=() pf name stand hermes
+    while IFS= read -r pf; do
+        [ -d "$pf" ] || continue
+        i=$((i+1)); pfade+=("$pf")
+        name="$(basename "$pf")"
+        # ASCII, nicht "—": printf zaehlt Bytes, und ein Gedankenstrich sind drei —
+        # die Spalte rutscht dann um zwei Zeichen. Dieselbe Falle wie bei der
+        # Sitzungsliste (dort geloest, indem bash die Zeichenkette selbst kuerzt).
+        if [ -f "$pf/results.json" ]; then stand="gerechnet"; else stand="offen"; fi
+        if [ -f "$pf/_agent/hermes/state.db" ]; then
+            hermes="Hermes seit $(date -r "$pf/_agent/hermes/state.db" '+%d.%m. %H:%M')"
+        else
+            hermes="Hermes neu"
+        fi
+        printf "  %d) %-42s  %-10s  %s\n" "$i" "${name:0:42}" "$stand" "$hermes"
+    done <<< "$liste"
+    echo "  g) gemeinsamer Speicher (ohne Projektbindung)"
+    local wahl
+    read -r -p "Projekt [1-$i], gemeinsam [g]? (Vorgabe: 1) " wahl || wahl=""
+    case "$wahl" in
+        ''|1)   PROJEKT="$(basename "${pfade[0]}")" ;;
+        g|G)    OHNE_PROJEKT=1 ;;
+        *) if [ "$wahl" -ge 1 ] 2>/dev/null && [ "$wahl" -le "$i" ]; then
+               PROJEKT="$(basename "${pfade[$((wahl-1))]}")"
+           else
+               warn "'$wahl' ist keines der angebotenen Projekte — juengstes."
+               PROJEKT="$(basename "${pfade[0]}")"
+           fi ;;
+    esac
+}
+
+if [ "$OHNE_PROJEKT" -eq 0 ] && [ -z "$PROJEKT" ] && [ "$NUR_SERVER" -eq 0 ] \
+   && [ -t 0 ] && [ -t 1 ]; then
+    projekt_menue
+fi
+
 PROJ_DIR=""
 if [ "$OHNE_PROJEKT" -eq 0 ]; then
     PROJ_DIR="$(projekt_pfad "${PROJEKT:-letztes}")"
@@ -316,7 +369,14 @@ if [ "$eigene_wahl" -eq 0 ] && [ "$NUR_SERVER" -eq 0 ]; then
     # auf eine Eingabe warten. -z ist oben schon als eigene Wahl erkannt.
     [ -z "$SITZUNGSWAHL" ] && [ -t 0 ] && [ -t 1 ] && {
         liste="$(sitzungen_hermes 5)"
-        if [ -n "$liste" ]; then
+        if [ -z "$liste" ]; then
+            # Frueher wurde hier stillschweigend nichts angezeigt. Bei projekteigenem
+            # HERMES_HOME ist der Sitzungsspeicher eines frischen Projekts IMMER leer
+            # -- das Menue erschien also nie, und es sah aus, als gaebe es keines.
+            echo
+            echo "Noch keine Hermes-Sitzung in diesem Projekt — es wird eine neue angelegt."
+            SITZUNGSWAHL="neu"
+        else
             echo
             echo "Sitzungen in diesem Projekt:"
             i=0; ids=()

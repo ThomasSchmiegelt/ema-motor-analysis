@@ -257,7 +257,12 @@ elif [ -t 0 ] && [ -t 1 ] && [ "$EINMALFRAGE" -eq 0 ]; then
     # etwas herausfaellt. Automatisch fortsetzen waere darum falsch — fragen ist der
     # Mittelweg. Nicht gefragt wird ohne Terminal (Skriptaufruf) und nicht bei -p.
     liste="$(sitzungen 5)"
-    if [ -n "$liste" ]; then
+    if [ -z "$liste" ]; then
+        # Sagen statt schweigen: ohne diese Zeile sieht ein leerer Sitzungsspeicher
+        # genauso aus wie ein kaputtes Menue. Bei Hermes war das der Fall.
+        echo
+        echo "Noch keine PI-Sitzung in diesem Verzeichnis — es wird eine neue angelegt."
+    else
         echo
         echo "Sitzungen in diesem Verzeichnis:"
         i=0; ids=()

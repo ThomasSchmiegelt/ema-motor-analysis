@@ -255,6 +255,90 @@ pruefe("WAS BEWEGT WAS" in t and "Paare" in t, "Kopf und Paarliste stehen im Tex
 pruefe("kein Feldlauf" in t, "die Scope-Grenze steht im Text")
 pruefe(all(a["titel"] in t for a in erg["achsen"].values()), "jede Achse ist ueberschrieben")
 
+print("\n13. Verschraubung, Barrieren und Wellenverbindung")
+from ema_rotorcheck import zusatzteile_check
+
+# Die Verbindung ist die einzige Achse, die T_verbind_Nm bewegt.
+tv = {o["wert"]: o["T_verbind_Nm"] for o in erg["achsen"]["wellenverbindung"]["optionen"]
+      if o["ok"]}
+pruefe(len(set(tv.values())) == 3,
+       f"jede Wellenverbindung traegt ein eigenes Moment ({tv})")
+pruefe(tv["spline"] > tv["press"] and tv["polygon"] > tv["press"],
+       "Formschluss (Keilwelle, Polygon) traegt mehr als der Reibschluss")
+for achse in ("anordnung", "hairpins", "kuehlung", "magnetwerkstoff"):
+    sp = erg["achsen"][achse]["spannweite"].get("T_verbind_Nm")
+    if sp is not None:
+        pruefe(sp["spanne_pct"] < 0.5,
+               f"{achse} bewegt das Wellenmoment nicht ({sp['spanne_pct']} %)")
+        break
+
+# Verschraubung und Barrieren nehmen Eisen weg -- sonst waere die Achse wirkungslos.
+mv = [o["gesamt_kg"] for o in erg["achsen"]["verschraubung"]["optionen"] if o["ok"]]
+pruefe(all(a >= b for a, b in zip(mv, mv[1:])) and mv[0] > mv[-1],
+       f"groessere Schrauben nehmen mehr Eisen weg ({mv})")
+mb = {o["wert"]: o["gesamt_kg"] for o in erg["achsen"]["flussbarrieren"]["optionen"]
+      if o["ok"]}
+pruefe(mb["aus"] > mb["q"] and mb["q"] > mb["qd"],
+       f"mehr Barrieren = weniger Eisen ({mb})")
+pruefe(erg["achsen"]["flussbarrieren"]["spannweite"]["Kt_Nm_per_A"]["spanne_pct"] < 0.5,
+       "Barrieren bewegen Kt auf dieser Stufe NICHT — das kann erst der Feldlauf")
+
+# Der neue Durchbruch-Check.
+g_frei = dict(BASIS["geom"], genFluxBarrierQ=True, fluxBarrierWidth=2.0,
+              fluxBarrierDepth=6.0)
+g_durch = dict(BASIS["geom"], genFluxBarrierD=True, fluxBarrierWidth=8.0,
+               fluxBarrierDepth=60.0)
+pruefe(zusatzteile_check(dict(BASIS["geom"]))["aktiv"] is False,
+       "ohne Barrieren und Schrauben meldet der Check 'nicht aktiv'")
+z_frei, z_durch = zusatzteile_check(g_frei), zusatzteile_check(g_durch)
+pruefe(z_frei["ok"], f"flache q-Barrieren gehen durch ({z_frei['min_abstand_mm']} mm)")
+pruefe(not z_durch["ok"] and z_durch["min_abstand_mm"] < 0,
+       f"tiefe, breite d-Barrieren schneiden die Tasche "
+       f"({z_durch['min_abstand_mm']} mm)")
+pruefe(len(z_durch["befunde"]) < 4 and "gleichartig" in " ".join(z_durch["befunde"]),
+       f"drehsymmetrische Wiederholungen werden zusammengefasst "
+       f"({len(z_durch['befunde'])} Zeilen)")
+
+# Und: der Befund bleibt eine WARNUNG, das Tor verweigert deswegen nicht.
+tor = rotor_layout_check(g_durch)
+pruefe(any("Magnettasche" in w for w in tor["warnings"]),
+       "das Layouttor traegt den Befund als Warnung")
+pruefe(tor["ok"] == rotor_layout_check(dict(BASIS["geom"]))["ok"],
+       "und aendert sein Urteil dadurch NICHT — Zusatzteile schliessen nicht aus")
+
+# In der Paarbilanz muss der Durchbruch zaehlen.
+e_fb = PV.vergleiche(dict(BASIS, geom=dict(BASIS["geom"], fluxBarrierWidth=8.0,
+                                           fluxBarrierDepth=60.0)),
+                     achsen=["flussbarrieren"])
+paare = e_fb["achsen"]["flussbarrieren"]["paare"]
+mit_zusatz = [p for p in paare if "_zusatz" in p["spricht_fuer_a"] + p["spricht_fuer_b"]]
+pruefe(mit_zusatz, f"'Platz im Blech' taucht in {len(mit_zusatz)} von {len(paare)} Paaren auf")
+t_fb = PV.als_text(e_fb)
+pruefe("⚠" in t_fb and "Platz im Blech" in t_fb,
+       "Warnung und Bilanzgrund stehen im Text")
+
+
+print("\n14. Die Geometrie der Zusatzteile steht an EINER Stelle")
+from ema_topology import balance_bolt_holes, flux_barrier_slots
+g = dict(BASIS["geom"], genBalanceBolts=True, balanceBoltThread="M8", p=4)
+loecher = balance_bolt_holes(g)
+pruefe(len(loecher) == 8, f"Lochzahl = Polzahl ({len(loecher)})")
+pruefe(abs(loecher[0]["r"] - (8.0 + 0.4) / 2) < 1e-9,
+       "Lochradius = Gewindenennmass + 0,4 mm Spiel")
+r_soll = g["shaftD"] / 2 + (g["rotorOD"] / 2 - g["shaftD"] / 2) * 0.5
+pruefe(abs(loecher[0]["pitch_r"] - r_soll) < 1e-6,
+       f"ohne Angabe sitzt der Lochkreis auf halber Strecke ({loecher[0]['pitch_r']:.2f} mm)")
+pruefe(all(abs(math.hypot(h["x"], h["y"]) - r_soll) < 1e-6 for h in loecher),
+       "alle Loecher liegen auf demselben Kreis")
+sl = flux_barrier_slots(dict(BASIS["geom"], genFluxBarrierQ=True, genFluxBarrierD=True, p=4))
+pruefe(len(sl) == 16 and {x["family"] for x in sl} == {"q", "d"},
+       f"q und d ergeben je Pol einen Schlitz ({len(sl)})")
+pruefe(abs(sl[0]["r_out"] - (BASIS["geom"]["rotorOD"] / 2 - 2.0)) < 1e-9,
+       "der Aussensteg von 2 mm bleibt stehen")
+pruefe(flux_barrier_slots(BASIS["geom"]) == [] and balance_bolt_holes(BASIS["geom"]) == [],
+       "abgeschaltet liefern beide nichts")
+
+
 print("\n" + "=" * 60)
 print(f"{_n_ok} bestanden, {_n_bad} fehlgeschlagen")
 sys.exit(1 if _n_bad else 0)

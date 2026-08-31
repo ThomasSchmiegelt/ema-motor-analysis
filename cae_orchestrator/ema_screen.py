@@ -48,7 +48,8 @@ from ema_analysis import _analytical_Bgap, compute_performance
 from ema_pipeline import HAIRPIN_MATS, LAMINATES, MAGNETS
 from ema_rotorcheck import (Pocket, _rot2, pocket_distance,
                             rotor_layout_check, rotor_stress_check)
-from ema_topology import BRIDGE_MM, TOPOLOGY_LABELS, leg_center, magnet_legs
+from ema_topology import (BRIDGE_MM, TOPOLOGY_LABELS, balance_bolt_holes,
+                          flux_barrier_slots, leg_center, magnet_legs)
 
 # Platzhalterpreise 2026 — fuer das Rangieren, nicht als Angebot. Was zaehlt, ist das
 # Verhaeltnis: NdFeB ~5x Kupfer, ~34x Elektroblech.
@@ -435,6 +436,13 @@ def massen_und_kosten(payload: dict) -> dict:
     m_mag = flaeche_mm2 * poles * L * 1e-9 * MAG_DICHTE_KG_M3
 
     m_rot_fe = math.pi / 4 * (d_rot**2 - d_wel**2) * L * 1e-9 * float(lam_rot["density"])
+    # Flussbarrieren und Wuchtbohrungen nehmen Rotoreisen weg. Ohne diesen Abzug
+    # waere jede Betrachtung ueber diese beiden Bauteile in Masse und Kosten still
+    # wirkungslos -- und eine Tabelle, in der sich nichts bewegt, sieht aus wie ein
+    # Befund ("macht keinen Unterschied") statt wie ein blinder Fleck.
+    v_weg = sum(sl["depth"] * sl["width"] for sl in flux_barrier_slots(geom)) * L
+    v_weg += sum(math.pi * h["r"] ** 2 for h in balance_bolt_holes(geom)) * L
+    m_rot_fe = max(0.0, m_rot_fe - v_weg * 1e-9 * float(lam_rot["density"]))
     m_welle  = math.pi / 4 * (d_wel**2 - d_bohr**2) * (L + 80.0) * 1e-9 * 7850.0
     v_st_m3  = math.pi / 4 * (d_st_a**2 - d_st_i**2) * L * 1e-9
     m_st_fe  = v_st_m3 * float(lam_st["density"]) * 0.78          # abzueglich Nuten

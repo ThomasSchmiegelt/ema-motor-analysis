@@ -43,7 +43,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `wait` | auf Abschluss warten |
 | `routes [--grep x]` | alle Serverrouten auflisten |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
-| `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Acht Achsen (Magnetanordnung, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Durchmesser, Länge), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht**. 0,4 s, rein analytisch |
+| `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Elf Achsen (Magnetanordnung, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht**. 0,4 s, rein analytisch |
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
 | `bilddaten <was>` | **Bilddatensatz zum optischen Bewerten**: `erzeugen` · `seite` · `einlesen` · `regel` · `stand`. Zieht zufaellige Rotorquerschnitte, behaelt nur die, die das Layouttor bestehen, und zeichnet sie. **Die Bewertung macht ein Mensch** — du kannst sie nur vorbereiten und hinterher auswerten |
 | `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver beide` (Vollrotor, ~7 s, mit Gegenüberstellung) |
@@ -282,6 +282,7 @@ eine Auslegung prägen, und sie fallen der Reihe nach.
 ```bash
 python3 cae_cli.py paarvergleich --from-project last
 python3 cae_cli.py paarvergleich --from-project last --achsen anordnung,kuehlung,durchmesser
+python3 cae_cli.py paarvergleich --from-project last --achsen verschraubung,flussbarrieren
 ```
 
 Zwei Ausgaben, und die zweite ist die wichtigere:
@@ -309,6 +310,12 @@ Drei Modellgrenzen, die in der Antwort mitgehören:
   ist eine Achse über Widerstand, Verlusten und Aufwand.
 * Beim **Durchmesser** wird geometrisch ähnlich skaliert, der **Luftspalt bleibt
   aber stehen** — der ist fertigungsbedingt.
+* **Flussbarrieren und Wuchtverschraubung** bewegen analytisch nur die Masse
+  (weggenommenes Eisen). Ihre entscheidende Auskunft ist eine andere: ob sie in
+  eine Magnettasche schneiden. Das steht mit ⚠ unter der Option und zählt in der
+  Paarbilanz als „Platz im Blech". Die **magnetische** Wirkung der Barrieren kennt
+  erst der Feldlauf — wer sie hier nach Kt beurteilt, beurteilt sie nach der einen
+  Größe, die sie nicht abbildet. Sag das dazu.
 
 Danach erst `screen`, dann `rotor-check`, dann `run`.
 

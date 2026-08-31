@@ -446,3 +446,81 @@ def leg_records(legs):
             "r_pos": lg.r_pos, "offset": lg.offset, "mag_rot": lg.mag_rot,
         })
     return recs
+
+
+# ── Zusatzteile im Rotorblech: Flussbarrieren und Wuchtverschraubung ──────────
+#
+# Beide schneiden Material aus demselben Blech, in dem die Magnettaschen sitzen,
+# und beide standen bisher an DREI Stellen einzeln ausgeschrieben: im
+# FreeCAD-Erzeuger (``ema_freecad.build_full_motor_script``), im 2-D-Schnittbild
+# (``ema_pipeline._save_cad_images``) und in der Leinwand-Vorschau (``ema.html``,
+# ``drawRotor``). Drei Abschriften derselben Formel sind drei Gelegenheiten
+# auseinanderzulaufen -- und das Layouttor kannte sie ueberhaupt nicht, obwohl es
+# genau die Frage beantwortet, ob im Blech noch Platz ist.
+#
+# Hier stehen sie einmal, als reine Zahlen ohne Zeichen- oder CAD-Bezug. Der
+# FreeCAD-Erzeuger schreibt seinen Code weiterhin selbst (er laeuft in einem
+# fremden Prozess und kann nichts importieren); die Formeln sind aus ihm
+# uebernommen und in ``test_rotorcheck`` gegen ihn festgenagelt.
+
+# Gewindenenndurchmesser [mm]. Spiegelt ``_THREAD_D`` im FreeCAD-Erzeuger.
+THREAD_D = {"M4": 4.0, "M5": 5.0, "M6": 6.0, "M8": 8.0,
+            "M10": 10.0, "M12": 12.0, "M16": 16.0, "M20": 20.0}
+
+# Steg zwischen Barrierenende und Rotoraussenrand, wie im Erzeuger fest gesetzt.
+FB_RANDSTEG_MM = 2.0
+
+
+def flux_barrier_slots(geom: dict) -> list:
+    """Die radialen Luftschlitze im Rotorblech -- je Schlitz ein Datensatz.
+
+    ``family`` ist ``"d"`` (Polmitte) oder ``"q"`` (zwischen den Polen). Die Winkel,
+    der Aussensteg von 2 mm und die Klemmung nach innen auf ``r_shaft + 1`` sind
+    zeichengetreu aus ``ema_freecad._flux_barrier_slots`` uebernommen.
+    """
+    if not (bool(geom.get("genFluxBarrierQ", False))
+            or bool(geom.get("genFluxBarrierD", False))):
+        return []
+    poles = max(2, 2 * max(1, int(geom.get("p", 3))))
+    r_rot = float(geom["rotorOD"]) / 2.0
+    r_sh  = float(geom["shaftD"]) / 2.0
+    breite = max(0.5, min(40.0, float(geom.get("fluxBarrierWidth", 3.0))))
+    tiefe  = max(1.0, min(120.0, float(geom.get("fluxBarrierDepth", 10.0))))
+    r_out = r_rot - FB_RANDSTEG_MM
+    r_in  = max(r_sh + 1.0, r_out - tiefe)
+    aus = []
+    if bool(geom.get("genFluxBarrierD", False)):
+        aus += [(i * 2.0 * math.pi / poles, "d") for i in range(poles)]
+    if bool(geom.get("genFluxBarrierQ", False)):
+        aus += [((i + 0.5) * 2.0 * math.pi / poles, "q") for i in range(poles)]
+    return [{"angle": a, "family": f, "r_in": r_in, "r_out": r_out,
+             "width": breite, "depth": max(0.5, r_out - r_in)} for a, f in aus]
+
+
+def balance_bolt_holes(geom: dict) -> list:
+    """Die Durchgangsloecher der Wuchtscheiben-Verschraubung.
+
+    Anzahl = Polzahl (mindestens 2), damit der Rotor symmetrisch bleibt; der
+    Lochdurchmesser ist Gewindenennmass + 0,4 mm Spiel. Ohne Angabe eines
+    Lochkreises sitzt er auf halber Strecke zwischen Welle und Rotoraussen.
+    Zeichengetreu aus ``ema_freecad`` (``bal_hole_r``, ``bal_pcr``,
+    ``_balance_positions``).
+    """
+    if not bool(geom.get("genBalanceBolts", False)):
+        return []
+    poles = max(2, 2 * max(1, int(geom.get("p", 3))))
+    r_rot = float(geom["rotorOD"]) / 2.0
+    r_sh  = float(geom["shaftD"]) / 2.0
+    gewinde = str(geom.get("balanceBoltThread", "M6")).upper()
+    nenn = THREAD_D.get(gewinde, 6.0)
+    r_loch = (nenn + 0.4) / 2.0
+    kreis_d = max(0.0, float(geom.get("balanceBoltCircleD", 0) or 0))
+    r_kreis = kreis_d / 2.0 if kreis_d > 0 else r_sh + (r_rot - r_sh) * 0.5
+    versatz = math.radians(float(geom.get("balanceBoltOffsetDeg", 0)))
+    n = max(2, poles)
+    aus = []
+    for i in range(n):
+        a = versatz + i * 2.0 * math.pi / n
+        aus.append({"angle": a, "x": r_kreis * math.cos(a), "y": r_kreis * math.sin(a),
+                    "r": r_loch, "thread": gewinde, "pitch_r": r_kreis})
+    return aus

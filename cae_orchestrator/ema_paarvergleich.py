@@ -48,6 +48,29 @@ muss, sonst liest man die Tabelle falsch:
   Nuttiefe und Magnetkoerper mit demselben Faktor), aber der **Luftspalt bleibt
   stehen** -- der ist fertigungsbedingt und skaliert nicht mit. Danach laeuft
   ``ema_screen.einpassen``, damit die Taschen wirklich passen.
+* **Flussbarrieren** wirken hier ausschliesslich ueber das weggenommene Eisen
+  (Masse, Kosten) und ueber den **Platz im Blech**. Ihre eigentliche Wirkung ist
+  magnetisch -- sie lenken den Fluss -- und die kennt erst der Feldlauf;
+  ``_analytical_Bgap`` weiss von ihnen nichts. Wer sie hier nach Kt beurteilt,
+  beurteilt sie nach der einen Groesse, die sie nicht abbildet.
+
+Verschraubung und Barrieren: was hier NEU geprueft wird
+-------------------------------------------------------
+
+Beide schneiden Material aus demselben Blech wie die Magnettaschen, und bis hierher
+hat das **niemand nachgemessen** -- die Doku benannte die Luecke ausdruecklich
+("a passing gate does not rule out a breakthrough from those"). Ein Luftschlitz oder
+eine Wuchtbohrung, die in eine Magnettasche laeuft, fiel erst in FreeCAD auf, nach
+40 Sekunden Startzeit.
+
+``ema_rotorcheck.zusatzteile_check`` schliesst das: mit **denselben** Bausteinen wie
+das Taschenlayout (der Schlitz ist ein Rechteck, das Bohrloch ein Kreis, beides ein
+``Pocket``), also ohne zweite Abstandsformel. Am Beispielprojekt gemessen schneiden
+die q-Achsen-Barrieren dort tatsaechlich um 0,23 mm in die Tasche.
+
+Der Befund zaehlt in der Bilanz eines Paares mit ("Platz im Blech"), obwohl er keine
+Zahl ist. Ohne das laese sich ein Paar, bei dem die eine Seite durchbricht, als
+"0:1 fuer rechts, weil 0,3 kg leichter" -- die Masse ist dort nicht der Punkt.
 """
 
 from __future__ import annotations
@@ -58,8 +81,10 @@ from itertools import combinations
 import ema_analysis
 import ema_thermal
 from ema_analysis import _analytical_Bgap, compute_performance
-from ema_pipeline import HAIRPIN_MATS, LAMINATES, MAGNETS
-from ema_rotorcheck import rotor_layout_check, rotor_stress_check
+from ema_pipeline import (HAIRPIN_MATS, LAMINATES, MAGNETS,
+                          connection_assessment)
+from ema_rotorcheck import (rotor_layout_check, rotor_stress_check,
+                            zusatzteile_check)
 from ema_screen import einpassen, massen_und_kosten, wicklung_moeglich
 from ema_topology import TOPOLOGY_LABELS
 
@@ -79,11 +104,13 @@ METRIKEN = {
     "P_verlust_W":  ("Verlustleistung",     "W",          "klein", True),
     "gesamt_kg":    ("Masse",               "kg",         "klein", True),
     "kosten_EUR":   ("Kosten",              "EUR",        "klein", True),
+    "T_verbind_Nm": ("Welle übertragbar",   "Nm",         "gross", True),
     "B_gap_T":      ("B_gap",               "T",          "gross", False),
     "magnet_kg":    ("Magnetmasse",         "kg",         "klein", False),
     "P_Cu_W":       ("davon Kupfer",        "W",          "klein", False),
     "J_Apmm2":      ("Stromdichte",         "A/mm²",      "klein", False),
     "R_phase_mOhm": ("Phasenwiderstand",    "mOhm",       "klein", False),
+    "verbind_ausl": ("Welle Auslastung",    "-",          "klein", False),
     "kt_je_kg":     ("Kt je kg",            "Nm/(A·kg)",  "gross", False),
     "kt_je_EUR":    ("Kt je EUR",           "Nm/(A·EUR)", "gross", False),
 }
@@ -92,7 +119,8 @@ METRIKEN = {
 # Zeile auseinander und niemand liest sie mehr.
 KURZ = {"Kt_Nm_per_A": "Kt [Nm/A]", "T_dauer_Nm": "T_dauer [Nm]",
         "SF_n_max": "SF n_max", "P_verlust_W": "Verlust [W]",
-        "gesamt_kg": "Masse [kg]", "kosten_EUR": "Kosten [EUR]"}
+        "gesamt_kg": "Masse [kg]", "kosten_EUR": "Kosten [EUR]",
+        "T_verbind_Nm": "Welle [Nm]"}
 
 DURCHMESSER_FAKTOREN = (0.8, 0.9, 1.0, 1.1, 1.2)
 LAENGEN_FAKTOREN     = (0.7, 0.85, 1.0, 1.15, 1.3)
@@ -141,6 +169,22 @@ def _setz_durchmesser(p, wert):
     g["statorID"] = round(float(g["rotorOD"]) + 2 * spalt, 3)   # Spalt bleibt
 
 
+def _setz_verschraubung(p, wert):
+    """``wert`` = None (keine Verschraubung) oder ein Gewindekuerzel."""
+    g = p["geom"]
+    g["genBalanceBolts"] = wert is not None
+    if wert is not None:
+        g["balanceBoltThread"] = wert
+
+
+def _setz_barrieren(p, wert):
+    """``wert`` aus ``("aus", "q", "d", "qd")`` -- q = zwischen den Polen,
+    d = in der Polmitte."""
+    g = p["geom"]
+    g["genFluxBarrierQ"] = "q" in wert
+    g["genFluxBarrierD"] = "d" in wert
+
+
 def _setz_laenge(p, wert):
     p["geom"]["axialLen"] = float(wert)
     p["axial_len"] = float(wert)
@@ -182,6 +226,30 @@ ACHSEN = {
         "werte": lambda b: list(KUEHLARTEN),
         "beschriften": lambda w: ema_thermal.COOLING_PRESETS.get(w, {}).get("label", w),
         "setzen": _setz_oben("cooling"),
+    },
+    "wellenverbindung": {
+        "titel": "Welle–Blechpaket-Verbindung",
+        "werte": lambda b: ["press", "spline", "polygon"],
+        "beschriften": lambda w: {"press": "Querpressverband (Schrumpfsitz)",
+                                  "spline": "Keilwelle (DIN 5480)",
+                                  "polygon": "Polygonprofil P3G"}.get(w, w),
+        "setzen": _setz_geom("shaftConnection"),
+    },
+    "verschraubung": {
+        "titel": "Wuchtscheiben-Verschraubung",
+        "werte": lambda b: [None, "M4", "M6", "M8", "M12"],
+        "beschriften": lambda w: "keine Verschraubung" if w is None
+                                 else f"{w} (Anzahl = Polzahl)",
+        "setzen": _setz_verschraubung,
+    },
+    "flussbarrieren": {
+        "titel": "Flussbarrieren (Luftschlitze im Rotorblech)",
+        "werte": lambda b: ["aus", "q", "d", "qd"],
+        "beschriften": lambda w: {"aus": "keine Barrieren",
+                                  "q": "q-Achse (zwischen den Polen)",
+                                  "d": "d-Achse (Polmitte)",
+                                  "qd": "q- und d-Achse"}[w],
+        "setzen": _setz_barrieren,
     },
     "durchmesser": {
         "titel": "Durchmesser (geometrisch ähnlich, Luftspalt bleibt)",
@@ -254,10 +322,24 @@ def _bewerte(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
     finally:
         ema_analysis.Br_NdFeB, ema_analysis.MU_R_MAG = br_alt, mu_alt
 
+    # Welle-Blechpaket-Verbindung: analytisch vorhanden, bisher nur im Bericht.
+    # Ohne sie waere die Achse "Verschraubung/Verbindung" eine Achse ohne Kennzahl.
+    verb = connection_assessment(geom, mat, n_max, axial, kuehl)
+
+    # Flussbarrieren und Wuchtbohrungen gegen die Magnettaschen. Das Layouttor
+    # meldet das als WARNUNG; fuer einen Vergleich von Optionen ist es aber die
+    # entscheidende Auskunft -- eine Schraube, die in die Tasche laeuft, ist keine
+    # Variante, sondern ein Fehler. Deshalb steht sie hier als eigenes Feld.
+    zus = zusatzteile_check(geom)
+
     mk = massen_und_kosten(payload)
     kt = float(perf["Kt_Nm_per_A"])
     return {
         "ok": True, "grund": "",
+        "zusatz_ok": bool(zus["ok"]),
+        "zusatz_hinweis": "; ".join(zus["befunde"])[:160],
+        "T_verbind_Nm": round(float(verb.get("T_capacity_Nm", 0.0)), 1),
+        "verbind_ausl": round(float(verb.get("utilization", 0.0)), 3),
         "Kt_Nm_per_A":  round(kt, 5),
         "B_gap_T":      round(float(b_gap), 4),
         "T_dauer_Nm":   round(float(t_dauer), 1),
@@ -331,9 +413,18 @@ def _paar(a: dict, b: dict) -> dict:
             fuer_a.append(m)
         else:
             fuer_b.append(m)
+
+    # „Platz im Blech" ist keine Zahl und steht deshalb nicht in METRIKEN -- in der
+    # Bilanz muss es trotzdem zaehlen. Sonst liest sich ein Paar, bei dem die eine
+    # Seite mit ihrem Luftschlitz in die Magnettasche laeuft, als "0:1 fuer die
+    # rechte Seite, weil sie 0,3 kg leichter ist". Die Masse ist dort nicht der
+    # Punkt; der Durchbruch ist es.
+    za, zb = a.get("zusatz_ok", True), b.get("zusatz_ok", True)
+    if za != zb:
+        (fuer_a if za else fuer_b).append("_zusatz")
     return {"a": a["name"], "b": b["name"], "a_wert": a["wert"], "b_wert": b["wert"],
             "deltas": deltas, "spricht_fuer_a": fuer_a, "spricht_fuer_b": fuer_b,
-            "unbewegt": unbewegt,
+            "unbewegt": unbewegt, "zusatz_a": za, "zusatz_b": zb,
             "bilanz": f"{len(fuer_a)}:{len(fuer_b)}"}
 
 
@@ -403,7 +494,10 @@ def vergleiche(basis: dict, achsen: list | None = None, n_max: float | None = No
             "hinweis": ("Analytischer Paarvergleich — kein Feldlauf, keine FEM, keine "
                         "Thermiksimulation. Die Kühlung wirkt nur über die Tabelle "
                         "COOLING_RATING, und Nutzahl/Leiterzahl bewegen Kt auf dieser "
-                        "Stufe nicht. Was hier oben steht, muss danach gerechnet werden.")}
+                        "Stufe nicht. FLUSSBARRIEREN wirken hier ausschliesslich über "
+                        "das weggenommene Eisen (Masse, Kosten) und über den Platz im "
+                        "Blech — ihre magnetische Wirkung kennt erst der Feldlauf. "
+                        "Was hier oben steht, muss danach gerechnet werden.")}
 
 
 # ── Textausgabe ───────────────────────────────────────────────────────────────
@@ -442,6 +536,12 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
                 if zaehlt:
                     zeile += f"{o[m]:>13.4g}"
             z.append(zeile)
+            # Der Zusatzteil-Befund steht UNTER der Zeile und nicht als Spalte: er
+            # ist kein Messwert, sondern ein Ausschlussgrund, und er muss im Klartext
+            # dastehen. Das Layouttor meldet ihn nur als Warnung -- fuer die Wahl
+            # zwischen zwei Optionen ist er aber das Entscheidende.
+            if not o.get("zusatz_ok", True):
+                z.append(f"        ⚠ {o.get('zusatz_hinweis', '')}")
         if a["spannweite"]:
             unbewegt = [METRIKEN[m][0] for m, s in a["spannweite"].items()
                         if METRIKEN[m][3] and s["spanne_pct"] < 100 * GLEICH_UNTER]
@@ -450,8 +550,11 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
         if paare and a["paare"]:
             z.append(f"    Paare ({len(a['paare'])}, gezeigt {min(max_paare, len(a['paare']))}):")
             for p in a["paare"][:max_paare]:
-                fa = ", ".join(METRIKEN[m][0] for m in p["spricht_fuer_a"]) or "—"
-                fb = ", ".join(METRIKEN[m][0] for m in p["spricht_fuer_b"]) or "—"
+                def _lab(m):
+                    return ("Platz im Blech (kein Durchbruch)" if m == "_zusatz"
+                            else METRIKEN[m][0])
+                fa = ", ".join(_lab(m) for m in p["spricht_fuer_a"]) or "—"
+                fb = ", ".join(_lab(m) for m in p["spricht_fuer_b"]) or "—"
                 z.append(f"      {p['a'][:24]:<24} vs {p['b'][:24]:<24} {p['bilanz']:>5}")
                 z.append(f"          für links:  {fa}")
                 z.append(f"          für rechts: {fb}")

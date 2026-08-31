@@ -316,10 +316,20 @@ The chain is drivable by a **local** model — via [PI](https://pi.dev) or **Her
 ./start_hermes.sh --nur-pruefen           # prove it only talks to local Ollama
 ```
 
+**Which project?** Hermes now asks that first at a terminal — a list of the eight newest
+projects with their calculation state and the date of their Hermes store, plus "shared
+store" as a way out. PI still simply takes the newest, and that is not an oversight: PI's
+memory is not bound to a project, Hermes's is. Landing in the wrong project with Hermes
+serves you another design's lessons as fact, and you do not notice. It only asks without
+`--projekt`/`--kein-projekt` and only at a terminal; the default is the newest project,
+i.e. the previous behaviour.
+
 **New or previous session?** Both heads can resume, but neither used to ask — and what
 is not asked is not used: every question started from zero while the session with the
 whole history sat next to it. Both now show a short menu at a terminal, **defaulting to
-new**. Resuming automatically would be wrong (a carried-over history only becomes visible
+new**. And when there is nothing to resume, it now says so: with a per-project store a
+fresh project is always empty, so the menu never appeared — indistinguishable from a
+broken one. Resuming automatically would be wrong (a carried-over history only becomes visible
 at 65 k context once something falls off the front); asking is the middle ground. Nothing
 is asked without a terminal, on a one-shot `-p`/`-z`, or when the caller set the session
 flags themselves — a scripted call must not block.

@@ -39,7 +39,8 @@ from __future__ import annotations
 
 import math
 
-from ema_topology import magnet_legs, leg_center, BRIDGE_MM
+from ema_topology import (BRIDGE_MM, balance_bolt_holes, flux_barrier_slots,
+                          leg_center, magnet_legs)
 
 
 # ── 2-D helpers ────────────────────────────────────────────────────────────────
@@ -142,21 +143,16 @@ def pocket_distance(A: Pocket, B: Pocket):
 
 # ── the check ─────────────────────────────────────────────────────────────────
 
-def rotor_layout_check(geom: dict, min_web_mm: float | None = None) -> dict:
-    """Run the 2-D rotor layout gate.  JSON-serialisable report."""
-    if min_web_mm is None:
-        min_web_mm = BRIDGE_MM
+def _magnettaschen(geom: dict):
+    """Die Magnettaschen aller Pole als ``Pocket`` -- eine Quelle fuer beide Pruefungen.
 
-    legs, meta = magnet_legs(geom)
+    Stand frueher nur in ``rotor_layout_check``; seit ``zusatzteile_check`` dieselben
+    Taschen braucht, waeren es zwei Abschriften derselben Spaltregel geworden.
+    """
+    legs, _meta = magnet_legs(geom)
     poles = max(2, int(geom.get("p", 3)) * 2)
-    r_rot = float(geom["rotorOD"]) / 2.0
-    r_shaft = float(geom["shaftD"]) / 2.0
     # identical pocket-gap rule as ema_freecad.build_full_motor_script
     gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
-
-    fatal: list[str] = []
-    warnings: list[str] = []
-
     pockets: list[tuple[dict, Pocket]] = []   # interior (must stay in annulus)
     surface: list[tuple[dict, Pocket]] = []   # rim-mounted (SPM/Halbach)
     for li, leg in enumerate(legs):
@@ -175,6 +171,133 @@ def rotor_layout_check(geom: dict, min_web_mm: float | None = None) -> dict:
                 pockets.append((base, Pocket(center, ang, hl, ht)))
             else:
                 surface.append((base, Pocket(center, ang, hl, ht)))
+    return pockets, surface
+
+
+def zusatzteile_check(geom: dict, min_web_mm: float | None = None) -> dict:
+    """Flussbarrieren und Wuchtverschraubung gegen die Magnettaschen pruefen.
+
+    Diese Luecke stand ausdruecklich in der Doku: „a passing gate does not rule out
+    a breakthrough from those". Beide schneiden Material aus demselben Blech wie die
+    Taschen, und bisher hat das niemand nachgemessen -- ein Schlitz, der in eine
+    Magnettasche laeuft, kam erst in FreeCAD heraus, nach 40 Sekunden Startzeit.
+
+    Geprueft wird mit **denselben** Bausteinen wie das Taschenlayout: der Schlitz ist
+    ein Rechteck (``Pocket`` mit radialer Laengsachse), das Bohrloch ein Kreis
+    (``Pocket`` mit gleichen Halbachsen). Damit gibt es keine zweite Abstandsformel.
+
+    **Die Befunde sind bewusst Warnungen, keine Ausschluesse.** Das Layouttor ist
+    Stufe 0 der Pipeline und bricht einen Lauf ab; eine neue Ausschlussregel wuerde
+    bestehende, laufende Auslegungen von einem Tag auf den anderen verweigern. Wer
+    sie als Tor will, liest ``ok`` aus diesem Ergebnis.
+    """
+    if min_web_mm is None:
+        min_web_mm = BRIDGE_MM
+    schlitze = flux_barrier_slots(geom)
+    loecher  = balance_bolt_holes(geom)
+    if not schlitze and not loecher:
+        return {"ok": True, "aktiv": False, "befunde": [],
+                "n_barrieren": 0, "n_loecher": 0, "min_abstand_mm": None}
+
+    r_rot = float(geom["rotorOD"]) / 2.0
+    r_sh  = float(geom["shaftD"]) / 2.0
+    pockets, surface = _magnettaschen(geom)
+
+    teile: list[tuple[str, Pocket]] = []
+    for i, sl in enumerate(schlitze):
+        mitte_r = (sl["r_in"] + sl["r_out"]) / 2.0
+        mitte = (mitte_r * math.cos(sl["angle"]), mitte_r * math.sin(sl["angle"]))
+        teile.append((f"Flussbarriere {sl['family']}{i}",
+                      Pocket(mitte, sl["angle"], sl["depth"] / 2.0, sl["width"] / 2.0)))
+    for i, lo in enumerate(loecher):
+        teile.append((f"Schraubloch {i} ({lo['thread']})",
+                      Pocket((lo["x"], lo["y"]), 0.0, lo["r"], lo["r"])))
+
+    # Befunde als (Art, Wert, Text) sammeln. Bei Drehsymmetrie meldet JEDER Pol
+    # denselben Durchbruch -- sechs gleichlautende Zeilen sind keine sechs Befunde,
+    # sondern einer, und sie verdecken in einer Agentenantwort alles Uebrige.
+    roh: list[tuple[str, float, str]] = []
+    min_abstand = math.inf
+
+    # 1. Einschluss im Blechring.
+    for sl in schlitze:
+        if sl["r_out"] > r_rot + 1e-6:
+            roh.append(("barriere_rand", sl["r_out"] - r_rot,
+                        f"Flussbarriere ragt {sl['r_out'] - r_rot:.2f} mm ueber den "
+                        f"Rotoraussenrand"))
+    for lo in loecher:
+        d_aussen = r_rot - lo["pitch_r"] - lo["r"]
+        if d_aussen < min_web_mm - 1e-6:
+            roh.append(("loch_rand", d_aussen,
+                        f"Schraubloch ({lo['thread']}) laesst zum Rotoraussenrand nur "
+                        f"{d_aussen:.2f} mm statt {min_web_mm:.1f} mm"))
+        d_innen = lo["pitch_r"] - lo["r"] - r_sh
+        if d_innen < min_web_mm - 1e-6:
+            roh.append(("loch_welle", d_innen,
+                        f"Schraubloch ({lo['thread']}) laesst zur Welle nur "
+                        f"{d_innen:.2f} mm statt {min_web_mm:.1f} mm"))
+
+    # 2. Zusatzteil gegen Magnettasche -- der eigentliche Grund fuer diese Pruefung.
+    for name, pk in teile:
+        art = "Flussbarriere" if name.startswith("Fluss") else "Schraubloch"
+        for base, tasche in pockets + surface:
+            d = pocket_distance(pk, tasche)
+            min_abstand = min(min_abstand, d)
+            if d < -1e-6:
+                roh.append((f"{art}_schnitt", d,
+                            f"{art} schneidet eine Magnettasche um {abs(d):.2f} mm "
+                            f"(zuerst Pol {base['pole']}, Leg {base['leg']})"))
+            elif d < min_web_mm - 1e-6:
+                roh.append((f"{art}_steg", d,
+                            f"{art} steht nur {d:.2f} mm von einer Magnettasche "
+                            f"(zuerst Pol {base['pole']}, Leg {base['leg']}) -- "
+                            f"Mindeststeg {min_web_mm:.1f} mm"))
+
+    # 3. Zusatzteile untereinander.
+    for i in range(len(teile)):
+        for j in range(i + 1, len(teile)):
+            d = pocket_distance(teile[i][1], teile[j][1])
+            min_abstand = min(min_abstand, d)
+            if d < min_web_mm - 1e-6:
+                a_kurz = teile[i][0].split(" ")[0]
+                b_kurz = teile[j][0].split(" ")[0]
+                roh.append((f"unter_sich_{a_kurz}_{b_kurz}", d,
+                            f"{a_kurz} und {b_kurz} stehen nur {d:.2f} mm auseinander "
+                            f"-- Mindeststeg {min_web_mm:.1f} mm"))
+
+    # Je Art nur der SCHLIMMSTE Fall, mit der Zahl der gleichartigen Stellen. Bei
+    # Drehsymmetrie meldet sonst jeder Pol denselben Durchbruch noch einmal.
+    nach_art: dict = {}
+    for art, wert, text in roh:
+        e = nach_art.setdefault(art, {"wert": wert, "text": text, "n": 0})
+        e["n"] += 1
+        if wert < e["wert"]:
+            e["wert"], e["text"] = wert, text
+    knapp = [(e["text"] + (f"  [{e['n']}× gleichartig]" if e["n"] > 1 else ""))
+             for _art, e in sorted(nach_art.items(), key=lambda kv: kv[1]["wert"])]
+    return {"ok": not knapp, "aktiv": True, "befunde": knapp,
+            "n_barrieren": len(schlitze), "n_loecher": len(loecher),
+            "min_abstand_mm": None if min_abstand == math.inf else round(min_abstand, 3),
+            "min_web_req_mm": min_web_mm}
+
+
+def rotor_layout_check(geom: dict, min_web_mm: float | None = None) -> dict:
+    """Run the 2-D rotor layout gate.  JSON-serialisable report."""
+    if min_web_mm is None:
+        min_web_mm = BRIDGE_MM
+
+    legs, meta = magnet_legs(geom)
+    poles = max(2, int(geom.get("p", 3)) * 2)
+    r_rot = float(geom["rotorOD"]) / 2.0
+    r_shaft = float(geom["shaftD"]) / 2.0
+
+    # identical pocket-gap rule as ema_freecad.build_full_motor_script
+    gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
+
+    fatal: list[str] = []
+    warnings: list[str] = []
+
+    pockets, surface = _magnettaschen(geom)
 
     # 1) containment -----------------------------------------------------------
     eps = 1e-6
@@ -226,6 +349,13 @@ def rotor_layout_check(geom: dict, min_web_mm: float | None = None) -> dict:
                 f"Oberflaechenmagnet (Pol {base['pole']}, Leg {base['leg']}) "
                 f"ragt bis {rmax:.1f} mm > Rotor-Aussen {r_rot:.1f} mm")
 
+    # 4) Zusatzteile: Flussbarrieren und Wuchtverschraubung gegen die Taschen.
+    #    Als WARNUNG, nicht als Ausschluss -- s. zusatzteile_check. Bisher sah das
+    #    Tor diese beiden Bauteile ueberhaupt nicht, obwohl sie in dasselbe Blech
+    #    schneiden; ein Schlitz durch eine Magnettasche fiel erst in FreeCAD auf.
+    zusatz = zusatzteile_check(geom, min_web_mm)
+    warnings.extend(zusatz["befunde"])
+
     info = {
         "topology": meta.code,
         "label": meta.label,
@@ -248,6 +378,7 @@ def rotor_layout_check(geom: dict, min_web_mm: float | None = None) -> dict:
                   "placement": worst[1]["placement"]},
             "distance_mm": round(worst[2], 3),
         },
+        "zusatzteile": zusatz,
     }
 
     return {"ok": not fatal, "fatal": fatal, "warnings": warnings,

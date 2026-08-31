@@ -63,10 +63,20 @@ ganze Kette:
 ./start_hermes.sh --nur-pruefen           # nur der Nachweis, dass nichts nach draußen geht
 ```
 
+**Welches Projekt?** Hermes fragt das am Terminal jetzt zuerst — eine Liste der acht
+jüngsten Projekte mit Rechenstand und dem Datum ihres Hermes-Speichers, dazu
+„gemeinsamer Speicher" als Ausweg. PI nimmt weiterhin einfach das jüngste, und das ist
+kein Versehen: PIs Gedächtnis hängt nicht am Projekt, Hermes' schon. Wer bei Hermes im
+falschen Projekt landet, bekommt das Gelernte einer anderen Auslegung als Tatsache
+serviert und merkt es nicht. Gefragt wird nur ohne `--projekt`/`--kein-projekt` und nur
+am Terminal; Vorgabe ist das jüngste Projekt, also das bisherige Verhalten.
+
 **Neue oder alte Sitzung?** Beide Köpfe können fortsetzen, gefragt hat es aber keiner —
 und was nicht gefragt wird, wird nicht benutzt: jede Frage fing bei null an, obwohl
 nebenan die Sitzung mit dem ganzen Verlauf lag. Beide zeigen jetzt am Terminal ein kurzes
-Menü, **Vorgabe neu**. Automatisch fortsetzen wäre falsch — ein mitgeschleppter Verlauf
+Menü, **Vorgabe neu**. Und wenn es nichts fortzusetzen gibt, steht das jetzt auch da:
+bei projekteigenem Speicher ist ein frisches Projekt immer leer, das Menü erschien also
+nie — was von einem kaputten Menü nicht zu unterscheiden war. Automatisch fortsetzen wäre falsch — ein mitgeschleppter Verlauf
 fällt bei 65 k Kontext erst auf, wenn vorne etwas herausfällt; fragen ist der Mittelweg.
 Nicht gefragt wird ohne Terminal, bei einer Einmalfrage (`-p`/`-z`) und wenn der Aufrufer
 die Sitzungsflaggen selbst gesetzt hat — ein Skriptaufruf darf nicht blockieren.
