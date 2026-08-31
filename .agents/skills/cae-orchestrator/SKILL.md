@@ -44,6 +44,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `routes [--grep x]` | alle Serverrouten auflisten |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
+| `bilddaten <was>` | **Bilddatensatz zum optischen Bewerten**: `erzeugen` · `seite` · `einlesen` · `regel` · `stand`. Zieht zufaellige Rotorquerschnitte, behaelt nur die, die das Layouttor bestehen, und zeichnet sie. **Die Bewertung macht ein Mensch** — du kannst sie nur vorbereiten und hinterher auswerten |
 | `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver beide` (Vollrotor, ~7 s, mit Gegenüberstellung) |
 | `topopt` | Topologieoptimierung des Rotorblechs. `--verfahren sko` (Vorgabe) oder `simp`. 20–60 s. Ergebnis ist ein **Dichtefeld, kein Bauteil** |
 | `db <was>` | **Rechnungsdatenbank**: `import` · `liste` · `zeige --lauf X` · `guete --lauf X` · `vergleich`. Kennwerte **mit Herkunft je Größe** |
@@ -234,6 +235,40 @@ Drei Arten von Befund, alle nachpruefbar:
 Mit `--merken` gehen die Befunde als belegte Regeln in den Lernspeicher; ohne `--merken`
 werden sie nur angezeigt. **Rangfolgen werden nie gemerkt** — die haengen am Verfahren,
 und das ist hier analytisch.
+
+### `bilddaten` — was das Auge sieht und keine Kennzahl misst
+
+Manches am Querschnitt beurteilt ein Mensch besser als jede Formel: ob die Stege
+gleichmaessig sind, ob der Magnet zur Polteilung passt, ob das Blech ausgewogen wirkt.
+`bilddaten` bereitet genau diese Frage vor.
+
+```bash
+python3 cae_cli.py bilddaten erzeugen --anzahl 500 --seed 1
+python3 cae_cli.py bilddaten seite
+```
+
+Das zieht Zufallsgeometrien, wirft alles weg, was `rotor_layout_check` ablehnt (das sind
+rund **drei Viertel** — geometrisch unmoegliche Maschinen, die niemand ansehen muss),
+zeichnet den Rest und schreibt eine HTML-Seite. **Dann bist du fertig und musst es
+sagen:** die Seite gehoert in einen Browser, und die Urteile faellt der Mensch. Ein
+Modell, das die Bilder selbst bewertet, hat den Zweck der Uebung aufgehoben.
+
+Danach:
+
+```bash
+python3 cae_cli.py bilddaten einlesen --datei ~/Downloads/urteile.json
+python3 cae_cli.py bilddaten regel --merken
+```
+
+`regel` sucht eine **Schranke** ueber messbaren Groessen des Blechschnitts (Stegbreite,
+Polbedeckung, Nabenanteil …), die die Urteile trifft, und prueft sie auf einem
+zurueckgehaltenen Drittel. Haelt sie dort nicht, wird sie **nicht** abgelegt — mit
+Begruendung. Das ist der Sinn der Sache: eine Schranke, die nur den Lernteil trifft,
+ist eine Eigenschaft des Datensatzes und keine des Rotors.
+
+Was NICHT passiert: kein neuronales Netz, keine Heuristik-Vorbelegung der Bilder. Die
+Bewertungsseite zeigt das Bild und sonst nichts — wer eine Vermutung vorschlaegt,
+bekommt sie bestaetigt zurueck.
 
 ### Ganz am Anfang: `screen`
 

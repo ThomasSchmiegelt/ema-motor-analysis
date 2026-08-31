@@ -894,6 +894,19 @@ _MAGSHAPES = _magshapes()
 _VERSUCH_P = [2, 3, 4, 5, 6, 8]
 
 
+# Die Bildkante des Datensatzes steht in ema_bilddaten; hier nur geholt, damit sie in
+# der Hilfe steht, ohne dass `--help` matplotlib laedt.
+def _bd_px() -> int:
+    try:
+        from ema_bilddaten import PX
+        return PX
+    except Exception:                                        # noqa: BLE001
+        return 384
+
+
+_BD_PX = _bd_px()
+
+
 def cmd_screen(args) -> int:
     """Konfigurationen grob durchspielen, bevor eine teuer gerechnet wird.
 
@@ -952,6 +965,82 @@ def cmd_screen(args) -> int:
     else:
         print(SC.bestenliste_text(erg, args.zeige))
     return 0 if erg["brauchbar"] else 1
+
+
+def cmd_bilddaten(args) -> int:
+    """Bilddatensatz: Rotorquerschnitte ziehen, bewerten lassen, eine Regel daraus ziehen.
+
+    Der Weg ist bewusst vierteilig und haelt zwischen jedem Schritt an, weil der
+    dritte -- das Bewerten -- ein Mensch ist und nicht getaktet werden kann.
+
+    Exit: 0 = ok, 1 = kein Ergebnis (keine Regel haelt / nichts abgelegt),
+    2 = Bedienfehler.
+    """
+    import ema_bilddaten as BD
+
+    if args.was == "stand":
+        s = BD.stand()
+        if getattr(args, "json", False):
+            return emit(s, args)
+        print(BD.stand_text(s))
+        return EXIT_OK
+
+    if args.was == "erzeugen":
+        basis = None
+        if args.payload or args.payload_file or args.from_project:
+            basis = (_load_payload(args) or {}).get("geom")
+        erg = BD.erzeuge(anzahl=args.anzahl, seed=args.seed, basis=basis,
+                         px=args.px or BD.PX, min_web=args.web)
+        if getattr(args, "json", False):
+            return emit(erg, args)
+        print(f"{erg['neu']} neue Varianten aus {erg['ziehungen']} Ziehungen "
+              f"(Ausbeute {erg['ausbeute']:.0%}, {erg['durchgefallen']} am Layouttor "
+              f"gescheitert, {erg['doppelt']} doppelt).")
+        print(f"{erg['sekunden']} s, {erg['sekunden_je_bild']} s je Bild. "
+              f"Bestand jetzt {erg['gesamt']}. Ablage: {erg['ablage']}")
+        print("Weiter mit:  cae_cli.py bilddaten seite")
+        return EXIT_OK if erg["neu"] else EXIT_REMOTE
+
+    if args.was == "seite":
+        pfad = BD.bewertungsseite(nur_offene=not args.alle, px=args.px or BD.PX)
+        offen = BD.stand()["offen"] if not args.alle else BD.stand()["varianten"]
+        if getattr(args, "json", False):
+            return emit({"seite": pfad, "varianten": offen}, args)
+        print(f"{offen} Varianten auf der Seite: {pfad}")
+        print("Im Browser oeffnen (file://), Tasten 1/2/3, am Ende 's' zum Speichern.")
+        print("Danach:  cae_cli.py bilddaten einlesen --datei ~/Downloads/urteile.json")
+        return EXIT_OK if offen else EXIT_REMOTE
+
+    if args.was == "einlesen":
+        if not args.datei:
+            return _die("'bilddaten einlesen' braucht --datei (die von der "
+                        "Bewertungsseite gespeicherte urteile.json).", EXIT_USAGE)
+        try:
+            e = BD.einlesen(os.path.expanduser(args.datei))
+        except (OSError, ValueError, json.JSONDecodeError) as ex:
+            return _die(str(ex), EXIT_USAGE)
+        if getattr(args, "json", False):
+            return emit(e, args)
+        print(f"{e['gesetzt']} Urteile uebernommen, {e['unveraendert']} unveraendert, "
+              f"{e['unbekannt']} unbekannte Kennung, {e['ungueltig']} ungueltig.")
+        print(f"Bewertet insgesamt: {e['bewertet_gesamt']}")
+        return EXIT_OK
+
+    # was == "regel"
+    befund = BD.regel_suchen(mittel_als=args.mittel_als)
+    if getattr(args, "json", False):
+        emit(befund, args)
+    else:
+        print(BD.regel_text(befund))
+    if args.merken:
+        r = BD.merke_regel(befund, quelle=args.quelle or "bilddaten")
+        if r["abgelegt"]:
+            print(f"\n  gemerkt: {r['regel']}")
+        else:
+            print(f"\n  nichts abgelegt: {r['grund']}")
+            return EXIT_REMOTE
+    return EXIT_OK if befund.get("genug") and any(
+        r["haelt"] for r in befund.get("regeln", [])) else EXIT_REMOTE
 
 
 # ``idle`` ist zweideutig: es heisst "nichts laeuft" — und das ist unmittelbar nach dem
@@ -1174,6 +1263,35 @@ def build_parser() -> argparse.ArgumentParser:
     _add_globals(s, json_hilfe="vollstaendig als JSON — je Zeile mit der EINGEPASSTEN "
                                "Geometrie, aus der sich die Variante nachbauen laesst")
     s.set_defaults(fn=cmd_screen)
+
+    s = sub.add_parser("bilddaten",
+                       help="Rotorquerschnitte zeichnen, optisch bewerten lassen und eine Regel daraus ziehen")
+    s.add_argument("was", choices=["erzeugen", "stand", "seite", "einlesen", "regel"])
+    s.add_argument("--anzahl", type=int, default=500,
+                   help="erzeugen: wie viele Varianten, die das Layouttor BESTEHEN")
+    s.add_argument("--seed", type=int, default=None,
+                   help="erzeugen: Startwert des Zufalls (gleicher Wert, gleiche Ziehung)")
+    s.add_argument("--px", type=int, default=None,
+                   help=f"Bildkante in Pixeln (Vorgabe {_BD_PX})")
+    s.add_argument("--web", type=float, default=None,
+                   help="erzeugen: Mindeststege in mm fuer das Tor (Vorgabe: BRIDGE_MM)")
+    s.add_argument("--alle", action="store_true",
+                   help="seite: auch die schon bewerteten Varianten zeigen")
+    s.add_argument("--datei", help="einlesen: die von der Seite gespeicherte urteile.json")
+    s.add_argument("--mittel-als", dest="mittel_als",
+                   choices=["aus", "gut", "schlecht"], default="aus",
+                   help="regel: was mit den mittleren Urteilen geschieht (Vorgabe: weglassen)")
+    s.add_argument("--merken", action="store_true",
+                   help="regel: die beste Schranke als belegte Erfahrung ablegen — "
+                        "nur wenn sie den Pruefteil haelt")
+    s.add_argument("--quelle", dest="quelle", help="regel --merken: Herkunftsvermerk")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="erzeugen: JSON direkt (Basis fuer die nicht gezogenen Werte)")
+    g.add_argument("--payload-file", help="erzeugen: Datei mit JSON")
+    g.add_argument("--from-project",
+                   help="erzeugen: Basis aus ~/cae_projekte/<id>/meta.json ('last')")
+    _add_globals(s, json_hilfe="der vollstaendige Befund als JSON")
+    s.set_defaults(fn=cmd_bilddaten)
 
     s = sub.add_parser("lernen",
                        help="was die Toolchain aus ihren eigenen Laeufen weiss (gemessen + belegte Erfahrungen)")

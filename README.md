@@ -151,6 +151,52 @@ constant would be deceiving itself.
 Drive cycles now include **city/rural** alongside WLTP, full load and motorway: 1300 s,
 18.76 km, 94.9 km/h peak, 12 % standstill (measured).
 
+## Image dataset: what the eye sees and no metric measures
+
+Some things about a lamination cross-section a human judges better than any formula —
+whether the webs are even, whether the magnet suits the pole pitch. `ema_bilddaten`
+prepares exactly that question: draw random rotor cross-sections, have them rated by
+hand, and mine the ratings for a **checkable threshold**.
+
+```bash
+python3 cae_orchestrator/cae_cli.py bilddaten erzeugen --anzahl 500
+python3 cae_orchestrator/cae_cli.py bilddaten seite     # open bewerten.html
+python3 cae_orchestrator/cae_cli.py bilddaten einlesen --datei ~/Downloads/urteile.json
+python3 cae_orchestrator/cae_cli.py bilddaten regel --merken
+```
+
+The occasion was a plan for **10,000 random machines** to train a vision model. The idea
+holds, the number did not — three measurements brought it down to ~500:
+
+| Measured | Consequence |
+|---|---|
+| Of randomly drawn geometries, **27 %** pass the layout gate (107 of 400) | The other three quarters are pockets that intersect or stick out of the rotor. `rotor_layout_check` decides those in milliseconds and exactly — nobody needs to look at them |
+| Of the survivors, the existing heuristic already calls **79.3 %** "bad" | A human judgment adds nothing where a rule already decides |
+| That leaves ~**5 %** of the draws where the eye is genuinely needed | At 10,000 that would be 500 worthwhile images and 9,500 wasted. So the 500 are drawn directly |
+
+Drawing goes through the **same** code as the project report's image
+(`ema_pipeline.render_cross_section`, extracted from `_save_cad_images` and verified
+bit-identical in the test) — a renderer of its own would have shown machines that were
+never computed that way. Only smaller and unlabelled: 384 px, 0.138 s and 33 kB per
+image against 0.245 s and 172 kB at report size.
+
+Two things that deliberately do **not** happen:
+
+* **No heuristic pre-fill.** The rating page shows the image and nothing else — no
+  dimensions, no metrics, no suggestion. Suggest a guess and you get it confirmed back,
+  and the independent judgment you were after is gone.
+* **No neural net.** The geometry is known exactly; estimating it back out of pixels
+  would be a step backwards. What comes out is a threshold over measured quantities
+  (web width, pole coverage, hub fraction …) that can be measured on the lamination and
+  argued with.
+
+`regel` checks the threshold it finds on a **held-out third** (fixed assignment by
+variant id, the same in every run) and only then files it as evidenced experience. If it
+does not hold there, it says so and writes nothing — a threshold that only fits the
+training part is a property of the dataset, not of the rotor. The test pins both cases:
+a threshold planted in the ratings must be recovered (held-out 1.00), and coin-flip
+ratings must let nothing through (training 0.63, held-out 0.48 — refused).
+
 ## Two solvers on one mesh
 
 Besides the FreeCAD route there is an own deck: Gmsh meshes one pole sector — or the

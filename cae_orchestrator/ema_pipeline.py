@@ -1269,28 +1269,52 @@ def _struct_sweep_chart(sweep_fem: dict | None, sweep_analytical: list, yield_mp
 
 # ── CAD cross-section images ──────────────────────────────────────────────────
 
-def _save_cad_images(geom: dict, axial: float, out_root: str) -> dict:
-    """Render motor cross-section + side view to <out_root>/cad_images/*.png."""
+def _schnittmasse(geom: dict) -> dict:
+    """Abgeleitete Querschnittsmasse — eine Quelle fuer Quer- UND Axialschnitt.
+
+    Beide Bilder rechneten dieselben zwoelf Groessen frueher jedes fuer sich aus. Seit
+    ``render_cross_section`` eigenstaendig ist (der Bilddatensatz zeichnet damit ohne
+    Beschriftung), waeren es drei Stellen gewesen, die auseinanderlaufen koennen.
+    """
+    R_si     = geom["statorID"] / 2
+    n_slots  = int(geom["slots"])
+    slot_dep = float(geom["slotDepth"])
+    dtheta_s = 2 * math.pi / n_slots
+    slot_w   = max(3.0, R_si * dtheta_s * float(geom.get("slotWidthRatio", 0.5)))
+    ins, n_layers = 0.8, 2
+    return {"R_rot": geom["rotorOD"] / 2, "R_shaft": geom["shaftD"] / 2,
+            "R_bore": float(geom.get("shaftBoreD", 0)) / 2,   # hollow shaft (0 = solid)
+            "R_si": R_si, "R_so": geom["statorOD"] / 2,
+            "n_poles": int(geom["p"]) * 2, "n_slots": n_slots,
+            "slot_dep": slot_dep, "dtheta_s": dtheta_s, "slot_w": slot_w,
+            "ins": ins, "n_layers": n_layers,
+            "cond_w": max(1.5, slot_w - 2 * ins),
+            "layer_h": max(2.0, (slot_dep - 2 - (n_layers + 1) * ins) / n_layers)}
+
+
+def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
+    """Den XY-Querschnitt auf eine **vorhandene** Achse zeichnen.
+
+    Herausgeloest aus ``_save_cad_images``, weil der Bilddatensatz
+    (``ema_bilddaten``) genau dieses Bild braucht — und zwar ohne Titel, Masszeile
+    und Legende: ein Bewertungsbild, das die Hauptmasse danebenschreibt, laesst den
+    Betrachter Zahlen ablesen statt Gestalt sehen.
+
+    Zeichnet ausschliesslich — speichert nichts, schliesst keine Figur.
+    """
     import math as _m
     import numpy as np
     from matplotlib.patches import Wedge, Circle
     from matplotlib.patches import Polygon as MplPoly, Patch
     from ema_topology import magnet_legs, leg_center
 
-    out_dir = os.path.join(out_root, "cad_images")
-    os.makedirs(out_dir, exist_ok=True)
-
-    R_rot   = geom["rotorOD"] / 2;  R_shaft = geom["shaftD"] / 2
-    R_bore  = float(geom.get("shaftBoreD", 0)) / 2          # hollow shaft (0 = solid)
-    R_si    = geom["statorID"] / 2; R_so    = geom["statorOD"] / 2
-    n_poles = int(geom["p"]) * 2;   n_slots = int(geom["slots"])
-    slot_dep = float(geom["slotDepth"])
-    sw_ratio      = float(geom.get("slotWidthRatio", 0.5))
-    dtheta_s      = 2 * _m.pi / n_slots
-    slot_w        = max(3.0, R_si * dtheta_s * sw_ratio)
-    ins, n_layers = 0.8, 2
-    cond_w   = max(1.5, slot_w - 2 * ins)
-    layer_h  = max(2.0, (slot_dep - 2 - (n_layers + 1) * ins) / n_layers)
+    m = _schnittmasse(geom)
+    R_rot, R_shaft, R_bore = m["R_rot"], m["R_shaft"], m["R_bore"]
+    R_si, R_so       = m["R_si"], m["R_so"]
+    n_poles, n_slots = m["n_poles"], m["n_slots"]
+    slot_dep, dtheta_s, slot_w = m["slot_dep"], m["dtheta_s"], m["slot_w"]
+    ins, n_layers    = m["ins"], m["n_layers"]
+    cond_w, layer_h  = m["cond_w"], m["layer_h"]
     legs, _meta = magnet_legs(geom)                          # single source of truth
 
     def rot2d(pts, a):
@@ -1305,8 +1329,7 @@ def _save_cad_images(geom: dict, axial: float, out_root: str) -> dict:
         ax_.add_patch(MplPoly(verts, closed=True, fc=fc, ec=ec, lw=lw, alpha=alpha))
 
     # ── cross-section (XY) ────────────────────────────────────────────────────
-    fig, ax = plt.subplots(figsize=(10, 10))
-    fig.patch.set_facecolor('#0d1117'); ax.set_facecolor('#0d1117')
+    ax.figure.patch.set_facecolor('#0d1117'); ax.set_facecolor('#0d1117')
     ax.set_aspect('equal'); ax.axis('off')
     lim = R_so * 1.15; ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
 
@@ -1431,24 +1454,38 @@ def _save_cad_images(geom: dict, axial: float, out_root: str) -> dict:
             mp = MplPoly(rect, closed=True, fc=fc, ec=ec, lw=0.8, alpha=0.95)
             ax.add_patch(mp); mp.set_clip_path(_rotor_clip)
 
-    ax.text(0, lim*0.95, "IPM-Motor — Querschnitt (XY)",
-            color='white', fontsize=11, ha='center', va='top', fontweight='bold')
-    ax.text(0, -lim*0.96,
-            f"D_a={geom['statorOD']:.0f} mm  |  D_i={geom['statorID']:.0f} mm  |  "
-            f"D_r={geom['rotorOD']:.0f} mm  |  d_w={geom['shaftD']:.0f} mm  |  "
-            f"2p={n_poles}  |  Q={n_slots}",
-            color='#888', fontsize=8, ha='center', va='top')
-    ax.legend(handles=[
-        Patch(fc='#555',    ec='#888',    label='Welle'),
-        Patch(fc='#2d3748', ec='#4a5568', label='Rotorblech'),
-        Patch(fc='#c0392b', ec='#ff6b6b', label='Magnet N'),
-        Patch(fc='#2980b9', ec='#74b9ff', label='Magnet S'),
-        Patch(fc='#1e3a5f', ec='#2e5f8a', label='Statorblech'),
-        Patch(fc='#e67e22', label='Phase A'), Patch(fc='#27ae60', label='Phase B'),
-        Patch(fc='#3498db', label='Phase C'),
-    ], loc='upper right', facecolor='#1a1a2e', labelcolor='white',
-       fontsize=7.5, framealpha=0.9, ncol=2)
+    if beschriftung:
+        ax.text(0, lim*0.95, "IPM-Motor — Querschnitt (XY)",
+                color='white', fontsize=11, ha='center', va='top', fontweight='bold')
+        ax.text(0, -lim*0.96,
+                f"D_a={geom['statorOD']:.0f} mm  |  D_i={geom['statorID']:.0f} mm  |  "
+                f"D_r={geom['rotorOD']:.0f} mm  |  d_w={geom['shaftD']:.0f} mm  |  "
+                f"2p={n_poles}  |  Q={n_slots}",
+                color='#888', fontsize=8, ha='center', va='top')
+        ax.legend(handles=[
+            Patch(fc='#555',    ec='#888',    label='Welle'),
+            Patch(fc='#2d3748', ec='#4a5568', label='Rotorblech'),
+            Patch(fc='#c0392b', ec='#ff6b6b', label='Magnet N'),
+            Patch(fc='#2980b9', ec='#74b9ff', label='Magnet S'),
+            Patch(fc='#1e3a5f', ec='#2e5f8a', label='Statorblech'),
+            Patch(fc='#e67e22', label='Phase A'), Patch(fc='#27ae60', label='Phase B'),
+            Patch(fc='#3498db', label='Phase C'),
+        ], loc='upper right', facecolor='#1a1a2e', labelcolor='white',
+           fontsize=7.5, framealpha=0.9, ncol=2)
 
+
+def _save_cad_images(geom: dict, axial: float, out_root: str) -> dict:
+    """Render motor cross-section + side view to <out_root>/cad_images/*.png."""
+    out_dir = os.path.join(out_root, "cad_images")
+    os.makedirs(out_dir, exist_ok=True)
+
+    m = _schnittmasse(geom)
+    R_rot, R_shaft, R_bore = m["R_rot"], m["R_shaft"], m["R_bore"]
+    R_si, R_so = m["R_si"], m["R_so"]
+    ins, n_layers, layer_h = m["ins"], m["n_layers"], m["layer_h"]
+
+    fig, ax = plt.subplots(figsize=(10, 10))
+    render_cross_section(geom, ax)
     cross_path = os.path.join(out_dir, "motor_cross_section.png")
     fig.savefig(cross_path, dpi=130, bbox_inches='tight', facecolor='#0d1117')
     plt.close(fig)

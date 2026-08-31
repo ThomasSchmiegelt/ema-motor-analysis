@@ -107,7 +107,7 @@ nicht antwortet, und wartet auf dessen Erreichbarkeit, bevor PI läuft.
 | `start_agent.sh` | Wurzel | Startkette + Sitzungsverwaltung (mit Sitzungsmenü) |
 | `.agents/projektstand.py` | Wurzel | erzeugt den Projektblock für `AGENTS.projekt.md` — beide Köpfe benutzen denselben Erzeuger, sehen also denselben Stand |
 | `.agents/` | Wurzel | Skill-Definition für PI (`skills/cae-orchestrator/SKILL.md`) und Einrichtung |
-| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — **sechzehn Verben**: neun über HTTP auf `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), sieben lokal (`rotor-check`, `screen`, `struktur`, `topopt`, `db`, `lernen`, `recherche`) |
+| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — **siebzehn Verben**: neun über HTTP auf `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), acht lokal (`rotor-check`, `screen`, `bilddaten`, `struktur`, `topopt`, `db`, `lernen`, `recherche`) |
 | `start_hermes.sh` | Wurzel | zweiter Agentenkopf: **Hermes Agent**, gleiches Modell, gleicher Skill, mit gemessenem Netznachweis; Projektbindung über `HERMES_HOME` |
 
 **Warum eine CLI und kein MCP-Server:** ein lokales Modell kann die ~135 HTTP-Routen des
@@ -254,6 +254,53 @@ rangiert, würde sich selbst betrügen.
 
 Bei den Fahrzyklen steht neben WLTP, Volllast und Autobahn jetzt **Stadt/Land**: 1300 s,
 18,76 km, Spitze 94,9 km/h, 12 % Standanteil (gemessen).
+
+## Bilddatensatz: was das Auge sieht und keine Kennzahl misst
+
+Manches am Blechschnitt beurteilt ein Mensch besser als jede Formel — ob die Stege
+gleichmaessig sind, ob der Magnet zur Polteilung passt. `ema_bilddaten` bereitet genau
+diese Frage vor: zufaellige Rotorquerschnitte zeichnen, von Hand bewerten lassen, und
+aus den Urteilen eine **nachrechenbare Schranke** ziehen.
+
+```bash
+python3 cae_orchestrator/cae_cli.py bilddaten erzeugen --anzahl 500
+python3 cae_orchestrator/cae_cli.py bilddaten seite     # bewerten.html im Browser
+python3 cae_orchestrator/cae_cli.py bilddaten einlesen --datei ~/Downloads/urteile.json
+python3 cae_orchestrator/cae_cli.py bilddaten regel --merken
+```
+
+Der Anlass war ein Plan ueber **10.000 Zufallsmaschinen** fuer ein Bildmodell. Die Idee
+stimmt, die Zahl nicht — drei Messungen haben sie auf ~500 gebracht:
+
+| Gemessen | Folge |
+|---|---|
+| Von zufaellig gezogenen Geometrien bestehen **27 %** das Layouttor (107 von 400) | Die uebrigen drei Viertel sind Taschen, die sich schneiden oder aus dem Rotor ragen. Das entscheidet `rotor_layout_check` in Millisekunden und exakt — niemand muss sie ansehen |
+| Von den Ueberlebenden nennt die vorhandene Heuristik bereits **79,3 %** „schlecht" | Ein menschliches Urteil traegt dort nichts bei, wo eine Regel schon entscheidet |
+| Bleiben ~**5 %** der Ziehungen, in denen das Auge wirklich gebraucht wird | Bei 10.000 waeren das 500 lohnende Bilder und 9.500 verlorene. Also werden gleich die 500 gezogen |
+
+Gezeichnet wird mit **demselben** Code wie das Bild im Projektbericht
+(`ema_pipeline.render_cross_section`, aus `_save_cad_images` herausgeloest und im Test
+bitgleich gegengeprueft) — ein eigener Zeichner haette Maschinen gezeigt, die so nie
+gerechnet wurden. Nur kleiner und ohne Beschriftung: 384 px, 0,138 s und 33 kB je Bild
+gegen 0,245 s und 172 kB in Berichtsgroesse.
+
+Zwei Dinge, die bewusst **nicht** passieren:
+
+* **Keine Heuristik-Vorbelegung.** Die Bewertungsseite zeigt das Bild und sonst nichts —
+  keine Masse, keine Kennzahlen, keinen Vorschlag. Wer eine Vermutung vorschlaegt,
+  bekommt sie bestaetigt zurueck, und das unabhaengige Urteil ist weg.
+* **Kein neuronales Netz.** Die Geometrie liegt exakt vor; sie aus Pixeln
+  zurueckzuschaetzen waere ein Rueckschritt. Am Ende steht eine Schranke ueber
+  gemessenen Groessen (Stegbreite, Polbedeckung, Nabenanteil …), die man am Blech
+  nachmessen und bestreiten kann.
+
+`regel` prueft die gefundene Schranke auf einem **zurueckgehaltenen Drittel** (feste
+Zuteilung ueber die Variantenkennung, in jedem Lauf dieselbe) und legt sie nur dann als
+belegte Erfahrung ab. Haelt sie dort nicht, sagt sie das und schreibt nichts — eine
+Schranke, die nur den Lernteil trifft, ist eine Eigenschaft des Datensatzes und keine
+des Rotors. Der Test legt beide Faelle fest: eine kuenstlich in die Urteile gelegte
+Schranke muss wiedergefunden werden (Pruefteil 1,00), und bei Muenzwurf-Urteilen darf
+keine Regel durchkommen (Lernteil 0,63, Pruefteil 0,48 — abgewiesen).
 
 ## Festigkeit ohne FreeCAD, zweiter Löser, Topologieoptimierung
 
