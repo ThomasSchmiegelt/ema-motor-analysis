@@ -1463,27 +1463,19 @@ def _comparison_context(project_ids, projects_root):
 
 def _variant_verdict(row: dict) -> dict:
     """Harte, regelbasierte Beurteilung einer Variante aus den Kennwerten.
-    Diese Logik ist deterministisch und überschreibt jede LLM-Aussage — eine
-    Variante, die strukturell oder thermisch versagt, darf NIE empfohlen werden."""
-    warn, ok = [], True
-    sf = row.get("safety_factor_fem")
-    if sf is not None:
-        if sf < 1.0:
-            warn.append(f"MECHANISCHES VERSAGEN: FEM-Sicherheitsfaktor {sf:.2f} < 1 "
-                        f"bei {_fmt_val(row.get('fem_rpm'),0)} U/min (Rotor fließt/berstet)")
-            ok = False
-        elif sf < 1.5:
-            warn.append(f"Festigkeit unzureichend: FEM-Sicherheitsfaktor {sf:.2f} < 1,5")
-            ok = False
-    tm = row.get("T_magnet_C")
-    if tm is not None and tm > 150:
-        warn.append(f"Magnettemperatur {tm:.0f} °C > 150 °C (Entmagnetisierungsgefahr)")
-        ok = False
-    tw = row.get("T_winding_C")
-    if tw is not None and tw > 180:
-        warn.append(f"Wicklungstemperatur {tw:.0f} °C > 180 °C (Isolationsklasse H)")
-        ok = False
-    return {"empfohlen": ok, "warnungen": warn}
+
+    Deterministisch und über jeder LLM-Aussage — eine Variante, die strukturell
+    oder thermisch versagt, darf NIE empfohlen werden. Die Kriterien stehen in
+    ``ema_sicherheit``, damit Bericht und Werkzeug (``cae_cli.py sicherheit``)
+    nicht zwei verschiedene Urteile fällen. **Dabei fiel eine zu weiche Grenze
+    auf:** hier wurde der Magnet gegen feste 150 °C geprüft, während die
+    Werkstofftabelle für NdFeB N35 **80 °C** führt und die Thermikstufe im
+    Laufprotokoll auch danach warnt — ein Lauf mit 118 °C stand also als
+    „einsetzbar" in der Tabelle und als „irreversible Entmagnetisierung" im Log.
+    ``ema_sicherheit`` nimmt die Grenze jetzt aus der Tabelle.
+    """
+    import ema_sicherheit
+    return ema_sicherheit.beurteile(row)
 
 
 def _md_verdict_table(rows):

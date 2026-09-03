@@ -171,7 +171,116 @@ def cmd_geom(args) -> int:
     return EXIT_OK
 
 
+def frischer_payload() -> dict:
+    """Ein NEUTRALER Grundpayload aus den Schemavorgaben — ohne jedes Altprojekt.
+
+    Warum es den geben muss
+    -----------------------
+
+    Bis hierher gab es genau drei Quellen fuer einen Payload: ``--payload`` (90
+    Schluessel von Hand, die zuverlaessigste Art, einen Lauf zu verderben),
+    ``--payload-file`` und ``--from-project``. Praktisch blieb damit nur
+    ``--from-project last``, und daran haengt ein Verhalten, das niemand wollte:
+    **jede neue Auslegung erbt Polzahl, Nutzahl, Magnetanordnung, Kuehlung und
+    Werkstoffe der vorigen**, obwohl gerade das die Entscheidungen sind, die neu
+    zu treffen waeren. Der Skill warnte davor in Prosa — und zeigte in JEDEM
+    Beispiel ``--from-project last``, weil es nichts anderes gab. Ein Modell folgt
+    den Beispielen, nicht der Warnung.
+
+    ``--frisch`` schliesst die Luecke: die Vorgaben kommen aus
+    ``ema_text2ema.SCHEMA``, **derselben** Quelle, aus der auch die Eingabemasken
+    und ``/param_schema`` speisen — keine zweite Vorgabetabelle, die driften
+    koennte. Das Ergebnis ist ein baubarer, absichtlich unentschiedener
+    Ausgangspunkt: nichts daran ist optimiert, und genau deshalb muss danach der
+    ``paarvergleich`` laufen.
+    """
+    import ema_text2ema as T2E
+
+    payload: dict = {"geom": {}}
+    for key, spec in T2E.SCHEMA.items():
+        if "def" not in spec:
+            continue
+        wert = spec["def"]
+        if spec.get("geom"):
+            payload["geom"][key] = wert
+        else:
+            ziel = _ALIAS.get(key, key)
+            payload[ziel] = wert
+            spiegel = _MIRROR.get(ziel)
+            if spiegel:                       # axial_len fuehrt geom.axialLen mit
+                payload[spiegel[0]][spiegel[1]] = wert
+
+    # Einpassen, sonst waere --frisch eine Sackgasse. Gemessen: die rohen
+    # Schemavorgaben fallen durch das Layouttor (Taschenkollision, Ueberlappung
+    # 4,37 mm) -- die Vorgaben sind je Feld sinnvoll, aber niemand hat sie je
+    # ALS SATZ gegeneinander geprueft. Ein Startpunkt, den ``rotor-check`` sofort
+    # ablehnt, treibt den Aufrufer genau dorthin zurueck, wovon ihn ``--frisch``
+    # abbringen soll. ``ema_screen.einpassen`` ist dieselbe Einpassung, die auch
+    # die Vorauswahl und der Paarvergleich fuer JEDE Option fahren -- also keine
+    # zweite Vorstellung davon, was baubar heisst.
+    # Fahrzyklus und Fahrzeug gehoeren SICHTBAR in den Payload. Fehlten sie, fiel
+    # die Pipeline still auf ``cycle="wltp3"`` zurueck -- und das zieht zusaetzlich
+    # die Autobahn-Volllastfahrt nach sich, gerechnet am 1600-kg-Pkw. Ein
+    # Fahrrad-Nabenmotor bekam so 23 km WLTP und 220 km/h Autobahn, und
+    # ``--set cycle=off`` wurde abgewiesen, weil der Schluessel nirgends stand.
+    # Vorgabe ist "off": der Zyklus ist eine WAHL am Anfang (Verb ``zyklus``),
+    # keine stille Voreinstellung.
+    try:
+        import ema_drivecycle
+        payload["cycle"] = "off"
+        payload["cycle_csv"] = ""
+        payload["vehicle"] = dict(ema_drivecycle.DEFAULT_VEHICLE)
+    except Exception:                                        # noqa: BLE001
+        pass
+
+    try:
+        from ema_screen import einpassen
+        pas = einpassen(payload["geom"])
+        if not pas["ok"] or pas["s_koerper"] < 0.999:
+            # Der Stegabstand wird aufgemacht, bis der Magnet UNGESCHMAELERT
+            # hineinpasst -- nicht bis er irgendwie hineinpasst.
+            #
+            # Vorher stand hier ein Erst-Treffer-Abbruch, und der war der Grund
+            # fuer die duennen Magnete: ``einpassen`` liefert zu JEDEM magDist das
+            # groesstmoegliche ``s_koerper``, und dieser Massstab greift auf
+            # ``magWidth`` UND ``magThick`` zugleich. Gemessen an den Vorgaben
+            # (V, p=3, magAngle 120, Rotor-Aussen-Ø 188,6 mm):
+            #
+            #   magDist   s_koerper   magThick   magWidth
+            #     2,5 mm     0,44       2,6 mm    19,7 mm   <- erster Treffer
+            #     3,0 mm     0,60       3,6 mm    25,8 mm
+            #     3,5 mm     0,77       4,6 mm    24,9 mm
+            #     4,0 mm     1,00       6,0 mm    24,7 mm   <- ungeschmaelert
+            #
+            # Der erste Treffer nahm also 56 % der Magnetdicke weg, obwohl ein
+            # halber Millimeter mehr Stegabstand den Magneten ganz gelassen
+            # haette. Eine duenne Tasche kostet doppelt: ueber die Arbeitsgerade
+            # ``h_m/(h_m + mu_r*k_c*g)`` faellt B_gap, und die
+            # Entmagnetisierungsreserve faellt mit.
+            d0 = float(payload["geom"].get("magDist", 2.0))
+            schritt, grenze = 0.5, float(T2E.SCHEMA["magDist"]["hi"])
+            bestes = pas if pas["ok"] else None
+            d = d0
+            while d < grenze:
+                d += schritt
+                versuch = einpassen(dict(payload["geom"], magDist=round(d, 2)))
+                if not versuch["ok"]:
+                    continue
+                if bestes is None or versuch["s_koerper"] > bestes["s_koerper"] + 1e-9:
+                    bestes = versuch
+                if bestes["s_koerper"] >= 0.999:      # mehr geht nicht
+                    break
+            if bestes is not None:
+                pas = bestes
+        payload["geom"] = pas["geom"]
+    except Exception:                          # noqa: BLE001 — lieber roh als gar nicht
+        pass
+    return payload
+
+
 def _load_payload(args) -> dict:
+    if getattr(args, "frisch", False):
+        return frischer_payload()
     if args.payload_file:
         with open(args.payload_file, encoding="utf-8") as f:
             data = json.load(f)
@@ -180,6 +289,7 @@ def _load_payload(args) -> dict:
         return json.loads(args.payload)
     if args.from_project:
         pid = _newest_project() if args.from_project == "last" else args.from_project
+        args._pid = pid          # wer den Payload stellt, benennt auch das Projekt
         meta = os.path.join(PROJECTS_ROOT, pid, "meta.json")
         try:
             with open(meta, encoding="utf-8") as f:
@@ -239,7 +349,15 @@ def param_schema(url: str) -> dict:
 
 def _parse_value(raw: str):
     """JSON zuerst — so bleiben 12, 1.5, true, null und [1,2] das, was sie sind.
-    Alles Uebrige ist Text (``magShape=v`` muss ohne Anfuehrungszeichen gehen)."""
+    Alles Uebrige ist Text (``magShape=v`` muss ohne Anfuehrungszeichen gehen).
+
+    ``@datei`` liest den Wert aus einer Datei. Das ist fuer genau einen Fall da,
+    der sonst nicht geht: ein selbst definierter Fahrzyklus (``cycle_csv``) sind
+    hunderte Zeilen und taugt nicht als Kommandozeilenargument.
+    """
+    if raw.startswith("@"):
+        with open(os.path.expanduser(raw[1:]), encoding="utf-8") as f:
+            return f.read()
     try:
         return json.loads(raw)
     except ValueError:
@@ -395,6 +513,26 @@ def cmd_run(args) -> int:
     path, status_path = route
     payload = _load_payload(args)
 
+    # Ein 3D-Lauf gehoert in DAS Projekt, dessen Payload er rechnet. Ohne
+    # ``project_id`` nimmt ``/em3d`` das im Server zuletzt aktive Projekt -- und
+    # das muss nicht dasselbe sein; dann liegen 2D und 3D derselben Maschine in
+    # zwei Projekten und ``em3d.compare_2d`` vergleicht zwei Fremde. Steht der
+    # Schluessel erst einmal im Payload, ist er auch mit ``--set`` erreichbar.
+    if args.stage in ("em3d", "em3d_sweep"):
+        pid = getattr(args, "_pid", "")
+        if pid and not payload.get("project_id"):
+            payload["project_id"] = pid
+
+    # Fahrzyklus aus dem gemeinsamen Speicher (Verb ``zyklus``) einsetzen --
+    # Zyklus UND Fahrzeug, nie einzeln.
+    zyk = getattr(args, "zyklus", None)
+    if zyk:
+        import ema_zyklen
+        try:
+            ema_zyklen.anwenden(payload, zyk)
+        except ValueError as e:
+            return _die(str(e), EXIT_USAGE)
+
     applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
                                  args.url, force=getattr(args, "force", False))
     if errors:
@@ -412,6 +550,12 @@ def cmd_run(args) -> int:
         if geom_touched:
             print("  Hinweis: die Schemagrenzen sagen NICHT, ob die Geometrie baubar "
                   "ist. Bei geaenderter Geometrie zuerst 'run cad --wait' (~1 min).")
+    # Welcher Lastfall gerechnet wird, muss VOR dem Lauf dastehen und nicht erst
+    # im Ergebnis: eine volle Analyse dauert Stunden, und ein Fahrzyklus, der
+    # nicht zur Maschine passt, faellt sonst erst am Bericht auf.
+    if args.stage in ("analyse",):
+        print("  " + _lastfall_zeile(payload))
+
     if getattr(args, "dry_run", False):
         print(f"[Probelauf — {path} NICHT aufgerufen]")
         return emit(payload, args)
@@ -847,6 +991,311 @@ def cmd_topopt(args) -> int:
     return EXIT_OK
 
 
+def _lastfall_zeile(payload: dict) -> str:
+    """Fahrzyklus und Fahrzeug in einer Zeile — der Lastfall auf einen Blick."""
+    zyk = payload.get("cycle")
+    fz = payload.get("vehicle") or {}
+    if zyk is None:
+        return ("Lastfall: KEIN Zyklus im Payload — die Pipeline nimmt dann 'wltp3' "
+                "(+ Autobahn-Volllast) am 1600-kg-Pkw")
+    if zyk == "off":
+        return "Lastfall: kein Fahrzyklus (cycle=off) — nur Auslegungspunkt und Kennfeld"
+    name = zyk
+    if zyk == "csv":
+        name = "eigener Zyklus (csv)"
+    elif zyk == "wltp3":
+        name = "wltp3 (+ Autobahn-Volllast)"
+    teile = [f"Lastfall: {name}"]
+    if fz:
+        teile.append(f"Fahrzeug {fz.get('mass_kg', '?')} kg, Rad "
+                     f"{fz.get('r_wheel_m', '?')} m, Uebersetzung "
+                     f"{fz.get('gear_ratio', '?')}")
+    else:
+        teile.append("Fahrzeug: Vorgabe (1600 kg Pkw, Uebersetzung 9,5)")
+    return " · ".join(teile)
+
+
+# Was VOR dem ersten Rechenlauf feststehen muss. Die Liste ist kurz und geschlossen:
+# das sind genau die Angaben, ohne die ein Lauf zwar durchlaeuft, aber eine andere
+# Maschine beschreibt als die bestellte. Je Punkt steht dabei, WOHER die Antwort
+# kommen kann -- und ob es dafuer eine oertliche Quelle gibt oder nur die Rueckfrage
+# bzw. die Recherche.
+PFLICHTPUNKTE = [
+    dict(name="einsatz", frage="Wofuer ist die Maschine? (Fahrzeug, Geraet, Pruefstand)",
+         quelle="aufgabe", hinweis="steht in der Aufgabe oder wird erfragt"),
+    # Die erste Entscheidung ueberhaupt -- und die einzige, die ueber die
+    # Bedeutung fast aller uebrigen entscheidet. Steht sie nicht in der Aufgabe,
+    # ist die Voreinstellung PSM, und die ist dann eine ANNAHME, keine Wahl.
+    dict(name="maschinenart", frage="PSM, ASM, SynRM oder EESM? (geom.machineType)",
+         quelle="paarvergleich",
+         hinweis="Vorgabe pmsm. 'paarvergleich --achse maschinenart' stellt sie "
+                 "gegeneinander. Getragen: analytisch pmsm+asm; Feld/CAD/3D nur pmsm"),
+    dict(name="betriebspunkt", frage="Moment und Drehzahl im Dauerbetrieb",
+         quelle="aufgabe", hinweis="load_nm, rpm_from/rpm_to — nicht ableitbar"),
+    dict(name="lastfall", frage="Fahrzyklus UND Fahrzeug (oder ausdruecklich keiner)",
+         quelle="zyklen", hinweis="'zyklus liste'; passt keiner: selbst anlegen"),
+    dict(name="bauraum", frage="Aussendurchmesser, Baulaenge, Wellendurchmesser",
+         quelle="aufgabe", hinweis="die Schemagrenzen sind die Suchbox, nicht der Bauraum"),
+    dict(name="kuehlung", frage="Welche Kuehlung ist vorgesehen?",
+         quelle="schema", hinweis="natural | air | water | oil"),
+    dict(name="umgebung", frage="Umgebungstemperatur",
+         quelle="schema", hinweis="T_ambient, Vorgabe 25 °C"),
+    dict(name="werkstoffe", frage="Magnet- und Blechwerkstoff",
+         quelle="schema", hinweis="entscheidet der Paarvergleich, wenn nichts vorgegeben ist"),
+    dict(name="anordnung", frage="Magnetanordnung, Pol- und Nutzahl",
+         quelle="paarvergleich", hinweis="'paarvergleich --frisch' entscheidet das"),
+    dict(name="stromrichter", frage="Zwischenkreisspannung und Strangstromgrenze",
+         quelle="fest", hinweis="FEST verdrahtet: 800 V / 800 A (ema_analysis.INVERTER_*). "
+                                "Fuer ein 48-V-System ist das falsch und NICHT einstellbar "
+                                "— im Bericht sagen"),
+    dict(name="sicherheit", frage="Geforderter Sicherheitsfaktor, Isolierklasse, Grenztemperaturen",
+         quelle="fest", hinweis="SF 1,5 · Klasse H 180 °C · Magnetgrenze aus der "
+                                "Werkstofftabelle ('sicherheit' prueft danach)"),
+]
+
+
+def cmd_maschinenart(args) -> int:
+    """Welche Maschinenarten es gibt und welche Rechenstufe jede heute traegt.
+
+    Der Sinn ist die zweite Spalte: sie sagt, wo eine Art **aufhoert**. Ohne sie
+    stuende die Wahl frei und der Lauf schluege erst spaeter fehl -- oder,
+    schlimmer, er liefe durch und gaebe PSM-Zahlen unter fremdem Namen heraus.
+
+    Exit: 0 = ok.
+    """
+    import ema_maschinenart as MA
+
+    if getattr(args, "code", None):
+        try:
+            art = MA.hole(args.code)
+        except MA.ArtNichtUnterstuetzt as e:
+            print(e); return 2
+        print(f"{art.code} — {art.label}")
+        print(f"  Erregung:            {art.erregung}")
+        print(f"  Permanentmagnete:    {'ja' if art.hat_magnete else 'nein'}")
+        print(f"  Laeuferwicklung:     {'ja' if art.hat_laeuferwicklung else 'nein'}")
+        print(f"  Schlupf:             {'ja' if art.hat_schlupf else 'nein'}")
+        print(f"  Fluss einstellbar:   {'ja' if art.stellbarer_fluss else 'nein'}")
+        for st in MA.STUFEN:
+            zeichen = "getragen" if st in art.stufen else "NICHT getragen"
+            print(f"  {MA.STUFEN_LABEL[st]:<34} {zeichen}")
+        if art.ohne_bedeutung:
+            print("  ohne Bedeutung fuer diese Art: " + ", ".join(art.ohne_bedeutung))
+        if art.hinweis:
+            print("  " + art.hinweis)
+        return 0
+
+    print(MA.uebersicht())
+    print()
+    print("Setzen:   --set geom.machineType=asm")
+    print("Vergleich: paarvergleich --achse maschinenart")
+    return 0
+
+
+def cmd_aufgabe(args) -> int:
+    """Eine neue Aufgabe zerlegen: was ist gefordert, was steht schon da, was fehlt.
+
+    Der Schritt VOR der Recherche. Ins Netz zu gehen ist billig, aber ungezielt:
+    ohne zu wissen, welche Angabe fehlt, sucht man nach dem, was man ohnehin schon
+    hat. Deshalb wird hier zuerst der eigene Bestand befragt — abgelegte
+    Fahrzyklen, gemessene Regeln, gerechnete Laeufe, die Wissensbasis und die
+    recherchierten Vergleichswerte — und erst was dort NICHT steht, ist ein Grund
+    fuer eine Suche oder eine Rueckfrage.
+
+    Exit: 0 = ok, 2 = Bedienfehler.
+    """
+    text = " ".join(args.beschreibung or []).strip()
+    if not text:
+        return _die("'aufgabe' braucht die Aufgabenbeschreibung als Text.", EXIT_USAGE)
+
+    bestand = {}
+
+    # Was oertlich vorhanden ist -- jede Quelle einzeln, damit ein fehlendes
+    # Teilstueck (kein Ollama, keine Datenbank) den Rest nicht mitnimmt.
+    try:
+        import ema_db
+        import ema_zyklen
+        conn = ema_db.oeffne()
+        bestand["zyklen"] = [z for z in ema_zyklen.liste(conn) if z["herkunft"] == "eigen"]
+        bestand["laeufe"] = len(ema_db.liste(conn))
+    except Exception as e:                                   # noqa: BLE001
+        bestand["zyklen"], bestand["laeufe"] = [], f"nicht lesbar ({e})"
+    try:
+        import ema_lernen
+        bestand["regeln"] = len(ema_lernen.gemessene_regeln() or [])
+        bestand["erfahrungen"] = len(ema_lernen.erfahrungen() or [])
+    except Exception:                                        # noqa: BLE001
+        bestand["regeln"] = bestand["erfahrungen"] = 0
+    try:
+        import ema_rag
+        treffer = ema_rag.search(text, k=4) or []
+        bestand["wissen"] = [{"dokument": t.get("doc") or t.get("title") or "?",
+                              "auszug": (t.get("text") or "")[:160]} for t in treffer]
+    except Exception as e:                                   # noqa: BLE001
+        bestand["wissen"] = []
+        bestand["wissen_fehler"] = str(e)
+
+    offen = []
+    zeilen = []
+    for pkt in PFLICHTPUNKTE:
+        stand, wie = "OFFEN", pkt["hinweis"]
+        if pkt["quelle"] == "zyklen" and bestand["zyklen"]:
+            stand = "PRUEFEN"
+            wie = ("abgelegt: " + ", ".join(z["name"] for z in bestand["zyklen"][:5])
+                   + " — passt einer? sonst neu anlegen")
+        elif pkt["quelle"] == "fest":
+            # Nicht „ableitbar", sondern unverrueckbar: das sind Annahmen der
+            # Toolchain, die man nur NENNEN, nicht einstellen kann.
+            stand = "FEST"
+        elif pkt["quelle"] in ("schema", "paarvergleich"):
+            stand = "ABLEITBAR"
+        zeilen.append((pkt["name"], stand, pkt["frage"], wie))
+        if stand == "OFFEN":
+            offen.append(pkt)
+
+    if getattr(args, "json", False):
+        return emit({"aufgabe": text, "bestand": bestand,
+                     "punkte": [dict(name=n, stand=s, frage=f, hinweis=h)
+                                for n, s, f, h in zeilen],
+                     "offen": [p["name"] for p in offen]}, args)
+
+    print(f"Aufgabe: {text}\n")
+    print("Was vor dem ersten Lauf feststehen muss")
+    print("-" * 72)
+    for name, stand, frage, wie in zeilen:
+        print(f"  [{stand:9}] {name:14} {frage}")
+        print(f"{'':14} {wie}")
+    print()
+    print("Eigener Bestand")
+    print("-" * 72)
+    print(f"  gerechnete Laeufe in der Datenbank : {bestand['laeufe']}")
+    print(f"  gemessene Regeln / Erfahrungen     : {bestand['regeln']} / {bestand['erfahrungen']}")
+    print(f"  eigene Fahrzyklen                  : "
+          f"{', '.join(z['name'] for z in bestand['zyklen']) or '— keine —'}")
+    if bestand["wissen"]:
+        print("  Wissensbasis passt an:")
+        for t in bestand["wissen"]:
+            print(f"    · {t['dokument']}: {t['auszug']}…")
+    else:
+        print("  Wissensbasis                       : kein Treffer"
+              + (f" ({bestand.get('wissen_fehler')})" if bestand.get("wissen_fehler") else ""))
+    print()
+    print("Offen — dafuer Rueckfrage oder Recherche, NICHT raten")
+    print("-" * 72)
+    if not offen:
+        print("  nichts offen.")
+    else:
+        for p in offen:
+            print(f"  · {p['name']}: {p['frage']}")
+        stichworte = " ".join(text.split()[:8])
+        print()
+        print("  Naechste Schritte:")
+        print(f"    python3 cae_cli.py recherche suche \"{stichworte}\" --treffer 5")
+        print( "    python3 cae_cli.py recherche hole <adresse>")
+        print( "    python3 cae_cli.py recherche merke --projekt last --adresse <adresse> \\")
+        print( "        --wert \"groesse=wert einheit :: woertliches Zitat\"")
+        print( "    (was nur der Auftraggeber weiss — Bauraum, Moment, Einsatz — wird GEFRAGT,")
+        print( "     nicht recherchiert)")
+    return EXIT_OK
+
+
+def cmd_zyklus(args) -> int:
+    """Fahrzyklen nachsehen, bauen, ablegen — der Speicher ist die gemeinsame DB.
+
+    Exit: 0 ok, 2 Bedienfehler.
+    """
+    import ema_db
+    import ema_zyklen
+    conn = ema_db.oeffne()
+    was = args.was
+
+    if was == "liste":
+        eintraege = ema_zyklen.liste(conn)
+        if getattr(args, "json", False):
+            return emit(eintraege, args)
+        print(f"{'Name':22} {'Herkunft':10} {'v_max':>7} {'Dauer':>7} {'Weg':>7}  gedacht fuer")
+        for z in eintraege:
+            print(f"{z['name']:22} {z['herkunft']:10} "
+                  f"{z.get('v_max_kmh', '—'):>7} {z.get('dauer_s', '—'):>7} "
+                  f"{z.get('weg_km', '—'):>7}  {z['gedacht_fuer']}")
+            if z.get("achtung"):
+                print(f"{'':22} ACHTUNG: {z['achtung']}")
+        return EXIT_OK
+
+    if was == "zeigen":
+        if args.name in ema_zyklen.EINGEBAUT:
+            e = ema_zyklen.EINGEBAUT[args.name]
+            return emit({"name": args.name, "herkunft": "eingebaut",
+                         "beschreibung": e["beschreibung"],
+                         "gedacht_fuer": e["gedacht_fuer"],
+                         **ema_zyklen._kennzahlen(e["bauer"])}, args)
+        z = ema_zyklen.holen(conn, args.name)
+        if not z:
+            return _die(f"Zyklus '{args.name}' nicht gefunden — 'zyklus liste' zeigt "
+                        f"die vorhandenen.", EXIT_USAGE)
+        if not getattr(args, "punkte", False):
+            z = {k: v for k, v in z.items() if k != "punkte"}
+        return emit(z, args)
+
+    if was == "anlegen":
+        try:
+            phasen = ema_zyklen.phasen_lesen(args.phasen)
+            csv = ema_zyklen.aus_phasen(phasen)
+            fahrzeug = {}
+            for zuweisung in (args.fahrzeug or []):
+                if "=" not in zuweisung:
+                    return _die(f"'{zuweisung}': erwartet wird GROESSE=WERT", EXIT_USAGE)
+                k, v = zuweisung.split("=", 1)
+                fahrzeug[k.strip()] = float(v)
+            z = ema_zyklen.speichern(conn, args.name, csv,
+                                     beschreibung=args.beschreibung or "",
+                                     fahrzeug_dict=fahrzeug)
+        except ValueError as e:
+            return _die(str(e), EXIT_USAGE)
+        print(f"Zyklus '{z['name']}' abgelegt ({len(z['punkte'].splitlines()) - 1} s, "
+              f"Fahrzeug {z['fahrzeug']['mass_kg']:.0f} kg). "
+              f"Verwenden mit: run analyse --zyklus {z['name']}")
+        return EXIT_OK
+
+    if was == "loeschen":
+        if ema_zyklen.loeschen(conn, args.name):
+            print(f"Zyklus '{args.name}' geloescht.")
+            return EXIT_OK
+        return _die(f"Zyklus '{args.name}' nicht gefunden.", EXIT_USAGE)
+
+    return _die(f"Unbekannt: {was}", EXIT_USAGE)
+
+
+def cmd_sicherheit(args) -> int:
+    """Sicherheitskriterien eines gerechneten Projekts pruefen.
+
+    Exit: 0 = alle bestanden, 1 = mindestens eines verletzt (Muster ``rotor-check``).
+    """
+    import ema_sicherheit
+    pid = _newest_project() if args.projekt == "last" else args.projekt
+    ordner = os.path.join(PROJECTS_ROOT, pid)
+    try:
+        with open(os.path.join(ordner, "results.json"), encoding="utf-8") as f:
+            results = json.load(f)
+    except FileNotFoundError:
+        return _die(f"Kein results.json in '{pid}' — die Analyse ist nicht gelaufen.",
+                    EXIT_USAGE)
+    meta = {}
+    try:
+        with open(os.path.join(ordner, "meta.json"), encoding="utf-8") as f:
+            meta = json.load(f)
+    except FileNotFoundError:
+        pass
+
+    befund = ema_sicherheit.pruefen(results, meta)
+    if getattr(args, "json", False):
+        emit({"projekt": pid, **befund}, args)
+    else:
+        print(f"Projekt: {pid}")
+        print(ema_sicherheit.als_text(befund))
+    return EXIT_OK if befund["ok"] else 1
+
+
 def cmd_rotor_check(args) -> int:
     """2D-Layoutgate lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
     Exit: 0 = Layout OK, 1 = Check abgelehnt (defekte Geometrie)."""
@@ -989,6 +1438,18 @@ def cmd_paarvergleich(args) -> int:
 
     Exit: 0 = mindestens eine Achse mit zwei brauchbaren Optionen, 1 = keine.
     """
+    if getattr(args, "referenz", False):
+        import ema_referenz as REF
+        if getattr(args, "json", False):
+            return emit({"quellen": REF.QUELLEN, "messpunkte": REF.MESSPUNKTE,
+                         "salienz_band": {k: {"min": v[0], "max": v[1],
+                                              "stuetzen": list(v[2]), "bemerkung": v[3]}
+                                          for k, v in REF.SALIENZ_BAND.items()},
+                         "v_oeffnung": REF.V_OEFFNUNG_GRAD, "bauband": REF.BAUBAND},
+                        args)
+        print(REF.als_text())
+        return EXIT_OK
+
     payload = _load_payload(args)
     applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
                                  args.url, force=getattr(args, "force", False))
@@ -1254,12 +1715,19 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--payload", help="JSON direkt")
     g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
     g.add_argument("--from-project",
-                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes) — "
+                        "erbt ALLE Entscheidungen dieses Projekts")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben, ohne Altprojekt "
+                        "— der richtige Start fuer eine NEUE Auslegung")
     s.add_argument("--set", action="append", metavar="KEY=WERT",
                    help="einzelnen Parameter aendern, mehrfach angebbar. Geprueft gegen "
                         "'geom'. Punktpfade erlaubt (vehicle.mass_kg=1600)")
     s.add_argument("--force", action="store_true",
                    help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--zyklus", metavar="NAME",
+                   help="Fahrzyklus UND sein Fahrzeug einsetzen ('zyklus liste' zeigt "
+                        "die waehlbaren; 'off' rechnet ohne Zyklus)")
     s.add_argument("--dry-run", action="store_true",
                    help="Payload nur bauen und zeigen, nichts starten")
     s.add_argument("--wait", action="store_true", help="bis zum Abschluss warten")
@@ -1268,13 +1736,64 @@ def build_parser() -> argparse.ArgumentParser:
     _add_globals(s)
     s.set_defaults(fn=cmd_run)
 
+    s = sub.add_parser("aufgabe",
+                       help="eine neue Aufgabe zerlegen: was muss feststehen, was steht "
+                            "schon im eigenen Bestand, was fehlt (der Schritt VOR der Recherche)")
+    s.add_argument("beschreibung", nargs="+", help="die Aufgabe in eigenen Worten")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_aufgabe)
+
+    s = sub.add_parser("zyklus",
+                       help="Fahrzyklen: nachsehen, eigene bauen und in der gemeinsamen "
+                            "Datenbank behalten")
+    zs = s.add_subparsers(dest="was", required=True)
+    z1 = zs.add_parser("liste", help="alle waehlbaren Zyklen mit ihrem gedachten Fahrzeug")
+    _add_globals(z1)
+    z2 = zs.add_parser("zeigen", help="einen Zyklus im Einzelnen")
+    z2.add_argument("name")
+    z2.add_argument("--punkte", action="store_true", help="auch die CSV-Punkte ausgeben")
+    _add_globals(z2)
+    z3 = zs.add_parser("anlegen", help="eigenen Zyklus bauen und ablegen")
+    z3.add_argument("name")
+    z3.add_argument("--phasen", required=True, metavar="ZIEL:DAUER,...",
+                    help="Phasen als ziel_kmh:dauer_s, z. B. '0:5,25:20,25:300,0:15' — "
+                         "in jeder Phase laeuft v linear auf das Ziel")
+    z3.add_argument("--fahrzeug", action="append", metavar="GROESSE=WERT",
+                    help="mass_kg, r_wheel_m, gear_ratio, cwA_m2, cr, eta_drive, "
+                         "regen_frac, slope_deg — mehrfach angebbar")
+    z3.add_argument("--beschreibung", default="")
+    _add_globals(z3)
+    z4 = zs.add_parser("loeschen", help="abgelegten Zyklus entfernen")
+    z4.add_argument("name")
+    _add_globals(z4)
+    s.set_defaults(fn=cmd_zyklus)
+
+    s = sub.add_parser("maschinenart",
+                       help="Maschinenarten (PSM/ASM/SynRM/EESM) und welche "
+                            "Rechenstufe jede heute traegt")
+    s.add_argument("code", nargs="?", help="eine Art im Einzelnen (pmsm|asm|synrm|eesm)")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_maschinenart)
+
+    s = sub.add_parser("sicherheit",
+                       help="Sicherheitskriterien eines gerechneten Projekts pruefen "
+                            "(Festigkeit, Temperaturen, Entmagnetisierung, Fahrprofil)")
+    s.add_argument("--from-project", dest="projekt", default="last",
+                   help="Projektkennung oder 'last' (Vorgabe)")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_sicherheit)
+
     s = sub.add_parser("rotor-check",
                        help="2D Rotorlayout-Check (Taschen: Kollision/Stege/Containment) — ohne CAD, in ms")
     g = s.add_mutually_exclusive_group()
     g.add_argument("--payload", help="JSON direkt")
     g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
     g.add_argument("--from-project",
-                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes) — "
+                        "erbt ALLE Entscheidungen dieses Projekts")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben, ohne Altprojekt "
+                        "— der richtige Start fuer eine NEUE Auslegung")
     s.add_argument("--set", action="append", metavar="KEY=WERT",
                    help="einzelnen Parameter aendern, mehrfach angebbar (Geometrie-Test)")
     s.add_argument("--force", action="store_true",
@@ -1290,7 +1809,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--payload", help="JSON direkt")
     g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
     g.add_argument("--from-project",
-                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes) — "
+                        "erbt ALLE Entscheidungen dieses Projekts")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben, ohne Altprojekt "
+                        "— der richtige Start fuer eine NEUE Auslegung")
     s.add_argument("--ziel", choices=["auto", "guenstig", "leistung", "ausgewogen"],
                    default="auto",
                    help="Auslegungsziel; auto liest es aus --auftrag bzw. dem design_brief")
@@ -1321,12 +1844,16 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_screen)
 
     s = sub.add_parser("paarvergleich",
-                       help="Gestaltungsentscheidungen gegeneinanderstellen (Anordnung, Hairpins, Material, Kühlung, Durchmesser, Länge) — vor der Geometrie")
+                       help="Gestaltungsentscheidungen gegeneinanderstellen (Anordnung, V-Öffnungswinkel, Hairpins, Material, Kühlung, Durchmesser, Länge, Welle) — vor der Geometrie")
     g = s.add_mutually_exclusive_group()
     g.add_argument("--payload", help="JSON direkt")
     g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
     g.add_argument("--from-project",
-                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes) — "
+                        "erbt ALLE Entscheidungen dieses Projekts")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben, ohne Altprojekt "
+                        "— der richtige Start fuer eine NEUE Auslegung")
     s.add_argument("--achsen",
                    help="nur diese Achsen, mit Komma. Vorgabe: alle. Bekannt: " + _PV_ACHSEN)
     s.add_argument("--n_max", type=float, default=None,
@@ -1345,6 +1872,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="einzelnen Parameter der Basis aendern, mehrfach angebbar")
     s.add_argument("--force", action="store_true",
                    help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--referenz", action="store_true",
+                   help="nur die recherchierten Vergleichswerte zeigen (Salienzband je "
+                        "Anordnung, V-Oeffnungswinkel, Bauverhaeltnisse) — Fremdtext "
+                        "mit Quellen, ohne Payload")
     _add_globals(s, json_hilfe="der vollstaendige Vergleich als JSON — je Achse "
                                "Optionen, Paare und Spannweiten")
     s.set_defaults(fn=cmd_paarvergleich)
@@ -1375,6 +1906,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--payload-file", help="erzeugen: Datei mit JSON")
     g.add_argument("--from-project",
                    help="erzeugen: Basis aus ~/cae_projekte/<id>/meta.json ('last')")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben statt eines "
+                        "Altprojekts")
     _add_globals(s, json_hilfe="der vollstaendige Befund als JSON")
     s.set_defaults(fn=cmd_bilddaten)
 
@@ -1389,6 +1923,9 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--payload-file", help="probieren: Datei mit JSON")
     g.add_argument("--from-project",
                    help="probieren: Basis aus ~/cae_projekte/<id>/meta.json ('last')")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben statt eines "
+                        "Altprojekts")
     s.add_argument("--merken", action="store_true",
                    help="probieren: die Befunde als belegte Regeln ablegen")
     s.add_argument("--polpaare", "--pole", dest="pole",
@@ -1439,7 +1976,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--payload", help="JSON direkt")
     g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
     g.add_argument("--from-project",
-                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes) — "
+                        "erbt ALLE Entscheidungen dieses Projekts")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben, ohne Altprojekt "
+                        "— der richtige Start fuer eine NEUE Auslegung")
     s.add_argument("--set", action="append", metavar="KEY=WERT",
                    help="einzelnen Parameter aendern, mehrfach angebbar")
     s.add_argument("--force", action="store_true", help="Schemagrenzen nicht pruefen")
@@ -1463,7 +2004,11 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("--payload", help="JSON direkt")
     g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
     g.add_argument("--from-project",
-                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes) — "
+                        "erbt ALLE Entscheidungen dieses Projekts")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben, ohne Altprojekt "
+                        "— der richtige Start fuer eine NEUE Auslegung")
     s.add_argument("--set", action="append", metavar="KEY=WERT")
     s.add_argument("--force", action="store_true")
     s.add_argument("--verfahren", choices=["sko", "simp"], default="sko",

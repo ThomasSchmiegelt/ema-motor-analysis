@@ -43,7 +43,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `wait` | auf Abschluss warten |
 | `routes [--grep x]` | alle Serverrouten auflisten |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
-| `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Elf Achsen (Magnetanordnung, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht**. 0,4 s, rein analytisch |
+| `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Dreizehn Achsen (Magnetanordnung, **V-Öffnungswinkel**, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge, **Wellendurchmesser**), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht**. 0,7 s, rein analytisch. `--referenz` zeigt statt eines Vergleichs die **recherchierten Vergleichswerte** mit Quellen |
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
 | `bilddaten <was>` | **Bilddatensatz zum optischen Bewerten**: `erzeugen` · `seite` · `einlesen` · `regel` · `stand`. Zieht zufaellige Rotorquerschnitte, behaelt nur die, die das Layouttor bestehen, und zeichnet sie. **Die Bewertung macht ein Mensch** — du kannst sie nur vorbereiten und hinterher auswerten |
 | `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver beide` (Vollrotor, ~7 s, mit Gegenüberstellung) |
@@ -52,6 +52,12 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `lernen <was>` | **was aus dem eigenen Bestand folgt**: `zeige` · `merke --regel … --beleg …` · `pruefe` · **`probieren`** = geplanter Versuch: jede Bauform ueber jede Polzahl, mit `--merken` landen die Befunde als belegte Regeln im Speicher |
 | `recherche <was>` | **Internet**: `suche <begriffe>` · `hole <adresse>` |
 | `raw GET/POST <pfad>` | beliebige Route — Notausgang für alles Übrige |
+
+**`--frisch` gegen `--from-project`** — gilt für `run`, `rotor-check`, `screen`, `paarvergleich`, `bilddaten`, `lernen`, `struktur`, `topopt`:
+
+* **`--frisch`** baut den Grundpayload aus den Schemavorgaben und passt ihn ein. Kein Altprojekt, keine geerbte Polzahl, Anordnung, Kühlung oder Werkstoffwahl. **Das ist der Start jeder neuen Auslegung.**
+* **`--from-project <id>`** erbt ALLE Entscheidungen dieses Projekts. Richtig zum Nachrechnen, Verfeinern und für gezielte Einzeländerungen — sonst nicht.
+
 
 ### `struktur` und `topopt` — wann welches
 
@@ -75,6 +81,40 @@ python3 cae_cli.py topopt   --from-project last --iterationen 25        # ~20 s
   Ergebnis nennt den Radialbereich, in dem das Eisen mechanisch wenig trägt. Das ist
   ein Hinweis, wo eine Flussbarriere vertretbar *wäre* — **nach** einer EM-Rechnung,
   nicht davor. Wer daraus eine Geometrieempfehlung macht, sagt das dazu.
+
+### Bei einer NEUEN Aufgabe: erst zerlegen, dann suchen
+
+```bash
+python3 cae_cli.py aufgabe "Nabenmotor fuer ein Lastenrad, 28 Zoll, 140 kg, 27 Nm bei 210 U/min"
+```
+
+Das ist der Schritt **vor** jeder Recherche und vor jedem Rechenlauf. Ins Netz zu gehen
+ist billig, aber ungezielt: wer nicht weiß, welche Angabe fehlt, sucht nach dem, was er
+ohnehin schon hat. `aufgabe` stellt drei Dinge nebeneinander:
+
+1. **Was feststehen muss**, bevor gerechnet wird — Einsatz, Betriebspunkt, Lastfall,
+   Bauraum, Kühlung, Umgebung, Werkstoffe, Anordnung, Stromrichter, Sicherheit.
+2. **Was der eigene Bestand schon hergibt** — abgelegte Fahrzyklen, gemessene Regeln und
+   Erfahrungen, gerechnete Läufe, Treffer in der Wissensbasis.
+3. **Was offen bleibt.** Genau das — und nur das — rechtfertigt eine Suche.
+
+Drei Zustände, und sie bedeuten Verschiedenes:
+
+* `ABLEITBAR` — das Werkzeug entscheidet es (Schema, `paarvergleich`). Nicht fragen.
+* `PRUEFEN` — es gibt schon etwas Passendes im Bestand. **Ansehen, nicht neu erfinden.**
+* `OFFEN` — fehlt. Zwei Wege, und sie sind nicht austauschbar:
+  * **Was nur der Auftraggeber wissen kann** (Bauraum, geforderter Betriebspunkt,
+    Einsatzzweck, Spannungsebene) wird **gefragt**, nicht recherchiert. Eine
+    recherchierte Antwort auf eine Frage nach dem Bauraum ist geraten.
+  * **Was allgemein bekannt ist** (typische Stegbreiten, übliche Pol-/Nutkombinationen,
+    Werkstoffgrenzen) wird recherchiert — und mit Beleg abgelegt (unten).
+* `FEST` — eine Annahme der Toolchain, die man nur **nennen** kann. Vor allem:
+  **Zwischenkreis 800 V und Strangstromgrenze 800 A sind fest verdrahtet**
+  (`ema_analysis.INVERTER_*`) und **nicht einstellbar**. Für ein 48-V-Fahrradsystem ist
+  das falsch — das gehört in den Bericht, statt die Peak-Zahlen unkommentiert zu zitieren.
+
+Erst danach recherchieren, und die Suche mit dem formulieren, was offen war — nicht mit
+der Aufgabe als Ganzes.
 
 ### Zuerst nachsehen, was schon bekannt ist
 
@@ -179,7 +219,10 @@ python3 cae_cli.py run cad     --from-project last --wait \
         --set slotDepth=30 --set p=8 --set project_name=Variante_A #  … dann bauen
 ```
 
-* `--from-project last` nimmt die jüngste **gerechnete** Auslegung (die mit `meta.json`).
+* `--frisch` baut den Payload aus den Schemavorgaben — **kein Altprojekt**. Das ist der
+  Start jeder neuen Auslegung; alles Weitere entscheidest du mit `paarvergleich`.
+* `--from-project last` nimmt die jüngste **gerechnete** Auslegung (die mit `meta.json`)
+  und erbt damit ALLE ihre Entscheidungen — nur zum Nachrechnen und Verfeinern.
 * `--set KEY=WERT`, beliebig oft. Der Wert wird als JSON gelesen — `12`, `1.5`, `true`,
   `[1,2]` bleiben Typen, alles Übrige ist Text (`magShape=v` ohne Anführungszeichen).
 * Wohin der Wert gehört, entscheidet `cae_cli.py` selbst (`geom` oder obere Ebene).
@@ -213,13 +256,149 @@ Typ und Auswahlliste — `python3 cae_cli.py raw GET /param_schema` zeigt sie sa
 `windingHeadStyle` …). Die gehen weiterhin durch, wenn sie in der Vorlage stehen — aber
 ohne Grenzen und ohne Typprüfung. Was das Feld beeinflusst, steht im Schema.
 
+### Noch davor: WELCHE MASCHINENART?
+
+Das Werkzeug ist als **permanenterregte Synchronmaschine (PSM) mit Hairpins**
+gewachsen. Die Vorgabe `geom.machineType = pmsm` ist deshalb keine Wahl, sondern eine
+**Annahme** — und sie entscheidet über die Bedeutung fast aller übrigen Entscheidungen:
+eine Maschine ohne Magnete hat keine Magnetanordnung, keinen Magnetwerkstoff, keinen
+V-Öffnungswinkel, keine Entmagnetisierungsreserve und kein Kurzschlussmoment.
+
+```bash
+python3 cae_cli.py maschinenart          # alle Arten und wie weit jede getragen ist
+python3 cae_cli.py maschinenart asm      # eine im Einzelnen
+```
+
+| Art | was | analytisch | Feld | CAD | 3-D |
+|---|---|---|---|---|---|
+| `pmsm` | permanenterregt (Vorgabe) | ✔ | ✔ | ✔ | ✔ |
+| `asm` | Asynchron, Käfigläufer | ✔ | — | — | — |
+| `synrm` | Reluktanz, ohne Magnete | — | — | — | — |
+| `eesm` | fremderregt | — | — | — | — |
+
+* **Setzen:** `--set geom.machineType=asm`.
+* **Vergleichen:** `paarvergleich --achse maschinenart` stellt PSM und ASM am
+  **gemeinsamen** Betriebspunkt gegeneinander — gleiche Kennzahlen, gleiche Einheiten.
+  Nicht getragene Arten stehen als Zeile **mit Begründung** da, statt den Vergleich
+  abzureißen.
+* **Was `run analyse` mit `asm` macht: es bricht ab.** Das ist Absicht. Die 2-D-FDM
+  dieses Werkzeugs ist reell, linear und magnetostatisch — sie kennt weder σ noch
+  ∂A/∂t und kann einen Käfigläufer grundsätzlich nicht abbilden. Ein Durchlauf würde
+  **PSM-Zahlen unter fremdem Namen** liefern: ein Feld aus Magneten, die es nicht gibt,
+  ein Moment ohne Schlupf, eine Entmagnetisierungsreserve für einen Läufer aus Blech
+  und Aluminium. Die ASM-Feldstufe braucht Elmers `MagnetoDynamics2DHarmonic` und ist
+  noch nicht gebaut.
+* Auch `screen` (Vorauswahl) weist magnetlose Arten ab — sie fährt den Magnet-
+  Kombinationsraum ab.
+* **Beim Lesen der ASM-Zeile:** das PSM-Luftspaltfeld ist durch die Magnete
+  **festgelegt**, das der ASM wird über den Magnetisierungsstrom **eingestellt**
+  (Zielwert `geom.bZielT`, Vorgabe 0,80 T). Ob dieser Strom aufzubringen ist, sagt
+  `I_s` und die Warnung am Umrichter-Limit — sonst wäre das Feld geschenkt. Der Preis
+  steht daneben: `I_s` trägt den Magnetisierungsstrom **dauernd** mit, und der
+  Schlupfverlust fällt im **Läufer** an, also an der thermisch schlechtesten Stelle.
+
+### Ganz zuerst: WELCHER Lastfall? (Fahrzyklus + Fahrzeug)
+
+Ein Fahrzyklus ist eine Geschwindigkeit über der Zeit — welches **Moment** daraus wird,
+entscheidet das **Fahrzeug** (Masse, Radhalbmesser, Übersetzung, Luft- und Rollwiderstand).
+Beide gehören zusammen, und beide sind eine **Wahl am Anfang**:
+
+```bash
+python3 cae_cli.py zyklus liste          # was es gibt, und für WELCHES Fahrzeug
+```
+
+* `--frisch` setzt **`cycle=off`** — ohne Wahl wird kein Fahrzyklus gerechnet. Das ist
+  Absicht: früher fehlte der Schlüssel ganz, die Pipeline fiel still auf `wltp3` zurück
+  (das zusätzlich die **Autobahn-Volllastfahrt** nach sich zieht), gerechnet am
+  **1600-kg-Pkw** mit Übersetzung 9,5. Ein Fahrrad-Nabenmotor bekam so 23 km WLTP und
+  220 km/h Autobahn — Zahlen, die eine andere Maschine beschreiben als die bestellte.
+* **Passt ein eingebauter Zyklus, nimm ihn:** `run analyse --zyklus stadtland …`
+* **Passt keiner, definiere einen — und behalte ihn.** Er landet in der gemeinsamen
+  Datenbank, also steht er beim nächsten Mal schon da (und zwei Auslegungen für
+  denselben Einsatz sind über denselben Zyklus gerechnet und damit vergleichbar):
+
+```bash
+python3 cae_cli.py zyklus anlegen pedelec_stadt \
+    --phasen "0:5,18:12,18:120,25:15,25:240,12:10,12:60,0:12" \
+    --fahrzeug mass_kg=140 --fahrzeug r_wheel_m=0.35 --fahrzeug gear_ratio=1.0 \
+    --fahrzeug cwA_m2=0.5 --fahrzeug cr=0.006 \
+    --beschreibung "Stadtfahrt Pedelec, 25 km/h Spitze"
+python3 cae_cli.py run analyse --frisch --zyklus pedelec_stadt --wait
+```
+
+* `--phasen` sind `ziel_kmh:dauer_s`, durch Komma getrennt; in jeder Phase läuft die
+  Geschwindigkeit linear auf das Ziel. Konstantfahrt = denselben Wert wiederholen.
+* **Direktantrieb heißt `gear_ratio=1.0`.** Die Vorgabe 9,5 ist ein Pkw-Getriebe; mit ihr
+  rechnet ein Nabenmotor das Neunfache an Raddrehzahl.
+* `--zyklus` setzt **Zyklus UND Fahrzeug** — nie nur eins davon. Ein eigener Zyklus mit
+  dem Fahrzeugmodell eines 1600-kg-Autos ergibt wieder die Momente eines Autos.
+* `run analyse` schreibt den Lastfall **vor** dem Start in einer Zeile hin. Steht dort
+  nicht, was du meinst, brich ab — die Analyse dauert Stunden.
+* Für Maschinen ohne Fahrprofil (Spindel, Pumpe, Prüfstand) ist `off` richtig: dann
+  zählen Auslegungspunkt und Kennfeld, und es steht kein fremdes Fahrzeug im Bericht.
+
+### Nach jedem Lauf: Sicherheitskriterien prüfen
+
+```bash
+python3 cae_cli.py sicherheit --from-project <pid>     # Exit 0 = bestanden, 1 = verletzt
+```
+
+Die Pipeline **meldet** ihre Grenzwertverletzungen im Protokoll, aber sie hält nichts an
+und schreibt „✅ Analyse abgeschlossen" darunter. Geprüft werden deshalb an einer Stelle:
+
+| Kriterium | Grenze | woher |
+|---|---|---|
+| Festigkeit | FEM-Sicherheitsfaktor ≥ 1,5 (< 1,0 = Versagen) | `summary.safety_factor_fem` |
+| Drehzahl | sichere Drehzahl ≥ Betriebsmaximum | `summary.max_safe_rpm` |
+| Magnet (Dauer + Spitze) | **Dauergrenze des Werkstoffs** — NdFeB N35: 80 °C, Ferrit: 250 °C | Werkstofftabelle |
+| Wicklung | 180 °C dauernd, 200 °C kurzzeitig (Klasse H) | `thermal` + je Zyklus |
+| Entmagnetisierung | Abstand zum Knie | `em_advanced.demag` |
+| Fahrprofil | Zyklus und Fahrzeug müssen im Payload stehen | `meta.payload` |
+
+* **`safety_factor_fem = null` heißt NICHT „sicher", sondern „nicht gerechnet".** Dann
+  ruht die Festigkeitsaussage allein auf der Ringformel, die die Spannungsspitzen an den
+  dünnen Stegen über den Magnettaschen nicht kennt — das melden.
+* Die Temperaturen werden über **alle** gerechneten Zyklen genommen, nicht nur am
+  Auslegungspunkt: der Auslegungspunkt kann 46 °C zeigen, während derselbe Lauf im
+  Zyklus 210 °C erreicht.
+* Ein verletztes Kriterium ist **kein Nebensatz im Abschlussbericht**. Entweder du
+  behebst es (Kühlung, Magnetwerkstoff, Drehzahlgrenze, Geometrie) oder du sagst
+  ausdrücklich, dass die Auslegung so nicht einsetzbar ist.
+
+### Nach `analyse` gehört der 3D-Lauf dazu — nicht als Zugabe
+
+Das 2D-FDM-Feld ist analytisch verankert, aber **zweidimensional**: axiale Streuung,
+Schrägung und die Endwirkung an den Stirnseiten sieht es nicht. Der Elmer-Lauf ist die
+unabhängige Gegenrechnung dazu; `em3d.compare_2d` stellt beide nebeneinander. Eine
+Auslegung ohne ihn ist eine 2D-Zahl ohne Gegenprobe.
+
+```bash
+python3 cae_cli.py run analyse --from-project last --wait      # 30 min – 4 h
+python3 cae_cli.py run em3d --from-project <pid> --wait        # 5–30 min
+python3 cae_cli.py raw POST /project/<pid>/report --data '{}'  # Bericht MIT 3D-Abschnitt
+```
+
+* **Immer `--from-project <pid>` mit der Kennung des gerade gerechneten Projekts.**
+  Der Payload trägt daraus `project_id`, und das 3D-Ergebnis landet im selben Projekt
+  wie die 2D-Rechnung. Ohne das nimmt `/em3d` das im Server zuletzt aktive Projekt —
+  dann vergleicht `compare_2d` zwei Fremde oder es entsteht ein eigenes `…_em3d`-Projekt.
+* **Der Bericht entsteht NICHT in der Pipeline**, sondern über `POST
+  /project/<pid>/report`. Sobald `results["em3d"]` existiert, nehmen beide Berichtsarten
+  den bebilderten 3D-Abschnitt und die 2D-gegen-3D-Tabelle von selbst auf. Also: erst
+  `em3d`, dann den Bericht — sonst steht die Gegenprobe nicht darin.
+* **503 heißt: Elmer fehlt.** Das melden, nicht stillschweigend überspringen.
+* `run em3d` hat eine **eigene** Statusroute (`/em3d/status`). `status` allein zeigt
+  weiter die Pipeline und meldet `idle`, während der 3D-Lauf rechnet.
+* `em3d_sweep` (mehrere Betriebspunkte, Stunden) ist NICHT Teil des Regelwegs — nur
+  auf ausdrückliche Ansage.
+
 ### `lernen probieren` — den Raum einmal kartieren
 
 `screen` waehlt aus, `lernen probieren` **kartiert**. Es faehrt jede Bauform ueber jede
 Polzahl ab und haelt fest, was dabei herauskommt:
 
 ```bash
-python3 cae_cli.py lernen probieren --from-project last --merken
+python3 cae_cli.py lernen probieren --frisch --merken
 ```
 
 Drei Arten von Befund, alle nachpruefbar:
@@ -273,6 +452,15 @@ bekommt sie bestaetigt zurueck.
 
 ### Noch davor: `paarvergleich` — worüber überhaupt entschieden wird
 
+> **Pflichtschritt bei jedem Projektstart.** Bevor du eine Zahl vorschlägst oder
+> irgendetwas rechnest, lässt du `paarvergleich --frisch` über **alle** Achsen
+> laufen und trägst dem Nutzer die Befunde vor: Rotor- und Statorabmaße,
+> Magnetanordnung, V-Öffnungswinkel, Polzahl, Leiter je Nut, Kühlung, Werkstoffe,
+> Wellendurchmesser, Wellenverbindung, Verschraubung und was Flussbarrieren
+> bringen. **Übernimm dafür nichts aus einem alten Projekt.** Auch wenn ein
+> Projekt gebunden ist und daneben liegt: seine Entscheidungen sind seine, nicht
+> die der neuen Maschine. Erst wenn der Nutzer gewählt hat, geht es weiter.
+
 `screen` variiert Polzahl, Nutzahl, Bauform und Leiterzahl und gibt eine Rangliste
 heraus. Das beantwortet „welche Variante nehme ich?". Eine Stufe früher steht aber
 eine andere Frage: **woran hängt die Maschine überhaupt?** Magnetanordnung, Zahl der
@@ -280,9 +468,12 @@ Hairpins, Werkstoffe, Kühlung, Durchmesser, Länge — das sind die Entscheidun
 eine Auslegung prägen, und sie fallen der Reihe nach.
 
 ```bash
-python3 cae_cli.py paarvergleich --from-project last
-python3 cae_cli.py paarvergleich --from-project last --achsen anordnung,kuehlung,durchmesser
-python3 cae_cli.py paarvergleich --from-project last --achsen verschraubung,flussbarrieren
+python3 cae_cli.py paarvergleich --frisch                       # ALLE Achsen — der Pflichtstart
+python3 cae_cli.py paarvergleich --frisch --achsen anordnung,kuehlung,durchmesser
+python3 cae_cli.py paarvergleich --frisch --achsen verschraubung,flussbarrieren
+python3 cae_cli.py paarvergleich --frisch --achsen anordnung,v_oeffnung,wellendurchmesser
+python3 cae_cli.py paarvergleich --referenz                     # recherchierte Werte + Quellen
+python3 cae_cli.py paarvergleich --from-project <id>            # NUR zum Nachvollziehen
 ```
 
 Zwei Ausgaben, und die zweite ist die wichtigere:
@@ -299,6 +490,59 @@ Kt, Kosten und Masse ist eine Zielentscheidung, keine Rechnung — `screen --zie
 macht sie bereits offen und nachvollziehbar. Der Paarvergleich stellt gegenüber;
 die Wahl trifft der Mensch. Trag ihm die Achsen vor, die seine Frage betreffen, und
 sag dazu, was sich **nicht** bewegt — das ist oft die nützlichere Hälfte.
+
+### Die Anordnungen vergleicht man über den STROM, nicht über Kt
+
+Das ist die wichtigste Lesehilfe der ganzen Tabelle. **`Kt` ist reines
+Magnetmoment** — die analytische Formel ist `1,5·p·ψ_pm`, das Reluktanzmoment
+kommt darin nicht vor. Genau daran unterscheiden sich aber V, asymmetrisches V,
+U, Delta, Doppel-V und PMa-SynRM in erster Linie.
+
+Deshalb trägt die Tabelle **`I_s [A]`**: den Strangstrom, den diese Anordnung für
+den **gemeinsamen** Betriebspunkt braucht (MTPA, also mit Reluktanzmoment). Klein
+ist besser. Dort — und nur dort — zeigt sich der Nutzen der Anordnung.
+
+An der Beispielmaschine gemessen: PMa-SynRM hat mit 0,021 das **kleinste** Kt der
+ganzen Achse und braucht mit 525 A den **kleinsten** Strom; SPM hat mit 0,061 das
+größte Kt und läuft ins Umrichter-Limit. Wer nach Kt sortiert, dreht die Reihenfolge
+also um. Doppel-V (644 A) und Delta (656 A) liegen deutlich unter dem einfachen V
+(798 A) — das ist der Grund, aus dem mehrlagige Anordnungen gebaut werden.
+
+Zwei Zusatzspalten ordnen ein (sie zählen **nicht** in der Bilanz):
+`xi_LqLd` = Lq/Ld aus dem recherchierten Band je Anordnung, `T_rel_pct` = Anteil des
+Reluktanzmoments. **Achtung:** der Anteil folgt nicht dem xi — eine Speiche mit
+kleinem xi kann einen größeren Reluktanzanteil haben, weil ihr ψ_pm kleiner ist.
+
+Steht unter einer Zeile **⚠ Strom am Umrichter-Limit**, ist `I_s` dort kein Messwert
+mehr, sondern ein Anschlag: die Option erreicht das geforderte Moment gar nicht, und
+zwei gedeckelte Optionen sehen mit demselben Wert gleich aus. Sag das dazu, statt die
+Zahl zu vergleichen.
+
+### V-Öffnungswinkel: es gibt ein Optimum, keine Richtung
+
+Die Achse `v_oeffnung` gilt nur für die Formen, die `magAngle` überhaupt lesen
+(V, asym. V, U, Doppel-V, Delta, PMa-SynRM) — bei Balken, Oberfläche und Speiche
+meldet sie selbst, dass sie bedeutungslos ist.
+
+Der Zielkonflikt ist belegt: **Momentdichte steigt mit dem Öffnungswinkel, das
+Reluktanzmoment fällt.** Es gibt deshalb ein Optimum; die Literatur nennt für eine
+8-polige Maschine **115°** als Kompromiss (Polbogenwinkel 130°). Die Reihe ist um
+diesen Wert gelegt und beschriftet ihn als das, was er ist: ein Anhaltspunkt aus
+einer fremden Maschine, kein Sollwert.
+
+### Woher die recherchierten Werte kommen
+
+`python3 cae_cli.py paarvergleich --referenz` zeigt sie mit Quelle und Fundstelle.
+**Es ist Fremdtext** — abgerufene Veröffentlichungen, nicht gerechnet und nicht
+nachgerechnet. Zwei Sorten, sauber getrennt: **wörtlich übernommene Messpunkte**
+(mit Zitat) und **abgeleitete Bänder** (unsere Einordnung, jedes nennt die
+Messpunkte, auf denen es ruht). Nenne sie in einer Antwort nie ohne Quelle und nie
+als Ersatz für eine Zahl aus der Rechnungsdatenbank.
+
+Dieselbe Quelle trägt die **Bauverhältnisse** von sieben abgerufenen Maschinen
+(Rotor/Stator, Wellenbohrung/Rotor, Länge/Durchmesser, Luftspalt). Liegt eine Option
+außerhalb, steht das mit ⓘ darunter — **kein Tor**: außerhalb heißt nicht falsch,
+sondern nur, dass die Vorbilder dort keine Auskunft geben.
 
 Drei Modellgrenzen, die in der Antwort mitgehören:
 
@@ -321,16 +565,23 @@ Danach erst `screen`, dann `rotor-check`, dann `run`.
 
 ### Ganz am Anfang: `screen`
 
-**Fang nicht beim letzten Stand an.** `--from-project last` ist bequem und führt in einen
-engen Pfad: Polzahl, Nutzahl und Magnetanordnung des ersten Entwurfs bleiben stehen,
-obwohl gerade sie die Maschine prägen. Wenn eine **neue** Auslegung ansteht, spiel sie
-zuerst durch:
+**Bei einer NEUEN Auslegung nimm `--frisch`, nicht `--from-project last`.**
+
+`--frisch` baut den Grundpayload aus den Schemavorgaben — kein Altprojekt, keine
+geerbten Entscheidungen. `--from-project last` erbt dagegen **alles**: Polzahl,
+Nutzahl, Magnetanordnung, Kühlung, Werkstoffe, Barrieren. Das sind genau die
+Entscheidungen, die bei einer neuen Maschine neu zu treffen sind. Wer damit
+anfängt, legt keine Maschine aus, sondern schreibt die vorige ab.
 
 ```bash
-python3 cae_cli.py screen --from-project last --auftrag "<der Auslegungsauftrag>"
-python3 cae_cli.py screen --from-project last --ziel leistung \
+python3 cae_cli.py screen --frisch --auftrag "<der Auslegungsauftrag>"
+python3 cae_cli.py screen --frisch --ziel leistung \
         --pole 3,4,5 --nuten 36,48 --formen v,vasym,spoke --leiter 4,6
 ```
+
+`--from-project <id>` ist richtig, wenn du eine **bestehende** Auslegung nachrechnest,
+verfeinerst oder gezielt einen Wert daran änderst — also überall dort, wo das Erbe
+gewollt ist. Sonst nicht.
 
 Das kostet ~20 s gegen 30 min bis 4 h für einen vollen Lauf.
 
@@ -347,7 +598,14 @@ baubar — mit `magWidth` 21,8 statt 32, `magThick` 4,09 statt 6 und `magDist` 6
 13,5.
 
 Mit `--json` kommt die eingepasste Geometrie je Zeile mit, wenn du selbst auswählen
-willst statt Platz 1 zu nehmen.
+willst statt Platz 1 zu nehmen. Achte auf die **12-000-Zeichen-Kürzung** — sie gilt
+für die JSON-Ausgabe ALLER Verben (nicht nur `results`, `emit()` in `cae_cli.py`):
+Rangliste plus eingepasste Geometrie je Zeile überschreiten sie schnell, und das
+Ergebnis ist abgeschnittenes, nicht parsebares JSON — der Bruch sitzt mitten in der
+Zeile, `json.load` meldet „Invalid control character" oder „Unterminated string".
+`--full` hebt die Kürzung auf; `--zeige N` verkürzt zusätzlich die Rangliste. Wer
+die JSON in ein Skript leitet: `--full` immer mitgeben, sonst ist das `json.loads`
+ein Wurf ins Kalkül.
 
 **Drei Dinge, die du dabei nicht verwechseln darfst:**
 
@@ -372,8 +630,8 @@ rechnet dieselbe Frage in Millisekunden vor, rein zweidimensional und **ohne den
 Server**:
 
 ```bash
-python3 cae_cli.py rotor-check --from-project last
-python3 cae_cli.py rotor-check --from-project last --set magLayerGap=4 --set magDist=6
+python3 cae_cli.py rotor-check --frisch --set p=4 --set magShape=vv
+python3 cae_cli.py rotor-check --from-project <id> --set magLayerGap=4 --set magDist=6
 python3 cae_cli.py rotor-check --payload-file entwurf.json --web 2.5
 ```
 
@@ -400,7 +658,7 @@ lohnt der Analyselauf über Stunden nicht.
 | Stufe | Was | Dauer | Voraussetzung |
 |---|---|---|---|
 | `cad` | nur Geometrie bauen | ~1 min | FreeCAD (pixi) |
-| `analyse` | volle Pipeline inkl. Bericht | **30 min–4 h** | FreeCAD + CalculiX |
+| `analyse` | volle Pipeline (Bericht NICHT — der ist `POST /project/<pid>/report`) | **30 min–4 h** | FreeCAD + CalculiX |
 | `em3d` | 3D-Feld | 5–30 min | Elmer |
 | `em3d_sweep` | 3D über Betriebspunkte | Stunden | Elmer |
 | `cfd` | Kühlung (OpenFOAM) | **Stunden** | OpenFOAM v2406 |

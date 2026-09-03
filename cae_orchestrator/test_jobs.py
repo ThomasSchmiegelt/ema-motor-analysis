@@ -80,16 +80,25 @@ def test_persistence_and_restart():
     by_id = {j["id"]: j for j in out["jobs"]}
     assert by_id["aa"]["status"] == "abgebrochen"
     assert "Neustart" in (by_id["aa"]["error"] or "")
-    assert by_id["bb"]["status"] == "wartet"           # pausiert ⇒ läuft nicht an
+    assert by_id["bb"]["status"] == "wartet"           # läuft NICHT von selbst an
+    # Der Neustart HÄLT die Schlange an, statt den nächsten Auftrag zu starten:
+    # ein abgebrochener Lauf hat keinen Zwischenstand, er finge von vorn an — und
+    # ein Neustart hat meistens einen Grund, der gegen genau diese Reihenfolge
+    # spricht. Beobachtet als „der Server startet alte Läufe immer wieder neu".
+    assert out["halt"] is True
+    assert "alt" in out["halt_grund"] and "neu" in out["halt_grund"]
     # Persistenz auf Platte:
     with open(ema_jobs.QUEUE_FILE) as f:
         disk = json.load(f)
     assert disk["jobs"][0]["status"] == "abgebrochen"
-    # Pause aufheben ⇒ der wartende Job läuft durch.
+    assert disk["config"]["halt"] is True
+    # Erst die Entscheidung setzt die Schlange wieder in Gang (Pause zusätzlich lösen).
     ema_jobs.set_paused(False)
+    ema_jobs.entscheiden("weiter")
     jobs = _wait_all_finished()
     assert {j["id"]: j["status"] for j in jobs}["bb"] == "fertig"
-    print("  ✓ Persistenz + Server-Neustart (läuft→abgebrochen, wartet läuft weiter)")
+    print("  ✓ Persistenz + Server-Neustart (läuft→abgebrochen, Schlange hält an, "
+          "läuft erst auf Zuruf weiter)")
 
 
 def test_cancel_waiting_and_pause():

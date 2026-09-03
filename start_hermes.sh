@@ -28,7 +28,11 @@
 set -euo pipefail
 
 MODEL="qwen-gross:latest"
-MODEL_ID="6b9d840acbf5"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
+MODEL_ID="ca8ec377441f"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
+# 02.09.2026 nachgezogen: qwen-gross wurde auf qwen3.8:27b-mtp-q4_K_M neu gebaut
+# (identische Blobs, nur num_ctx 65536 ergaenzt). Der Wechsel ist geprueft und
+# gewollt: MTP-Spekulativdekodierung, warm gemessen 93,1 statt 86,7 tok/s bei
+# 65536 Kontext, und jetzt 100 % GPU statt 94 %. Vorher: 6b9d840acbf5.
 PORT=5000
 OLLAMA_URL="http://localhost:11434"
 OLLAMA_HOSTPORT="127.0.0.1:11434"
@@ -230,11 +234,47 @@ projekt_pfad() {
 # Gefragt wird NUR am Terminal und nur, wenn weder --projekt noch --kein-projekt
 # gesetzt ist; jeder Skript- oder Cron-Aufruf verhaelt sich unveraendert.
 # Die Vorgabe ist das juengste Projekt, also genau das bisherige Verhalten.
+# Ein neues Projekt anlegen -- mit DERSELBEN Funktion, die auch der Server hinter
+# POST /project/new benutzt (``ema_pipeline.create_project_dir``, origin "manual").
+# Ein blosses ``mkdir`` waere hier der naheliegende Fehler: es entstuende ein
+# Verzeichnis ohne ``project.json``, und die Projektakte -- Status, Abstammung,
+# Evolutionsverlauf -- fehlte genau bei den Projekten, die der Agent selbst anlegt.
+# Der Server muss dafuer nicht laufen; die Funktion ist reines Dateisystem.
+projekt_anlegen() {
+    local name pfad
+    read -r -p "Name des neuen Projekts (leer = nur Zeitstempel): " name || name=""
+    # Aus $ORCH heraus, damit ema_pipeline seine Nachbarmodule findet -- kein
+    # sys.path-Gebastel und keine zweite Vorstellung davon, wo der Code liegt.
+    pfad="$(cd "$ORCH" && ./venv/bin/python -c '
+import sys
+from ema_pipeline import create_project_dir
+voll, _pid = create_project_dir(sys.argv[1], sys.argv[2], origin="manual")
+print(voll)' "$PROJEKTE" "$name" 2>/dev/null || true)"
+    if [ -z "$pfad" ] || [ ! -d "$pfad" ]; then
+        warn "Projekt konnte nicht angelegt werden — es bleibt beim juengsten."
+        return 1
+    fi
+    PROJEKT="$(basename "$pfad")"
+    ok "Angelegt: $PROJEKT"
+    return 0
+}
+
 projekt_menue() {
     local liste
     liste="$(ls -d "$PROJEKTE"/2* 2>/dev/null | sort -r | head -8 || true)"
-    [ -n "$liste" ] || return 0
     echo
+    if [ -z "$liste" ]; then
+        # Frueher stieg das Menue hier aus (``[ -n "$liste" ] || return 0``) -- dann
+        # war beim allerersten Start weder ein Projekt da noch eines anzulegen.
+        echo "Noch keine Projekte in $PROJEKTE."
+        local w0
+        read -r -p "Neues Projekt anlegen [n] oder gemeinsamer Speicher [g]? (Vorgabe: n) " w0 || w0=""
+        case "$w0" in
+            g|G) OHNE_PROJEKT=1 ;;
+            *)   projekt_anlegen || OHNE_PROJEKT=1 ;;
+        esac
+        return 0
+    fi
     echo "Projekte in $PROJEKTE (neueste zuerst):"
     local i=0 pfade=() pf name stand hermes
     while IFS= read -r pf; do
@@ -252,11 +292,13 @@ projekt_menue() {
         fi
         printf "  %d) %-42s  %-10s  %s\n" "$i" "${name:0:42}" "$stand" "$hermes"
     done <<< "$liste"
+    echo "  n) NEUES Projekt anlegen"
     echo "  g) gemeinsamer Speicher (ohne Projektbindung)"
     local wahl
-    read -r -p "Projekt [1-$i], gemeinsam [g]? (Vorgabe: 1) " wahl || wahl=""
+    read -r -p "Projekt [1-$i], neu [n], gemeinsam [g]? (Vorgabe: 1) " wahl || wahl=""
     case "$wahl" in
         ''|1)   PROJEKT="$(basename "${pfade[0]}")" ;;
+        n|N)    projekt_anlegen || PROJEKT="$(basename "${pfade[0]}")" ;;
         g|G)    OHNE_PROJEKT=1 ;;
         *) if [ "$wahl" -ge 1 ] 2>/dev/null && [ "$wahl" -le "$i" ]; then
                PROJEKT="$(basename "${pfade[$((wahl-1))]}")"
@@ -328,6 +370,28 @@ if [ -n "$PROJ_DIR" ] && [ -d "$PROJ_DIR" ]; then
         fi
     } > "$kontext"
     ok "Projektkontext erzeugt: AGENTS.projekt.md"
+else
+    # Ohne Projektbindung wurde die Datei bisher gar nicht angefasst -- die des
+    # letzten Laufs blieb liegen und war mit "Aktuelles Projekt" ueberschrieben.
+    # Wer ausdruecklich OHNE Projekt startet, um etwas Neues zu entwerfen, bekam
+    # so den vorigen Entwurf als seinen eigenen serviert, und das Modell hatte
+    # keinen Anlass, daran zu zweifeln. Eine falsche Akte ist schlimmer als keine.
+    {
+        echo "# Aktuelles Projekt — ERZEUGT von start_hermes.sh, nicht von Hand aendern"
+        echo
+        echo "Diese Datei wird bei JEDEM Agentenstart neu geschrieben — auch wenn kein"
+        echo "Projekt gebunden ist. Die Regeln stehen in AGENTS.md."
+        echo
+        echo "- Stand: $(date '+%d.%m.%Y %H:%M')"
+        echo "- Agentenkopf: Hermes (start_hermes.sh)"
+        echo "- Projekt: **keines gebunden** (gemeinsamer Speicher)"
+        echo
+        echo "**Es gibt kein aktuelles Projekt.** Was in frueheren Laeufen entworfen"
+        echo "wurde, ist fuer diese Aufgabe keine Vorgabe und keine Vorlage. Eine neue"
+        echo "Auslegung beginnt mit"
+        echo "\`python3 cae_orchestrator/cae_cli.py aufgabe \"<Aufgabe>\"\` und danach"
+        echo "\`paarvergleich --frisch\` — NICHT mit \`--from-project last\`."
+    } > "$ROOT/AGENTS.projekt.md"
 fi
 
 # ── 5b. Neue oder alte Sitzung? ─────────────────────────────────────────────

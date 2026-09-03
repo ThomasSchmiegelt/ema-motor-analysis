@@ -877,6 +877,19 @@ def compute_performance(geom: dict, B_gap: float, rpm: float = 1000.0,
 
 # ── Saliency estimate ─────────────────────────────────────────────────────────
 
+# Plausible span of the pure gap-ratio saliency term, used to place a rotor
+# inside its researched band.  1.6 = thin magnet against a wide gap
+# (h_m/g ≈ 2), 4.5 = thick magnet against a tight gap (h_m/g ≈ 12).
+XI_GEO_SPAN = (1.6, 4.5)
+
+# Torque margin ``estimate_dq_currents`` adds on top of the requested load, so the
+# operating point is not sitting exactly on the limit.  Named because consumers that
+# want the *exact* torque the returned currents produce (e.g. the reluctance share in
+# ``ema_paarvergleich``) need the same number — guessing it there would be a silent
+# drift the moment this value changes.
+DQ_TORQUE_MARGIN_NM = 5.0
+
+
 def estimate_saliency(geom: dict) -> float:
     """Estimate Lq/Ld saliency ratio from magnetic circuit reluctance.
 
@@ -885,22 +898,54 @@ def estimate_saliency(geom: dict) -> float:
 
     Slot leakage and fringing reduce apparent saliency vs the pure gap ratio;
     k_leak = 0.35 is an empirical correction consistent with published IPM data.
-    Result is clipped to the realistic IPM range [1.5, 5.0].
+
+    ⚠ The gap-ratio term alone is **topology-blind**: it reads only ``g`` and
+    ``magThick``, so V, U, Delta, Doppel-V, Speiche and the flat bar all came out
+    with the *same* ξ at equal magnet thickness — which is precisely the
+    distinction that matters when those arrangements are compared against each
+    other (``ema_paarvergleich``).
+
+    The fix keeps both halves honest and separable:
+
+    * the **researched band** ``ema_referenz.SALIENZ_BAND[code]`` says how far a
+      given arrangement can be pushed at all (literature, with sources, marked
+      as foreign text — never mixed with computed values);
+    * the **geometry** decides where inside that band this particular rotor
+      lands, via the same gap-ratio term as before, normalised over its own
+      plausible span ``XI_GEO_SPAN`` (thin magnet / wide gap → bottom of the
+      band, thick magnet / tight gap → top).
+
+    Two independent checks that this is not just a rescaling: the measured
+    48-slot/8-pole pair from the same thesis gives Speiche 0.689/0.264 = 2.61 and
+    Doppel-V 1.002/0.304 = 3.30, and a rotor of that shape lands here at ≈2.5 and
+    ≈3.2.  Topologies without a researched band (``custom``) keep the previous
+    behaviour unchanged.
     """
+    import ema_referenz
+
     _legs, meta = magnet_legs(geom)
+    band = ema_referenz.salienz_band(meta.code)
+
     if meta.is_surface:
-        return 1.02                  # SPM/Halbach: Ld ≈ Lq, negligible saliency
-    if meta.flux_focusing:           # Spoke: moderate saliency
-        return float(np.clip(meta.salient_xi_hint or 1.6, 1.2, 2.5))
+        # SPM/Halbach: Ld ≈ Lq, negligible saliency — geometry has nothing to say.
+        return float(np.clip(1.02, *band) if band else 1.02)
 
     g   = max((geom["statorID"] - geom["rotorOD"]) / 2.0, 0.3)   # air gap [mm]
-    hm  = float(geom.get("magThick", 8.0))                         # magnet thickness [mm]
-    kc  = 1.15                                                      # Carter factor
+    hm  = float(geom.get("magThick", 8.0))                       # magnet thickness [mm]
+    kc  = 1.15                                                    # Carter factor
     g_d = g * kc + hm / MU_R_MAG     # effective d-axis reluctance path [mm]
     g_q = g * kc                      # effective q-axis reluctance path [mm]
     xi  = 1.0 + 0.35 * (g_d / g_q - 1.0)
+
+    if band:
+        lo_g, hi_g = XI_GEO_SPAN
+        t = float(np.clip((xi - lo_g) / (hi_g - lo_g), 0.0, 1.0))
+        return float(band[0] + t * (band[1] - band[0]))
+
     if meta.salient_xi_hint > 0:      # reluctance-dominated topologies (PMa-SynRM)
         xi = max(xi, meta.salient_xi_hint)
+    if meta.flux_focusing:
+        return float(np.clip(meta.salient_xi_hint or 1.6, 1.2, 2.5))
     hi = 7.0 if meta.reluctance_dominated else 5.0
     return float(np.clip(xi, 1.5, hi))
 
@@ -923,8 +968,8 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
     Kt     = max(perf["Kt_Nm_per_A"], 1e-3)
     psi_pm = max(float(perf.get("psi_pm_Wb", 0.0)), 1e-6)
     p      = int(geom["p"])
-    T_req  = float(load_nm) + 5.0
-    iq_pure = max(min(T_req / Kt, 800.0), 5.0)          # pure-q current for this torque
+    T_req  = float(load_nm) + DQ_TORQUE_MARGIN_NM
+    iq_pure = max(min(T_req / Kt, INVERTER_I_MAX), 5.0)  # pure-q current for this torque
 
     if rpm_base is None or rpm_base <= 0:
         v_max = v_dc / math.sqrt(3)
@@ -948,7 +993,7 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
         def _torque(iqv):
             idv = (psi_pm - math.sqrt(psi_pm ** 2 + 8.0 * dL ** 2 * iqv ** 2)) / (4.0 * dL)
             return 1.5 * p * (psi_pm * iqv + (Ld - Lq) * idv * iqv), idv
-        lo, hi = 0.0, 800.0                              # T monotonic ↑ in iq → bisection
+        lo, hi = 0.0, INVERTER_I_MAX                     # T monotonic ↑ in iq → bisection
         for _ in range(40):
             mid = 0.5 * (lo + hi)
             Tm, _ = _torque(mid)
@@ -957,8 +1002,8 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
         iq0 = 0.5 * (lo + hi)
         _, id0 = _torque(iq0)
         Is = math.hypot(iq0, id0)                        # respect inverter current limit
-        if Is > 800.0:
-            iq0 *= 800.0 / Is; id0 *= 800.0 / Is
+        if Is > INVERTER_I_MAX:
+            iq0 *= INVERTER_I_MAX / Is; id0 *= INVERTER_I_MAX / Is
         iq0 = max(iq0, 5.0)
 
     if rpm <= rpm_base:
@@ -967,7 +1012,7 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
     # ── field weakening above base: add demagnetising d-current on top of MTPA ──
     fw     = min((rpm - rpm_base) / max(rpm_base, 1.0), 1.5)
     id_fw  = iq_pure * fw / xi                          # ∝ load, ∝ 1/ξ
-    id_    = -min(abs(id0) + id_fw, 0.9 * 800.0)        # cap at 90 % of inverter limit
+    id_    = -min(abs(id0) + id_fw, 0.9 * INVERTER_I_MAX)  # cap at 90 % of inverter limit
     iq     = max(iq0 * (1.0 - 0.25 * fw), 5.0)          # MTPV: slight iq reduction in FW
     return float(iq), float(id_)
 

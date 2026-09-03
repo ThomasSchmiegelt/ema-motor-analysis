@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CAE-Agent</title>
+<style>
+  :root{
+    --bg:#0e1116; --bg2:#151a21; --bg3:#1c232c; --rand:#2a333f;
+    --tx:#dfe6ee; --tx2:#93a1b1; --ak:#4ea1ff; --ok:#4ec98f; --warn:#ffb454; --err:#ff6b6b;
+    --mono:ui-monospace,"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--tx);
+       font:14px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+       display:flex;flex-direction:column;overflow:hidden}
+
+  header{display:flex;align-items:center;gap:14px;padding:10px 16px;
+         background:var(--bg2);border-bottom:1px solid var(--rand);flex:0 0 auto}
+  header h1{font-size:15px;margin:0;font-weight:650;letter-spacing:.2px}
+  .pille{font:12px/1 var(--mono);padding:5px 9px;border-radius:999px;
+         background:var(--bg3);color:var(--tx2);border:1px solid var(--rand)}
+  .pille.an{color:var(--ok);border-color:#2c5a45}
+  .pille.arbeit{color:var(--warn);border-color:#5a4526}
+  .wachs{flex:1}
+  button{font:inherit;background:var(--bg3);color:var(--tx);border:1px solid var(--rand);
+         border-radius:8px;padding:7px 13px;cursor:pointer}
+  button:hover:not(:disabled){border-color:var(--ak);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.haupt{background:var(--ak);border-color:var(--ak);color:#04121f;font-weight:600}
+
+  /* ── Startmaske ─────────────────────────────────────────────── */
+  #start{flex:1;overflow:auto;display:grid;place-items:center;padding:24px}
+  .karte{background:var(--bg2);border:1px solid var(--rand);border-radius:14px;
+         padding:26px 28px;width:min(760px,100%)}
+  .karte h2{margin:0 0 6px;font-size:19px}
+  .karte p.hint{margin:0 0 22px;color:var(--tx2);font-size:13px}
+  label{display:block;margin:16px 0 6px;font-size:12px;color:var(--tx2);
+        text-transform:uppercase;letter-spacing:.6px}
+  select,input[type=text],textarea{width:100%;background:var(--bg);color:var(--tx);
+        border:1px solid var(--rand);border-radius:8px;padding:9px 11px;font:inherit}
+  textarea{font:13px/1.5 var(--mono);resize:vertical}
+  .zeile{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .fuss{display:flex;align-items:center;gap:12px;margin-top:24px}
+  .fehler{color:var(--err);font-size:13px}
+
+  /* ── Geteilter Bildschirm ───────────────────────────────────── */
+  #buehne{flex:1;display:none;grid-template-columns:minmax(320px,42%) 6px 1fr;
+          min-height:0}
+  #buehne.an{display:grid}
+  .spalte{display:flex;flex-direction:column;min-height:0;min-width:0;position:relative}
+  .kopf{flex:0 0 auto;padding:8px 14px;background:var(--bg2);
+        border-bottom:1px solid var(--rand);font-size:12px;color:var(--tx2);
+        text-transform:uppercase;letter-spacing:.7px;display:flex;gap:10px;
+        align-items:center}
+  .strom{flex:1;overflow-y:auto;padding:14px 16px 24px}
+  #griff{background:var(--rand);cursor:col-resize}
+  #griff:hover{background:var(--ak)}
+
+  /* links */
+  .blase{margin:0 0 14px;white-space:pre-wrap;word-break:break-word}
+  .blase.frage{background:#172433;border-left:3px solid var(--ak);
+               padding:10px 12px;border-radius:0 8px 8px 0}
+  .blase.denken{color:var(--tx2);font-style:italic;font-size:13px;
+                border-left:2px solid var(--rand);padding-left:11px}
+  .blase.text{color:var(--tx)}
+  .blase.wz{font:12.5px/1.5 var(--mono);color:var(--warn);
+            background:#1a1712;border:1px solid #3a3120;border-radius:8px;
+            padding:8px 10px}
+  .blase.sys{color:var(--tx2);font-size:12px;border-top:1px dashed var(--rand);
+             padding-top:8px}
+  .blase.fehl{color:var(--err)}
+  .blase.hinweis{background:#241d10;border-left:3px solid var(--warn);
+                 padding:9px 12px;border-radius:0 8px 8px 0;color:var(--warn)}
+
+  /* rechts */
+  .kachel{background:var(--bg2);border:1px solid var(--rand);border-radius:11px;
+          margin:0 0 14px;overflow:hidden;animation:auf .32s ease-out}
+  @keyframes auf{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  .kachel > .kk{display:flex;gap:10px;align-items:center;padding:8px 12px;
+        background:var(--bg3);border-bottom:1px solid var(--rand);
+        font:12px/1 var(--mono);color:var(--tx2)}
+  .kachel.fehler > .kk{color:var(--err)}
+  .kachel pre{margin:0;padding:11px 13px;overflow-x:auto;
+              font:12.5px/1.5 var(--mono);white-space:pre;color:var(--tx)}
+  .kachel img{display:block;width:100%;background:#fff}
+  .kachel .bu{padding:7px 12px;font-size:12px;color:var(--tx2)}
+  .leer{color:var(--tx2);text-align:center;margin-top:18vh;font-size:13px}
+
+  /* „Neues unten" — erscheint nur, wenn der Betrachter selbst hochgescrollt hat */
+  .chip{position:absolute;left:50%;transform:translateX(-50%);z-index:6;display:none;
+        background:var(--ak);border:0;color:#04121f;font-weight:600;font-size:12px;
+        border-radius:999px;padding:6px 14px;box-shadow:0 5px 16px #0009;cursor:pointer}
+  .kachel .kk .zeit{margin-left:auto;opacity:.75}
+  .pille.rek{color:var(--err);border-color:#5a2c2c}
+  .kknopf{padding:4px 10px;font-size:12px}
+  .wohin{font:11.5px/1.4 var(--mono);color:var(--tx2);padding:0 12px 8px;
+         word-break:break-all}
+</style>
+</head>
+<body>
+
+<header>
+  <h1>🤖 CAE-Agent</h1>
+  <span class="pille" id="p_zustand">bereit</span>
+  <span class="pille" id="p_uhr" title="Laufzeit des Agenten · Dauer des laufenden Zuges">⏱ 00:00</span>
+  <span class="pille" id="p_modell"></span>
+  <span class="pille" id="p_projekt"></span>
+  <span class="wachs"></span>
+  <span class="pille rek" id="p_rek" style="display:none"></span>
+  <button id="b_video" onclick="videoUm()"
+          title="Bildschirm mitschneiden — 5 B/s, ~5 MB je Minute, wird sofort auf die Platte geschrieben">🎥 Aufnahme</button>
+  <button id="b_stopp" onclick="stoppen()" style="display:none">⛔ Beenden</button>
+  <button onclick="location.href='/'">← Oberfläche</button>
+</header>
+
+<!-- ── Startmaske ───────────────────────────────────────────────── -->
+<div id="start">
+  <div class="karte">
+    <h2>Agent starten</h2>
+    <p class="hint">PI läuft aus der Repo-Wurzel — sonst findet es weder
+       <code>AGENTS.md</code> noch <code>.agents/skills/</code>. Alles Weitere
+       macht der Agent über <code>cae_cli.py</code>, genau wie im Terminal.</p>
+
+    <div class="zeile">
+      <div>
+        <label for="f_projekt">Projekt</label>
+        <select id="f_projekt"></select>
+      </div>
+      <div>
+        <label for="f_sitzung">Sitzung</label>
+        <select id="f_sitzung"></select>
+      </div>
+    </div>
+
+    <label for="f_modell">Modell</label>
+    <input type="text" id="f_modell" value="">
+
+    <label for="f_prompt">Erster Auftrag (optional)</label>
+    <textarea id="f_prompt" rows="3"
+      placeholder="z. B.: Lege eine 80-kW-Maschine für ein Stadtfahrzeug aus. Fang mit dem Paarvergleich an."></textarea>
+
+    <div class="fuss">
+      <button class="haupt" id="b_start" onclick="starten()">▶ Starten</button>
+      <span class="fehler" id="f_fehler"></span>
+    </div>
+  </div>
+</div>
+
+<!-- ── Geteilter Bildschirm ─────────────────────────────────────── -->
+<div id="buehne">
+  <div class="spalte">
+    <div class="kopf">Agent<span class="wachs"></span>
+      <label style="margin:0;text-transform:none;letter-spacing:0">
+        <input type="checkbox" id="c_denken" checked onchange="denkenUm()"> Denken zeigen
+      </label>
+    </div>
+    <div class="strom" id="links"></div>
+    <button class="chip" id="chip_links" style="bottom:92px"
+            onclick="nachUnten('links')">⤓ Neues</button>
+    <div style="flex:0 0 auto;padding:10px;border-top:1px solid var(--rand);
+                background:var(--bg2);display:flex;gap:9px">
+      <textarea id="eingabe" rows="2" placeholder="Auftrag … (Enter senden, Shift+Enter Zeilenumbruch)"
+                style="flex:1" onkeydown="tastatur(event)"></textarea>
+      <button class="haupt" id="b_senden" onclick="senden()">Senden</button>
+    </div>
+    <!-- Zwischenruf: IMMER bedienbar, auch mitten im Zug. PI nimmt waehrend
+         eines Zuges keinen zweiten Prompt an, also wird der Hinweis gemerkt
+         und am naechsten Zugende von selbst uebergeben. -->
+    <div style="flex:0 0 auto;padding:0 10px 10px;background:var(--bg2);
+                display:flex;gap:9px;align-items:flex-start">
+      <textarea id="hinweis" rows="1"
+                placeholder="Zwischenruf … wird nach dem laufenden Zug übergeben (Enter)"
+                style="flex:1;border-color:#5a4526" onkeydown="tastaturHinweis(event)"></textarea>
+      <button id="b_hinweis" onclick="hinweisSenden()" title="Rückmeldung, ohne den Lauf zu unterbrechen">📣 Zwischenruf</button>
+    </div>
+  </div>
+  <div id="griff"></div>
+  <div class="spalte">
+    <div class="kopf">Ergebnisse<span class="wachs"></span>
+      <span id="zaehler" style="font-family:var(--mono)"></span>
+      <button class="kknopf" id="b_sichern" onclick="sichernJetzt()"
+              title="Protokoll (Markdown + Ereignisse) ins Projekt schreiben">💾 Sichern</button></div>
+    <div class="wohin" id="p_gesichert"></div>
+    <div class="strom" id="rechts">
+      <div class="leer" id="rechts_leer">Rechnungen und Bilder erscheinen hier,
+        sobald der Agent etwas ausführt.</div>
+    </div>
+    <button class="chip" id="chip_rechts" style="bottom:18px"
+            onclick="nachUnten('rechts')">⤓ Neues</button>
+  </div>
+</div>
+
+<script>
+let LETZT = 0, LAEUFT = false, ABBRUCH = null, N_KACHELN = 0;
+let blaseDenken = null, blaseText = null;
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+
+// ── Startmaske füllen ────────────────────────────────────────────
+async function auswahlLaden(){
+  try{
+    const d = await (await fetch('/agent/auswahl')).json();
+    $('f_modell').value = d.modell || '';
+    const p = $('f_projekt');
+    p.innerHTML = '<option value="">— kein Projekt binden —</option>' +
+      (d.projekte||[]).map(x => `<option value="${esc(x.id)}">${esc(x.id)}${x.gerechnet?' · gerechnet':' · offen'}</option>`).join('');
+    const s = $('f_sitzung');
+    s.innerHTML = '<option value="">neue Sitzung</option>' +
+      (d.sitzungen||[]).map(x => `<option value="${esc(x.id)}">${esc(x.stand)} · ${esc(x.titel||x.id.slice(0,8))}</option>`).join('');
+    if(!d.pi) fehler('pi ist nicht installiert oder nicht auffindbar (~/.npm-global/bin).');
+  }catch(e){ fehler('Auswahl nicht ladbar: ' + e.message); }
+}
+const fehler = t => { $('f_fehler').textContent = t; };
+
+// ── An einen schon laufenden Agenten wieder anknüpfen ────────────
+// Die Seite lebt jetzt auch in einem Reiter der Hauptoberfläche; jedes Neuladen
+// würde sonst die Startmaske zeigen, während im Server noch ein Lauf hängt --
+// und /agent/start würde ihn nur verweigern. Der Ringpuffer (?ab=0) zeichnet den
+// bisherigen Verlauf nach, statt ein leeres Fenster zu zeigen.
+async function anknuepfen(){
+  try{
+    const z = await (await fetch('/agent/status')).json();
+    if(!z.laeuft) return false;
+    $('start').style.display = 'none';
+    $('buehne').classList.add('an');
+    $('b_stopp').style.display = '';
+    $('p_modell').textContent  = z.modell || '';
+    $('p_projekt').textContent = z.projekt || 'ohne Projektbindung';
+    zustand(z.beschaeftigt ? 'arbeitet' : 'bereit');
+    T0 = z.start_ts || (Date.now()/1000 - (z.sekunden || 0)); uhrTick();
+    if(z.ordner) ordnerZeigen(z.ordner);
+    LETZT = 0;                       // von vorn: der Ringpuffer hält den Verlauf
+    LAEUFT = true; lauschen();
+    return true;
+  }catch(e){ return false; }
+}
+
+// ── Starten / Stoppen ────────────────────────────────────────────
+async function starten(){
+  fehler(''); $('b_start').disabled = true;
+  const koerper = {
+    modell:  $('f_modell').value.trim(),
+    projekt: $('f_projekt').value,
+    sitzung: $('f_sitzung').value,
+    prompt:  $('f_prompt').value.trim()
+  };
+  try{
+    const a = await (await fetch('/agent/start', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify(koerper)})).json();
+    if(!a.ok){ fehler(a.grund || 'Start fehlgeschlagen.'); $('b_start').disabled = false; return; }
+    $('start').style.display = 'none';
+    $('buehne').classList.add('an');
+    $('b_stopp').style.display = '';
+    $('p_modell').textContent = a.modell || '';
+    $('p_projekt').textContent = a.projekt || 'ohne Projektbindung';
+    T0 = Date.now()/1000; ZUG0 = ZUG_LETZT = 0; uhrTick();
+    LAEUFT = true; lauschen();
+  }catch(e){ fehler(e.message); $('b_start').disabled = false; }
+}
+
+async function stoppen(){
+  await fetch('/agent/stopp', {method:'POST'});
+  if(ABBRUCH) ABBRUCH.abort();
+  LAEUFT = false; zustand('beendet');
+}
+
+// ── Ereignisstrom ────────────────────────────────────────────────
+async function lauschen(){
+  ABBRUCH = new AbortController();
+  let rest = '';
+  try{
+    const r = await fetch('/agent/strom?ab=' + LETZT, {signal: ABBRUCH.signal});
+    const leser = r.body.getReader(), dek = new TextDecoder();
+    while(true){
+      const {value, done} = await leser.read();
+      if(done) break;
+      rest += dek.decode(value, {stream:true});
+      const zeilen = rest.split('\n'); rest = zeilen.pop();
+      for(const z of zeilen){
+        if(!z.trim()) continue;
+        try{ verarbeiten(JSON.parse(z)); }catch(_){}
+      }
+    }
+  }catch(e){ if(e.name !== 'AbortError') links('sys', 'Verbindung unterbrochen: ' + e.message); }
+  // Der Strom endet, wenn der Prozess endet ODER die Leitung abreißt. Nur im
+  // zweiten Fall neu verbinden — sonst hinge die Seite ewig an einem toten Agenten.
+  if(LAEUFT) setTimeout(lauschen, 900);
+}
+
+function verarbeiten(e){
+  if(e.i) LETZT = e.i;
+  switch(e.art){
+    case 'start':   T0 = e.t || T0; uhrTick(); if(e.ordner) ordnerZeigen(e.ordner);
+                    links('sys', '▶ ' + e.befehl); break;
+    case 'sitzung': links('sys', 'Sitzung ' + (e.id||'').slice(0,8) + ' · ' + (e.cwd||'')); break;
+    case 'frage':   blaseDenken = blaseText = null; ZUG0 = e.t || Date.now()/1000;
+                    links('frage', e.text); zustand('arbeitet'); break;
+    case 'denken':  anfuegen('denken', e.text); break;
+    case 'text':    anfuegen('text', e.text); break;
+    case 'werkzeug':
+      blaseDenken = blaseText = null;
+      links('wz', '$ ' + e.befehl); break;
+    case 'ergebnis': kachelText(e); break;
+    case 'bild':     kachelBild(e); break;
+    case 'bereit':   zugEnde(e); zustand('bereit'); break;
+    case 'gesichert': gesichertZeigen(e); break;
+    case 'gemerkt':  links('hinweis', '📣 ' + e.text +
+                           '  (wird nach dem laufenden Zug übergeben)'); break;
+    case 'fehler':   zugEnde(e); links('fehl', '⚠ ' + e.text); zustand('bereit'); break;
+    case 'roh':      links('sys', e.text); break;
+    case 'ende':     LAEUFT = false; zugEnde(e);
+                     links('sys', 'Agent beendet (Code ' + e.code + ')');
+                     zustand('beendet'); break;
+  }
+}
+
+function zugEnde(e){
+  if(ZUG0) ZUG_LETZT = (e.t || Date.now()/1000) - ZUG0;
+  ZUG0 = 0; uhrTick();
+}
+
+// ── Linke Spalte ─────────────────────────────────────────────────
+function links(art, text){
+  const d = document.createElement('div');
+  d.className = 'blase ' + art;
+  d.textContent = text;
+  $('links').appendChild(d); runter($('links'));
+  return d;
+}
+// Deltas an dieselbe Blase hängen, statt je Token ein Element zu erzeugen —
+// sonst stehen für zwei Wörter Antwort 75 Knoten im DOM.
+function anfuegen(art, text){
+  const merker = art === 'denken' ? 'blaseDenken' : 'blaseText';
+  let b = art === 'denken' ? blaseDenken : blaseText;
+  if(!b){ b = links(art, ''); if(art === 'denken') blaseDenken = b; else blaseText = b; }
+  b.textContent += text; runter($('links'));
+}
+function denkenUm(){
+  const zeig = $('c_denken').checked;
+  document.querySelectorAll('.blase.denken').forEach(x => x.style.display = zeig ? '' : 'none');
+}
+
+// ── Rechte Spalte ────────────────────────────────────────────────
+function kachelText(e){
+  if(!e.text || !e.text.trim()) return;
+  const k = document.createElement('div');
+  k.className = 'kachel' + (e.fehler ? ' fehler' : '');
+  k.innerHTML = `<div class="kk">${e.fehler ? '⚠' : '✓'} ${esc(e.name)}` +
+                `<span class="zeit">${uhrStempel(e.t)}</span></div>` +
+                `<pre>${esc(e.text)}</pre>` +
+                (e.gekuerzt ? `<div class="bu">gekürzt — ${e.voll} Zeichen insgesamt</div>` : '');
+  rechts(k);
+}
+function kachelBild(e){
+  const k = document.createElement('div');
+  k.className = 'kachel';
+  const url = '/agent/bild/' + encodeURIComponent(e.projekt) + '/' +
+              encodeURIComponent(e.unter) + '/' + encodeURIComponent(e.datei);
+  k.innerHTML = `<div class="kk">🖼 ${esc(e.datei)}<span class="zeit">${uhrStempel(e.t)}</span></div>` +
+                `<img src="${url}" alt="${esc(e.datei)}" loading="lazy">` +
+                `<div class="bu">${esc(e.projekt)}</div>`;
+  // Erst mit dem geladenen Bild steht die Höhe fest — ohne das zweite Nachziehen
+  // bliebe genau das interessanteste Ergebnis halb unter dem Rand.
+  const bild = k.querySelector('img');
+  bild.addEventListener('load',  () => runter($('rechts')));
+  bild.addEventListener('error', () => runter($('rechts')));
+  rechts(k);
+}
+function rechts(k){
+  const leer = $('rechts_leer'); if(leer) leer.remove();
+  const sp = $('rechts');
+  sp.appendChild(k); N_KACHELN++;
+  $('zaehler').textContent = N_KACHELN + (N_KACHELN === 1 ? ' Ergebnis' : ' Ergebnisse');
+  runter(sp);
+}
+// „Läuft nach oben weg": die Spalte folgt dem Neuesten, solange der Betrachter
+// unten steht. Wer hochscrollt, um etwas zu lesen, wird NICHT weggerissen —
+// stattdessen erscheint „⤓ Neues", und ein Klick hängt ihn wieder an.
+//
+// Der Zustand wird gemerkt und nicht bei jedem Anhängen neu geschätzt: eine
+// einzelne Kachel kann höher sein als jede Schwelle (ein langes Ergebnis, ein
+// Bild, das erst nach dem Anhängen seine Höhe bekommt), und dann bliebe die
+// Anzeige mitten im Lauf stehen — genau das, was hier nicht passieren soll.
+const FOLGT = {links:true, rechts:true};
+
+function folgeUeberwachen(id){
+  const el = $(id);
+  el.addEventListener('scroll', () => {
+    const unten = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if(FOLGT[id] !== unten){ FOLGT[id] = unten; $('chip_' + id).style.display = unten ? 'none' : 'block'; }
+  }, {passive:true});
+}
+function nachUnten(id){
+  const el = $(id);
+  FOLGT[id] = true; $('chip_' + id).style.display = 'none';
+  el.scrollTop = el.scrollHeight;
+}
+function runter(el){
+  if(FOLGT[el.id] !== false) el.scrollTop = el.scrollHeight;
+}
+
+// ── Eingabe ──────────────────────────────────────────────────────
+function tastatur(ev){
+  if(ev.key === 'Enter' && !ev.shiftKey){ ev.preventDefault(); senden(); }
+}
+// Der Zwischenruf bleibt bedienbar, waehrend der Agent arbeitet — das ist sein
+// ganzer Zweck. Er wird nur quittiert, nicht sofort beantwortet.
+function tastaturHinweis(ev){
+  if(ev.key === 'Enter' && !ev.shiftKey){ ev.preventDefault(); hinweisSenden(); }
+}
+async function hinweisSenden(){
+  const t = $('hinweis').value.trim(); if(!t) return;
+  $('hinweis').value = '';
+  try{
+    const a = await (await fetch('/agent/hinweis', {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify({text:t})})).json();
+    if(!a.ok) links('fehl', '⚠ ' + (a.grund || 'Zwischenruf nicht angenommen'));
+  }catch(e){ links('fehl', '⚠ ' + e.message); }
+}
+
+async function senden(){
+  const t = $('eingabe').value.trim(); if(!t) return;
+  $('eingabe').value = '';
+  const a = await (await fetch('/agent/frage', {method:'POST',
+      headers:{'Content-Type':'application/json'}, body: JSON.stringify({text:t})})).json();
+  if(!a.ok) links('fehl', '⚠ ' + a.grund);
+}
+function zustand(s){
+  const p = $('p_zustand');
+  p.textContent = s;
+  p.className = 'pille' + (s === 'arbeitet' ? ' arbeit' : s === 'bereit' ? ' an' : '');
+  const beschaeftigt = (s === 'arbeitet');
+  $('b_senden').disabled = beschaeftigt || !LAEUFT;
+  $('eingabe').disabled  = !LAEUFT;
+  $('b_hinweis').disabled = !LAEUFT;      // waehrend der Arbeit ausdruecklich AN
+  $('hinweis').disabled   = !LAEUFT;
+}
+
+// ── Stoppuhr ─────────────────────────────────────────────────────
+// Zwei Zeiten, weil zwei Fragen dahinterstehen: wie lange läuft der Agent
+// schon, und wie lange hängt er am AKTUELLEN Zug. Beide aus den Zeitstempeln
+// der Ereignisse (Server und Browser sind dieselbe Maschine), damit ein neu
+// geladenes Fenster nicht bei null anfängt.
+let T0 = 0, ZUG0 = 0, ZUG_LETZT = 0;
+
+const uhrText = s => {
+  s = Math.max(0, Math.round(s));
+  const h = Math.floor(s/3600), m = Math.floor(s/60)%60, k = s%60;
+  const zz = n => String(n).padStart(2,'0');
+  return h ? `${h}:${zz(m)}:${zz(k)}` : `${zz(m)}:${zz(k)}`;
+};
+const uhrStempel = t => (T0 && t) ? uhrText(t - T0) : '';
+
+function uhrTick(){
+  if(!T0) return;
+  const jetzt = Date.now()/1000;
+  let t = '⏱ ' + uhrText(jetzt - T0);
+  if(ZUG0)           t += ' · Zug ' + uhrText(jetzt - ZUG0);
+  else if(ZUG_LETZT) t += ' · Zug ' + uhrText(ZUG_LETZT);
+  $('p_uhr').textContent = t;
+}
+setInterval(uhrTick, 1000);
+
+// ── Sichern ──────────────────────────────────────────────────────
+// Der Server schreibt nach jedem Zug von selbst; dieser Knopf ist der Griff
+// für zwischendurch. Geschrieben wird aus dem Ringpuffer im Server, nicht aus
+// dem DOM — ein geschlossenes Fenster verliert damit nichts.
+async function sichernJetzt(){
+  const b = $('b_sichern'); b.disabled = true;
+  try{
+    const a = await (await fetch('/agent/sichern', {method:'POST'})).json();
+    if(a.ok) gesichertZeigen(a); else $('p_gesichert').textContent = '⚠ ' + (a.grund||'');
+  }catch(e){ $('p_gesichert').textContent = '⚠ ' + e.message; }
+  b.disabled = false;
+}
+// Wo dieser Lauf liegt — Protokoll, Mitschrift und Aufnahme in EINEM Ordner.
+// Steht von Anfang an da, damit niemand die Aufnahme hinterher suchen muss.
+function ordnerZeigen(o){ $('p_gesichert').textContent = '📁 ' + o; }
+function gesichertZeigen(a){
+  $('p_gesichert').textContent = '💾 ' + a.pfad +
+      (a.kacheln != null ? `  (${a.kacheln} Ergebnisse)` : '');
+}
+
+// ── Bildschirmaufnahme ───────────────────────────────────────────
+// Aufgenommen wird im Browser, GESPEICHERT wird im Server: jedes Stück geht
+// sofort per POST an /agent/video/stueck und wird dort angehängt. Der Browser
+// behält nichts — sonst läge nach einem stundenlangen Lauf ein Blob von
+// hunderten Megabyte im Arbeitsspeicher der Seite, und ein geschlossenes
+// Fenster hätte alles verloren. 5 Bilder/s und 0,7 Mbit/s reichen für Text
+// und Diagramme und ergeben rund 5 MB je Minute; bei 800 MB endet die
+// Aufnahme von selbst.
+const VIDEO_FPS = 5, VIDEO_BITS = 700000, VIDEO_STUECK_MS = 5000;
+let REK = null, REK_STROM = null, REK_KETTE = Promise.resolve(),
+    REK_BYTES = 0, REK_START = 0, REK_TICK = null,
+    REK_PAUSE = false, REK_PAUSE_S = 0, REK_PAUSE_SEIT = 0, REK_WACHE = null;
+
+// Während der Server rechnet, ändert sich am Bild nichts außer einem
+// Fortschrittsbalken — bei Läufen von Stunden ist das der weitaus größte Teil.
+// Die Aufnahme wird dann angehalten und danach fortgesetzt: `MediaRecorder`
+// kann das ohne Naht (`pause`/`resume` unterbrechen nur den Datenstrom, die
+// Datei bleibt EINE Aufnahme). Ohne das ist die 800-MB-Grenze erreicht, bevor
+// etwas Sehenswertes im Bild war.
+function rekPause(an){
+  if(!REK || REK_PAUSE === an) return;
+  try{ an ? REK.pause() : REK.resume(); }catch(_){ return; }
+  REK_PAUSE = an;
+  if(an){ REK_PAUSE_SEIT = Date.now()/1000; }
+  else if(REK_PAUSE_SEIT){ REK_PAUSE_S += Date.now()/1000 - REK_PAUSE_SEIT;
+                           REK_PAUSE_SEIT = 0; }
+  fetch('/agent/video/pause', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({an: an})}).catch(() => {});
+  videoAnzeige();
+}
+
+async function videoUm(){ REK ? videoStopp('beendet') : videoStart(); }
+
+async function videoStart(){
+  if(!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia){
+    links('sys', 'Aufnahme: dieser Browser bietet keine Bildschirmaufnahme an.'); return;
+  }
+  let strom;
+  try{
+    strom = await navigator.mediaDevices.getDisplayMedia({
+      video: {frameRate: {ideal: VIDEO_FPS, max: 8}}, audio: false});
+  }catch(e){
+    if(e.name !== 'NotAllowedError') links('sys', 'Aufnahme: ' + e.message);
+    return;
+  }
+  const a = await (await fetch('/agent/video/start', {method:'POST'})).json();
+  if(!a.ok){ strom.getTracks().forEach(t => t.stop());
+             links('sys', 'Aufnahme: ' + (a.grund||'')); return; }
+
+  const typ = ['video/webm;codecs=vp9', 'video/webm;codecs=vp8', 'video/webm']
+                .find(t => MediaRecorder.isTypeSupported(t)) || '';
+  REK_STROM = strom; REK_BYTES = 0; REK_START = Date.now()/1000;
+  REK_PAUSE = false; REK_PAUSE_S = 0; REK_PAUSE_SEIT = 0;
+  REK = new MediaRecorder(strom, {mimeType: typ, videoBitsPerSecond: VIDEO_BITS});
+  REK.ondataavailable = ev => {
+    if(!ev.data || !ev.data.size) return;
+    // Der Reihe nach senden: die Stücke ergeben nur in ihrer Folge ein Video.
+    REK_KETTE = REK_KETTE.then(() => fetch('/agent/video/stueck',
+        {method:'POST', headers:{'Content-Type':'application/octet-stream'}, body: ev.data})
+      .then(r => r.json())
+      .then(r => { if(r.bytes != null) REK_BYTES = r.bytes;
+                   if(r.grenze){ links('sys','Aufnahme bei ' + a.max_mb +
+                                 ' MB beendet — die Datei liegt bei ' + a.pfad);
+                                 videoStopp('grenze'); } })
+      .catch(() => {}));
+  };
+  // Der Betrachter kann die Freigabe auch im Browser beenden.
+  strom.getVideoTracks()[0].addEventListener('ended', () => videoStopp('freigabe'));
+  REK.start(VIDEO_STUECK_MS);
+  $('b_video').textContent = '⏹ Aufnahme beenden';
+  $('p_rek').style.display = '';
+  REK_TICK = setInterval(videoAnzeige, 1000); videoAnzeige();
+  // Alle 5 s nachsehen, ob der Server rechnet. Nur während einer Aufnahme —
+  // sonst fragte die Seite den Server auch dann, wenn niemand etwas davon hat.
+  REK_WACHE = setInterval(rekWache, 5000); rekWache();
+  links('sys', '🎥 Aufnahme läuft → ' + a.pfad);
+}
+
+function videoAnzeige(){
+  if(!REK) return;
+  const mb = REK_BYTES / 1048576;
+  const pause = REK_PAUSE_S + (REK_PAUSE_SEIT ? Date.now()/1000 - REK_PAUSE_SEIT : 0);
+  // Angezeigt wird die AUFGEZEICHNETE Zeit, nicht die verstrichene — sonst
+  // stimmt die Uhr nicht mit der Datei überein.
+  $('p_rek').textContent = (REK_PAUSE ? '⏸ Pause (Server rechnet) ' : '● REC ') +
+                           uhrText(Date.now()/1000 - REK_START - pause) +
+                           ' · ' + mb.toFixed(1) + ' MB';
+}
+
+async function rekWache(){
+  if(!REK) return;
+  try{
+    const z = await (await fetch('/agent/status')).json();
+    if(z.rechnet && !REK_PAUSE){
+      links('sys', '⏸ Aufnahme angehalten — der Server rechnet (' +
+                   (z.rechnet_was||[]).join(', ') + ').');
+    } else if(!z.rechnet && REK_PAUSE){
+      links('sys', '▶ Aufnahme läuft weiter.');
+    }
+    rekPause(!!z.rechnet);
+  }catch(_){ /* Server kurz weg: dann lieber weiter aufnehmen als abbrechen */ }
+}
+
+async function videoStopp(grund){
+  if(!REK) return;
+  const r = REK; REK = null;
+  clearInterval(REK_TICK); clearInterval(REK_WACHE); REK_WACHE = null;
+  try{ if(REK_PAUSE) r.resume(); }catch(_){}   // pausiert lässt sich nicht stoppen
+  try{ r.stop(); }catch(_){}
+  if(REK_STROM) REK_STROM.getTracks().forEach(t => t.stop());
+  REK_STROM = null;
+  await REK_KETTE;                       // die letzten Stücke noch loswerden
+  const a = await (await fetch('/agent/video/ende', {method:'POST'})).json();
+  $('b_video').textContent = '🎥 Aufnahme';
+  $('p_rek').style.display = 'none';
+  if(a.ok) links('sys', '🎬 Aufnahme ' + (grund === 'grenze' ? '(Grenze) ' : '') +
+                        uhrText(a.sekunden) + ' · ' +
+                        (a.bytes/1048576).toFixed(1) + ' MB → ' + a.pfad);
+}
+// Ein weggeklicktes Fenster soll keine halbe Datei hinterlassen.
+addEventListener('pagehide', () => { if(REK) navigator.sendBeacon('/agent/video/ende'); });
+
+// ── Trenner ziehen ───────────────────────────────────────────────
+(function(){
+  const g = $('griff'), b = $('buehne');
+  let zieht = false;
+  g.addEventListener('mousedown', () => { zieht = true; document.body.style.userSelect = 'none'; });
+  addEventListener('mouseup',   () => { zieht = false; document.body.style.userSelect = ''; });
+  addEventListener('mousemove', e => {
+    if(!zieht) return;
+    const px = Math.min(Math.max(e.clientX, 300), innerWidth - 340);
+    b.style.gridTemplateColumns = px + 'px 6px 1fr';
+  });
+})();
+
+folgeUeberwachen('links'); folgeUeberwachen('rechts');
+(async () => { if (!await anknuepfen()) auswahlLaden(); })();
+</script>
+</body>
+</html>

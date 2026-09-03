@@ -12,6 +12,7 @@ import json
 import re
 import urllib.request
 
+import ema_maschinenart
 from ema_report import OLLAMA_URL, DEFAULT_MODEL, DEFAULT_NUM_CTX
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
@@ -22,6 +23,10 @@ _HAIR  = ["cu_etp", "cu_crZr", "cu_ag01", "al_1350"]
 _MAG   = ["ndfeb_n35", "ndfeb_n42", "ndfeb_n50", "ferrite"]
 _COOL  = ["natural", "forced", "water", "oil"]
 _SHAPE = ["v", "vasym", "vv", "u", "delta", "pmasynrm", "spm", "halbach", "spoke", "bar"]
+# Maschinenart. Die Liste kommt aus ``ema_maschinenart``, damit sie nicht als
+# zweite, handgepflegte Menge daneben lebt -- welche Art welche Rechenstufe
+# heute wirklich traegt, sagt allein dieses Modul.
+_ART   = list(ema_maschinenart.ARTEN)
 _ORIENT = ["transverse", "longitudinal"]
 _POCKET = ["position", "diameter"]
 _THREAD = ["M4", "M5", "M6", "M8", "M10", "M12", "M16", "M20"]
@@ -48,12 +53,22 @@ SCHEMA = {
     "slots":      {"kind": "num", "lo": 6,   "hi": 96,  "def": 54, "geom": True,  "desc": "Statornutzahl (Vielfaches von 3, typ. 6·p)", "int": True},
     "slotDepth":  {"kind": "num", "lo": 8,   "hi": 60,  "def": 25, "geom": True,  "desc": "Nuttiefe [mm]"},
     "p":          {"kind": "num", "lo": 1,   "hi": 12,  "def": 3, "geom": True,   "desc": "Polpaarzahl", "int": True},
+    "machineType":{"kind": "enum", "opts": _ART, "def": "pmsm", "geom": True, "adv": True,
+                   "desc": "Maschinenart: pmsm=permanenterregt, asm=Asynchron (Käfig), synrm=Reluktanz, eesm=fremderregt (analytisch getragen: pmsm, asm)"},
+    "rotorBars":  {"kind": "num", "lo": 0, "hi": 120, "def": 0, "geom": True, "adv": True, "int": True,
+                   "desc": "Läufernutzahl (ASM-Käfig); 0 = automatisch nach der Auswahlregel"},
+    "bZielT":     {"kind": "num", "lo": 0.55, "hi": 0.95, "def": 0.80, "geom": True, "adv": True,
+                   "desc": "Ziel-Luftspaltfeld [T] der ASM (wird über den Magnetisierungsstrom eingestellt)"},
     "magShape":   {"kind": "enum", "opts": _SHAPE, "def": "v", "geom": True, "desc": "Magnet-Topologie"},
     "magAngle":   {"kind": "num", "lo": 40,  "hi": 170, "def": 120, "geom": True, "desc": "V-Öffnungswinkel [°] (kleiner → mehr Flusskonzentration)"},
     "magDepthRel":{"kind": "num", "lo": 0.4, "hi": 0.92,"def": 0.7, "geom": True, "desc": "radiale Magnetposition (0=Welle … 1=Rotorrand)"},
     "magWidth":   {"kind": "num", "lo": 10,  "hi": 90,  "def": 45, "geom": True,  "desc": "Magnetlänge [mm]"},
     "magThick":   {"kind": "num", "lo": 2,   "hi": 15,  "def": 6, "geom": True,   "desc": "Magnetdicke [mm]"},
-    "magDist":    {"kind": "num", "lo": 0,   "hi": 30,  "def": 2, "geom": True,   "desc": "Stegabstand zwischen den Magneten [mm]"},
+    # 2 mm war die Vorgabe und ist an der Vorgabegeometrie (V, p=3, magAngle 120)
+    # nicht baubar: die beiden V-Schenkel kommen nie aneinander vorbei --
+    # ``einpassen`` schrumpfte den Magneten dafuer auf 43 % (Dicke 6 -> 2,6 mm).
+    # Bei 4 mm bleibt er ungeschmaelert. Gemessen, s. cae_cli.frischer_payload.
+    "magDist":    {"kind": "num", "lo": 0,   "hi": 30,  "def": 4, "geom": True,   "desc": "Stegabstand zwischen den Magneten [mm]"},
     "nAx":        {"kind": "num", "lo": 1,   "hi": 12,  "def": 1, "geom": True,   "desc": "Magnet-Segmente axial (Wirbelstromreduktion)", "int": True},
     "nCirc":      {"kind": "num", "lo": 1,   "hi": 6,   "def": 1, "geom": True,   "desc": "Magnet-Segmente in Umfangsrichtung", "int": True},
     "rotor_lam":  {"kind": "enum", "opts": _LAM,  "def": "m270_35a", "desc": "Rotorblech"},

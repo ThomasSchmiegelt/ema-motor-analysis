@@ -34,7 +34,7 @@ cd ~/ai-workspace
 ```
 
 Es prüft Ollama, **nagelt das Modell auf seine ID fest** (`qwen-gross:latest` /
-`6b9d840acbf5` — ein `ollama pull` unter gleichem Namen tauscht sonst still die
+`ca8ec377441f` — ein `ollama pull` unter gleichem Namen tauscht sonst still die
 Gewichte), startet den Orchestrator nur, wenn `:5000` nicht antwortet, räumt einen
 belegten Port über `fuser` frei und wartet auf die Erreichbarkeit, bevor PI
 losläuft. Alle weiteren Argumente gehen unverändert an `pi`.

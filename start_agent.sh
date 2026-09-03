@@ -14,7 +14,11 @@
 set -euo pipefail
 
 MODEL="qwen-gross:latest"
-MODEL_ID="6b9d840acbf5"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
+MODEL_ID="ca8ec377441f"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
+# 02.09.2026 nachgezogen: qwen-gross wurde auf qwen3.8:27b-mtp-q4_K_M neu gebaut
+# (identische Blobs, nur num_ctx 65536 ergaenzt). Der Wechsel ist geprueft und
+# gewollt: MTP-Spekulativdekodierung, warm gemessen 93,1 statt 86,7 tok/s bei
+# 65536 Kontext, und jetzt 100 % GPU statt 94 %. Vorher: 6b9d840acbf5.
 PORT=5000
 OLLAMA_URL="http://localhost:11434"
 
@@ -178,17 +182,29 @@ cd "$ROOT"
 # .agents/skills/. Das ist der Unterschied zu Hermes, wo HERMES_HOME die Ablage
 # verschieben kann, ohne das Arbeitsverzeichnis anzufassen.
 PROJ_DIR="$(ls -d "$HOME/cae_projekte"/2* 2>/dev/null | sort | tail -1)"
-if [ -n "$PROJ_DIR" ] && [ -d "$PROJ_DIR" ]; then
-    {
-        echo "# Aktuelles Projekt — ERZEUGT beim Agentenstart, nicht von Hand aendern"
-        echo
-        echo "Diese Datei wird bei jedem Agentenstart neu geschrieben. Die Regeln stehen"
-        echo "in AGENTS.md; hier stehen nur die Fakten des Projekts, an dem gerade"
-        echo "gearbeitet wird."
-        echo
+# Die Projektakte wird IMMER neu geschrieben -- auch ohne Projektbindung.
+#
+# Vorher stand hier ein `if [ -n "$PROJ_DIR" ]` um den ganzen Block: wer
+# ausdruecklich OHNE Projekt startete, um etwas Neues zu entwerfen, bekam die
+# Akte des vorigen Laufs stehen -- ueberschrieben mit "Aktuelles Projekt" und
+# vom Modell zu Recht geglaubt. Gemessen lag am 03.09. ein Flugzeugantrieb vom
+# 02.09. darin. Eine falsche Akte ist schlimmer als keine.
+{
+    echo "# Aktuelles Projekt — ERZEUGT beim Agentenstart, nicht von Hand aendern"
+    echo
+    echo "Diese Datei wird bei JEDEM Agentenstart neu geschrieben — auch wenn kein"
+    echo "Projekt gebunden ist. Die Regeln stehen in AGENTS.md; hier stehen nur die"
+    echo "Fakten des Laufs, der gerade beginnt."
+    echo
+    echo "- Stand: $(date '+%d.%m.%Y %H:%M')"
+    echo "- Agentenkopf: PI im Terminal (start_agent.sh)"
+    if [ -n "$PROJ_DIR" ] && [ -d "$PROJ_DIR" ]; then
         echo "- Kennung: \`$(basename "$PROJ_DIR")\`"
         echo "- Verzeichnis: \`$PROJ_DIR\`"
-        echo "- Stand: $(date '+%d.%m.%Y %H:%M')"
+        echo
+        echo "Das gebundene Projekt ist der ABLAGEORT dieses Laufs, **keine** Vorlage:"
+        echo "Polzahl, Nutzahl, Magnetanordnung, Kuehlung und Werkstoffe werden nicht"
+        echo "daraus uebernommen."
         echo
         if [ -f "$PROJ_DIR/results.json" ]; then
             echo "Bereits gerechnet (aus results.json):"
@@ -197,8 +213,16 @@ if [ -n "$PROJ_DIR" ] && [ -d "$PROJ_DIR" ]; then
         else
             echo "Noch nichts gerechnet — es gibt keine results.json."
         fi
-    } > "$ROOT/AGENTS.projekt.md"
-fi
+    else
+        echo "- Projekt: **keines gebunden**"
+        echo
+        echo "**Es gibt kein aktuelles Projekt.** Was in frueheren Laeufen entworfen"
+        echo "wurde, ist fuer diese Aufgabe keine Vorgabe und keine Vorlage. Eine neue"
+        echo "Auslegung beginnt mit"
+        echo "\`python3 cae_orchestrator/cae_cli.py aufgabe \"<Aufgabe>\"\` und danach"
+        echo "\`paarvergleich --frisch\` — NICHT mit \`--from-project last\`."
+    fi
+} > "$ROOT/AGENTS.projekt.md"
 
 # Hat der Aufrufer PIs eigene Sitzungsflaggen benutzt, gilt seine Wahl unangetastet:
 # nichts hinzufuegen, nichts herausloesen (sonst risse die Erkennung unten den Wert aus

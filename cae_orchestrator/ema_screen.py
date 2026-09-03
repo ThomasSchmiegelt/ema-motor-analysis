@@ -53,7 +53,9 @@ from ema_topology import (BRIDGE_MM, TOPOLOGY_LABELS, balance_bolt_holes,
 
 # Platzhalterpreise 2026 — fuer das Rangieren, nicht als Angebot. Was zaehlt, ist das
 # Verhaeltnis: NdFeB ~5x Kupfer, ~34x Elektroblech.
-PREISE_EUR_KG = {"magnet": 55.0, "kupfer": 10.0, "stahl": 1.6}
+PREISE_EUR_KG = {"magnet": 55.0, "kupfer": 10.0, "stahl": 1.6,
+                 # Aluminium: Kaefiglaeufer-Druckguss (ema_asm).
+                 "alu": 3.0}
 
 # NdFeB-Dichte; steht so nicht in der MAGNETS-Tabelle (Literaturwert N42–N52).
 MAG_DICHTE_KG_M3 = 7600.0
@@ -558,6 +560,18 @@ def screene(basis: dict, ziel: str = "ausgewogen", achsen: dict | None = None,
     """
     if ziel not in ZIELE:
         raise ValueError(f"ziel muss aus {ZIELE} sein, nicht {ziel!r}")
+    # Die Vorauswahl faehrt ausschliesslich den PSM-Kombinationsraum ab
+    # (Magnetanordnung, Magnetwerkstoff, V-Winkel). Fuer eine Maschine ohne
+    # Magnete ist dieser Raum leer -- und stillschweigend PSM-Zahlen unter dem
+    # Namen einer anderen Bauart auszugeben waere schlimmer als eine Absage.
+    import ema_maschinenart
+    art = ema_maschinenart.hole(ema_maschinenart.art_code(basis))
+    if not art.hat_magnete:
+        raise ema_maschinenart.ArtNichtUnterstuetzt(
+            f"{art.label}: die Vorauswahl (screen) faehrt den Magnet-"
+            f"Kombinationsraum ab und traegt diese Maschinenart noch nicht. "
+            f"Was heute geht: `paarvergleich --achse maschinenart` stellt die "
+            f"Arten analytisch gegeneinander.")
     achsen = achsen or ACHSEN_VORGABE
     n_max  = float(n_max or (basis.get("target") or {}).get("n_max") or 12000.0)
 

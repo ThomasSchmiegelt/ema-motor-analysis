@@ -27,7 +27,27 @@ import math
 from dataclasses import dataclass
 
 # Iron bridge kept between the outer magnet corner and the rotor OD [mm].
-BRIDGE_MM = 2.0
+#
+# 1,3 mm ist der Wert der **Erstauslegung** und ausdruecklich zum Optimieren
+# gedacht -- er ist nicht aus einer Festigkeitsrechnung hergeleitet, sondern eine
+# Vorgabe. Was er bewirkt, ist gemessen (V-Form, p=3, Rotor-Aussen-Ø 188,6 mm):
+#
+#   BRIDGE_MM   Wand Tasche→Rand   Magnetlaenge   B_gap
+#     2,0 mm         2,00 mm         23,56 mm     0,351 T
+#     1,3 mm         1,30 mm         24,72 mm     0,369 T
+#
+# Der Steg sitzt also naeher am Rand, der Magnet wird laenger und liegt weiter
+# aussen -- genau das war die Absicht. **Der Preis steht daneben und wird nicht
+# verschwiegen:** ein duennerer Steg traegt die Fliehkraft schlechter. Geprueft
+# wird das nicht hier, sondern in ``ema_rotorcheck.rotor_stress_check`` (Kerbfaktor
+# ``KT_POCKET``) und in der Struktur-FEM; wer die Drehzahl hochzieht, sieht es dort.
+#
+# Die Groesse hat zwei Rollen, die zusammengehoeren: sie klemmt die Magnetlaenge
+# gegen den Rotorrand (``_max_magnet_width``) UND sie ist die Vorgabe fuer den
+# Mindeststeg des Layouttors (``ema_rotorcheck``). Der JS-Spiegel in ``ema.html``
+# (``BRIDGE`` in ``magnetLegs``) fuehrt denselben Wert -- ``test_topology.py``
+# nagelt beide gegeneinander fest.
+BRIDGE_MM = 1.3
 
 
 @dataclass(frozen=True)
@@ -185,6 +205,7 @@ def _build_u(geom: dict):
     # POCKETS, not between magnet bodies: each pocket is one CAD gap wider than its
     # magnet on every side, and the arm foot carries a round end cap of the same
     # radius.  Reserving only ``mag_h + BRIDGE_MM`` left a **1.75 mm** web against
+    # (measured back when BRIDGE_MM was 2.0; the 1.15 factor scales with it)
     # the 2.00 mm minimum of ``rotor_layout_check`` — measured, and independent of
     # magThick, magAngle and magWidth, i.e. the U-cup never passed the layout gate
     # at any parameter setting.  The 15 % on the bridge covers the difference

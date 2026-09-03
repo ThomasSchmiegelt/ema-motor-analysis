@@ -93,6 +93,14 @@
     .tab-btn.active{color:#fff;border-bottom-color:var(--acc)}
     .tab-btn:disabled{opacity:.4;cursor:default}
 
+    /* Agent-Tab: der Rahmen fuellt die Flaeche, die Seite darin scrollt selbst */
+    #panel-agent{height:100%;flex-direction:column}
+    #panel-agent.active{display:flex}
+    #panel-agent .agent-leiste{display:flex;align-items:center;gap:10px;flex:0 0 auto;
+                               padding:6px 12px;background:#22272e;border-bottom:1px solid var(--brd);
+                               font-size:.78rem;color:#8aa}
+    #panel-agent iframe{flex:1;width:100%;border:0;display:block;min-height:0}
+
     /* results / compare are full-width tab panels inside #panel-area */
     #tab-results,#tab-compare{display:none;background:#111}
     #tab-results.active,#tab-compare.active{display:block}
@@ -210,9 +218,12 @@
     <button class="tab-btn"        id="tbtn-jobs"    onclick="switchTab('jobs')">⏳ Jobs<span id="jobs-badge" style="display:none;margin-left:5px;background:#e67e22;color:#fff;border-radius:9px;padding:0 6px;font-size:.68rem"></span></button>
     <button class="tab-btn"        id="tbtn-results" onclick="switchTab('results')" disabled>📊 FEM-Ergebnisse</button>
     <button class="tab-btn"        id="tbtn-compare" onclick="switchTab('compare')">⚖ Vergleich</button>
+    <button class="tab-btn"        id="tbtn-agent"   onclick="switchTab('agent')">🤖 Agent</button>
   </div>
+  <button id="btn-agent" onclick="switchTab('agent')" title="PI im Browser: links der Agent, rechts die Ergebnisse"
+          style="margin-left:auto;background:#3a4a63;width:auto;padding:8px 16px;font-size:.82rem;white-space:nowrap;border-radius:5px">🤖 Agent</button>
   <button id="btn-global-save" onclick="openSaveModal()" title="Alles Speicherbare an einer Stelle sichern (mit Vorschau + Auswahl)"
-          style="margin-left:auto;background:#2e7d4a;width:auto;padding:8px 16px;font-size:.82rem;white-space:nowrap;border-radius:5px">💾 Speichern</button>
+          style="margin-left:8px;background:#2e7d4a;width:auto;padding:8px 16px;font-size:.82rem;white-space:nowrap;border-radius:5px">💾 Speichern</button>
 </div>
 
 <!-- ═══════════════════ WORKSPACE (panels + persistent preview pane) ══════════ -->
@@ -693,7 +704,7 @@
     </div>
     <div class="slider-group topo-param" data-topos="v vasym vv u delta pmasynrm">
       <div class="slider-header"><span>Magnet Abstand (Steg)</span><span id="disp_mag_dist">2 mm</span></div>
-      <input type="range" id="mag_dist" min="0" max="80" step="0.5" value="2"/>
+      <input type="range" id="mag_dist" min="0" max="80" step="0.5" value="4"/>
     </div>
     <div class="slider-group pocket-pos">
       <div class="slider-header"><span>Magnet Länge</span><span id="disp_mag_width">45 mm</span><span id="disp_mag_width_eff" style="color:#f90;font-size:.8em;margin-left:4px"></span></div>
@@ -2603,6 +2614,24 @@
     🎯 Optimierung / 📂 Analyse). 3D-Feld-Jobs werden dabei automatisch gespeichert und
     erscheinen auch in der Karte „🧲 Gespeicherte 3D-Läufe" im 3D-Feld-Tab.
   </div>
+  <!-- Nach einem Serverstart mit offenen Auftraegen laeuft NICHTS von selbst an;
+       hier wird entschieden. Vorher fing die Schlange unbemerkt wieder an — beim
+       unterbrochenen Auftrag von vorn, weil ein abgebrochener Lauf keinen
+       Zwischenstand hat. -->
+  <div id="jobs_halt" style="display:none;border:1px solid #7a5a20;background:#241d10;
+       border-radius:7px;padding:11px 13px;margin-bottom:12px">
+    <div style="color:#ffb454;font-size:.85rem;font-weight:600;margin-bottom:4px">
+      ⏸ Warteschlange nach dem Serverstart angehalten</div>
+    <div id="jobs_halt_grund" style="font-size:.78rem;color:#cbb;line-height:1.5;margin-bottom:9px"></div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <button onclick="jobsEntscheiden('weiter')"
+              style="background:#2e7d4a;width:auto;padding:6px 13px;font-size:.78rem">▶ Fortsetzen</button>
+      <button onclick="jobsEntscheiden('verwerfen')"
+              style="background:#733;width:auto;padding:6px 13px;font-size:.78rem">🗑 Wartende verwerfen</button>
+      <span style="font-size:.75rem;color:#998;align-self:center">
+        … oder unten „⬆ Zuerst" bei dem Auftrag, der als Erstes laufen soll.</span>
+    </div>
+  </div>
   <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
     <button id="jobs_pause_btn" onclick="jobsTogglePause()"
             style="background:#555;width:auto;padding:7px 14px;font-size:.78rem">⏸ Pausieren</button>
@@ -3111,6 +3140,21 @@
     </div>
   </div>
 
+<!-- ════════ TAB: Agent (Rahmen auf /agent — eine Quelle, kein zweites Layout) ════════ -->
+<div class="tab-panel" id="panel-agent">
+  <div class="agent-leiste">
+    <span>🤖 PI im Browser — links der Agent, rechts Ergebnisse und Bilder</span>
+    <span style="flex:1"></span>
+    <a href="/agent" target="_blank" rel="noopener"
+       style="color:#7db9e8;text-decoration:none">↗ in eigenem Fenster öffnen</a>
+    <a href="#" onclick="agNeu();return false;"
+       style="color:#7db9e8;text-decoration:none">⟳ neu laden</a>
+  </div>
+  <!-- allow: ohne display-capture verweigert der Browser die Bildschirmaufnahme
+       IM RAHMEN — auf der eigenen Seite ginge sie, im Reiter nicht. -->
+  <iframe id="agent-rahmen" title="CAE-Agent" allow="display-capture"></iframe>
+</div>
+
 </div><!-- /panel-area -->
 
 <div id="vsplit" title="Ziehen: Vorschau-Breite ändern"></div>
@@ -3339,7 +3383,7 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','cfd','spraytest','ki','jobs','results','compare'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','cfd','spraytest','ki','jobs','results','compare','agent'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
@@ -3347,8 +3391,19 @@ const PANEL_OF = {
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
   designer:'panel-designer', import:'panel-import', em3d:'panel-em3d', oil:'panel-oil',
   cfd:'panel-cfd', spraytest:'panel-spraytest', ki:'panel-ki', jobs:'panel-jobs',
-  results:'tab-results', compare:'tab-compare'
+  results:'tab-results', compare:'tab-compare', agent:'panel-agent'
 };
+
+// Der Agent-Rahmen wird ERST beim ersten Öffnen geladen: sonst haengt schon beim
+// Seitenstart ein offener NDJSON-Strom (/agent/strom) an einem Server-Arbeiter.
+function agActivate() {
+  const f = document.getElementById('agent-rahmen');
+  if (f && !f.src) f.src = '/agent';
+}
+function agNeu() {
+  const f = document.getElementById('agent-rahmen');
+  if (f) f.src = '/agent';   // laedt neu; der Lauf im Server bleibt bestehen
+}
 
 function switchTab(name) {
   window._activeTab = name;
@@ -3390,6 +3445,7 @@ function switchTab(name) {
   if (name === 'cfd' && typeof _cfdSyncInherited === 'function') _cfdSyncInherited();
   if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
   if (name === 'jobs' && typeof jobsActivate === 'function') jobsActivate();
+  if (name === 'agent' && typeof agActivate === 'function') agActivate();
   if (name === 'em3d' && typeof adoptEm3dGeom === 'function') {
     // Beim Öffnen die aktuelle Geometrie der gewählten Quelle übernehmen + Zusammenfassung zeigen.
     const src = document.getElementById('e3_geomsrc');
@@ -3588,6 +3644,12 @@ async function jobsRefresh() {
   let j;
   try { j = await fetch('/jobs').then(r => r.json()); } catch (e) { return; }
   _jobsPaused = !!j.paused;
+  const halt = document.getElementById('jobs_halt');
+  if (halt) {
+    halt.style.display = j.halt ? 'block' : 'none';
+    const g = document.getElementById('jobs_halt_grund');
+    if (g) g.textContent = j.halt_grund || '';
+  }
   const pb = document.getElementById('jobs_pause_btn');
   if (pb) {
     pb.textContent = _jobsPaused ? '▶ Fortsetzen' : '⏸ Pausieren';
@@ -3641,13 +3703,42 @@ async function jobsRefresh() {
     const cancel = (x.status === 'wartet' || x.status === 'läuft')
       ? `<button onclick="jobsCancel('${x.id}')" title="abbrechen" ` +
         `style="background:#733;width:auto;padding:3px 9px;font-size:.7rem">✖</button>` : '';
+    // Umsortieren ist die dritte Antwort neben „weiter" und „weg": erst das hier.
+    const vor = (x.status === 'wartet')
+      ? `<button onclick="jobsVorziehen('${x.id}')" title="an den Anfang der Warteschlange" ` +
+        `style="background:#456;width:auto;padding:3px 9px;font-size:.7rem">⬆ Zuerst</button>` : '';
+    // Ein vom Neustart unterbrochener Lauf hat KEINEN Zwischenstand — er finge von
+    // vorn an. Darum nur auf Zuruf, nie von selbst.
+    const wdh = (x.status === 'abgebrochen')
+      ? `<button onclick="jobsWiederholen('${x.id}')" title="erneut einreihen (faengt von vorn an)" ` +
+        `style="background:#456;width:auto;padding:3px 9px;font-size:.7rem">↻ Nochmal</button>` : '';
     return `<div style="display:flex;gap:10px;align-items:flex-start;border:1px solid #2a2f38;` +
            `border-radius:6px;padding:8px 10px;margin-bottom:6px;background:#161a20">` +
            `<div style="font-size:1.1rem">${_JOB_ICON[x.type] || '⚙'}</div>` +
            `<div style="flex:1;min-width:0"><div style="color:#dde;font-size:.82rem">${escHtml(x.title || x.type)}` +
            ` <span style="color:#667;font-size:.68rem;margin-left:6px">${escHtml(x.type)} · ${_jobsFmtT(x.created)}</span></div>` +
-           prog + err + `</div>${chip}${proj}${cancel}</div>`;
+           prog + err + `</div>${chip}${proj}${vor}${wdh}${cancel}</div>`;
   }).join('');
+}
+
+async function jobsEntscheiden(was) {
+  if (was === 'verwerfen' &&
+      !confirm('Alle WARTENDEN Aufträge verwerfen? Laufende und fertige bleiben.')) return;
+  try {
+    await fetch('/jobs/entscheiden', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ was }) });
+  } catch (e) {}
+  jobsRefresh();
+}
+
+async function jobsVorziehen(id) {
+  try { await fetch('/jobs/' + id + '/vorziehen', { method: 'POST' }); } catch (e) {}
+  jobsRefresh();
+}
+
+async function jobsWiederholen(id) {
+  try { await fetch('/jobs/' + id + '/wiederholen', { method: 'POST' }); } catch (e) {}
+  jobsRefresh();
 }
 
 async function jobsTogglePause() {
@@ -10542,7 +10633,7 @@ function escHtml(s) {
     statorOD: 280, statorID: 190, rotorOD: 188.6, shaftD: 60,
     slots: 54, slotDepth: 25, slotWidthRatio: 0.5,
     p: 3, magShape: "v", magAngle: 120, magDepthRel: 0.7,
-    magWidth: 45, magThick: 6, magDist: 2, airGap: 0.7,
+    magWidth: 45, magThick: 6, magDist: 4, airGap: 0.7,
     magLayers: 3, magLayerGap: 8, poleArcFrac: 0.83, segPerPole: 6,
     nAx: 1, nCirc: 1, shaftBoreD: 0, magTangLen: 0, magAngle2: 90, magAsym: 0, magGapMm: 0.1,
     pocketMode: "position", pocketOuterD: 178, pocketInnerD: 150,
@@ -10869,9 +10960,9 @@ function escHtml(s) {
 
   // <<MIRROR-START>> (test_topology.py extracts this block to compare against ema_topology.py)
   // mirrors ema_topology._max_magnet_width(): clamps arm length so the outer
-  // corner stays inside R_rot - 2 mm (same 2 mm iron bridge as FreeCAD)
+  // corner stays inside R_rot - BRIDGE (same iron bridge as FreeCAD/ema_topology)
   function _maxMagnetWidth(rPos_mm, mDistHalf_mm, halfAngle, rRot_mm, bridge) {
-    if (bridge == null) bridge = 2.0;
+    if (bridge == null) bridge = 1.3;
     const a = Math.cos(halfAngle), b = Math.sin(halfAngle);
     const R = rRot_mm - bridge;
     const p = a * rPos_mm + b * mDistHalf_mm;
@@ -10895,7 +10986,7 @@ function escHtml(s) {
   // "perp"|"tangential"|"radial"; magSign flips polarity; placement ∈
   // "interior"|"surface".
   function magnetLegs(G) {
-    const BRIDGE = 2.0;
+    const BRIDGE = 1.3;   // Spiegel von ema_topology.BRIDGE_MM (test_topology.py)
     const Rrot = G.rotorOD/2, Rshaft = G.shaftD/2;
     const Rbore = (G.shaftBoreD != null ? G.shaftBoreD : 0)/2;
     const rPos = Rshaft + (Rrot - Rshaft) * G.magDepthRel;
@@ -10936,7 +11027,8 @@ function escHtml(s) {
       const w = Math.min(G.magWidth, _maxMagnetWidth(rPos, dH, hA, Rrot, eb));
       // Der Steg wird zwischen TASCHEN gemessen, nicht zwischen Magnetkoerpern:
       // jede Tasche ist rundum einen Klebespalt groesser und der Armfuss traegt eine
-      // runde Endkappe. Mit nur BRIDGE blieben 1,75 mm gegen 2,00 mm Mindestdicke.
+      // runde Endkappe. Mit nur BRIDGE blieben 1,75 mm gegen 2,00 mm Mindestdicke
+      // (gemessen, als BRIDGE noch 2,0 war; der Faktor 1,15 geht mit).
       // Spiegel zu ema_topology._build_u -- beide zusammen aendern.
       const gapU = Math.max(0.05, Math.min(0.3, G.magGapMm != null ? G.magGapMm : 0.1));
       const barR = Math.max(rPos - magH - 2*gapU - BRIDGE*1.15, Rbore + magH/2 + 1.0);

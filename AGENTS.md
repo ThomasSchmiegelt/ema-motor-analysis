@@ -6,7 +6,7 @@ Monorepo einer CAE-Toolchain für E-Maschinen. Drei eigenständige Teilprojekte,
 
 | Ordner | Was | Dienst |
 |---|---|---|
-| `cae_orchestrator/` | Browser-CAE für IPM-Motoren: Geometrie → EM-Feld → Struktur-FEM → Thermik → Fahrzyklus → PDF | `:5000` |
+| `cae_orchestrator/` | Browser-CAE für E-Maschinen (heute PSM/IPM, ASM analytisch): Geometrie → EM-Feld → Struktur-FEM → Thermik → Fahrzyklus → PDF | `:5000` |
 | `pikogk/` | PicoGK-Geometriekern + HTTP-API (Voxel/implizit, LLM-erzeugte „Skills") | `:5266` |
 | `physics_surrogate/` | ML-Surrogat für die Löserstufen (PhysicsNeMo/Torch) | `:5300` |
 | `connection_detection/` | FreeCAD-Workbench: Verbindungserkennung in STEP-Baugruppen | — (CLI) |
@@ -17,9 +17,16 @@ Ollama läuft auf `:11434`.
 ## Woran du gerade arbeitest
 
 Neben dieser Datei liegt **`AGENTS.projekt.md`**. Sie wird bei **jedem** Agentenstart
-neu geschrieben und traegt die Fakten des Projekts, an dem gerade gearbeitet wird —
-Kennung, Verzeichnis, welche Kennwerte schon da sind und **welche Stufen noch nicht
-gerechnet sind**. Lies sie zuerst.
+neu geschrieben — von beiden Agentenköpfen und **auch dann, wenn gar kein Projekt
+gebunden ist**. Sie trägt die Fakten des Laufs, der gerade beginnt: Kennung,
+Verzeichnis, welche Kennwerte schon da sind und **welche Stufen noch nicht gerechnet
+sind**. Lies sie zuerst.
+
+Steht dort „keines gebunden", dann gibt es **kein** aktuelles Projekt, und nichts aus
+früheren Läufen ist eine Vorgabe. Das ist kein Randfall, sondern der Normalfall einer
+neuen Aufgabe. (Vorher schrieb nur der Terminalkopf diese Datei, und nur bei
+gebundenem Projekt — jeder Browser-Lauf las deshalb die Akte des letzten
+Terminallaufs als seine eigene.)
 
 Diese Datei hier ist die eine, unveraenderte Regelquelle und wird **nicht** in
 Projektverzeichnisse kopiert. Eine Kopie liefe still auseinander, und dann arbeiteten
@@ -56,11 +63,30 @@ Es gibt **zwei** Agentenköpfe und **einen** Skill. Hermes lädt ihn über
 `hermes skills trust <repo>` direkt aus `./.agents/skills/` — dem Verzeichnis, das PI
 schon benutzt. Nichts wird kopiert; sie können nicht auseinanderlaufen.
 
-Einen Lauf **nie** über einen selbstgeschriebenen Payload starten — der hat rund 90
-Schlüssel. Eine bestehende Auslegung übernehmen und einzeln ändern:
+### Eine NEUE Aufgabe beginnt bei null — nicht beim letzten Projekt
+
+Das ist die Regel, gegen die hier am häufigsten verstoßen wurde, und sie stand vorher
+an genau dieser Stelle falsch: das einzige Beispiel zeigte `--from-project last`. Ein
+Modell folgt dem Beispiel, nicht der Warnung daneben — und erbte damit Polzahl,
+Nutzahl, Magnetanordnung, Kühlung und Werkstoffe der vorigen Auslegung, also gerade
+die Entscheidungen, die neu zu treffen wären.
 
 ```bash
-python3 cae_cli.py run cad --from-project last --wait \
+cd ~/ai-workspace/cae_orchestrator
+python3 cae_cli.py aufgabe "Nabenmotor Lastenrad, 28 Zoll, 140 kg, 27 Nm @ 210 1/min"
+python3 cae_cli.py maschinenart              # PSM? ASM? (Vorgabe pmsm ist eine ANNAHME)
+python3 cae_cli.py zyklus liste              # welcher Lastfall — und für welches Fahrzeug
+python3 cae_cli.py paarvergleich --frisch    # woran hängt die Auslegung überhaupt
+python3 cae_cli.py run analyse --frisch --zyklus <name> --wait
+python3 cae_cli.py sicherheit --from-project <pid>
+```
+
+`--frisch` ist der neutrale Grundpayload aus `ema_text2ema.SCHEMA` — absichtlich
+unentschieden, deshalb muss danach der `paarvergleich` laufen. **`--from-project` ist
+für das Weiterrechnen an DERSELBEN Maschine da**, nicht für den Start einer neuen:
+
+```bash
+python3 cae_cli.py run cad --from-project <pid> --wait \
         --set slotDepth=30 --set p=8 --set project_name=Variante_A
 ```
 
@@ -68,6 +94,23 @@ python3 cae_cli.py run cad --from-project last --wait \
 zeigt den fertigen Payload, ohne etwas zu starten. Die Schemagrenzen sagen allerdings
 nicht, ob eine Geometrie *baubar* ist — nach jeder Geometrieänderung erst `run cad`
 (~1 min), dann die teure Stufe.
+
+### Vier Entscheidungen, die vor jedem Lauf getroffen sind
+
+Sie stehen ausführlich im Skill; hier stehen sie, weil ein langer Zug den Skilltext
+verdrängt und diese Datei am Anfang jeder Sitzung neu gelesen wird.
+
+1. **Maschinenart** (`geom.machineType`) — `pmsm` ist die Vorgabe und damit eine
+   *Annahme*, keine Wahl. `maschinenart` sagt, welche Art welche Rechenstufe heute
+   trägt: analytisch `pmsm` + `asm`, Feld/CAD/3D bisher nur `pmsm`. Eine nicht
+   getragene Art wird abgewiesen — es wird **nicht** ersatzweise PSM-Physik gerechnet.
+2. **Lastfall** (`zyklus`) — Fahrzyklus **und** Fahrzeug gehören zusammen. Ohne Wahl
+   rechnet `--frisch` mit `cycle=off`. Nie einen Pkw-Zyklus auf etwas legen, das kein
+   Pkw ist.
+3. **Was nur der Auftraggeber weiß** (Bauraum, Betriebspunkt, Einsatz, Spannungsebene)
+   wird **gefragt**, nicht recherchiert. `aufgabe` trennt das auf.
+4. **Nach jedem Lauf `sicherheit --from-project <pid>`** (Exit 1 = Kriterium verletzt).
+   `safety_factor_fem=null` heißt „keine FEM gerechnet", nicht „sicher".
 
 ## Harte Grenzen — nicht verhandelbar
 

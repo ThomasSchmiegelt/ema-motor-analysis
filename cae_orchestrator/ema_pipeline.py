@@ -12,6 +12,35 @@ from matplotlib.lines import Line2D
 from freecad_runner import run_freecad_script
 from ema_freecad   import build_full_motor_script, build_rotor_fem_script
 from ema_rotorcheck import rotor_layout_check, rotor_stress_check, _bore_hoop_mpa
+import ema_maschinenart
+
+
+def _gate_maschinenart(data: dict, state: dict | None = None,
+                       stufe: str = "feld") -> None:
+    """Tor VOR der Physik: traegt diese Pipeline die gewaehlte Maschinenart?
+
+    Die ganze Rechenkette dieses Moduls -- Luftspaltfeld aus ``Br_NdFeB``,
+    ``Kt = 1.5*p*psi_pm``, Entmagnetisierung, Kurzschlussstrom, Magnettaschen --
+    setzt einen **Permanentmagneten** voraus. Wer hier eine Asynchron- oder
+    Reluktanzmaschine hineinreicht, bekaeme ohne dieses Tor keine Fehlermeldung,
+    sondern **PSM-Zahlen unter einem anderen Namen**: das Feld aus Magneten, die
+    es nicht gibt, ein Moment ohne Schlupf, eine Entmagnetisierungsreserve fuer
+    einen Laeufer aus Blech und Aluminium.
+
+    Genau dieser Fehler ist beim Fahrzyklus schon einmal passiert (WLTP als
+    Voreinstellung an einem Fahrrad) -- er faellt nicht auf, weil nichts
+    widerspricht. Deshalb wird hier abgewiesen und nicht ersetzt.
+
+    Analytisch (Paarvergleich, ``ema_asm``) ist die ASM getragen; der Feldlauf
+    braucht Elmers ``MagnetoDynamics2DHarmonic`` und ist eine eigene Stufe --
+    die 2-D-FDM dieses Werkzeugs ist reell, linear und magnetostatisch und kann
+    einen Kaefiglaeufer grundsaetzlich nicht abbilden.
+    """
+    code = ema_maschinenart.art_code(data or {})
+    art = ema_maschinenart.hole(code)
+    if state is not None:
+        _log(state, f"\U0001F6E1 Maschinenart: {art.label}", 4)
+    ema_maschinenart.pruefe_stufe(code, stufe)
 
 
 def _gate_rotor_layout(data: dict, state: dict | None = None,
@@ -1675,6 +1704,7 @@ def build_cad_preview(data: dict, state: dict, project_dir: str) -> dict:
     geom  = data["geom"]
     axial = float(data.get("axial_len", 80.0))
 
+    _gate_maschinenart(data, state, "cad")
     _gate_rotor_layout(data, state)
     _gate_rotor_stress(data, state)
     _log(state, "⚙ Erzeuge Motorgeometrie in FreeCAD…", 10)
@@ -1830,6 +1860,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
     # nackten Traceback sieht. Im Teil-Nachrechnen wird nur gewarnt, nicht
     # abgewiesen: die Geometrie liegt dort fertig auf der Platte und wird gar nicht
     # neu gebaut — ein hartes Tor würde ein ladbares Altprojekt unrechenbar machen.
+    _gate_maschinenart(data, state, "feld")
     _gate_rotor_layout(data, state, fatal=not partial)
     _gate_rotor_stress(data, state, fatal=not partial)
 

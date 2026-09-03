@@ -3183,6 +3183,15 @@ def param_schema():
         "cooling":     _opts(getattr(T2E, "_COOL", []), labelmap=cool_labels),
         "magOrient":   _opts(getattr(T2E, "_ORIENT", []), labelmap=orient_labels),
         "pocketMode":  _opts(getattr(T2E, "_POCKET", []), labelmap=pocket_labels),
+        # Die Beschriftung kommt aus ``ema_maschinenart`` selbst und nennt gleich,
+        # wie weit eine Art getragen ist -- die Auswahlliste soll nicht zu einer
+        # Wahl einladen, die der Lauf danach abweist.
+        "machineType": [
+            {"value": c,
+             "label": a.label + (" — analytisch" if a.stufen == ("analytisch",)
+                                 else "" if len(a.stufen) == 4
+                                 else " — noch nicht getragen")}
+            for c, a in __import__("ema_maschinenart").ARTEN.items()],
     }
     # geom vs. obere Ebene kommt aus dem Schema selbst (``spec["geom"]``). Frueher stand
     # die Menge hier ein zweites Mal von Hand — ein neuer Schluessel war dann im Schema
@@ -3567,6 +3576,37 @@ def jobs_clear_done():
     return jsonify({"status": "ok", "removed": ema_jobs.clear_finished()})
 
 
+@app.route("/jobs/entscheiden", methods=["POST", "OPTIONS"])
+def jobs_entscheiden():
+    """Den Halt nach einem Serverstart aufloesen: {was: 'weiter'|'verwerfen'}."""
+    if request.method == "OPTIONS":
+        return "", 200
+    data = request.get_json(force=True) or {}
+    try:
+        return jsonify(ema_jobs.entscheiden(str(data.get("was", ""))))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/jobs/<jid>/vorziehen", methods=["POST", "OPTIONS"])
+def jobs_vorziehen(jid):
+    """Einen wartenden Auftrag an den Anfang stellen — die dritte Antwort neben
+    'weiter' und 'verwerfen': erst das hier."""
+    if request.method == "OPTIONS":
+        return "", 200
+    r = ema_jobs.vorziehen(jid)
+    return jsonify(r), (200 if r.get("ok") else 400)
+
+
+@app.route("/jobs/<jid>/wiederholen", methods=["POST", "OPTIONS"])
+def jobs_wiederholen(jid):
+    """Einen abgebrochenen Auftrag erneut einreihen (faengt von vorn an)."""
+    if request.method == "OPTIONS":
+        return "", 200
+    r = ema_jobs.wiederholen(jid)
+    return jsonify(r), (200 if r.get("ok") else 400)
+
+
 @app.route("/jobs/config", methods=["POST", "OPTIONS"])
 def jobs_config():
     if request.method == "OPTIONS":
@@ -3870,6 +3910,283 @@ def mobil_zugang():
     import ema_mobil
     return jsonify({"url": ema_mobil.einstieg_url(), "token": ema_mobil.token(),
                     "lan": ema_mobil.lan_adresse()})
+
+
+# ── Agent im Browser (PI): Startmaske + geteilter Bildschirm ──────────────────
+#
+# Warum eine eigene Seite und nicht ein Reiter in ema.html: die Seite ist zum
+# ZEIGEN gebaut (Bildschirmaufnahme), also zwei grosse Spalten ohne die
+# Werkzeugleisten drumherum. ema.html hat keine einzige @media-Regel und ein
+# Layout aus festen Bereichen -- dasselbe Argument wie beim Handy-Pfad.
+# Geteilt wird nicht das Layout, sondern der Server und die Bilder.
+
+@app.route("/agent")
+def agent_seite():
+    return send_from_directory(os.path.dirname(__file__), "ema_agent.html")
+
+
+@app.route("/agent/auswahl")
+def agent_auswahl():
+    """Was die Startmaske anzubieten hat: Projekte, Sitzungen, Vorgabemodell."""
+    import ema_agent
+    from ema_report import DEFAULT_MODEL
+    return jsonify({"projekte": ema_agent.projekte(),
+                    "sitzungen": ema_agent.sitzungen(),
+                    "modell": DEFAULT_MODEL,
+                    "pi": bool(ema_agent.pi_gefunden())})
+
+
+@app.route("/agent/start", methods=["POST", "OPTIONS"])
+def agent_start():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import ema_agent
+    from ema_report import DEFAULT_MODEL
+    d = request.get_json(silent=True) or {}
+    projekt = str(d.get("projekt", ""))
+    if projekt and not _safe_name(projekt):
+        return jsonify({"ok": False, "grund": "ungueltiger Projektname"}), 403
+
+    # Das gebundene Projekt kommt als Systemzusatz herein, nicht als Prompt: ein
+    # Prompt kann vom Modell ueberschrieben oder vergessen werden, der
+    # Systemzusatz nicht. Und es wird ausdruecklich gesagt, dass das Projekt KEINE
+    # Vorlage ist -- genau die Verwechslung war der Anlass fuer ``--frisch``.
+    zusatz = ""
+    if projekt:
+        zusatz = (f"Gebundenes Projekt: {projekt} (unter ~/cae_projekte). "
+                  f"Ergebnisse dieses Laufs gehoeren dorthin. Es ist AUSDRUECKLICH "
+                  f"KEINE Vorlage: uebernimm daraus keine Polzahl, Nutzahl, "
+                  f"Magnetanordnung, Kuehlung oder Werkstoffwahl. Fuer eine neue "
+                  f"Auslegung beginnst du mit "
+                  f"'python3 cae_orchestrator/cae_cli.py paarvergleich --frisch'. ")
+    # Der 3D-Lauf steht auch im Skill, aber der Systemzusatz ueberlebt einen langen
+    # Zug: das 2D-FDM-Feld ist zweidimensional, erst Elmer prueft es unabhaengig nach.
+    # Fahrzyklus und Sicherheitskriterien: beides steht im Skill, aber beides ist
+    # eine Entscheidung AM ANFANG bzw. eine Pflicht AM ENDE -- und dazwischen
+    # liegen Stunden Rechenzeit, in denen ein langer Zug den Skilltext verdraengt.
+    zusatz += ("Bei einer NEUEN Aufgabe zuerst "
+               "'python3 cae_orchestrator/cae_cli.py aufgabe \"<Aufgabe>\"': das stellt "
+               "nebeneinander, was feststehen muss, was der eigene Bestand schon hergibt "
+               "und was offen ist. Erst DANN recherchieren, und nur nach dem Offenen. "
+               "Was nur der Auftraggeber wissen kann (Bauraum, Betriebspunkt, Einsatz, "
+               "Spannungsebene) wird GEFRAGT, nicht recherchiert. Recherchiertes wird mit "
+               "woertlichem Zitat abgelegt ('recherche merke ... --wert \"x=1 mm :: Zitat\"') "
+               "und ersetzt nie eine gerechnete Zahl. ")
+    zusatz += ("Erste Entscheidung jeder Auslegung ist der LASTFALL: "
+               "'python3 cae_orchestrator/cae_cli.py zyklus liste' zeigt die "
+               "waehlbaren Fahrzyklen samt dem Fahrzeug, fuer das sie gedacht sind. "
+               "Passt keiner, lege selbst einen an ('zyklus anlegen <name> --phasen "
+               "ziel_kmh:dauer_s,... --fahrzeug mass_kg=... --fahrzeug gear_ratio=...') "
+               "-- er bleibt in der gemeinsamen Datenbank und steht beim naechsten Mal "
+               "schon da. Der Lauf bekommt ihn ueber 'run analyse --zyklus <name>', was "
+               "Zyklus UND Fahrzeug setzt. Ohne Wahl rechnet '--frisch' mit cycle=off; "
+               "NIE einen Pkw-Zyklus auf eine Maschine legen, die kein Pkw ist. "
+               "Nach jedem Lauf: "
+               "'python3 cae_orchestrator/cae_cli.py sicherheit --from-project <pid>' "
+               "(Exit 1 = Kriterium verletzt: Festigkeit, Drehzahl, Magnet- und "
+               "Wicklungstemperatur ueber ALLE Zyklen, Entmagnetisierung, Fahrprofil). "
+               "Ein verletztes Kriterium wird behoben oder ausdruecklich als "
+               "'so nicht einsetzbar' gemeldet, nicht in einem Nebensatz erwaehnt. "
+               "safety_factor_fem=null heisst 'keine FEM gerechnet', nicht 'sicher'. ")
+    zusatz += ("Zu einer Auslegung gehoert die 3D-Gegenprobe: nach jedem erfolgreichen "
+               "'run analyse --wait' folgt "
+               "'python3 cae_orchestrator/cae_cli.py run em3d --from-project <pid> --wait' "
+               "(5-30 min, Elmer) auf DEMSELBEN Projekt, und erst danach der Bericht "
+               "ueber 'raw POST /project/<pid>/report' -- nur dann enthaelt er den "
+               "3D-Abschnitt und die 2D-gegen-3D-Tabelle. Antwortet die Route mit 503, "
+               "fehlt Elmer: das melden, nicht stillschweigend ueberspringen.")
+
+    erg = ema_agent.LAUF.starten(str(d.get("modell") or DEFAULT_MODEL),
+                                 projekt=projekt,
+                                 sitzung=str(d.get("sitzung", "")),
+                                 system_zusatz=zusatz)
+    if erg.get("ok") and str(d.get("prompt", "")).strip():
+        ema_agent.LAUF.fragen(str(d["prompt"]).strip())
+    return jsonify(erg)
+
+
+@app.route("/agent/frage", methods=["POST", "OPTIONS"])
+def agent_frage():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import ema_agent
+    text = str((request.get_json(silent=True) or {}).get("text", "")).strip()
+    if not text:
+        return jsonify({"ok": False, "grund": "leerer Auftrag"}), 400
+    return jsonify(ema_agent.LAUF.fragen(text))
+
+
+@app.route("/agent/hinweis", methods=["POST", "OPTIONS"])
+def agent_hinweis():
+    """Zwischenruf waehrend eines laufenden Zuges.
+
+    Nicht dasselbe wie ``/agent/frage``: die wird abgewiesen, solange der Agent
+    arbeitet. Der Hinweis wird gemerkt und am naechsten Zugende von selbst
+    uebergeben — wartet der Agent ohnehin, geht er sofort durch.
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import ema_agent
+    text = str((request.get_json(silent=True) or {}).get("text", "")).strip()
+    if not text:
+        return jsonify({"ok": False, "grund": "leerer Hinweis"}), 400
+    return jsonify(ema_agent.LAUF.merken(text))
+
+
+@app.route("/agent/stopp", methods=["POST", "OPTIONS"])
+def agent_stopp():
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import ema_agent
+    return jsonify(ema_agent.LAUF.stoppen())
+
+
+@app.route("/agent/sichern", methods=["POST"])
+def agent_sichern():
+    """Was rechts steht auf die Platte -- ins gebundene Projekt, sonst daneben.
+
+    Der Server schreibt es ohnehin nach jedem Zug selbst; diese Route ist der
+    Knopf fuer zwischendurch und gibt den Pfad zurueck, damit die Seite ihn zeigen
+    kann.
+    """
+    import ema_agent
+    a = ema_agent.LAUF.sichern()
+    return jsonify(a), (200 if a.get("ok") else 400)
+
+
+@app.route("/agent/video/start", methods=["POST"])
+def agent_video_start():
+    """Aufnahme beginnen -- die Datei liegt in ``ema_agent.VIDEO_ORDNER``.
+
+    Nicht im Projektordner: ein Bildschirmvideo ist kein Rechenergebnis. Der
+    Bezug zum Lauf steckt im Dateinamen, und ``sichern()`` schreibt den Pfad ins
+    Protokoll.
+    """
+    import ema_agent
+    a = ema_agent.VIDEO.starten(projekt=ema_agent.LAUF.projekt)
+    return jsonify(a), (200 if a.get("ok") else 400)
+
+
+@app.route("/agent/video/pause", methods=["POST"])
+def agent_video_pause():
+    """Aufnahme anhalten/fortsetzen -- die Buchfuehrung dazu.
+
+    Angehalten wird im Browser (nur er haelt den ``MediaRecorder``); hier wird
+    gezaehlt, damit die Dauer im Protokoll die aufgezeichnete Zeit ist.
+    """
+    import ema_agent
+    an = bool((request.get_json(silent=True) or {}).get("an", True))
+    return jsonify(ema_agent.VIDEO.pausieren(an))
+
+
+@app.route("/agent/video/stueck", methods=["POST"])
+def agent_video_stueck():
+    """Ein Stueck des Stroms anhaengen (Rohdaten im Rumpf).
+
+    Der Browser schickt alle paar Sekunden, statt bis zum Schluss zu sammeln:
+    so bleibt sein Speicherbedarf flach und die Datei ueberlebt ein
+    geschlossenes Fenster.
+    """
+    import ema_agent
+    return jsonify(ema_agent.VIDEO.anhaengen(request.get_data()))
+
+
+@app.route("/agent/video/ende", methods=["POST"])
+def agent_video_ende():
+    import ema_agent
+    return jsonify(ema_agent.VIDEO.beenden())
+
+
+@app.route("/agent/video/status")
+def agent_video_status():
+    import ema_agent
+    return jsonify(ema_agent.VIDEO.zustand())
+
+
+def _rechnet() -> list:
+    """Welche Serverstufen gerade rechnen -- als Namensliste.
+
+    Die Stufen fuehren je einen eigenen Zustand (``_state``, ``_cad_state``,
+    ``_em3d_state``, ...). Statt sie hier ein zweites Mal aufzuzaehlen -- eine
+    Liste, die beim naechsten neuen Zustand still unvollstaendig waere -- werden
+    die Modulglobalen nach dem Muster ``_<name>_state`` durchgesehen. Ein neuer
+    Zustand ist damit automatisch erfasst.
+    """
+    aus = []
+    for name, wert in list(globals().items()):
+        if not (name.startswith("_") and name.endswith("state")):
+            continue
+        if isinstance(wert, dict) and wert.get("status") == "running":
+            # "_state" ist die Hauptpipeline und heisst so, weil sie die erste war.
+            kurz = name[1:-len("_state")] if name.endswith("_state") else name[1:]
+            aus.append(kurz or "analyse")
+    try:
+        import ema_jobs
+        if any(j.get("status") == "läuft" for j in ema_jobs.list_jobs().get("jobs", [])):
+            aus.append("jobs")
+    except Exception:                                  # noqa: BLE001
+        pass
+    return sorted(set(aus))
+
+
+@app.route("/agent/status")
+def agent_status():
+    """Zustand des Agenten -- plus ob der SERVER gerade rechnet.
+
+    ``rechnet`` haengt an der Bildschirmaufnahme: waehrend einer Rechenstufe
+    aendert sich am Bild nichts ausser einem Fortschrittsbalken. Die Seite haelt
+    die Aufnahme dann an und setzt sie fort, wenn wieder etwas passiert -- sonst
+    besteht ein vierstuendiger Lauf fast ganz aus Stillstand und die
+    800-MB-Grenze ist erreicht, bevor etwas Sehenswertes im Bild war.
+    """
+    import ema_agent
+    was = _rechnet()
+    return jsonify({**ema_agent.LAUF.zustand(),
+                    "rechnet": bool(was), "rechnet_was": was})
+
+
+@app.route("/agent/strom")
+def agent_strom():
+    """Ereignisse als NDJSON, ab Position ``?ab=`` aus dem Ringpuffer.
+
+    ``ab`` ist der Grund, aus dem es einen Ringpuffer gibt: laedt der Browser neu
+    oder reisst die Leitung, steigt er wieder dort ein, wo er war -- statt mitten
+    im Satz oder mit einem leeren Fenster.
+    """
+    import ema_agent
+    try:
+        ab = int(request.args.get("ab", 0))
+    except ValueError:
+        ab = 0
+    q = ema_agent.LAUF.anmelden(ab)
+
+    def strom():
+        try:
+            while True:
+                try:
+                    satz = q.get(timeout=20)
+                except queue.Empty:
+                    if not ema_agent.LAUF.laeuft:
+                        return
+                    yield "\n"                     # Lebenszeichen gegen Zwischenpuffer
+                    continue
+                yield json.dumps(satz, ensure_ascii=False) + "\n"
+        finally:
+            ema_agent.LAUF.abmelden(q)
+
+    return Response(strom(), mimetype="application/x-ndjson",
+                    headers={"Cache-Control": "no-store",
+                             "X-Accel-Buffering": "no"})
+
+
+@app.route("/agent/bild/<pid>/<unter>/<name>")
+def agent_bild(pid: str, unter: str, name: str):
+    if not (_safe_name(pid) and _safe_name(name)) or unter not in ("charts", "cad_images"):
+        return jsonify({"error": "ungueltiger Pfad"}), 403
+    d = os.path.join(PROJECTS_ROOT, pid, unter)
+    if not os.path.isfile(os.path.join(d, name)):
+        return jsonify({"error": "nicht gefunden"}), 404
+    return send_from_directory(d, name)
 
 
 @app.after_request

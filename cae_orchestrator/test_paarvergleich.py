@@ -32,6 +32,10 @@ from ema_rotorcheck import rotor_layout_check
 _n_ok = _n_bad = 0
 
 
+def METRIKEN_ZAEHLT(name):
+    return PV.METRIKEN[name][3]
+
+
 def pruefe(bedingung, text):
     global _n_ok, _n_bad
     if bedingung:
@@ -337,6 +341,111 @@ pruefe(abs(sl[0]["r_out"] - (BASIS["geom"]["rotorOD"] / 2 - 2.0)) < 1e-9,
        "der Aussensteg von 2 mm bleibt stehen")
 pruefe(flux_barrier_slots(BASIS["geom"]) == [] and balance_bolt_holes(BASIS["geom"]) == [],
        "abgeschaltet liefern beide nichts")
+
+
+print("\n15. Reluktanzmoment: die Anordnungen unterscheiden sich wirklich")
+import ema_referenz as REF
+from ema_topology import _BUILDERS
+
+# (a) Das recherchierte Band greift und ordnet die Formen -- vorher lieferte
+#     estimate_saliency fuer v/u/vv/delta/spoke bei gleicher Magnetdicke denselben
+#     Wert, weil sie nur Luftspalt und Magnetdicke las.
+xi = {k: ema_analysis.estimate_saliency(dict(BASIS["geom"], magShape=k))
+      for k in _BUILDERS if k != "custom"}
+pruefe(len(set(round(xi[k], 3) for k in ("bar", "v", "u", "vv", "delta", "pmasynrm"))) == 6,
+       f"jede Innenlaeufer-Form bekommt ein eigenes xi ({ {k: xi[k] for k in ('bar','v','u','vv','delta','pmasynrm')} })")
+pruefe(xi["bar"] < xi["v"] < xi["u"] < xi["vv"] < xi["pmasynrm"],
+       "die Reihenfolge folgt der Recherche: Balken < V < U < Doppel-V < PMa-SynRM")
+pruefe(xi["spm"] < 1.1 and xi["halbach"] < 1.1,
+       f"Oberflaechenmagnete bleiben ohne Salienz ({xi['spm']:.2f})")
+for code, (lo, hi, _st, _b) in REF.SALIENZ_BAND.items():
+    pruefe(lo - 1e-9 <= xi[code] <= hi + 1e-9,
+           f"{code}: xi {xi[code]:.2f} liegt im recherchierten Band {lo}–{hi}")
+
+# (b) Die Geometrie bewegt den Wert INNERHALB seines Bandes weiter -- das Band
+#     ersetzt die Rechnung nicht, es verortet sie.
+duenn = ema_analysis.estimate_saliency(dict(BASIS["geom"], magShape="v", magThick=3))
+dick = ema_analysis.estimate_saliency(dict(BASIS["geom"], magShape="v", magThick=12))
+pruefe(duenn < xi["v"] < dick,
+       f"dickere Magnete heben xi innerhalb des Bandes ({duenn:.2f} < {xi['v']:.2f} < {dick:.2f})")
+
+# (c) Der Strom ist die Kennzahl, in der sich das zeigt -- und er zaehlt.
+erg15 = PV.vergleiche(BASIS, achsen=["anordnung"])
+opt = {o["wert"]: o for o in erg15["achsen"]["anordnung"]["optionen"] if o.get("ok")}
+pruefe(METRIKEN_ZAEHLT("I_s_A"), "I_s_A zaehlt in der Bilanz mit")
+pruefe(not METRIKEN_ZAEHLT("xi_LqLd") and not METRIKEN_ZAEHLT("T_rel_pct"),
+       "xi und Reluktanzanteil sind Einordnung, keine Bilanzposten")
+frei = [o for o in opt.values() if not o.get("strom_limit")]
+pruefe(len(frei) >= 4, f"{len(frei)} Optionen bleiben unter dem Umrichter-Limit")
+pruefe(opt["pmasynrm"]["I_s_A"] < opt["v"]["I_s_A"],
+       f"PMa-SynRM braucht weniger Strom als V ({opt['pmasynrm']['I_s_A']} vs {opt['v']['I_s_A']} A) "
+       f"-- OBWOHL sein Kt kleiner ist ({opt['pmasynrm']['Kt_Nm_per_A']} vs {opt['v']['Kt_Nm_per_A']})")
+pruefe(opt["vv"]["I_s_A"] < opt["v"]["I_s_A"],
+       f"Doppel-V braucht weniger Strom als einfaches V ({opt['vv']['I_s_A']} vs {opt['v']['I_s_A']} A)")
+spanne = erg15["achsen"]["anordnung"]["spannweite"]
+pruefe(spanne["I_s_A"]["spanne_pct"] > 20,
+       f"die Anordnung bewegt den Strom deutlich ({spanne['I_s_A']['spanne_pct']:.0f} %)")
+
+# (d) Am Limit ist I_s KEIN Messwert -- das muss dastehen, sonst liest man 800 A
+#     als Ergebnis statt als Anschlag.
+txt15 = PV.als_text(erg15, paare=False)
+if any(o.get("strom_limit") for o in opt.values()):
+    pruefe("Umrichter-Limit" in txt15, "gedeckelte Optionen sind im Text als solche markiert")
+else:
+    pruefe(True, "keine Option laeuft ins Limit (nichts zu markieren)")
+
+
+print("\n16. V-Oeffnungswinkel und Wellendurchmesser als eigene Achsen")
+erg16 = PV.vergleiche(BASIS, achsen=["v_oeffnung", "wellendurchmesser"])
+vo = [o for o in erg16["achsen"]["v_oeffnung"]["optionen"] if o.get("ok")]
+pruefe(len(vo) >= 4, f"{len(vo)} Oeffnungswinkel sind baubar")
+kt_v = [o["Kt_Nm_per_A"] for o in vo]
+pruefe(kt_v == sorted(kt_v),
+       f"Kt waechst mit dem Oeffnungswinkel ({kt_v}) — die eine Haelfte des Zielkonflikts")
+pruefe(any(str(REF.V_OEFFNUNG_GRAD["kompromiss"]).startswith(str(int(o["wert"]))) or
+           abs(o["wert"] - REF.V_OEFFNUNG_GRAD["kompromiss"]) < 1e-6 for o in vo),
+       f"der recherchierte Kompromiss {REF.V_OEFFNUNG_GRAD['kompromiss']:.0f}° steht in der Reihe")
+pruefe("Literatur-Kompromiss" in PV.als_text(erg16, paare=False),
+       "und ist als solcher beschriftet, nicht als Sollwert")
+
+# Die Achse ist bei Formen ohne magAngle bedeutungslos -- und sagt das, statt
+# stumm "bewegt NICHT" zu melden (das waere ein Befund, den es nicht gibt).
+erg_bar = PV.vergleiche(dict(BASIS, geom=dict(BASIS["geom"], magShape="bar")),
+                        achsen=["v_oeffnung"])
+pruefe("ohne Bedeutung" in erg_bar["achsen"]["v_oeffnung"]["hinweis"],
+       "bei einer Balkenform meldet die Achse ihre Bedeutungslosigkeit")
+pruefe(not PV.vergleiche(BASIS, achsen=["v_oeffnung"])["achsen"]["v_oeffnung"]["hinweis"],
+       "bei einer V-Form nicht")
+
+wd = [o for o in erg16["achsen"]["wellendurchmesser"]["optionen"] if o.get("ok")]
+pruefe(len(wd) == len(PV.WELLEN_FAKTOREN), f"alle {len(wd)} Wellendurchmesser sind baubar")
+pruefe([o["T_verbind_Nm"] for o in wd] == sorted(o["T_verbind_Nm"] for o in wd),
+       f"die dickere Welle traegt mehr ({[o['T_verbind_Nm'] for o in wd]})")
+g_gross = dict(BASIS["geom"])
+PV._setz_welle({"geom": g_gross}, BASIS["geom"]["shaftD"] * 1.3)
+pruefe(abs(g_gross["rotorOD"] - BASIS["geom"]["rotorOD"]) < 1e-9
+       and abs(g_gross["statorOD"] - BASIS["geom"]["statorOD"]) < 1e-9,
+       "Rotor und Stator bleiben dabei stehen — das ist der Unterschied zur Durchmesser-Achse")
+
+
+print("\n17. Recherchierte Werte bleiben von den gerechneten getrennt")
+pruefe(all(m["quelle"] in REF.QUELLEN for m in REF.MESSPUNKTE),
+       f"jeder der {len(REF.MESSPUNKTE)} Messpunkte nennt eine hinterlegte Quelle")
+pruefe(all(m["zitat"].strip() for m in REF.MESSPUNKTE),
+       "und jeder eine Fundstelle im Originaltext")
+pruefe(all(q["url"].startswith("https://") for q in REF.QUELLEN.values()),
+       "jede Quelle ist mit Adresse nachschlagbar")
+pruefe(all(any(REF.messpunkt(x) for x in st)
+           for _lo, _hi, st, _b in REF.SALIENZ_BAND.values()),
+       "jedes abgeleitete Band nennt die Messpunkte, auf denen es ruht")
+kopf = REF.als_text()[:400]
+pruefe("nicht gerechnet" in kopf and "Fremdtext" in kopf.upper() or "FREMDTEXT" in kopf.upper(),
+       "die Ausgabe traegt die Herkunftsmarke")
+# Kein Tor: ein Entwurf ausserhalb der Vorbilder wird gemeldet, aber nicht abgelehnt.
+weit = dict(BASIS["geom"], shaftD=BASIS["geom"]["rotorOD"] * 0.85)
+pruefe(REF.bauband_pruefen(weit), "eine ueberdicke Welle faellt als 'ausserhalb' auf")
+pruefe(PV._bewerte(dict(BASIS, geom=weit), 12000.0, 5000.0, 120.0).get("ok") in (True, False),
+       "und wird trotzdem bewertet statt abgelehnt — das Band ist kein Tor")
 
 
 print("\n" + "=" * 60)

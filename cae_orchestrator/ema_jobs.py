@@ -63,17 +63,50 @@ def _save():
 
 def init(executors):
     """Von server.py beim Import aufgerufen: Executors registrieren, Store laden,
-    verwaiste 'läuft'-Jobs (Server-Neustart/-Absturz) als abgebrochen markieren und —
-    falls wartende Jobs existieren und nicht pausiert ist — den Worker starten."""
+    verwaiste 'läuft'-Jobs als abgebrochen markieren — und bei offenen Aufträgen
+    die Warteschlange ANHALTEN statt sie weiterlaufen zu lassen.
+
+    Warum angehalten wird
+    ---------------------
+
+    Vorher startete der Worker nach jedem Serverstart sofort den ersten wartenden
+    Auftrag. Für den Absturz mitten in einer Zehnerreihe ist das richtig gedacht,
+    aus der Sicht des Menschen aber falsch: Ein Neustart hat meistens einen Grund
+    (etwas war kaputt, etwas wurde geändert, es sollte etwas anderes zuerst
+    laufen), und die Warteschlange fing stattdessen unbemerkt wieder an — beim
+    unterbrochenen Auftrag von vorn, weil ein abgebrochener Lauf keinen
+    Zwischenstand hat. Von aussen sieht das aus, als starte der Server alte Läufe
+    von selbst neu; genau das tat er auch.
+
+    Jetzt gilt: gab es beim Start offene Aufträge, wird ``halt`` gesetzt und der
+    Grund dazu. Es läuft nichts, bis jemand entscheidet — fortsetzen, umsortieren
+    oder verwerfen. Ohne offene Aufträge ändert sich nichts.
+    """
     global _store, _executors
     with _lock:
         _executors = dict(executors or {})
         _store = _load()
+        unterbrochen = []
         for j in _store["jobs"]:
             if j.get("status") == ST_RUN:
                 j["status"] = ST_ABORT
                 j["error"] = "Server-Neustart während der Ausführung"
                 j["finished"] = time.time()
+                unterbrochen.append(j["title"])
+        wartend = [j for j in _store["jobs"] if j.get("status") == ST_WAIT]
+        if wartend or unterbrochen:
+            teile = []
+            if unterbrochen:
+                teile.append(f"{len(unterbrochen)} Auftrag/Aufträge wurden vom Neustart "
+                             f"unterbrochen ({', '.join(unterbrochen[:3])})")
+            if wartend:
+                teile.append(f"{len(wartend)} warten noch "
+                             f"({', '.join(j['title'] for j in wartend[:3])})")
+            _store["config"]["halt"] = True
+            _store["config"]["halt_grund"] = (
+                "Nach dem Serverstart angehalten: " + " · ".join(teile)
+                + ". Nichts läuft, bis du entscheidest: fortsetzen, umsortieren "
+                  "oder verwerfen.")
         _save()
     _ensure_worker()
 
@@ -91,7 +124,7 @@ def _ensure_worker():
 
 def _next_waiting():
     with _lock:
-        if _store["config"].get("paused"):
+        if _store["config"].get("paused") or _store["config"].get("halt"):
             return None
         for j in _store["jobs"]:
             if j.get("status") == ST_WAIT:
@@ -177,7 +210,10 @@ def list_jobs():
     """Alle Jobs (ohne die Payloads — die können groß sein) + paused-Flag."""
     with _lock:
         jobs = [{k: v for k, v in j.items() if k != "payload"} for j in _store["jobs"]]
-        return {"paused": bool(_store["config"].get("paused")), "jobs": jobs}
+        return {"paused": bool(_store["config"].get("paused")),
+                "halt": bool(_store["config"].get("halt")),
+                "halt_grund": _store["config"].get("halt_grund", ""),
+                "jobs": jobs}
 
 
 def get_job(jid):
@@ -215,6 +251,71 @@ def clear_finished():
         _store["jobs"] = [j for j in _store["jobs"] if j.get("status") not in _FINISHED]
         _save()
         return before - len(_store["jobs"])
+
+
+def entscheiden(was: str) -> dict:
+    """Den Halt nach einem Serverstart aufloesen — bewusst, nicht nebenbei.
+
+    ``weiter``    die wartenden Auftraege laufen in der abgelegten Reihenfolge.
+    ``verwerfen`` alle wartenden werden abgebrochen; nichts laeuft an.
+    """
+    if was not in ("weiter", "verwerfen"):
+        raise ValueError(f"unbekannte Entscheidung: {was!r}")
+    with _lock:
+        n = 0
+        if was == "verwerfen":
+            for j in _store["jobs"]:
+                if j.get("status") == ST_WAIT:
+                    j["status"], j["finished"] = ST_ABORT, time.time()
+                    j["error"] = "nach Serverstart verworfen"
+                    n += 1
+        _store["config"]["halt"] = False
+        _store["config"]["halt_grund"] = ""
+        _save()
+    _ensure_worker()
+    return {"ok": True, "entscheidung": was, "verworfen": n}
+
+
+def vorziehen(jid: str) -> dict:
+    """Einen wartenden Auftrag an den Anfang der Warteschlange stellen.
+
+    Die Reihenfolge IST die Liste — der Worker nimmt den ersten wartenden. Damit
+    ist Umsortieren die dritte Antwort auf die Frage nach einem Neustart: nicht
+    nur „weiter oder weg", sondern „erst das hier".
+    """
+    with _lock:
+        job = next((j for j in _store["jobs"] if j.get("id") == jid), None)
+        if not job:
+            return {"ok": False, "grund": "unbekannter Auftrag"}
+        if job.get("status") != ST_WAIT:
+            return {"ok": False, "grund": f"nur wartende Auftraege ({job['status']})"}
+        erste = next((i for i, j in enumerate(_store["jobs"])
+                      if j.get("status") == ST_WAIT), None)
+        _store["jobs"].remove(job)
+        _store["jobs"].insert(erste if erste is not None else 0, job)
+        _save()
+    return {"ok": True, "id": jid}
+
+
+def wiederholen(jid: str) -> dict:
+    """Einen abgebrochenen Auftrag erneut einreihen (als Kopie am Ende).
+
+    Ausdruecklich auf Zuruf: ein vom Neustart unterbrochener Lauf hat keinen
+    Zwischenstand, er finge von vorn an — das soll ein Mensch entscheiden.
+    """
+    with _lock:
+        job = next((j for j in _store["jobs"] if j.get("id") == jid), None)
+        if not job:
+            return {"ok": False, "grund": "unbekannter Auftrag"}
+        if job.get("status") not in _FINISHED:
+            return {"ok": False, "grund": "laeuft oder wartet bereits"}
+        neu = dict(job, id=uuid.uuid4().hex[:10], status=ST_WAIT,
+                   created=time.time(), started=None, finished=None,
+                   error=None, project_id=None)
+        _store["jobs"].append(neu)
+        _save()
+    _ensure_worker()
+    return {"ok": True, "id": neu["id"]}
 
 
 def set_paused(paused):

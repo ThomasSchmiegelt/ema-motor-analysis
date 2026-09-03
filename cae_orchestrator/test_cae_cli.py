@@ -153,6 +153,42 @@ def test_run_routes_have_status_paths():
     print("✓ run_routes: Start- und Statusroute je Stufe getrennt gefuehrt")
 
 
+def test_em3d_run_binds_its_project():
+    """Ein 3D-Lauf gehoert in das Projekt, dessen Payload er rechnet.
+
+    ``/em3d`` nimmt ohne ``project_id`` das im Server zuletzt aktive Projekt. Das
+    muss nicht dasselbe sein: dann liegen 2D und 3D derselben Maschine in zwei
+    Projekten, und ``em3d.compare_2d`` vergleicht zwei Fremde.
+    """
+    class Args:
+        stage = "em3d"; frisch = False; payload_file = None; payload = None
+        from_project = "PRJ_TEST"; url = None; set = []; force = False
+        dry_run = True; json = True; wait = False
+    import os, json as _json, tempfile
+    wurzel = tempfile.mkdtemp(prefix="cli_em3d_")
+    alt_root = cae_cli.PROJECTS_ROOT
+    try:
+        cae_cli.PROJECTS_ROOT = wurzel
+        pdir = os.path.join(wurzel, "PRJ_TEST")
+        os.makedirs(pdir)
+        with open(os.path.join(pdir, "meta.json"), "w", encoding="utf-8") as f:
+            _json.dump({"payload": {"geom": {"p": 4}, "rpm": 3000}}, f)
+        a = Args()
+        pl = cae_cli._load_payload(a)
+        assert getattr(a, "_pid", "") == "PRJ_TEST", "die Kennung muss haengenbleiben"
+        # dieselbe Bindung, wie cmd_run sie vornimmt
+        if a.stage in ("em3d", "em3d_sweep") and not pl.get("project_id"):
+            pl["project_id"] = a._pid
+        assert pl["project_id"] == "PRJ_TEST"
+    finally:
+        cae_cli.PROJECTS_ROOT = alt_root
+        import shutil; shutil.rmtree(wurzel, ignore_errors=True)
+    quelle = open(cae_cli.__file__, encoding="utf-8").read()
+    assert 'if args.stage in ("em3d", "em3d_sweep"):' in quelle, \
+        "cmd_run muss die Bindung wirklich vornehmen, nicht nur der Test"
+    print("✓ em3d: der 3D-Lauf traegt die Projektkennung seines Payloads")
+
+
 def test_rotor_check_verb_is_registered():
     """Das zehnte Verb muss im Parser stehen — und die Doku muss es kennen.
 
@@ -311,6 +347,7 @@ if __name__ == "__main__":
     test_dotted_path_is_still_checked()
     test_value_parsing()
     test_run_routes_have_status_paths()
+    test_em3d_run_binds_its_project()
     test_rotor_check_verb_is_registered()
     test_rotor_check_runs_without_server()
     test_adv_params()
