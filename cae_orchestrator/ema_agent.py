@@ -311,6 +311,57 @@ def _umgebung(pfade=PI_PFADE) -> dict:
     return env
 
 
+def _zerlegen(inhalt: str) -> list:
+    """Den Inhalt einer ``role='tool'``-Zeile in die einzelnen Ergebnisse zerlegen.
+
+    Eine Zeile traegt **nicht immer genau ein** JSON-Objekt: gemessen enthaelt
+    sie auch mehrere HINTEREINANDER geschriebene (``json.loads`` scheitert dort
+    mit „Extra data: line 3 column 1"). Das passiert, wenn das Modell mehrere
+    Werkzeuge in einem Zug aufruft -- also genau in dem Fall, um dessentwillen
+    hier ueberhaupt nachgelesen wird. Ein einzelnes ``loads`` haette dann die
+    rohe Huelle angezeigt statt der drei Ergebnisse darin.
+
+    Nutzlast ist ``output`` (Terminal) bzw. ``content`` (Dateilesen); was sich
+    gar nicht lesen laesst, wird roh durchgereicht statt verschluckt.
+    """
+    inhalt = inhalt.strip()
+    if not inhalt:
+        return []
+    leser, aus, i = json.JSONDecoder(), [], 0
+    while i < len(inhalt):
+        try:
+            d, ende = leser.raw_decode(inhalt, i)
+        except ValueError:
+            break
+        if isinstance(d, dict):
+            stueck = d.get("output")
+            if stueck is None:
+                stueck = d.get("content")
+            fehler = str(d.get("error") or "").strip()
+            text = str(stueck if stueck is not None else d)
+            if fehler:
+                text = (text + "\n" if text else "") + f"FEHLER: {fehler}"
+            code = d.get("exit_code")
+            if code not in (None, 0):
+                text += f"\n(Exit {code})"
+            aus.append(text)
+        else:
+            aus.append(str(d))
+        i = ende
+        while i < len(inhalt) and inhalt[i] in " \t\r\n":
+            i += 1
+    # Was hinter dem letzten Objekt steht, ist KEIN weiteres Ergebnis: gemessen
+    # haengt Hermes dort Kontext an, den es dem Modell mitgibt (etwa
+    # „[Subdirectory context discovered: …]" samt ganzer CLAUDE.md, 8.000
+    # Zeichen). In die Ergebniskachel gehoert das nicht -- sie zeigt, was das
+    # WERKZEUG ausgegeben hat. Verschluckt wird es trotzdem nicht: eine Zeile
+    # sagt, dass da noch etwas war und wie viel.
+    if aus and i < len(inhalt) and inhalt[i:].strip():
+        aus[-1] += (f"\n\n[+{len(inhalt) - i} Zeichen Kontext, die Hermes dem "
+                    f"Modell angehaengt hat — kein Werkzeugergebnis]")
+    return aus or [inhalt]
+
+
 class Kopf:
     """Ein laufender Agentenprozess samt Ereignisstrom -- ohne sein Protokoll.
 
@@ -996,6 +1047,17 @@ class Kopf:
         return {"ok": True, "pfad": md, "ordner": ordner,
                 "kacheln": kacheln, "ereignisse": len(ring)}
 
+    def tempo(self) -> dict:
+        """Erzeugungstempo in Token je Sekunde -- wenn der Kopf es hergibt.
+
+        Die Basis kann es nicht: aus einem Textstrom laesst sich die Zeichenzahl
+        messen, aber nicht die Tokenzahl. Wer sie aus Zeichen SCHAETZT, schreibt
+        eine Zahl hin, die wie eine Messung aussieht. Also gibt es hier nichts,
+        und die Seite zeigt statt dessen ihr gemessenes ZEICHEN-Tempo -- als
+        das, was es ist.
+        """
+        return {"da": False}
+
     def zustand(self) -> dict:
         return {"laeuft": self.laeuft, "beschaeftigt": self.beschaeftigt,
                 "start_ts": round(self.start_ts, 3), "ordner": self.ordner,
@@ -1172,6 +1234,8 @@ class HermesKopf(Kopf):
     def __init__(self):
         super().__init__()
         self._offene_wz: dict = {}   # toolCallId -> Titel, s. u.
+        self._zug_ts = 0.0            # Beginn des laufenden Zuges
+        self._tempo_probe = None      # (Zeit, Ausgabetoken) der letzten Messung
         self._id = 0                  # laufende JSON-RPC-Nummer
         self._sid = ""                # ACP-Sitzung
         self._zug_id = 0              # Anfrage, deren Antwort das Zugende ist
@@ -1291,6 +1355,7 @@ class HermesKopf(Kopf):
             self._id += 1
             nr = self._id
         self._zug_id = nr
+        self._zug_ts = time.time()
         self.proc.stdin.write(json.dumps(
             {"jsonrpc": "2.0", "id": nr, "method": "session/prompt",
              "params": {"sessionId": self._sid,
@@ -1404,6 +1469,100 @@ class HermesKopf(Kopf):
         elif art == "usage_update":
             self._sende("kontext", genutzt=upd.get("used"), gross=upd.get("size"))
 
+    # Wo Hermes seine Sitzung fuehrt. Die Werkzeugergebnisse stehen dort als
+    # Zeilen mit ``role='tool'`` -- also GENAU das, was ACP bei mehreren
+    # Werkzeugen je Zug nicht schickt.
+    ZUG_NACHLESE_MAX = 24
+
+    def _ergebnisse_nachlesen(self, seit: float) -> list:
+        """Die Werkzeugergebnisse dieses Zuges aus Hermes' eigener Ablage holen.
+
+        Der Grund ist der gemessene ACP-Fehler (s. ``_neue_rechnungen``): ruft
+        das Modell in EINEM Zug mehrere Werkzeuge auf, kommt je Aufruf ein
+        ``tool_call``, aber kein ``tool_call_update`` -- die Ergebnisse
+        erreichen den Klienten nie. Sie sind aber nicht verloren: Hermes
+        schreibt sie in ``<HERMES_HOME>/state.db`` (Tabelle ``messages``,
+        ``role='tool'``, Inhalt als JSON mit ``output`` bzw. ``content``), denn
+        das Modell bekommt sie ja auch. Von dort werden sie hier nachgelesen.
+
+        **Nur lesend und mit Zeitgrenze.** Die Datenbank gehoert dem laufenden
+        Hermes; ein Schreibzugriff oder eine lange Sperre von hier waere ein
+        Eingriff in seinen Betrieb. ``mode=ro`` plus ``timeout`` heisst im
+        schlechtesten Fall: keine Nachlese, und dann steht wieder der ehrliche
+        Platzhalter da.
+        """
+        heim = self._hermes_heim()
+        if not heim:
+            return []
+        pfad = os.path.join(heim, "state.db")
+        if not os.path.isfile(pfad):
+            return []
+        try:
+            import sqlite3
+            verb = sqlite3.connect(f"file:{pfad}?mode=ro", uri=True, timeout=2.0)
+        except Exception:                                    # noqa: BLE001
+            return []
+        try:
+            frage = ("select tool_name, content from messages "
+                     "where role='tool' and timestamp >= ? "
+                     + ("and session_id = ? " if self._sid else "")
+                     + "order by timestamp, id limit ?")
+            werte = ([seit - 1.0] + ([self._sid] if self._sid else [])
+                     + [self.ZUG_NACHLESE_MAX])
+            zeilen = list(verb.execute(frage, werte))
+        except Exception:                                    # noqa: BLE001
+            return []
+        finally:
+            try:
+                verb.close()
+            except Exception:                                # noqa: BLE001
+                pass
+
+        aus = []
+        for name, inhalt in zeilen:
+            if isinstance(inhalt, (bytes, bytearray)):
+                inhalt = inhalt.decode("utf-8", "replace")
+            for text in _zerlegen(str(inhalt or "")):
+                aus.append({"name": str(name or "werkzeug"), "text": text})
+        return aus
+
+    def tempo(self) -> dict:
+        """Exakte Ausgabetoken je Sekunde -- aus Hermes' eigener Buchfuehrung.
+
+        ``session_model_usage`` in ``state.db`` fuehrt je Sitzung
+        ``input_tokens`` und ``output_tokens`` mit. Zwei Abfragen im Abstand
+        weniger Sekunden geben also die **gemessene** Rate, nicht eine aus
+        Zeichen hochgerechnete. Der ``task``-Eintrag (``title_generation``)
+        bleibt draussen: er gehoert nicht zu der Antwort, die gerade entsteht.
+        """
+        heim = self._hermes_heim()
+        if not heim or not self._sid:
+            return {"da": False}
+        pfad = os.path.join(heim, "state.db")
+        if not os.path.isfile(pfad):
+            return {"da": False}
+        try:
+            import sqlite3
+            verb = sqlite3.connect(f"file:{pfad}?mode=ro", uri=True, timeout=1.5)
+            zeile = verb.execute(
+                "select sum(input_tokens), sum(output_tokens), sum(api_call_count) "
+                "from session_model_usage where session_id = ? "
+                "and (task is null or task = '')", (self._sid,)).fetchone()
+            verb.close()
+        except Exception:                                    # noqa: BLE001
+            return {"da": False}
+        if not zeile or zeile[1] is None:
+            return {"da": False}
+        ein, aus, rufe = int(zeile[0] or 0), int(zeile[1] or 0), int(zeile[2] or 0)
+        jetzt = time.time()
+        vorher = self._tempo_probe
+        self._tempo_probe = (jetzt, aus)
+        rate = None
+        if vorher and jetzt > vorher[0] + 0.5 and aus >= vorher[1]:
+            rate = (aus - vorher[1]) / (jetzt - vorher[0])
+        return {"da": True, "ein": ein, "aus": aus, "rufe": rufe,
+                "tok_s": round(rate, 1) if rate is not None else None}
+
     def _offene_werkzeuge_abschliessen(self) -> None:
         """Werkzeugaufrufe benennen, zu denen ACP nie ein Ergebnis geschickt hat.
 
@@ -1422,13 +1581,36 @@ class HermesKopf(Kopf):
         ueber ``_rechnungen_melden`` an -- unabhaengig von diesem Fehler.
         """
         offen, self._offene_wz = dict(self._offene_wz), {}
-        for titel in offen.values():
+        if not offen:
+            return
+        # Erst die Nachlese: die Ergebnisse SIND da, ACP hat sie nur nicht
+        # geschickt. Zugeordnet wird der REIHE nach -- Aufrufe und Ergebnisse
+        # stehen beide in der Reihenfolge, in der sie entstanden. Eine Zuordnung
+        # ueber die Kennung geht nicht: ACP vergibt ``tc-…``, die Ablage
+        # ``call_…``; das sind zwei Nummernkreise.
+        nachgelesen = self._ergebnisse_nachlesen(self._zug_ts or 0.0)
+        # Nur so viele, wie offen sind, und nur vom Ende her: was vorher schon
+        # ueber ein ordentliches ``tool_call_update`` kam, steht bereits rechts.
+        if len(nachgelesen) > len(offen):
+            nachgelesen = nachgelesen[-len(offen):]
+
+        titel = list(offen.values())
+        for i, t in enumerate(titel):
+            treffer = nachgelesen[i] if i < len(nachgelesen) else None
+            if treffer and str(treffer["text"]).strip():
+                text = f"{t}\n\n{treffer['text']}"
+                self._sende("ergebnis", name=treffer["name"], fehler=False,
+                            text=text[:MAX_AUSGABE],
+                            gekuerzt=len(text) > MAX_AUSGABE, voll=len(text),
+                            nachgelesen=True)
+                continue
             self._sende("ergebnis", name="ohne Rueckmeldung", fehler=False,
-                        text=(f"{titel}\n\n"
+                        text=(f"{t}\n\n"
                               "Hermes hat zu diesem Werkzeugaufruf KEIN Ergebnis "
                               "gemeldet (ACP schickt bei mehreren Werkzeugen in "
                               "einem Zug kein tool_call_update — gemessen mit "
-                              "hermes acp v0.20.5). Der Agent selbst hat es "
+                              "hermes acp v0.20.5), und in seiner Sitzungsablage "
+                              "stand dazu auch nichts. Der Agent selbst hat es "
                               "bekommen; hier ist es nicht bekannt. Was ein "
                               "cae_cli-Verb ablegt, erscheint trotzdem — es "
                               "kommt ueber den Projektordner, nicht ueber ACP."),

@@ -477,11 +477,28 @@ function links(art, text){
 }
 // Deltas an dieselbe Blase hängen, statt je Token ein Element zu erzeugen —
 // sonst stehen für zwei Wörter Antwort 75 Knoten im DOM.
+// Zeichentempo. Die Seite kann Zeichen exakt zaehlen, Token nicht — wer sie
+// aus Zeichen hochrechnet, schreibt eine Zahl hin, die wie eine Messung
+// aussieht. Also wird gezaehlt, was zaehlbar ist, und es heisst auch „Z/s".
+// Hermes liefert daneben ECHTE Token/s aus seiner eigenen Buchführung.
+let ZTEMPO = {zeichen: 0, t0: 0, rate: 0};
+function zeichenZaehlen(n){
+  const jetzt = Date.now() / 1000;
+  if(!ZTEMPO.t0 || jetzt - ZTEMPO.t0 > 3){
+    if(ZTEMPO.t0 && jetzt > ZTEMPO.t0)
+      ZTEMPO.rate = ZTEMPO.zeichen / (jetzt - ZTEMPO.t0);
+    ZTEMPO.t0 = jetzt; ZTEMPO.zeichen = 0;
+  }
+  ZTEMPO.zeichen += n;
+}
+
 function anfuegen(art, text){
   const merker = art === 'denken' ? 'blaseDenken' : 'blaseText';
   let b = art === 'denken' ? blaseDenken : blaseText;
   if(!b){ b = links(art, ''); if(art === 'denken') blaseDenken = b; else blaseText = b; }
-  b.textContent += text; runter($(SPALTEN.l));
+  b.textContent += text;
+  if(SPALTEN.l === 'links') zeichenZaehlen((text || '').length);
+  runter($(SPALTEN.l));
 }
 function denkenUm(){
   const zeig = $('c_denken').checked;
@@ -767,10 +784,24 @@ function arbeitZeigen(d){
                                   (x.mb ? ' ' + (x.mb/1024).toFixed(1) + ' GB' : '')).join(', ')
                                : 'keins geladen'));
   }
+  // 6) Tempo. Hermes führt seine Ausgabetoken selbst mit — das ist gemessen,
+  // nicht geschätzt. Wo das fehlt (PI), steht das Zeichentempo der Seite, und
+  // es steht auch „Z/s" dran.
+  const tp = d.tempo || {};
+  if(tp.da && tp.tok_s != null){
+    teile.push(lampe(tp.tok_s > 0.5, '⚡', 'Tempo',
+                     tp.tok_s.toFixed(1) + ' Tok/s · ' +
+                     (tp.aus || 0).toLocaleString('de') + ' aus'));
+  }else{
+    const zs = ZTEMPO.rate;
+    teile.push(lampe(zs > 1, '⚡', 'Tempo',
+                     zs > 0.05 ? zs.toFixed(0) + ' Z/s (Zeichen)' : '—'));
+  }
   ziel.innerHTML = teile.join('');
 
   const arbeitet = [r.an && 'Rechnung', re.an && 'Recherche', l.an && 'Löser',
-                    g.an && 'GPU'].filter(Boolean);
+                    g.an && 'GPU',
+                    (tp.da && tp.tok_s > 0.5) && 'Modell schreibt'].filter(Boolean);
   fuss.textContent = arbeitet.length
     ? 'arbeitet: ' + arbeitet.join(' · ')
     : 'nichts in Arbeit — der Agent denkt oder wartet auf dich.';

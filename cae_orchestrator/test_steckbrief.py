@@ -293,6 +293,8 @@ h._offene_wz = {}
 h._bild_marke = time.time() + 3600      # keine echten Bilder in diese Pruefung
 h._gesehen = set()
 h._offen = []
+h._zug_ts = 0.0
+h._hermes_heim = lambda: ""             # ohne Ablage: nur der Platzhalter
 gesendet = []
 h._sende = lambda art, **kw: gesendet.append({"art": art, **kw})
 upd = {"sessionUpdate": "tool_call", "toolCallId": "tc-1", "kind": "execute",
@@ -517,6 +519,99 @@ pruefe("block_eingabe" in html and "block_hinweis" in html
 pruefe("document.hidden" in html,
        "im verdeckten Reiter wird nicht abgefragt — eine Anzeige ist kein "
        "Messgeraet")
+
+# ── 12) Die stummen Werkzeuge nachlesen, statt sie zu beschriften ──────────
+print("\n[12] Nachlese aus Hermes' Sitzungsablage")
+
+# Der ACP-Fehler bleibt (er ist stromaufwaerts), aber die Ergebnisse SIND da:
+# Hermes schreibt sie in state.db, denn das Modell bekommt sie ja auch. Also
+# werden sie von dort geholt statt nur benannt.
+zerlegen = ema_agent._zerlegen
+pruefe(zerlegen('{"output": "hallo", "exit_code": 0}') == ["hallo"],
+       "ein Terminalergebnis wird ausgepackt")
+pruefe(zerlegen('{"content": "1|zeile", "total_lines": 1}') == ["1|zeile"],
+       "ein Dateilesen ebenso (`content` statt `output`)")
+pruefe(zerlegen('{"output": "a"}\n{"output": "b"}') == ["a", "b"],
+       "MEHRERE hintereinander geschriebene Objekte werden alle gefunden — "
+       "genau der Fall, um dessentwillen nachgelesen wird")
+mit_rest = zerlegen('{"output": "a"}\n\n[Subdirectory context discovered: x]\nlang')
+pruefe(len(mit_rest) == 1 and mit_rest[0].startswith("a")
+       and "Kontext" in mit_rest[0],
+       "angehaengter Modellkontext landet NICHT in der Ergebniskachel — wird "
+       "aber gemeldet statt verschluckt")
+pruefe("(Exit 3)" in zerlegen('{"output": "x", "exit_code": 3}')[0],
+       "ein Exit-Code ungleich 0 steht dabei")
+pruefe(zerlegen("kein json") == ["kein json"],
+       "was sich nicht lesen laesst, wird roh durchgereicht")
+
+with tempfile.TemporaryDirectory() as tmp:
+    import sqlite3
+    heim = os.path.join(tmp, "hermes")
+    os.makedirs(heim)
+    db = sqlite3.connect(os.path.join(heim, "state.db"))
+    db.execute("create table messages (id integer primary key, session_id text, "
+               "role text, content text, tool_name text, timestamp real)")
+    db.execute("create table session_model_usage (session_id text, task text, "
+               "input_tokens int, output_tokens int, api_call_count int)")
+    db.executemany("insert into messages (session_id, role, content, tool_name, "
+                   "timestamp) values (?,?,?,?,?)", [
+        ("s1", "tool", '{"output": "ERGEBNIS EINS", "exit_code": 0}', "terminal", 100.0),
+        ("s1", "tool", '{"content": "ERGEBNIS ZWEI"}', "read_file", 101.0),
+        ("s1", "tool", '{"output": "ZU ALT"}', "terminal", 10.0),
+    ])
+    db.executemany("insert into session_model_usage values (?,?,?,?,?)", [
+        ("s1", "", 1000, 500, 2), ("s1", "title_generation", 50, 10, 1)])
+    db.commit(); db.close()
+
+    h = ema_agent.HermesKopf.__new__(ema_agent.HermesKopf)
+    h._hermes_heim = lambda: heim
+    h._sid = "s1"
+    h._tempo_probe = None
+
+    erg = h._ergebnisse_nachlesen(99.0)
+    pruefe([e["text"] for e in erg] == ["ERGEBNIS EINS", "ERGEBNIS ZWEI"],
+           "die Ergebnisse dieses Zuges kommen zurueck, in der Reihenfolge")
+    pruefe(all(e["text"] != "ZU ALT" for e in erg),
+           "aeltere aus demselben Sitzungsverlauf nicht")
+    pruefe(erg[1]["name"] == "read_file", "mit dem Werkzeugnamen")
+
+    h._offene_wz = {"tc-1": "terminal: cae_cli.py health",
+                    "tc-2": "read: SKILL.md"}
+    h._zug_ts = 99.0
+    gesendet = []
+    h._sende = lambda art, **kw: gesendet.append({"art": art, **kw})
+    h._offene_werkzeuge_abschliessen()
+    pruefe(len(gesendet) == 2 and all(g["art"] == "ergebnis" for g in gesendet),
+           "beide stummen Aufrufe bekommen eine Kachel")
+    pruefe("ERGEBNIS EINS" in gesendet[0]["text"]
+           and "ERGEBNIS ZWEI" in gesendet[1]["text"],
+           "und darin steht das ECHTE Ergebnis, nicht mehr nur die Erklaerung, "
+           "warum keines da ist")
+    pruefe(all(g.get("nachgelesen") for g in gesendet),
+           "als nachgelesen gekennzeichnet")
+
+    h._offene_wz = {"tc-9": "terminal: irgendwas"}
+    h._zug_ts = 10_000.0            # nichts in der Ablage aus diesem Zeitraum
+    gesendet.clear()
+    h._offene_werkzeuge_abschliessen()
+    pruefe(len(gesendet) == 1 and "KEIN Ergebnis" in gesendet[0]["text"],
+           "findet die Nachlese nichts, steht wieder der ehrliche Platzhalter da")
+
+    t1 = h.tempo()
+    pruefe(t1["da"] and t1["aus"] == 500 and t1["ein"] == 1000,
+           "das Tempo kommt aus Hermes' eigener Buchfuehrung (exakte Token, "
+           "nicht aus Zeichen hochgerechnet)")
+    pruefe(t1["tok_s"] is None, "die erste Messung hat noch keine Rate")
+    time.sleep(0.7)
+    pruefe(h.tempo()["tok_s"] == 0.0,
+           "die zweite schon — hier 0, weil nichts dazugekommen ist")
+
+pruefe(ema_agent.Kopf.tempo(ema_agent.PiKopf())["da"] is False,
+       "PI fuehrt keine Token mit, und es wird auch nichts geschaetzt")
+
+pruefe("ZTEMPO" in html and "Z/s (Zeichen)" in html,
+       "wo kein Tokentempo da ist, misst die Seite ZEICHEN und sagt das auch")
+pruefe("Tok/s" in html, "wo eines da ist, steht es in Token")
 
 print(f"\n{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

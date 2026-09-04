@@ -4241,15 +4241,25 @@ def agent_arbeit():
     statt dass jenes den Server importierte: das waere ein Importzirkel und
     machte das Messmodul ohne laufenden Flask unpruefbar.
     """
-    import ema_arbeit
-    return jsonify(ema_arbeit.stand({
+    import ema_agent, ema_arbeit
+    k = _agent_kopf()
+    stand = ema_arbeit.stand({
         "Analyse": _state, "Bericht": _report_state, "3D-Feld": _em3d_state,
         "CAD": _cad_state, "Rauchtest": _smoke_state, "STEP-Import": _import_state,
         "Zielwertsuche": _opt_state, "KI-Entwurf": _design_state,
         "Magnetfeinschliff": _design_opt_state, "Parameterstudie": _study_state,
         "Studienbericht": _study_report_state, "Stroemung": _cfd_state,
         "Oelkuehlung": _oil_state, "Spruehtest": _spraytest_state,
-    }))
+    })
+    # Das Erzeugungstempo kann nur der Kopf sagen -- Hermes fuehrt es exakt mit
+    # (``session_model_usage``), PI nicht. Wo es fehlt, misst die Seite ihr
+    # eigenes Zeichentempo und sagt auch, dass es Zeichen sind.
+    try:
+        stand["tempo"] = k.tempo()
+    except Exception:                                        # noqa: BLE001
+        stand["tempo"] = {"da": False}
+    stand["laeuft"] = bool(k.laeuft)
+    return jsonify(stand)
 
 
 @app.route("/agent/laeufe")
