@@ -721,5 +721,125 @@ with tempfile.TemporaryDirectory() as tmp:
 
 pruefe('@app.route("/agent/video/marke"' in quelle_srv, "die Route gibt es")
 
+# ── 15) Rechenguete: Entwurf gegen Detail ──────────────────────────────────
+print("\n[15] Guete — schnell entscheiden, spaet genau rechnen")
+
+import ema_text2ema as T2E
+pruefe(set(T2E.GUETE) == {"entwurf", "detail"}, "es gibt zwei Stufen")
+e, dt = T2E.GUETE["entwurf"]["felder"], T2E.GUETE["detail"]["felder"]
+pruefe(e["fdm_resolution"] >= 300 and dt["fdm_resolution"] >= 300,
+       "KEINE Stufe geht unter N=300 — gemessen knickt die Form der "
+       "Luftspaltwelle dort ein, darunter liegt sie um die Haelfte daneben")
+pruefe(e["fdm_resolution"] < dt["fdm_resolution"]
+       and e["struct_mesh_mm"] > dt["struct_mesh_mm"]
+       and e["n_frames"] < dt["n_frames"],
+       "Entwurf ist in jeder Achse groeber als Detail")
+pruefe(e["struct_solver"] == "ccx" and dt["struct_solver"] == "freecad",
+       "der Entwurf nimmt den eigenen Rechensatz (Sekunden), das Detail "
+       "FreeCAD (der einzige Weg zu Verformungsbildern)")
+
+pl = {"geom": {}}
+gesetzt = T2E.guete_anwenden(pl, "entwurf")
+pruefe(pl["fdm_resolution"] == 300 and set(gesetzt) == set(e),
+       "guete_anwenden schreibt die Felder in den Payload")
+try:
+    T2E.guete_anwenden(pl, "mittel")
+    pruefe(False, "eine unbekannte Stufe wird abgewiesen")
+except ValueError:
+    pruefe(True, "eine unbekannte Stufe wird abgewiesen")
+
+# Die Oberflaeche hatte die Tabelle zuerst. Zwei Kopien laufen auseinander --
+# also wird die JS-Kopie gegen die Python-Tabelle festgenagelt, genau wie
+# test_topology.py es fuer die Topologien tut.
+ema = open(os.path.join(HIER, "ema.html"), encoding="utf-8").read()
+js = ema[ema.index("const CALC_PRESETS"):]
+js = js[:js.index("};") + 2]
+for stufe, felder in (("entwurf", e), ("detail", dt)):
+    block = js[js.index(stufe + ":"):]
+    block = block[:block.index("},")]
+    def _js(v):
+        if v is True:
+            return "true"
+        if v is False:
+            return "false"
+        return f"'{v}'" if isinstance(v, str) else str(v)
+    fehlt = [f"{k}={v}" for k, v in felder.items() if f"{k}: {_js(v)}" not in block]
+    pruefe(not fehlt,
+           f"die JS-Voreinstellung '{stufe}' stimmt mit ema_text2ema.GUETE ueberein"
+           + (f" — abweichend: {', '.join(fehlt)}" if fehlt else ""))
+
+pruefe("--guete" in quelle and 'choices=["entwurf", "detail"]' in quelle,
+       "`run --guete` gibt es — vorher konnte ein Agent die Guete GAR NICHT "
+       "waehlen: die Schluessel stehen in keinem Schema, und --set wies sie ab")
+pruefe("guete_anwenden(payload, args.guete)" in quelle,
+       "und es wirkt auf den Payload, nicht nur auf die Hilfe")
+
+pruefe("schleifen" in quelle_srv and "ARBEITSWEISE" in quelle_srv,
+       "die Zahl der Entwurfsschleifen geht als stehender Auftrag mit")
+pruefe('id="f_schleifen"' in html and "schleifen: parseInt" in html,
+       "und der Mensch gibt sie in der Startmaske vor — nicht der Agent")
+
+
+# ── 16) Vollwelle oder Hohlwelle ───────────────────────────────────────────
+print("\n[16] Die Welle — gemessen statt geraten")
+
+import ema_welle
+pruefe(ema_welle.SCHWELLE_T == 0.05,
+       "die Schwelle ist konservativ: weit unter allem, was im Eisen zaehlt, "
+       "und weit ueber dem Rauschen des Loesers")
+pruefe(ema_welle.MIN_BOHRUNG_MM >= 5,
+       "unter einer Mindestbohrung lohnt keine — dann ist Vollwelle die "
+       "einfachere Antwort")
+
+import numpy as _np
+# Ein gebautes Feld: innen frei, ab r=30 mm Fluss. Damit ist der Befund
+# nachrechenbar, ohne einen Loeserlauf in den Test zu haengen.
+n = 201
+yy, xx = _np.mgrid[0:n, 0:n]
+r = _np.hypot(xx - 100, yy - 100) * 0.5          # 0.5 mm je Pixel -> r bis 50
+B = _np.where(r < 30, 0.0, 1.2)
+prof = ema_welle._profil(B, r, 50.0)
+pruefe(prof[0]["b_p95_T"] == 0.0 and prof[-1]["b_p95_T"] > 1.0,
+       "das radiale Profil trennt den freien Kern vom flussfuehrenden Ring")
+
+class _Feld:
+    @staticmethod
+    def feld_rechnen(geom, **kw):
+        return {"B": B, "r_mm": r}
+
+sys.modules["ema_feldbild"] = _Feld
+try:
+    b = ema_welle.pruefen({"shaftD": 40, "shaftBoreD": 0, "rotorOD": 100})
+    pruefe(b["empfehlung"] == "hohlwelle" and b["bohrung"]["hoechstens_mm"] > 10,
+           "eine Welle im freien Kern darf gebohrt werden")
+    pruefe(b["aendern"] == {"shaftBoreD": b["bohrung"]["hoechstens_mm"]},
+           "und der Befund sagt, WIE gross — als fertige --set-Zuweisung")
+
+    b2 = ema_welle.pruefen({"shaftD": 24, "shaftBoreD": 0, "rotorOD": 100})
+    pruefe(b2["bohrung"]["hoechstens_mm"] <= 22,
+           "die Bohrung wird bei shaftD-2 gedeckelt — genau dort setzt "
+           "ema_text2ema sie sonst stillschweigend auf 0 zurueck")
+
+    B[:] = 1.2                                  # ueberall Fluss, auch im Kern
+    b3 = ema_welle.pruefen({"shaftD": 40, "shaftBoreD": 20, "rotorOD": 100})
+    pruefe(b3["empfehlung"] == "vollwelle" and b3["aendern"] == {"shaftBoreD": 0.0},
+           "laeuft Fluss bis in den Kern, ist die Vollwelle noetig — und die "
+           "vorhandene Bohrung wird zum Streichen vorgeschlagen")
+    pruefe("MAGNETISCH" in b3["vorbehalt"] and "Festigkeit" in b3["vorbehalt"],
+           "der Befund sagt dazu, dass er magnetisch ist und die Festigkeit "
+           "nicht ersetzt")
+finally:
+    del sys.modules["ema_feldbild"]
+
+pruefe("cmd_welle" in quelle and 'add_parser("welle"' in quelle,
+       "das Verb ist verdrahtet")
+pruefe('_ablegen(args, "welle"' in quelle,
+       "und legt seinen Befund im Projekt ab")
+pruefe("cae_cli.py welle" in quelle_srv,
+       "der stehende Auftrag sagt dem Agenten, dass ER darueber entscheidet — "
+       "und womit er es misst")
+pruefe("| `welle`" in skill and "cae_cli.py welle" in skill,
+       "und es steht als eigenes Verb in der SKILL.md, die beide Koepfe lesen")
+
 print(f"\n{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

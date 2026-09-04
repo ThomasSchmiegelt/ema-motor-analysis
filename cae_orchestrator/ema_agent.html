@@ -198,8 +198,20 @@
       </div>
     </div>
 
-    <label for="f_modell">Modell</label>
-    <input type="text" id="f_modell" value="">
+    <div class="zeile">
+      <div>
+        <label for="f_modell">Modell</label>
+        <input type="text" id="f_modell" value="">
+      </div>
+      <div>
+        <label for="f_schleifen">Entwurfsschleifen</label>
+        <input type="number" id="f_schleifen" value="3" min="0" max="20" step="1">
+        <div class="hint" style="margin:5px 0 0;font-size:11.5px;color:var(--tx2)">
+          So viele Runden rechnet er schnell (Minuten, gleiche Kennwerte) und
+          entscheidet dazwischen. Erst danach EIN genauer Lauf. 0 = sofort genau.
+        </div>
+      </div>
+    </div>
 
     <div id="f_vorgabe" style="display:none;margin-top:14px;padding:9px 11px;
          border:1px solid #2c5a45;border-radius:8px;background:#0f1c17;
@@ -383,7 +395,11 @@ async function starten(){
     modell:  $('f_modell').value.trim(),
     projekt: $('f_projekt').value,
     sitzung: $('f_sitzung').value,
-    prompt:  $('f_prompt').value.trim()
+    prompt:  $('f_prompt').value.trim(),
+    // Der Mensch gibt die Zahl vor, nicht der Agent. Ohne sie fällt er in eines
+    // von zwei Extremen: EIN Detaillauf von Stunden, an dem sich nichts mehr
+    // entscheiden lässt — oder endloses Herumprobieren.
+    schleifen: parseInt($('f_schleifen').value, 10)
   };
   try{
     const a = await (await fetch(K('/agent/start'), {method:'POST',

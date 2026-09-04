@@ -513,6 +513,21 @@ def cmd_run(args) -> int:
     path, status_path = route
     payload = _load_payload(args)
 
+    # Rechenguete. Die Regler dafuer (Aufloesung, Netzweite, Bildzahl) stehen in
+    # KEINEM Schema -- sie beschreiben nicht die Maschine, sondern wie genau
+    # gerechnet wird. Genau deshalb konnte ein Agent sie bisher gar nicht
+    # waehlen: '--set fdm_resolution=300' wurde als unbekannt abgewiesen, und
+    # jeder Entwurfsversuch lief in Detailgenauigkeit. Die Oberflaeche hatte die
+    # Tabelle laengst, die Kommandozeile nicht.
+    if getattr(args, "guete", None):
+        import ema_text2ema as T2E
+        try:
+            gesetzt = T2E.guete_anwenden(payload, args.guete)
+        except ValueError as e:
+            return _die(str(e), EXIT_USAGE)
+        print(f"  Guete {T2E.GUETE[args.guete]['label']}: "
+              + ", ".join(f"{k}={v}" for k, v in gesetzt.items()))
+
     # Ein 3D-Lauf gehoert in DAS Projekt, dessen Payload er rechnet. Ohne
     # ``project_id`` nimmt ``/em3d`` das im Server zuletzt aktive Projekt -- und
     # das muss nicht dasselbe sein; dann liegen 2D und 3D derselben Maschine in
@@ -1484,6 +1499,56 @@ def cmd_feldbild(args) -> int:
     return 0
 
 
+def cmd_welle(args) -> int:
+    """Vollwelle oder Hohlwelle -- am Feld entschieden, nicht am Gefuehl.
+
+    Eine Bohrung spart Masse und Traegheit und nimmt Kuehlmittel oder eine
+    Steckverzahnung auf; sie ist erst dann falsch, wenn durch die Welle Fluss
+    laeuft. Genau das wird hier gemessen: ein FDM-Lauf, dann das radiale Profil
+    von |B| im Rotor, und daraus der groesste Radius, unter dem nirgends Fluss
+    steht.
+
+    Exit: 0 = Hohlwelle moeglich, 1 = Vollwelle noetig.
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    for a in applied:
+        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    geom = payload.get("geom") or {}
+    if not geom:
+        return _die("Keine Geometrie im Payload — welle braucht geom.", EXIT_USAGE)
+
+    import ema_welle
+    # Unter Last, wenn gewuenscht: der Ankerfluss verschiebt das Bild im Joch,
+    # und genau dort entscheidet sich, ob noch etwas in die Welle laeuft.
+    iq = float(getattr(args, "iq", 0.0) or 0.0)
+    id_ = float(getattr(args, "id_", 0.0) or 0.0)
+    if getattr(args, "last", False) and abs(iq) + abs(id_) < 0.1:
+        import ema_analysis as A
+        rpm = float(payload.get("rpm_to") or payload.get("rpm_from") or 5000.0)
+        iq, id_ = A.estimate_dq_currents(geom, rpm, float(payload.get("load_nm") or 0.0),
+                                         b_gap_t=A._analytical_Bgap(geom))
+        print(f"  Betriebspunkt: {rpm:.0f} 1/min -> i_q={iq:.0f} A, i_d={id_:.0f} A")
+
+    b = ema_welle.pruefen(geom, N=int(args.n), iq=iq, id_=id_,
+                          schwelle=float(args.schwelle))
+    if not b.get("ok"):
+        return _die(b.get("grund", "kein Befund"), EXIT_USAGE)
+    text = ema_welle.als_text(b)
+    if getattr(args, "json", False):
+        emit(b, args)
+    else:
+        print(text)
+    _ablegen(args, "welle", text, daten=b,
+             ok=(b["empfehlung"] == "hohlwelle"))
+    return EXIT_OK if b["empfehlung"] == "hohlwelle" else 1
+
+
 def cmd_rotor_check(args) -> int:
     """2D-Layoutgate lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
     Exit: 0 = Layout OK, 1 = Check abgelehnt (defekte Geometrie)."""
@@ -1939,6 +2004,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--wait", action="store_true", help="bis zum Abschluss warten")
     s.add_argument("--timeout", type=int, default=7200)
     s.add_argument("--poll", type=float, default=5.0)
+    s.add_argument("--guete", choices=["entwurf", "detail"],
+                   help="Rechenguete: 'entwurf' spielt durch (Minuten, gleiche "
+                        "Kennwerte, groebere Bilder), 'detail' rechnet die Zahl, "
+                        "die in den Bericht geht")
     _add_globals(s)
     s.set_defaults(fn=cmd_run)
 
@@ -2002,6 +2071,35 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_sicherheit)
+
+    s = sub.add_parser("welle",
+                       help="Vollwelle oder Hohlwelle? Misst am Feld, ob durch die "
+                            "Welle Fluss laeuft, und wie gross die Bohrung darf")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--n", type=int, default=420,
+                   help="Rasterweite des Feldlaufs (Vorgabe 420)")
+    s.add_argument("--schwelle", type=float, default=0.05,
+                   help="ab welcher Flussdichte [T] ein Bereich als flussfuehrend "
+                        "gilt (Vorgabe 0.05)")
+    s.add_argument("--last", action="store_true",
+                   help="unter Last statt im Leerlauf messen (i_q/i_d aus dem Payload)")
+    s.add_argument("--iq", type=float, default=0.0, help="q-Strom [A] von Hand")
+    s.add_argument("--id", type=float, default=0.0, dest="id_",
+                   help="d-Strom [A] von Hand")
+    s.add_argument("--projekt", help="Zielprojekt fuer die Ablage")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_welle)
 
     s = sub.add_parser("rotor-check",
                        help="2D Rotorlayout-Check (Taschen: Kollision/Stege/Containment) — ohne CAD, in ms")

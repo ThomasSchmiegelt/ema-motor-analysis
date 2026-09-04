@@ -43,6 +43,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `wait` | auf Abschluss warten |
 | `routes [--grep x]` | alle Serverrouten auflisten |
 | `steckbrief [id]` | **Was dieses Projekt IST und was daran gerechnet wurde** — Maschinenart, Pole/Nuten, Bauraum, Werkstoffe, Betriebspunkt, welche Stufen gelaufen sind, die Kennwerte **samt Herkunft**, und was offen ist. Rechnet nichts; was fehlt, steht als fehlend da. `--laeufe` listet zusätzlich die früheren Agentenläufe und die abgelegten Rechnungen |
+| `welle` | **Vollwelle oder Hohlwelle — gemessen.** Rechnet EIN Feld und sagt, ob durch die Welle Fluss läuft und wie groß die Bohrung höchstens sein darf. Exit 0 = Hohlwelle möglich, 1 = Vollwelle nötig |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
 | `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Dreizehn Achsen (Magnetanordnung, **V-Öffnungswinkel**, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge, **Wellendurchmesser**), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht**. 0,7 s, rein analytisch. `--referenz` zeigt statt eines Vergleichs die **recherchierten Vergleichswerte** mit Quellen |
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
@@ -451,6 +452,60 @@ ist eine Eigenschaft des Datensatzes und keine des Rotors.
 Was NICHT passiert: kein neuronales Netz, keine Heuristik-Vorbelegung der Bilder. Die
 Bewertungsseite zeigt das Bild und sonst nichts — wer eine Vermutung vorschlaegt,
 bekommt sie bestaetigt zurueck.
+
+### Erst schnell entscheiden, dann genau rechnen — `--guete`
+
+```bash
+python3 cae_cli.py run analyse --frisch --guete entwurf --wait   # Minuten
+python3 cae_cli.py run analyse --from-project <pid> --guete detail --wait
+```
+
+**Das ist die wichtigste Arbeitsweise in diesem Werkzeug, und sie war dir bisher
+verschlossen:** die Regler für die Rechengüte (Auflösung, Netzweite, Bildzahl)
+stehen in **keinem** Schema, `--set fdm_resolution=300` wurde als unbekannt
+abgewiesen — jeder Entwurfsversuch lief also in Detailgenauigkeit, Stunden statt
+Minuten.
+
+| | `entwurf` | `detail` |
+|---|---|---|
+| FDM-Auflösung | 300 | 800 |
+| Struktur | eigener Satz (`ccx`), 4 mm | FreeCAD, 2,5 mm |
+| Bilder je Umlauf | 12 | 36 |
+| Drehzahlschritt | 1000 | 500 |
+| wofür | durchspielen, entscheiden, verwerfen | die Zahl, die in den Bericht geht |
+
+**Warum sich mit `entwurf` überhaupt entscheiden lässt** (gemessen am Projekt
+`20260827_170019_Alpenpass`): `B_gap` und `Kt` hängen **nicht** an der Auflösung
+— sie kommen aus der analytischen Formel. Ein Entwurfslauf verliert also keinen
+Kennwert, nur Bildschärfe und die Feinform der Luftspaltwelle. Deshalb geht auch
+keine Stufe unter N=300: darunter liegt die Wellenform um die Hälfte daneben.
+
+Der Mensch gibt dir in der Startmaske eine **Zahl von Entwurfsschleifen** vor.
+Halte dich daran: so viele schnelle Runden mit `--guete entwurf`, nach jeder
+`sicherheit --from-project <pid>` und daraus die nächste Änderung — und erst
+wenn ein Stand alle Kriterien hält, EIN Lauf mit `--guete detail`. Sag in jeder
+Antwort, in welcher Runde du bist. Brauchst du mehr, frag; laufe nicht
+stillschweigend weiter.
+
+
+### `welle` — Vollwelle oder Hohlwelle, und du entscheidest das
+
+```bash
+python3 cae_cli.py welle --from-project <pid>          # Leerlauf
+python3 cae_cli.py welle --from-project <pid> --last   # unter Last
+```
+
+Eine Wellenbohrung (`shaftBoreD`, 0 = Vollwelle) spart Masse und Trägheit und
+nimmt Kühlmittel oder eine Steckverzahnung auf — sie ist **erst dann falsch,
+wenn durch die Welle Fluss läuft**. Das ist messbar, also wird es gemessen: ein
+FDM-Lauf, das radiale Profil von |B| im Rotor, und daraus der größte Radius,
+unter dem nirgends Fluss steht.
+
+Der Befund sagt dir die Änderung fertig hin (`--set shaftBoreD=58.0`) — oder
+dass eine Vollwelle nötig ist. **Er ist magnetisch**: ob die Welle Moment und
+Fliehkraft trägt, sagt `struktur` bzw. `sicherheit`. Eine magnetisch
+unbedenkliche Bohrung kann mechanisch unzulässig sein; gib das so weiter.
+
 
 ### `steckbrief` — was dieses Projekt ist, bevor du etwas daran änderst
 

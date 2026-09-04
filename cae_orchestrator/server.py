@@ -4131,6 +4131,44 @@ def agent_start():
             zusatz += (f"Der Mensch hat das Projekt so beschrieben: \"{brief[:1200]}\" "
                        f"Das ist der Auftrag; frag nach, was darin offen bleibt, "
                        f"statt es zu erfinden. ")
+    # ── Entwurfsschleifen ───────────────────────────────────────────────────
+    #
+    # Der Mensch gibt die ZAHL vor, nicht der Agent. Ohne sie faellt er in eines
+    # von zwei Extremen: einen einzigen Detaillauf von Stunden, an dem sich
+    # nichts mehr entscheiden laesst -- oder endloses Herumprobieren. Beides
+    # wurde beobachtet.
+    #
+    # Die Guetestufen sind gemessen (ema_text2ema.GUETE): 'entwurf' liefert
+    # DIESELBEN Kennwerte wie 'detail' (B_gap und Kt kommen aus der analytischen
+    # Formel und haengen nicht an der Aufloesung), nur groebere Bilder und eine
+    # groebere Luftspaltwelle. Genau deshalb laesst sich damit entscheiden.
+    try:
+        schleifen = max(0, min(20, int(d.get("schleifen", 3))))
+    except (TypeError, ValueError):
+        schleifen = 3
+    if schleifen:
+        zusatz += (
+            f"ARBEITSWEISE: fahre die ersten {schleifen} Auslegungsrunden im "
+            f"ENTWURFSMODUS -- 'run analyse ... --guete entwurf' (Minuten statt "
+            f"Stunden; gleiche Kennwerte, nur groebere Bilder). Nach jeder Runde "
+            f"'sicherheit --from-project <pid>' und daraus die naechste Aenderung "
+            f"ableiten. Erst wenn ein Stand alle Kriterien haelt, EINEN Lauf mit "
+            f"'--guete detail' -- das ist die Zahl, die in den Bericht geht. Zaehle "
+            f"die Runden mit und sag, in welcher du bist. Brauchst du mehr als "
+            f"{schleifen} Runden, sag das und frag, statt stillschweigend "
+            f"weiterzulaufen. ")
+    else:
+        zusatz += ("ARBEITSWEISE: keine Entwurfsschleifen vorgegeben — rechne "
+                   "gleich mit '--guete detail'. ")
+    # Ueber die Welle entscheidest DU, und zwar gemessen:
+    zusatz += ("Ob die Maschine eine Vollwelle braucht, entscheidest du selbst und "
+               "MISST es: 'python3 cae_orchestrator/cae_cli.py welle --from-project "
+               "<pid>' rechnet ein Feld und sagt, ob durch die Welle Fluss laeuft "
+               "und wie gross die Bohrung hoechstens sein darf. Eine Bohrung spart "
+               "Masse und Traegheit und ist erst dann falsch, wenn sie im "
+               "magnetischen Pfad sitzt. Der Befund ist magnetisch — die "
+               "Festigkeit sagt 'struktur'/'sicherheit'. ")
+
     # Der 3D-Lauf steht auch im Skill, aber der Systemzusatz ueberlebt einen langen
     # Zug: das 2D-FDM-Feld ist zweidimensional, erst Elmer prueft es unabhaengig nach.
     # Fahrzyklus und Sicherheitskriterien: beides steht im Skill, aber beides ist

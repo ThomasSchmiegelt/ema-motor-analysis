@@ -115,6 +115,68 @@ SCHEMA = {
 }
 
 
+# ── Rechengüte: Entwurf gegen Detail ────────────────────────────────────────
+#
+# Gemessen am Projekt 20260827_170019_Alpenpass (vasym, p=3, 36 Nuten, Saettigung
+# an), ``run_em_analysis`` ueber die Aufloesung:
+#
+#   N             120     150     200     240     300     400     600
+#   Sekunden      0.54    1.13    3.53    4.79    9.18    20.9    68.75
+#   B_gap [T]     0.477   0.477   0.477   0.477   0.477   0.477   0.477
+#   Kt            0.031   0.031   0.031   0.031   0.031   0.031   0.031
+#   Br-Grundwelle -92.0%  -83.7%  -72.1%  -52.5%  -2.8%   +8.2%   0
+#
+# Zwei Befunde tragen die Voreinstellungen:
+#   1. ``B_gap`` und ``Kt`` haengen NICHT an N -- sie kommen aus
+#      ``_analytical_Bgap``. Ein Entwurfslauf verliert also keinen Kennwert, nur
+#      Bildschaerfe. Das ist der Grund, warum sich mit ``entwurf`` ueberhaupt
+#      entscheiden laesst.
+#   2. Die FORM der Luftspaltwelle knickt bei N=300 ein; darunter liegt sie um
+#      die Haelfte daneben. Deshalb geht KEINE Stufe unter 300.
+#
+# **Warum das hier steht und nicht nur in ``ema.html``:** die Oberflaeche hatte
+# diese Tabelle als ``CALC_PRESETS`` schon, die Kommandozeile nicht -- und die
+# Schluessel stehen in KEINEM Schema. Ein Agent konnte die Guete also gar nicht
+# waehlen (``--set fdm_resolution=300`` wurde als unbekannt abgewiesen) und
+# rechnete jeden Entwurfsversuch in Detailgenauigkeit. ``test_steckbrief.py``
+# nagelt die JS-Kopie gegen diese Tabelle fest, wie es ``test_topology.py`` fuer
+# die Topologien tut.
+GUETE = {
+    "entwurf": {
+        "label": "Entwurf",
+        "zweck": "durchspielen, entscheiden, verwerfen — Minuten statt Stunden",
+        "felder": {"n_frames": 12, "frame_resolution": 180, "fdm_resolution": 300,
+                   "rpm_step": 1000, "struct_solver": "ccx", "struct_mesh_mm": 4,
+                   "struct_img_px": 1500, "struct_video": False,
+                   "struct_frames": 20},
+    },
+    "detail": {
+        "label": "Detail",
+        "zweck": "die Zahl, die in den Bericht geht",
+        "felder": {"n_frames": 36, "frame_resolution": 300, "fdm_resolution": 800,
+                   "rpm_step": 500, "struct_solver": "freecad",
+                   "struct_mesh_mm": 2.5, "struct_img_px": 3000,
+                   "struct_video": True, "struct_frames": 48},
+    },
+}
+
+
+def guete_anwenden(payload: dict, stufe: str) -> dict:
+    """Die Guetefelder in einen Payload schreiben. Gibt die gesetzten zurueck.
+
+    Sie gehen NICHT durch die Schemapruefung: es sind Regler der Pipeline
+    (Aufloesung, Netzweite, Bildzahl), keine Groessen der Maschine. Im Schema
+    haetten sie nichts zu suchen -- dort steht, was die MASCHINE beschreibt.
+    """
+    stufe = str(stufe or "").lower()
+    if stufe not in GUETE:
+        raise ValueError(f"Unbekannte Guete '{stufe}'. Waehlbar: "
+                         + ", ".join(GUETE))
+    felder = GUETE[stufe]["felder"]
+    payload.update(felder)
+    return dict(felder)
+
+
 def _extract_obj(txt: str):
     m = re.search(r"\{.*\}", txt, re.DOTALL)
     if not m:
