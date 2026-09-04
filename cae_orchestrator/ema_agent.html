@@ -124,6 +124,8 @@
   .lampe.an{border-color:#2c5a45;color:#cfe}
   .lampe.an .pkt{background:var(--ok);animation:pulsen 1.4s ease-in-out infinite}
   .lampe.aus{opacity:.62}
+  .lampe.still{border-color:#5a4526;color:var(--warn)}
+  .lampe.still .pkt{background:var(--warn)}
   .lampe.fehlt{opacity:.4}
   @keyframes pulsen{0%,100%{opacity:1}50%{opacity:.25}}
   #ar_fuss{font:11px/1.3 var(--mono);color:var(--tx2);overflow:hidden;
@@ -696,7 +698,26 @@ setInterval(uhrTick, 1000);
 // meldet, welches Modell im Speicher LIEGT — nicht, ob es rechnet. Statt dessen
 // das geladene Modell samt Speicher und die Grafikkartenlast daneben; die ist
 // auf dieser Maschine der einzige belastbare Hinweis.
-let AR_TIMER = null, AR_FEHLER = 0;
+let AR_TIMER = null, AR_FEHLER = 0, HAENGT = false;
+// Schwellen in Sekunden. Sie müssen ÜBER der Dauer eines langen Werkzeugaufrufs
+// liegen: während `sleep 180 && status` kommt zu Recht nichts, und Hermes lässt
+// ein Werkzeug bis 420 s laufen. Darunter wäre die Warnung ein Fehlalarm.
+const STILL_WARNUNG = 120, STILL_FREIGABE = 450;
+
+function uhrKurz(s){
+  if(s == null) return '—';
+  return (s >= 60 ? Math.floor(s/60) + ':' + String(s%60).padStart(2,'0') : s + ' s');
+}
+
+async function freigeben(){
+  if(!confirm('Zugsperre lösen?\n\nDer Agent wird NICHT beendet — er läuft weiter. ' +
+              'Kommt doch noch eine Antwort, erscheint sie im Verlauf.')) return;
+  try{
+    const a = await (await fetch(K('/agent/freigeben'), {method:'POST'})).json();
+    if(!a.ok) links('fehl', '⚠ ' + (a.grund || 'nicht freigegeben'));
+  }catch(e){ links('fehl', '⚠ ' + e.message); }
+  arbeitTick();
+}
 
 function arbeitHoehe(){
   // Genau so hoch wie die beiden Eingabeblöcke links — gemessen, nicht geraten.
@@ -743,6 +764,35 @@ function arbeitZeigen(d){
     return;
   }
   const teile = [];
+
+  // 0) Der Agent selbst. „Arbeitet noch" war bisher eine Behauptung ohne Beleg —
+  // und wenn ein Zug hängt (gemessen: Hermes beendet ihn nie), stimmt sie nicht
+  // mehr, blockiert aber jede weitere Eingabe. Hier steht statt dessen, WIE
+  // LANGE nichts mehr kam.
+  const kp = d.kopf || {};
+  if(kp.laeuft){
+    const still = kp.still_sek == null ? null : Math.round(kp.still_sek);
+    if(!kp.prozess_lebt){
+      teile.push(lampe(false, '🤖', 'Agent', 'Prozess beendet', 'fehlt'));
+    }else if(kp.beschaeftigt){
+      const haengt = still != null && still >= STILL_WARNUNG;
+      teile.push(lampe(!haengt, '🤖', 'Agent',
+                       (haengt ? 'still seit ' : 'arbeitet · ') + uhrKurz(still),
+                       haengt ? 'still' : 'an'));
+      HAENGT = still != null && still >= STILL_FREIGABE;
+      // Auch die Pille oben korrigieren. Sie sagte bisher unbeirrt „arbeitet",
+      // auch wenn seit einer Viertelstunde nichts mehr kam — genau das war die
+      // Beschwerde („er sagt, dass der Agent arbeitet, tut er aber nicht").
+      const pille = $('p_zustand');
+      if(haengt && pille.textContent !== 'bereit')
+        pille.textContent = 'still seit ' + uhrKurz(still);
+      else if(!haengt && pille.textContent.startsWith('still'))
+        pille.textContent = 'arbeitet';
+    }else{
+      teile.push(lampe(false, '🤖', 'Agent', 'wartet auf dich'));
+      HAENGT = false;
+    }
+  }else{ HAENGT = false; }
 
   // 1) Rechnung auf dem Server
   const r = d.rechnung || {};
@@ -802,6 +852,16 @@ function arbeitZeigen(d){
   const arbeitet = [r.an && 'Rechnung', re.an && 'Recherche', l.an && 'Löser',
                     g.an && 'GPU',
                     (tp.da && tp.tok_s > 0.5) && 'Modell schreibt'].filter(Boolean);
+  if(HAENGT){
+    // Nur dann, und mit Ansage: der Prozess läuft weiter, und wenn doch noch
+    // eine Antwort kommt, mischt sie sich ein. Ein stiller Neustart des Zuges
+    // wäre schlimmer — dann liefen zwei nebeneinander, ohne dass es jemand weiß.
+    fuss.innerHTML = '<span style="color:var(--warn)">Der Zug ist seit ' +
+      uhrKurz(Math.round(d.kopf.still_sek)) + ' stumm und wurde nie beendet.</span> ' +
+      '<button class="kknopf" onclick="freigeben()" style="margin-left:6px">' +
+      '🔓 Sperre lösen</button>';
+    return;
+  }
   fuss.textContent = arbeitet.length
     ? 'arbeitet: ' + arbeitet.join(' · ')
     : 'nichts in Arbeit — der Agent denkt oder wartet auf dich.';

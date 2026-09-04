@@ -613,5 +613,52 @@ pruefe("ZTEMPO" in html and "Z/s (Zeichen)" in html,
        "wo kein Tokentempo da ist, misst die Seite ZEICHEN und sagt das auch")
 pruefe("Tok/s" in html, "wo eines da ist, steht es in Token")
 
+# ── 13) Ein Zug, der nie endet ─────────────────────────────────────────────
+print("\n[13] Haengender Zug — sichtbar und loesbar")
+
+k = ema_agent.PiKopf()
+k.laeuft = True
+k.proc = None
+pruefe(k.freigeben() == {"ok": True, "war_gesperrt": False},
+       "ohne Sperre ist Freigeben ein Nichtstun")
+
+k.beschaeftigt = True
+k.zug_ab = time.time() - 900
+k.letztes_ts = time.time() - 700
+z = k.zustand()
+pruefe(z["beschaeftigt"] and z["still_sek"] > 600,
+       "der Zustand sagt, wie lange schon NICHTS mehr kam — vorher war ein "
+       "haengender Zug von einem langen nicht zu unterscheiden")
+pruefe(z["zug_sek"] > 800 and z["prozess_lebt"] is False,
+       "dazu die Zugdauer und ob der Prozess ueberhaupt noch lebt")
+
+a = k.freigeben()
+pruefe(a["ok"] and a["war_gesperrt"] and a["still_sek"] > 600,
+       "die Sperre laesst sich loesen, ohne den Agenten zu beenden")
+pruefe(k.beschaeftigt is False, "danach nimmt er wieder Auftraege an")
+arten = [e["art"] for e in k.ring]
+pruefe(arten == ["fehler", "bereit"],
+       "im Verlauf steht, DASS von Hand geloest wurde, und dann erst 'bereit'")
+pruefe("laeuft weiter" in k.ring[0]["text"],
+       "und dass der Agent WEITERLAEUFT — ein stiller Neustart des Zuges waere "
+       "schlimmer, dann liefen zwei nebeneinander")
+pruefe(k.freigeben()["war_gesperrt"] is False, "zweimal loesen tut nichts")
+
+k.laeuft = False
+pruefe(k.freigeben()["ok"] is False, "ohne laufenden Agenten gibt es nichts zu loesen")
+
+pruefe('@app.route("/agent/freigeben"' in quelle_srv, "die Route gibt es")
+pruefe('stand["kopf"] = {' in quelle_srv,
+       "die Arbeitsleiste bekommt den Kopfzustand mitgeliefert")
+
+pruefe("STILL_WARNUNG = 120" in html and "STILL_FREIGABE = 450" in html,
+       "die Schwellen liegen UEBER der Dauer eines langen Werkzeugaufrufs "
+       "(Hermes laesst eines bis 420 s laufen) — darunter waere die Warnung "
+       "ein Fehlalarm")
+pruefe("still seit" in html and "🔓 Sperre lösen" in html,
+       "die Leiste zeigt die Stille und bietet erst dann das Loesen an")
+pruefe("pille.textContent = 'still seit '" in html,
+       "auch die Pille oben wird korrigiert — sie sagte unbeirrt 'arbeitet'")
+
 print(f"\n{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

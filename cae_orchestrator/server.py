@@ -4206,6 +4206,23 @@ def agent_hinweis():
     return jsonify(_agent_kopf().merken(text))
 
 
+@app.route("/agent/freigeben", methods=["POST", "OPTIONS"])
+def agent_freigeben():
+    """Die Zugsperre loesen, ohne den Agenten zu beenden.
+
+    Der Notausgang aus einem Zug, der nie endet -- gemessen am 04.09.: Hermes
+    schickte auf ``session/prompt`` keine Antwort mehr, ``beschaeftigt`` blieb
+    stehen, und jede weitere Eingabe wurde mit "Der Agent arbeitet noch"
+    abgewiesen. Der einzige Ausweg war bisher, den ganzen Lauf zu beenden und
+    die Sitzung zu verlieren.
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import ema_agent
+    a = _agent_kopf().freigeben()
+    return jsonify(a), (200 if a.get("ok") else 400)
+
+
 @app.route("/agent/stopp", methods=["POST", "OPTIONS"])
 def agent_stopp():
     if request.method == "OPTIONS":
@@ -4258,6 +4275,13 @@ def agent_arbeit():
         stand["tempo"] = k.tempo()
     except Exception:                                        # noqa: BLE001
         stand["tempo"] = {"da": False}
+    # Der Kopf selbst gehoert in die Leiste: "arbeitet noch" war bisher eine
+    # Behauptung ohne Beleg, und wenn ein Zug haengt, stimmt sie nicht mehr.
+    z = k.zustand()
+    stand["kopf"] = {"laeuft": z["laeuft"], "beschaeftigt": z["beschaeftigt"],
+                     "still_sek": z.get("still_sek"), "zug_sek": z.get("zug_sek"),
+                     "prozess_lebt": z.get("prozess_lebt"),
+                     "label": z.get("kopf_label")}
     stand["laeuft"] = bool(k.laeuft)
     return jsonify(stand)
 

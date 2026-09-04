@@ -442,9 +442,17 @@ class Kopf:
         self.ordner = ""                  # steht mit dem Start fest
         self._ordner_fuer = None          # fuer welches Projekt er gilt
         self._mit = None                  # offene Mitschrift (ereignisse.jsonl)
+        # Wann zuletzt IRGENDETWAS aus dem Agenten kam. Ohne diese Marke ist ein
+        # haengender Zug nicht von einem langen zu unterscheiden -- und genau
+        # das ist passiert: Hermes hat einen Zug nie beendet, ``beschaeftigt``
+        # blieb stehen, die Seite meldete stur "arbeitet noch", und es gab
+        # keinen Weg zurueck ausser den Agenten zu beenden.
+        self.letztes_ts = 0.0
+        self.zug_ab = 0.0                 # seit wann dieser Zug laeuft
 
     # ── Ereignisse verteilen ────────────────────────────────────────────────
     def _sende(self, art: str, **felder) -> None:
+        self.letztes_ts = time.time()
         with self.sperre:
             # Die Nummer zaehlt DURCH und ist nicht die Stelle im Ring: sobald der
             # Ring das erste Mal ueberlaeuft, waere die Stelle nicht mehr eindeutig,
@@ -665,6 +673,7 @@ class Kopf:
         if self.beschaeftigt:
             return {"ok": False, "grund": "Der Agent arbeitet noch."}
         self.beschaeftigt = True
+        self.zug_ab = time.time()
         self._sende("frage", text=text)
         try:
             self._prompt_senden(text)
@@ -672,6 +681,36 @@ class Kopf:
             self.beschaeftigt = False
             return {"ok": False, "grund": f"{type(e).__name__}: {e}"}
         return {"ok": True}
+
+    def freigeben(self) -> dict:
+        """Die Zugsperre loesen, ohne den Agenten zu beenden.
+
+        Der Notausgang aus einem Zug, der nie endet. Gemessener Fall: Hermes hat
+        auf ``session/prompt`` keine Antwort mehr geschickt -- kein Text, kein
+        Werkzeug, kein Fehler. Damit blieb ``beschaeftigt`` stehen, ``fragen()``
+        wies jede weitere Eingabe mit "Der Agent arbeitet noch" ab, und der
+        einzige Ausweg war, den ganzen Lauf zu beenden und die Sitzung zu
+        verlieren.
+
+        Was das NICHT tut: den Agenten anhalten. Der Prozess laeuft weiter, und
+        wenn doch noch eine Antwort kommt, erscheint sie im Strom. Das ist der
+        Preis und er wird auch so gesagt -- ein stiller Neustart des Zuges waere
+        schlimmer, weil dann zwei Zuege nebeneinander liefen, ohne dass es
+        jemand wuesste.
+        """
+        if not self.laeuft:
+            return {"ok": False, "grund": "Es laeuft kein Agent."}
+        if not self.beschaeftigt:
+            return {"ok": True, "war_gesperrt": False}
+        still = round(time.time() - (self.letztes_ts or self.zug_ab or time.time()), 1)
+        self.beschaeftigt = False
+        self._sende("fehler",
+                    text=(f"Zugsperre von Hand geloest — der Agent hat {still:.0f} s "
+                          f"lang nichts mehr gemeldet und den Zug nie beendet. Er "
+                          f"laeuft weiter; kommt doch noch eine Antwort, erscheint "
+                          f"sie hier."))
+        self._sende("bereit", grund="freigegeben", marken=None)
+        return {"ok": True, "war_gesperrt": True, "still_sek": still}
 
     def stoppen(self) -> dict:
         if not self.proc:
@@ -1059,7 +1098,14 @@ class Kopf:
         return {"da": False}
 
     def zustand(self) -> dict:
+        jetzt = time.time()
         return {"laeuft": self.laeuft, "beschaeftigt": self.beschaeftigt,
+                # Wie lange schon nichts mehr kam, und ob der Prozess ueberhaupt
+                # noch lebt. Beides zusammen unterscheidet "denkt nach" von
+                # "haengt" -- vorher sah beides gleich aus.
+                "still_sek": round(jetzt - self.letztes_ts, 1) if self.letztes_ts else None,
+                "zug_sek": round(jetzt - self.zug_ab, 1) if self.zug_ab and self.beschaeftigt else None,
+                "prozess_lebt": bool(self.proc and self.proc.poll() is None),
                 "start_ts": round(self.start_ts, 3), "ordner": self.ordner,
                 "projekt": self.projekt, "modell": self.modell,
                 "sitzung": self.sitzung, "fehler": self.fehler,
