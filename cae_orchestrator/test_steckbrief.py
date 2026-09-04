@@ -660,5 +660,66 @@ pruefe("still seit" in html and "🔓 Sperre lösen" in html,
 pruefe("pille.textContent = 'still seit '" in html,
        "auch die Pille oben wird korrigiert — sie sagte unbeirrt 'arbeitet'")
 
+# ── 14) Aufnahme: Marken statt Pausen ──────────────────────────────────────
+print("\n[14] Bildschirmaufnahme — die Momente rechts")
+
+# Die alte Regel war "Server rechnet -> Pause", begruendet damit, am Bild aendere
+# sich dann nichts. Gemessen falsch: im Lauf vom 04.09. kamen MITTEN im
+# Rechenlauf fuenf Bilder in die rechte Spalte. Angehalten wurde also genau
+# waehrend der Momente, die aufzuheben sich lohnt.
+pruefe("z.rechnet" not in html,
+       "die Aufnahme richtet sich NICHT mehr danach, ob der Server rechnet")
+pruefe("REK_NACHLAUF" in html and "rekTaetig(" in html,
+       "sondern nach Taetigkeit in der Ergebnisspalte")
+pruefe("k.dataset.markeArt = 'bild'" in html
+       and "k.dataset.markeArt = e.fehler ? 'fehler' : 'ergebnis'" in html,
+       "jede Kachel und jedes Bild setzt eine Marke")
+pruefe("function rekVideoS" in html and "REK_PAUSE_S" in html,
+       "die Marke traegt die VIDEOsekunde, nicht die Uhrzeit — nach einer Pause "
+       "laegen die beiden auseinander")
+pruefe('id="c_luecken"' in html and "luecken.checked" in html,
+       "und die Pause laesst sich ganz abschalten: mit der Markenliste ist sie "
+       "nur noch Platzersparnis, kein Zwang")
+
+with tempfile.TemporaryDirectory() as tmp:
+    v = ema_agent.Aufnahme()
+    v.starten(projekt="probe", ordner=tmp)
+    v.anhaengen(b"x" * 64)
+    pruefe(v.marke("bild", "em_field.png", video_s=12.0)["ok"],
+           "eine Marke laesst sich setzen")
+    v.marke("ergebnis", "sicherheit: 2 Kriterien verletzt", video_s=20.0)
+    v.marke("bild", "em_curve.png", video_s=400.0)
+    e = v.beenden()
+    pruefe(e["n_marken"] == 3 and os.path.isfile(e["marken"]),
+           "beim Beenden entsteht die Markenliste neben der Aufnahme")
+    tsv = open(e["marken"], encoding="utf-8").read()
+    pruefe("12.00\t" in tsv and "em_curve.png" in tsv,
+           "mit Videosekunde und Beschriftung je Marke")
+    pruefe(e["stuecke"] == 2,
+           "benachbarte Marken werden zu EINEM Stueck verschmolzen, entfernte "
+           "nicht (12 s und 20 s zusammen, 400 s eigenes)")
+    skript = open(e["schnitt"], encoding="utf-8").read()
+    pruefe(skript.startswith("#!/usr/bin/env bash") and "ffmpeg" in skript,
+           "und ein fertiges ffmpeg-Skript — eine Liste von Zeitpunkten ist "
+           "noch keine Arbeit, die jemand gern von Hand macht")
+    pruefe("-ss 6.00 -t 26.00" in skript,
+           "geschnitten wird mit Vor- und Nachlauf um die Marke herum")
+    pruefe("-c:v libvpx-vp9" in skript and "-ss 6.00 -t 26.00 -i " in skript,
+           "neu kodiert statt kopiert: `-c copy` schnitte an Schluesselbildern "
+           "und traefe den Moment um Sekunden daneben")
+    pruefe(os.access(e["schnitt"], os.X_OK), "das Skript ist ausfuehrbar")
+    import subprocess as _sp
+    pruefe(_sp.run(["bash", "-n", e["schnitt"]]).returncode == 0,
+           "und syntaktisch gueltig")
+
+    leer = ema_agent.Aufnahme()
+    leer.starten(projekt="leer", ordner=tmp)
+    leer.anhaengen(b"x")
+    e2 = leer.beenden()
+    pruefe(e2["stuecke"] == 0 and "Keine Marken" in open(e2["schnitt"]).read(),
+           "ohne Marken sagt das Skript das, statt ein leeres Video zu bauen")
+
+pruefe('@app.route("/agent/video/marke"' in quelle_srv, "die Route gibt es")
+
 print(f"\n{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

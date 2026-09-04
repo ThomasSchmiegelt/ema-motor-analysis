@@ -4377,6 +4377,26 @@ def agent_video_stueck():
     return jsonify(ema_agent.VIDEO.anhaengen(request.get_data()))
 
 
+@app.route("/agent/video/marke", methods=["POST"])
+def agent_video_marke():
+    """Festhalten, WANN im Video etwas geschah -- fuer den spaeteren Schnitt.
+
+    Der verlustfreie Gegenentwurf zur Pause: aufnehmen laesst sich alles,
+    geschnitten wird hinterher. Beim Beenden entstehen daraus eine
+    ``.marken.tsv`` und ein fertiges ``.schnitt.sh``.
+
+    Die Videosekunde schickt der Browser mit -- er kennt seinen
+    ``MediaRecorder`` genauer als der Server; fehlt sie, rechnet der Server sie
+    aus verstrichener Zeit minus Pausen.
+    """
+    import ema_agent
+    d = request.get_json(silent=True) or {}
+    v = d.get("video_s")
+    return jsonify(ema_agent.VIDEO.marke(
+        str(d.get("art", "")), str(d.get("text", "")),
+        float(v) if isinstance(v, (int, float)) else None))
+
+
 @app.route("/agent/video/ende", methods=["POST"])
 def agent_video_ende():
     import ema_agent

@@ -1738,6 +1738,46 @@ VIDEO_ORDNER = os.path.expanduser(
     os.environ.get("CAE_VIDEO_ORDNER") or "~/Videos")
 
 
+def _schnitt_skript(video: str, stuecke: list) -> str:
+    """Ein ffmpeg-Skript, das aus der Aufnahme die Stuecke mit Inhalt schneidet.
+
+    Zweimal ``-ss``: einmal VOR ``-i`` (springt schnell, aber nur zum
+    Schluesselbild) und die Feineinstellung danach waere langsam -- hier wird
+    darum **neu kodiert** statt kopiert. Ein ``-c copy`` schnitte an
+    Schluesselbildern und traefe den Moment um Sekunden daneben; bei 5 Bildern/s
+    und einem Schluesselbild alle paar Sekunden ist das genau der Fehler, den
+    man beim Nachsehen bemerkt.
+    """
+    z = ["#!/usr/bin/env bash",
+         "# Schnittliste zur Agentenaufnahme — ERZEUGT, nicht von Hand aendern.",
+         "#",
+         "# Geschnitten werden die Stellen, an denen in der Ergebnisspalte etwas",
+         "# geschah (Kachel, Bild, Auftrag). Die Marken stehen daneben in der",
+         "# .marken.tsv, falls du lieber selbst schneidest.",
+         "set -euo pipefail",
+         f'VIDEO="{video}"',
+         'ZIEL="${1:-${VIDEO%.webm}_schnitt.webm}"',
+         'TMP="$(mktemp -d)"',
+         'trap \'rm -rf "$TMP"\' EXIT',
+         'command -v ffmpeg >/dev/null || { echo "ffmpeg fehlt"; exit 1; }',
+         ""]
+    if not stuecke:
+        z += ['echo "Keine Marken — nichts zu schneiden."', "exit 0"]
+        return "\n".join(z) + "\n"
+    z.append(f"echo \"{len(stuecke)} Stueck(e) werden geschnitten…\"")
+    for i, (ab, bis, marken) in enumerate(stuecke):
+        was = "; ".join(m["text"] or m["art"] for m in marken)[:150]
+        z += ["", f"# [{i + 1}] {ab:.1f}–{bis:.1f} s — {was}",
+              f'ffmpeg -nostdin -loglevel error -y -ss {ab:.2f} -t {bis - ab:.2f} '
+              f'-i "$VIDEO" -c:v libvpx-vp9 -b:v 700k -an "$TMP/{i:03d}.webm"',
+              f'echo "file \'$TMP/{i:03d}.webm\'" >> "$TMP/liste.txt"']
+    z += ["",
+          'ffmpeg -nostdin -loglevel error -y -f concat -safe 0 -i "$TMP/liste.txt" '
+          '-c copy "$ZIEL"',
+          'echo "fertig: $ZIEL"']
+    return "\n".join(z) + "\n"
+
+
 class Aufnahme:
     def __init__(self):
         self.sperre = threading.Lock()
@@ -1745,13 +1785,15 @@ class Aufnahme:
         self.pfad = ""
         self.bytes = 0
         self.start_ts = 0.0
-        # Waehrend der Server rechnet, steht das Bild still. Die Aufnahme wird
-        # dann angehalten (der Browser haelt den MediaRecorder an, hier wird nur
-        # BUCHGEFUEHRT, wie lange) -- sonst besteht ein vierstuendiger Lauf zu
-        # neun Zehnteln aus einem unveraenderten Fortschrittsbalken und die
-        # 800-MB-Grenze ist erreicht, bevor etwas Sehenswertes passiert ist.
+        # Angehalten wird im Browser (nur er haelt den MediaRecorder); hier wird
+        # BUCHGEFUEHRT, wie lange. Das Kriterium dafuer ist die Taetigkeit in der
+        # ERGEBNISSPALTE, nicht ob der Server rechnet -- gemessen kommen die
+        # Bilder gerade WAEHREND er rechnet. Die Buchfuehrung ist auch der
+        # Grund, warum die Marken unten stimmen: die Videozeit ist die
+        # verstrichene Zeit MINUS der Pausen.
         self.pause_s = 0.0
         self.pause_seit = 0.0
+        self.marken: list = []            # (Videosekunde, Art, Text)
 
     def starten(self, projekt: str = "", ordner: str = "") -> dict:
         with self.sperre:
@@ -1768,6 +1810,7 @@ class Aufnahme:
             self.start_ts = time.time()
             self.pause_s = 0.0
             self.pause_seit = 0.0
+            self.marken = []
             return {"ok": True, "pfad": self.pfad, "max_mb": VIDEO_MAX_MB}
 
     def anhaengen(self, rohdaten: bytes) -> dict:
@@ -1794,10 +1837,84 @@ class Aufnahme:
                 self.f = None
             pause = self._pause_gesamt()
             gesamt = time.time() - self.start_ts
-            return {"ok": True, "pfad": self.pfad, "bytes": self.bytes,
-                    "sekunden": round(gesamt - pause, 1),
-                    "pause_s": round(pause, 1),
-                    "verstrichen_s": round(gesamt, 1)}
+            aus = {"ok": True, "pfad": self.pfad, "bytes": self.bytes,
+                   "sekunden": round(gesamt - pause, 1),
+                   "pause_s": round(pause, 1),
+                   "verstrichen_s": round(gesamt, 1),
+                   "n_marken": len(self.marken)}
+            aus.update(self._marken_schreiben())
+            return aus
+
+    # Wie weit vor und nach einer Marke geschnitten wird, und ab welchem Abstand
+    # zwei Marken zu EINEM Stueck verschmelzen. Grosszuegig: lieber ein paar
+    # Sekunden Leerlauf im Schnitt als eine Kachel, die halb angeschnitten ist.
+    VOR_S, NACH_S, VERSCHMELZEN_S = 6.0, 12.0, 25.0
+
+    def marke(self, art: str, text: str = "", video_s: float | None = None) -> dict:
+        """Festhalten, WANN im Video etwas geschah -- zum spaeteren Schneiden.
+
+        Die Pause loest das Platzproblem, aber sie loest es mit einem Verlust:
+        was in der Pause geschieht, ist weg. Eine Markenliste loest dasselbe
+        Problem ohne Verlust -- aufnehmen laesst sich alles, und geschnitten
+        wird hinterher.
+
+        **Die Videozeit ist nicht die Uhrzeit.** Pausiert der Browser, laeuft
+        die Uhr weiter, die Datei aber nicht. Darum wird hier ``verstrichen
+        minus Pausen`` gerechnet; wer statt dessen die Wanduhr naehme, bekaeme
+        eine Schnittliste, die mit jeder Pause weiter danebenliegt. Der Browser
+        darf seine eigene Videosekunde mitschicken (``video_s``) -- er kennt
+        den ``MediaRecorder`` genauer; fehlt sie, rechnet der Server.
+        """
+        with self.sperre:
+            if not self.f:
+                return {"ok": False, "grund": "Es laeuft keine Aufnahme."}
+            jetzt = time.time()
+            if video_s is None:
+                video_s = (jetzt - self.start_ts) - self._pause_gesamt(jetzt)
+            self.marken.append({"s": round(max(0.0, float(video_s)), 2),
+                                "uhr": time.strftime("%H:%M:%S", time.localtime(jetzt)),
+                                "art": str(art)[:40],
+                                "text": " ".join(str(text).split())[:200]})
+            return {"ok": True, "n": len(self.marken)}
+
+    def _marken_schreiben(self) -> dict:
+        """Markenliste und ein fertiges ffmpeg-Skript neben die Aufnahme legen.
+
+        Nicht nur die Liste: eine Liste von Zeitpunkten ist noch keine Arbeit,
+        die jemand gerne von Hand macht. Das Skript fasst benachbarte Marken zu
+        Stuecken zusammen, schneidet mit Vor- und Nachlauf und haengt sie
+        aneinander -- ein Aufruf, fertig.
+        """
+        if not self.pfad:
+            return {}
+        stamm = os.path.splitext(self.pfad)[0]
+        liste, skript = stamm + ".marken.tsv", stamm + ".schnitt.sh"
+        try:
+            with open(liste, "w", encoding="utf-8") as f:
+                f.write("# Videosekunde\tUhrzeit\tArt\tText\n")
+                for m in self.marken:
+                    f.write(f"{m['s']:.2f}\t{m['uhr']}\t{m['art']}\t{m['text']}\n")
+        except OSError:
+            return {}
+
+        # Marken zu Stuecken zusammenfassen.
+        stuecke: list = []
+        for m in sorted(self.marken, key=lambda x: x["s"]):
+            ab = max(0.0, m["s"] - self.VOR_S)
+            bis = m["s"] + self.NACH_S
+            if stuecke and ab - stuecke[-1][1] <= self.VERSCHMELZEN_S:
+                stuecke[-1][1] = max(stuecke[-1][1], bis)
+                stuecke[-1][2].append(m)
+            else:
+                stuecke.append([ab, bis, [m]])
+
+        try:
+            with open(skript, "w", encoding="utf-8") as f:
+                f.write(_schnitt_skript(self.pfad, stuecke))
+            os.chmod(skript, 0o755)
+        except OSError:
+            return {"marken": liste}
+        return {"marken": liste, "schnitt": skript, "stuecke": len(stuecke)}
 
     def pausieren(self, an: bool) -> dict:
         """Nur die Buchfuehrung -- angehalten wird im Browser.

@@ -168,6 +168,9 @@
   <span class="pille" id="p_projekt"></span>
   <span class="wachs"></span>
   <span class="pille rek" id="p_rek" style="display:none"></span>
+  <label class="pille" id="l_luecken" style="display:none;cursor:pointer"
+         title="Aus: alles aufnehmen und hinterher mit dem erzeugten schnitt.sh schneiden">
+    <input type="checkbox" id="c_luecken" checked> Leerlauf auslassen</label>
   <button id="b_video" onclick="videoUm()"
           title="Bildschirm mitschneiden — 5 B/s, ~5 MB je Minute, wird sofort auf die Platte geschrieben">🎥 Aufnahme</button>
   <button id="b_archiv_kopf" onclick="archivAuf()"
@@ -433,6 +436,7 @@ function verarbeiten(e){
                     links('sys', '▶ ' + e.befehl); break;
     case 'sitzung': links('sys', 'Sitzung ' + (e.id||'').slice(0,8) + ' · ' + (e.cwd||'')); break;
     case 'frage':   blaseDenken = blaseText = null; ZUG0 = e.t || Date.now()/1000;
+                    rekTaetig('auftrag', e.text);
                     links('frage', e.text); zustand('arbeitet'); break;
     case 'denken':  anfuegen('denken', e.text); break;
     case 'text':    anfuegen('text', e.text); break;
@@ -520,6 +524,8 @@ function kachelText(e){
                 `<pre>${esc(e.text)}</pre>` +
                 (e.gekuerzt ? `<div class="bu">gekürzt — ${e.voll} Zeichen insgesamt</div>` : '') +
                 (e.ablage ? `<div class="bu">📄 im Projekt: ${esc(e.ablage)}</div>` : '');
+  k.dataset.markeArt = e.fehler ? 'fehler' : 'ergebnis';
+  k.dataset.markeText = (e.name || '') + ': ' + String(e.text || '').slice(0, 90);
   rechts(k);
 }
 function kachelBild(e){
@@ -535,6 +541,8 @@ function kachelBild(e){
                 `<div class="bu">${esc(e.projekt)}</div>`;
   // Erst mit dem geladenen Bild steht die Höhe fest — ohne das zweite Nachziehen
   // bliebe genau das interessanteste Ergebnis halb unter dem Rand.
+  k.dataset.markeArt = 'bild';
+  k.dataset.markeText = e.datei || '';
   const bild = k.querySelector('img'), ziel = SPALTEN.r;
   bild.addEventListener('load',  () => runter($(ziel)));
   bild.addEventListener('error', () => runter($(ziel)));
@@ -544,6 +552,7 @@ function rechts(k){
   const sp = $(SPALTEN.r);
   sp.appendChild(k);
   if(SPALTEN.r !== 'rechts'){ runter(sp); return; }   // Archiv zählt nicht mit
+  rekTaetig(k.dataset.markeArt || '', k.dataset.markeText || '');
   const leer = $('rechts_leer'); if(leer) leer.remove();
   N_KACHELN++;
   $('zaehler').textContent = N_KACHELN + (N_KACHELN === 1 ? ' Ergebnis' : ' Ergebnisse');
@@ -1007,13 +1016,57 @@ const VIDEO_FPS = 5, VIDEO_BITS = 700000, VIDEO_STUECK_MS = 5000;
 let REK = null, REK_STROM = null, REK_KETTE = Promise.resolve(),
     REK_BYTES = 0, REK_START = 0, REK_TICK = null,
     REK_PAUSE = false, REK_PAUSE_S = 0, REK_PAUSE_SEIT = 0, REK_WACHE = null;
+// Nachlauf: so lange nach der letzten Tätigkeit rechts wird weiter aufgenommen.
+// Großzügig, damit eine Folge von Kacheln EINE zusammenhängende Aufnahme bleibt
+// statt in Stücke zu zerfallen — eine Pipeline schreibt ihre Diagramme in
+// Schüben von wenigen Sekunden bis zu einer halben Minute Abstand.
+const REK_NACHLAUF = 45;
+let REK_AKTIV_TS = 0;
 
-// Während der Server rechnet, ändert sich am Bild nichts außer einem
-// Fortschrittsbalken — bei Läufen von Stunden ist das der weitaus größte Teil.
-// Die Aufnahme wird dann angehalten und danach fortgesetzt: `MediaRecorder`
-// kann das ohne Naht (`pause`/`resume` unterbrechen nur den Datenstrom, die
-// Datei bleibt EINE Aufnahme). Ohne das ist die 800-MB-Grenze erreicht, bevor
-// etwas Sehenswertes im Bild war.
+// Wo die Aufnahme gerade steht. NICHT die Uhrzeit: pausiert der Recorder,
+// läuft die Uhr weiter, die Datei aber nicht — eine Schnittliste nach Wanduhr
+// läge mit jeder Pause weiter daneben.
+function rekVideoS(){
+  if(!REK_START) return 0;
+  const pause = REK_PAUSE_S + (REK_PAUSE_SEIT ? Date.now()/1000 - REK_PAUSE_SEIT : 0);
+  return Math.max(0, Date.now()/1000 - REK_START - pause);
+}
+
+// „Rechts ist etwas passiert." Setzt die Uhr, nimmt die Aufnahme SOFORT wieder
+// auf (statt bis zum nächsten Wächterlauf zu warten) und schreibt eine Marke —
+// aus der entsteht beim Beenden die Schnittliste fürs ffmpeg.
+function rekTaetig(art, text){
+  REK_AKTIV_TS = Date.now() / 1000;
+  if(!REK) return;
+  if(REK_PAUSE) rekPause(false);
+  if(!art) return;
+  fetch(K('/agent/video/marke'), {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({art: art, text: text || '', video_s: rekVideoS()})
+      }).catch(() => {});
+}
+
+// WAS aufgenommen wird, hängt an der RECHTEN SPALTE — nicht daran, ob der
+// Server rechnet.
+//
+// Vorher war es umgekehrt: „Server rechnet → Pause", mit der Begründung, am
+// Bild ändere sich dann nichts außer einem Fortschrittsbalken. Die Begründung
+// ist gemessen falsch. Im Lauf vom 04.09. kamen MITTEN im Rechenlauf fünf
+// Bilder in die rechte Spalte (Querschnitt, Seitenansicht, Luftspalt, Feldbild,
+// Feld unter Last) — angehalten wurde also genau während der einzigen Momente,
+// die aufzuheben sich lohnt.
+//
+// Jetzt zählt Tätigkeit: jede Kachel und jedes Bild rechts, jeder Auftrag, und
+// Scrollen in der Ergebnisspalte setzen die Uhr zurück; die Aufnahme läuft
+// weiter, solange die letzte Tätigkeit weniger als REK_NACHLAUF her ist. Die
+// Pause bleibt nur für echte Leerstrecken — sonst ist die 800-MB-Grenze
+// erreicht, bevor etwas Sehenswertes im Bild war (`MediaRecorder` pausiert
+// ohne Naht: die Datei bleibt EINE Aufnahme).
+//
+// Beim Fortsetzen geht der Bruchteil einer Sekunde VOR dem Ereignis verloren.
+// Das ist der Preis der Pause und er ist hier vertretbar: die Kachel bleibt
+// stehen, sobald sie da ist. Darum wird beim Erscheinen SOFORT fortgesetzt und
+// nicht erst beim nächsten Wächterlauf.
 function rekPause(an){
   if(!REK || REK_PAUSE === an) return;
   try{ an ? REK.pause() : REK.resume(); }catch(_){ return; }
@@ -1067,10 +1120,13 @@ async function videoStart(){
   REK.start(VIDEO_STUECK_MS);
   $('b_video').textContent = '⏹ Aufnahme beenden';
   $('p_rek').style.display = '';
+  $('l_luecken').style.display = '';
   REK_TICK = setInterval(videoAnzeige, 1000); videoAnzeige();
-  // Alle 5 s nachsehen, ob der Server rechnet. Nur während einer Aufnahme —
-  // sonst fragte die Seite den Server auch dann, wenn niemand etwas davon hat.
-  REK_WACHE = setInterval(rekWache, 5000); rekWache();
+  REK_AKTIV_TS = Date.now() / 1000;      // der Start selbst ist Tätigkeit
+  // Wer die Ergebnisspalte durchsieht, TUT etwas — auch das gehört aufs Band.
+  $('rechts').addEventListener('scroll', () => rekTaetig(), {passive: true});
+  rekTaetig('start', 'Aufnahme begonnen');
+  REK_WACHE = setInterval(rekWache, 2000); rekWache();
   links('sys', '🎥 Aufnahme läuft → ' + a.pfad);
 }
 
@@ -1080,23 +1136,27 @@ function videoAnzeige(){
   const pause = REK_PAUSE_S + (REK_PAUSE_SEIT ? Date.now()/1000 - REK_PAUSE_SEIT : 0);
   // Angezeigt wird die AUFGEZEICHNETE Zeit, nicht die verstrichene — sonst
   // stimmt die Uhr nicht mit der Datei überein.
-  $('p_rek').textContent = (REK_PAUSE ? '⏸ Pause (Server rechnet) ' : '● REC ') +
+  $('p_rek').textContent = (REK_PAUSE ? '⏸ Pause (nichts Neues rechts) ' : '● REC ') +
                            uhrText(Date.now()/1000 - REK_START - pause) +
                            ' · ' + mb.toFixed(1) + ' MB';
 }
 
-async function rekWache(){
+function rekWache(){
   if(!REK) return;
-  try{
-    const z = await (await fetch(K('/agent/status'))).json();
-    if(z.rechnet && !REK_PAUSE){
-      links('sys', '⏸ Aufnahme angehalten — der Server rechnet (' +
-                   (z.rechnet_was||[]).join(', ') + ').');
-    } else if(!z.rechnet && REK_PAUSE){
-      links('sys', '▶ Aufnahme läuft weiter.');
-    }
-    rekPause(!!z.rechnet);
-  }catch(_){ /* Server kurz weg: dann lieber weiter aufnehmen als abbrechen */ }
+  // Kein Serverabruf mehr: was zählt, steht im Browser. Ob der Server rechnet,
+  // sagt nichts darüber, ob rechts etwas zu sehen ist — im Gegenteil, gerade
+  // dann kommen die Bilder.
+  const still = Date.now() / 1000 - (REK_AKTIV_TS || 0);
+  // Mit der Markenliste ist die Pause nur noch eine Platzersparnis, kein
+  // Zwang: wer lieber alles aufnimmt und hinterher schneidet, schaltet sie ab.
+  const luecken = $('c_luecken');
+  const soll = (!luecken || luecken.checked) && still > REK_NACHLAUF;
+  if(soll !== REK_PAUSE){
+    links('sys', soll
+      ? `⏸ Aufnahme angehalten — seit ${Math.round(still)} s nichts Neues rechts.`
+      : '▶ Aufnahme läuft weiter.');
+  }
+  rekPause(soll);
 }
 
 async function videoStopp(grund){
@@ -1111,9 +1171,18 @@ async function videoStopp(grund){
   const a = await (await fetch(K('/agent/video/ende'), {method:'POST'})).json();
   $('b_video').textContent = '🎥 Aufnahme';
   $('p_rek').style.display = 'none';
-  if(a.ok) links('sys', '🎬 Aufnahme ' + (grund === 'grenze' ? '(Grenze) ' : '') +
-                        uhrText(a.sekunden) + ' · ' +
-                        (a.bytes/1048576).toFixed(1) + ' MB → ' + a.pfad);
+  $('l_luecken').style.display = 'none';
+  if(a.ok){
+    links('sys', '🎬 Aufnahme ' + (grund === 'grenze' ? '(Grenze) ' : '') +
+                 uhrText(a.sekunden) + ' · ' +
+                 (a.bytes/1048576).toFixed(1) + ' MB → ' + a.pfad);
+    // Die Schnittliste ist der eigentliche Ertrag der Marken — sie muss
+    // dastehen, sonst sucht sie niemand.
+    if(a.marken)
+      links('sys', '✂ ' + (a.n_marken || 0) + ' Marken, ' + (a.stuecke || 0) +
+                   ' Stück(e) mit Inhalt → ' + a.schnitt +
+                   '   (ausführen schneidet die Aufnahme; Liste: ' + a.marken + ')');
+  }
 }
 // Ein weggeklicktes Fenster soll keine halbe Datei hinterlassen.
 addEventListener('pagehide', () => { if(REK) navigator.sendBeacon(K('/agent/video/ende')); });
