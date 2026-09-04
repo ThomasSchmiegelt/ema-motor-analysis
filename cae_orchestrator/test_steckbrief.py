@@ -385,5 +385,32 @@ pruefe("archivZeigen" in html and "verarbeitenStumm" in html,
        "ein alter Lauf faerbt die Anzeige des laufenden nicht um "
        "(eigene, stumme Verarbeitung)")
 
+# ── 9) Der Skill muss auffindbar bleiben, auch ohne skill_view ─────────────
+print("\n[9] Der Weg zum Skill")
+
+# Gemessen am 04.09.2026: `skill_view("cae-orchestrator")` scheitert in
+# `hermes acp` v0.20.5 mit "not found", obwohl `hermes skills list` den Skill
+# zeigt und derselbe Aufruf in einem gewoehnlichen Python-Prozess mit demselben
+# HERMES_HOME und demselben Arbeitsverzeichnis gelingt (mit eigenem ACP-Klienten
+# nachgestellt, also nicht von diesem Repo verursacht). Der Agent muss den Skill
+# trotzdem bekommen -- ueber den Dateipfad, der in JEDER Startunterlage steht.
+WURZEL = os.path.dirname(HIER)
+PFAD = ".agents/skills/cae-orchestrator/SKILL.md"
+pruefe(os.path.isfile(os.path.join(WURZEL, PFAD)),
+       "der Skill liegt an dem Pfad, auf den verwiesen wird")
+
+agents = open(os.path.join(WURZEL, "AGENTS.md"), encoding="utf-8").read()
+pruefe(PFAD in agents and "skill_view" in agents,
+       "AGENTS.md nennt den Dateipfad UND den gemessenen Fehlgriff")
+
+quelle_agent = open(os.path.join(HIER, "ema_agent.py"), encoding="utf-8").read()
+pruefe(PFAD in quelle_agent and "## Der Skill" in quelle_agent,
+       "die im Browser erzeugte Projektakte nennt ihn ebenfalls — sie ist die "
+       "einzige Unterlage, die bei JEDEM Start neu entsteht")
+
+for skript in ("start_agent.sh", "start_hermes.sh"):
+    t = open(os.path.join(WURZEL, skript), encoding="utf-8").read()
+    pruefe(PFAD in t, f"{skript} schreibt ihn in die Projektakte des Terminalkopfs")
+
 print(f"\n{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

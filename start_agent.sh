@@ -198,6 +198,17 @@ PROJ_DIR="$(ls -d "$HOME/cae_projekte"/2* 2>/dev/null | sort | tail -1)"
     echo
     echo "- Stand: $(date '+%d.%m.%Y %H:%M')"
     echo "- Agentenkopf: PI im Terminal (start_agent.sh)"
+    echo
+    # Der Skill liegt da, aber `skill_view` findet ihn in `hermes acp` v0.20.5
+    # nicht (gemessen 04.09.2026). Ohne diesen Hinweis sucht der Kopf danach --
+    # oder arbeitet ohne ihn, und dann fehlen ihm Verben, Laufzeiten und Fallen.
+    echo "## Der Skill"
+    echo
+    echo "Der Skill \`cae-orchestrator\` liegt als Datei unter"
+    echo "\`.agents/skills/cae-orchestrator/SKILL.md\`. **Lies ihn dort.**"
+    echo "Findet \`skill_view\` ihn nicht, ist das kein Grund zu suchen und"
+    echo "keiner, ohne ihn zu arbeiten — eine Datei lesen, weiterarbeiten."
+    echo
     if [ -n "$PROJ_DIR" ] && [ -d "$PROJ_DIR" ]; then
         echo "- Kennung: \`$(basename "$PROJ_DIR")\`"
         echo "- Verzeichnis: \`$PROJ_DIR\`"

@@ -64,6 +64,24 @@ Es gibt **zwei** Agentenköpfe und **einen** Skill. Hermes lädt ihn über
 `hermes skills trust <repo>` direkt aus `./.agents/skills/` — dem Verzeichnis, das PI
 schon benutzt. Nichts wird kopiert; sie können nicht auseinanderlaufen.
 
+**Wenn `skill_view` den Skill nicht findet, lies ihn als Datei:**
+
+```
+.agents/skills/cae-orchestrator/SKILL.md
+```
+
+Das ist kein Notbehelf für den Fehlerfall, sondern der zuverlässige Weg. Gemessen am
+04.09.2026 mit `hermes acp` v0.20.5: `skill_view("cae-orchestrator")` antwortet dort
+mit *Skill 'cae-orchestrator' not found*, **obwohl** `hermes skills list` ihn zeigt
+(Quelle `local`, Trust `local`) und derselbe Aufruf in einem gewöhnlichen
+Python-Prozess mit demselben `HERMES_HOME` und demselben Arbeitsverzeichnis
+gelingt — nachgestellt mit einem eigenen ACP-Klienten, also nicht von diesem Repo
+verursacht. Der Skill LIEGT da; nur die ACP-Oberfläche findet ihn nicht.
+
+Verliere damit keine Zeit: **eine Datei lesen, weiterarbeiten.** Weder suchen noch
+`skills_list` abklappern noch den Skill für abwesend halten und ohne ihn losrechnen —
+er trägt die Verben, die Laufzeiten, die Exit-Codes und die Fallen.
+
 ### Eine NEUE Aufgabe beginnt bei null — nicht beim letzten Projekt
 
 Das ist die Regel, gegen die hier am häufigsten verstoßen wurde, und sie stand vorher

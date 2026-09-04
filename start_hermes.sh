@@ -375,6 +375,17 @@ if [ -n "$PROJ_DIR" ] && [ -d "$PROJ_DIR" ]; then
         echo
         echo "Ausfuehrlich, samt Herkunft jeder Zahl und frueheren Laeufen:"
         echo "\`python3 cae_orchestrator/cae_cli.py steckbrief $(basename "$PROJ_DIR") --laeufe\`"
+        echo
+        # Der Skill liegt da, aber `skill_view` findet ihn in `hermes acp`
+        # v0.20.5 nicht (gemessen 04.09.2026). Ohne diesen Hinweis sucht der
+        # Kopf danach -- oder arbeitet ohne ihn, und dann fehlen ihm Verben,
+        # Laufzeiten, Exit-Codes und die Fallen.
+        echo "## Der Skill"
+        echo
+        echo "Der Skill \`cae-orchestrator\` liegt als Datei unter"
+        echo "\`.agents/skills/cae-orchestrator/SKILL.md\`. **Lies ihn dort.**"
+        echo "Findet \`skill_view\` ihn nicht, ist das kein Grund zu suchen und"
+        echo "keiner, ohne ihn zu arbeiten — eine Datei lesen, weiterarbeiten."
     } > "$kontext"
     ok "Projektkontext erzeugt: AGENTS.projekt.md"
 else
@@ -398,6 +409,17 @@ else
         echo "Auslegung beginnt mit"
         echo "\`python3 cae_orchestrator/cae_cli.py aufgabe \"<Aufgabe>\"\` und danach"
         echo "\`paarvergleich --frisch\` — NICHT mit \`--from-project last\`."
+    echo
+    # Der Skill liegt da, aber `skill_view` findet ihn in `hermes acp` v0.20.5
+    # nicht (gemessen 04.09.2026). Ohne diesen Hinweis sucht der Kopf danach --
+    # oder arbeitet ohne ihn, und dann fehlen ihm Verben, Laufzeiten und Fallen.
+    echo "## Der Skill"
+    echo
+    echo "Der Skill \`cae-orchestrator\` liegt als Datei unter"
+    echo "\`.agents/skills/cae-orchestrator/SKILL.md\`. **Lies ihn dort.**"
+    echo "Findet \`skill_view\` ihn nicht, ist das kein Grund zu suchen und"
+    echo "keiner, ohne ihn zu arbeiten — eine Datei lesen, weiterarbeiten."
+    echo
     } > "$ROOT/AGENTS.projekt.md"
 fi
 

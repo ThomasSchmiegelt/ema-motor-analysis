@@ -706,7 +706,22 @@ class Kopf:
                 "nur die Fakten des Laufs, der gerade beginnt.",
                 "",
                 f"- Stand: {time.strftime('%d.%m.%Y %H:%M')}",
-                f"- Agentenkopf: {self.LABEL} im Browser (`/agent?kopf={self.NAME}`)"]
+                f"- Agentenkopf: {self.LABEL} im Browser (`/agent?kopf={self.NAME}`)",
+                "",
+                # Der Skill liegt da, aber `skill_view` findet ihn in `hermes acp`
+                # v0.20.5 nicht (gemessen 04.09.2026, mit eigenem ACP-Klienten
+                # nachgestellt: "Skill 'cae-orchestrator' not found", waehrend
+                # `hermes skills list` ihn zeigt und derselbe Aufruf in einem
+                # gewoehnlichen Prozess gelingt). Ohne diesen Hinweis sucht der
+                # Kopf minutenlang -- oder rechnet ohne den Skill los, und dann
+                # fehlen ihm Verben, Laufzeiten, Exit-Codes und die Fallen.
+                "## Der Skill",
+                "",
+                "Der Skill `cae-orchestrator` liegt als Datei unter",
+                "`.agents/skills/cae-orchestrator/SKILL.md`. **Lies ihn dort.**",
+                "Findet `skill_view` ihn nicht (bei Hermes gemessen der Fall), ist",
+                "das kein Grund zu suchen und keiner, ohne ihn zu arbeiten — eine",
+                "Datei lesen, weiterarbeiten."]
         if not self.projekt:
             kopf += [
                 "- Projekt: **keines gebunden**",
