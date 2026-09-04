@@ -56,8 +56,23 @@ def _notiere(art: str, was: str, ergebnis: str) -> None:
         pass
 
 
+def _arbeit_puls() -> None:
+    """Der Arbeitsleiste im Agentenreiter sagen, dass gerade ins Netz gegriffen wird.
+
+    Von hier und nicht aus dem Werkzeugtext des Agenten geraten: nur die Stelle,
+    die tatsaechlich eine Verbindung aufmacht, weiss, dass sie es tut. Weich
+    fehlschlagend -- eine Anzeige darf eine Recherche nie abbrechen.
+    """
+    try:
+        import ema_arbeit
+        ema_arbeit.puls()
+    except Exception:                                        # noqa: BLE001
+        pass
+
+
 def suche(frage: str, treffer: int = 5, region: str = "de-de") -> list:
     """Websuche. Gibt ``[{titel, adresse, anriss}]`` zurueck."""
+    _arbeit_puls()
     from ddgs import DDGS
 
     treffer = max(1, min(MAX_TREFFER, int(treffer)))
@@ -71,6 +86,7 @@ def suche(frage: str, treffer: int = 5, region: str = "de-de") -> list:
 
 def hole(adresse: str, max_zeichen: int = MAX_ZEICHEN) -> dict:
     """Eine Seite als Fliesstext. Gibt ``{adresse, titel, text, zeichen, gekuerzt}``."""
+    _arbeit_puls()
     import trafilatura
 
     roh = trafilatura.fetch_url(adresse)
@@ -152,6 +168,7 @@ def hole_bild(adresse: str, ziel_ordner: str) -> dict:
     eigenen Anschauung; wer sie in einen Bericht nimmt, der weitergegeben wird, muss
     die Rechtelage selbst klaeren. Die Quelladresse wird darum immer mitgespeichert.
     """
+    _arbeit_puls()
     try:
         req = _ur.Request(adresse, headers=KOPF)
         with _ur.urlopen(req, timeout=25) as r:

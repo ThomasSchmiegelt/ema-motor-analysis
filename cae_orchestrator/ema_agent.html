@@ -106,6 +106,29 @@
   .wohin{font:11.5px/1.4 var(--mono);color:var(--tx2);padding:0 12px 8px;
          word-break:break-all}
 
+  /* ── Arbeitsleiste ──────────────────────────────────────────── */
+  /* Schmal und faktisch: fünf Leuchten mit je einer Zahl daran. Keine Balken,
+     keine Verläufe — sie beantwortet EINE Frage: arbeitet gerade etwas, und
+     was? Wer das nicht sieht, bricht zu früh ab oder wartet auf etwas, das
+     gar nicht läuft. */
+  #arbeit{flex:0 0 auto;border-top:1px solid var(--rand);background:var(--bg2);
+          padding:8px 10px;display:flex;flex-direction:column;gap:6px;
+          justify-content:center;overflow:hidden}
+  #arbeit .lampen{display:flex;flex-wrap:wrap;gap:6px}
+  .lampe{display:inline-flex;align-items:center;gap:5px;font:11.5px/1 var(--mono);
+         padding:5px 8px;border-radius:999px;background:var(--bg3);
+         border:1px solid var(--rand);color:var(--tx2);white-space:nowrap}
+  .lampe b{font-weight:600;color:var(--tx)}
+  .lampe .pkt{width:7px;height:7px;border-radius:50%;background:#3a4450;
+              flex:0 0 auto}
+  .lampe.an{border-color:#2c5a45;color:#cfe}
+  .lampe.an .pkt{background:var(--ok);animation:pulsen 1.4s ease-in-out infinite}
+  .lampe.aus{opacity:.62}
+  .lampe.fehlt{opacity:.4}
+  @keyframes pulsen{0%,100%{opacity:1}50%{opacity:.25}}
+  #ar_fuss{font:11px/1.3 var(--mono);color:var(--tx2);overflow:hidden;
+           text-overflow:ellipsis;white-space:nowrap}
+
   /* ── Archiv: frueher gelaufene Zuege ────────────────────────── */
   /* Als Ueberlagerung und nicht als dritte Spalte: ein alter Lauf und der
      laufende nebeneinander sind zwei Zeitachsen im selben Bild — man liest
@@ -173,6 +196,14 @@
     <label for="f_modell">Modell</label>
     <input type="text" id="f_modell" value="">
 
+    <div id="f_vorgabe" style="display:none;margin-top:14px;padding:9px 11px;
+         border:1px solid #2c5a45;border-radius:8px;background:#0f1c17;
+         font-size:12.5px;color:#cfe">
+      ✓ Aus dem Designer übergeben: die Geometrie dieses Projekts ist eine
+      <b>Vorgabe</b>. Der Agent bekommt sie als Startpunkt — er darf sie ändern
+      und sagt dann, was und warum.
+    </div>
+
     <label for="f_prompt">Erster Auftrag (optional)</label>
     <textarea id="f_prompt" rows="3"
       placeholder="z. B.: Lege eine 80-kW-Maschine für ein Stadtfahrzeug aus. Fang mit dem Paarvergleich an."></textarea>
@@ -195,7 +226,7 @@
     <div class="strom" id="links"></div>
     <button class="chip" id="chip_links" style="bottom:92px"
             onclick="nachUnten('links')">⤓ Neues</button>
-    <div style="flex:0 0 auto;padding:10px;border-top:1px solid var(--rand);
+    <div id="block_eingabe" style="flex:0 0 auto;padding:10px;border-top:1px solid var(--rand);
                 background:var(--bg2);display:flex;gap:9px">
       <textarea id="eingabe" rows="2" placeholder="Auftrag … (Enter senden, Shift+Enter Zeilenumbruch)"
                 style="flex:1" onkeydown="tastatur(event)"></textarea>
@@ -204,7 +235,7 @@
     <!-- Zwischenruf: IMMER bedienbar, auch mitten im Zug. PI nimmt waehrend
          eines Zuges keinen zweiten Prompt an, also wird der Hinweis gemerkt
          und am naechsten Zugende von selbst uebergeben. -->
-    <div style="flex:0 0 auto;padding:0 10px 10px;background:var(--bg2);
+    <div id="block_hinweis" style="flex:0 0 auto;padding:0 10px 10px;background:var(--bg2);
                 display:flex;gap:9px;align-items:flex-start">
       <textarea id="hinweis" rows="1"
                 placeholder="Zwischenruf … wird nach dem laufenden Zug übergeben (Enter)"
@@ -227,6 +258,13 @@
     </div>
     <button class="chip" id="chip_rechts" style="bottom:18px"
             onclick="nachUnten('rechts')">⤓ Neues</button>
+    <!-- Arbeitsleiste. Höhe wird an die beiden Eingabeblöcke links ANGEGLICHEN
+         (arbeitHoehe), nicht geraten — sonst steht die eine Spalte einen
+         Zentimeter tiefer als die andere, und das sieht man sofort. -->
+    <div id="arbeit">
+      <div class="lampen" id="ar_lampen"></div>
+      <div class="arzeile" id="ar_fuss">—</div>
+    </div>
   </div>
 
 
@@ -265,6 +303,18 @@ async function auswahlLaden(){
     const s = $('f_sitzung');
     s.innerHTML = '<option value="">neue Sitzung</option>' +
       (d.sitzungen||[]).map(x => `<option value="${esc(x.id)}">${esc(x.stand)} · ${esc(x.titel||x.id.slice(0,8))}</option>`).join('');
+    // `?projekt=` aus der Adresse vorwählen. So landet die Übergabe aus dem
+    // Designer („an PI" / „an Hermes") direkt im richtigen Projekt, statt dass
+    // man es in einer Liste von achtzig wiederfinden muss — und genau dort
+    // liegt ja die eben gezeichnete Geometrie.
+    const wunsch = new URLSearchParams(location.search).get('projekt') || '';
+    if(wunsch){
+      if(![...p.options].some(o => o.value === wunsch))
+        p.insertAdjacentHTML('beforeend', `<option value="${esc(wunsch)}">${esc(wunsch)}</option>`);
+      p.value = wunsch;
+      const v = $('f_vorgabe');
+      if(v) v.style.display = '';
+    }
     if(!d.programm) fehler(LABEL + ' ist nicht installiert oder nicht auffindbar.');
   }catch(e){ fehler('Auswahl nicht ladbar: ' + e.message); }
 }
@@ -303,6 +353,7 @@ async function anknuepfen(){
     if(!z.laeuft) return false;
     $('start').style.display = 'none';
     $('buehne').classList.add('an');
+    arbeitStart();
     $('b_stopp').style.display = '';
     $('p_modell').textContent  = z.modell || '';
     $('p_projekt').textContent = z.projekt || 'ohne Projektbindung';
@@ -335,6 +386,7 @@ async function starten(){
     if(!a.ok){ fehler(a.grund || 'Start fehlgeschlagen.'); $('b_start').disabled = false; return; }
     $('start').style.display = 'none';
     $('buehne').classList.add('an');
+    arbeitStart();
     $('b_stopp').style.display = '';
     $('p_modell').textContent = a.modell || '';
     $('p_projekt').textContent = a.projekt || 'ohne Projektbindung';
@@ -620,6 +672,112 @@ setInterval(uhrTick, 1000);
 // Der Server schreibt nach jedem Zug von selbst; dieser Knopf ist der Griff
 // für zwischendurch. Geschrieben wird aus dem Ringpuffer im Server, nicht aus
 // dem DOM — ein geschlossenes Fenster verliert damit nichts.
+// ── Arbeitsleiste ────────────────────────────────────────────────
+//
+// Fünf Leuchten, jede mit einer Zahl daran. Was NICHT dasteht, ist so wichtig
+// wie was dasteht: „Modell denkt" gibt es nicht, weil Ollama über /api/ps nur
+// meldet, welches Modell im Speicher LIEGT — nicht, ob es rechnet. Statt dessen
+// das geladene Modell samt Speicher und die Grafikkartenlast daneben; die ist
+// auf dieser Maschine der einzige belastbare Hinweis.
+let AR_TIMER = null, AR_FEHLER = 0;
+
+function arbeitHoehe(){
+  // Genau so hoch wie die beiden Eingabeblöcke links — gemessen, nicht geraten.
+  const a = $('block_eingabe'), b = $('block_hinweis'), z = $('arbeit');
+  if(!a || !b || !z) return;
+  z.style.height = (a.offsetHeight + b.offsetHeight) + 'px';
+}
+
+function arbeitStart(){
+  if(AR_TIMER) return;
+  arbeitHoehe();
+  arbeitTick();
+  AR_TIMER = setInterval(arbeitTick, 2000);
+}
+function arbeitStopp(){ if(AR_TIMER){ clearInterval(AR_TIMER); AR_TIMER = null; } }
+
+async function arbeitTick(){
+  // Nicht abfragen, während das Fenster im Hintergrund liegt: die Leiste ist
+  // eine Anzeige, kein Messgerät — im verdeckten Reiter misst sie niemanden.
+  if(document.hidden) return;
+  let d;
+  try{
+    d = await (await fetch(K('/agent/arbeit'))).json();
+    AR_FEHLER = 0;
+  }catch(e){
+    if(++AR_FEHLER > 2) arbeitZeigen(null);
+    return;
+  }
+  arbeitZeigen(d);
+}
+
+function lampe(an, symbol, kopf, text, klasse){
+  const k = klasse || (an ? 'an' : 'aus');
+  return `<span class="lampe ${k}"><span class="pkt"></span>${symbol} ` +
+         `<b>${esc(kopf)}</b>${text ? ' ' + esc(text) : ''}</span>`;
+}
+
+function arbeitZeigen(d){
+  const ziel = $('ar_lampen'), fuss = $('ar_fuss');
+  if(!ziel) return;
+  if(!d){
+    ziel.innerHTML = lampe(false, '⚠', 'Arbeitsanzeige', 'nicht erreichbar', 'fehlt');
+    fuss.textContent = 'Der Server antwortet nicht auf /agent/arbeit.';
+    return;
+  }
+  const teile = [];
+
+  // 1) Rechnung auf dem Server
+  const r = d.rechnung || {};
+  const rn = (r.was || []).map(x => x.name +
+             (x.fortschritt != null ? ' ' + x.fortschritt + '%' : '')).join(', ');
+  teile.push(lampe(r.an, '⚙', 'Rechnung', r.an ? rn : 'nichts läuft'));
+
+  // 2) Internetrecherche
+  const re = d.recherche || {};
+  teile.push(lampe(re.an, '🌐', 'Recherche',
+                   re.an ? 'greift ins Netz'
+                         : (re.vor_sek != null ? 'zuletzt vor ' + Math.round(re.vor_sek) + ' s'
+                                               : 'inaktiv')));
+
+  // 3) Löser als eigene Prozesse
+  const l = d.loeser || {};
+  teile.push(lampe(l.an, '🧮', 'Löser',
+                   l.an ? (l.was || []).map(x => x.name + (x.n > 1 ? '×' + x.n : '')).join(', ')
+                        : 'keiner'));
+
+  // 4) Grafikkarte
+  const g = d.gpu || {};
+  if(!g.da){
+    teile.push(lampe(false, '🖥', 'GPU', 'keine', 'fehlt'));
+  }else{
+    teile.push(lampe(g.an, '🖥', 'GPU', g.last_pct + ' % · ' +
+                     (g.mb_belegt / 1024).toFixed(1) + '/' +
+                     Math.round(g.mb_gesamt / 1024) + ' GB'));
+  }
+
+  // 5) Sprachmodell — GELADEN, nicht „denkt". Siehe oben.
+  const m = d.modell || {};
+  if(!m.da){
+    teile.push(lampe(false, '🧠', 'Ollama', 'aus', 'fehlt'));
+  }else{
+    const ge = m.geladen || [];
+    teile.push(lampe(ge.length > 0, '🧠', 'Modell',
+                     ge.length ? ge.map(x => x.name.split(':')[0] +
+                                  (x.mb ? ' ' + (x.mb/1024).toFixed(1) + ' GB' : '')).join(', ')
+                               : 'keins geladen'));
+  }
+  ziel.innerHTML = teile.join('');
+
+  const arbeitet = [r.an && 'Rechnung', re.an && 'Recherche', l.an && 'Löser',
+                    g.an && 'GPU'].filter(Boolean);
+  fuss.textContent = arbeitet.length
+    ? 'arbeitet: ' + arbeitet.join(' · ')
+    : 'nichts in Arbeit — der Agent denkt oder wartet auf dich.';
+}
+
+window.addEventListener('resize', arbeitHoehe);
+
 // ── Archiv: frühere Läufe wieder aufrufen ────────────────────────
 //
 // Der Gegenweg zu `sichern`. Geschrieben wurde nach jedem Zug — gelesen bisher

@@ -412,5 +412,111 @@ for skript in ("start_agent.sh", "start_hermes.sh"):
     t = open(os.path.join(WURZEL, skript), encoding="utf-8").read()
     pruefe(PFAD in t, f"{skript} schreibt ihn in die Projektakte des Terminalkopfs")
 
+# ── 10) Vorgabe aus dem Designer und die Projektbeschreibung ───────────────
+print("\n[10] Vorgabe, Beschreibung — einmal eingeben, nicht zweimal")
+
+with tempfile.TemporaryDirectory() as tmp:
+    d = _projekt(tmp, "20260101_140000")
+    akte = json.load(open(os.path.join(d, "project.json")))
+    akte["design"] = {"brief": "80 kW Peak, 1200 kg, guenstig.\n\nGrob "
+                               "vorgezeichnet: 8 Pole, V-Form.",
+                      "source": "designer", "vorgabe": True}
+    json.dump(akte, open(os.path.join(d, "project.json"), "w"))
+
+    sb = SB.steckbrief(d, mit_laeufen=False)
+    pruefe(sb["vorgabe"] is True,
+           "eine im Designer uebergebene Geometrie ist als VORGABE markiert")
+    pruefe("80 kW Peak" in sb["auftrag"] and "8 Pole" in sb["auftrag"],
+           "Projektbeschreibung UND Designerzusatz stehen beide im Auftrag — "
+           "der zweite darf den ersten nicht loeschen")
+
+    md = SB.als_markdown(sb)
+    pruefe("VORGABE, kein Altbestand" in md,
+           "die Projektakte sagt ausdruecklich, dass die Geometrie GEWOLLT ist")
+    pruefe("`--frisch` gebaut wurde" in md,
+           "und grenzt sie gegen den Fall ab, gegen den --frisch gebaut wurde — "
+           "eine ignorierte Vorgabe aergert mehr als eine geerbte Altgeometrie")
+    kopf = [z for z in md.splitlines() if z.startswith("- **Auftrag")]
+    pruefe(len(kopf) == 1 and not any(
+        z and not z.startswith((" ", "-")) for z in md.splitlines()),
+        "ein mehrzeiliger Auftrag zerreisst die Aufzaehlung nicht")
+
+    ohne = _projekt(tmp, "20260101_150000")
+    pruefe(SB.steckbrief(ohne, mit_laeufen=False)["vorgabe"] is False,
+           "ein gewoehnliches Projekt bleibt ausdruecklich KEINE Vorlage")
+
+quelle_srv = open(os.path.join(HIER, "server.py"), encoding="utf-8").read()
+pruefe('@app.route("/agent/vorgabe"' in quelle_srv,
+       "es gibt eine Route, die gezeichnete Geometrie uebergibt — ohne Lauf")
+pruefe("body.get(\"brief\")" in quelle_srv,
+       "/project/new nimmt die Beschreibung an und legt sie nach design.brief")
+pruefe("gibt es nicht." in quelle_srv,
+       "ein Agentenstart auf ein Projekt, das es nicht gibt, wird abgewiesen "
+       "statt einen Scheinordner anzulegen")
+
+ema = open(os.path.join(HIER, "ema.html"), encoding="utf-8").read()
+pruefe("dsnAnAgent" in ema and "/agent/vorgabe" in ema,
+       "der Designer hat den Uebergabeknopf")
+pruefe("brief: notes" in ema,
+       "die Beschreibung beim Anlegen geht als Auftrag mit — nicht nur als Notiz")
+
+
+# ── 11) Die Arbeitsleiste ──────────────────────────────────────────────────
+print("\n[11] Arbeitsleiste")
+
+import ema_arbeit
+st = ema_arbeit.stand({"Analyse": {"status": "idle"},
+                       "3D-Feld": {"status": "running", "progress": 42}})
+pruefe(st["rechnung"]["an"] is True
+       and st["rechnung"]["was"][0]["name"] == "3D-Feld"
+       and st["rechnung"]["was"][0]["fortschritt"] == 42,
+       "eine laufende Rechnung wird mit Namen und Fortschritt gemeldet")
+pruefe(all(s["name"] != "Analyse" for s in st["rechnung"]["was"]),
+       "eine untaetige nicht")
+for feld in ("recherche", "gpu", "modell", "loeser"):
+    pruefe(feld in st, f"die Leiste meldet '{feld}'")
+pruefe("denkt" not in json.dumps(st, ensure_ascii=False),
+       "sie behauptet NICHT, das Modell denke — Ollama meldet nur, was GELADEN "
+       "ist, nicht was rechnet")
+
+alt_puls = ema_arbeit.PULS_DATEI
+with tempfile.TemporaryDirectory() as tmp:
+    ema_arbeit.PULS_DATEI = os.path.join(tmp, "recherche.puls")
+    try:
+        pruefe(ema_arbeit.recherche_laeuft()["an"] is False,
+               "ohne Puls laeuft keine Recherche")
+        ema_arbeit.puls()
+        pruefe(ema_arbeit.recherche_laeuft()["an"] is True,
+               "nach einem Puls schon — gesetzt von der Stelle, die WIRKLICH "
+               "ins Netz greift, nicht aus dem Werkzeugtext geraten")
+    finally:
+        ema_arbeit.PULS_DATEI = alt_puls
+
+quelle_rech = open(os.path.join(HIER, "ema_recherche.py"), encoding="utf-8").read()
+pruefe(quelle_rech.count("_arbeit_puls()") >= 4,
+       "suche, hole und hole_bild setzen den Puls (plus der Helfer selbst)")
+
+t0 = time.time()
+for _ in range(5):
+    ema_arbeit.stand({})
+dauer = (time.time() - t0) / 5 * 1000
+pruefe(dauer < 60,
+       f"ein Abruf kostet {dauer:.0f} ms — die Leiste wird im Sekundentakt "
+       f"abgefragt, teuer darf sie nicht sein")
+
+pruefe('@app.route("/agent/arbeit")' in quelle_srv, "die Route gibt es")
+pruefe("ema_arbeit.stand({" in quelle_srv,
+       "der Server reicht seine Zustandsdicts herein, statt dass das Messmodul "
+       "ihn importiert (Importzirkel, und ohne Flask nicht pruefbar)")
+
+pruefe('id="arbeit"' in html and "arbeitHoehe" in html,
+       "die Seite hat die Leiste und gleicht ihre Hoehe an")
+pruefe("block_eingabe" in html and "block_hinweis" in html
+       and "offsetHeight" in html,
+       "und zwar GEMESSEN an den beiden Eingabebloecken links, nicht geraten")
+pruefe("document.hidden" in html,
+       "im verdeckten Reiter wird nicht abgefragt — eine Anzeige ist kein "
+       "Messgeraet")
+
 print(f"\n{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

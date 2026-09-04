@@ -2721,9 +2721,115 @@ def project_new():
         patch["tags"] = [str(t)[:40] for t in body["tags"]][:20]
     if "notes" in body:
         patch["notes"] = str(body["notes"])
+    # Die Beschreibung geht in ``design.brief`` und damit in den Steckbrief --
+    # also in das, was der Agent beim Start liest. Sie war vorher nur ``notes``
+    # und stand dem Agenten nirgends zur Verfuegung; wer ihn anschliessend
+    # beauftragte, musste dieselbe Aufgabe ein zweites Mal tippen.
+    brief = str(body.get("brief") or body.get("beschreibung") or "").strip()
+    if brief:
+        patch["design"] = {"brief": brief[:4000], "rationale": "",
+                           "source": "mensch"}
     if patch:
         ema_projekt.update(proj_dir, **patch)
-    return jsonify({"id": proj_id, "name": name or proj_id})
+    return jsonify({"id": proj_id, "name": name or proj_id, "brief": brief})
+
+
+@app.route("/agent/vorgabe", methods=["POST", "OPTIONS"])
+def agent_vorgabe():
+    """Grob vorgezeichnete Geometrie als STARTPUNKT an einen Agenten uebergeben.
+
+    Warum eine eigene Route und nicht ``/analyse``
+    -----------------------------------------------
+
+    Wer im Designer die Hauptmasse und die Magnetlage hinlegt, will damit noch
+    nichts rechnen -- er will dem Agenten sagen „hier faengst du an". Ein
+    Pipelinelauf waere Minuten bis Stunden fuer eine Uebergabe, die Sekunden
+    dauern darf.
+
+    Der Payload wird als ``meta.json`` abgelegt, also genau dort, wo ihn
+    ``cae_cli.py --from-project`` und der Steckbrief ohnehin suchen. Der Agent
+    braucht dafuer kein neues Werkzeug: er sieht die Maschine im Steckbrief
+    seiner Projektakte stehen.
+
+    **Der Unterschied, auf den es ankommt:** ein gebundenes Projekt ist sonst
+    ausdruecklich KEINE Vorlage (dagegen wurde ``--frisch`` gebaut). Eine
+    Vorgabe ist das Gegenteil -- sie ist gewollt. Deshalb wird sie als solche
+    markiert (``design.vorgabe``), und der Systemzusatz des Laufs sagt dann das
+    Umgekehrte: fang hier an, aendere was noetig ist, und sag, WAS du geaendert
+    hast und warum.
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import datetime
+    from ema_pipeline import create_project_dir
+    import ema_projekt
+    body = request.get_json(silent=True) or {}
+    payload = body.get("payload")
+    if not isinstance(payload, dict) or not payload.get("geom"):
+        return jsonify({"ok": False, "grund": "Kein Payload mit geom."}), 400
+
+    # Den uebergebenen Payload auf den vollstaendigen Satz auffuellen. Der
+    # Designer liefert die Hauptmasse und die Magnetlage -- nicht die neunzig
+    # Schluessel, die ein Verb erwartet. Fehlten sie, liefe der Agent mit
+    # `--from-project` in halbe Payloads und bekaeme stillschweigend
+    # Vorgabewerte an Stellen, an denen er eine Entscheidung vermutet. Der
+    # Grundsatz ist derselbe wie bei `--frisch`: neutraler Grundsatz aus dem
+    # Schema, und darueber das, was wirklich gezeichnet wurde.
+    try:
+        import cae_cli
+        grund = cae_cli.frischer_payload()
+        geom = dict(grund.get("geom") or {})
+        geom.update(payload.get("geom") or {})
+        voll = {**grund, **{k: v for k, v in payload.items() if k != "geom"}}
+        voll["geom"] = geom
+        payload = voll
+    except Exception:                                        # noqa: BLE001
+        pass                       # lieber roh uebergeben als gar nicht
+
+    pid = str(body.get("projekt") or "").strip()
+    if pid:
+        if not _safe_name(pid):
+            return jsonify({"ok": False, "grund": "ungueltiger Projektname"}), 403
+        proj_dir = os.path.join(PROJECTS_ROOT, pid)
+        if not os.path.isdir(proj_dir):
+            return jsonify({"ok": False, "grund": f"Projekt {pid} gibt es nicht"}), 404
+    else:
+        proj_dir, pid = create_project_dir(
+            PROJECTS_ROOT, str(body.get("name") or "").strip(), origin="designer")
+
+    meta = {"label": str(body.get("name") or "").strip() or pid,
+            "created": datetime.datetime.now().isoformat(timespec="seconds"),
+            "payload": payload,
+            "axial_len": payload.get("axial_len"),
+            "geom": payload.get("geom"),
+            "load_nm": payload.get("load_nm"),
+            "cooling": payload.get("cooling")}
+    try:
+        with open(os.path.join(proj_dir, "meta.json"), "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2, ensure_ascii=False, default=str)
+    except OSError as e:
+        return jsonify({"ok": False, "grund": f"meta.json nicht schreibbar: {e}"}), 500
+
+    # Die Beschreibung des Projekts NICHT ueberschreiben: sie beantwortet
+    # „wozu ueberhaupt" (80 kW, 1200 kg, guenstig), der Zusatz aus dem Designer
+    # beantwortet „was liegt hier gezeichnet". Beides ist der Auftrag, und das
+    # zweite darf das erste nicht loeschen -- sonst waere die Uebergabe genau
+    # das Doppeltippen, das sie ersparen soll.
+    alt = ema_projekt.load(proj_dir) or {}
+    alt_brief = str((alt.get("design") or {}).get("brief") or "").strip()
+    zusatz_brief = str(body.get("brief") or "").strip()
+    brief = "\n\n".join(x for x in (alt_brief, zusatz_brief) if x)[:4000]
+    ema_projekt.update(proj_dir, status="vorgabe",
+                       design={"brief": brief,
+                               "rationale": str(body.get("begruendung") or "")[:4000],
+                               "source": "designer", "vorgabe": True})
+    ema_projekt.append_evolution(proj_dir, {
+        "action": "vorgabe:designer",
+        "note": ("Geometrie im Designer vorgezeichnet und als Startpunkt "
+                 "uebergeben" + (f": {brief[:160]}" if brief else "")),
+        "ref": "meta.json"})
+    return jsonify({"ok": True, "id": pid, "projekt": pid,
+                    "ordner": proj_dir, "brief": brief})
 
 
 @app.route("/project/<pid>/manifest")
@@ -3974,6 +4080,13 @@ def agent_start():
     projekt = str(d.get("projekt", ""))
     if projekt and not _safe_name(projekt):
         return jsonify({"ok": False, "grund": "ungueltiger Projektname"}), 403
+    # Ein Projekt, das es nicht gibt, wurde bisher stillschweigend angenommen:
+    # der Lauf startete, ``zielordner()`` legte ``<tippfehler>/agent`` an, und in
+    # der Projektliste stand hinterher ein Ordner, den niemand gewollt hatte --
+    # ohne project.json, also auch ohne Steckbrief und ohne Projektakte.
+    if projekt and not os.path.isdir(os.path.join(PROJECTS_ROOT, projekt)):
+        return jsonify({"ok": False,
+                        "grund": f"Projekt '{projekt}' gibt es nicht."}), 404
 
     # Das gebundene Projekt kommt als Systemzusatz herein, nicht als Prompt: ein
     # Prompt kann vom Modell ueberschrieben oder vergessen werden, der
@@ -3981,12 +4094,43 @@ def agent_start():
     # Vorlage ist -- genau die Verwechslung war der Anlass fuer ``--frisch``.
     zusatz = ""
     if projekt:
-        zusatz = (f"Gebundenes Projekt: {projekt} (unter ~/cae_projekte). "
-                  f"Ergebnisse dieses Laufs gehoeren dorthin. Es ist AUSDRUECKLICH "
-                  f"KEINE Vorlage: uebernimm daraus keine Polzahl, Nutzahl, "
-                  f"Magnetanordnung, Kuehlung oder Werkstoffwahl. Fuer eine neue "
-                  f"Auslegung beginnst du mit "
-                  f"'python3 cae_orchestrator/cae_cli.py paarvergleich --frisch'. ")
+        # Ablageort ODER Vorgabe. Beides falschherum zu sagen ist gleich teuer:
+        # eine uebernommene Altgeometrie ist der Fehler, gegen den ``--frisch``
+        # gebaut wurde -- eine IGNORIERTE Vorgabe ist der umgekehrte, und er
+        # aergert mehr, weil jemand sie eigens hingelegt hat.
+        akte = {}
+        try:
+            with open(os.path.join(PROJECTS_ROOT, projekt, "project.json"),
+                      encoding="utf-8") as f:
+                akte = json.load(f) or {}
+        except (OSError, ValueError):
+            akte = {}
+        entwurf = akte.get("design") or {}
+        brief = str(entwurf.get("brief") or "").strip()
+        if entwurf.get("vorgabe"):
+            zusatz = (f"Gebundenes Projekt: {projekt} (unter ~/cae_projekte). "
+                      f"Ergebnisse dieses Laufs gehoeren dorthin. In ihm liegt eine "
+                      f"VON HAND VORGEZEICHNETE GEOMETRIE, die ausdruecklich als "
+                      f"Startpunkt uebergeben wurde: 'python3 "
+                      f"cae_orchestrator/cae_cli.py steckbrief {projekt}' zeigt sie, "
+                      f"und '--from-project {projekt}' uebernimmt sie in jedes Verb. "
+                      f"Fang damit an. Aendern darfst du sie -- sag dann aber, WAS du "
+                      f"geaendert hast und warum. Benutze hier NICHT '--frisch': das "
+                      f"wuerfe genau die Vorgabe weg, um die es geht. ")
+        else:
+            zusatz = (f"Gebundenes Projekt: {projekt} (unter ~/cae_projekte). "
+                      f"Ergebnisse dieses Laufs gehoeren dorthin. Es ist AUSDRUECKLICH "
+                      f"KEINE Vorlage: uebernimm daraus keine Polzahl, Nutzahl, "
+                      f"Magnetanordnung, Kuehlung oder Werkstoffwahl. Fuer eine neue "
+                      f"Auslegung beginnst du mit "
+                      f"'python3 cae_orchestrator/cae_cli.py paarvergleich --frisch'. ")
+        # Die Beschreibung, die beim Anlegen des Projekts eingegeben wurde. Ohne
+        # sie muesste sie ein zweites Mal getippt werden -- und beim zweiten Mal
+        # steht etwas anderes da als beim ersten.
+        if brief:
+            zusatz += (f"Der Mensch hat das Projekt so beschrieben: \"{brief[:1200]}\" "
+                       f"Das ist der Auftrag; frag nach, was darin offen bleibt, "
+                       f"statt es zu erfinden. ")
     # Der 3D-Lauf steht auch im Skill, aber der Systemzusatz ueberlebt einen langen
     # Zug: das 2D-FDM-Feld ist zweidimensional, erst Elmer prueft es unabhaengig nach.
     # Fahrzyklus und Sicherheitskriterien: beides steht im Skill, aber beides ist
@@ -4081,6 +4225,31 @@ def agent_sichern():
     import ema_agent
     a = _agent_kopf().sichern()
     return jsonify(a), (200 if a.get("ok") else 400)
+
+
+@app.route("/agent/arbeit")
+def agent_arbeit():
+    """Was gerade arbeitet -- fuer die schmale Leiste unter der Ergebnisspalte.
+
+    Ein Agentenlauf sieht von aussen minutenlang gleich aus: links laeuft Text,
+    rechts steht nichts Neues. Ob dabei eine Recherche haengt, der Loeser
+    rechnet oder schlicht nichts passiert, war nicht zu unterscheiden -- und wer
+    das nicht sieht, bricht zu frueh ab oder wartet auf etwas, das gar nicht
+    laeuft.
+
+    Die Zustandsdicts werden hier eingesammelt und ``ema_arbeit`` hereingereicht,
+    statt dass jenes den Server importierte: das waere ein Importzirkel und
+    machte das Messmodul ohne laufenden Flask unpruefbar.
+    """
+    import ema_arbeit
+    return jsonify(ema_arbeit.stand({
+        "Analyse": _state, "Bericht": _report_state, "3D-Feld": _em3d_state,
+        "CAD": _cad_state, "Rauchtest": _smoke_state, "STEP-Import": _import_state,
+        "Zielwertsuche": _opt_state, "KI-Entwurf": _design_state,
+        "Magnetfeinschliff": _design_opt_state, "Parameterstudie": _study_state,
+        "Studienbericht": _study_report_state, "Stroemung": _cfd_state,
+        "Oelkuehlung": _oil_state, "Spruehtest": _spraytest_state,
+    }))
 
 
 @app.route("/agent/laeufe")

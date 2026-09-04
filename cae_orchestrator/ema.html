@@ -261,7 +261,8 @@
         <label style="font-size:.78rem;color:#9ab;display:block;margin-top:9px">Tags (Komma-getrennt)
           <input id="pj_new_tags" placeholder="z. B. PKW, 800V, Prototyp"
                  style="width:100%;margin-top:3px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:7px 8px;border-radius:4px;font-size:.82rem"/></label>
-        <label style="font-size:.78rem;color:#9ab;display:block;margin-top:9px">Notizen / Ziel der Auslegung
+        <label style="font-size:.78rem;color:#9ab;display:block;margin-top:9px">Beschreibung / Ziel der Auslegung
+          <span style="display:block;color:#778;font-size:.72rem;margin-top:2px">geht als Auftrag an PI und Hermes — nicht noch einmal eintippen</span>
           <textarea id="pj_new_notes" placeholder="Wozu? Randbedingungen, Anforderungen, Entscheidungen…"
                     style="width:100%;margin-top:3px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:7px 8px;border-radius:4px;font-size:.82rem;min-height:60px"></textarea></label>
         <button onclick="pjCreate()" style="background:#1f7a5a;width:100%;padding:10px;font-size:.82rem;margin-top:12px">
@@ -1153,6 +1154,23 @@
         <button onclick="dsnClear()" style="background:#7a3030;font-size:.76rem;padding:8px;width:100%;margin-bottom:6px">🗑 Alles löschen</button>
         <button onclick="dsnBuild()" style="background:#27ae60;font-size:.82rem;padding:11px;width:100%">⚙ CAD + Berechnung erzeugen</button>
         <div id="dsn_build_msg" style="font-size:.74rem;color:#9aa;margin-top:6px"></div>
+
+        <!-- An den Agenten übergeben. Bewusst NEBEN dem Rechenknopf und nicht
+             statt seiner: wer hier grob vorzeichnet, will oft gar nichts
+             rechnen, sondern dem Agenten sagen „hier fängst du an". Ein
+             Pipelinelauf wären Minuten bis Stunden für eine Übergabe, die
+             Sekunden dauern darf. -->
+        <div style="margin-top:14px;border-top:1px solid #3a4250;padding-top:12px">
+          <label style="font-size:.78rem;color:#9ab;display:block">🤖 Als Startpunkt an einen Agenten
+            <span style="display:block;color:#778;font-size:.72rem;margin-top:2px">Die gezeichnete Geometrie wird zur Vorgabe — der Agent darf sie ändern, muss aber sagen was und warum.</span>
+            <textarea id="dsn_agent_brief" placeholder="Auftrag dazu (optional): z. B. „80 kW Stadtfahrzeug, 1200 kg, günstig. Prüf, ob 8 Pole besser sind."
+                      style="width:100%;margin-top:5px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:7px 8px;border-radius:4px;font-size:.82rem;min-height:52px"></textarea></label>
+          <div style="display:flex;gap:6px;margin-top:8px">
+            <button onclick="dsnAnAgent('pi')" style="background:#2b5f86;flex:1;font-size:.8rem;padding:9px">🤖 an PI</button>
+            <button onclick="dsnAnAgent('hermes')" style="background:#5c3f86;flex:1;font-size:.8rem;padding:9px">🪽 an Hermes</button>
+          </div>
+          <div id="dsn_agent_msg" style="font-size:.74rem;color:#9aa;margin-top:6px"></div>
+        </div>
       </div>
     </div>
 
@@ -4815,7 +4833,11 @@ async function pjCreate() {
   msg.textContent = '⏳ lege an…';
   try {
     const r = await fetch('/project/new', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, tags, notes }) }).then(x => x.json());
+      // `brief` ist dieselbe Eingabe wie `notes`, geht aber nach `design.brief` und
+      // damit in den Steckbrief — also in das, was der Agent beim Start liest.
+      // Vorher stand die Beschreibung nur in `notes` und war für ihn unsichtbar;
+      // wer ihn danach beauftragte, tippte dieselbe Aufgabe ein zweites Mal.
+      body: JSON.stringify({ name, tags, notes, brief: notes }) }).then(x => x.json());
     if (r.error) { msg.textContent = '❌ ' + r.error; return; }
     msg.textContent = '✓ angelegt: ' + (r.name || r.id);
     document.getElementById('pj_new_name').value = '';
@@ -5924,6 +5946,45 @@ async function _dsnBuildPayload() {
   if (!payload.project_id && window._activeProject && _activeProject.id)
     payload.project_id = _activeProject.id;
   return payload;
+}
+
+// Die gezeichnete Geometrie als STARTPUNKT an einen Agentenkopf übergeben —
+// ohne Pipelinelauf. Der Payload landet als meta.json im Projekt, also genau
+// dort, wo `cae_cli.py --from-project` und der Steckbrief ohnehin nachsehen:
+// der Agent braucht dafür kein neues Werkzeug, er liest die Maschine in seiner
+// Projektakte. Markiert wird sie als `design.vorgabe` — sonst bekäme er den
+// üblichen Satz zu hören, das gebundene Projekt sei „ausdrücklich KEINE
+// Vorlage", und würfe genau das weg, was hier eigens hingelegt wurde.
+async function dsnAnAgent(kopf) {
+  const msg = document.getElementById('dsn_agent_msg');
+  if (!DESIGN.magnets.length) {
+    msg.style.color = '#e57';
+    msg.textContent = '⚠ Mindestens einen Magneten zeichnen — sonst gibt es keine Geometrie zu übergeben.';
+    return;
+  }
+  msg.style.color = '#9c9'; msg.textContent = '⏳ übergebe…';
+  try {
+    const payload = await _dsnBuildPayload();
+    const brief = (document.getElementById('dsn_agent_brief').value || '').trim();
+    // In ein bestehendes aktives Projekt hinein, wenn es eines gibt — sonst legt
+    // die Route ein neues an. Zwei Projekte für dieselbe Auslegung sind der
+    // Anfang davon, dass später niemand mehr weiß, welches gilt.
+    const pid = (window._activeProject && window._activeProject.id) || '';
+    const r = await fetch('/agent/vorgabe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ payload, brief, projekt: pid,
+                             name: (document.getElementById('pj_new_name') || {}).value || '' })
+    }).then(x => x.json());
+    if (!r.ok) { msg.style.color = '#e57'; msg.textContent = '❌ ' + (r.grund || 'fehlgeschlagen'); return; }
+    const url = '/agent?kopf=' + encodeURIComponent(kopf) + '&projekt=' + encodeURIComponent(r.id);
+    msg.style.color = '#9c9';
+    msg.innerHTML = '✓ übergeben an Projekt <b>' + escHtml(r.id) + '</b> — ' +
+                    '<a href="' + url + '" target="_blank" style="color:#6cf">' +
+                    (kopf === 'hermes' ? '🪽 Hermes' : '🤖 PI') + ' öffnen</a>';
+    window.open(url, '_blank');
+  } catch (e) {
+    msg.style.color = '#e57'; msg.textContent = '❌ ' + e.message;
+  }
 }
 
 async function dsnBuild() {

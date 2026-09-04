@@ -319,6 +319,11 @@ def steckbrief(projekt_dir: str, *, mit_laeufen: bool = True) -> dict:
                      "ursprung": (akte.get("lineage") or {}).get("origin"),
                      "quelle": (akte.get("design") or {}).get("source")},
         "auftrag": (akte.get("design") or {}).get("brief") or "",
+        # Der Unterschied, auf den beim Agentenstart alles ankommt: ein
+        # gebundenes Projekt ist sonst ausdruecklich KEINE Vorlage (dagegen
+        # wurde ``--frisch`` gebaut). Eine im Designer vorgezeichnete Geometrie
+        # ist das Gegenteil -- sie ist als Startpunkt GEWOLLT.
+        "vorgabe": bool((akte.get("design") or {}).get("vorgabe")),
         "maschine": maschine(payload, akte),
         "gerechnet": gerechnet,
         "kennwerte": kennwerte,
@@ -399,6 +404,9 @@ def als_text(sb: dict, *, kurz: bool = False) -> str:
          f"Leiter {_z(m['leiter'])}"]
     if sb["auftrag"]:
         z.append(f"  Auftrag  : {sb['auftrag'][:180]}")
+    if sb.get("vorgabe"):
+        z.append("  VORGABE  : die Geometrie ist von Hand vorgezeichnet und als "
+                 "Startpunkt gemeint")
     if sb["herkunft"]["eltern"]:
         z.append(f"  Abgeleitet aus: {sb['herkunft']['eltern']}")
 
@@ -449,7 +457,20 @@ def als_markdown(sb: dict) -> str:
     if not sb.get("ok"):
         return f"- Steckbrief nicht lesbar: {sb.get('grund', '')}"
     m = sb["maschine"]
-    z = [f"- Maschinenart: {m['art_text']} (`{m['art']}`)"]
+    z = []
+    if sb.get("auftrag"):
+        # Mehrzeilig eingeruecken: eine rohe Leerzeile im Auftrag beendete
+        # sonst die Aufzaehlung, und der Rest stuende danach wie Fliesstext da.
+        auftrag = "\n  ".join(zeile for zeile in
+                              str(sb["auftrag"])[:1500].splitlines() if zeile.strip())
+        z.append(f"- **Auftrag des Menschen**: {auftrag}")
+    if sb.get("vorgabe"):
+        z += ["- **Diese Geometrie ist eine VORGABE, kein Altbestand.** Sie wurde",
+              "  von Hand im Designer vorgezeichnet und ausdruecklich als Startpunkt",
+              "  uebergeben. Fang damit an. Aendern darfst du sie -- sag dann aber,",
+              "  WAS du geaendert hast und warum. Sie ist NICHT der Fall, gegen den",
+              "  `--frisch` gebaut wurde."]
+    z.append(f"- Maschinenart: {m['art_text']} (`{m['art']}`)")
     if m["anordnung_text"]:
         z.append(f"- Magnetanordnung: {m['anordnung_text']} (`{m['anordnung']}`)")
     z += [f"- Pole/Nuten: {_z(m['pole'])} / {_z(m['nuten'])}",

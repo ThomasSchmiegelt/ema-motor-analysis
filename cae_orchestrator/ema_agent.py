@@ -707,21 +707,7 @@ class Kopf:
                 "",
                 f"- Stand: {time.strftime('%d.%m.%Y %H:%M')}",
                 f"- Agentenkopf: {self.LABEL} im Browser (`/agent?kopf={self.NAME}`)",
-                "",
-                # Der Skill liegt da, aber `skill_view` findet ihn in `hermes acp`
-                # v0.20.5 nicht (gemessen 04.09.2026, mit eigenem ACP-Klienten
-                # nachgestellt: "Skill 'cae-orchestrator' not found", waehrend
-                # `hermes skills list` ihn zeigt und derselbe Aufruf in einem
-                # gewoehnlichen Prozess gelingt). Ohne diesen Hinweis sucht der
-                # Kopf minutenlang -- oder rechnet ohne den Skill los, und dann
-                # fehlen ihm Verben, Laufzeiten, Exit-Codes und die Fallen.
-                "## Der Skill",
-                "",
-                "Der Skill `cae-orchestrator` liegt als Datei unter",
-                "`.agents/skills/cae-orchestrator/SKILL.md`. **Lies ihn dort.**",
-                "Findet `skill_view` ihn nicht (bei Hermes gemessen der Fall), ist",
-                "das kein Grund zu suchen und keiner, ohne ihn zu arbeiten — eine",
-                "Datei lesen, weiterarbeiten."]
+]
         if not self.projekt:
             kopf += [
                 "- Projekt: **keines gebunden**",
@@ -734,13 +720,31 @@ class Kopf:
             ]
         else:
             ordner = os.path.join(PROJEKTE, self.projekt)
+            # Ablageort ODER Vorgabe -- der Unterschied entscheidet, ob die
+            # Geometrie zu uebernehmen oder zu ignorieren ist, und beides
+            # falschherum zu sagen ist gleich teuer. Die Marke steht in
+            # ``project.json`` (``design.vorgabe``) und wird gesetzt, wenn
+            # jemand im Designer vorzeichnet und ausdruecklich uebergibt.
+            vorgabe = False
+            try:
+                with open(os.path.join(ordner, "project.json"),
+                          encoding="utf-8") as f:
+                    vorgabe = bool((json.load(f).get("design") or {}).get("vorgabe"))
+            except (OSError, ValueError):
+                pass
             kopf += [f"- Kennung: `{self.projekt}`",
                      f"- Verzeichnis: `{ordner}`",
-                     "",
-                     "Das gebundene Projekt ist der ABLAGEORT dieses Laufs, **keine**",
-                     "Vorlage: Polzahl, Nutzahl, Magnetanordnung, Kuehlung und",
-                     "Werkstoffe werden nicht daraus uebernommen.",
                      ""]
+            kopf += ([
+                "In diesem Projekt liegt eine **von Hand vorgezeichnete Geometrie**,",
+                "die ausdruecklich als STARTPUNKT uebergeben wurde. Fang damit an.",
+                "Aendern darfst du sie -- sag dann aber, WAS du geaendert hast und",
+                "warum. Dies ist NICHT der Fall, gegen den `--frisch` gebaut wurde.",
+                ""] if vorgabe else [
+                "Das gebundene Projekt ist der ABLAGEORT dieses Laufs, **keine**",
+                "Vorlage: Polzahl, Nutzahl, Magnetanordnung, Kuehlung und",
+                "Werkstoffe werden nicht daraus uebernommen.",
+                ""])
             # Der Steckbrief statt nur der Kennwerte aus ``results.json``.
             #
             # Gemessener Anlass: auf „erstelle kurz einen Steckbrief ueber das
@@ -765,6 +769,23 @@ class Kopf:
                      f"`python3 cae_orchestrator/cae_cli.py steckbrief {self.projekt}`;",
                      "`--laeufe` zeigt zusaetzlich, was frueher schon an diesem",
                      "Projekt gerechnet wurde."]
+        kopf += ["",
+                 # Der Skill liegt da, aber `skill_view` findet ihn in
+                 # `hermes acp` v0.20.5 nicht (gemessen 04.09.2026, mit eigenem
+                 # ACP-Klienten nachgestellt: "Skill 'cae-orchestrator' not
+                 # found", waehrend `hermes skills list` ihn zeigt und derselbe
+                 # Aufruf in einem gewoehnlichen Prozess gelingt). Ohne diesen
+                 # Hinweis sucht der Kopf minutenlang -- oder rechnet ohne den
+                 # Skill los, und dann fehlen ihm Verben, Laufzeiten,
+                 # Exit-Codes und die Fallen.
+                 "## Der Skill",
+                 "",
+                 "Der Skill `cae-orchestrator` liegt als Datei unter",
+                 "`.agents/skills/cae-orchestrator/SKILL.md`. **Lies ihn dort.**",
+                 "Findet `skill_view` ihn nicht (bei Hermes gemessen der Fall),",
+                 "ist das kein Grund zu suchen und keiner, ohne ihn zu arbeiten",
+                 "— eine Datei lesen, weiterarbeiten."]
+
         # Der stehende Auftrag -- fuer die Koepfe, die keinen Systemzusatz kennen.
         #
         # PI bekommt ihn ueber ``--append-system-prompt``: ein Systemzusatz
