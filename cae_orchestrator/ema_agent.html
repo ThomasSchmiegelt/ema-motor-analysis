@@ -85,6 +85,14 @@
   .kachel pre{margin:0;padding:11px 13px;overflow-x:auto;
               font:12.5px/1.5 var(--mono);white-space:pre;color:var(--tx)}
   .kachel img{display:block;width:100%;background:#fff}
+  /* Die Feldbilder aus `ema_feldbild` tragen einen Alphakanal — auf dem weissen
+     Vorgabegrund darueber waere die Durchsicht nicht als solche zu erkennen. Ein
+     dunkles Schachbrett ist das uebliche Zeichen fuer „hier ist nichts". */
+  .kachel img.durchsicht{
+    background:
+      linear-gradient(45deg,#0b0e13 25%,transparent 25%,transparent 75%,#0b0e13 75%),
+      linear-gradient(45deg,#0b0e13 25%,#151b23 25%,#151b23 75%,#0b0e13 75%);
+    background-size:18px 18px; background-position:0 0,9px 9px}
   .kachel .bu{padding:7px 12px;font-size:12px;color:var(--tx2)}
   .leer{color:var(--tx2);text-align:center;margin-top:18vh;font-size:13px}
 
@@ -399,8 +407,11 @@ function kachelBild(e){
   k.className = 'kachel';
   const url = '/agent/bild/' + encodeURIComponent(e.projekt) + '/' +
               encodeURIComponent(e.unter) + '/' + encodeURIComponent(e.datei);
+  // Feldbilder (`cae_cli.py feldbild`) sind durchsichtig gerendert — sie bekommen
+  // das Schachbrett statt des weissen Grundes, sonst sieht man die Durchsicht nicht.
+  const durch = /^feld_/i.test(e.datei) ? ' class="durchsicht"' : '';
   k.innerHTML = `<div class="kk">🖼 ${esc(e.datei)}<span class="zeit">${uhrStempel(e.t)}</span></div>` +
-                `<img src="${url}" alt="${esc(e.datei)}" loading="lazy">` +
+                `<img${durch} src="${url}" alt="${esc(e.datei)}" loading="lazy">` +
                 `<div class="bu">${esc(e.projekt)}</div>`;
   // Erst mit dem geladenen Bild steht die Höhe fest — ohne das zweite Nachziehen
   // bliebe genau das interessanteste Ergebnis halb unter dem Rand.

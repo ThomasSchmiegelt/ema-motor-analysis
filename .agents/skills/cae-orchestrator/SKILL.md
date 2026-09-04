@@ -46,6 +46,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Dreizehn Achsen (Magnetanordnung, **V-Öffnungswinkel**, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge, **Wellendurchmesser**), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht**. 0,7 s, rein analytisch. `--referenz` zeigt statt eines Vergleichs die **recherchierten Vergleichswerte** mit Quellen |
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
 | `bilddaten <was>` | **Bilddatensatz zum optischen Bewerten**: `erzeugen` · `seite` · `einlesen` · `regel` · `stand`. Zieht zufaellige Rotorquerschnitte, behaelt nur die, die das Layouttor bestehen, und zeichnet sie. **Die Bewertung macht ein Mensch** — du kannst sie nur vorbereiten und hinterher auswerten |
+| `feldbild` | **Magnetfeldlinien zum Ansehen** in den Projektordner legen: `linien` (Durchsicht) · `schnitt` (Stator ueber einen Sektor weggenommen) · `pol` (ein Polsektor gross) · `laengs` (Achsschnitt, gerechnetes Feld nur mit 3-D-Lauf). Durchsichtige PNG, ein FDM-Lauf, Sekunden bis Minuten — **kein** Pipelinelauf |
 | `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver beide` (Vollrotor, ~7 s, mit Gegenüberstellung) |
 | `topopt` | Topologieoptimierung des Rotorblechs. `--verfahren sko` (Vorgabe) oder `simp`. 20–60 s. Ergebnis ist ein **Dichtefeld, kein Bauteil** |
 | `db <was>` | **Rechnungsdatenbank**: `import` · `liste` · `zeige --lauf X` · `guete --lauf X` · `vergleich`. Kennwerte **mit Herkunft je Größe** |
@@ -53,7 +54,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `recherche <was>` | **Internet**: `suche <begriffe>` · `hole <adresse>` |
 | `raw GET/POST <pfad>` | beliebige Route — Notausgang für alles Übrige |
 
-**`--frisch` gegen `--from-project`** — gilt für `run`, `rotor-check`, `screen`, `paarvergleich`, `bilddaten`, `lernen`, `struktur`, `topopt`:
+**`--frisch` gegen `--from-project`** — gilt für `run`, `rotor-check`, `screen`, `paarvergleich`, `bilddaten`, `lernen`, `struktur`, `topopt`, `feldbild`:
 
 * **`--frisch`** baut den Grundpayload aus den Schemavorgaben und passt ihn ein. Kein Altprojekt, keine geerbte Polzahl, Anordnung, Kühlung oder Werkstoffwahl. **Das ist der Start jeder neuen Auslegung.**
 * **`--from-project <id>`** erbt ALLE Entscheidungen dieses Projekts. Richtig zum Nachrechnen, Verfeinern und für gezielte Einzeländerungen — sonst nicht.
@@ -449,6 +450,42 @@ ist eine Eigenschaft des Datensatzes und keine des Rotors.
 Was NICHT passiert: kein neuronales Netz, keine Heuristik-Vorbelegung der Bilder. Die
 Bewertungsseite zeigt das Bild und sonst nichts — wer eine Vermutung vorschlaegt,
 bekommt sie bestaetigt zurueck.
+
+### `feldbild` — das Feld zeigen, ohne einen Lauf zu starten
+
+Wer zusieht, fragt irgendwann „wie sieht das Feld dazu aus?". Die Antwort darauf ist
+**nicht** ein neuer Pipelinelauf. `feldbild` rechnet EINEN FDM-Lauf auf der Geometrie,
+die gerade zur Debatte steht, und legt die Bilder in `<projekt>/charts/` — dort, wo die
+rechte Spalte sie ohnehin findet.
+
+```bash
+python3 cae_cli.py feldbild --from-project last                    # alle vier Ansichten
+python3 cae_cli.py feldbild --from-project last --ansicht pol --n 700
+python3 cae_cli.py feldbild --from-project last --last             # unter Last statt Leerlauf
+```
+
+Vier Ansichten, jede beantwortet eine andere Frage:
+
+| Ansicht | Wofuer |
+|---|---|
+| `linien` | Wo laeuft der Fluss ueberhaupt? Ganzer Querschnitt, Blech durchscheinend |
+| `schnitt` | Wie sieht es im Luftspalt und in den Taschen aus? Stator ueber 90° weggenommen |
+| `pol` | Stege, Barrieren, Streupfade EINZELN — im Vollbild sind sie ein Knaeuel |
+| `laengs` | Achsschnitt (r–z), Endeffekt an den Paketenden |
+
+**Die Darstellung ist durchsichtig, und zwar nach der Flussdichte**: Luft ist unsichtbar,
+gesaettigtes Blech nahezu deckend. Man sieht deshalb durch die Maschine hindurch auf das,
+was Fluss fuehrt.
+
+**Der Laengsschnitt ist der eine Fall, in dem nicht immer ein gerechnetes Feld drinsteht.**
+Die 2-D-FDM kennt kein z; Feldlinien ueber der Paketlaenge gibt es nur aus einem
+3-D-Elmer-Lauf. Liegt keiner im Projekt, zeigt das Bild die Geometrie und **sagt das im
+Bild**. Erfinde dazu nichts — `run em3d` ist der Weg, nicht eine Beschreibung.
+
+Vorgabe ist der **Leerlauf** (nur Magnetfluss). `--last` nimmt Drehzahl und Last aus dem
+Payload und rechnet den MTPA-Punkt — dieselbe Schaetzung, mit der die Pipeline ihre
+Lastbilder rechnet. Beide nebeneinander zeigen die Ankerrueckwirkung; einzeln ist keines
+davon „das Feld der Maschine".
 
 ### Noch davor: `paarvergleich` — worüber überhaupt entschieden wird
 

@@ -1296,6 +1296,95 @@ def cmd_sicherheit(args) -> int:
     return EXIT_OK if befund["ok"] else 1
 
 
+def cmd_feldbild(args) -> int:
+    """Magnetfeldlinien-Bilder in den Projektordner legen -- durchsichtig, geschnitten.
+
+    Warum als eigenes Verb und nicht als Nebenprodukt eines Laufs
+    -------------------------------------------------------------
+
+    Die rechte Spalte des Agentenreiters zeigt, was im Projekt an Bildern NEU
+    entsteht (Aenderungszeit in ``charts/``/``cad_images/``). Sie zeigt also
+    genau das, was gerechnet wurde -- und Feldbilder fallen bisher nur als
+    Beiwerk eines vollen Pipelinelaufs ab (``em_field.png``, Minuten bis
+    Stunden). Wer beim Zusehen sagt „zeig mir das Feld", will keinen neuen
+    Pipelinelauf, sondern ein Bild aus der Geometrie, die gerade zur Debatte
+    steht. Das kostet hier EINEN FDM-Lauf.
+
+    Weil die Bilder ganz normal in ``charts/`` landen, braucht es dafuer
+    **keinen eigenen Meldeweg je Agentenkopf**: PI und Hermes sehen sie beide
+    ueber denselben Bilderpfad, und der Bericht findet sie spaeter auch.
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    for a in applied:
+        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+
+    geom = payload.get("geom") or {}
+    if not geom:
+        return _die("Keine Geometrie im Payload -- feldbild braucht geom.", EXIT_USAGE)
+
+    kennung = getattr(args, "projekt", None) or getattr(args, "_pid", None)
+    if not kennung:
+        return _die("Kein Zielprojekt: --projekt <id> angeben (oder den Payload "
+                    "mit --from-project holen, dann ist es dessen Projekt).",
+                    EXIT_USAGE)
+    pdir = _projekt_pfad(kennung)
+    if not pdir:
+        return _die(f"Projekt '{kennung}' nicht gefunden -- 'projects' zeigt die "
+                    f"vorhandenen.", EXIT_USAGE)
+
+    ansichten = [a.strip() for a in (args.ansicht or "").split(",") if a.strip()]
+    import ema_feldbild as FB
+    if not ansichten:
+        ansichten = list(FB.ANSICHTEN)
+    unbekannt = [a for a in ansichten if a not in FB.ANSICHTEN]
+    if unbekannt:
+        return _die(f"Unbekannte Ansicht(en): {', '.join(unbekannt)} -- waehlbar: "
+                    f"{', '.join(FB.ANSICHTEN)}", EXIT_USAGE)
+
+    # Betriebspunkt. --last leitet i_q/i_d aus Drehzahl und Last des Payloads ab,
+    # ueber DIESELBE MTPA-Schaetzung, mit der auch die Pipeline ihre Lastbilder
+    # rechnet -- ein eigener Stromansatz waere ein zweites Modell.
+    iq = float(getattr(args, "iq", 0.0) or 0.0)
+    id_ = float(getattr(args, "id_", 0.0) or 0.0)
+    if getattr(args, "last", False) and abs(iq) + abs(id_) < 0.1:
+        import ema_analysis as A
+        rpm = float(payload.get("rpm_to") or payload.get("rpm_from") or 5000.0)
+        last_nm = float(payload.get("load_nm") or 0.0)
+        iq, id_ = A.estimate_dq_currents(geom, rpm, last_nm,
+                                         b_gap_t=A._analytical_Bgap(geom))
+        print(f"  Betriebspunkt aus dem Payload: {rpm:.0f} 1/min, {last_nm:.1f} Nm "
+              f"-> i_q={iq:.0f} A, i_d={id_:.0f} A")
+
+    sektor = tuple(float(x) for x in str(args.sektor).split(",")[:2])
+    if len(sektor) != 2:
+        return _die("--sektor braucht zwei Gradwerte, z.B. 25,115", EXIT_USAGE)
+
+    ziel = os.path.join(pdir, "charts")
+    bilder = FB.feldbilder(
+        geom, ziel, ansichten=ansichten, N=int(args.n),
+        rotor_angle=math.radians(float(args.winkel)), iq=iq, id_=id_,
+        axial_mm=float(payload.get("axial_len") or geom.get("axialLen") or 80.0),
+        projekt_dir=pdir, vtu=getattr(args, "vtu", None), sektor=sektor)
+
+    aus = {"projekt": os.path.basename(pdir), "ordner": ziel,
+           "betriebspunkt": {"iq_A": round(iq, 1), "id_A": round(id_, 1),
+                             "winkel_grad": float(args.winkel)},
+           "bilder": bilder}
+    if getattr(args, "json", False):
+        return emit(aus, args)
+    print(f"ERGEBNIS: {len(bilder)} Bild(er) in {ziel}")
+    for b in bilder:
+        print(f"  {b['ansicht']:8s} {b['datei']}"
+              + (f"   ({b['hinweis']})" if b.get("hinweis") else ""))
+    return 0
+
+
 def cmd_rotor_check(args) -> int:
     """2D-Layoutgate lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
     Exit: 0 = Layout OK, 1 = Check abgelehnt (defekte Geometrie)."""
@@ -1802,6 +1891,39 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Mindeststege in mm (Vorgabe: ema_topology.BRIDGE_MM = 2.0)")
     _add_globals(s)
     s.set_defaults(fn=cmd_rotor_check)
+
+    s = sub.add_parser("feldbild",
+                       help="Magnetfeldlinien als Bilder ins Projekt legen (durchsichtig, "
+                            "aufgeschnitten, ein Pol, Laengsschnitt)")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes); "
+                        "dieses Projekt ist dann auch das Ziel der Bilder")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben (braucht dann --projekt)")
+    s.add_argument("--projekt",
+                   help="Zielprojekt fuer die Bilder (Vorgabe: das Projekt des Payloads)")
+    s.add_argument("--ansicht", default="",
+                   help="Auswahl mit Komma: linien,schnitt,pol,laengs (Vorgabe: alle vier)")
+    s.add_argument("--n", type=int, default=560,
+                   help="FDM-Aufloesung des einen Feldlaufs (Vorgabe 560)")
+    s.add_argument("--winkel", type=float, default=0.0, help="Rotorwinkel in Grad")
+    s.add_argument("--last", action="store_true",
+                   help="Lastfall: i_q/i_d aus Drehzahl und Last des Payloads (MTPA)")
+    s.add_argument("--iq", type=float, default=0.0, help="q-Strom in A (statt --last)")
+    s.add_argument("--id", dest="id_", type=float, default=0.0, help="d-Strom in A")
+    s.add_argument("--sektor", default="25,115",
+                   help="Schnittsektor in Grad (von,bis) fuer die Schnittdarstellung")
+    s.add_argument("--vtu",
+                   help="3D-Elmer-VTU fuer den Laengsschnitt (Vorgabe: juengste im Projekt)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_feldbild)
 
     s = sub.add_parser("screen",
                        help="viele Konfigurationen (Pole/Nuten/Magnetform/Leiter) grob durchspielen und rangieren")
