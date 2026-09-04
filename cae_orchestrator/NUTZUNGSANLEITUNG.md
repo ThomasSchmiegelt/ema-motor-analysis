@@ -1074,6 +1074,58 @@ mechanisch wenig trägt — ein Hinweis, wo eine zusätzliche Flussbarriere vert
 > **nicht für Linux** — nur für Windows, und dort als reines Fenster-Programm ohne
 > Stapelbetrieb. Deshalb läuft das Verfahren hier selbstgebaut auf CalculiX bzw. Z88.
 
+**Erst nachsehen, was schon dasteht.** Bevor irgendetwas gerechnet wird, sagt der
+Steckbrief, was ein Projekt überhaupt ist und was daran bereits gerechnet wurde:
+
+```bash
+python3 cae_cli.py steckbrief --projekt last            # kurz und vollständig
+python3 cae_cli.py steckbrief --projekt last --laeufe   # + frühere Agentenläufe und Ablagen
+```
+
+Er nennt Identität und Herkunft, Maschinenart, Pole/Nuten, Bauraum, Luftspalt, Werkstoffe,
+Betriebspunkt, welche Stufen gelaufen sind, die Kennwerte, den Sicherheitsbefund und den
+Bestand an Bildern, CAD-Dateien und 3-D-Feldnetzen. Zwei Eigenschaften sind wichtiger als
+die Liste selbst: **er rechnet nichts nach** — was fehlt, steht als *fehlend* da, nicht als
+0 und nicht als Näherung —, und **jeder Kennwert trägt seine Herkunft**
+(`B_gap_T [analytisch]` neben `T_maxwell_Nm [fdm2d]`); ohne diese Marke sehen die beiden
+im selben Kasten gleichwertig aus, obwohl das eine eine Formel und das andere ein
+Feldlauf ist.
+
+**Vollwelle oder Hohlwelle — nachmessen statt annehmen.** Eine Bohrung spart Masse und
+Trägheit und nimmt Kühlmittel oder eine Steckverzahnung auf; falsch ist sie erst, wenn
+durch die Welle Fluss läuft. Genau das misst `welle`: ein FDM-Lauf, das radiale |B|-Profil
+im Rotor, und daraus der größte Radius, in dem nirgends Fluss steht.
+
+```bash
+python3 cae_cli.py welle --projekt last            # im Leerlauf
+python3 cae_cli.py welle --projekt last --last     # unter Last (Ankerfluss verschiebt das Bild)
+```
+
+Entschieden wird am **flussfreien Kern**, nicht am Mittelwert über die ganze Welle — sonst
+stünden „Vollwelle nötig" und „Bohrung bis 104 mm unbedenklich" im selben Befund. Der
+Befund ist **magnetisch** und sagt das auch: ob die Welle Moment und Fliehkraft trägt,
+beantworten `struktur` und `sicherheit`. Exit-Code 1 heißt „Vollwelle nötig".
+
+**Erst schnell, dann genau (`--guete`).** Die Knöpfe „📐 Entwurf" / „🔬 Detail" aus dem
+Berechnungs-Tab gibt es auch auf der Kommandozeile — sie setzen Framezahl, Frame- und
+FDM-Auflösung, Drehzahlschritt und die Struktur-Einstellungen in einem Griff:
+
+```bash
+python3 cae_cli.py run analyse --from-project last --guete entwurf --wait   # ~9 min
+python3 cae_cli.py run analyse --from-project last --guete detail  --wait   # ~2,7 h
+```
+
+Der Entwurf verliert **keine Kennzahl**, nur Bildschärfe: `B_gap` und `Kt` kommen aus der
+analytischen Formel und hängen nicht an der Auflösung. Unter N=300 geht deshalb keine
+Stufe — dort fängt die gemessene Luftspaltwelle an, um die Hälfte danebenzuliegen.
+
+**Was entschieden wird, bleibt liegen.** `paarvergleich`, `screen`, `rotor-check`,
+`sicherheit`, `welle` und `feldbild` schreiben ihr Ergebnis bei gebundenem Projekt nach
+`<projekt>/rechnungen/<zeit>_<verb>.txt` — mit dem auslösenden Aufruf im Kopf, den
+strukturierten Daten daneben als `.json` und einer Zeile im Verlauf der Projektakte.
+`--ohne-ablage` schaltet das ab. Vorher stand die Begründung hinter einer Auslegung nur
+im Terminal und war beim nächsten Start weg.
+
 **Mit Sprachmodell:** ein Skript in der Repo-Wurzel startet Server und Agent zusammen.
 
 ```bash
@@ -1108,6 +1160,46 @@ Ollama anspricht, und bricht sonst ab. Das ist kein Übereifer: Hermes' mitgelie
 Voreinstellung zeigt auf einen Cloud-Dienst, und zwei bekannte Fehler im Programm
 lassen die Ollama-Einstellung still dorthin durchfallen. Eine Einstellungsdatei ist
 darum kein Beleg — gemessen wird, wohin der Prozess wirklich verbindet.
+
+---
+
+### Die Agenten im Browser (Reiter 🤖 PI und 🪽 Hermes)
+
+Beide Agentenköpfe hängen auch in der Oberfläche auf `:5000` — links der Denk- und
+Antwortstrom mit Prompt-Feld, rechts Werkzeugausgaben und Bilder, oben Stoppuhr und
+Bildschirmaufnahme. Es ist **eine** Seite für beide Köpfe.
+
+**Vor dem Start** wählt man Projekt, Sitzung, Modell und den ersten Auftrag. Zwei Angaben
+sind neu und ersparen doppeltes Tippen:
+
+- **Die Projektbeschreibung**, die beim Anlegen eines Projekts eingegeben wurde, geht
+  automatisch an den Agenten — als Auftrag, nicht als Fußnote.
+- **Eine im 🎨 Designer grob gezeichnete Geometrie** lässt sich ohne Berechnung als
+  *Startpunkt* übergeben („an PI"/„an Hermes" im Designer-Tab). Der Agent darf sie
+  weiterentwickeln; er wird ausdrücklich aufgefordert zu sagen, **was** er geändert hat
+  und **warum**. Ohne Übergabe gilt das Gegenteil: ein gebundenes Projekt ist
+  ausdrücklich *keine* Vorlage.
+- **Die Zahl der Entwurfsschleifen** gibt man in der Startmaske vor. Sie erreicht den
+  Agenten als stehende Anweisung: erst mehrere schnelle Entwurfsläufe, und erst wenn ein
+  guter Stand steht, ein genauer Detaillauf.
+
+**Die Arbeitsleiste** unter der Ergebnisspalte beantwortet die Frage, die man sonst nur
+raten kann: *arbeitet da gerade etwas?* Sie zeigt im Sekundentakt, ob eine Rechnung läuft
+(mit Name und Fortschritt), ob gerade recherchiert wird, welcher Löser läuft
+(CalculiX/Elmer/Z88/Gmsh/FreeCAD/OpenFOAM/Blender), wie ausgelastet die Grafikkarte ist,
+welches Modell geladen ist, wie schnell es schreibt — und den Zustand des Agenten selbst
+(„arbeitet · 0:42" bzw. „still seit 8:13"). Bleibt ein Zug dauerhaft stumm, lässt sich die
+Eingabe wieder freigeben, **ohne** den Lauf zu beenden.
+
+**Frühere Läufe** sind über den Knopf 🗂 in der Kopfzeile wieder aufrufbar — beide Köpfe
+zusammen, neueste zuerst, mit den damals gegebenen Aufträgen; ein Lauf wird in derselben
+Darstellung abgespielt wie der lebende.
+
+**Die Bildschirmaufnahme** richtet sich nach der rechten Spalte: sobald dort etwas
+erscheint, wird aufgezeichnet. Nebenher entsteht eine Markendatei und ein fertiges
+`ffmpeg`-Skript, mit dem sich hinterher genau die interessanten Stellen herausschneiden
+und aneinanderhängen lassen. Wer nichts auslassen will, schaltet „Leerlauf auslassen" ab
+und schneidet erst am Ende.
 
 ---
 
@@ -1189,6 +1281,10 @@ Es gibt keinen `#report`-Anker mehr — der Bericht liegt auf `#projekt`.
 | `~/cae_projekte/<Zeitstempel[_Name]>/` | Einzelprojekt: `motor.FCStd`, `motor.step`, `results.json`, `meta.json`, `cad_images/`, `charts/`, `frames/`, `frames_react/`, `frames_load/`, `frames_struct/` |
 | `~/cae_projekte/<…>/import.step` | Beim STEP-Import: die hochgeladene Original-STEP |
 | `~/cae_projekte/<…>/em3d/` | 3D-Feld (Elmer): Gmsh-Mesh, Elmer-Mesh, `case.sif`, `results/case_t0001.vtu` (ParaView) |
+| `~/cae_projekte/<…>/rechnungen/` | Ergebnisse der Agenten-/CLI-Verben (`<zeit>_<verb>.txt` + `.json`, Aufruf im Kopf) |
+| `~/cae_projekte/<…>/agent/` | Agentenläufe dieses Projekts: `protokoll_<marke>.md` + `ereignisse_<marke>.jsonl` |
+| `~/cae_projekte/_agent_laeufe/<marke>/` | Agentenläufe **ohne** Projektbindung (führender `_`, damit sie nicht als Projekt gelistet werden) |
+| `~/Videos/agent_<marke>_<projekt>.webm` | Bildschirmaufnahme eines Agentenlaufs, daneben `.marken.tsv` + `.schnitt.sh` (`CAE_VIDEO_ORDNER` stellt den Ort um) |
 | `~/cae_projekte/_comparisons/` | Vergleichsberichte |
 | `~/cae_projekte/_variants/` | Gespeicherte Variantensätze (JSON) |
 | `~/cae_projekte/_rag/index.json` | RAG-Wissensbasis (Dokumente + Embeddings) |

@@ -196,6 +196,137 @@ Zwei Quellen, streng getrennt:
 Es wird **kein Modell trainiert**. „Gelernt" heißt: aus dem eigenen Bestand hergeleitet
 und beim nächsten Mal da.
 
+## Was von einem Agentenlauf bleibt
+
+Ein Agent, der rechnet und nichts hinterlässt, ist eine Vorführung, kein Werkzeug.
+Drei Dinge verschwanden bisher.
+
+**Die Ergebnisse der örtlichen Verben standen nirgends.** Von sechzehn örtlichen
+Verben schrieb genau eines auf die Platte. `paarvergleich`, `screen`,
+`rotor-check`, `sicherheit`, `welle` — also gerade die Verben, mit denen eine
+Auslegung *entschieden* wird — gaben ihr Ergebnis auf `stdout` aus: es stand in
+der rechten Spalte, wanderte nach oben aus dem Bild und war beim nächsten Start
+weg. Die Begründung eines Entwurfs überlebte den Entwurf nicht. Sie schreiben ihr
+Ergebnis jetzt nach `<projekt>/rechnungen/<zeit>_<verb>.txt` — mit dem Aufruf im
+Kopf, sonst ist eine Zahl später nicht zuzuordnen — und hängen eine Zeile an das
+Projekttagebuch in `project.json`. **Nicht** in `results.json`: die gehört dem
+Pipelinelauf und würde beim nächsten `run analyse` neu geschrieben.
+
+**Die Läufe waren geschrieben, aber unerreichbar.** Nach *jedem* Zug entstanden
+ein `protokoll_*.md` und eine `ereignisse_*.jsonl` — gelesen hat das nie jemand:
+keine Route, kein Verb, kein Knopf. Für den, der davorsitzt, ist „geschrieben,
+aber unerreichbar" dasselbe wie „nicht gespeichert". Es gibt jetzt **🗂 Frühere
+Läufe**: alle Läufe beider Köpfe, neueste zuerst, jeder **mit dem gestellten
+Auftrag** daran — an einer Uhrzeit erkennt man keinen Lauf wieder, an der Frage
+schon. Ein Klick spielt ihn über *dieselben* Zeichenfunktionen ab wie den
+laufenden Strom; ein zweiter Satz liefe mit dem ersten auseinander. Die Übersicht
+liest dabei keine Mitschrift ganz ein — eine hier gemessene ist **9,4 MB mit
+140.872 Ereignissen** — und ein einzelner Lauf kommt auf die Ringgröße gedeckelt
+zurück, **vorne** abgeschnitten, weil das Ende das ist, worauf man zurückkommt.
+
+**Was ist dieses Projekt?** Auf „erstelle kurz einen Steckbrief über das Projekt"
+beschrieb ein Agent das **Monorepo** — Ports, Teilprojekte, Git-Zweig. Keine
+Halluzination: über die Maschine lag ihm nichts vor außer einer 1,7 MB großen
+`results.json`. `cae_cli.py steckbrief [--laeufe]` und derselbe Text am Anfang der
+erzeugten `AGENTS.projekt.md` tragen jetzt Maschinenart, Pole/Nuten, Bauraum,
+Luftspalt, Werkstoffe, Betriebspunkt, gelaufene Stufen und die Kennwerte — **jeden
+mit seiner Herkunft** aus demselben Register, aus dem sich die Rechnungsdatenbank
+speist. `B_gap_T [analytisch]` und `T_maxwell_Nm [fdm2d]` stehen im selben
+`summary` nebeneinander und sähen ohne die Angabe gleichwertig aus. Gerechnet wird
+nichts: was auf der Platte fehlt, steht als fehlend da, nicht als 0.
+
+### Die Arbeitsleiste
+
+Ein Agentenlauf sieht von außen minutenlang gleich aus: links läuft Text, rechts
+steht nichts Neues. Ob dabei eine Recherche hängt, der Löser rechnet oder schlicht
+nichts passiert, war nicht zu unterscheiden — und wer das nicht sieht, bricht zu
+früh ab oder wartet auf etwas, das gar nicht läuft. Eine Leiste unter der
+Ergebnisspalte, genau so hoch wie die beiden Eingabefelder gegenüber, trägt fünf
+Leuchten und den Agenten selbst: **Rechnung** (die vierzehn Zustände des Servers,
+mit Fortschritt), **Recherche** (ein Puls, den die Stelle setzt, die *wirklich*
+ins Netz greift — nicht aus dem Werkzeugtext geraten), **Löser**
+(`ccx`/Elmer/Z88/Gmsh/FreeCAD/OpenFOAM/Blender über `/proc/<pid>/comm`, gegen den
+Prozess*namen*, damit ein `grep ccx` in irgendeiner Shell die Leuchte nicht
+anschaltet), **GPU** und das geladene **Modell**.
+
+Zwei Dinge fehlen bewusst oder sind gemessen statt angenommen. Es gibt keine
+Leuchte „das Modell denkt": Ollama meldet über `/api/ps` nur, was im Speicher
+*liegt*, nicht was rechnet — eine so beschriftete Leuchte wäre schlechter als
+keine. Und die GPU-Schwelle liegt bei 50 %, nicht bei 12 %, weil diese Karte im
+Leerlauf mit nichts als dem Schreibtisch **18–24 %** zeigt; eine Lampe bei 12 %
+wäre dauernd an. Ein Abruf kostet 5 ms, und im verdeckten Reiter wird gar nicht
+gefragt.
+
+Das **Tempo** ist exakt, wo es exakt sein kann: Hermes führt `output_tokens` je
+Sitzung mit, zwei Abfragen ergeben also gemessene Token je Sekunde. PI führt keine
+— dort zählt die Seite Zeichen und schreibt „Z/s" daran, weil sich Zeichen zählen
+lassen und Token nicht, und eine aus Zeichen hochgerechnete Zahl wie eine Messung
+aussähe.
+
+### Wenn ein Zug nie endet
+
+Gemeldet als *„er sagt, dass der Agent arbeitet, tut er aber nicht"* — während die
+Leiste daneben korrekt „nichts läuft" zeigte. Gemessene Ursache: Hermes schickte
+auf `session/prompt` überhaupt keine Antwort — kein Text, kein Werkzeug, kein
+Fehler. Die Sperre blieb stehen, jede weitere Eingabe wurde mit „Der Agent
+arbeitet noch" abgewiesen, und der einzige Ausweg war, den ganzen Lauf zu beenden
+und die Sitzung zu verlieren. Ein hängender Zug war von einem langen nicht zu
+unterscheiden, weil nirgends stand, *wann zuletzt etwas kam*. Jetzt schon: die
+Leiste zeigt bernsteinfarben „still seit 8:13", die Pille oben wird korrigiert,
+und ab 450 s Stille erscheint **🔓 Sperre lösen**. Das beendet den Agenten
+**nicht** — der Prozess läuft weiter, und eine später doch noch eintreffende
+Antwort erscheint im Verlauf. Das wird ausdrücklich gesagt, statt den Zug still
+neu zu starten: dann liefen zwei nebeneinander, ohne dass es jemand weiß.
+
+### Zwei gemessene Fehler stromaufwärts in Hermes ACP
+
+Beide mit einem eigenen ACP-Klienten nachgestellt, also nicht von diesem Repo
+verursacht. Beide dokumentiert statt überspielt — und umgangen, wo eine Umgehung
+ehrlich ist.
+
+**Parallele Werkzeugaufrufe verlieren ihr Ergebnis.** Bei *einem* Werkzeug je Zug
+schickt `hermes acp` v0.20.5 `tool_call` **und** `tool_call_update`. Bei drei
+schickt es drei `tool_call` und **null** Updates: die Ergebnisse erreichen den
+Klienten nie, und die Ergebnisspalte blieb einen ganzen Lauf lang leer (gemessen:
+1.562 Ereignisse, 3 Werkzeugaufrufe, 0 Ergebnisse). Verloren sind sie aber nicht —
+Hermes schreibt jedes Werkzeugergebnis in seine eigene `state.db`, denn das Modell
+bekommt sie ja auch. Von dort werden sie am Zugende nachgelesen (nur lesend, mit
+Zeitgrenze — die Datei gehört dem laufenden Hermes) und füllen die stummen
+Kacheln mit dem *echten* Text. Zugeordnet wird der **Reihe** nach, nicht über die
+Kennung: ACP vergibt `tc-…`, die Ablage `call_…`, zwei Nummernkreise. Nur wo auch
+die Ablage nichts hergibt, bleibt der ehrliche Platzhalter.
+
+**`skill_view` findet einen Skill nicht, der nachweislich da ist.** Es antwortet
+*Skill 'cae-orchestrator' not found*, obwohl `hermes skills list` ihn zeigt
+(Quelle `local`, Trust `local`), das Repo in `trusted_project_dirs` steht, der
+Prozess-cwd das Repo ist und derselbe Aufruf in einem gewöhnlichen Python-Prozess
+mit demselben `HERMES_HOME` und demselben Arbeitsverzeichnis gelingt. Hier wird
+nichts geflickt. Statt dessen nennt **jede** Startunterlage den Dateipfad
+ausdrücklich — `AGENTS.md`, die erzeugte `AGENTS.projekt.md`, beide Startskripte:
+*lies ihn als Datei.* Ein Agent, der den Skill für abwesend hält, rechnet ohne
+Verben, Laufzeiten, Exit-Codes und Fallen los.
+
+### Die Bildschirmaufnahme folgt der Ergebnisspalte
+
+Angehalten wurde bisher, während der Server rechnete, mit der Begründung, am Bild
+ändere sich dann nichts außer einem Fortschrittsbalken. Gemessen ist das falsch:
+in einem Lauf kamen **mitten im Rechenlauf fünf Bilder** in die rechte Spalte —
+Querschnitt, Seitenansicht, Luftspalt, Feldbild, Feld unter Last. Angehalten wurde
+also genau während der Momente, die aufzuheben sich lohnt. Jetzt setzen jede
+Kachel, jedes Bild, jeder Auftrag und Scrollen in der Ergebnisspalte die Uhr
+zurück, und beim Erscheinen wird sofort fortgesetzt statt erst beim nächsten
+Wächterlauf.
+
+Vor allem aber wird **mitgeschrieben, wann was geschah**. Jedes Ereignis bekommt
+seine **Videosekunde** — verstrichene Zeit *minus* Pausen, weil eine Liste nach
+der Wanduhr mit jeder Pause weiter danebenläge — und beim Beenden liegen neben der
+Aufnahme eine `.marken.tsv` und ein ausführbares `.schnitt.sh`, das benachbarte
+Marken zu Stücken verschmilzt, jedes mit Vor- und Nachlauf schneidet und alle
+aneinanderhängt. Bewusst **neu kodiert statt `-c copy`**: kopierend schneidet
+ffmpeg an Schlüsselbildern und trifft den Moment um Sekunden daneben. Mit dieser
+Liste ist die Pause nur noch Platzersparnis und kein Zwang — ein Kästchen schaltet
+sie ab, und geschnitten wird hinterher.
+
 ## Recherche — und ihre Grenze
 
 Die Agenten dürfen im Internet nachschlagen (`cae_cli.py recherche suche|hole`). Was
@@ -387,6 +518,21 @@ Bildschärfe — und darum liegt trotzdem keine Voreinstellung unter 300: die
 Berichtsbilder rendern mit der doppelten Frame-Auflösung, der Entwurf mit 180 px also
 bei 360.
 
+**Der Agent konnte davon nichts wählen.** Die Regler stehen in *keinem* Schema —
+sie beschreiben nicht die Maschine, sondern wie genau gerechnet wird — also wurde
+`--set fdm_resolution=300` als unbekannt abgewiesen, und jeder Versuch eines
+Agenten lief in Detailgenauigkeit: Stunden, wo Minuten genügen. Die Tabelle steht
+jetzt als `ema_text2ema.GUETE` an einer Stelle, `cae_cli.py run --guete
+entwurf|detail` wendet sie an, und ein Test nagelt die Kopie in der Oberfläche
+gegen die Python-Tabelle fest — so wie der Topologietest es für den JS-Spiegel tut.
+
+Und die **Zahl der Entwurfsschleifen gibt der Mensch vor**, nicht der Agent: ein
+Feld in der Startmaske, das beide Köpfe als stehenden Auftrag erreicht — *so viele
+schnelle Runden, nach jeder `sicherheit`, und erst wenn ein Stand hält, geht EIN
+Lauf auf Detail.* Ohne diese Zahl fielen Agenten in eines von zwei Extremen, beide
+hier beobachtet: ein Detaillauf von Stunden, an dem sich nichts entscheiden lässt,
+oder Herumprobieren ohne Ende.
+
 **Der Laufzeitschätzer war dabei um mehr als eine Größenordnung zu niedrig.** Er
 rechnete mit einer Faktorisierung je Rotorwinkel und einer billigen Rück-Substitution
 je Drehzahl. Das war richtig, solange die Frames linear liefen; seit sie mit
@@ -398,6 +544,46 @@ Außerdem zählte der Schätzer nur die Rotation, nicht die beiden Zusatzdarstel
 Er rechnet jetzt mit direkt gemessenen Sekunden je Frame (0,74 / 2,86 / 4,64 / 8,61 /
 18,72 / 59,64 s bei N = 120…600) und nennt die Zahl, die dabei herauskommt: **9 Minuten
 für den Entwurf, 2,7 Stunden für Detail.**
+
+## Vollwelle oder Hohlwelle — gemessen, nicht angenommen
+
+Eine Wellenbohrung (`shaftBoreD`, 0 = Vollwelle) spart Masse und Trägheit und
+nimmt Kühlmittel oder eine Steckverzahnung auf. Falsch ist sie erst, wenn **durch
+die Welle Fluss läuft**. Das ist messbar, also wird es gemessen: `cae_cli.py
+welle` rechnet ein Feld, nimmt das radiale |B|-Profil im Rotor (je Ring
+Mittelwert und p95 über den vollen Umfang) und sucht von innen nach außen den
+ersten Ring über 0,05 T. Alles darunter ist der **flussfreie Kern** und darf
+heraus; der Befund reicht die Änderung fertig hin (`--set shaftBoreD=58.0`) oder
+sagt, dass die Vollwelle nötig ist.
+
+Entschieden wird am **Kern**, nicht am Mittelwert über die ganze Welle, und der
+Unterschied ist keiner auf dem Papier: bei einer 120-mm-Welle führt der äußere
+Ring gemessen Fluss, während der Kern bis r = 54 mm frei bleibt. Über den
+Mittelwert entschieden stünden „Vollwelle nötig" und „Bohrung bis 104 mm
+unbedenklich" im selben Befund — beides zugleich kann nicht stimmen. Gedeckelt
+wird bei `shaftD-2`: genau dort setzt das Schema die Bohrung sonst
+stillschweigend auf 0 zurück.
+
+Der Befund ist **magnetisch** und sagt das auch: ob die Welle Moment und
+Fliehkraft trägt, sagt `struktur`/`sicherheit`. Eine magnetisch unbedenkliche
+Bohrung kann mechanisch unzulässig sein.
+
+## Vom Designer direkt an den Agenten
+
+Im Canvas-Designer grob vorgezeichnete Geometrie geht als **Startpunkt** an PI
+oder Hermes — ohne Pipelinelauf, zwei Knöpfe im Designer-Reiter. Der Payload wird
+aus den Schemavorgaben aufgefüllt (sonst liefe der Agent in einen halben Payload
+und bekäme still Vorgabewerte an Stellen, an denen er eine Entscheidung vermutet)
+und als `meta.json` abgelegt: genau dort, wo `--from-project` und der Steckbrief
+ohnehin nachsehen. Kein neues Werkzeug nötig.
+
+Der Punkt, an dem es hängt: ein gebundenes Projekt ist sonst **ausdrücklich keine
+Vorlage** — das ist der Fehler, gegen den `--frisch` gebaut wurde. Eine bewusste
+Übergabe ist das Gegenteil, wird als solche markiert und **dreht** den stehenden
+Auftrag um: *fang hier an, ändere was nötig ist, und sag, was du geändert hast
+und warum.* Auch die Beschreibung, die beim Anlegen eines Projekts eingegeben
+wird, erreicht den Agenten jetzt — dieselbe Aufgabe muss nicht zweimal getippt
+werden; eine Designer-Übergabe hängt daran an, statt sie zu ersetzen.
 
 ## Festigkeit ohne FreeCAD, zweiter Löser, Topologieoptimierung
 

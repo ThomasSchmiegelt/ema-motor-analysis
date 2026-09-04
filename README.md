@@ -269,6 +269,21 @@ draft run therefore loses no metric, only image sharpness — and still no prese
 below 300: the report field images render at twice the frame resolution, so the
 draft's 180 px lands at 360.
 
+**The agent could not choose any of this.** The knobs live in *no* schema — they
+describe how precisely to compute, not what the machine is — so `--set
+fdm_resolution=300` was rejected as unknown and every trial an agent ran went at
+full detail: hours where minutes would do. The table now lives in
+`ema_text2ema.GUETE` as the single source, `cae_cli.py run --guete
+entwurf|detail` applies it, and a test nails the browser's copy against the
+Python one the way the topology test does for the JS mirror.
+
+And the **number of draft loops is the human's to set**, not the agent's: a field
+in the agent start mask that reaches both heads as a standing instruction — *that
+many fast rounds, `sicherheit` after each, and only when a state holds does one
+run go to detail.* Without it agents fell into one of two extremes, both observed
+here: a single multi-hour detail run that decides nothing, or fiddling without
+end.
+
 **The runtime estimate was more than an order of magnitude too low.** It assumed one
 factorisation per rotor angle and a cheap back-substitution per speed. That was right
 while the frames ran linearly; since they run saturated it no longer holds — the
@@ -279,6 +294,43 @@ recurs and is therefore deliberately not cached. Measured, the second frame at t
 It now uses directly measured seconds per frame (0.74 / 2.86 / 4.64 / 8.61 / 18.72 /
 59.64 s for N = 120…600) and states the number that falls out: **9 minutes for the
 draft, 2.7 hours for detail.**
+
+## Solid shaft or hollow — measured, not assumed
+
+A shaft bore (`shaftBoreD`, 0 = solid) saves mass and inertia and takes coolant or
+a spline. It is wrong only when **flux runs through the shaft**. That is
+measurable, so it is measured: `cae_cli.py welle` solves one field, takes the
+radial |B| profile in the rotor (mean and p95 over the full circumference per
+ring) and, from the inside out, finds the first ring above 0.05 T. Everything
+below that is the **flux-free core** and may come out; the finding hands you the
+change ready-made (`--set shaftBoreD=58.0`) or says a solid shaft is needed.
+
+The decision is on the **core**, not on the mean over the whole shaft, and the
+difference is not academic: on a 120 mm shaft the outer ring measurably carries
+flux while the core stays free to r = 54 mm. Decided on the mean, one finding
+would read "solid shaft required" and "bore up to 104 mm harmless" at the same
+time — both cannot be true. The bore is capped at `shaftD-2`, which is exactly
+where the schema otherwise silently resets it to 0.
+
+The finding is **magnetic** and says so: whether the shaft carries torque and
+centrifugal load is `struktur`/`sicherheit`. A magnetically harmless bore can be
+mechanically inadmissible.
+
+## From the designer straight to the agent
+
+Geometry roughed out in the canvas designer goes to PI or Hermes as a **starting
+point** without a pipeline run — two buttons in the designer tab. The payload is
+topped up from the schema defaults (otherwise the agent inherits half a payload
+and silently gets defaults where it assumes a decision) and written as
+`meta.json`: exactly where `--from-project` and the project profile already look,
+so no new tool is needed.
+
+The point it turns on: a bound project is normally **expressly not a template** —
+that is the mistake `--frisch` was built against. A deliberate hand-over is the
+opposite, so it is marked as such and **inverts** the standing instruction: *start
+here, change what you must, and say what you changed and why.* The description
+typed when a project is created now also reaches the agent, so the same task is
+not typed twice; a designer hand-over appends to it rather than replacing it.
 
 ## Two solvers on one mesh
 
@@ -360,6 +412,131 @@ endpoint, and two known upstream bugs make the local setting fall through to it 
 
 **Why a CLI and not MCP:** a local model cannot hold ~135 HTTP routes as 135 tool schemas
 in its context. Tools are bound as *skill = CLI + README*.
+
+## What survives an agent run
+
+An agent that computes and leaves nothing behind is a demo, not a tool. Three
+things used to disappear.
+
+**The results of the local verbs stood nowhere.** Of the sixteen local verbs
+exactly one wrote to disk. `paarvergleich`, `screen`, `rotor-check`,
+`sicherheit`, `welle` — the verbs with which a design is actually *decided* —
+printed to stdout: it showed in the results column, scrolled off the top, and was
+gone at the next start. The reasoning behind a design did not outlive the design.
+They now write `<project>/rechnungen/<time>_<verb>.txt` with the invoking command
+in the header, plus one line in `project.json`'s evolution log. Not into
+`results.json`: that belongs to the pipeline run and would be rewritten by the
+next `run analyse`.
+
+**The runs were written but unreachable.** A `protokoll_*.md` and an
+`ereignisse_*.jsonl` were saved after *every* turn — and nothing ever read them
+back: no route, no verb, no button. From the seat in front of it, "written but
+unreachable" is the same as "not saved", and that is how it was reported. There
+is now **🗂 Frühere Läufe**: every run of both heads, newest first, each with the
+prompts that were given — you recognise a run by what was asked, not by its clock
+time. One click replays it through *the same* render functions as the live stream;
+a second set would drift from the first. The overview never fully parses a
+transcript — one measured here is **9.4 MB with 140,872 events** — and a single
+run comes back capped at the ring-buffer size, cut from the front, because the end
+is what you come back to.
+
+**What is this project?** Asked for "a short profile of the project", an agent
+described the *monorepo* — ports, subprojects, git branch. Not a hallucination:
+about the machine it had nothing but a 1.7 MB `results.json`. `cae_cli.py
+steckbrief [--laeufe]` and the same text at the top of the generated
+`AGENTS.projekt.md` now carry machine type, poles/slots, envelope, air gap,
+materials, operating point, which stages ran, and the key figures — **each with
+its provenance** from the same register the computation database uses, because
+`B_gap_T [analytisch]` and `T_maxwell_Nm [fdm2d]` sit side by side in one summary
+and would otherwise look equivalent. It computes nothing: what is missing on disk
+is printed as missing, not as 0.
+
+### The work strip
+
+An agent run looks the same from outside for minutes on end: text on the left,
+nothing new on the right. Whether a web search is hanging, the solver is
+computing, or simply nothing is happening was indistinguishable — and whoever
+cannot see that either aborts too early or waits for something that is not
+running. A strip under the results column, exactly as tall as the two input boxes
+opposite, carries five lamps plus the agent itself: **computation** (the server's
+fourteen state dicts, with progress), **research** (a pulse set by the code that
+actually opens the connection, not guessed from the agent's tool text),
+**solver** (`ccx`/Elmer/Z88/Gmsh/FreeCAD/OpenFOAM/Blender via `/proc/<pid>/comm`,
+matched on the process *name* so a `grep ccx` in some shell does not light it),
+**GPU**, and the **model** loaded.
+
+Two things are deliberately absent or measured rather than assumed. There is no
+"the model is thinking" lamp: Ollama reports over `/api/ps` only what is *resident*,
+not what is computing, and a lamp labelled that way would be worse than none. And
+the GPU threshold is 50 %, not 12 %, because this card measures 18–24 % at idle
+with only the desktop on it — a lamp at 12 % would be permanently lit. A poll
+costs 5 ms; nothing is polled while the tab is hidden.
+
+The **rate** is exact where it can be: Hermes keeps `output_tokens` per session,
+so two samples give measured tokens per second. PI keeps none — there the page
+counts characters and writes "Z/s" on it, because characters can be counted and
+tokens cannot, and a figure extrapolated from characters would look like a
+measurement.
+
+### When a turn never ends
+
+Reported as *"it says the agent is working, but it isn't"* — while the strip next
+to it correctly said nothing was running. Measured cause: Hermes sent no answer to
+`session/prompt` at all — no text, no tool, no error. The busy flag stayed set,
+every further input was refused with "the agent is still working", and the only
+way out was to end the whole run and lose the session. A hanging turn was
+indistinguishable from a long one because nothing recorded *when something last
+arrived*. It does now, the strip shows "still seit 8:13" in amber, the pill at the
+top is corrected, and past 450 s of silence a **🔓 Sperre lösen** button appears.
+It does not stop the agent — the process runs on, and a late answer still shows up
+in the stream. That is said out loud rather than restarting the turn quietly,
+which would leave two turns running side by side with nobody knowing.
+
+### Two measured upstream defects in Hermes ACP
+
+Both found by reproducing them with an own ACP client, so neither is caused by
+this repo. Both are documented rather than papered over — and worked around where
+a workaround is honest.
+
+**Parallel tool calls lose their results.** With one tool per turn, `hermes acp`
+v0.20.5 sends `tool_call` *and* `tool_call_update`. With three, it sends three
+`tool_call` and **zero** updates: the results never reach the client, and the
+results column stayed empty for the whole run (measured: 1,562 events, 3 tool
+calls, 0 results). They are not lost, though — Hermes writes every tool result
+into its own `state.db`, because the model receives them too. They are read back
+from there at the end of the turn (read-only, with a timeout — the file belongs to
+the running Hermes) and fill the silent tiles with the *real* text. Matched in
+*order*, not by id: ACP hands out `tc-…`, the store `call_…`, two numbering
+schemes. Only where the store has nothing does the honest placeholder remain.
+
+**`skill_view` does not find a skill that is demonstrably there.** It answers
+*Skill 'cae-orchestrator' not found* although `hermes skills list` shows it
+(source `local`, trust `local`), the repo is in `trusted_project_dirs`, the
+process cwd is the repo, and the identical call succeeds in an ordinary Python
+process with the same `HERMES_HOME` and cwd. Not patched here. Instead every start
+document names the file path outright — `AGENTS.md`, the generated
+`AGENTS.projekt.md`, both start scripts: *read it as a file.* An agent that thinks
+the skill is absent starts computing without verbs, runtimes, exit codes and
+traps.
+
+### Screen recording follows the results column
+
+The recording used to pause while the server computed, on the argument that
+nothing changes on screen but a progress bar. Measured, that is false: in one run
+**five images arrived in the results column mid-computation** — cross-section,
+side view, air gap, field, field under load. It paused during precisely the
+moments worth keeping. Now every tile, every image, every prompt and any scrolling
+in the results column resets the clock, and the recording resumes the instant
+something appears rather than at the next watchdog tick.
+
+Better still, it writes down **when** things happened. Each event is stamped with
+its **video second** — elapsed time *minus* pauses, since a list against the wall
+clock drifts further with every pause — and on stop two files land next to the
+recording: a `.marken.tsv` and an executable `.schnitt.sh` that merges neighbouring
+marks into segments, cuts each with lead-in and lead-out, and concatenates them.
+Deliberately re-encoding rather than `-c copy`: copying cuts at key frames and
+misses the moment by seconds. With that list the pause is only a size saving and
+no longer a constraint — a checkbox turns it off, and you cut afterwards.
 
 ## Research — and its boundary
 

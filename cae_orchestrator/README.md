@@ -22,6 +22,7 @@ Die Oberfläche (`ema.html`) ist ein **Workflow mit Tabs**: ① Projekt · ② G
 - **🎓 LLM-Trainingsdatensatz** – jede Berechnung wird automatisch als SFT-Trainingsbeispiel (Text) + VLM-Manifest (Bilder) abgelegt, inkl. automatischer und manueller gut/schlecht-Bewertung (`ema_training.py`).
 - **💬 Ergebnis-Chat** – Fragen zum geladenen Projekt oder zum Variantenvergleich, gestützt auf ein automatisches Maschinen-Datenblatt + RAG-Kontext (`ema_chat.py`).
 - **🖼 Einzelbild-Vorschau** – ein Feldbild ohne Volllauf, bis 5000 px (Multigrid-Solver).
+- **🤖 Agent / 🪽 Hermes** – zwei Agentenköpfe auf einem lokalen Modell bedienen dieselbe Toolkette im Browser: links Denk-/Antwortstrom, rechts Werkzeugausgaben und Bilder, darunter eine Arbeitsleiste (läuft eine Rechnung? welcher Löser? GPU? Tempo?), dazu Bildschirmaufnahme mit Schnittmarken und ein Archiv aller früheren Läufe (`ema_agent.py`, siehe unten).
 
 ---
 
@@ -153,6 +154,47 @@ Kühltypen mit kalibrierten h_eff-Werten: Natürliche Konvektion, Zwangsluft, Wa
 - Agentischer Modus: mehrere Experten-LLM-Agenten schreiben Teilkapitel parallel (`ema_experts.py`)
 - Bindet — sofern vorhanden — die 3D-Feldberechnung (Elmer) mit eigenem Abschnitt + 2D-vs-3D-Kennwerttabelle ein
 
+### 12. Agentenbetrieb (`cae_cli.py` / `ema_agent.py`)
+
+Die gesamte Toolkette ist auch **ohne Browser** bedienbar — von der Kommandozeile und von
+einem **lokalen** Sprachmodell (Ollama), das über zwei Agentenköpfe (PI, Hermes) dieselbe
+Kommandozeile aufruft. Einrichtung und Hintergrund stehen in `../.agents/README.md`.
+
+- **`cae_cli.py`** hat fünfundzwanzig Verben: neun über HTTP auf `:5000`
+  (`health/status/geom/projects/results/run/wait/raw/routes`) und sechzehn, die **lokal**
+  rechnen — darunter `steckbrief` (was ist dieses Projekt, und was ist daran schon
+  gerechnet — **mit Herkunftsangabe je Kennwert**; es rechnet nichts nach: was fehlt, steht
+  als fehlend da, nicht als 0), `welle` (Vollwelle oder Hohlwelle, am gemessenen Feld
+  entschieden), `paarvergleich`, `screen`, `rotor-check`, `sicherheit`, `feldbild`,
+  `struktur`, `topopt`, `zyklus`, `maschinenart`, `aufgabe`, `bilddaten`, `db`, `lernen`,
+  `recherche`.
+- **`run … --guete entwurf|detail`** setzt Framezahl, Frame-/FDM-Auflösung, Drehzahlschritt
+  und die Struktur-Einstellungen in einem Griff — dieselbe Tabelle wie die Knöpfe
+  „📐 Entwurf" / „🔬 Detail" im Berechnungs-Tab, jetzt aus **einer** Quelle
+  (`ema_text2ema.GUETE`; die JS-Kopie ist per Test dagegen festgenagelt). Vorher standen
+  diese Werte in keinem Schema und waren für ein Modell unerreichbar: jeder Versuch lief
+  in voller Schärfe, Stunden statt Minuten. Der Entwurf verliert dabei keine Kennzahl —
+  `B_gap` und `Kt` kommen aus der analytischen Formel und hängen nicht an der Auflösung —,
+  nur Bildschärfe; unter N=300 geht deshalb keine Stufe.
+- **Was entschieden wird, bleibt liegen.** `paarvergleich`, `screen`, `rotor-check`,
+  `sicherheit`, `welle` und `feldbild` legen ihr Ergebnis bei gebundenem Projekt in
+  `<projekt>/rechnungen/<zeit>_<verb>.txt` ab (der auslösende Aufruf steht im Kopf,
+  strukturierte Daten daneben als `.json`) und vermerken eine Zeile in `project.json`s
+  `evolution`; `--ohne-ablage` schaltet es ab. Bewusst **nicht** in `results.json` — die
+  gehört dem Pipelinelauf und würde beim nächsten `run analyse` überschrieben.
+- **Im Browser** liegen beide Köpfe als Reiter 🤖 PI und 🪽 Hermes auf **einer** Seite mit
+  **einer** Routenmenge (`/agent/…`, unterschieden nur durch `?kopf=`). Dazu gehören eine
+  **Arbeitsleiste** (`/agent/arbeit`: laufende Rechnung mit Fortschritt, Recherche, Löser,
+  GPU, Modell, Zustand des Agenten samt „still seit …"), ein **Archiv**
+  (`/agent/laeufe`, `/agent/lauf` — frühere Läufe beider Köpfe, abgespielt über dieselben
+  Zeichenfunktionen wie der lebende Lauf) und eine **Bildschirmaufnahme**, die sich nach
+  der Ergebnisspalte richtet und neben dem Video eine `.marken.tsv` plus ein fertiges
+  `.schnitt.sh` ablegt.
+- **Vom Designer an den Agenten:** eine im Canvas-Designer grob entworfene Geometrie geht
+  ohne Pipelinelauf als **Startpunkt** an PI/Hermes (`POST /agent/vorgabe`, Knöpfe im
+  Designer-Tab); die Beschreibung aus „Projekt anlegen" erreicht den Agenten ebenfalls,
+  statt ein zweites Mal getippt zu werden.
+
 ---
 
 ## Voraussetzungen
@@ -266,6 +308,9 @@ python smoke_test.py      # ~15 s, kein FreeCAD nötig: Importe, Topologie, dq/M
 python smoke_test.py --cad  # zusätzlich ein echter FreeCAD-Build + Rotor-FEM (Minuten)
 python test_topology.py   # Magnetgeometrie + JS↔Python-Spiegel (magnetLegs), braucht node
 python test_em3d.py       # 3D-Elmer-Mesh/SIF/Feldlinien-Export ohne Elmer, End-to-End mit Elmer
+python test_steckbrief.py # Steckbrief, Ablage, Laufarchiv, Arbeitsleiste, Wellenbefund
+python test_agent.py      # Agentenköpfe: Strom-Zerlegung, Zustand, Aufnahme/Marken
+python test_cae_cli.py    # --set gegen ein gestelltes Schema (+ Drift-Test gegen :5000)
 ```
 
 `smoke_test.py` nach jeder Backend-Änderung ausführen.
@@ -300,6 +345,13 @@ ema_rag.py              Lokale Wissensbasis (RAG), global + pro Projekt
 ema_training.py         Fortlaufendes LLM-Trainingsfile (SFT + VLM)
 freecad_runner.py       FreeCAD-Subprocess-Wrapper (headless, Output-Parsing)
 em3d_perf_check.py      Performance-/RAM-Kalibrierung der 3D-Elmer-Vernetzung (Standalone-CLI)
+cae_cli.py              Agent-/Skript-Kommandozeile (25 Verben, 16 davon lokal)
+ema_agent.py            Beide Agentenköpfe im Browser (Routen /agent…), Aufnahme, Laufarchiv
+ema_agent.html          Die Agentenseite (eine Seite für PI und Hermes, ?kopf=)
+ema_steckbrief.py       Projekt-Steckbrief + Ablage der Verbergebnisse (rechnungen/)
+ema_arbeit.py           Messwerte der Arbeitsleiste (Rechnung/Recherche/Löser/GPU/Modell)
+ema_welle.py            Vollwelle oder Hohlwelle, am Feld entschieden
+ema_feldbild.py         Feldlinienbilder (durchsichtig, Schnitt, ein Pol, Längsschnitt)
 start.sh                Startskript mit Prerequisite-Prüfung
 install.sh              Einmalige Installation und Konfigurationsprüfung
 requirements.txt        Python-Abhängigkeiten
