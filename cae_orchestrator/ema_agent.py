@@ -47,6 +47,7 @@ from __future__ import annotations
 import json
 import os
 import queue
+import re
 import shutil
 import subprocess
 import sys
@@ -98,6 +99,209 @@ def pi_gefunden() -> str | None:
 def hermes_gefunden() -> str | None:
     """Pfad zu ``hermes`` -- oder ``None``."""
     return _suchen("hermes", HERMES_PFADE)
+
+
+# ── Frueheren Laeufen nachgehen ──────────────────────────────────────────────
+#
+# ``Kopf.sichern()`` schreibt nach JEDEM Zug ein ``protokoll_*.md`` und die
+# ``ereignisse_*.jsonl`` -- und bis hierher hat das nie jemand wieder gelesen. Es
+# gab keine Route, kein Verb und keinen Knopf, der zurueck in einen alten Lauf
+# fuehrt. Fuer den, der davorsitzt, ist "geschrieben, aber unerreichbar" dasselbe
+# wie "nicht gespeichert"; genau so wurde es auch berichtet.
+#
+# Gelesen wird die **JSONL**, nicht die Markdown-Datei: die Markdown ist fuer
+# Menschen gesetzt (Ueberschriften, Codebloecke), waehrend die JSONL Ereignis fuer
+# Ereignis genau das enthaelt, was der Browser beim ersten Mal verarbeitet hat.
+# Aus ihr laesst sich die rechte Spalte Kachel fuer Kachel wieder aufbauen, ohne
+# ein zweites Anzeigeverfahren zu schreiben, das mit dem ersten auseinanderlaeuft.
+
+_LAUF_DATEI = re.compile(r"^ereignisse_(\d{8}_\d{6}(?:-\d+)?)\.jsonl$")
+
+
+def _lauf_lesen_datei(pfad: str) -> list:
+    aus = []
+    try:
+        with open(pfad, encoding="utf-8") as f:
+            for zeile in f:
+                zeile = zeile.strip()
+                if not zeile:
+                    continue
+                try:
+                    aus.append(json.loads(zeile))
+                except ValueError:
+                    continue          # halbe letzte Zeile nach einem Absturz
+    except OSError:
+        return []
+    return aus
+
+
+def _lauf_kopfdaten(ereignisse: list) -> dict:
+    """Modell, Kopf, Sitzung, Dauer und Umfang -- aus dem Ereignisstrom selbst.
+
+    Nicht aus der Markdown geparst: die ist die abgeleitete Darstellung. Wer die
+    Uebersicht aus ihr zoege, muesste ihr Format fuer immer festhalten.
+    """
+    if not ereignisse:
+        return {}
+    t0 = ereignisse[0].get("t") or 0.0
+    t1 = ereignisse[-1].get("t") or t0
+    kopf = {"ereignisse": len(ereignisse),
+            "sekunden": round(max(0.0, float(t1) - float(t0)), 1),
+            "kacheln": sum(1 for e in ereignisse
+                           if e.get("art") in ("ergebnis", "bild")),
+            "bilder": sum(1 for e in ereignisse if e.get("art") == "bild"),
+            "auftraege": [str(e.get("text", ""))[:160] for e in ereignisse
+                          if e.get("art") == "frage"]}
+    for e in ereignisse:
+        if e.get("art") == "start":
+            kopf["kopf"] = e.get("kopf") or ""
+            kopf["modell"] = e.get("modell") or ""
+            kopf["projekt"] = e.get("projekt") or ""
+        elif e.get("art") == "sitzung" and not kopf.get("sitzung"):
+            kopf["sitzung"] = e.get("id") or ""
+    return kopf
+
+
+def _lauf_ueberblick(pfad: str) -> dict:
+    """Dieselben Kopfdaten, aber OHNE die Datei ganz einzulesen.
+
+    Der Grund ist gemessen: die Mitschrift eines einzigen Laufs vom 04.09. ist
+    **9,4 MB mit 140.872 Ereignissen**. Eine Uebersicht, die jeden Lauf jedes
+    Projekts vollstaendig durch ``json.loads`` schickt, laedt beim Oeffnen der
+    Liste hunderte Megabyte -- fuer eine Tabelle mit fuenf Spalten.
+
+    Darum ein Durchgang Zeile fuer Zeile, und entpackt wird nur, was die Zeile
+    ueber ihren Wortlaut schon als interessant ausweist. Der Rest wird gezaehlt.
+    """
+    daten = {"ereignisse": 0, "kacheln": 0, "bilder": 0, "auftraege": [],
+             "kopf": "", "modell": "", "sitzung": "", "sekunden": 0.0}
+    erste_t = letzte_t = None
+    try:
+        with open(pfad, encoding="utf-8", errors="replace") as f:
+            for zeile in f:
+                if not zeile.strip():
+                    continue
+                daten["ereignisse"] += 1
+                if '"art": "ergebnis"' in zeile:
+                    daten["kacheln"] += 1
+                elif '"art": "bild"' in zeile:
+                    daten["kacheln"] += 1
+                    daten["bilder"] += 1
+                elif ('"art": "frage"' in zeile or '"art": "start"' in zeile
+                        or '"art": "sitzung"' in zeile):
+                    try:
+                        e = json.loads(zeile)
+                    except ValueError:
+                        continue
+                    art = e.get("art")
+                    if art == "frage":
+                        daten["auftraege"].append(str(e.get("text", ""))[:160])
+                    elif art == "start":
+                        daten["kopf"] = e.get("kopf") or ""
+                        daten["modell"] = e.get("modell") or ""
+                        daten["projekt"] = e.get("projekt") or ""
+                    elif art == "sitzung" and not daten["sitzung"]:
+                        daten["sitzung"] = e.get("id") or ""
+                # Die Zeitmarke ohne Entpacken: sie steht als ``"t": …`` in jeder
+                # Zeile, und der Schnitt darauf ist ein Vielfaches billiger als
+                # das Auspacken des ganzen Satzes.
+                k = zeile.find('"t":')
+                if k >= 0:
+                    try:
+                        letzte_t = float(zeile[k + 4:].split(",")[0].strip("} \n"))
+                        if erste_t is None:
+                            erste_t = letzte_t
+                    except ValueError:
+                        pass
+    except OSError:
+        return daten
+    if erste_t is not None and letzte_t is not None:
+        daten["sekunden"] = round(max(0.0, letzte_t - erste_t), 1)
+    return daten
+
+
+def laeufe_im_ordner(ordner: str, projekt: str = "") -> list:
+    """Die Laeufe eines ``agent/``-Ordners, neueste zuerst."""
+    if not os.path.isdir(ordner):
+        return []
+    aus = []
+    for name in sorted(os.listdir(ordner), reverse=True):
+        m = _LAUF_DATEI.match(name)
+        if not m:
+            continue
+        marke = m.group(1)
+        pfad = os.path.join(ordner, name)
+        eintrag = {"marke": marke, "projekt": projekt, "ordner": ordner,
+                   "jsonl": pfad, "bytes": os.path.getsize(pfad),
+                   "protokoll": os.path.join(ordner, f"protokoll_{marke}.md")
+                   if os.path.isfile(os.path.join(ordner, f"protokoll_{marke}.md"))
+                   else "",
+                   "kopf": "", "modell": "", "sitzung": ""}
+        eintrag.update(_lauf_ueberblick(pfad))
+        eintrag["projekt"] = projekt or eintrag.get("projekt") or ""
+        aus.append(eintrag)
+    return aus
+
+
+def laeufe_liste(max_n: int = 60) -> list:
+    """Alle Agentenlaeufe -- die projektgebundenen UND die freien.
+
+    Die freien tragen ``projekt: ""``. Sie gehen sonst verloren: wer ohne
+    Bindung startet, um etwas Neues zu entwerfen, macht dabei oft gerade die
+    Rechnung, auf die er spaeter zurueckkommen will.
+    """
+    aus = []
+    try:
+        eintraege = os.listdir(PROJEKTE)
+    except OSError:
+        return []
+    for name in eintraege:
+        if name.startswith("_"):
+            continue
+        aus += laeufe_im_ordner(os.path.join(PROJEKTE, name, "agent"), name)
+    if os.path.isdir(FREIE_LAEUFE):
+        for name in os.listdir(FREIE_LAEUFE):
+            aus += laeufe_im_ordner(os.path.join(FREIE_LAEUFE, name), "")
+    aus.sort(key=lambda e: e["marke"], reverse=True)
+    return aus[:max_n]
+
+
+def lauf_lesen(projekt: str, marke: str,
+               max_ereignisse: int = RINGGROESSE) -> dict:
+    """Einen einzelnen Lauf zurueckholen -- Kopfdaten und Ereignisse.
+
+    ``projekt`` und ``marke`` werden gegen die Formen geprueft, die sie haben
+    duerfen, und der fertige Pfad muss unter ``PROJEKTE`` liegen. Sonst waere
+    dies eine Route, die jede Datei des Rechners ausliefert: die Kennungen kommen
+    aus einer URL.
+    """
+    if not re.fullmatch(r"\d{8}_\d{6}(?:-\d+)?", str(marke or "")):
+        return {"ok": False, "grund": "unzulaessige Laufkennung"}
+    if projekt and not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", str(projekt)):
+        return {"ok": False, "grund": "unzulaessige Projektkennung"}
+    ordner = (os.path.join(PROJEKTE, projekt, "agent") if projekt
+              else os.path.join(FREIE_LAEUFE, marke))
+    ordner = os.path.realpath(ordner)
+    if not ordner.startswith(os.path.realpath(PROJEKTE) + os.sep):
+        return {"ok": False, "grund": "Pfad ausserhalb der Projektablage"}
+    pfad = os.path.join(ordner, f"ereignisse_{marke}.jsonl")
+    if not os.path.isfile(pfad):
+        return {"ok": False, "grund": f"Kein Lauf {marke} in {ordner}"}
+    ereignisse = _lauf_lesen_datei(pfad)
+    md = os.path.join(ordner, f"protokoll_{marke}.md")
+    # Gedeckelt wie der laufende Strom. Ein Lauf mit 140.872 Ereignissen -- so
+    # einer liegt hier -- waere als eine JSON-Antwort 9 MB, und der Browser baute
+    # daraus 140.872 Knoten, waehrend er denselben Verlauf im laufenden Betrieb
+    # auf RINGGROESSE beschneidet. Beschnitten wird VORNE: das Ende eines Laufs
+    # ist das, worauf man zurueckkommt.
+    voll = len(ereignisse)
+    if max_ereignisse and voll > max_ereignisse:
+        ereignisse = ereignisse[-max_ereignisse:]
+    return {"ok": True, "marke": marke, "projekt": projekt, "ordner": ordner,
+            "protokoll": md if os.path.isfile(md) else "",
+            **_lauf_kopfdaten(ereignisse),
+            "ereignisse": voll, "gekuerzt": voll > len(ereignisse),
+            "ereignisse_liste": ereignisse}
 
 
 def _umgebung(pfade=PI_PFADE) -> dict:
@@ -277,6 +481,75 @@ class Kopf:
         self._offen = aus[MAX_BILDER_JE_ZUG:]
         return aus[:MAX_BILDER_JE_ZUG]
 
+    def _neue_rechnungen(self) -> list:
+        """Abgelegte Verbergebnisse, die seit der letzten Schau entstanden sind.
+
+        Der zweite Weg in die rechte Spalte -- und der belastbarere.
+
+        Der erste Weg fuehrt ueber den Agentenkopf: er meldet sein
+        Werkzeugergebnis, wir zeigen es. Bei Hermes ist dieser Weg **gemessen
+        unterbrochen**: ruft er in einem Zug MEHRERE Werkzeuge auf, schickt
+        ``hermes acp`` zwar je ein ``tool_call``, aber **kein einziges**
+        ``tool_call_update`` -- die Ergebnisse kommen beim Klienten nie an.
+        Nachgestellt am 04.09. mit ``hermes acp`` v0.20.5: ein Werkzeug im Zug ->
+        ``tool_call`` UND ``tool_call_update {status: completed}``; drei
+        Werkzeuge im Zug -> drei ``tool_call``, null Updates. Der Lauf vom
+        selben Tag zeigt genau das: 1.562 Ereignisse, 3 Werkzeugaufrufe, 0
+        Ergebnisse, rechte Spalte leer.
+
+        Der zweite Weg geht nicht ueber den Kopf, sondern ueber die **Platte**:
+        was ``cae_cli.py`` in ``<projekt>/rechnungen/`` ablegt, wird hier
+        gefunden -- genau wie die Bilder in ``charts/``. Damit haengt das, was
+        der Betrachter sieht, nicht mehr daran, ob ein Agentenprogramm sein
+        Ergebnis korrekt meldet. Es haengt daran, ob gerechnet wurde.
+        """
+        aus = []
+        try:
+            for pid in os.listdir(PROJEKTE):
+                d = os.path.join(PROJEKTE, pid, "rechnungen")
+                if pid.startswith("_") or not os.path.isdir(d):
+                    continue
+                for name in os.listdir(d):
+                    if not name.endswith(".txt"):
+                        continue
+                    voll = os.path.join(d, name)
+                    try:
+                        mt = os.path.getmtime(voll)
+                    except OSError:
+                        continue
+                    if mt <= self._bild_marke:
+                        continue
+                    schluessel = (voll, round(mt, 2))
+                    if schluessel in self._gesehen:
+                        continue
+                    self._gesehen.add(schluessel)
+                    aus.append({"projekt": pid, "datei": name, "pfad": voll,
+                                "mtime": mt})
+        except OSError:
+            return []
+        aus.sort(key=lambda r: r["mtime"])
+        return aus
+
+    def _rechnungen_melden(self) -> None:
+        for r in self._neue_rechnungen():
+            try:
+                with open(r["pfad"], encoding="utf-8") as f:
+                    roh = f.read()
+            except OSError:
+                continue
+            # Der Kopf der Datei (``# verb — Zeitpunkt``) steht schon in der
+            # Kachelzeile; im Rumpf waere er nur doppelt.
+            text = "\n".join(z for z in roh.splitlines()
+                              if not z.startswith("#")).strip()
+            verb = r["datei"].split("_", 2)[-1][:-4]
+            self._sende("ergebnis", name=verb, fehler="ABGELEHNT" in roh
+                        or "verletzt" in roh.split("\n\n")[0],
+                        text=text[:MAX_AUSGABE],
+                        gekuerzt=len(text) > MAX_AUSGABE, voll=len(text),
+                        ablage=os.path.join(r["projekt"], "rechnungen",
+                                            r["datei"]))
+            self._bild_marke = max(self._bild_marke, r["mtime"])
+
     def _bilder_melden(self, alle: bool = False) -> None:
         neue = self._neue_bilder(alle=alle)
         self._bild_marke = max([b["mtime"] for b in neue] + [self._bild_marke])
@@ -453,19 +726,30 @@ class Kopf:
                      "Vorlage: Polzahl, Nutzahl, Magnetanordnung, Kuehlung und",
                      "Werkstoffe werden nicht daraus uebernommen.",
                      ""]
-            erg = os.path.join(ordner, "results.json")
-            if os.path.exists(erg):
-                kopf.append("Bereits gerechnet (aus results.json):")
-                stand = os.path.join(WURZEL, ".agents", "projektstand.py")
-                try:
-                    aus = subprocess.run([sys.executable, stand, erg],
-                                         capture_output=True, text=True, timeout=20)
-                    kopf.append(aus.stdout.rstrip()
-                                or "- (results.json nicht lesbar)")
-                except Exception:                          # noqa: BLE001
-                    kopf.append("- (results.json nicht lesbar)")
-            else:
-                kopf.append("Noch nichts gerechnet — es gibt keine results.json.")
+            # Der Steckbrief statt nur der Kennwerte aus ``results.json``.
+            #
+            # Gemessener Anlass: auf „erstelle kurz einen Steckbrief ueber das
+            # Projekt" beschrieb der Agent am 04.09. das **Monorepo** -- Ports,
+            # Teilprojekte, Git-Zweig. Das war keine Halluzination, sondern die
+            # einzige Beschreibung, die er hatte: hier standen nur Kennung,
+            # Verzeichnis und „noch nichts gerechnet", und was sonst nach
+            # „Projekt" aussah, stand in ``CLAUDE.md``. Jetzt steht die Maschine
+            # selbst hier -- Art, Pole, Nuten, Bauraum, Werkstoffe, Betriebspunkt
+            # -- und dazu, was daran schon gerechnet ist und was nicht.
+            kopf.append("## Steckbrief dieses Projekts")
+            kopf.append("")
+            try:
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                import ema_steckbrief
+                kopf.append(ema_steckbrief.als_markdown(
+                    ema_steckbrief.steckbrief(ordner)))
+            except Exception as e:                         # noqa: BLE001
+                kopf.append(f"- (Steckbrief nicht lesbar: {type(e).__name__})")
+            kopf += ["",
+                     "Den ausfuehrlichen Steckbrief samt Herkunft jeder Zahl gibt",
+                     f"`python3 cae_orchestrator/cae_cli.py steckbrief {self.projekt}`;",
+                     "`--laeufe` zeigt zusaetzlich, was frueher schon an diesem",
+                     "Projekt gerechnet wurde."]
         # Der stehende Auftrag -- fuer die Koepfe, die keinen Systemzusatz kennen.
         #
         # PI bekommt ihn ueber ``--append-system-prompt``: ein Systemzusatz
@@ -602,6 +886,7 @@ class Kopf:
 
         z = [f"# Agentenlauf {time.strftime('%d.%m.%Y %H:%M', time.localtime(t0))}",
              "",
+             f"* Kopf: {self.LABEL} (`{self.NAME}`)",
              f"* Modell: `{self.modell}`",
              f"* Projekt: {self.projekt or '— keine Bindung —'}",
              f"* Sitzung: `{self.sitzung or '—'}`",
@@ -780,12 +1065,14 @@ class PiKopf(Kopf):
                         text=text[:MAX_AUSGABE],
                         gekuerzt=len(text) > MAX_AUSGABE, voll=len(text))
             self._bilder_melden()
+            self._rechnungen_melden()
         elif typ == "turn_start":
             self._sende("zug_start")
         elif typ == "agent_settled":
             # DAS ist das Zugende -- nicht turn_end, nicht agent_end.
             self.beschaeftigt = False
             self._bilder_melden(alle=True)      # Zugende: nichts zurueckhalten
+            self._rechnungen_melden()
             self._sende("bereit")
             self._sichern_still()
             self._hinweise_uebergeben()
@@ -848,6 +1135,7 @@ class HermesKopf(Kopf):
 
     def __init__(self):
         super().__init__()
+        self._offene_wz: dict = {}   # toolCallId -> Titel, s. u.
         self._id = 0                  # laufende JSON-RPC-Nummer
         self._sid = ""                # ACP-Sitzung
         self._zug_id = 0              # Anfrage, deren Antwort das Zugende ist
@@ -1023,6 +1311,8 @@ class HermesKopf(Kopf):
                     self._sende("fehler",
                                 text=str(d["error"].get("message", ""))[:400])
                 self._bilder_melden(alle=True)
+                self._rechnungen_melden()
+                self._offene_werkzeuge_abschliessen()
                 erg = d.get("result") or {}
                 self._sende("bereit", grund=str(erg.get("stopReason", "")),
                             marken=(erg.get("usage") or {}).get("totalTokens"))
@@ -1056,20 +1346,57 @@ class HermesKopf(Kopf):
         elif art == "agent_message_chunk":
             self._sende("text", text=_text(inhalt))
         elif art == "tool_call":
+            # Gemerkt, um am Zugende zu WISSEN, welcher Aufruf nie ein Ergebnis
+            # bekommen hat -- siehe _offene_werkzeuge_abschliessen.
+            if upd.get("toolCallId"):
+                self._offene_wz[str(upd["toolCallId"])] = str(upd.get("title") or
+                                                              upd.get("kind") or "")
             self._sende("werkzeug", name=str(upd.get("kind") or "werkzeug"),
                         befehl=(str(upd.get("title") or "")
                                 + ("\n" + _text(inhalt) if inhalt else ""))[:600])
         elif art == "tool_call_update":
             if str(upd.get("status")) not in ("completed", "failed"):
                 return                       # Zwischenstand, nicht das Ergebnis
+            self._offene_wz.pop(str(upd.get("toolCallId") or ""), None)
             text = _text(inhalt)
             self._sende("ergebnis", name=str(upd.get("kind") or "werkzeug"),
                         fehler=str(upd.get("status")) == "failed",
                         text=text[:MAX_AUSGABE],
                         gekuerzt=len(text) > MAX_AUSGABE, voll=len(text))
             self._bilder_melden()
+            self._rechnungen_melden()
         elif art == "usage_update":
             self._sende("kontext", genutzt=upd.get("used"), gross=upd.get("size"))
+
+    def _offene_werkzeuge_abschliessen(self) -> None:
+        """Werkzeugaufrufe benennen, zu denen ACP nie ein Ergebnis geschickt hat.
+
+        Gemessener Fehler stromaufwaerts, ``hermes acp`` v0.20.5 (04.09.2026):
+        ruft das Modell in EINEM Zug mehrere Werkzeuge auf, kommt je Aufruf ein
+        ``tool_call``, aber **kein** ``tool_call_update`` -- bei einem einzelnen
+        Werkzeug kommt es zuverlaessig. Nachgestellt mit einem eigenen
+        ACP-Klienten: 1 Werkzeug -> 1 Aufruf + 1 Update; 3 Werkzeuge -> 3
+        Aufrufe + 0 Updates. Das Modell selbst BEKOMMT seine Ergebnisse (es
+        zitiert sie in der Antwort) -- nur der Klient sieht sie nicht.
+
+        Erfinden laesst sich hier nichts: das Ergebnis ist an dieser Stelle
+        wirklich nicht bekannt. Also steht genau das da, statt dass die rechte
+        Spalte schweigt und der Betrachter denkt, es sei nichts gerechnet
+        worden. Was das Verb auf die PLATTE geschrieben hat, kommt ohnehin
+        ueber ``_rechnungen_melden`` an -- unabhaengig von diesem Fehler.
+        """
+        offen, self._offene_wz = dict(self._offene_wz), {}
+        for titel in offen.values():
+            self._sende("ergebnis", name="ohne Rueckmeldung", fehler=False,
+                        text=(f"{titel}\n\n"
+                              "Hermes hat zu diesem Werkzeugaufruf KEIN Ergebnis "
+                              "gemeldet (ACP schickt bei mehreren Werkzeugen in "
+                              "einem Zug kein tool_call_update — gemessen mit "
+                              "hermes acp v0.20.5). Der Agent selbst hat es "
+                              "bekommen; hier ist es nicht bekannt. Was ein "
+                              "cae_cli-Verb ablegt, erscheint trotzdem — es "
+                              "kommt ueber den Projektordner, nicht ueber ACP."),
+                        gekuerzt=False, voll=0)
 
     def _freigabe(self, d: dict) -> None:
         """Eine Rueckfrage beantworten -- und sie sichtbar machen.

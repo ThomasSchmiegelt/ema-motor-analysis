@@ -4083,6 +4083,60 @@ def agent_sichern():
     return jsonify(a), (200 if a.get("ok") else 400)
 
 
+@app.route("/agent/laeufe")
+def agent_laeufe():
+    """Die frueheren Agentenlaeufe -- projektgebundene und freie, neueste zuerst.
+
+    Der Gegenweg zu ``/agent/sichern``. Geschrieben wurde nach jedem Zug, gelesen
+    bisher nie: es gab keine Route zurueck. Ein Lauf, den man nicht wieder
+    aufrufen kann, ist fuer den Betrachter nicht gespeichert.
+
+    Ohne Kopffilter: PI und Hermes legen ihre Laeufe in denselben Projektordner,
+    und wer nachsieht, was an einer Maschine schon gerechnet wurde, will beide
+    sehen. Welcher Kopf es war, steht an jedem Eintrag.
+    """
+    import ema_agent
+    try:
+        n = max(1, min(400, int(request.args.get("max", 60))))
+    except (TypeError, ValueError):
+        n = 60
+    laeufe = ema_agent.laeufe_liste(max_n=n)
+    projekt = (request.args.get("projekt") or "").strip()
+    if projekt:
+        laeufe = [l for l in laeufe if l.get("projekt") == projekt]
+    return jsonify({"ok": True, "laeufe": laeufe, "anzahl": len(laeufe)})
+
+
+@app.route("/agent/lauf")
+def agent_lauf():
+    """Einen alten Lauf zurueckholen -- als derselbe Ereignisstrom wie beim Mal davor.
+
+    Die Seite baut daraus ihre beiden Spalten mit **denselben** Funktionen wieder
+    auf, mit denen sie den laufenden Strom verarbeitet. Ein zweites
+    Anzeigeverfahren fuer das Archiv waere eines, das mit dem ersten
+    auseinanderlaeuft -- das durchsichtige Feldbild bekaeme dort dann kein
+    Schachbrett, weil jemand die eine Zeile im anderen Zweig vergessen hat.
+    """
+    import ema_agent
+    a = ema_agent.lauf_lesen((request.args.get("projekt") or "").strip(),
+                             (request.args.get("marke") or "").strip())
+    return jsonify(a), (200 if a.get("ok") else 404)
+
+
+@app.route("/agent/steckbrief")
+def agent_steckbrief():
+    """Der Steckbrief eines Projekts -- dieselbe Quelle, die der Agent liest."""
+    import ema_steckbrief
+    pid = (request.args.get("projekt") or "").strip()
+    pdir = ema_steckbrief.projekt_pfad(pid or "last")
+    if not pdir:
+        return jsonify({"ok": False, "grund": f"Projekt '{pid}' nicht gefunden"}), 404
+    sb = ema_steckbrief.steckbrief(pdir)
+    if not sb.get("ok"):
+        return jsonify(sb), 404
+    return jsonify({**sb, "text": ema_steckbrief.als_text(sb)})
+
+
 @app.route("/agent/video/start", methods=["POST"])
 def agent_video_start():
     """Aufnahme beginnen -- die Datei liegt in ``ema_agent.VIDEO_ORDNER``.

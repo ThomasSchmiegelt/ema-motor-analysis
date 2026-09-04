@@ -7,55 +7,51 @@ Startskript: verschachtelte Anfuehrungszeichen in einem ``bash``-Here-Dokument s
 eine der zuverlaessigsten Fehlerquellen ueberhaupt, und ein Syntaxfehler dort haette
 den ganzen Agentenstart lahmgelegt.
 
+Der Inhalt kommt aus ``cae_orchestrator/ema_steckbrief.py`` — **derselben Quelle**,
+aus der auch der Browserkopf seine Projektakte fuellt und aus der
+``cae_cli.py steckbrief`` liest. Vorher stand hier eine eigene Kennwertliste; zwei
+Auflegungen von „was weiss dieses Projekt" waeren zwei, die auseinanderlaufen, und
+der Unterschied faellt erst auf, wenn der Terminalkopf etwas anderes glaubt als der
+Browserkopf. Er beschreibt jetzt auch die MASCHINE (Art, Pole, Nuten, Bauraum,
+Werkstoffe, Betriebspunkt), nicht nur ihre Kennwerte: auf „erstelle kurz einen
+Steckbrief ueber das Projekt" beschrieb ein Agent am 04.09. das Monorepo, weil ihm
+ueber die Maschine nichts vorlag.
+
 Es MELDET nur und wertet nicht — was fehlt, steht als fehlend da. Ein Agent, der
 glaubt, die Festigkeit sei gerechnet, waehrend die FEM still auf die analytische
 Naeherung zurueckgefallen ist, zieht daraus falsche Schluesse; genau das ist in
 diesem Repo schon dreimal unbemerkt passiert.
+
+Aufruf: ``projektstand.py <projektordner>``. Ein Pfad auf eine ``results.json``
+wird weiterhin angenommen (aeltere Startskripte gaben den) und auf ihren Ordner
+zurueckgefuehrt.
 """
 
-import json
+import os
 import sys
-
-# Kennwerte, die einen Entwurf beschreiben — knapp gehalten, der Projektblock soll
-# den Kontext des Modells nicht auffressen.
-KENNWERTE = [
-    ("B_gap_T", "Luftspaltflussdichte [T]"),
-    ("Kt_Nm_per_A", "Momentkonstante [Nm/A]"),
-    ("T_max_Nm", "Spitzenmoment [Nm]"),
-    ("P_max_kW", "Spitzenleistung [kW]"),
-    ("max_safe_rpm", "hoechste sichere Drehzahl [1/min]"),
-    ("safety_factor_fem", "Sicherheit aus der FEM"),
-    ("structural_basis", "Grundlage der Festigkeit"),
-    ("T_magnet_C", "Magnettemperatur [C]"),
-    ("T_winding_C", "Wicklungstemperatur [C]"),
-]
-
-STUFEN = [("em", "EM-Feld"), ("structural", "Festigkeit"),
-          ("thermal", "Thermik"), ("cycle", "Fahrzyklus")]
 
 
 def main() -> int:
-    try:
-        with open(sys.argv[1], encoding="utf-8") as f:
-            erg = json.load(f)
-    except Exception as e:                                   # noqa: BLE001
-        print(f"- results.json nicht lesbar: {type(e).__name__}")
+    if len(sys.argv) < 2:
+        print("- (kein Projekt angegeben)")
+        return 2
+    ziel = sys.argv[1]
+    if os.path.isfile(ziel):            # alter Aufruf: Pfad auf results.json
+        ziel = os.path.dirname(ziel)
+    if not os.path.isdir(ziel):
+        print(f"- Projektordner nicht gefunden: {ziel}")
         return 1
 
-    zus = erg.get("summary") or {}
-    zeilen = [f"- {text}: {zus[k]}" for k, text in KENNWERTE if zus.get(k) is not None]
-    print("\n".join(zeilen) if zeilen else "- (keine Kennwerte in results.json)")
-
-    fehlt = [text for k, text in STUFEN if not erg.get(k)]
-    if fehlt:
-        print("- NOCH NICHT gerechnet: " + ", ".join(fehlt))
-
-    # Der wichtigste Einzelhinweis. `structural_basis == "analytisch"` heisst, dass
-    # die FEM NICHT gelaufen ist und die Zahl aus der Ringformel kommt — sie sieht
-    # aber genauso aus wie ein FEM-Ergebnis.
-    if zus.get("structural_basis") == "analytisch":
-        print("- ACHTUNG: die Festigkeitszahl ist ANALYTISCH, die FEM ist nicht "
-              "gelaufen. Sie kennt die Spannungsspitzen an den Stegen nicht.")
+    sys.path.insert(0, os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        "cae_orchestrator"))
+    try:
+        import ema_steckbrief
+    except Exception as e:                                   # noqa: BLE001
+        print(f"- Projektstand nicht lesbar ({type(e).__name__})")
+        return 1
+    print(ema_steckbrief.als_markdown(
+        ema_steckbrief.steckbrief(ziel, mit_laeufen=True)))
     return 0
 
 

@@ -361,13 +361,20 @@ if [ -n "$PROJ_DIR" ] && [ -d "$PROJ_DIR" ]; then
         echo "- Erinnerungen/Sitzungen dieses Projekts: \`$PROJ_DIR/_agent/hermes/\`"
         echo "- Stand: $(date '+%d.%m.%Y %H:%M')"
         echo
-        if [ -f "$PROJ_DIR/results.json" ]; then
-            echo "Bereits gerechnet (aus results.json):"
-            "$ROOT/.agents/projektstand.py" "$PROJ_DIR/results.json" \
-                2>/dev/null || echo "- (results.json nicht lesbar)"
-        else
-            echo "Noch nichts gerechnet — es gibt keine results.json."
-        fi
+        # Der volle Steckbrief, nicht nur die Kennwerte aus results.json:
+        # Maschinenart, Pole, Nuten, Bauraum, Werkstoffe, Betriebspunkt — und
+        # was daran schon gerechnet ist. Aus derselben Quelle wie der
+        # Browserkopf (ema_steckbrief), damit Terminal und Browser nicht
+        # Verschiedenes ueber dasselbe Projekt glauben. Er wird IMMER
+        # geschrieben, auch ohne results.json: dass nichts gerechnet ist, sagt
+        # er selbst.
+        echo "## Steckbrief dieses Projekts"
+        echo
+        "$ROOT/.agents/projektstand.py" "$PROJ_DIR" \
+            2>/dev/null || echo "- (Projektstand nicht lesbar)"
+        echo
+        echo "Ausfuehrlich, samt Herkunft jeder Zahl und frueheren Laeufen:"
+        echo "\`python3 cae_orchestrator/cae_cli.py steckbrief $(basename "$PROJ_DIR") --laeufe\`"
     } > "$kontext"
     ok "Projektkontext erzeugt: AGENTS.projekt.md"
 else

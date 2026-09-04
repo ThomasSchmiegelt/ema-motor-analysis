@@ -42,6 +42,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `run <stufe>` | Rechnung starten |
 | `wait` | auf Abschluss warten |
 | `routes [--grep x]` | alle Serverrouten auflisten |
+| `steckbrief [id]` | **Was dieses Projekt IST und was daran gerechnet wurde** — Maschinenart, Pole/Nuten, Bauraum, Werkstoffe, Betriebspunkt, welche Stufen gelaufen sind, die Kennwerte **samt Herkunft**, und was offen ist. Rechnet nichts; was fehlt, steht als fehlend da. `--laeufe` listet zusätzlich die früheren Agentenläufe und die abgelegten Rechnungen |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
 | `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Dreizehn Achsen (Magnetanordnung, **V-Öffnungswinkel**, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge, **Wellendurchmesser**), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht**. 0,7 s, rein analytisch. `--referenz` zeigt statt eines Vergleichs die **recherchierten Vergleichswerte** mit Quellen |
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
@@ -450,6 +451,59 @@ ist eine Eigenschaft des Datensatzes und keine des Rotors.
 Was NICHT passiert: kein neuronales Netz, keine Heuristik-Vorbelegung der Bilder. Die
 Bewertungsseite zeigt das Bild und sonst nichts — wer eine Vermutung vorschlaegt,
 bekommt sie bestaetigt zurueck.
+
+### `steckbrief` — was dieses Projekt ist, bevor du etwas daran änderst
+
+```bash
+python3 cae_cli.py steckbrief                       # das jüngste Projekt
+python3 cae_cli.py steckbrief 20260903_183044       # ein bestimmtes
+python3 cae_cli.py steckbrief last --laeufe         # + frühere Läufe und Ablagen
+```
+
+**Fragt dich jemand nach einem „Steckbrief" oder „was ist das für ein Projekt",
+ist DAS gemeint — die Maschine, nicht das Repo.** Der Unterschied ist einmal
+schiefgegangen: auf „erstelle kurz einen Steckbrief über das Projekt" kam eine
+Beschreibung des Monorepos samt Ports und Git-Zweig. Über die Maschine dagegen
+steht alles hier: Art, Pole, Nuten, Bauraum, Luftspalt, Werkstoffe,
+Betriebspunkt, gelaufene Stufen, Kennwerte.
+
+Zwei Dinge, auf die du dich verlassen kannst und die du nicht überschreiben
+darfst:
+
+* **Es wird nichts gerechnet und nichts aufgefüllt.** Was auf der Platte fehlt,
+  steht als fehlend da — nicht als 0, nicht als Näherung.
+* **Jeder Kennwert trägt seine Herkunft**: `[analytisch]` ist die geschlossene
+  Formel, `[fdm2d]` das gelöste 2D-Feld, `[fem3d]` die FEM. `B_gap_T` und
+  `T_maxwell_Nm` stehen im selben `summary` nebeneinander und sähen ohne diese
+  Angabe gleichwertig aus. Sie sind es nicht. Gib die Herkunft mit weiter.
+
+Der Steckbrief steht auch am Anfang von `AGENTS.projekt.md`, sobald ein Projekt
+gebunden ist — du musst ihn also nicht erst abrufen, um zu wissen, woran du
+arbeitest.
+
+
+### Was du rechnest, bleibt im Projekt liegen
+
+`paarvergleich`, `screen`, `rotor-check`, `sicherheit` und `feldbild` schreiben
+ihr Ergebnis **von selbst** nach `<projekt>/rechnungen/<zeit>_<verb>.txt` (mit
+dem Aufruf im Kopf) und hängen eine Zeile an das Projekttagebuch in
+`project.json`. Das gilt, sobald ein Projekt bestimmt ist — über
+`--from-project <id>` oder `--projekt <id>`.
+
+**Warum dich das angeht:** vorher ging ein Ergebnis nur auf den Schirm, und die
+Begründung eines Entwurfs überlebte den Entwurf nicht. Zwei Folgerungen für
+deine Arbeitsweise:
+
+* Arbeite **mit** einem Projekt, sobald eine Auslegung ernst wird. Mit
+  `--frisch` oder `--payload` gibt es keinen Ort für das Ergebnis, und es
+  bleibt nirgends.
+* Bevor du eine Entscheidung neu ausrechnest, sieh mit
+  `steckbrief <id> --laeufe` nach, ob sie schon einmal ausgerechnet wurde. Die
+  abgelegten Dateien sind dein eigener Bestand, nicht der eines Fremden.
+
+`--ohne-ablage` schaltet das ab — nur für ein Ausprobieren, das nirgends
+hingehört.
+
 
 ### `feldbild` — das Feld zeigen, ohne einen Lauf zu starten
 

@@ -735,15 +735,15 @@ def cmd_recherche(args) -> int:
 
 
 def _projekt_pfad(kennung: str) -> str | None:
-    """Projekt-Id oder 'last' -> Pfad unter ~/cae_projekte."""
-    wurzel = os.path.expanduser("~/cae_projekte")
-    if kennung == "last":
-        kand = sorted(d for d in os.listdir(wurzel)
-                      if not d.startswith("_")
-                      and os.path.isfile(os.path.join(wurzel, d, "meta.json")))
-        return os.path.join(wurzel, kand[-1]) if kand else None
-    p = os.path.join(wurzel, kennung)
-    return p if os.path.isdir(p) else None
+    """Projekt-Id oder 'last' -> Pfad unter ~/cae_projekte.
+
+    Die Aufloesung steht in ``ema_steckbrief`` und nicht hier, weil der Server
+    sie ueber ``/agent/steckbrief`` genauso braucht. Zwei Auflegungen von 'last'
+    waeren zwei, die auseinanderlaufen -- und ausgerechnet bei 'last' faellt das
+    erst auf, wenn zwei Werkzeuge auf verschiedene Projekte zeigen.
+    """
+    import ema_steckbrief
+    return ema_steckbrief.projekt_pfad(kennung) or None
 
 
 def cmd_db(args) -> int:
@@ -1266,6 +1266,96 @@ def cmd_zyklus(args) -> int:
     return _die(f"Unbekannt: {was}", EXIT_USAGE)
 
 
+def _ablegen(args, verb: str, text: str, *, daten=None, ok: bool = True,
+             pid: str = "") -> None:
+    """Das Ergebnis eines oertlichen Verbs bleibend ins Projekt legen.
+
+    Warum ueberhaupt: von den oertlichen Verben schrieb bisher nur ``feldbild``
+    etwas auf die Platte. ``paarvergleich``, ``screen``, ``rotor-check`` und
+    ``sicherheit`` -- die Verben, mit denen ein Agent eine Auslegung tatsaechlich
+    ENTSCHEIDET -- gaben ihr Ergebnis auf ``stdout`` aus. Im Agentenreiter stand
+    es dann in der rechten Spalte, wanderte nach oben aus dem Bild und war beim
+    naechsten Start weg. Die Begruendung eines Entwurfs ueberlebte den Entwurf
+    nicht.
+
+    Kein Projekt, keine Ablage: bei ``--frisch`` oder ``--payload`` gibt es
+    schlicht keinen Ort dafuer, und ein Ordner „irgendwo" waere schlechter als
+    keiner. Das wird gesagt, nicht verschwiegen.
+    """
+    if getattr(args, "ohne_ablage", False):
+        return
+    kennung = (pid or getattr(args, "projekt", "") or getattr(args, "_pid", "") or "")
+    if not kennung:
+        return
+    pdir = _projekt_pfad(kennung)
+    if not pdir:
+        return
+    import ema_steckbrief
+    a = ema_steckbrief.ablegen(pdir, verb, text, daten=daten, ok=ok,
+                               befehl=" ".join(sys.argv[1:])[:400])
+    if a.get("ok"):
+        print(f"  abgelegt: {os.path.relpath(a['datei'], os.path.dirname(pdir))}")
+    else:
+        print(f"  (nicht abgelegt: {a.get('grund')})", file=sys.stderr)
+
+
+def cmd_steckbrief(args) -> int:
+    """Was dieses Projekt IST und was daran gerechnet wurde -- in einem Absatz.
+
+    Der Anlass war eine Beobachtung am fahrenden Agenten: auf „erstelle kurz
+    einen Steckbrief ueber das Projekt" beschrieb er das **Monorepo** -- Ports,
+    Teilprojekte, Git-Zweig -- statt der Maschine. Das war kein Fehlschluss,
+    sondern die einzige Beschreibung, die er hatte: ueber die Maschine stand ihm
+    nichts zur Verfuegung ausser einer ``results.json`` von 1,7 MB, und was sonst
+    „Projekt" hiess, stand in ``CLAUDE.md``.
+
+    Hier steht nichts Gerechnetes. Was auf der Platte fehlt, steht als fehlend
+    da -- nicht als 0 und nicht als Naeherung -- und jeder Kennwert traegt seine
+    Herkunft mit (``analytisch`` sieht sonst aus wie ``fdm2d``).
+
+    Exit: 0 = Steckbrief steht, 1 = das Projekt hat eine Warnung (nichts
+    gerechnet, Sicherheitskriterium verletzt, Festigkeit nur analytisch).
+    """
+    import ema_steckbrief as SB
+    pdir = _projekt_pfad(args.projekt)
+    if not pdir:
+        return _die(f"Projekt '{args.projekt}' nicht gefunden — 'projects' zeigt "
+                    f"die vorhandenen.", EXIT_USAGE)
+    sb = SB.steckbrief(pdir)
+    if not sb.get("ok"):
+        return _die(sb.get("grund", "kein Steckbrief"), EXIT_USAGE)
+
+    if getattr(args, "json", False):
+        emit(sb, args)
+        return EXIT_OK if not sb["warnungen"] else 1
+
+    print(SB.als_text(sb, kurz=getattr(args, "kurz", False)))
+    if getattr(args, "laeufe", False):
+        print("")
+        if sb.get("laeufe"):
+            print(f"Fruehere Agentenlaeufe in diesem Projekt ({len(sb['laeufe'])}):")
+            for l in sb["laeufe"]:
+                dauer = int(l.get("sekunden") or 0)
+                print(f"  {l['marke']}  {(l.get('kopf') or '?'):8s} "
+                      f"{l.get('ereignisse', 0):5d} Ereignisse, "
+                      f"{l.get('kacheln', 0):3d} Ergebnisse, {dauer // 60:02d}:"
+                      f"{dauer % 60:02d}")
+                for auftrag in (l.get("auftraege") or [])[:3]:
+                    print(f"      > {auftrag}")
+                if l.get("protokoll"):
+                    print(f"      {l['protokoll']}")
+        else:
+            print("Fruehere Agentenlaeufe: keine.")
+        print("")
+        if sb["rechnungen"]:
+            print(f"Abgelegte Rechnungen ({len(sb['rechnungen'])}):")
+            for r in sb["rechnungen"]:
+                print(f"  {r['marke']}  {r['verb']:14s} {r['ausgang']:22s} {r['datei']}")
+        else:
+            print("Abgelegte Rechnungen: keine.")
+    return EXIT_OK if not sb["warnungen"] else 1
+
+
 def cmd_sicherheit(args) -> int:
     """Sicherheitskriterien eines gerechneten Projekts pruefen.
 
@@ -1288,11 +1378,13 @@ def cmd_sicherheit(args) -> int:
         pass
 
     befund = ema_sicherheit.pruefen(results, meta)
+    text = ema_sicherheit.als_text(befund)
     if getattr(args, "json", False):
         emit({"projekt": pid, **befund}, args)
     else:
         print(f"Projekt: {pid}")
-        print(ema_sicherheit.als_text(befund))
+        print(text)
+    _ablegen(args, "sicherheit", text, daten=befund, ok=befund["ok"], pid=pid)
     return EXIT_OK if befund["ok"] else 1
 
 
@@ -1376,6 +1468,13 @@ def cmd_feldbild(args) -> int:
            "betriebspunkt": {"iq_A": round(iq, 1), "id_A": round(id_, 1),
                              "winkel_grad": float(args.winkel)},
            "bilder": bilder}
+    text = "\n".join([f"{len(bilder)} Feldbild(er) in {ziel}",
+                      f"Betriebspunkt: i_q={iq:.0f} A, i_d={id_:.0f} A, "
+                      f"Rotorwinkel {float(args.winkel):.0f}°"]
+                     + [f"  {b['ansicht']:8s} {b['datei']}"
+                        + (f"   ({b['hinweis']})" if b.get("hinweis") else "")
+                        for b in bilder])
+    _ablegen(args, "feldbild", text, daten=aus, pid=os.path.basename(pdir))
     if getattr(args, "json", False):
         return emit(aus, args)
     print(f"ERGEBNIS: {len(bilder)} Bild(er) in {ziel}")
@@ -1407,12 +1506,12 @@ def cmd_rotor_check(args) -> int:
     chk = rotor_layout_check(geom, min_web_mm=getattr(args, "web", None))
     emit(chk, args)
     if chk["ok"]:
-        print("ERGEBNIS: Layout OK — keine Kollision, Stege ueber Grenze, Taschen im Ring.")
-        return 0
-    print("ERGEBNIS: ABGELEHNT:")
-    for m in chk["fatal"]:
-        print("  ✗ " + m)
-    return 1
+        text = "Layout OK — keine Kollision, Stege ueber Grenze, Taschen im Ring."
+    else:
+        text = "ABGELEHNT:\n" + "\n".join("  ✗ " + m for m in chk["fatal"])
+    print("ERGEBNIS: " + text)
+    _ablegen(args, "rotor-check", text, daten=chk, ok=chk["ok"])
+    return 0 if chk["ok"] else 1
 
 
 # Die baubaren Magnetanordnungen. Aus ema_topology geholt statt abgeschrieben, damit
@@ -1504,6 +1603,10 @@ def cmd_screen(args) -> int:
             achsen[name] = werte if name == "magShape" else [int(w) for w in werte]
 
     erg = SC.screene(payload, ziel, achsen=achsen, n_max=args.n_max, grenze=args.grenze)
+    _ablegen(args, "screen", SC.bestenliste_text(erg, args.zeige),
+             daten={"ziel": ziel, "rangliste": erg["rangliste"][:args.zeige],
+                    "brauchbar": erg["brauchbar"]},
+             ok=bool(erg["brauchbar"]))
     if args.json:
         # Die Verworfenen sind der laengste Teil und im JSON-Modus selten das Ziel;
         # ohne --alle wuerde eine Agentenantwort daran ihren Kontext verlieren.
@@ -1566,11 +1669,14 @@ def cmd_paarvergleich(args) -> int:
     except ValueError as e:
         return _die(str(e), EXIT_USAGE)
 
+    text = PV.als_text(erg, paare=not args.ohne_paare, max_paare=args.max_paare)
     if getattr(args, "json", False):
         emit(erg, args)
     else:
-        print(PV.als_text(erg, paare=not args.ohne_paare, max_paare=args.max_paare))
-    return EXIT_OK if any(a["brauchbar"] >= 2 for a in erg["achsen"].values()) else EXIT_REMOTE
+        print(text)
+    brauchbar = any(a["brauchbar"] >= 2 for a in erg["achsen"].values())
+    _ablegen(args, "paarvergleich", text, daten=erg, ok=brauchbar)
+    return EXIT_OK if brauchbar else EXIT_REMOTE
 
 
 def cmd_bilddaten(args) -> int:
@@ -1753,6 +1859,17 @@ def cmd_routes(args) -> int:
     return EXIT_OK
 
 
+def _add_ablage(s) -> None:
+    """``--ohne-ablage`` fuer die Verben, deren Ergebnis im Projekt bleibt.
+
+    Die Ablage ist die Vorgabe und nicht die Ausnahme: das Ergebnis, das man
+    spaeter sucht, ist immer eines, das man beim Rechnen fuer nebensaechlich
+    hielt. Wer nur eben etwas ausprobiert, schaltet sie ab.
+    """
+    s.add_argument("--ohne-ablage", dest="ohne_ablage", action="store_true",
+                   help="Ergebnis NICHT ins Projekt schreiben (nur ansehen)")
+
+
 def _add_globals(sp, json_hilfe: str | None = None) -> None:
     """Dieselben Schalter auch NACH dem Verb annehmen. Ohne das quittiert argparse
     ``run analyse --full`` mit einer nackten usage-Zeile — der haeufigste Fehlgriff,
@@ -1864,11 +1981,25 @@ def build_parser() -> argparse.ArgumentParser:
     _add_globals(s)
     s.set_defaults(fn=cmd_maschinenart)
 
+    s = sub.add_parser("steckbrief",
+                       help="was ein Projekt IST und was daran gerechnet wurde — "
+                            "Maschine, Stufen, Kennwerte samt Herkunft, offene Punkte")
+    s.add_argument("projekt", nargs="?", default="last",
+                   help="Projektkennung oder 'last' (Vorgabe)")
+    s.add_argument("--laeufe", action="store_true",
+                   help="zusaetzlich die frueheren Agentenlaeufe und die "
+                        "abgelegten Rechnungen dieses Projekts auflisten")
+    s.add_argument("--kurz", action="store_true",
+                   help="ohne den Warnblock (nur die Fakten)")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_steckbrief)
+
     s = sub.add_parser("sicherheit",
                        help="Sicherheitskriterien eines gerechneten Projekts pruefen "
                             "(Festigkeit, Temperaturen, Entmagnetisierung, Fahrprofil)")
     s.add_argument("--from-project", dest="projekt", default="last",
                    help="Projektkennung oder 'last' (Vorgabe)")
+    _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_sicherheit)
 
@@ -1889,6 +2020,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Grenzen und Typen aus dem Schema nicht pruefen")
     s.add_argument("--web", type=float, default=None,
                    help="Mindeststege in mm (Vorgabe: ema_topology.BRIDGE_MM = 2.0)")
+    _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_rotor_check)
 
@@ -1922,6 +2054,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="einzelnen Parameter aendern, mehrfach angebbar")
     s.add_argument("--force", action="store_true",
                    help="Grenzen und Typen aus dem Schema nicht pruefen")
+    _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_feldbild)
 
@@ -1961,6 +2094,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="einzelnen Parameter der Basis aendern, mehrfach angebbar")
     s.add_argument("--force", action="store_true",
                    help="Grenzen und Typen aus dem Schema nicht pruefen")
+    _add_ablage(s)
     _add_globals(s, json_hilfe="vollstaendig als JSON — je Zeile mit der EINGEPASSTEN "
                                "Geometrie, aus der sich die Variante nachbauen laesst")
     s.set_defaults(fn=cmd_screen)
@@ -1998,6 +2132,7 @@ def build_parser() -> argparse.ArgumentParser:
                    help="nur die recherchierten Vergleichswerte zeigen (Salienzband je "
                         "Anordnung, V-Oeffnungswinkel, Bauverhaeltnisse) — Fremdtext "
                         "mit Quellen, ohne Payload")
+    _add_ablage(s)
     _add_globals(s, json_hilfe="der vollstaendige Vergleich als JSON — je Achse "
                                "Optionen, Paare und Spannweiten")
     s.set_defaults(fn=cmd_paarvergleich)

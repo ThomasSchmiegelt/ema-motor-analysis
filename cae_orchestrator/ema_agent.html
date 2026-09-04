@@ -47,7 +47,7 @@
 
   /* ── Geteilter Bildschirm ───────────────────────────────────── */
   #buehne{flex:1;display:none;grid-template-columns:minmax(320px,42%) 6px 1fr;
-          min-height:0}
+          min-height:0;position:relative}
   #buehne.an{display:grid}
   .spalte{display:flex;flex-direction:column;min-height:0;min-width:0;position:relative}
   .kopf{flex:0 0 auto;padding:8px 14px;background:var(--bg2);
@@ -105,6 +105,32 @@
   .kknopf{padding:4px 10px;font-size:12px}
   .wohin{font:11.5px/1.4 var(--mono);color:var(--tx2);padding:0 12px 8px;
          word-break:break-all}
+
+  /* ── Archiv: frueher gelaufene Zuege ────────────────────────── */
+  /* Als Ueberlagerung und nicht als dritte Spalte: ein alter Lauf und der
+     laufende nebeneinander sind zwei Zeitachsen im selben Bild — man liest
+     unweigerlich das eine als Fortsetzung des anderen. */
+  #archiv{position:fixed;inset:0;z-index:40;background:var(--bg);
+          display:none;grid-template-rows:auto 1fr}
+  #archiv.an{display:grid}
+  #archiv .kopf{background:#241d10;border-bottom:1px solid #5a4526;color:#e8c98a;
+                text-transform:none;letter-spacing:0;font-size:12.5px}
+  #a_koerper{display:grid;grid-template-columns:minmax(280px,34%) 1fr;min-height:0}
+  #a_inhalt{display:grid;grid-template-columns:minmax(280px,42%) 1fr;min-height:0}
+  #a_links{border-right:1px solid var(--rand)}
+  #a_koerper > .spalte{border-right:1px solid var(--rand)}
+  #a_liste{overflow-y:auto;padding:10px 12px 20px}
+  .lauf{background:var(--bg2);border:1px solid var(--rand);border-radius:10px;
+        padding:9px 12px;margin-bottom:9px;cursor:pointer}
+  .lauf:hover{border-color:var(--ak)}
+  .lauf.an{border-color:var(--ak);background:#12212b}
+  .lauf .z1{display:flex;gap:8px;align-items:center;font:12px/1.4 var(--mono);
+            color:var(--tx2)}
+  .lauf .z1 b{color:var(--tx);font-weight:600}
+  .lauf .auf{font-size:12.5px;color:var(--tx);margin-top:5px;
+             overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;
+             -webkit-box-orient:vertical}
+  .lauf .leerlauf{font-size:12.5px;color:var(--tx2);margin-top:5px;font-style:italic}
 </style>
 </head>
 <body>
@@ -119,6 +145,8 @@
   <span class="pille rek" id="p_rek" style="display:none"></span>
   <button id="b_video" onclick="videoUm()"
           title="Bildschirm mitschneiden — 5 B/s, ~5 MB je Minute, wird sofort auf die Platte geschrieben">🎥 Aufnahme</button>
+  <button id="b_archiv_kopf" onclick="archivAuf()"
+          title="Frühere Läufe — auch ohne laufenden Agenten">🗂 Frühere Läufe</button>
   <button id="b_stopp" onclick="stoppen()" style="display:none">⛔ Beenden</button>
   <button onclick="location.href='/'">← Oberfläche</button>
 </header>
@@ -188,6 +216,8 @@
   <div class="spalte">
     <div class="kopf">Ergebnisse<span class="wachs"></span>
       <span id="zaehler" style="font-family:var(--mono)"></span>
+      <button class="kknopf" id="b_archiv" onclick="archivAuf()"
+              title="Frühere Läufe — auch die von vorher gestarteten Sitzungen">🗂 Frühere Läufe</button>
       <button class="kknopf" id="b_sichern" onclick="sichernJetzt()"
               title="Protokoll (Markdown + Ereignisse) ins Projekt schreiben">💾 Sichern</button></div>
     <div class="wohin" id="p_gesichert"></div>
@@ -197,6 +227,10 @@
     </div>
     <button class="chip" id="chip_rechts" style="bottom:18px"
             onclick="nachUnten('rechts')">⤓ Neues</button>
+  </div>
+
+
+    </div>
   </div>
 </div>
 
@@ -371,11 +405,22 @@ function zugEnde(e){
 }
 
 // ── Linke Spalte ─────────────────────────────────────────────────
+//
+// Wohin gerendert wird, steht in SPALTEN und nicht fest im Code: das Archiv
+// zeichnet einen alten Lauf mit GENAU denselben Funktionen wie der laufende
+// Strom. Ein zweiter Satz Zeichenfunktionen fürs Archiv wäre ein Satz, der mit
+// dem ersten auseinanderläuft — das durchsichtige Feldbild bekäme dort dann
+// kein Schachbrett, weil jemand die eine Zeile im anderen Zweig vergisst.
+// Umgeschaltet wird nur synchron (Wiedergabe ist eine for-Schleife), deshalb
+// kann kein Live-Ereignis dazwischenrutschen.
+let SPALTEN = {l:'links', r:'rechts'};
+
 function links(art, text){
   const d = document.createElement('div');
   d.className = 'blase ' + art;
   d.textContent = text;
-  $('links').appendChild(d); runter($('links'));
+  const sp = $(SPALTEN.l);
+  sp.appendChild(d); runter(sp);
   return d;
 }
 // Deltas an dieselbe Blase hängen, statt je Token ein Element zu erzeugen —
@@ -384,7 +429,7 @@ function anfuegen(art, text){
   const merker = art === 'denken' ? 'blaseDenken' : 'blaseText';
   let b = art === 'denken' ? blaseDenken : blaseText;
   if(!b){ b = links(art, ''); if(art === 'denken') blaseDenken = b; else blaseText = b; }
-  b.textContent += text; runter($('links'));
+  b.textContent += text; runter($(SPALTEN.l));
 }
 function denkenUm(){
   const zeig = $('c_denken').checked;
@@ -396,10 +441,14 @@ function kachelText(e){
   if(!e.text || !e.text.trim()) return;
   const k = document.createElement('div');
   k.className = 'kachel' + (e.fehler ? ' fehler' : '');
-  k.innerHTML = `<div class="kk">${e.fehler ? '⚠' : '✓'} ${esc(e.name)}` +
+  // `ablage` heißt: das steht nicht nur hier, sondern liegt als Datei im
+  // Projekt. Genau das war die Beschwerde — Ergebnisse, die mit dem Fenster
+  // verschwinden. Wo sie liegen, gehört sichtbar an die Kachel.
+  k.innerHTML = `<div class="kk">${e.ablage ? '💾' : (e.fehler ? '⚠' : '✓')} ${esc(e.name)}` +
                 `<span class="zeit">${uhrStempel(e.t)}</span></div>` +
                 `<pre>${esc(e.text)}</pre>` +
-                (e.gekuerzt ? `<div class="bu">gekürzt — ${e.voll} Zeichen insgesamt</div>` : '');
+                (e.gekuerzt ? `<div class="bu">gekürzt — ${e.voll} Zeichen insgesamt</div>` : '') +
+                (e.ablage ? `<div class="bu">📄 im Projekt: ${esc(e.ablage)}</div>` : '');
   rechts(k);
 }
 function kachelBild(e){
@@ -415,15 +464,17 @@ function kachelBild(e){
                 `<div class="bu">${esc(e.projekt)}</div>`;
   // Erst mit dem geladenen Bild steht die Höhe fest — ohne das zweite Nachziehen
   // bliebe genau das interessanteste Ergebnis halb unter dem Rand.
-  const bild = k.querySelector('img');
-  bild.addEventListener('load',  () => runter($('rechts')));
-  bild.addEventListener('error', () => runter($('rechts')));
+  const bild = k.querySelector('img'), ziel = SPALTEN.r;
+  bild.addEventListener('load',  () => runter($(ziel)));
+  bild.addEventListener('error', () => runter($(ziel)));
   rechts(k);
 }
 function rechts(k){
+  const sp = $(SPALTEN.r);
+  sp.appendChild(k);
+  if(SPALTEN.r !== 'rechts'){ runter(sp); return; }   // Archiv zählt nicht mit
   const leer = $('rechts_leer'); if(leer) leer.remove();
-  const sp = $('rechts');
-  sp.appendChild(k); N_KACHELN++;
+  N_KACHELN++;
   $('zaehler').textContent = N_KACHELN + (N_KACHELN === 1 ? ' Ergebnis' : ' Ergebnisse');
   runter(sp);
 }
@@ -569,6 +620,116 @@ setInterval(uhrTick, 1000);
 // Der Server schreibt nach jedem Zug von selbst; dieser Knopf ist der Griff
 // für zwischendurch. Geschrieben wird aus dem Ringpuffer im Server, nicht aus
 // dem DOM — ein geschlossenes Fenster verliert damit nichts.
+// ── Archiv: frühere Läufe wieder aufrufen ────────────────────────
+//
+// Der Gegenweg zu `sichern`. Geschrieben wurde nach jedem Zug — gelesen bisher
+// nie, weil es keinen Weg zurück gab. Für den, der davorsitzt, ist
+// „geschrieben, aber unerreichbar" dasselbe wie „nicht gespeichert"; genau so
+// wurde es auch berichtet.
+let A_LAEUFE = [], A_OFFEN = '';
+
+async function archivAuf(){
+  $('archiv').classList.add('an');
+  $('a_liste').innerHTML = '<div class="leer" style="margin-top:6vh">lädt …</div>';
+  try{
+    const a = await (await fetch(K('/agent/laeufe?max=200'))).json();
+    A_LAEUFE = a.laeufe || [];
+  }catch(e){ A_LAEUFE = []; }
+  archivListe();
+}
+function archivZu(){ $('archiv').classList.remove('an'); }
+
+function archivListe(){
+  const ziel = $('a_liste');
+  if(!A_LAEUFE.length){
+    ziel.innerHTML = '<div class="leer" style="margin-top:6vh">Noch keine ' +
+                     'gespeicherten Läufe.</div>';
+    $('a_titel').textContent = 'Frühere Läufe'; $('a_wo').textContent = '';
+    return;
+  }
+  $('a_titel').textContent = A_LAEUFE.length + ' frühere Läufe';
+  $('a_wo').textContent = '· PI und Hermes gemeinsam, neueste zuerst';
+  ziel.innerHTML = '';
+  for(const l of A_LAEUFE){
+    const d = document.createElement('div');
+    d.className = 'lauf' + (l.marke === A_OFFEN ? ' an' : '');
+    const s = Math.round(l.sekunden || 0);
+    const dauer = (s >= 3600 ? Math.floor(s/3600) + ':' : '') +
+                  String(Math.floor(s/60)%60).padStart(2,'0') + ':' +
+                  String(s%60).padStart(2,'0');
+    const auf = (l.auftraege || []).join(' · ');
+    d.innerHTML =
+      `<div class="z1"><b>${esc(datumHuebsch(l.marke))}</b>` +
+      `<span>${esc(l.kopf || '?')}</span>` +
+      `<span>${l.ereignisse||0} Ereignisse</span>` +
+      `<span>${l.kacheln||0} Ergebnisse</span><span>${dauer}</span></div>` +
+      `<div class="z1">${esc(l.projekt || '— ohne Projektbindung —')}</div>` +
+      (auf ? `<div class="auf">${esc(auf)}</div>`
+           : `<div class="leerlauf">(kein Auftrag gestellt)</div>`);
+    d.onclick = () => archivZeigen(l);
+    ziel.appendChild(d);
+  }
+}
+// `20260904_124810` → `04.09.2026 12:48`. Die Marke ist der Dateiname; ein
+// zweites Datumsfeld daneben könnte von ihm abweichen.
+function datumHuebsch(m){
+  const t = String(m || '');
+  if(!/^\d{8}_\d{6}/.test(t)) return t;
+  return `${t.slice(6,8)}.${t.slice(4,6)}.${t.slice(0,4)} ` +
+         `${t.slice(9,11)}:${t.slice(11,13)}`;
+}
+
+async function archivZeigen(l){
+  A_OFFEN = l.marke; archivListe();
+  $('a_links').innerHTML = ''; $('a_rechts').innerHTML = '';
+  $('a_hinweis').textContent = 'lädt …';
+  let a;
+  try{
+    a = await (await fetch(K('/agent/lauf?projekt=' +
+        encodeURIComponent(l.projekt || '') + '&marke=' +
+        encodeURIComponent(l.marke)))).json();
+  }catch(e){ $('a_hinweis').textContent = 'nicht lesbar: ' + e.message; return; }
+  if(!a.ok){ $('a_hinweis').textContent = a.grund || 'nicht lesbar'; return; }
+
+  // Denselben Weg wie der laufende Strom — nur in die Archivspalten.
+  const vorher = SPALTEN, dText = blaseText, dDenk = blaseDenken;
+  SPALTEN = {l:'a_links', r:'a_rechts'};
+  blaseText = blaseDenken = null;
+  try{
+    for(const e of (a.ereignisse_liste || [])){
+      if(e.art === 'start' || e.art === 'bereit' || e.art === 'ende' ||
+         e.art === 'gesichert' || e.art === 'kontext') continue;
+      verarbeitenStumm(e);
+    }
+  } finally {
+    SPALTEN = vorher; blaseText = dText; blaseDenken = dDenk;
+  }
+  denkenUm();
+  $('a_hinweis').textContent =
+    (a.gekuerzt ? `nur die letzten ${(a.ereignisse_liste||[]).length} von ${a.ereignisse} Ereignissen · ` : '') +
+    (a.protokoll ? '📄 ' + a.protokoll : '');
+}
+
+// Wie `verarbeiten`, aber ohne alles, was den LAUFENDEN Agenten betrifft
+// (Uhr, Zustandspille, Ordneranzeige, Zähler). Ein Archivlauf darf die Anzeige
+// des lebenden nicht anfassen — sonst stünde nach dem Nachlesen eines alten
+// Laufs „beendet" über einem, der noch rechnet.
+function verarbeitenStumm(e){
+  switch(e.art){
+    case 'sitzung':  links('sys', 'Sitzung ' + (e.id||'').slice(0,8)); break;
+    case 'frage':    blaseDenken = blaseText = null; links('frage', e.text); break;
+    case 'denken':   anfuegen('denken', e.text); break;
+    case 'text':     anfuegen('text', e.text); break;
+    case 'werkzeug': blaseDenken = blaseText = null;
+                     links('wz', '$ ' + e.befehl); break;
+    case 'ergebnis': kachelText(e); break;
+    case 'bild':     kachelBild(e); break;
+    case 'gemerkt':  links('hinweis', '📣 ' + e.text); break;
+    case 'fehler':   links('fehl', '⚠ ' + e.text); break;
+    case 'roh':      links('sys', e.text); break;
+  }
+}
+
 async function sichernJetzt(){
   const b = $('b_sichern'); b.disabled = true;
   try{
@@ -724,5 +885,25 @@ addEventListener('pagehide', () => { if(REK) navigator.sendBeacon(K('/agent/vide
 folgeUeberwachen('links'); folgeUeberwachen('rechts');
 (async () => { if (!await anknuepfen()) auswahlLaden(); })();
 </script>
+<!-- Archiv. Über der ganzen Seite und NICHT in der Bühne: gesucht wird es
+     gerade dann, wenn kein Agent läuft — und die Bühne ist dann ausgeblendet.
+     Ein Knopf, der nur während eines Laufs erreichbar ist, hilft niemandem,
+     der nachsehen will, was gestern herauskam. -->
+<div id="archiv">
+  <div class="kopf">🗂 <b id="a_titel">Frühere Läufe</b>
+    <span id="a_wo"></span><span class="wachs"></span>
+    <span id="a_hinweis"></span>
+    <button class="kknopf" onclick="archivZu()">← zurück</button></div>
+  <div id="a_koerper">
+    <div class="spalte"><div id="a_liste"></div></div>
+    <div class="spalte">
+      <div id="a_inhalt">
+        <div class="strom" id="a_links"></div>
+        <div class="strom" id="a_rechts"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
 </body>
 </html>
