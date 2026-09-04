@@ -66,6 +66,9 @@ FREIE_LAEUFE = os.path.join(PROJEKTE, "_agent_laeufe")
 # Wo npm ohne sudo installiert. ``pi`` liegt hier, nicht in ~/.local/bin.
 PI_PFADE = (os.path.expanduser("~/.npm-global/bin"),
             os.path.expanduser("~/.local/bin"))
+# Der Nous-Installer legt ``hermes`` nach ~/.local/bin (kein root).
+HERMES_PFADE = (os.path.expanduser("~/.local/bin"),
+                os.path.expanduser("~/.npm-global/bin"))
 
 # Ringpuffer: damit ein spaet geoeffneter oder neu geladener Browser den Verlauf
 # nachbekommt, statt mitten im Satz einzusteigen.
@@ -79,29 +82,90 @@ MAX_BILDER_JE_ZUG = 12
 BILD_ENDUNGEN = (".png", ".jpg", ".jpeg", ".svg", ".webp")
 
 
-def pi_gefunden() -> str | None:
-    """Pfad zu ``pi`` -- oder ``None``, dann sagt die Route es ehrlich."""
+def _suchen(name: str, pfade) -> str | None:
     umgebung = os.environ.get("PATH", "")
-    for p in PI_PFADE:
+    for p in pfade:
         if os.path.isdir(p):
             umgebung = p + os.pathsep + umgebung
-    return shutil.which("pi", path=umgebung)
+    return shutil.which(name, path=umgebung)
 
 
-def _umgebung() -> dict:
+def pi_gefunden() -> str | None:
+    """Pfad zu ``pi`` -- oder ``None``, dann sagt die Route es ehrlich."""
+    return _suchen("pi", PI_PFADE)
+
+
+def hermes_gefunden() -> str | None:
+    """Pfad zu ``hermes`` -- oder ``None``."""
+    return _suchen("hermes", HERMES_PFADE)
+
+
+def _umgebung(pfade=PI_PFADE) -> dict:
     env = dict(os.environ)
-    zusatz = [p for p in PI_PFADE if os.path.isdir(p)]
+    zusatz = [p for p in pfade if os.path.isdir(p)]
     env["PATH"] = os.pathsep.join(zusatz + [env.get("PATH", "")])
     return env
 
 
-class Lauf:
-    """Ein laufender PI-Prozess samt Ereignisstrom.
+class Kopf:
+    """Ein laufender Agentenprozess samt Ereignisstrom -- ohne sein Protokoll.
 
-    Bewusst EIN Lauf je Server (wie die uebrigen Zustands-Dicts in ``server.py``):
-    zwei gleichzeitige Agenten wuerden sich um dasselbe Projektverzeichnis und
-    denselben Ollama-Speicher streiten, und im Video will man ohnehin einen.
+    Hier steht alles, was BEIDE Agentenkoepfe gleich machen: Ringpuffer und
+    anhaengende Mitschrift, neue Bilder aus dem Projektordner, Protokoll,
+    Zielordner, Zwischenrufe, Projektakte, Zustand. Was sich unterscheidet --
+    Aufrufform, Drahtprotokoll, Sitzungsliste -- steht in den beiden
+    Unterklassen ``PiKopf`` und ``HermesKopf``, jede an EINER Stelle.
+
+    Der Grund fuer diese Aufteilung ist derselbe wie beim Skill: PI und Hermes
+    lesen EINE ``SKILL.md``, keine Kopie. Eine zweite ``ema_agent.py`` fuer
+    Hermes waere anfangs identisch und nach dem dritten Fehlerbericht nicht mehr
+    -- und dann verhalten sich zwei Reiter unterschiedlich, ohne dass jemand
+    sagen koennte, warum.
+
+    Bewusst EIN Lauf je Kopf (wie die uebrigen Zustands-Dicts in ``server.py``):
+    zwei gleichzeitige Agenten desselben Kopfes wuerden sich um dasselbe
+    Projektverzeichnis und denselben Ollama-Speicher streiten, und im Video will
+    man ohnehin einen.
     """
+
+    NAME = "?"                 # Kennung in Routen und Oberflaeche
+    LABEL = "?"                # Klartext fuer den Menschen
+    PFADE = PI_PFADE           # wo das Programm gesucht wird
+    KANN_SYSTEMZUSATZ = True   # eigener Systemzusatz beim Aufruf moeglich?
+
+    # ── Was die Unterklassen ausfuellen ─────────────────────────────────────
+    def programm(self) -> str | None:
+        raise NotImplementedError
+
+    def _fehlt_text(self) -> str:
+        raise NotImplementedError
+
+    def _befehl(self, prog: str, modell: str, sitzung: str,
+                system_zusatz: str) -> list:
+        raise NotImplementedError
+
+    def _stderr_ziel(self):
+        """PI mischt seine Klartextzeilen in stdout; Hermes schreibt dorthin
+        reines JSON-RPC und seine Protokollzeilen nach stderr. Wer das
+        zusammenlegt, zerschiesst bei Hermes den Strom."""
+        return subprocess.STDOUT
+
+    def _nach_start(self, modell: str, sitzung: str, system_zusatz: str) -> dict:
+        """Nach dem Aufruf, vor der ersten Frage. PI ist sofort bereit; ACP
+        braucht erst ``initialize`` und ``session/new``."""
+        return {"ok": True}
+
+    def _lesen(self) -> None:
+        raise NotImplementedError
+
+    def _prompt_senden(self, text: str) -> None:
+        raise NotImplementedError
+
+    def sitzungen(self, n: int = 8) -> list:
+        return []
+
+    def _umfeld(self) -> dict:
+        return _umgebung(self.PFADE)
 
     def __init__(self):
         self.proc: subprocess.Popen | None = None
@@ -221,87 +285,14 @@ class Lauf:
                         datei=b["datei"])
 
     # ── Der Lesefaden ───────────────────────────────────────────────────────
-    def _lesen(self) -> None:
-        assert self.proc and self.proc.stdout
-        for zeile in self.proc.stdout:
-            zeile = zeile.strip()
-            if not zeile:
-                continue
-            try:
-                d = json.loads(zeile)
-            except ValueError:
-                # Kein JSON: PI schreibt gelegentlich Klartext dazwischen. Nicht
-                # verwerfen -- genau solche Zeilen tragen die Startfehler.
-                self._sende("roh", text=zeile[:400])
-                continue
-            self._verarbeiten(d)
-        self.laeuft = False
-        self.beschaeftigt = False
-        code = self.proc.wait() if self.proc else -1
-        self._sende("ende", code=code)
-        self._sichern_still()
-        self._mitschrift_schliessen()
-
-    def _verarbeiten(self, d: dict) -> None:
-        typ = d.get("type")
-        ev = d.get("assistantMessageEvent") or {}
-        evt = ev.get("type")
-
-        if evt == "thinking_delta":
-            self._sende("denken", text=ev.get("delta", ""))
-        elif evt == "text_delta":
-            self._sende("text", text=ev.get("delta", ""))
-        elif evt == "toolcall_start":
-            self._sende("werkzeug_start", name=ev.get("toolName", ""))
-        elif typ == "tool_execution_start":
-            args = d.get("args") or {}
-            self._sende("werkzeug", name=d.get("toolName", ""),
-                        befehl=str(args.get("command") or
-                                   json.dumps(args, ensure_ascii=False))[:600])
-        elif typ == "tool_execution_end":
-            res = d.get("result") or {}
-            stuecke = [c.get("text", "") for c in (res.get("content") or [])
-                       if c.get("type") == "text"]
-            text = "\n".join(stuecke)
-            self._sende("ergebnis", name=d.get("toolName", ""),
-                        fehler=bool(d.get("isError")),
-                        text=text[:MAX_AUSGABE],
-                        gekuerzt=len(text) > MAX_AUSGABE, voll=len(text))
-            self._bilder_melden()
-        elif typ == "turn_start":
-            self._sende("zug_start")
-        elif typ == "agent_settled":
-            # DAS ist das Zugende -- nicht turn_end, nicht agent_end.
-            self.beschaeftigt = False
-            self._bilder_melden(alle=True)      # Zugende: nichts zurueckhalten
-            self._sende("bereit")
-            self._sichern_still()
-            self._hinweise_uebergeben()
-        elif typ == "response" and d.get("command") == "prompt":
-            if not d.get("success"):
-                self.beschaeftigt = False
-                self._sende("fehler", text=str(d.get("error", ""))[:400])
-        elif typ == "session":
-            self.sitzung = str(d.get("id", ""))
-            self._sende("sitzung", id=self.sitzung, cwd=d.get("cwd", ""))
-
     # ── Steuerung ───────────────────────────────────────────────────────────
     def starten(self, modell: str, projekt: str = "", sitzung: str = "",
                 system_zusatz: str = "") -> dict:
         if self.laeuft:
-            return {"ok": False, "grund": "Es laeuft bereits ein Agent."}
-        pi = pi_gefunden()
-        if not pi:
-            return {"ok": False,
-                    "grund": "pi nicht gefunden (erwartet in ~/.npm-global/bin) — "
-                             "Einrichtung steht in .agents/README.md"}
-        befehl = [pi, "--provider", "ollama", "--model", modell, "--mode", "rpc"]
-        if sitzung == "weiter":
-            befehl.append("--continue")
-        elif sitzung:
-            befehl += ["--session", sitzung]
-        if system_zusatz:
-            befehl += ["--append-system-prompt", system_zusatz]
+            return {"ok": False, "grund": f"Es laeuft bereits ein {self.LABEL}."}
+        prog = self.programm()
+        if not prog:
+            return {"ok": False, "grund": self._fehlt_text()}
 
         self.ring = []
         self._gesehen = set()
@@ -309,30 +300,40 @@ class Lauf:
         self.fehler = ""
         self.projekt = projekt
         self.modell = modell
+        self.sitzung = "" if sitzung in ("", "weiter") else sitzung
         self.start_ts = time.time()
-        try:
-            self.proc = subprocess.Popen(
-                befehl, cwd=WURZEL, env=_umgebung(),
-                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT, text=True, bufsize=1)
-        except OSError as e:
-            self.fehler = f"{type(e).__name__}: {e}"
-            return {"ok": False, "grund": self.fehler}
-        self.laeuft = True
-        # Neuer Lauf, neuer Ordner -- und alles zu diesem Lauf kommt hinein:
-        # Mitschrift, Protokoll und eine schon laufende Aufnahme.
+        # Der Ordner steht mit dem Start fest, und die Projektakte wird VOR dem
+        # Aufruf geschrieben: Hermes liest sie beim Hochfahren aus dem
+        # Arbeitsverzeichnis, und was danach entstuende, saehe er nicht mehr.
         self.ordner = ""
         self._ordner_fuer = None
         self._nr = 0
         ordner = self.zielordner()
         self._mitschrift_schliessen()
         self._mitschrift_oeffnen()
-        akte = self.projektakte_schreiben()
+        akte = self.projektakte_schreiben(system_zusatz)
+
+        befehl = self._befehl(prog, modell, sitzung, system_zusatz)
+        try:
+            self.proc = subprocess.Popen(
+                befehl, cwd=WURZEL, env=self._umfeld(),
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                stderr=self._stderr_ziel(), text=True, bufsize=1)
+        except OSError as e:
+            self.fehler = f"{type(e).__name__}: {e}"
+            return {"ok": False, "grund": self.fehler}
+        self.laeuft = True
         threading.Thread(target=self._lesen, daemon=True).start()
-        self._sende("start", modell=modell, projekt=projekt,
+        self._sende("start", modell=modell, projekt=projekt, kopf=self.NAME,
                     befehl=" ".join(befehl), ordner=ordner, akte=akte)
+        bereit = self._nach_start(modell, sitzung, system_zusatz)
+        if not bereit.get("ok"):
+            self.fehler = str(bereit.get("grund", ""))
+            self._sende("fehler", text=self.fehler[:400])
+            self.stoppen()
+            return bereit
         return {"ok": True, "modell": modell, "projekt": projekt,
-                "ordner": ordner}
+                "kopf": self.NAME, "ordner": ordner}
 
     def fragen(self, text: str) -> dict:
         if not self.laeuft or not self.proc or not self.proc.stdin:
@@ -342,10 +343,7 @@ class Lauf:
         self.beschaeftigt = True
         self._sende("frage", text=text)
         try:
-            self.proc.stdin.write(
-                json.dumps({"type": "prompt", "message": text},
-                           ensure_ascii=False) + "\n")
-            self.proc.stdin.flush()
+            self._prompt_senden(text)
         except (BrokenPipeError, OSError) as e:
             self.beschaeftigt = False
             return {"ok": False, "grund": f"{type(e).__name__}: {e}"}
@@ -402,7 +400,7 @@ class Lauf:
         self.fragen(text)
 
     # ── Den Lauf auf die Platte ─────────────────────────────────────────────
-    def projektakte_schreiben(self) -> str:
+    def projektakte_schreiben(self, system_zusatz: str = "") -> str:
         """``AGENTS.projekt.md`` in der Repo-Wurzel neu schreiben.
 
         Warum das hier stehen MUSS -- gemessener Befund
@@ -435,7 +433,7 @@ class Lauf:
                 "nur die Fakten des Laufs, der gerade beginnt.",
                 "",
                 f"- Stand: {time.strftime('%d.%m.%Y %H:%M')}",
-                f"- Agentenkopf: PI im Browser (`/agent`)"]
+                f"- Agentenkopf: {self.LABEL} im Browser (`/agent?kopf={self.NAME}`)"]
         if not self.projekt:
             kopf += [
                 "- Projekt: **keines gebunden**",
@@ -468,6 +466,23 @@ class Lauf:
                     kopf.append("- (results.json nicht lesbar)")
             else:
                 kopf.append("Noch nichts gerechnet — es gibt keine results.json.")
+        # Der stehende Auftrag -- fuer die Koepfe, die keinen Systemzusatz kennen.
+        #
+        # PI bekommt ihn ueber ``--append-system-prompt``: ein Systemzusatz
+        # ueberlebt einen langen Zug, ein Prompt nicht. **Hermes ACP hat diese
+        # Flagge nicht** (gemessen an ``hermes acp --help``). Ihn statt dessen an
+        # den ersten Prompt zu haengen waere genau der Fehler, gegen den der
+        # Systemzusatz gebaut wurde -- ein Prompt kann vergessen werden.
+        #
+        # Hermes liest aber ``AGENTS.md`` und ``AGENTS.projekt.md`` aus dem
+        # Arbeitsverzeichnis, und diese Datei wird bei JEDEM Start neu
+        # geschrieben. Derselbe Inhalt, zugestellt ueber den Weg, den dieser Kopf
+        # hat. Deshalb steht der Aufruf VOR dem Popen: was danach entstuende,
+        # saehe der Prozess nicht mehr.
+        if system_zusatz and not self.KANN_SYSTEMZUSATZ:
+            kopf += ["", "## Stehender Auftrag fuer diesen Lauf", "",
+                     "Das Folgende gilt fuer den ganzen Lauf, nicht nur fuer die",
+                     "erste Frage:", "", str(system_zusatz).strip()]
         try:
             with open(pfad, "w", encoding="utf-8") as f:
                 f.write("\n".join(kopf) + "\n")
@@ -668,10 +683,448 @@ class Lauf:
                 "ereignisse": len(self.ring),
                 "sekunden": round(time.time() - self.start_ts, 1)
                 if self.start_ts else 0.0,
-                "pi": bool(pi_gefunden())}
+                "kopf": self.NAME, "kopf_label": self.LABEL,
+                "programm": bool(self.programm()),
+                # ``pi`` bleibt als Name stehen, damit eine aeltere Seite nicht
+                # ploetzlich "nicht installiert" meldet; ``programm`` ist das
+                # kopfrichtige Feld.
+                "pi": bool(self.programm())}
 
 
-LAUF = Lauf()
+class PiKopf(Kopf):
+    """PI ueber ``pi --mode rpc``.
+
+    Die Form ist gemessen, nicht dokumentiert: hinein ``{"type":"prompt",
+    "message":…}`` (mit ``prompt``/``content``/``text`` als Feldname scheitert es
+    mit "Cannot read properties of undefined"), heraus NDJSON. **Zugende ist
+    ``agent_settled``**, nicht ``turn_end`` und nicht ``agent_end`` -- die kommen
+    davor.
+    """
+
+    NAME = "pi"
+    LABEL = "PI"
+    PFADE = PI_PFADE
+    KANN_SYSTEMZUSATZ = True
+
+    def programm(self) -> str | None:
+        return pi_gefunden()
+
+    def _fehlt_text(self) -> str:
+        return ("pi nicht gefunden (erwartet in ~/.npm-global/bin) — "
+                "Einrichtung steht in .agents/README.md")
+
+    def _befehl(self, prog, modell, sitzung, system_zusatz) -> list:
+        befehl = [prog, "--provider", "ollama", "--model", modell,
+                  "--mode", "rpc"]
+        if sitzung == "weiter":
+            befehl.append("--continue")
+        elif sitzung:
+            befehl += ["--session", sitzung]
+        if system_zusatz:
+            befehl += ["--append-system-prompt", system_zusatz]
+        return befehl
+
+    def _prompt_senden(self, text: str) -> None:
+        self.proc.stdin.write(
+            json.dumps({"type": "prompt", "message": text},
+                       ensure_ascii=False) + "\n")
+        self.proc.stdin.flush()
+
+    def sitzungen(self, n: int = 8) -> list:
+        return sitzungen(n)
+
+    def _lesen(self) -> None:
+        assert self.proc and self.proc.stdout
+        for zeile in self.proc.stdout:
+            zeile = zeile.strip()
+            if not zeile:
+                continue
+            try:
+                d = json.loads(zeile)
+            except ValueError:
+                # Kein JSON: PI schreibt gelegentlich Klartext dazwischen. Nicht
+                # verwerfen -- genau solche Zeilen tragen die Startfehler.
+                self._sende("roh", text=zeile[:400])
+                continue
+            self._verarbeiten(d)
+        self.laeuft = False
+        self.beschaeftigt = False
+        code = self.proc.wait() if self.proc else -1
+        self._sende("ende", code=code)
+        self._sichern_still()
+        self._mitschrift_schliessen()
+
+    def _verarbeiten(self, d: dict) -> None:
+        typ = d.get("type")
+        ev = d.get("assistantMessageEvent") or {}
+        evt = ev.get("type")
+
+        if evt == "thinking_delta":
+            self._sende("denken", text=ev.get("delta", ""))
+        elif evt == "text_delta":
+            self._sende("text", text=ev.get("delta", ""))
+        elif evt == "toolcall_start":
+            self._sende("werkzeug_start", name=ev.get("toolName", ""))
+        elif typ == "tool_execution_start":
+            args = d.get("args") or {}
+            self._sende("werkzeug", name=d.get("toolName", ""),
+                        befehl=str(args.get("command") or
+                                   json.dumps(args, ensure_ascii=False))[:600])
+        elif typ == "tool_execution_end":
+            res = d.get("result") or {}
+            stuecke = [c.get("text", "") for c in (res.get("content") or [])
+                       if c.get("type") == "text"]
+            text = "\n".join(stuecke)
+            self._sende("ergebnis", name=d.get("toolName", ""),
+                        fehler=bool(d.get("isError")),
+                        text=text[:MAX_AUSGABE],
+                        gekuerzt=len(text) > MAX_AUSGABE, voll=len(text))
+            self._bilder_melden()
+        elif typ == "turn_start":
+            self._sende("zug_start")
+        elif typ == "agent_settled":
+            # DAS ist das Zugende -- nicht turn_end, nicht agent_end.
+            self.beschaeftigt = False
+            self._bilder_melden(alle=True)      # Zugende: nichts zurueckhalten
+            self._sende("bereit")
+            self._sichern_still()
+            self._hinweise_uebergeben()
+        elif typ == "response" and d.get("command") == "prompt":
+            if not d.get("success"):
+                self.beschaeftigt = False
+                self._sende("fehler", text=str(d.get("error", ""))[:400])
+        elif typ == "session":
+            self.sitzung = str(d.get("id", ""))
+            self._sende("sitzung", id=self.sitzung, cwd=d.get("cwd", ""))
+
+
+class HermesKopf(Kopf):
+    """Hermes ueber ``hermes acp`` -- Agent Client Protocol, JSON-RPC 2.0.
+
+    Warum ACP und nicht ``hermes serve``
+    ------------------------------------
+
+    ``hermes serve`` bringt eine EIGENE Weboberflaeche auf :9119 mit eigener
+    Anmeldung. Sie in einen Rahmen zu haengen waere kein zweiter Agentenreiter,
+    sondern ein Fremdkoerper: keine Stoppuhr, kein gemeinsames Protokoll, keine
+    Bilder aus dem Projektordner, keine Aufnahme. ``hermes acp`` ist das
+    Gegenstueck zu ``pi --mode rpc`` -- ein Prozess, ein Strom, und dieselbe
+    Seite kann beide bedienen.
+
+    Die Form ist gemessen (nicht dokumentiert geglaubt):
+
+    * **Zeilengetrenntes JSON-RPC 2.0 auf stdout, Protokollzeilen auf stderr.**
+      Sauberer als bei PI -- deshalb darf stderr hier NICHT hineingemischt
+      werden, sonst zerfaellt der Strom an der ersten Logzeile.
+    * ``initialize`` -> ``session/new {cwd, mcpServers}`` -> ``result.sessionId``.
+      Erst danach ist der Kopf ansprechbar, deshalb ``_nach_start``.
+    * ``session/prompt`` -- und **die Antwort auf diese Anfrage IST das
+      Zugende** (``stopReason``). Das ist der eine Punkt, an dem ACP deutlich
+      besser ist als PIs ``agent_settled``: es muss nichts erraten werden.
+    * Waehrend des Zuges ``session/update`` mit ``update.sessionUpdate`` aus
+      ``agent_thought_chunk`` (Denken), ``agent_message_chunk`` (Antwort),
+      ``tool_call`` / ``tool_call_update`` (Werkzeug und sein Ergebnis),
+      ``usage_update`` (Kontextfuellung) und ``session_info_update``.
+    * **Keine Freigabe-Rueckfragen gemessen** (0 bei einem Shell-Aufruf). Kaeme
+      doch eine (``session/request_permission``), wuerde der Zug ohne Antwort
+      still stehen -- deshalb wird sie beantwortet und im Strom sichtbar
+      gemacht, statt sie zu verschweigen.
+
+    Was Hermes anders macht als PI, und warum das hier steht
+    -------------------------------------------------------
+
+    **Sein Gedaechtnis haengt am Projekt.** ``HERMES_HOME`` verschiebt die ganze
+    Hermes-Ablage; ``start_hermes.sh`` macht das seit jeher, und es ist gemessen,
+    dass ``hermes acp`` die Variable befolgt (``state.db`` landet dort). Ohne das
+    bekaeme eine neue Auslegung das an einer anderen Auslegung Gelernte als
+    Tatsache serviert -- genau der Grund, warum das Terminal beim Hermes-Start
+    zuerst nach dem Projekt fragt und bei PI nicht.
+    """
+
+    NAME = "hermes"
+    LABEL = "Hermes"
+    PFADE = HERMES_PFADE
+    KANN_SYSTEMZUSATZ = False        # kein --append-system-prompt (gemessen)
+
+    def __init__(self):
+        super().__init__()
+        self._id = 0                  # laufende JSON-RPC-Nummer
+        self._sid = ""                # ACP-Sitzung
+        self._zug_id = 0              # Anfrage, deren Antwort das Zugende ist
+        self._warten: dict = {}       # id -> Antwort
+        self._rpc_sperre = threading.Lock()
+
+    # ── Aufruf ──────────────────────────────────────────────────────────────
+    def programm(self) -> str | None:
+        return hermes_gefunden()
+
+    def _fehlt_text(self) -> str:
+        return ("hermes nicht gefunden (erwartet in ~/.local/bin) — "
+                "Einrichtung steht in .agents/README.md")
+
+    def _befehl(self, prog, modell, sitzung, system_zusatz) -> list:
+        # Modell und Sitzung gehen NICHT ueber die Kommandozeile: `hermes acp`
+        # nimmt beides nicht an (gemessen an --help). Das Modell steht in
+        # ~/.hermes/config.yaml, die Sitzung wird ueber session/new bzw.
+        # session/load gewaehlt.
+        return [prog, "acp"]
+
+    def _stderr_ziel(self):
+        # NICHT nach stdout: dort laeuft reines JSON-RPC.
+        return subprocess.PIPE
+
+    def _umfeld(self) -> dict:
+        env = _umgebung(self.PFADE)
+        heim = self._hermes_heim()
+        if heim:
+            env["HERMES_HOME"] = heim
+        return env
+
+    def _hermes_heim(self) -> str:
+        """Projekteigene Hermes-Ablage -- dieselbe wie in ``start_hermes.sh``.
+
+        Geteiltes wird VERLINKT, nicht kopiert (``config.yaml``, ``.env``,
+        ``skills``): eine Kopie liefe auseinander, und dann arbeiteten Terminal-
+        und Browserkopf nach zwei Konfigurationen, die beide plausibel aussehen.
+        Ohne Projektbindung bleibt die gemeinsame Ablage -- dann gibt es nichts
+        zu trennen.
+        """
+        if not self.projekt:
+            return ""
+        heim = os.path.join(PROJEKTE, self.projekt, "_agent", "hermes")
+        try:
+            os.makedirs(os.path.join(heim, "memories"), exist_ok=True)
+            os.makedirs(os.path.join(heim, "sessions"), exist_ok=True)
+            for teil in ("config.yaml", ".env", "skills"):
+                quelle = os.path.expanduser(f"~/.hermes/{teil}")
+                ziel = os.path.join(heim, teil)
+                if not os.path.exists(quelle):
+                    continue
+                if os.path.islink(ziel) and os.readlink(ziel) == quelle:
+                    continue
+                if os.path.lexists(ziel):
+                    if os.path.isdir(ziel) and not os.path.islink(ziel):
+                        continue          # echtes Verzeichnis: nicht anfassen
+                    os.remove(ziel)
+                os.symlink(quelle, ziel)
+        except OSError:
+            return ""
+        return heim
+
+    # ── JSON-RPC ────────────────────────────────────────────────────────────
+    def _rpc(self, methode: str, params: dict, sek: float = 120.0) -> dict:
+        with self._rpc_sperre:
+            self._id += 1
+            nr = self._id
+        self._warten[nr] = None
+        self.proc.stdin.write(json.dumps(
+            {"jsonrpc": "2.0", "id": nr, "method": methode, "params": params},
+            ensure_ascii=False) + "\n")
+        self.proc.stdin.flush()
+        t0 = time.time()
+        while self._warten.get(nr) is None and time.time() - t0 < sek:
+            if not self.laeuft:
+                break
+            time.sleep(0.05)
+        return self._warten.pop(nr, None) or {
+            "error": {"message": f"keine Antwort auf {methode} in {sek:.0f}s"}}
+
+    def _antworten(self, nr, ergebnis: dict) -> None:
+        self.proc.stdin.write(json.dumps(
+            {"jsonrpc": "2.0", "id": nr, "result": ergebnis},
+            ensure_ascii=False) + "\n")
+        self.proc.stdin.flush()
+
+    def _nach_start(self, modell: str, sitzung: str, system_zusatz: str) -> dict:
+        a = self._rpc("initialize",
+                      {"protocolVersion": 1,
+                       "clientCapabilities": {"fs": {"readTextFile": False,
+                                                     "writeTextFile": False}}},
+                      sek=120)
+        if "error" in a:
+            return {"ok": False, "grund": f"initialize: {a['error'].get('message')}"}
+
+        if sitzung and sitzung != "weiter":
+            b = self._rpc("session/load",
+                          {"sessionId": sitzung, "cwd": WURZEL, "mcpServers": []},
+                          sek=180)
+            if "error" not in b:
+                self._sid = sitzung
+        if not self._sid:
+            b = self._rpc("session/new", {"cwd": WURZEL, "mcpServers": []}, sek=240)
+            if "error" in b:
+                return {"ok": False,
+                        "grund": f"session/new: {b['error'].get('message')}"}
+            self._sid = str((b.get("result") or {}).get("sessionId", ""))
+        if not self._sid:
+            return {"ok": False, "grund": "ACP lieferte keine sessionId"}
+        self.sitzung = self._sid
+        self._sende("sitzung", id=self._sid, cwd=WURZEL, heim=self._hermes_heim())
+        return {"ok": True}
+
+    def _prompt_senden(self, text: str) -> None:
+        with self._rpc_sperre:
+            self._id += 1
+            nr = self._id
+        self._zug_id = nr
+        self.proc.stdin.write(json.dumps(
+            {"jsonrpc": "2.0", "id": nr, "method": "session/prompt",
+             "params": {"sessionId": self._sid,
+                        "prompt": [{"type": "text", "text": text}]}},
+            ensure_ascii=False) + "\n")
+        self.proc.stdin.flush()
+
+    # ── Strom ───────────────────────────────────────────────────────────────
+    def _lesen(self) -> None:
+        assert self.proc and self.proc.stdout
+        threading.Thread(target=self._stderr_lesen, daemon=True).start()
+        for zeile in self.proc.stdout:
+            zeile = zeile.strip()
+            if not zeile:
+                continue
+            try:
+                d = json.loads(zeile)
+            except ValueError:
+                self._sende("roh", text=zeile[:400])
+                continue
+            self._verarbeiten(d)
+        self.laeuft = False
+        self.beschaeftigt = False
+        code = self.proc.wait() if self.proc else -1
+        self._sende("ende", code=code)
+        self._sichern_still()
+        self._mitschrift_schliessen()
+
+    def _stderr_lesen(self) -> None:
+        """Hermes' Protokollzeilen -- nur die, die etwas bedeuten.
+
+        Alles durchzureichen fuellte die linke Spalte mit 55 Zeilen
+        Plugin-Registrierung je Start. Weggeworfen werden darf es aber auch
+        nicht: die Startfehler stehen genau dort.
+        """
+        if not self.proc or not self.proc.stderr:
+            return
+        for zeile in self.proc.stderr:
+            zeile = zeile.rstrip()
+            if not zeile:
+                continue
+            if "[ERROR]" in zeile or "[CRITICAL]" in zeile or "Traceback" in zeile:
+                self._sende("roh", text=zeile[:400])
+
+    def _verarbeiten(self, d: dict) -> None:
+        # Antwort auf eine unserer Anfragen?
+        if "id" in d and ("result" in d or "error" in d):
+            nr = d.get("id")
+            if nr == self._zug_id:
+                # DAS ist das Zugende -- die Antwort auf session/prompt selbst.
+                self._zug_id = 0
+                self.beschaeftigt = False
+                if "error" in d:
+                    self._sende("fehler",
+                                text=str(d["error"].get("message", ""))[:400])
+                self._bilder_melden(alle=True)
+                erg = d.get("result") or {}
+                self._sende("bereit", grund=str(erg.get("stopReason", "")),
+                            marken=(erg.get("usage") or {}).get("totalTokens"))
+                self._sichern_still()
+                self._hinweise_uebergeben()
+            else:
+                self._warten[nr] = d
+            return
+
+        # Anfrage AN uns (z. B. Freigabe). Unbeantwortet stuende der Zug still.
+        if "id" in d and "method" in d:
+            self._freigabe(d)
+            return
+
+        if d.get("method") != "session/update":
+            return
+        upd = (d.get("params") or {}).get("update") or {}
+        art = upd.get("sessionUpdate")
+        inhalt = upd.get("content")
+
+        def _text(x) -> str:
+            if isinstance(x, dict):
+                return str(x.get("text", ""))
+            if isinstance(x, list):
+                return "\n".join(_text(e.get("content", e)) if isinstance(e, dict)
+                                 else str(e) for e in x)
+            return str(x or "")
+
+        if art == "agent_thought_chunk":
+            self._sende("denken", text=_text(inhalt))
+        elif art == "agent_message_chunk":
+            self._sende("text", text=_text(inhalt))
+        elif art == "tool_call":
+            self._sende("werkzeug", name=str(upd.get("kind") or "werkzeug"),
+                        befehl=(str(upd.get("title") or "")
+                                + ("\n" + _text(inhalt) if inhalt else ""))[:600])
+        elif art == "tool_call_update":
+            if str(upd.get("status")) not in ("completed", "failed"):
+                return                       # Zwischenstand, nicht das Ergebnis
+            text = _text(inhalt)
+            self._sende("ergebnis", name=str(upd.get("kind") or "werkzeug"),
+                        fehler=str(upd.get("status")) == "failed",
+                        text=text[:MAX_AUSGABE],
+                        gekuerzt=len(text) > MAX_AUSGABE, voll=len(text))
+            self._bilder_melden()
+        elif art == "usage_update":
+            self._sende("kontext", genutzt=upd.get("used"), gross=upd.get("size"))
+
+    def _freigabe(self, d: dict) -> None:
+        """Eine Rueckfrage beantworten -- und sie sichtbar machen.
+
+        Gemessen kommt hier nichts (0 Rueckfragen bei einem Shell-Aufruf, weil
+        der Kopf ohne Terminal-Freigaben laeuft). Kaeme doch eine und niemand
+        antwortete, stuende der Zug still und die Seite zeigte nur eine Uhr, die
+        weiterlaeuft. Deshalb wird zugestimmt UND in den Strom geschrieben --
+        stillschweigend zuzustimmen waere schlimmer als die Rueckfrage.
+        """
+        params = d.get("params") or {}
+        optionen = params.get("options") or []
+        wahl = ""
+        for o in optionen:
+            kennung = str(o.get("optionId", ""))
+            if "allow" in kennung.lower() or "allow" in str(o.get("kind", "")).lower():
+                wahl = kennung
+                break
+        if not wahl and optionen:
+            wahl = str(optionen[0].get("optionId", ""))
+        self._sende("freigabe", methode=str(d.get("method", "")),
+                    text=json.dumps(params, ensure_ascii=False)[:400],
+                    gewaehlt=wahl)
+        try:
+            self._antworten(d.get("id"),
+                            {"outcome": {"outcome": "selected", "optionId": wahl}})
+        except (BrokenPipeError, OSError):
+            pass
+
+    # ── Sitzungen ───────────────────────────────────────────────────────────
+    def sitzungen(self, n: int = 8) -> list:
+        """Hermes-Sitzungen liegen in seiner state.db, nicht als Dateien.
+
+        Sie ueber ein eigenes SQL-Schema zu lesen hiesse, eine fremde
+        Tabellenform nachzubauen, die sich mit jeder Fassung aendern darf. ACP
+        kann es selbst (``sessionCapabilities.list``), aber erst NACH dem Start
+        -- und die Startmaske fragt vorher. Bis das gebraucht wird, bleibt die
+        Liste leer: eine leere Liste heisst hier "neue Sitzung", und das ist bei
+        Hermes ohnehin der Normalfall, weil sein Gedaechtnis am Projekt haengt.
+        """
+        return []
+
+
+LAUF = PiKopf()
+HERMES = HermesKopf()
+
+# Beide Koepfe unter ihrem Namen -- die Routen schlagen hier nach, statt je Kopf
+# eine eigene Route zu tragen. Ein dritter Kopf braucht dann eine Zeile, keine
+# fuenfzehn Routen.
+KOEPFE = {LAUF.NAME: LAUF, HERMES.NAME: HERMES}
+
+
+def kopf(name: str = "") -> Kopf:
+    """Den gemeinten Kopf holen. Unbekannt -> PI (der gewachsene Weg)."""
+    return KOEPFE.get(str(name or "").strip().lower(), LAUF)
 
 
 # ── Bildschirmaufnahme ───────────────────────────────────────────────────────

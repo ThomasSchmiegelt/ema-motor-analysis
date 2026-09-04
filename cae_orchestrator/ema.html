@@ -93,13 +93,17 @@
     .tab-btn.active{color:#fff;border-bottom-color:var(--acc)}
     .tab-btn:disabled{opacity:.4;cursor:default}
 
-    /* Agent-Tab: der Rahmen fuellt die Flaeche, die Seite darin scrollt selbst */
-    #panel-agent{height:100%;flex-direction:column}
-    #panel-agent.active{display:flex}
-    #panel-agent .agent-leiste{display:flex;align-items:center;gap:10px;flex:0 0 auto;
+    /* Agent-Tabs: der Rahmen fuellt die Flaeche, die Seite darin scrollt selbst.
+       PI und Hermes teilen EINE Regelmenge — zwei Kopien liefen beim ersten
+       Layoutfehler auseinander (wie die eine SKILL.md, die beide lesen). */
+    #panel-agent,#panel-agent-hermes{height:100%;flex-direction:column}
+    #panel-agent.active,#panel-agent-hermes.active{display:flex}
+    #panel-agent .agent-leiste,
+    #panel-agent-hermes .agent-leiste{display:flex;align-items:center;gap:10px;flex:0 0 auto;
                                padding:6px 12px;background:#22272e;border-bottom:1px solid var(--brd);
                                font-size:.78rem;color:#8aa}
-    #panel-agent iframe{flex:1;width:100%;border:0;display:block;min-height:0}
+    #panel-agent iframe,
+    #panel-agent-hermes iframe{flex:1;width:100%;border:0;display:block;min-height:0}
 
     /* results / compare are full-width tab panels inside #panel-area */
     #tab-results,#tab-compare{display:none;background:#111}
@@ -218,7 +222,8 @@
     <button class="tab-btn"        id="tbtn-jobs"    onclick="switchTab('jobs')">⏳ Jobs<span id="jobs-badge" style="display:none;margin-left:5px;background:#e67e22;color:#fff;border-radius:9px;padding:0 6px;font-size:.68rem"></span></button>
     <button class="tab-btn"        id="tbtn-results" onclick="switchTab('results')" disabled>📊 FEM-Ergebnisse</button>
     <button class="tab-btn"        id="tbtn-compare" onclick="switchTab('compare')">⚖ Vergleich</button>
-    <button class="tab-btn"        id="tbtn-agent"   onclick="switchTab('agent')">🤖 Agent</button>
+    <button class="tab-btn"        id="tbtn-agent"   onclick="switchTab('agent')">🤖 PI</button>
+    <button class="tab-btn"        id="tbtn-agenth"  onclick="switchTab('agenth')">🪽 Hermes</button>
   </div>
   <button id="btn-agent" onclick="switchTab('agent')" title="PI im Browser: links der Agent, rechts die Ergebnisse"
           style="margin-left:auto;background:#3a4a63;width:auto;padding:8px 16px;font-size:.82rem;white-space:nowrap;border-radius:5px">🤖 Agent</button>
@@ -3147,12 +3152,26 @@
     <span style="flex:1"></span>
     <a href="/agent" target="_blank" rel="noopener"
        style="color:#7db9e8;text-decoration:none">↗ in eigenem Fenster öffnen</a>
-    <a href="#" onclick="agNeu();return false;"
+    <a href="#" onclick="agNeu('pi');return false;"
        style="color:#7db9e8;text-decoration:none">⟳ neu laden</a>
   </div>
   <!-- allow: ohne display-capture verweigert der Browser die Bildschirmaufnahme
        IM RAHMEN — auf der eigenen Seite ginge sie, im Reiter nicht. -->
   <iframe id="agent-rahmen" title="CAE-Agent" allow="display-capture"></iframe>
+</div>
+
+<!-- ════════ TAB: Hermes (dieselbe Seite, nur ?kopf=hermes) ════════════════════ -->
+<div class="tab-panel" id="panel-agent-hermes">
+  <div class="agent-leiste">
+    <span>🪽 Hermes im Browser — dieselbe <code>.agents/skills/</code> wie PI;
+          sein Gedächtnis hängt am Projekt</span>
+    <span style="flex:1"></span>
+    <a href="/agent?kopf=hermes" target="_blank" rel="noopener"
+       style="color:#7db9e8;text-decoration:none">↗ in eigenem Fenster öffnen</a>
+    <a href="#" onclick="agNeu('hermes');return false;"
+       style="color:#7db9e8;text-decoration:none">⟳ neu laden</a>
+  </div>
+  <iframe id="agent-rahmen-hermes" title="Hermes-Agent" allow="display-capture"></iframe>
 </div>
 
 </div><!-- /panel-area -->
@@ -3383,7 +3402,7 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','cfd','spraytest','ki','jobs','results','compare','agent'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','cfd','spraytest','ki','jobs','results','compare','agent','agenth'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
@@ -3391,18 +3410,26 @@ const PANEL_OF = {
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
   designer:'panel-designer', import:'panel-import', em3d:'panel-em3d', oil:'panel-oil',
   cfd:'panel-cfd', spraytest:'panel-spraytest', ki:'panel-ki', jobs:'panel-jobs',
-  results:'tab-results', compare:'tab-compare', agent:'panel-agent'
+  results:'tab-results', compare:'tab-compare', agent:'panel-agent',
+  agenth:'panel-agent-hermes'
 };
 
 // Der Agent-Rahmen wird ERST beim ersten Öffnen geladen: sonst haengt schon beim
 // Seitenstart ein offener NDJSON-Strom (/agent/strom) an einem Server-Arbeiter.
-function agActivate() {
-  const f = document.getElementById('agent-rahmen');
-  if (f && !f.src) f.src = '/agent';
+// EINE Seite (/agent), zwei Rahmen — unterschieden allein durch ?kopf=.
+// Die beiden Laeufe sind im Server getrennt (`ema_agent.KOEPFE`), also darf
+// jeder Reiter seinen eigenen Rahmen behalten.
+const AG_RAHMEN = {pi: 'agent-rahmen', hermes: 'agent-rahmen-hermes'};
+const _agSrc = k => k === 'hermes' ? '/agent?kopf=hermes' : '/agent';
+function agActivate(kopf) {
+  const k = kopf || 'pi';
+  const f = document.getElementById(AG_RAHMEN[k]);
+  if (f && !f.src) f.src = _agSrc(k);
 }
-function agNeu() {
-  const f = document.getElementById('agent-rahmen');
-  if (f) f.src = '/agent';   // laedt neu; der Lauf im Server bleibt bestehen
+function agNeu(kopf) {
+  const k = kopf || 'pi';
+  const f = document.getElementById(AG_RAHMEN[k]);
+  if (f) f.src = _agSrc(k);   // laedt neu; der Lauf im Server bleibt bestehen
 }
 
 function switchTab(name) {
@@ -3445,7 +3472,8 @@ function switchTab(name) {
   if (name === 'cfd' && typeof _cfdSyncInherited === 'function') _cfdSyncInherited();
   if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
   if (name === 'jobs' && typeof jobsActivate === 'function') jobsActivate();
-  if (name === 'agent' && typeof agActivate === 'function') agActivate();
+  if (name === 'agent' && typeof agActivate === 'function') agActivate('pi');
+  if (name === 'agenth' && typeof agActivate === 'function') agActivate('hermes');
   if (name === 'em3d' && typeof adoptEm3dGeom === 'function') {
     // Beim Öffnen die aktuelle Geometrie der gewählten Quelle übernehmen + Zusammenfassung zeigen.
     const src = document.getElementById('e3_geomsrc');

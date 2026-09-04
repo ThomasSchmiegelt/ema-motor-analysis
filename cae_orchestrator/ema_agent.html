@@ -102,7 +102,7 @@
 <body>
 
 <header>
-  <h1>🤖 CAE-Agent</h1>
+  <h1 id="h_titel">🤖 CAE-Agent</h1>
   <span class="pille" id="p_zustand">bereit</span>
   <span class="pille" id="p_uhr" title="Laufzeit des Agenten · Dauer des laufenden Zuges">⏱ 00:00</span>
   <span class="pille" id="p_modell"></span>
@@ -119,7 +119,7 @@
 <div id="start">
   <div class="karte">
     <h2>Agent starten</h2>
-    <p class="hint">PI läuft aus der Repo-Wurzel — sonst findet es weder
+    <p class="hint" id="f_hinweis">PI läuft aus der Repo-Wurzel — sonst findet es weder
        <code>AGENTS.md</code> noch <code>.agents/skills/</code>. Alles Weitere
        macht der Agent über <code>cae_cli.py</code>, genau wie im Terminal.</p>
 
@@ -193,6 +193,17 @@
 </div>
 
 <script>
+// ── Welcher Agentenkopf? ─────────────────────────────────────────
+// EINE Seite fuer PI UND Hermes, unterschieden allein durch ?kopf=.
+// Ein zweites ema_agent_hermes.html waere die naechste Kopie, die beim
+// ersten Fehlerbericht auseinanderlaeuft — dieselbe Ueberlegung, aus der
+// PI und Hermes EINE SKILL.md lesen statt zweier Abschriften.
+// Der Server liest ``kopf`` aus der Abfragezeichenkette, auch bei POST;
+// deshalb genuegt es, JEDE Adresse durch K() zu schicken.
+const KOPF = (new URLSearchParams(location.search).get('kopf') || 'pi').toLowerCase();
+const K = u => u + (u.includes('?') ? '&' : '?') + 'kopf=' + encodeURIComponent(KOPF);
+let PROJEKTPFLICHT = false;
+
 let LETZT = 0, LAEUFT = false, ABBRUCH = null, N_KACHELN = 0;
 let blaseDenken = null, blaseText = null;
 
@@ -202,18 +213,42 @@ const esc = s => String(s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'
 // ── Startmaske füllen ────────────────────────────────────────────
 async function auswahlLaden(){
   try{
-    const d = await (await fetch('/agent/auswahl')).json();
+    const d = await (await fetch(K('/agent/auswahl'))).json();
+    kopfBeschriften(d);
     $('f_modell').value = d.modell || '';
     const p = $('f_projekt');
-    p.innerHTML = '<option value="">— kein Projekt binden —</option>' +
+    p.innerHTML = (PROJEKTPFLICHT ? '<option value="">— Projekt wählen —</option>'
+                                  : '<option value="">— kein Projekt binden —</option>') +
       (d.projekte||[]).map(x => `<option value="${esc(x.id)}">${esc(x.id)}${x.gerechnet?' · gerechnet':' · offen'}</option>`).join('');
     const s = $('f_sitzung');
     s.innerHTML = '<option value="">neue Sitzung</option>' +
       (d.sitzungen||[]).map(x => `<option value="${esc(x.id)}">${esc(x.stand)} · ${esc(x.titel||x.id.slice(0,8))}</option>`).join('');
-    if(!d.pi) fehler('pi ist nicht installiert oder nicht auffindbar (~/.npm-global/bin).');
+    if(!d.programm) fehler(LABEL + ' ist nicht installiert oder nicht auffindbar.');
   }catch(e){ fehler('Auswahl nicht ladbar: ' + e.message); }
 }
 const fehler = t => { $('f_fehler').textContent = t; };
+
+// Ein Kopf, zwei Beschriftungen. Das Modell steht bei Hermes NICHT auf der
+// Kommandozeile (``hermes acp`` nimmt keine): es kommt aus seiner config.yaml.
+let LABEL = 'PI';
+function kopfBeschriften(d){
+  LABEL = d.kopf_label || 'PI';
+  PROJEKTPFLICHT = !!d.projektpflicht;
+  document.title = LABEL + '-Agent';
+  $('h_titel').textContent = '🤖 ' + LABEL + '-Agent';
+  const h = $('f_hinweis');
+  if(h && KOPF === 'hermes')
+    h.innerHTML = 'Hermes läuft aus der Repo-Wurzel und liest <b>dieselbe</b> ' +
+      '<code>.agents/skills/</code> wie PI — nichts ist kopiert, die beiden können ' +
+      'nicht auseinanderlaufen. <b>Sein Gedächtnis hängt am Projekt</b> ' +
+      '(<code>HERMES_HOME</code>); im falschen Projekt serviert er das an einer ' +
+      'anderen Auslegung Gelernte als Tatsache. Deshalb ist die Projektwahl hier Pflicht.';
+  if(KOPF === 'hermes'){
+    // ``hermes acp`` kennt keinen Modellschalter — das Feld waere eine Behauptung.
+    $('f_modell').disabled = true;
+    $('f_modell').placeholder = 'aus der config.yaml von Hermes';
+  }
+}
 
 // ── An einen schon laufenden Agenten wieder anknüpfen ────────────
 // Die Seite lebt jetzt auch in einem Reiter der Hauptoberfläche; jedes Neuladen
@@ -222,7 +257,7 @@ const fehler = t => { $('f_fehler').textContent = t; };
 // bisherigen Verlauf nach, statt ein leeres Fenster zu zeigen.
 async function anknuepfen(){
   try{
-    const z = await (await fetch('/agent/status')).json();
+    const z = await (await fetch(K('/agent/status'))).json();
     if(!z.laeuft) return false;
     $('start').style.display = 'none';
     $('buehne').classList.add('an');
@@ -240,7 +275,12 @@ async function anknuepfen(){
 
 // ── Starten / Stoppen ────────────────────────────────────────────
 async function starten(){
-  fehler(''); $('b_start').disabled = true;
+  fehler('');
+  if(PROJEKTPFLICHT && !$('f_projekt').value){
+    fehler('Bitte ein Projekt wählen — ' + LABEL + ' hängt sein Gedächtnis daran auf.');
+    return;
+  }
+  $('b_start').disabled = true;
   const koerper = {
     modell:  $('f_modell').value.trim(),
     projekt: $('f_projekt').value,
@@ -248,7 +288,7 @@ async function starten(){
     prompt:  $('f_prompt').value.trim()
   };
   try{
-    const a = await (await fetch('/agent/start', {method:'POST',
+    const a = await (await fetch(K('/agent/start'), {method:'POST',
         headers:{'Content-Type':'application/json'}, body: JSON.stringify(koerper)})).json();
     if(!a.ok){ fehler(a.grund || 'Start fehlgeschlagen.'); $('b_start').disabled = false; return; }
     $('start').style.display = 'none';
@@ -262,7 +302,7 @@ async function starten(){
 }
 
 async function stoppen(){
-  await fetch('/agent/stopp', {method:'POST'});
+  await fetch(K('/agent/stopp'), {method:'POST'});
   if(ABBRUCH) ABBRUCH.abort();
   LAEUFT = false; zustand('beendet');
 }
@@ -272,7 +312,7 @@ async function lauschen(){
   ABBRUCH = new AbortController();
   let rest = '';
   try{
-    const r = await fetch('/agent/strom?ab=' + LETZT, {signal: ABBRUCH.signal});
+    const r = await fetch(K('/agent/strom?ab=' + LETZT), {signal: ABBRUCH.signal});
     const leser = r.body.getReader(), dek = new TextDecoder();
     while(true){
       const {value, done} = await leser.read();
@@ -386,20 +426,70 @@ function rechts(k){
 // Anzeige mitten im Lauf stehen — genau das, was hier nicht passieren soll.
 const FOLGT = {links:true, rechts:true};
 
+// GLEITEN statt SPRINGEN. Vorher setzte `runter` einfach `scrollTop =
+// scrollHeight`: die Spalte stand mit dem naechsten Bild schon wieder unten,
+// und WAS dazugekommen war, sah man nur, wenn man es ohnehin schon wusste. In
+// der Bildschirmaufnahme ist das der Unterschied zwischen einem lesbaren Lauf
+// und einer Folge von Spruengen — gerade rechts, wo eine einzelne Kachel ein
+// ganzes Rechenergebnis oder ein Bild ist. Gilt fuer BEIDE Koepfe, weil PI und
+// Hermes dieselbe Seite bedienen.
+//
+// Das Tempo ist nicht fest, sondern eine Zeitkonstante: `rest/GLEIT_TAU_S`,
+// nach unten begrenzt auf eine ruhige Lesegeschwindigkeit. Fest waere eins von
+// beidem falsch — bei einem Zeichen-Anhang links stuende die Spalte sekundenlang
+// nach, bei fuenf Kacheln auf einmal liefe sie eine halbe Minute hinterher.
+const GLEIT_MIN_PX_S = 260;    // ruhiges Nachziehen, wenn wenig dazukam
+const GLEIT_TAU_S    = 2.5;    // grosser Rueckstand wird in dieser Zeit abgebaut
+const GLEIT = {};              // id -> {raf, t, erwartet}
+
 function folgeUeberwachen(id){
   const el = $(id);
   el.addEventListener('scroll', () => {
+    const g = GLEIT[id];
+    // Die EIGENE Bewegung nicht als Bedienung deuten. Waehrend des Gleitens
+    // steht die Spalte per Definition nicht unten — ohne diese Unterscheidung
+    // schaltete das Mitlaufen sich bei der ersten neuen Kachel selbst ab und
+    // „⤓ Neues" erschiene, obwohl niemand gescrollt hat.
+    if(g && Math.abs(el.scrollTop - g.erwartet) < 2) return;
     const unten = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    if(!unten) gleitStopp(id);   // von Hand hochgescrollt: das Gleiten endet sofort
     if(FOLGT[id] !== unten){ FOLGT[id] = unten; $('chip_' + id).style.display = unten ? 'none' : 'block'; }
   }, {passive:true});
 }
+function gleitStopp(id){
+  const g = GLEIT[id];
+  if(!g) return;
+  if(g.raf) cancelAnimationFrame(g.raf);
+  delete GLEIT[id];
+}
+function gleitStart(id){
+  const el = $(id);
+  if(GLEIT[id]) return;          // laeuft schon — das Ziel wird je Bild neu gelesen
+  const schritt = t => {
+    const g = GLEIT[id];
+    if(!g) return;
+    const dt = g.t ? Math.min(0.1, (t - g.t) / 1000) : 0;   // Deckel: Tab war weg
+    g.t = t;
+    const rest = el.scrollHeight - el.clientHeight - el.scrollTop;
+    if(rest <= 1){ gleitStopp(id); el.scrollTop = el.scrollHeight; return; }
+    el.scrollTop += Math.max(GLEIT_MIN_PX_S, rest / GLEIT_TAU_S) * dt;
+    g.erwartet = el.scrollTop;
+    g.raf = requestAnimationFrame(schritt);
+  };
+  GLEIT[id] = {raf: 0, t: 0, erwartet: el.scrollTop};
+  GLEIT[id].raf = requestAnimationFrame(schritt);
+}
+// „⤓ Neues" ist eine ausdrueckliche Bitte, ans Ende zu kommen — die wird nicht
+// zwei Sekunden lang verhandelt.
 function nachUnten(id){
   const el = $(id);
+  gleitStopp(id);
   FOLGT[id] = true; $('chip_' + id).style.display = 'none';
   el.scrollTop = el.scrollHeight;
 }
 function runter(el){
-  if(FOLGT[el.id] !== false) el.scrollTop = el.scrollHeight;
+  if(FOLGT[el.id] === false) return;
+  gleitStart(el.id);
 }
 
 // ── Eingabe ──────────────────────────────────────────────────────
@@ -415,7 +505,7 @@ async function hinweisSenden(){
   const t = $('hinweis').value.trim(); if(!t) return;
   $('hinweis').value = '';
   try{
-    const a = await (await fetch('/agent/hinweis', {method:'POST',
+    const a = await (await fetch(K('/agent/hinweis'), {method:'POST',
         headers:{'Content-Type':'application/json'}, body: JSON.stringify({text:t})})).json();
     if(!a.ok) links('fehl', '⚠ ' + (a.grund || 'Zwischenruf nicht angenommen'));
   }catch(e){ links('fehl', '⚠ ' + e.message); }
@@ -424,7 +514,7 @@ async function hinweisSenden(){
 async function senden(){
   const t = $('eingabe').value.trim(); if(!t) return;
   $('eingabe').value = '';
-  const a = await (await fetch('/agent/frage', {method:'POST',
+  const a = await (await fetch(K('/agent/frage'), {method:'POST',
       headers:{'Content-Type':'application/json'}, body: JSON.stringify({text:t})})).json();
   if(!a.ok) links('fehl', '⚠ ' + a.grund);
 }
@@ -471,7 +561,7 @@ setInterval(uhrTick, 1000);
 async function sichernJetzt(){
   const b = $('b_sichern'); b.disabled = true;
   try{
-    const a = await (await fetch('/agent/sichern', {method:'POST'})).json();
+    const a = await (await fetch(K('/agent/sichern'), {method:'POST'})).json();
     if(a.ok) gesichertZeigen(a); else $('p_gesichert').textContent = '⚠ ' + (a.grund||'');
   }catch(e){ $('p_gesichert').textContent = '⚠ ' + e.message; }
   b.disabled = false;
@@ -510,7 +600,7 @@ function rekPause(an){
   if(an){ REK_PAUSE_SEIT = Date.now()/1000; }
   else if(REK_PAUSE_SEIT){ REK_PAUSE_S += Date.now()/1000 - REK_PAUSE_SEIT;
                            REK_PAUSE_SEIT = 0; }
-  fetch('/agent/video/pause', {method:'POST',
+  fetch(K('/agent/video/pause'), {method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({an: an})}).catch(() => {});
   videoAnzeige();
@@ -530,7 +620,7 @@ async function videoStart(){
     if(e.name !== 'NotAllowedError') links('sys', 'Aufnahme: ' + e.message);
     return;
   }
-  const a = await (await fetch('/agent/video/start', {method:'POST'})).json();
+  const a = await (await fetch(K('/agent/video/start'), {method:'POST'})).json();
   if(!a.ok){ strom.getTracks().forEach(t => t.stop());
              links('sys', 'Aufnahme: ' + (a.grund||'')); return; }
 
@@ -542,7 +632,7 @@ async function videoStart(){
   REK.ondataavailable = ev => {
     if(!ev.data || !ev.data.size) return;
     // Der Reihe nach senden: die Stücke ergeben nur in ihrer Folge ein Video.
-    REK_KETTE = REK_KETTE.then(() => fetch('/agent/video/stueck',
+    REK_KETTE = REK_KETTE.then(() => fetch(K('/agent/video/stueck'),
         {method:'POST', headers:{'Content-Type':'application/octet-stream'}, body: ev.data})
       .then(r => r.json())
       .then(r => { if(r.bytes != null) REK_BYTES = r.bytes;
@@ -577,7 +667,7 @@ function videoAnzeige(){
 async function rekWache(){
   if(!REK) return;
   try{
-    const z = await (await fetch('/agent/status')).json();
+    const z = await (await fetch(K('/agent/status'))).json();
     if(z.rechnet && !REK_PAUSE){
       links('sys', '⏸ Aufnahme angehalten — der Server rechnet (' +
                    (z.rechnet_was||[]).join(', ') + ').');
@@ -597,7 +687,7 @@ async function videoStopp(grund){
   if(REK_STROM) REK_STROM.getTracks().forEach(t => t.stop());
   REK_STROM = null;
   await REK_KETTE;                       // die letzten Stücke noch loswerden
-  const a = await (await fetch('/agent/video/ende', {method:'POST'})).json();
+  const a = await (await fetch(K('/agent/video/ende'), {method:'POST'})).json();
   $('b_video').textContent = '🎥 Aufnahme';
   $('p_rek').style.display = 'none';
   if(a.ok) links('sys', '🎬 Aufnahme ' + (grund === 'grenze' ? '(Grenze) ' : '') +
@@ -605,7 +695,7 @@ async function videoStopp(grund){
                         (a.bytes/1048576).toFixed(1) + ' MB → ' + a.pfad);
 }
 // Ein weggeklicktes Fenster soll keine halbe Datei hinterlassen.
-addEventListener('pagehide', () => { if(REK) navigator.sendBeacon('/agent/video/ende'); });
+addEventListener('pagehide', () => { if(REK) navigator.sendBeacon(K('/agent/video/ende')); });
 
 // ── Trenner ziehen ───────────────────────────────────────────────
 (function(){

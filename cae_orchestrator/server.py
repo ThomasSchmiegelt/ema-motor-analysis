@@ -3925,14 +3925,42 @@ def agent_seite():
     return send_from_directory(os.path.dirname(__file__), "ema_agent.html")
 
 
+def _agent_kopf():
+    """Welchen Agentenkopf meint diese Anfrage -- ``?kopf=`` oder ``{"kopf":…}``.
+
+    Bewusst ein PARAMETER und kein zweiter Satz Routen: die fuenfzehn
+    ``/agent/…``-Routen ein zweites Mal fuer Hermes hinzuschreiben hiesse, sie
+    beim naechsten Fehlerbericht an zwei Stellen zu aendern -- derselbe Fehler,
+    den dieses Repo beim Skill vermeidet (PI und Hermes lesen EINE SKILL.md).
+    Ohne Angabe gilt PI, damit eine aeltere Seite unveraendert weiterlaeuft.
+    """
+    import ema_agent
+    name = request.args.get("kopf") or ""
+    if not name and request.method in ("POST", "PUT"):
+        name = (request.get_json(silent=True) or {}).get("kopf") or ""
+    return ema_agent.kopf(name)
+
+
 @app.route("/agent/auswahl")
 def agent_auswahl():
     """Was die Startmaske anzubieten hat: Projekte, Sitzungen, Vorgabemodell."""
     import ema_agent
     from ema_report import DEFAULT_MODEL
+    k = _agent_kopf()
     return jsonify({"projekte": ema_agent.projekte(),
-                    "sitzungen": ema_agent.sitzungen(),
+                    "sitzungen": k.sitzungen(),
                     "modell": DEFAULT_MODEL,
+                    "kopf": k.NAME, "kopf_label": k.LABEL,
+                    # ``projektpflicht``: bei Hermes haengt das GEDAECHTNIS am
+                    # Projekt (HERMES_HOME). Im falschen Projekt zu landen heisst
+                    # dort, das an einer anderen Auslegung Gelernte als Tatsache
+                    # serviert zu bekommen -- deshalb fragt schon das Terminal
+                    # danach, und deshalb sagt es die Maske hier auch.
+                    "projektpflicht": k.NAME == "hermes",
+                    "koepfe": [{"name": x.NAME, "label": x.LABEL,
+                                "da": bool(x.programm())}
+                               for x in ema_agent.KOEPFE.values()],
+                    "programm": bool(k.programm()),
                     "pi": bool(ema_agent.pi_gefunden())})
 
 
@@ -3996,12 +4024,13 @@ def agent_start():
                "3D-Abschnitt und die 2D-gegen-3D-Tabelle. Antwortet die Route mit 503, "
                "fehlt Elmer: das melden, nicht stillschweigend ueberspringen.")
 
-    erg = ema_agent.LAUF.starten(str(d.get("modell") or DEFAULT_MODEL),
+    k = _agent_kopf()
+    erg = k.starten(str(d.get("modell") or DEFAULT_MODEL),
                                  projekt=projekt,
                                  sitzung=str(d.get("sitzung", "")),
                                  system_zusatz=zusatz)
     if erg.get("ok") and str(d.get("prompt", "")).strip():
-        ema_agent.LAUF.fragen(str(d["prompt"]).strip())
+        k.fragen(str(d["prompt"]).strip())
     return jsonify(erg)
 
 
@@ -4013,7 +4042,7 @@ def agent_frage():
     text = str((request.get_json(silent=True) or {}).get("text", "")).strip()
     if not text:
         return jsonify({"ok": False, "grund": "leerer Auftrag"}), 400
-    return jsonify(ema_agent.LAUF.fragen(text))
+    return jsonify(_agent_kopf().fragen(text))
 
 
 @app.route("/agent/hinweis", methods=["POST", "OPTIONS"])
@@ -4030,7 +4059,7 @@ def agent_hinweis():
     text = str((request.get_json(silent=True) or {}).get("text", "")).strip()
     if not text:
         return jsonify({"ok": False, "grund": "leerer Hinweis"}), 400
-    return jsonify(ema_agent.LAUF.merken(text))
+    return jsonify(_agent_kopf().merken(text))
 
 
 @app.route("/agent/stopp", methods=["POST", "OPTIONS"])
@@ -4038,7 +4067,7 @@ def agent_stopp():
     if request.method == "OPTIONS":
         return ("", 204)
     import ema_agent
-    return jsonify(ema_agent.LAUF.stoppen())
+    return jsonify(_agent_kopf().stoppen())
 
 
 @app.route("/agent/sichern", methods=["POST"])
@@ -4050,7 +4079,7 @@ def agent_sichern():
     kann.
     """
     import ema_agent
-    a = ema_agent.LAUF.sichern()
+    a = _agent_kopf().sichern()
     return jsonify(a), (200 if a.get("ok") else 400)
 
 
@@ -4063,7 +4092,7 @@ def agent_video_start():
     Protokoll.
     """
     import ema_agent
-    a = ema_agent.VIDEO.starten(projekt=ema_agent.LAUF.projekt)
+    a = ema_agent.VIDEO.starten(projekt=_agent_kopf().projekt)
     return jsonify(a), (200 if a.get("ok") else 400)
 
 
@@ -4141,7 +4170,7 @@ def agent_status():
     """
     import ema_agent
     was = _rechnet()
-    return jsonify({**ema_agent.LAUF.zustand(),
+    return jsonify({**_agent_kopf().zustand(),
                     "rechnet": bool(was), "rechnet_was": was})
 
 
@@ -4158,7 +4187,8 @@ def agent_strom():
         ab = int(request.args.get("ab", 0))
     except ValueError:
         ab = 0
-    q = ema_agent.LAUF.anmelden(ab)
+    k = _agent_kopf()
+    q = k.anmelden(ab)
 
     def strom():
         try:
@@ -4166,13 +4196,13 @@ def agent_strom():
                 try:
                     satz = q.get(timeout=20)
                 except queue.Empty:
-                    if not ema_agent.LAUF.laeuft:
+                    if not k.laeuft:
                         return
                     yield "\n"                     # Lebenszeichen gegen Zwischenpuffer
                     continue
                 yield json.dumps(satz, ensure_ascii=False) + "\n"
         finally:
-            ema_agent.LAUF.abmelden(q)
+            k.abmelden(q)
 
     return Response(strom(), mimetype="application/x-ndjson",
                     headers={"Cache-Control": "no-store",

@@ -165,6 +165,33 @@ das Skript drei Dinge:
 Gemessen am 24.08.2026: 12 Beobachtungen, alle auf `127.0.0.1:11434`, keine
 Gegenstelle außerhalb.
 
+### Hermes im Browser (Reiter 🪽 neben 🤖 PI)
+
+Beide Köpfe hängen auch in der Oberfläche auf `:5000` — links der Denk-/Antwortstrom,
+rechts Werkzeugausgaben und Bilder, darüber Stoppuhr und Bildschirmaufnahme. Es ist
+**eine** Seite (`cae_orchestrator/ema_agent.html`) und **eine** Routenmenge
+(`/agent/…`), unterschieden allein durch `?kopf=pi|hermes`; ein zweites HTML wäre die
+Kopie, die beim ersten Fehlerbericht auseinanderläuft — dasselbe Argument, aus dem
+beide Köpfe eine `SKILL.md` lesen.
+
+Angesprochen wird **`hermes acp`** (Agent Client Protocol, zeilengetrenntes JSON-RPC
+2.0 auf stdout, Protokoll auf stderr), nicht `hermes serve`: dessen eigene Oberfläche
+auf `:9119` wäre ein Fremdkörper ohne Stoppuhr, ohne gemeinsames Protokoll, ohne die
+Bilder aus dem Projektordner und ohne Aufnahme.
+
+Zwei Unterschiede zu PI stehen direkt in der Startmaske:
+
+* **Kein `--append-system-prompt`.** Der stehende Stand geht über `AGENTS.projekt.md`
+  hinein, das der Kopf bei jedem Start schreibt.
+* **Das Gedächtnis hängt am Projekt.** `HERMES_HOME` zeigt auf
+  `<projekt>/_agent/hermes` (geteiltes `config.yaml`/`.env`/`skills` verlinkt, nicht
+  kopiert), deshalb ist die Projektwahl im Browser **Pflicht** — genau wie die
+  Projektmatrix, die `start_hermes.sh` am Terminal zuerst zeigt. Im falschen Projekt
+  serviert Hermes das an einer anderen Auslegung Gelernte als Tatsache.
+
+Das Modell ist im Browser nicht wählbar: `hermes acp` nimmt keinen Modellschalter an,
+es gilt `~/.hermes/config.yaml`.
+
 ### Beide Köpfe, dieselbe Frage
 
 ```

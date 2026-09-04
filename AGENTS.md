@@ -53,6 +53,7 @@ Umweg, nicht die Abkürzung.
 ```bash
 ./start_agent.sh                    # Wurzel: Orchestrator + PI mit dem lokalen Modell
 ./start_hermes.sh                   # dasselbe mit Hermes — gleiches Modell, gleicher Skill
+#   beide gibt es auch im Browser: Reiter 🤖 PI und 🪽 Hermes auf :5000
 cd ~/ai-workspace/cae_orchestrator
 python3 cae_cli.py health           # laeuft der Server?
 python3 cae_cli.py lernen zeige     # was aus dem eigenen Bestand messbar folgt

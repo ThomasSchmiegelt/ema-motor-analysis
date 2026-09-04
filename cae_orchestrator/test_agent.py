@@ -29,6 +29,7 @@ import json
 import os
 import queue
 import shutil
+import subprocess
 import sys
 import time
 
@@ -47,9 +48,9 @@ def pruefe(bedingung, text):
         print(f"  ✗ {text}")
 
 
-def _frischer_lauf() -> A.Lauf:
+def _frischer_lauf() -> A.PiKopf:
     """Ein Aufseher ohne Prozess — genug, um den Ereignispfad zu pruefen."""
-    lauf = A.Lauf()
+    lauf = A.PiKopf()
     lauf.laeuft = True
     lauf._bild_marke = time.time() + 3600      # keine echten Bilder einstreuen
     return lauf
@@ -243,7 +244,7 @@ umg = A._umgebung()
 pruefe(any(p in umg["PATH"].split(os.pathsep) for p in A.PI_PFADE if os.path.isdir(p)),
        "npm-global liegt im PATH des Unterprozesses — dort liegt pi")
 
-lauf = A.Lauf()
+lauf = A.PiKopf()
 lauf.laeuft = True
 pruefe(not lauf.starten("egal")["ok"],
        "ein zweiter Agent wird abgewiesen, solange einer laeuft")
@@ -273,12 +274,18 @@ print("\n8. Der Agent haengt als eigener Reiter in der Hauptoberflaeche")
 _hier = os.path.dirname(os.path.abspath(__file__))
 _ema = io.open(os.path.join(_hier, "ema.html"), encoding="utf-8").read()
 pruefe("switchTab('agent')" in _ema and "id=\"tbtn-agent\"" in _ema,
-       "die Reiterleiste hat einen Knopf 🤖 Agent")
-pruefe("'compare','agent']" in _ema.replace(" ", "") and "agent:'panel-agent'" in _ema,
-       "der Reiter ist in TABS und PANEL_OF angemeldet — sonst schaltet switchTab ihn nie sichtbar")
-pruefe('id="agent-rahmen"' in _ema and 'src="/agent"' not in _ema,
-       "der Rahmen zeigt auf /agent, aber erst nach dem ersten Oeffnen (kein Strom beim Seitenstart)")
-pruefe("f.src = '/agent'" in _ema, "agActivate() setzt die Quelle nach")
+       "die Reiterleiste hat einen Knopf 🤖 PI")
+pruefe("switchTab('agenth')" in _ema and "id=\"tbtn-agenth\"" in _ema,
+       "und daneben einen zweiten Knopf 🪽 Hermes")
+pruefe("'compare','agent','agenth']" in _ema.replace(" ", "")
+       and "agent:'panel-agent'" in _ema
+       and "agenth:'panel-agent-hermes'" in _ema,
+       "beide Reiter sind in TABS und PANEL_OF angemeldet — sonst schaltet switchTab sie nie sichtbar")
+pruefe('id="agent-rahmen"' in _ema and 'id="agent-rahmen-hermes"' in _ema
+       and 'src="/agent"' not in _ema,
+       "je Kopf ein eigener Rahmen, beide erst nach dem ersten Oeffnen geladen (kein Strom beim Seitenstart)")
+pruefe("_agSrc = k => k === 'hermes' ? '/agent?kopf=hermes' : '/agent'" in _ema,
+       "agActivate() setzt die Quelle nach — EINE Seite, unterschieden durch ?kopf=")
 
 _ag = io.open(os.path.join(_hier, "ema_agent.html"), encoding="utf-8").read()
 pruefe("anknuepfen" in _ag and "'/agent/status'" in _ag,
@@ -319,7 +326,7 @@ pruefe(_lauf.zielordner() == os.path.join(A.PROJEKTE, "20260901_x", "agent"),
        "mit Bindung liegt es im Projekt")
 shutil.rmtree(A.FREIE_LAEUFE, ignore_errors=True)
 
-_leer = A.Lauf()
+_leer = A.PiKopf()
 pruefe(not _leer.sichern()["ok"], "ein leerer Lauf schreibt keine leere Datei")
 
 
@@ -374,7 +381,7 @@ except NameError:
 
 print("\n12. Ein LANGER Lauf verliert weder seinen Anfang noch seinen Ordner")
 _tmp = tempfile.mkdtemp(prefix="langer_lauf_")
-_l = A.Lauf()
+_l = A.PiKopf()
 _l.start_ts = time.time()
 _l.ordner = _tmp; _l._ordner_fuer = _l.projekt
 _l._mitschrift_oeffnen()
@@ -475,7 +482,7 @@ try:
     for i in range(_n):                       # eine fertige Pipeline schreibt sie
         with open(os.path.join(_ch, f"bild_{i:02d}.png"), "wb") as f:
             f.write(b"x")                     # in wenigen Sekunden auf einmal
-    _b = A.Lauf()
+    _b = A.PiKopf()
     _b._bild_marke = 0.0
     _erste = _b._neue_bilder()
     pruefe(len(_erste) == A.MAX_BILDER_JE_ZUG,
@@ -543,7 +550,7 @@ pruefe("Fahrrad" in _gesendet[0] and "gear_ratio" in _gesendet[0]
        "beide Rufe stehen darin, als Zwischenruf gekennzeichnet")
 pruefe(not _z.merken("  ")["ok"], "ein leerer Zwischenruf wird abgewiesen")
 
-_w = A.Lauf()
+_w = A.PiKopf()
 _w.laeuft = True
 _w.beschaeftigt = False
 _w.fragen = lambda t: {"ok": True, "direkt": True}
@@ -555,6 +562,154 @@ pruefe("b_hinweis" in _html and "/agent/hinweis" in _html,
        "die Seite hat ein eigenes Zwischenruf-Feld")
 pruefe("$('b_hinweis').disabled = !LAEUFT" in _html,
        "das WAEHREND der Arbeit bedienbar bleibt — sonst haette es keinen Zweck")
+
+
+print("\n15b. Die Ergebnisspalte GLEITET ans Ende, sie springt nicht")
+# Fuer die Bildschirmaufnahme ist das der ganze Unterschied: sprang die Spalte,
+# war die neue Kachel schon unten, bevor man sah, DASS eine kam.
+_runter = _html.split("function runter(el){")[1].split("}")[0]
+pruefe("scrollHeight" not in _runter,
+       "kein Sprung mehr beim Anhaengen — runter() weist scrollTop nicht mehr zu")
+pruefe("gleitStart(el.id)" in _html and "requestAnimationFrame(schritt)" in _html,
+       "runter() startet ein Gleiten je Bild statt einer Zuweisung")
+pruefe("GLEIT_MIN_PX_S" in _html and "rest / GLEIT_TAU_S" in _html,
+       "das Tempo ist Rueckstand/Zeitkonstante, nach unten auf Lesegeschwindigkeit begrenzt")
+pruefe("if(g && Math.abs(el.scrollTop - g.erwartet) < 2) return;" in _html,
+       "die eigene Bewegung gilt nicht als Bedienung — sonst schaltete das Mitlaufen sich selbst ab")
+pruefe("if(!unten) gleitStopp(id);" in _html,
+       "wer von Hand hochscrollt, bricht das Gleiten sofort ab")
+pruefe("gleitStopp(id);\n  FOLGT[id] = true" in _html,
+       "„⤓ Neues\" springt weiterhin sofort ans Ende")
+
+
+print("\n16. Zweiter Kopf: Hermes, genauso eingebaut wie PI")
+
+_h = A.HermesKopf()
+pruefe(_h.NAME == "hermes" and _h.LABEL == "Hermes",
+       "der Kopf traegt Name und Beschriftung, an denen die Routen ihn finden")
+pruefe(A.kopf("hermes") is A.HERMES and A.kopf("") is A.LAUF
+       and A.kopf("gibtsnicht") is A.LAUF,
+       "kopf() waehlt aus, faellt aber auf PI zurueck — eine aeltere Seite laeuft unveraendert weiter")
+pruefe(A.LAUF is not A.HERMES and A.LAUF.ring is not A.HERMES.ring,
+       "beide Koepfe haben EIGENEN Zustand: ein laufender PI blockiert Hermes nicht")
+
+pruefe(_h._befehl("/pfad/hermes", "qwen-gross:latest", "abc", "zusatz")
+       == ["/pfad/hermes", "acp"],
+       "Modell und Sitzung stehen NICHT auf der Kommandozeile — `hermes acp` nimmt beides nicht an")
+pruefe(_h._stderr_ziel() is subprocess.PIPE,
+       "stderr wird NICHT nach stdout gemischt — dort laeuft reines JSON-RPC")
+pruefe(A.PiKopf()._stderr_ziel() is subprocess.STDOUT,
+       "bei PI dagegen schon — dort ist stdout ohnehin NDJSON plus Text")
+pruefe(_h.KANN_SYSTEMZUSATZ is False and A.PiKopf().KANN_SYSTEMZUSATZ is True,
+       "Hermes kennt kein --append-system-prompt; der Stand geht ueber AGENTS.projekt.md hinein")
+
+# ── HERMES_HOME: das Gedaechtnis haengt am Projekt ──────────────
+_h.projekt = ""
+pruefe("HERMES_HOME" not in _h._umfeld(),
+       "ohne Projektbindung bleibt die gemeinsame Ablage — da gibt es nichts zu trennen")
+_tmp = tempfile.mkdtemp(prefix="agent_hermes_")
+_alt_proj = A.PROJEKTE
+try:
+    A.PROJEKTE = _tmp
+    _h.projekt = "20260904_120000_probe"
+    _heim = _h._umfeld().get("HERMES_HOME", "")
+    pruefe(_heim.endswith(os.path.join("20260904_120000_probe", "_agent", "hermes"))
+           and os.path.isdir(os.path.join(_heim, "memories")),
+           "mit Projekt zeigt HERMES_HOME in den Projektordner — sonst servierte er das an einer anderen Auslegung Gelernte")
+finally:
+    A.PROJEKTE = _alt_proj
+    shutil.rmtree(_tmp, ignore_errors=True)
+
+# ── Der Strom: die gemessenen session/update-Arten ──────────────
+_h2 = A.HermesKopf()
+_h2.laeuft = True
+_h2._bild_marke = time.time() + 3600
+_h2.proc = _Prozess()
+_h2._sid = "sitz-1"
+
+def _upd(art, **rest):
+    _h2._verarbeiten({"jsonrpc": "2.0", "method": "session/update",
+                      "params": {"sessionId": "sitz-1",
+                                 "update": {"sessionUpdate": art, **rest}}})
+
+_upd("agent_thought_chunk", content={"type": "text", "text": "Ich ueberlege."})
+_upd("agent_message_chunk", content={"type": "text", "text": "Ich rechne."})
+_upd("tool_call", kind="execute", title="python3 cae_cli.py paarvergleich")
+_upd("tool_call_update", kind="execute", status="pending", content={"text": "laeuft"})
+_upd("tool_call_update", kind="execute", status="completed",
+     content={"text": "Achse kuehlung: 3 Optionen"})
+_upd("usage_update", used=12000, size=65536)
+_arten = [e["art"] for e in _ereignisse(_h2)]
+pruefe(_arten == ["denken", "text", "werkzeug", "ergebnis", "kontext"],
+       f"denken/text/werkzeug/ergebnis/kontext kommen an, der Zwischenstand nicht ({_arten})")
+
+# ── Das Zugende ist die ANTWORT auf session/prompt ──────────────
+_h2.beschaeftigt = True
+_h2._zug_id = 7
+_h2._verarbeiten({"jsonrpc": "2.0", "id": 7,
+                  "result": {"stopReason": "end_turn"}})
+pruefe(not _h2.beschaeftigt and "bereit" in [e["art"] for e in _ereignisse(_h2)],
+       "die Antwort auf session/prompt IST das Zugende — nichts muss erraten werden")
+
+# Eine Antwort auf eine ANDERE Anfrage ist kein Zugende, sondern ein Ergebnis.
+_vorher = len(_ereignisse(_h2))
+_h2._verarbeiten({"jsonrpc": "2.0", "id": 3, "result": {"sessionId": "x"}})
+pruefe(_h2._warten.get(3, {}).get("result", {}).get("sessionId") == "x"
+       and len(_ereignisse(_h2)) == _vorher,
+       "eine Antwort auf initialize/session/new wird abgelegt, nicht als Zugende gedeutet")
+
+# ── Freigabe: beantworten UND sichtbar machen ───────────────────
+_h2.proc.stdin.zeilen = []
+_h2._verarbeiten({"jsonrpc": "2.0", "id": 9, "method": "session/request_permission",
+                  "params": {"options": [{"optionId": "reject_once"},
+                                         {"optionId": "allow_always"}]}})
+_antw = json.loads(_h2.proc.stdin.zeilen[-1])
+pruefe(_antw["id"] == 9
+       and _antw["result"]["outcome"]["optionId"] == "allow_always",
+       "eine Rueckfrage wird beantwortet — unbeantwortet stuende der Zug still")
+pruefe(_ereignisse(_h2)[-1]["art"] == "freigabe",
+       "und sie steht im Strom: stillschweigend zuzustimmen waere schlimmer als die Rueckfrage")
+
+# ── Der Prompt geht als session/prompt hinaus ───────────────────
+_h3 = A.HermesKopf()
+_h3.laeuft = True
+_h3._bild_marke = time.time() + 3600
+_h3.proc = _Prozess()
+_h3._sid = "sitz-2"
+_h3.fragen("Lege eine ASM aus.")
+_raus = json.loads(_h3.proc.stdin.zeilen[0])
+pruefe(_raus["method"] == "session/prompt"
+       and _raus["params"]["sessionId"] == "sitz-2"
+       and _raus["params"]["prompt"] == [{"type": "text", "text": "Lege eine ASM aus."}],
+       "hinein geht ACP-Form: sessionId + prompt-Bloecke")
+pruefe(_h3._zug_id == _raus["id"],
+       "und die Nummer wird gemerkt — an ihr erkennt der Strom das Zugende")
+
+# ── Die Seite bedient BEIDE Koepfe ──────────────────────────────
+pruefe("const KOPF = (new URLSearchParams(location.search).get('kopf') || 'pi')" in _html,
+       "die Seite liest ?kopf= (Vorgabe pi) statt ein zweites HTML zu sein")
+pruefe(_html.count("fetch('/agent") == 0 and _html.count("fetch(K('/agent") >= 10,
+       "und schickt JEDE Adresse durch K() — eine vergessene traefe sonst still PI")
+pruefe("PROJEKTPFLICHT && !$('f_projekt').value" in _html,
+       "bei Hermes ist die Projektwahl Pflicht: sein Gedaechtnis haengt daran")
+
+try:
+    import server as _srv
+    _srv.app.config["TESTING"] = True
+    _c = _srv.app.test_client()
+    _a = _c.get("/agent/auswahl?kopf=hermes").get_json()
+    _b = _c.get("/agent/auswahl").get_json()
+    pruefe(_a["kopf"] == "hermes" and _a["kopf_label"] == "Hermes"
+           and _a["projektpflicht"] is True,
+           "/agent/auswahl?kopf=hermes antwortet fuer Hermes — mit Projektpflicht")
+    pruefe(_b["kopf"] == "pi" and _b["projektpflicht"] is False,
+           "ohne Angabe bleibt es PI, ohne Projektpflicht")
+    pruefe({x["name"] for x in _a["koepfe"]} == {"pi", "hermes"},
+           "die Maske erfaehrt, welche Koepfe es gibt")
+    pruefe(_c.get("/agent/status?kopf=hermes").get_json()["kopf"] == "hermes",
+           "auch der Zustand ist je Kopf abfragbar — sonst zeigte der Hermes-Reiter PIs Uhr")
+except ImportError as e:
+    print(f"  (server nicht importierbar: {e} — Kopfroutentests uebersprungen)")
 
 
 print("\n" + "=" * 60)
