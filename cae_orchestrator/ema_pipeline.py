@@ -42,6 +42,14 @@ def _gate_maschinenart(data: dict, state: dict | None = None,
     """
     code = ema_maschinenart.art_code(data or {})
     art = ema_maschinenart.hole(code)
+    # Dasselbe Tor fuer die BAUFORM. Ein Aussenlaeufer, der durch die
+    # Innenlaeufer-Kette laeuft, bekaeme keine Fehlermeldung, sondern Zahlen
+    # unter fremdem Namen: ein Luftspalt aus den falschen zwei Flaechen, eine
+    # Fliehkraft an einem Ring, den es nicht gibt, Magnete an einem Steg, der
+    # sie gar nicht haelt. Analytisch ist der Aussenlaeufer getragen (Radien,
+    # Luftspalt, Ringspannung, Magnethaltung), die Pipeline noch nicht.
+    import ema_radien
+    ema_radien.pruefe_bauform(data or {}, stufe)
     if state is not None:
         _log(state, f"\U0001F6E1 Maschinenart: {art.label}", 4)
     if stufe == "feld":

@@ -228,7 +228,7 @@ def magnetisierungsstrom(geom: dict) -> dict:
     """
     p    = max(int(geom["p"]), 1)
     n_ph = max(int(geom["slots"]) / 3.0, 1.0)
-    g    = max((float(geom["statorID"]) - float(geom["rotorOD"])) / 2.0, 0.3)
+    g    = ema_analysis.luftspalt_mm(geom)      # beide Bauformen, s. ema_radien
     g_m  = K_CARTER * g / 1000.0
     b_m  = ziel_feld(geom)
 

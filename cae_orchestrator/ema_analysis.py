@@ -761,6 +761,25 @@ def _orient_factor(geom: dict) -> float:
     return num / den
 
 
+def luftspalt_mm(geom: dict) -> float:
+    """Luftspalt [mm], fuer BEIDE Bauformen -- und nie unter 0,3 mm.
+
+    Die Formel ``(statorID - rotorOD)/2`` stand hier neunmal. Sie ist nicht nur
+    abgeschrieben, sie ist auch **nur fuer den Innenlaeufer richtig**: beim
+    Aussenlaeufer liegt der Spalt zwischen ``statorOD`` und ``rotorID``, und die
+    alte Formel kaeme dort negativ heraus -- oder, mit der Klemme, bei 0,3 mm.
+    Eine Zahl, die nicht widerspricht.
+    """
+    import ema_radien
+    return max(ema_radien.radien(geom)["luftspalt_mm"], 0.3)
+
+
+def r_gap_m(geom: dict) -> float:
+    """Mittlerer Luftspaltradius [m], fuer beide Bauformen."""
+    import ema_radien
+    return ema_radien.radien(geom)["r_gap_mm"] / 1000.0
+
+
 def _analytical_Bgap(geom: dict) -> float:
     """Open-circuit air-gap flux density [T] from a magnetic-circuit estimate.
 
@@ -771,7 +790,7 @@ def _analytical_Bgap(geom: dict) -> float:
     V-opening efficiency so the magAngle slider still moves the result.
     """
     hm = float(geom["magThick"])                          # thickness in flux path [mm]
-    g  = max((geom["statorID"] - geom["rotorOD"]) / 2, 0.3)
+    g  = luftspalt_mm(geom)
     kc = 1.15                                              # Carter coefficient
 
     poles      = int(geom["p"]) * 2
@@ -782,7 +801,7 @@ def _analytical_Bgap(geom: dict) -> float:
     if meta.is_surface:
         # Surface magnets occupy the outer rotor band (inside the OD) and face the
         # air gap directly; gap = statorID/2 - rotorOD/2 (normal mechanical gap).
-        g_s   = max((geom["statorID"] - geom["rotorOD"]) / 2, 0.3)
+        g_s   = luftspalt_mm(geom)
         perm  = hm / (hm + MU_R_MAG * kc * g_s)
         alpha_i = min(meta.eta_hint, 0.98)                  # pole-arc coverage
         B_gap = Br_NdFeB * perm * alpha_i * f_orient
@@ -826,7 +845,7 @@ def _analytical_Barm(geom: dict, i_pk: float) -> float:
         return 0.0
     p       = max(int(geom["p"]), 1)
     n_slots = int(geom["slots"])
-    g       = max((geom["statorID"] - geom["rotorOD"]) / 2.0, 0.3)   # air gap [mm]
+    g       = luftspalt_mm(geom)                                     # air gap [mm]
     kc      = 1.15                                                     # Carter factor
     k_w     = 0.95                                                     # winding factor
     N_ph    = max(n_slots / 3.0, 1.0)                                 # turns/phase (1/slot)
@@ -847,7 +866,7 @@ def compute_performance(geom: dict, B_gap: float, rpm: float = 1000.0,
     poles   = p * 2
     n_slots = int(geom["slots"])
     L_ax    = (axial_mm / 1000.0) if axial_mm is not None else 0.080
-    R_gap   = ((geom["statorID"] / 2) + (geom["rotorOD"] / 2)) / 2 / 1000  # m
+    R_gap   = r_gap_m(geom)                                          # m
 
     # Flux linkage (normalised, 1 turn per slot assumed)
     psi_pm  = p * (2 / math.pi) * B_gap * R_gap * L_ax
@@ -867,7 +886,7 @@ def compute_performance(geom: dict, B_gap: float, rpm: float = 1000.0,
         "emf_rms_V":        round(emf_rms, 1),
         "Kt_Nm_per_A":      round(Kt, 3),
         "T_cogging_Nm":     round(abs(T_cogging_est), 3),
-        "air_gap_mm":       round((geom["statorID"] - geom["rotorOD"]) / 2, 2),
+        "air_gap_mm":       round(luftspalt_mm(geom), 2),
         "pole_pairs":       p,
         "n_slots":          n_slots,
         "rpm":              rpm,
@@ -930,7 +949,7 @@ def estimate_saliency(geom: dict) -> float:
         # SPM/Halbach: Ld ≈ Lq, negligible saliency — geometry has nothing to say.
         return float(np.clip(1.02, *band) if band else 1.02)
 
-    g   = max((geom["statorID"] - geom["rotorOD"]) / 2.0, 0.3)   # air gap [mm]
+    g   = luftspalt_mm(geom)                                     # air gap [mm]
     hm  = float(geom.get("magThick", 8.0))                       # magnet thickness [mm]
     kc  = 1.15                                                    # Carter factor
     g_d = g * kc + hm / MU_R_MAG     # effective d-axis reluctance path [mm]
@@ -978,8 +997,8 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
 
     # ── MTPA operating point (reluctance torque for salient rotors) ──────────────
     xi = estimate_saliency(geom)
-    R_gap   = ((geom["statorID"] / 2) + (geom["rotorOD"] / 2)) / 2 / 1000.0
-    g       = max((geom["statorID"] - geom["rotorOD"]) / 2.0, 0.3) / 1000.0
+    R_gap   = r_gap_m(geom)
+    g       = luftspalt_mm(geom) / 1000.0
     hm      = float(geom["magThick"]) / 1000.0
     kc = 1.15; k_w = 0.95; N_ph = max(int(geom["slots"]) / 3.0, 1.0)
     g_eff_d = kc * g + hm / MU_R_MAG
@@ -1042,8 +1061,8 @@ def compute_advanced_em(geom: dict, perf: dict, axial_mm: float,
     p        = int(geom["p"])
     n_slots  = int(geom["slots"])
     L_ax     = (axial_mm / 1000.0) if axial_mm else 0.080
-    R_gap    = ((geom["statorID"] / 2) + (geom["rotorOD"] / 2)) / 2 / 1000.0
-    g        = max((geom["statorID"] - geom["rotorOD"]) / 2.0, 0.3) / 1000.0   # m
+    R_gap    = r_gap_m(geom)
+    g        = luftspalt_mm(geom) / 1000.0                          # m
     hm       = float(geom["magThick"]) / 1000.0
     kc       = 1.15
     k_w      = 0.95
@@ -1387,7 +1406,7 @@ def run_em_analysis(geom: dict, N: int = 150, rotor_angle: float = 0.0,
     perf = compute_performance(geom, B_analytical, axial_mm=axial_mm)
 
     # Maxwell-stress torque estimate from FDM (in physical units)
-    R_gap_m  = ((geom["statorID"] / 2) + (geom["rotorOD"] / 2)) / 2 / 1000
+    R_gap_m  = r_gap_m(geom)
     T_maxwell = (2 * math.pi * R_gap_m * L_ax / MU0 *
                  float(np.mean(Br_T * Bt_T)))
     perf["T_maxwell_Nm"] = round(abs(T_maxwell), 1)

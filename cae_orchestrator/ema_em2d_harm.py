@@ -226,164 +226,206 @@ def stator_stroeme(geom: dict, i_pk_phys: float, a_nut_m2: float) -> dict:
 
 # ── Netz ──────────────────────────────────────────────────────────────────────
 
-def baue_netz(geom: dict, kaefig: dict, msh_pfad: str,
-              gap_lagen: int = GAP_LAGEN, lc_eisen_mm: float = 0.0) -> dict:
-    """2-D-Querschnitt in **Metern** nach ``msh_pfad`` (MSH 2.2 fuer ElmerGrid).
+def masse(geom: dict, kaefig: dict) -> dict:
+    """Alle Radien und Stabmasse in **Metern**, aus einer Rechnung.
 
-    Koerper: Welle, Laeufereisen, ``n_stab`` Kaefigstaebe, Luftspalt,
-    Statoreisen, ``slots`` Statornuten (jede eine eigene Gruppe, weil jede eine
-    eigene Stromdichte traegt).
-
-    Die Zuordnung der Flaechen nach dem Verschneiden laeuft ueber die
-    **Abbildung von ``occ.fragment``**, nicht ueber Schwerpunktabstaende: jedes
-    Eingangsobjekt sagt selbst, welche Ausgangsflaechen aus ihm entstanden sind.
-    Damit gibt es hier keine Toleranzen, an denen eine Zuordnung kippen kann.
+    Getrennt gehalten, weil die 3-D-Stufe (``ema_em3d_harm``) genau denselben
+    Querschnitt braucht. Zwei Rechnungen fuer dieselbe Geometrie waeren die
+    Vervielfaeltigung, gegen die ``ema_wicklung`` gerade angetreten ist.
     """
-    import gmsh
-
     r_wel = float(geom["shaftD"]) / 2000.0
     r_rot = float(geom["rotorOD"]) / 2000.0
     r_si  = float(geom["statorID"]) / 2000.0
     r_so  = float(geom["statorOD"]) / 2000.0
-    g     = r_si - r_rot
+    g = r_si - r_rot
     if g <= 0:
         raise ValueError(f"Luftspalt nicht positiv: rotorOD={geom['rotorOD']} "
                          f"statorID={geom['statorID']}")
+    t_stab = float(kaefig["nuttiefe_mm"]) / 1000.0
+    r_stab_a = r_rot - float(kaefig.get("steg_mm", 2.0)) / 1000.0
+    return {
+        "r_wel": r_wel, "r_rot": r_rot, "r_si": r_si, "r_so": r_so, "gap_m": g,
+        "n_stab": int(kaefig["n_stab"]),
+        "b_stab": float(kaefig["stabbreite_mm"]) / 1000.0,
+        "t_stab": t_stab, "r_stab_a": r_stab_a,
+        "r_stab_i": r_stab_a - t_stab,
+        "r_stab_m": r_stab_a - t_stab / 2.0,
+        "A_ring_m2": float(kaefig["A_ring_mm2"]) * 1e-6,
+    }
 
-    n_stab   = int(kaefig["n_stab"])
-    b_stab   = float(kaefig["stabbreite_mm"]) / 1000.0
-    t_stab   = float(kaefig["nuttiefe_mm"]) / 1000.0
-    r_stab_a = r_rot - float(kaefig.get("steg_mm", 2.0)) / 1000.0     # Aussenkante Stab
-    r_stab_m = r_stab_a - t_stab / 2.0
 
+def quer_flaechen(gmsh, geom: dict, kaefig: dict) -> dict:
+    """Den Querschnitt bauen und die Flaechen den Koerpern zuordnen.
+
+    Die Zuordnung nach dem Verschneiden laeuft ueber die **Abbildung von
+    ``occ.fragment``**, nicht ueber Schwerpunktabstaende: jedes Eingangsobjekt
+    sagt selbst, welche Ausgangsflaechen aus ihm entstanden sind. Damit gibt es
+    hier keine Toleranzen, an denen eine Zuordnung kippen kann.
+
+    Gibt die Flaechen je Koerper zurueck -- OHNE physikalische Gruppen und ohne
+    zu vernetzen, damit die 3-D-Stufe denselben Querschnitt extrudieren kann.
+    """
     import ema_em3d
+    m = masse(geom, kaefig)
+    occ = gmsh.model.occ
+
     nuten = ema_em3d.slot_rects(geom)
     if not nuten:
         raise ValueError("Statornuten fehlen (slots/slotDepth) -- ohne Nuten "
                          "gibt es keine Wicklung, die eingepraegt werden koennte")
 
+    n_stab = m["n_stab"]
+    welle  = occ.addDisk(0, 0, 0, m["r_wel"], m["r_wel"])
+    rotor  = _ring(occ, m["r_wel"], m["r_rot"])
+    luft   = _ring(occ, m["r_rot"], m["r_si"])
+    stator = _ring(occ, m["r_si"], m["r_so"])
+
+    staebe, stege = [], []
+    for j in range(n_stab):
+        a = 2.0 * math.pi * j / n_stab
+        s = occ.addRectangle(-m["t_stab"] / 2.0, -m["b_stab"] / 2.0, 0.0,
+                             m["t_stab"], m["b_stab"])
+        occ.rotate([(2, s)], 0, 0, 0, 0, 0, 1, a)
+        occ.translate([(2, s)], m["r_stab_m"] * math.cos(a),
+                      m["r_stab_m"] * math.sin(a), 0)
+        staebe.append(s)
+        # Der Steg genau UEBER dem Stab, gleiche tangentiale Breite: nur dieses
+        # Stueck Blech schliesst die Nut, das Blech zwischen zwei Nuten ist
+        # gewoehnlicher Laeuferzahn und bleibt Eisen.
+        g_ = occ.addRectangle(m["r_stab_a"], -m["b_stab"] / 2.0, 0.0,
+                              max(m["r_rot"] - m["r_stab_a"], 1e-6), m["b_stab"])
+        occ.rotate([(2, g_)], 0, 0, 0, 0, 0, 1, a)
+        stege.append(g_)
+
+    nut_tags = []
+    for n in nuten:
+        s = occ.addRectangle(-float(n["length"]) / 2000.0,
+                             -float(n["thick"]) / 2000.0, 0.0,
+                             float(n["length"]) / 1000.0,
+                             float(n["thick"]) / 1000.0)
+        occ.rotate([(2, s)], 0, 0, 0, 0, 0, 1, float(n["ang"]))
+        occ.translate([(2, s)], float(n["cx"]) / 1000.0, float(n["cy"]) / 1000.0, 0)
+        nut_tags.append(s)
+
+    eingang = [welle, rotor, luft, stator] + staebe + stege + nut_tags
+    _, abb = occ.fragment([(2, eingang[0])], [(2, t) for t in eingang[1:]])
+    occ.synchronize()
+
+    aus = [[t for (d, t) in grp if d == 2] for grp in abb]
+    i_wel, i_rot, i_luf, i_sta = 0, 1, 2, 3
+    i_stab0 = 4
+    i_steg0 = 4 + n_stab
+    i_nut0 = 4 + 2 * n_stab
+
+    f_rotor = set(aus[i_rot])
+    f_stator = set(aus[i_sta])
+    # Nur die Anteile behalten, die WIRKLICH im jeweiligen Eisen liegen -- ein
+    # Stab, der ueber den Laeuferrand hinausragte, kaeme sonst als
+    # Luftspaltkoerper mit Leitfaehigkeit heraus.
+    stab_f, steg_f, nut_f = [], [], []
+    for j in range(n_stab):
+        stab_f.append(sorted(f_rotor.intersection(aus[i_stab0 + j])))
+    alle_stab = set().union(*stab_f) if stab_f else set()
+    for j in range(n_stab):
+        steg_f.append(sorted(f_rotor.intersection(aus[i_steg0 + j]) - alle_stab))
+    for k in range(len(nut_tags)):
+        nut_f.append(sorted(f_stator.intersection(aus[i_nut0 + k])))
+    fehlend = [j for j, f in enumerate(stab_f) if not f]
+    if fehlend:
+        raise ValueError(f"{len(fehlend)} Kaefigstaebe liegen nicht im "
+                         f"Laeuferblech -- Geometrie pruefen")
+    fehlend = [j for j, f in enumerate(steg_f) if not f]
+    if fehlend:
+        raise ValueError(f"{len(fehlend)} Laeuferstege fehlen -- der Steg ueber "
+                         f"der Kaefignut muss ein eigener Koerper sein")
+    fehlend = [k for k, f in enumerate(nut_f) if not f]
+    if fehlend:
+        raise ValueError(f"{len(fehlend)} Statornuten liegen nicht im "
+                         f"Statorblech -- slotDepth pruefen")
+
+    belegt = set()
+    for f in stab_f + steg_f + nut_f:
+        belegt.update(f)
+
+    return {
+        "masse": m, "nuten": nuten,
+        "welle": sorted(aus[i_wel]),
+        "rotor": sorted(f_rotor - belegt),
+        "staebe": sorted(alle_stab),
+        "stege": sorted(set().union(*steg_f)),
+        "luft": sorted(aus[i_luf]),
+        "stator": sorted(f_stator - belegt),
+        "nut_f": nut_f,
+        "A_nut_m2": float(nuten[0]["length"]) * float(nuten[0]["thick"]) * 1e-6,
+    }
+
+
+def groessenfeld(gmsh, m: dict, gap_lagen: int, lc_eisen_m: float) -> float:
+    """Glockenfoermiges Verfeinerungsband um den Luftspalt. Gibt ``lc_gap`` zurueck.
+
+    Keine Sprungstelle im Netz, und die Lagen im Spalt stehen unabhaengig von
+    der Groesse der Maschine.
+    """
+    lc_gap = m["gap_m"] / max(int(gap_lagen), 1)
+    lc_eisen = max(lc_eisen_m, lc_gap)
+    r_mitte = 0.5 * (m["r_rot"] + m["r_si"])
+    f = gmsh.model.mesh.field.add("MathEval")
+    # Kleinbuchstaben und ausgeschriebenes Quadrat: der MathEval-Parser von gmsh
+    # kennt weder "Exp" noch zuverlaessig "^" -- ein Tippfehler darin faellt
+    # nicht auf, das Feld liefert dann still 0 und das Netzen bricht ab.
+    rr = "sqrt(x*x+y*y)"
+    u = f"(({rr}-{r_mitte!r})/{2.0 * m['gap_m']!r})"
+    gmsh.model.mesh.field.setString(
+        f, "F", f"{lc_eisen!r} + ({lc_gap!r} - {lc_eisen!r})*exp(-{u}*{u})")
+    gmsh.model.mesh.field.setAsBackgroundMesh(f)
+    gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
+    gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
+    gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+    return lc_gap
+
+
+def baue_netz(geom: dict, kaefig: dict, msh_pfad: str,
+              gap_lagen: int = GAP_LAGEN, lc_eisen_mm: float = 0.0) -> dict:
+    """2-D-Querschnitt in **Metern** nach ``msh_pfad`` (MSH 2.2 fuer ElmerGrid).
+
+    Koerper: Welle, Laeufereisen, ``n_stab`` Kaefigstaebe, deren Blechstege,
+    Luftspalt, Statoreisen, ``slots`` Statornuten (jede eine eigene Gruppe, weil
+    jede eine eigene Stromdichte traegt).
+    """
+    import gmsh
+
     gmsh.initialize()
     gmsh.option.setNumber("General.Terminal", 0)
     try:
         gmsh.model.add("asm2d")
-        occ = gmsh.model.occ
+        q = quer_flaechen(gmsh, geom, kaefig)
+        m = q["masse"]
 
-        welle  = occ.addDisk(0, 0, 0, r_wel, r_wel)
-        rotor  = _ring(occ, r_wel, r_rot)
-        luft   = _ring(occ, r_rot, r_si)
-        stator = _ring(occ, r_si, r_so)
-
-        staebe, stege = [], []
-        for j in range(n_stab):
-            a = 2.0 * math.pi * j / n_stab
-            s = occ.addRectangle(-t_stab / 2.0, -b_stab / 2.0, 0.0, t_stab, b_stab)
-            occ.rotate([(2, s)], 0, 0, 0, 0, 0, 1, a)
-            occ.translate([(2, s)], r_stab_m * math.cos(a), r_stab_m * math.sin(a), 0)
-            staebe.append(s)
-            # Der Steg genau UEBER dem Stab, gleiche tangentiale Breite: nur
-            # dieses Stueck Blech schliesst die Nut, das Blech zwischen zwei
-            # Nuten ist gewoehnlicher Laeuferzahn und bleibt Eisen.
-            g_ = occ.addRectangle(r_stab_a, -b_stab / 2.0, 0.0,
-                                  max(r_rot - r_stab_a, 1e-6), b_stab)
-            occ.rotate([(2, g_)], 0, 0, 0, 0, 0, 1, a)
-            stege.append(g_)
-
-        nut_tags = []
-        for n in nuten:
-            s = occ.addRectangle(-float(n["length"]) / 2000.0,
-                                 -float(n["thick"]) / 2000.0, 0.0,
-                                 float(n["length"]) / 1000.0,
-                                 float(n["thick"]) / 1000.0)
-            occ.rotate([(2, s)], 0, 0, 0, 0, 0, 1, float(n["ang"]))
-            occ.translate([(2, s)], float(n["cx"]) / 1000.0, float(n["cy"]) / 1000.0, 0)
-            nut_tags.append(s)
-
-        eingang = [welle, rotor, luft, stator] + staebe + stege + nut_tags
-        _, abb = occ.fragment([(2, eingang[0])], [(2, t) for t in eingang[1:]])
-        occ.synchronize()
-
-        aus = [[t for (d, t) in grp if d == 2] for grp in abb]
-        i_wel, i_rot, i_luf, i_sta = 0, 1, 2, 3
-        i_stab0 = 4
-        i_steg0 = 4 + n_stab
-        i_nut0 = 4 + 2 * n_stab
-
-        f_rotor = set(aus[i_rot])
-        f_stator = set(aus[i_sta])
-        # Nur die Anteile behalten, die WIRKLICH im jeweiligen Eisen liegen --
-        # ein Stab, der ueber den Laeuferrand hinausragte, kaeme sonst als
-        # Luftspaltkoerper mit Leitfaehigkeit heraus.
-        stab_f, steg_f, nut_f = [], [], []
-        for j in range(n_stab):
-            stab_f.append(sorted(f_rotor.intersection(aus[i_stab0 + j])))
-        alle_stab = set().union(*stab_f) if stab_f else set()
-        for j in range(n_stab):
-            steg_f.append(sorted(f_rotor.intersection(aus[i_steg0 + j]) - alle_stab))
-        for k in range(len(nut_tags)):
-            nut_f.append(sorted(f_stator.intersection(aus[i_nut0 + k])))
-        fehlend = [j for j, f in enumerate(stab_f) if not f]
-        if fehlend:
-            raise ValueError(f"{len(fehlend)} Kaefigstaebe liegen nicht im "
-                             f"Laeuferblech -- Geometrie pruefen")
-        fehlend = [j for j, f in enumerate(steg_f) if not f]
-        if fehlend:
-            raise ValueError(f"{len(fehlend)} Laeuferstege fehlen -- der Steg "
-                             f"ueber der Kaefignut muss ein eigener Koerper sein")
-        fehlend = [k for k, f in enumerate(nut_f) if not f]
-        if fehlend:
-            raise ValueError(f"{len(fehlend)} Statornuten liegen nicht im "
-                             f"Statorblech -- slotDepth pruefen")
-
-        belegt = set()
-        for f in stab_f + steg_f + nut_f:
-            belegt.update(f)
-        rest_rotor = sorted(f_rotor - belegt)
-        rest_stator = sorted(f_stator - belegt)
-
-        gmsh.model.addPhysicalGroup(2, sorted(aus[i_wel]), GID_WELLE, "welle")
-        gmsh.model.addPhysicalGroup(2, rest_rotor, GID_ROTOR, "rotoreisen")
-        gmsh.model.addPhysicalGroup(2, sorted(alle_stab), GID_STAEBE, "kaefigstaebe")
-        gmsh.model.addPhysicalGroup(2, sorted(set().union(*steg_f)),
-                                    GID_STEG, "laeuferstege")
-        gmsh.model.addPhysicalGroup(2, sorted(aus[i_luf]), GID_LUFT, "luftspalt")
-        gmsh.model.addPhysicalGroup(2, rest_stator, GID_STATOR, "statoreisen")
-        for k, f in enumerate(nut_f):
+        gmsh.model.addPhysicalGroup(2, q["welle"], GID_WELLE, "welle")
+        gmsh.model.addPhysicalGroup(2, q["rotor"], GID_ROTOR, "rotoreisen")
+        gmsh.model.addPhysicalGroup(2, q["staebe"], GID_STAEBE, "kaefigstaebe")
+        gmsh.model.addPhysicalGroup(2, q["stege"], GID_STEG, "laeuferstege")
+        gmsh.model.addPhysicalGroup(2, q["luft"], GID_LUFT, "luftspalt")
+        gmsh.model.addPhysicalGroup(2, q["stator"], GID_STATOR, "statoreisen")
+        for k, f in enumerate(q["nut_f"]):
             gmsh.model.addPhysicalGroup(2, f, GID_NUT0 + k, f"nut{k}")
 
-        # Aussenrand: alle Kurven auf r_so. Ohne diese Gruppe schreibt ElmerGrid
-        # keine Randelemente und die Dirichlet-Bedingung greift ins Leere.
-        # Nicht ueber den Schwerpunkt suchen: der eines VOLLKREISES liegt im
-        # Mittelpunkt, also bei jedem Radius gleich. Die Huellbox unterscheidet.
+        # Aussenrand: alle Kurven auf r_so. Nicht ueber den Schwerpunkt suchen:
+        # der eines VOLLKREISES liegt im Mittelpunkt, also bei jedem Radius
+        # gleich. Die Huellbox unterscheidet.
         rand = []
         for (d, t) in gmsh.model.getEntities(1):
             bb = gmsh.model.getBoundingBox(1, t)
             weite = max(bb[3] - bb[0], bb[4] - bb[1]) / 2.0
-            if abs(weite - r_so) < 1e-4 * r_so + 1e-9:
+            if abs(weite - m["r_so"]) < 1e-4 * m["r_so"] + 1e-9:
                 rand.append(t)
         if not rand:
             raise ValueError("Aussenrand nicht gefunden")
         gmsh.model.addPhysicalGroup(1, rand, GID_RAND, "aussenrand")
 
-        lc_gap = g / max(int(gap_lagen), 1)
         lc_eisen = (lc_eisen_mm / 1000.0) if lc_eisen_mm > 0 else min(
-            3.0e-3, b_stab / 3.0, float(nuten[0]["thick"]) / 3000.0)
-        lc_eisen = max(lc_eisen, lc_gap)
-        r_mitte = 0.5 * (r_rot + r_si)
-        # Glockenfoermiges Verfeinerungsband um den Luftspalt: keine Sprungstelle
-        # im Netz, und die drei Lagen im Spalt stehen unabhaengig von der Groesse
-        # der Maschine.
-        f = gmsh.model.mesh.field.add("MathEval")
-        # Kleinbuchstaben und ausgeschriebenes Quadrat: der MathEval-Parser von
-        # gmsh kennt weder "Exp" noch zuverlaessig "^" -- ein Tippfehler darin
-        # faellt nicht auf, das Feld liefert dann still 0 und das Netzen bricht ab.
-        rr = "sqrt(x*x+y*y)"
-        u = f"(({rr}-{r_mitte!r})/{2.0 * g!r})"
-        gmsh.model.mesh.field.setString(
-            f, "F", f"{lc_eisen!r} + ({lc_gap!r} - {lc_eisen!r})*exp(-{u}*{u})")
-        gmsh.model.mesh.field.setAsBackgroundMesh(f)
-        gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
-        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
-        gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
+            3.0e-3, m["b_stab"] / 3.0, float(q["nuten"][0]["thick"]) / 3000.0)
+        lc_gap = groessenfeld(gmsh, m, gap_lagen, lc_eisen)
         gmsh.option.setNumber("Mesh.Algorithm", 6)
         gmsh.model.mesh.generate(2)
 
@@ -399,12 +441,14 @@ def baue_netz(geom: dict, kaefig: dict, msh_pfad: str,
         gmsh.finalize()
 
     return {"msh": msh_pfad, "knoten": int(knoten), "dreiecke": int(dreiecke),
-            "n_stab": n_stab, "n_nut": len(nut_tags),
-            "steg_mm": 1000.0 * (r_rot - r_stab_a), "b_stab_m": b_stab,
-            "r_wel": r_wel, "r_rot": r_rot, "r_si": r_si, "r_so": r_so,
-            "gap_m": g, "lc_gap_m": lc_gap, "lc_eisen_m": lc_eisen,
+            "n_stab": m["n_stab"], "n_nut": len(q["nuten"]),
+            "steg_mm": 1000.0 * (m["r_rot"] - m["r_stab_a"]),
+            "b_stab_m": m["b_stab"],
+            "r_wel": m["r_wel"], "r_rot": m["r_rot"], "r_si": m["r_si"],
+            "r_so": m["r_so"], "gap_m": m["gap_m"], "lc_gap_m": lc_gap,
+            "lc_eisen_m": max(lc_eisen, lc_gap),
             "A_stab_m2": float(kaefig["A_stab_mm2"]) * 1e-6,
-            "A_nut_m2": float(nuten[0]["length"]) * float(nuten[0]["thick"]) * 1e-6}
+            "A_nut_m2": q["A_nut_m2"]}
 
 
 def _ring(occ, r_i: float, r_a: float) -> int:
@@ -720,6 +764,8 @@ def vorbereiten(payload: dict, rpm: float, last_nm: float, work_dir: str,
     geom = payload.get("geom", payload)
     art = ema_maschinenart.art_code(payload)
     ema_maschinenart.pruefe_stufe(art, "feld")
+    import ema_radien
+    ema_radien.pruefe_bauform(payload, "feld")   # Netz ist auf Innenlaeufer gebaut
     if art != "asm":
         raise ema_maschinenart.ArtNichtUnterstuetzt(
             f"Die harmonische 2-D-Stufe ist die Kaefiglaeufer-Stufe; "

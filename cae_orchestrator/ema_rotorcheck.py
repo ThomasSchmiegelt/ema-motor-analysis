@@ -426,12 +426,22 @@ def rotor_stress_check(geom: dict, mat: dict, target: dict,
 
     ``mat`` must carry ``density`` [kg/m^3], ``nu``, ``yield_mpa`` [MPa].
     ``target`` must carry ``n_max`` [rpm].  ``geom`` needs ``shaftD``/``rotorOD`` [mm].
+
+    Innen- UND Aussenlaeufer: die Lame-Loesung gilt fuer jeden rotierenden Ring,
+    nur ist es ein anderer Ring. Beim Innenlaeufer traegt das Blech von der
+    Welle bis zum Luftspalt, beim Aussenlaeufer vom Luftspalt nach aussen. Die
+    Radien kommen deshalb aus ``ema_radien`` und nicht mehr direkt aus
+    ``shaftD``/``rotorOD`` -- mit ``shaftD`` als Innenradius haette der
+    Aussenlaeufer einen Ring gerechnet, der die halbe Maschine umfasst, und
+    damit eine Spannung, die es nicht gibt.
     """
+    import ema_radien
+    r = ema_radien.radien(geom)
     nu     = float(mat.get("nu", 0.30))
     rho    = float(mat.get("density", 7650.0))
     sigy   = float(mat.get("yield_mpa", 340.0))
-    a_m    = float(geom["shaftD"])  / 2.0e3   # mm -> m
-    b_m    = float(geom["rotorOD"]) / 2.0e3
+    a_m    = float(r["r_traeger_innen_mm"]) / 1.0e3   # mm -> m
+    b_m    = float(r["r_traeger_aussen_mm"]) / 1.0e3
     nm     = float(target["n_max"])
     w      = 2.0 * math.pi * nm / 60.0
 
@@ -440,7 +450,14 @@ def rotor_stress_check(geom: dict, mat: dict, target: dict,
     gate    = max(sig_ps, sig_str)                             # = sig_str
 
     # Peak level = conservative ring stress + engineering notch factor (sharp pocket corner).
-    sig_peak  = gate * KT_POCKET
+    #
+    # Der Kerbfaktor gehoert zur MAGNETTASCHE. Beim Aussenlaeufer drueckt die
+    # Fliehkraft die Magnete gegen den Ring, statt sie an einem Steg zu halten
+    # (``ema_radien.magnethaltung``) -- dort gibt es die scharfe Taschenkante als
+    # bindende Stelle nicht, und ein Kt von 1,5 waere eine erfundene Verschaerfung.
+    # Der Ringwert bleibt bindend, und dass er es ist, steht im Ergebnis.
+    _steg_haelt = ema_radien.magnethaltung(geom)["steg_traegt_magnete"]
+    sig_peak  = gate * (KT_POCKET if _steg_haelt else 1.0)
     sf_gate   = sigy / gate if gate > 0 else float("inf")            # ohne Notch
     sf_peak   = sigy / sig_peak if sig_peak > 0 else float("inf")    # MIT Notch -> bindend
     sf_ps     = sigy / sig_ps if sig_ps > 0 else float("inf")
@@ -452,7 +469,7 @@ def rotor_stress_check(geom: dict, mat: dict, target: dict,
         "sigma_bore_conservative_MPa": round(sig_str, 1),   # Ring, ohne Notch
         "sigma_bore_plane_stress_MPa": round(sig_ps, 1),    # optimistische 2D-Scheibe
         "sigma_bore_plane_strain_MPa": round(sig_str, 1),   # konservativer 3D-Zylinder
-        "kt_pocket": KT_POCKET,                              # engineering Notch-Faktor
+        "kt_pocket": KT_POCKET if _steg_haelt else 1.0,      # engineering Notch-Faktor
         "sigma_peak_MPa": round(sig_peak, 1),                # Ring x Kt -> analyt. Peak
         "safety_factor": round(sf_gate, 3),                  # am Ring-Wert (ohne Notch)
         "safety_factor_peak": round(sf_peak, 3),             # MIT Notch -> GATE
@@ -460,6 +477,8 @@ def rotor_stress_check(geom: dict, mat: dict, target: dict,
         "yield_mpa": sigy, "nu": nu, "density_kg_m3": rho,
         "a_mm": round(a_m * 1e3, 3), "b_mm": round(b_m * 1e3, 3),
         "n_max_rpm": nm, "sf_target": sf_target,
+        "bauform": r["bauform"],
+        "magnethaltung": ema_radien.magnethaltung(geom)["haltendes_bauteil"],
         "note": ("2D-Lame-Losung rotierende Scheibe mit Bohrung, Spannungsmax. an der "
                  "Bohrung. Konservativ = Ebenenverformung (durchgehender Zylinder). "
                  "Peak = Ring x Kt (scharfe Taschenkante, Kt=1.5 Annahme); "

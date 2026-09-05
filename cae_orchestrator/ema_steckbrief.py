@@ -74,6 +74,21 @@ _MARKE = re.compile(r"^(\d{8}_\d{6}(?:-\d+)?)_(.+)\.(txt|json)$")
 
 
 # ── Ablegen ─────────────────────────────────────────────────────────────────
+def _luftspalt(g: dict):
+    """Luftspalt aus ``ema_radien`` -- er kennt auch den Aussenlaeufer.
+
+    Die frueher hier stehende Formel ``(statorID - rotorOD)/2`` haette an einem
+    Aussenlaeufer eine negative Zahl gemeldet, und der Steckbrief haette sie
+    ausgegeben. Er rechnet nichts nach; um so wichtiger ist, dass das, was er
+    zeigt, aus der richtigen Quelle kommt.
+    """
+    try:
+        import ema_radien
+        return round(ema_radien.radien(g)["luftspalt_mm"], 3)
+    except Exception:
+        return None
+
+
 def _freie_marke(ordner: str, verb: str) -> str:
     """Zeitmarke, die in diesem Ordner noch frei ist.
 
@@ -236,8 +251,7 @@ def maschine(payload: dict, projektakte: dict) -> dict:
         "statorOD_mm": g.get("statorOD"), "statorID_mm": g.get("statorID"),
         "rotorOD_mm": g.get("rotorOD"),
         "axial_mm": payload.get("axial_len") or g.get("axialLen"),
-        "luftspalt_mm": (round((float(g["statorID"]) - float(g["rotorOD"])) / 2.0, 3)
-                         if g.get("statorID") and g.get("rotorOD") else None),
+        "luftspalt_mm": _luftspalt(g),
         "kuehlung": payload.get("cooling"),
         "magnet": payload.get("magnet"),
         "rotor_blech": payload.get("rotor_lam"),

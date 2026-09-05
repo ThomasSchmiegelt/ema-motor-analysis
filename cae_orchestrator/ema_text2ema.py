@@ -13,6 +13,7 @@ import re
 import urllib.request
 
 import ema_maschinenart
+import ema_radien
 import ema_wicklung
 from ema_report import OLLAMA_URL, DEFAULT_MODEL, DEFAULT_NUM_CTX
 
@@ -29,6 +30,7 @@ _SHAPE = ["v", "vasym", "vv", "u", "delta", "pmasynrm", "spm", "halbach", "spoke
 # heute wirklich traegt, sagt allein dieses Modul.
 _ART   = list(ema_maschinenart.ARTEN)
 _WICKLUNG = list(ema_wicklung.ARTEN)
+_BAUFORM  = list(ema_radien.BAUFORMEN)
 _ORIENT = ["transverse", "longitudinal"]
 _POCKET = ["position", "diameter"]
 _THREAD = ["M4", "M5", "M6", "M8", "M10", "M12", "M16", "M20"]
@@ -93,6 +95,10 @@ SCHEMA = {
     # unveraendert; der Runddraht ist die zweite Bauart und keine Umstellung.
     "windingType":         {"kind": "enum", "opts": _WICKLUNG, "def": ema_wicklung.VORGABE, "geom": True, "adv": True, "desc": "Wicklungsart: hairpin=rechteckige Staebe (Vorgabe), rundraht=gewickelt"},
     "turnsPerSlot":        {"kind": "num", "lo": 0,    "hi": 400,  "def": 0,   "int": True, "geom": True, "adv": True, "desc": "Windungen je Nut (Runddraht; 0 = wie conductorsPerSlot)"},
+    # Bauform. Vorgabe bleibt der Innenlaeufer; der Aussenlaeufer ist heute nur
+    # analytisch getragen (ema_radien.STUFEN_AUSSEN sagt es, und das Tor weist ab).
+    "rotorPosition":       {"kind": "enum", "opts": _BAUFORM, "def": ema_radien.VORGABE, "geom": True, "adv": True, "desc": "Bauform: innen=Laeufer innen (Vorgabe), aussen=Aussenlaeufer"},
+    "rotorID":             {"kind": "num", "lo": 0,    "hi": 600,  "def": 0,   "geom": True, "adv": True, "desc": "Laeufer-Innendurchmesser [mm] (nur Aussenlaeufer; 0 = aus statorOD + Luftspalt)"},
     "slotWidthRatio":      {"kind": "num", "lo": 0.2,  "hi": 0.8,  "def": 0.5,  "geom": True, "adv": True, "desc": "Nutbreite / Nutteilung (Rest ist Zahn)"},
     # Magnetlagen und Polkontur
     "magLayers":           {"kind": "num", "lo": 2,    "hi": 4,    "def": 3,   "int": True, "geom": True, "adv": True, "desc": "Magnetlagen je Pol (nur pmasynrm)"},
@@ -210,13 +216,37 @@ def _validate(raw: dict) -> dict:
             out[key] = int(round(v)) if spec.get("int") else round(v, 3)
     # slots → nearest multiple of 3 (>=6)
     out["slots"] = max(6, int(round(out["slots"] / 3)) * 3)
-    # enforce radial ordering statorOD > statorID > rotorOD > shaftD > shaftBoreD
-    if out["statorID"] >= out["statorOD"] - 10:
-        out["statorID"] = round(out["statorOD"] - 40, 1)
-    if out["rotorOD"] >= out["statorID"] - 0.4:
-        out["rotorOD"] = round(out["statorID"] - 1.4, 1)        # ~0.7 mm air gap each side
-    if out["shaftD"] >= out["rotorOD"] - 5:
-        out["shaftD"] = round(out["rotorOD"] * 0.35, 1)
+    # Radiale Ordnung erzwingen -- je nach BAUFORM eine andere.
+    #
+    # Diese Zurechtrueckung war fest auf den Innenlaeufer geschrieben. An einem
+    # Aussenlaeufer haette sie den Laeufer stillschweigend wieder nach innen
+    # gezogen (rotorOD = statorID - 1,4) und damit die Bauform aufgehoben, ohne
+    # dass irgendwo etwas dagegen gesagt haette.
+    # Die Bauform steht in ``raw``, nicht in ``out``: ``rotorPosition`` ist ein
+    # Feinparameter (``adv``) und wird von der Text->Auslegung gar nicht erst
+    # erfragt. Wer sie aber im Payload mitbringt, darf sie hier nicht verlieren --
+    # sonst zoege die Zurechtrueckung den Laeufer wieder nach innen.
+    _bauform = str(raw.get("rotorPosition", "") or "innen").lower()
+    if _bauform.startswith("a"):
+        out["rotorPosition"] = "aussen"
+        out["rotorID"] = float(raw.get("rotorID", 0) or 0)
+        # Aussenlaeufer: shaftD < statorID < statorOD < rotorID < rotorOD
+        if out["statorID"] >= out["statorOD"] - 10:
+            out["statorID"] = round(out["statorOD"] - 40, 1)
+        if out.get("rotorID", 0) <= out["statorOD"] + 0.4:
+            out["rotorID"] = round(out["statorOD"] + 1.4, 1)    # ~0,7 mm Luftspalt
+        if out["rotorOD"] <= out["rotorID"] + 4:
+            out["rotorOD"] = round(out["rotorID"] + 12, 1)      # Ringwand
+        if out["shaftD"] >= out["statorID"] - 5:
+            out["shaftD"] = round(out["statorID"] * 0.5, 1)
+    else:
+        # Innenlaeufer: statorOD > statorID > rotorOD > shaftD > shaftBoreD
+        if out["statorID"] >= out["statorOD"] - 10:
+            out["statorID"] = round(out["statorOD"] - 40, 1)
+        if out["rotorOD"] >= out["statorID"] - 0.4:
+            out["rotorOD"] = round(out["statorID"] - 1.4, 1)    # ~0.7 mm air gap each side
+        if out["shaftD"] >= out["rotorOD"] - 5:
+            out["shaftD"] = round(out["rotorOD"] * 0.35, 1)
     if out["shaftBoreD"] >= out["shaftD"] - 2:
         out["shaftBoreD"] = 0
     if out["rpm_to"] <= out["rpm_from"]:

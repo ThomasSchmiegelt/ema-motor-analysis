@@ -125,6 +125,7 @@ from itertools import combinations
 import ema_analysis
 import ema_asm
 import ema_maschinenart
+import ema_radien
 import ema_wicklung
 import ema_referenz
 import ema_thermal
@@ -230,6 +231,40 @@ def _setz_blech(p, wert):
     p["stator_lam"] = wert
 
 
+def _setz_bauform(p, wert):
+    """Bauform umstellen -- und dabei die Maschine WIRKLICH umbauen.
+
+    Ein Aussenlaeufer ist keine Innenlaeufer-Geometrie mit umgelegtem Schalter:
+    ohne einen Laeuferring gibt es keinen Luftspalt, und die Achse haette nur
+    eine baubare Option. Umgebaut wird nach einer Regel, die genau das erhaelt,
+    was das Moment traegt -- **der Luftspalt bleibt, wo er ist**:
+
+        rotorID  = statorID_alt      (der Laeuferring beginnt an der alten Bohrung)
+        statorOD = rotorOD_alt       (der Stator endet am alten Laeuferrand)
+
+    Damit sind Spaltdurchmesser und Spaltweite unveraendert. Nuttiefe und
+    Jochstaerke werden uebernommen, nur liegen sie jetzt nach innen; der
+    Laeuferring bekommt dieselbe Jochstaerke wie zuvor der Stator.
+
+    Was das ehrlicherweise NICHT ist: eine Auslegung. Es ist der Vergleichsfall,
+    bei dem alles Uebrige gleich bleibt -- und genau der gehoert in eine Achse.
+    """
+    g = p["geom"]
+    if str(wert).lower().startswith("a"):
+        st_id, st_od = float(g["statorID"]), float(g["statorOD"])
+        ro_od = float(g["rotorOD"])
+        nut = float(g.get("slotDepth", 25.0))
+        joch = max((st_od - st_id) / 2.0 - nut, 3.0)      # Statorjoch, uebernommen
+        g["rotorPosition"] = "aussen"
+        g["rotorID"] = st_id                              # Spalt bleibt, wo er war
+        g["rotorOD"] = st_id + 2.0 * joch
+        g["statorOD"] = ro_od
+        g["statorID"] = max(ro_od - 2.0 * (nut + joch),
+                            float(g.get("shaftD", 40.0)) + 4.0)
+    else:
+        g["rotorPosition"] = "innen"
+
+
 def _setz_durchmesser(p, wert):
     """Geometrisch aehnlich skalieren -- ausser dem Luftspalt."""
     g = p["geom"]
@@ -297,6 +332,16 @@ ACHSEN = {
         "beschriften": lambda w: TOPOLOGY_LABELS.get(w, w),
         "setzen": _setz_geom("magShape"),
         "braucht_magnete": True,
+    },
+    # Bauform. Sie steht direkt hinter der Maschinenart, weil sie wie diese
+    # ueber die Bedeutung anderer Achsen entscheidet: an einem Aussenlaeufer
+    # haelt kein Steg die Magnete, und die Fliehkraft greift an einem anderen
+    # Ring an (s. ``ema_radien.magnethaltung``).
+    "bauform": {
+        "titel": "Bauform (Innen- oder Aussenlaeufer)",
+        "werte": lambda b: list(ema_radien.BAUFORMEN),
+        "beschriften": lambda w: ema_radien.LABEL.get(w, w),
+        "setzen": _setz_bauform,
     },
     # Wicklungsart. Sie steht neben der Leiterzahl und nicht in ihr: die Zahl
     # der Leiter je Nut heisst beim Hairpin „Lagen" und beim Runddraht
@@ -413,6 +458,17 @@ def _bewerte(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
     eine einzige nicht getragene Art den ganzen Vergleich ab, und die Achse
     „Maschinenart" koennte ihren eigenen Ausbaustand nicht zeigen.
     """
+    # Dieselbe Behandlung fuer die BAUFORM: der Aussenlaeufer ist keine
+    # Innenlaeufer-Geometrie mit umgelegtem Schalter. Er braucht einen eigenen
+    # Laeuferring (``rotorID``), und ohne ihn stimmt schon der Luftspalt nicht.
+    # Deshalb erscheint er als Zeile MIT Begruendung -- wie eine nicht getragene
+    # Maschinenart -- statt den ganzen Vergleich mit einer Ausnahme abzureissen.
+    import ema_radien
+    try:
+        ema_radien.radien(payload.get("geom") or payload)
+    except (ValueError, KeyError) as e:
+        return {"ok": False, "grund": str(e)}
+
     art = ema_maschinenart.art_code(payload)
     try:
         ema_maschinenart.pruefe_stufe(art, "analytisch")
