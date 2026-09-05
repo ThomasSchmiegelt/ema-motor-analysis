@@ -42,9 +42,14 @@ def masses(g):
     n_pole = g['slots'] / 3       # 12
     magnet = 2 * n_pole * g['magWidth'] * g['magThick'] * L * RHO_MAG
     stator_iron = math.pi / 4 * (g['statorOD']**2 - g['statorID']**2) * L * RHO_ST
-    pitch = math.pi * g['statorID'] / g['slots']
-    slotw = pitch * g['slotWidthRatio']
-    copper = g['slots'] * slotw * g['slotDepth'] * L * 0.40 * RHO_CU  # Fuellung ~40%
+    # Kupfer aus ``ema_wicklung`` -- derselben Quelle wie Pipeline, Thermik, CAD
+    # und Paarvergleich. Hier stand die ACHTE Kopie der Nutformel, und sie war
+    # bereits abgewichen: ohne die 3-mm-Mindestnutbreite und mit einem
+    # ANGENOMMENEN Fuellfaktor von 40 %, waehrend das Modell ihn aus der
+    # Lagenaufteilung ausrechnet (gemessen 0,61 beim Hairpin). Eine Studie, die
+    # gegen andere Zahlen rechnet als das Werkzeug, vergleicht zwei Maschinen.
+    import ema_wicklung
+    copper = ema_wicklung.wicklung(g, L)["V_kupfer_m3"] * 1e9 * RHO_CU
     return rotor_iron, magnet, stator_iron, copper
 
 def evaluate(label, g):
