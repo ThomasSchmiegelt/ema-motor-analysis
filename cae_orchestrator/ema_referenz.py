@@ -671,10 +671,13 @@ def arten_gegenueberstellung(zeilen: dict) -> list:
         v = p_s / p_a
         lo, hi = ART_BAND["synrm"]["verlust_anteil_asm"]["band"]
         drin = lo <= v <= hi
+        # Verluste haengen nicht am Umrichterdeckel -- dieser Vergleich ist
+        # immer zulaessig. ``vergleichbar`` steht trotzdem dabei: ein fehlendes
+        # Feld liest sich wie „unbekannt", und das waere es nicht.
         aus.append({
             "groesse": "SynRM-Verluste / ASM-Verluste",
             "gerechnet": round(v, 3), "band": (lo, hi), "im_band": drin,
-            "beleg": "gercekcioglu2021",
+            "vergleichbar": True, "beleg": "gercekcioglu2021",
             "text": (f"SynRM verliert {v:.2f} mal soviel wie die ASM "
                      f"({p_s:.0f} gegen {p_a:.0f} W). Gemessen am gleichen "
                      f"Stator: 0,41 (0,26 gegen 0,63 kW) — der SynRM-Laeufer "
@@ -685,10 +688,12 @@ def arten_gegenueberstellung(zeilen: dict) -> list:
         v = kt_s / kt_a
         lo, hi = ART_BAND["synrm"]["moment_je_ampere_anteil_asm"]["band"]
         drin = lo <= v <= hi
+        # Kt ist Moment JE AMPERE und damit auch am Stromdeckel noch eine
+        # Aussage ueber die Bauart -- anders als das Stromverhaeltnis oben.
         aus.append({
             "groesse": "SynRM-Moment je Ampere / ASM",
             "gerechnet": round(v, 3), "band": (lo, hi), "im_band": drin,
-            "beleg": "gercekcioglu2021",
+            "vergleichbar": True, "beleg": "gercekcioglu2021",
             "text": (f"SynRM erreicht {v:.2f} mal das Moment je Ampere der ASM. "
                      f"Gemessen an einer OPTIMIERTEN SynRM am gleichen Stator: "
                      f"1,09 bei Vollast, 2,16 bei Teillast."

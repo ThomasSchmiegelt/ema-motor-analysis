@@ -128,6 +128,9 @@ pruefe(v["SynRM-Verluste / ASM-Verluste"]["im_band"],
        "260/630 = 0,41 ebenfalls — das ist der gemessene Wert")
 pruefe(all(e["beleg"] in R.QUELLEN for e in v.values()),
        "jeder Vergleich nennt seine Quelle")
+pruefe(all(isinstance(e.get("vergleichbar"), bool) for e in v.values()),
+       "und jeder sagt ausdruecklich, ob er ueberhaupt zulaessig ist — ein "
+       "fehlendes Feld laese sich als 'unbekannt' lesen, und das waere es nicht")
 
 # Fehlt eine Seite, entfaellt der Vergleich -- er wird nicht ersetzt.
 ohne = R.arten_gegenueberstellung({"eesm": zeilen["eesm"]})
