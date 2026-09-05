@@ -3253,6 +3253,32 @@ def rag_search():
 # angereichert um lesbare Enum-Labels aus den Material-/Topologie-Tabellen, damit
 # das Frontend die Tabelle aufbauen und Dropdown-Zellen befüllen kann.
 
+def _art_optionen():
+    """Auswahlliste der Maschinenarten mit ihrem WIRKLICHEN Ausbaustand.
+
+    Der Zusatz hinter dem Namen wird aus ``Art.stufen`` gebildet: was getragen
+    ist, steht da, und was nicht, fehlt. Eine Art, die gar nichts traegt, sagt
+    das ausdruecklich -- die Liste soll nicht zu einer Wahl einladen, die der
+    Lauf danach abweist.
+    """
+    import ema_maschinenart as MA
+    aus = []
+    for c, a in MA.ARTEN.items():
+        if not a.stufen:
+            zusatz = " — noch nicht getragen"
+        elif len(a.stufen) == len(MA.STUFEN):
+            zusatz = ""
+        else:
+            zusatz = " — getragen: " + ", ".join(a.stufen)
+            if a.feldweg != "fdm" and "feld" in a.stufen:
+                # Der Feldlauf dieser Art laeuft NICHT ueber die Pipeline. Wer
+                # sie hier waehlt und auf „Rechnen" drueckt, wird abgewiesen --
+                # also steht das Werkzeug gleich dabei.
+                zusatz += f" (Feld nur ueber {MA.FELDWEG_WERKZEUG.get(a.feldweg, a.feldweg)})"
+        aus.append({"value": c, "label": a.label + zusatz})
+    return aus
+
+
 @app.route("/param_schema")
 def param_schema():
     import ema_text2ema as T2E
@@ -3289,15 +3315,26 @@ def param_schema():
         "cooling":     _opts(getattr(T2E, "_COOL", []), labelmap=cool_labels),
         "magOrient":   _opts(getattr(T2E, "_ORIENT", []), labelmap=orient_labels),
         "pocketMode":  _opts(getattr(T2E, "_POCKET", []), labelmap=pocket_labels),
+        # Wicklungsart und Bauform standen als nackte Codes in der Auswahl,
+        # waehrend jede andere Aufzaehlung eine lesbare Beschriftung hat. Beide
+        # fuehren ihre Beschriftung selbst -- ema_wicklung.ART_LABEL und
+        # ema_radien.LABEL -- also wird sie von dort genommen und nicht hier
+        # ein zweites Mal geschrieben.
+        "windingType": _opts(list(__import__("ema_wicklung").ARTEN),
+                             labelmap=__import__("ema_wicklung").ART_LABEL),
+        "rotorPosition": _opts(list(__import__("ema_radien").BAUFORMEN),
+                               labelmap=__import__("ema_radien").LABEL),
         # Die Beschriftung kommt aus ``ema_maschinenart`` selbst und nennt gleich,
         # wie weit eine Art getragen ist -- die Auswahlliste soll nicht zu einer
         # Wahl einladen, die der Lauf danach abweist.
-        "machineType": [
-            {"value": c,
-             "label": a.label + (" — analytisch" if a.stufen == ("analytisch",)
-                                 else "" if len(a.stufen) == 4
-                                 else " — noch nicht getragen")}
-            for c, a in __import__("ema_maschinenart").ARTEN.items()],
+        #
+        # Sie wird aus der Stufenliste GEBILDET und nicht aus deren Laenge
+        # geraten. Die frueheren drei Faelle („genau analytisch" / „alle vier" /
+        # sonst „noch nicht getragen") liessen die ASM durchfallen, sobald sie
+        # eine zweite Stufe bekam: sie traegt analytisch UND Feld und stand
+        # trotzdem als „noch nicht getragen" da. Genau die Art Etikett, das
+        # nicht widerspricht und falsch ist.
+        "machineType": _art_optionen(),
     }
     # geom vs. obere Ebene kommt aus dem Schema selbst (``spec["geom"]``). Frueher stand
     # die Menge hier ein zweites Mal von Hand — ein neuer Schluessel war dann im Schema

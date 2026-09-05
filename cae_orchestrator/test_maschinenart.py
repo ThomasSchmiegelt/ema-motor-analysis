@@ -305,5 +305,38 @@ pruefe(erg2["achsen"]["anordnung"]["geprueft"] == 0
 pruefe(erg2["achsen"]["hairpins"]["brauchbar"] > 0,
        "die Wicklungsachse laeuft dagegen auch an der ASM")
 
+# ── Die Auswahlliste im Browser sagt den WIRKLICHEN Ausbaustand ──────────────
+
+print("\nDie Auswahlliste im Browser (server./param_schema)")
+
+import server as _srv
+_opt = {o["value"]: o["label"] for o in _srv._art_optionen()}
+pruefe(set(_opt) == set(MA.ARTEN), "alle vier Arten stehen zur Wahl")
+pruefe("noch nicht getragen" not in _opt["asm"],
+       f"die ASM steht NICHT mehr als 'noch nicht getragen' da")
+pruefe("analytisch, feld" in _opt["asm"],
+       "sondern mit den Stufen, die sie wirklich traegt")
+pruefe("feld2d" in _opt["asm"],
+       "und mit dem Werkzeug, ueber das ihr Feldlauf geht — wer sie waehlt und "
+       "auf Rechnen drueckt, wird sonst vom Tor abgewiesen, ohne zu wissen wohin")
+pruefe(_opt["pmsm"] == MA.ARTEN["pmsm"].label,
+       "die PSM traegt alle Stufen und bekommt darum keinen Zusatz")
+for _c in ("synrm", "eesm"):
+    pruefe("getragen: analytisch" in _opt[_c] and "feld" not in _opt[_c],
+           f"'{_c}' steht mit genau seiner einen Stufe da")
+
+# Der Zusatz muss der Tabelle FOLGEN, nicht sie beschreiben: eine Art ohne
+# Stufen sagt das, unabhaengig von der Anzahl der Stufen ueberhaupt.
+import dataclasses as _dc2
+MA.ARTEN["_leer"] = _dc2.replace(MA.ARTEN["synrm"], code="_leer", label="Leer",
+                                 stufen=())
+try:
+    pruefe("noch nicht getragen" in
+           {o["value"]: o["label"] for o in _srv._art_optionen()}["_leer"],
+           "eine Art ohne jede Stufe sagt 'noch nicht getragen'")
+finally:
+    MA.ARTEN.pop("_leer", None)
+
+
 print(f"\n{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)
