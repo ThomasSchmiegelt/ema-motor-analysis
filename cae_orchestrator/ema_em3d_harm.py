@@ -48,11 +48,22 @@ geraten:
    Stromerhaltung HERGELEITET ist (``wickelkopf_stromdichte``), nicht
    kalibriert. Er wirkt nachweislich (mit Ring steigt der Median von 0,151 auf
    0,243 T), behebt aber nichts.
-2. **Restdivergenz der eingepraegten Stromdichte.** ``Fix Input Current
-   Density`` ist an. Ergebnis Ziffer fuer Ziffer dasselbe -- der Jfix-Loeser
-   lief schon vorher von selbst. Die Probe nebenbei: eine KONSTANTE
-   Ringstromdichte aendert gar nichts, weil sie nicht divergenzfrei ist und
-   Jfix sie vollstaendig wegprojiziert. Jfix arbeitet also.
+2. **Die Divergenzbereinigung war der VERSTAERKER, nicht die Abhilfe.**
+   ``Fix Input Current Density`` war eingeschaltet, weil die eingepraegte
+   Stromdichte nicht exakt divergenzfrei ist -- die Nutstroeme sind je Nut
+   konstant, der Rueckstrom im Ring eine stetige Welle. Der Gedanke war
+   richtig, die Wirkung das Gegenteil:
+
+       Jfix AN   Median 0,221 T   20,3 % ueber 20 T   B_Spalt 3,25 T
+       Jfix AUS  Median 0,002 T    2,7 % ueber 20 T   B_Spalt 0,02 T
+
+   Elmer sagt selbst, woran es liegt: „JfixPotentialSolver: No Dirichlet
+   conditions used to define Jfix level!" Das Jfix-Problem ist ein reines
+   Neumann-Poisson-System und damit singulaer; bei einer nicht exakt
+   vertraeglichen rechten Seite laeuft der iterative Loeser darin davon und
+   legt seinen Fehler auf das Feld. **Jfix ist jetzt AUS.** Der richtige Weg
+   waere eine diskret divergenzfreie Einpraegung (Ringstrom je Nut statt als
+   stetige Welle), nicht eine nachtraegliche Projektion.
 3. **Stagnierender Loeser.** Behoben, aber nicht die Ursache: MUMPS rechnet den
    Fall in 56 s statt in 19 Minuten ohne Ergebnis.
 4. **Netz, Eichung, Loeser als solche.** Mit ALLEN Quellen auf null kommt
@@ -75,12 +86,47 @@ ist. Elmer meldet dabei keine unbekannten Schluesselwoerter, und die
 Randbedingung trifft nachweislich ihre Gruppe (4058 Dreiecke, Gruppe 1, Knoten-
 UND Kantenbedingung).
 
-Was als naechstes zu pruefen waere: ob ``AV re {e}`` in DIESEM Elmer die
-Kantenfreiheitsgrade der komplexen Variablen wirklich bindet. Ein
-unbeschraenkter Kantenraum saehe genau so aus -- richtig dort, wo die Quelle
-stark ist, beliebig dort, wo sie es nicht ist. Pruefbar ohne Ratespiel: ein
-Lauf mit ``Calculate Potential`` und ein Blick darauf, ob ``av re`` auf dem
-Rand tatsaechlich null ist.
+Eine Falle, die dabei gefunden wurde und die jeden treffen wird
+----------------------------------------------------------------
+
+Von fuenf Schreibweisen der Randbedingung bindet **eine einzige** die
+Kanten-Freiheitsgrade. Gemessen, jede mit einem eigenen Lauf:
+
+    AV re {e} / AV im {e}      wirkt      (Median 0,221 gegen 0,279)
+    AV {e}                     WIRKUNGSLOS
+    AV {e} 1 / AV {e} 2        WIRKUNGSLOS
+    nur AV re / AV im          WIRKUNGSLOS
+    gar keine Randbedingung    dasselbe wie die drei wirkungslosen
+
+Elmer meldet dazu **nichts** -- kein unbekanntes Schluesselwort, keine Warnung.
+Wer aus ``ema_em3d`` das dort richtige ``AV {e}`` uebernimmt (die Variable ist
+dort reell), bekommt hier stillschweigend gar keine Randbedingung. Genau
+deshalb steht diese Tabelle hier.
+
+Was heute erreicht ist, und was fehlt
+--------------------------------------
+
+Mit Jfix aus ist der grosse Ausreisser weg (20,3 % des Volumens ueber 20 T sind
+2,7 % geworden), und das Feld ist gebunden. Es ist aber weiterhin **falsch**,
+und zwar zu klein. Die Probe ueber die Paketlaenge zeigt es:
+
+    L =  30 mm   B_Spalt 0,0196 T   2,67 % ueber 20 T
+    L =  90 mm   B_Spalt 0,0474 T   2,98 %
+    L = 180 mm   B_Spalt 0,0532 T   3,43 %
+
+Die Reihe waechst zuerst -- das ist die abnehmende Stirnstreuung und spricht
+fuer das Modell -- aber sie **saettigt bei rund 0,05 T**. Die 2-D-Stufe gibt am
+selben Betriebspunkt 0,3 T, und bei 180 mm Paketlaenge an einer 190-mm-Bohrung
+sollte der 3-D-Wert dem 2-D-Wert nahekommen. Ein Faktor sechs bleibt also
+unerklaert; er ist keine Stirnstreuung, sondern ein Fehler.
+
+Der wilde Rest von rund 3 % waechst dabei mit der Laenge leicht mit -- er
+haengt also an der Zahl der Elemente, nicht an der Physik.
+
+Der Waechter weist das Ergebnis darum weiterhin ab. Nutzbar ist
+``netzkosten()``; die tragende Feldstufe des Kaefiglaeufers bleibt
+``cae_cli.py feld2d``, wo zwei unabhaengige Momentwege auf 0,00 %
+uebereinstimmen.
 
 Bis dahin traegt die Feldstufe des Kaefiglaeufers weiterhin
 ``cae_cli.py feld2d`` (Elmer 2-D, harmonisch) -- dort stimmen zwei unabhaengige
@@ -477,17 +523,25 @@ def schreibe_sif(netz: dict, omega1: float, sigma_eff: float, j_nut: dict,
              '  Variable = "AV[AV re:1 AV im:1]"\n'
              f"  Angular Frequency = Real {omega1:.9e}\n"
              "  Use Tree Gauge = Logical True\n"
-             # Die eingepraegte Stromdichte ist NICHT exakt divergenzfrei: die
-             # Nutstroeme sind je Nut konstant, der Rueckstrom im Wickelkopfring
-             # dagegen eine stetige Sinuswelle. Was an den Nutgrenzen uebrig
-             # bleibt, muss der Jfix-Loeser wegprojizieren -- ``ema_em3d``
-             # schaltet ihn im Lastfall aus genau diesem Grund ein.
-             "  Fix Input Current Density = Logical True\n"
-             "  Jfix: Linear System Iterative Method = BiCGStabL\n"
-             "  Jfix: Linear System Max Iterations = 10000\n"
-             "  Jfix: Linear System Convergence Tolerance = 1.0e-8\n"
-             "  Jfix: Linear System Preconditioning = ILU1\n"
-             "  Jfix: Linear System Abort Not Converged = False\n"
+             # Jfix bleibt AUS. Er war eingeschaltet, weil die eingepraegte
+             # Stromdichte nicht exakt divergenzfrei ist -- die Nutstroeme sind
+             # je Nut konstant, der Rueckstrom im Ring eine stetige Welle. Der
+             # Gedanke war richtig, die Wirkung das Gegenteil:
+             #
+             #     Jfix AN   Median 0,221 T   20,3 % ueber 20 T   B_Spalt 3,25 T
+             #     Jfix AUS  Median 0,002 T    2,7 % ueber 20 T   B_Spalt 0,02 T
+             #
+             # Elmer meldet dazu „JfixPotentialSolver: No Dirichlet conditions
+             # used to define Jfix level!" -- das Jfix-Problem ist ein reines
+             # Neumann-Poisson-System und damit singulaer. Bei einer rechten
+             # Seite, die nicht exakt vertraeglich ist, laeuft der iterative
+             # Loeser darin davon und legt seinen Fehler auf das Feld. Er
+             # bereinigte also nicht die Divergenz, er erzeugte den Ausreisser.
+             #
+             # Der richtige Weg waere eine diskret divergenzfreie Einpraegung
+             # (Ringstrom je Nut statt als stetige Welle), nicht eine
+             # nachtraegliche Projektion.
+             "  Fix Input Current Density = Logical False\n"
              "  Linear System Solver = Direct\n"
              "  Linear System Direct Method = MUMPS\n"
              "  Steady State Convergence Tolerance = 1.0e-8\n"

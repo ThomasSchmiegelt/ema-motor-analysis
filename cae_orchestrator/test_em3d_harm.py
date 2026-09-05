@@ -236,9 +236,24 @@ pruefe("exakt** null" in kopf or "exakt" in kopf,
 pruefe("2359" in kopf and "1129" in kopf,
        "und den unvollstaendigen Aussenrand mit den gemessenen Flaechen — ein "
        "wirklicher Fehler, behoben, und trotzdem nicht die Ursache")
-pruefe("AV re {e}" in kopf,
-       "er sagt, was als naechstes zu pruefen ist, statt nur zu melden, dass "
-       "es nicht geht")
+pruefe("AV re {e}" in kopf and "WIRKUNGSLOS" in kopf,
+       "er fuehrt die Falle auf: von fuenf Schreibweisen der Randbedingung "
+       "bindet nur EINE die Kanten, und Elmer meldet dazu nichts")
+pruefe("Jfix ist jetzt AUS" in kopf and "verstaerker" in kopf.lower(),
+       "und den Befund, dass die Divergenzbereinigung der Verstaerker war")
+pruefe("saettigt" in kopf and "Faktor sechs" in kopf,
+       "sowie die Laengenreihe MIT ihrer ehrlichen Lesart: sie saettigt bei "
+       "0,05 T statt gegen die 0,3 T der 2-D-Stufe zu laufen")
+
+# Jfix muss AUS sein -- eingeschaltet war er der Verstaerker (20 % gegen 2,7 %).
+pruefe("Fix Input Current Density = Logical False" in mit,
+       "Jfix ist ausgeschaltet: eingeschaltet hob er das Luftspaltfeld von "
+       "0,02 auf 3,25 T und den wilden Volumenanteil von 2,7 auf 20,3 %")
+
+# Und die eine wirksame Schreibweise darf nicht verloren gehen.
+pruefe("AV re {e}" in mit and "AV im {e}" in mit,
+       "die Randbedingung benutzt die EINZIGE Schreibweise, die die "
+       "Kanten-Freiheitsgrade bindet")
 pruefe("netzkosten()" in kopf and "feld2d" in kopf,
        "und was heute stattdessen traegt")
 
