@@ -81,8 +81,12 @@ except MA.ArtNichtUnterstuetzt as e:
            "Werkzeugs (feld2d) statt ein magnetostatisches Feld ohne Laeuferstroeme")
 pruefe(MA.pruefe_feldweg("pmsm", "fdm").code == "pmsm",
        "die PSM laeuft weiterhin durch die FDM")
-pruefe(not MA.traegt("synrm", "analytisch") and not MA.traegt("eesm", "analytisch"),
-       "SynRM und EESM sind angemeldet, aber noch von keiner Stufe getragen")
+pruefe(MA.traegt("synrm", "analytisch") and MA.traegt("eesm", "analytisch"),
+       "SynRM und EESM tragen die analytische Stufe (ema_synrm, ema_eesm)")
+pruefe(not any(MA.traegt(c, st) for c in ("synrm", "eesm")
+               for st in ("feld", "cad", "em3d")),
+       "aber keine der beiden traegt Feld, CAD oder 3D — und die Tabelle sagt es, "
+       "statt es einen Lauf herausfinden zu lassen")
 
 try:
     MA.pruefe_stufe("asm", "cad")
@@ -250,9 +254,24 @@ namen = {o["wert"]: o for o in a["optionen"]}
 pruefe(set(namen) == set(MA.ARTEN), "alle vier Arten stehen als Option da")
 pruefe(namen["pmsm"]["ok"] and namen["asm"]["ok"],
        "PSM und ASM sind analytisch baubar")
-pruefe(not namen["synrm"]["ok"] and "analytisch" in namen["synrm"]["grund"],
-       "SynRM erscheint als Zeile MIT Begruendung, statt den Vergleich abzureissen "
-       "— so zeigt die Achse ihren eigenen Ausbaustand")
+pruefe(namen["synrm"]["ok"] and namen["eesm"]["ok"],
+       "SynRM und EESM sind jetzt ebenfalls analytisch baubar — die Achse "
+       "vergleicht alle vier Bauarten am selben Betriebspunkt")
+# Der Ausbaustand zeigt sich weiterhin: eine Art ohne getragene Stufe kommt als
+# Zeile MIT Begruendung, nicht als Ausnahme. Geprueft an einer erfundenen Art.
+import dataclasses as _dc
+MA.ARTEN["_probe"] = _dc.replace(MA.ARTEN["synrm"], code="_probe",
+                                 label="Probe", stufen=())
+try:
+    e2 = PV.vergleiche(_basis("pmsm"), achsen=["maschinenart"],
+                       n_max=12000, rpm=3000, last_nm=100)
+    n2 = {o["wert"]: o for o in e2["achsen"]["maschinenart"]["optionen"]}
+    pruefe(not n2["_probe"]["ok"] and "analytisch" in n2["_probe"]["grund"],
+           "eine Art ohne getragene Stufe erscheint als Zeile MIT Begruendung, "
+           "statt den Vergleich abzureissen — so zeigt die Achse ihren eigenen "
+           "Ausbaustand")
+finally:
+    MA.ARTEN.pop("_probe", None)
 
 for m, (_l, _e, _r, zaehlt) in PV.METRIKEN.items():
     if zaehlt:

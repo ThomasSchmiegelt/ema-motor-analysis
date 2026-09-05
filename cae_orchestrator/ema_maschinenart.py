@@ -134,7 +134,7 @@ ARTEN = {
         hat_laeuferwicklung=False,
         hat_schlupf=False,
         stellbarer_fluss=False,
-        stufen=(),
+        stufen=("analytisch",),
         ohne_bedeutung=_PM_KENNZAHLEN,
         hinweis=("Steht der PMa-SynRM-Anordnung geometrisch am naechsten "
                  "(``_build_pmasynrm`` ohne Magnete), das Moment kommt aber "
@@ -148,7 +148,7 @@ ARTEN = {
         hat_laeuferwicklung=True,
         hat_schlupf=False,
         stellbarer_fluss=True,
-        stufen=(),
+        stufen=("analytisch",),
         ohne_bedeutung=_PM_KENNZAHLEN,
         hinweis=("Die einzige Art, bei der der Fluss EINGESTELLT wird -- "
                  "zweiter Freiheitsgrad im Betriebspunkt (Erregerstrom), dafuer "

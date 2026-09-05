@@ -220,7 +220,13 @@ pruefe(all(m not in p["spricht_fuer_a"] and m not in p["spricht_fuer_b"]
 
 
 print("\n9. Rangfolge — welche Entscheidung zuerst")
-pruefe(erg["rangfolge"]["Kt_Nm_per_A"][0][0] in ("magnetwerkstoff", "anordnung"),
+# ``maschinenart`` steht jetzt mit vorn und meist ganz vorn: zwischen PSM,
+# ASM, SynRM und EESM liegt beim Kt ein Faktor drei, zwischen N35 und N50 rund
+# ein Fuenftel. Das ist kein aufgeweichter Test, sondern die Bestaetigung
+# dessen, was ema_maschinenart behauptet -- die Wahl der Bauart ist die erste
+# Entscheidung, weil sie die groesste ist.
+pruefe(erg["rangfolge"]["Kt_Nm_per_A"][0][0] in ("maschinenart", "magnetwerkstoff",
+                                                 "anordnung"),
        f"Kt wird am staerksten von {erg['rangfolge']['Kt_Nm_per_A'][0][0]} bewegt")
 pruefe(erg["rangfolge"]["T_dauer_Nm"][0][0] == "kuehlung",
        f"das Dauermoment von {erg['rangfolge']['T_dauer_Nm'][0][0]}")

@@ -125,7 +125,9 @@ from itertools import combinations
 import ema_analysis
 import ema_asm
 import ema_maschinenart
+import ema_eesm
 import ema_radien
+import ema_synrm
 import ema_wicklung
 import ema_referenz
 import ema_thermal
@@ -476,7 +478,135 @@ def _bewerte(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
         return {"ok": False, "grund": str(e)}
     if art == "asm":
         return _bewerte_asm(payload, n_max, rpm, last_nm)
+    if art == "synrm":
+        return _bewerte_synrm(payload, n_max, rpm, last_nm)
+    if art == "eesm":
+        return _bewerte_eesm(payload, n_max, rpm, last_nm)
     return _bewerte_pmsm(payload, n_max, rpm, last_nm)
+
+
+def _grundlast(payload: dict, n_max: float):
+    """Was alle magnetlosen Zweige gemeinsam brauchen: Werkstoffe und die
+    beiden Tore, die von der Bauart unabhaengig sind.
+
+    Steht hier und nicht dreimal, weil eine abgeschriebene Torbedingung genau
+    die Art Fehler ist, gegen die dieses Vorhaben angetreten ist -- eine, die
+    an einer von drei Stellen vergessen wird und dort nichts meldet.
+    """
+    geom = payload["geom"]
+    axial = float(geom.get("axialLen") or payload.get("axial_len") or 80.0)
+    poles = 2 * int(geom["p"])
+    if not wicklung_moeglich(int(geom["slots"]), poles):
+        return None, {"ok": False, "grund": "keine symmetrische Drehstromwicklung"}
+    mat = LAMINATES.get(payload.get("rotor_lam", "m270_35a"), LAMINATES["m270_35a"])
+    st = LAMINATES.get(payload.get("stator_lam", "m270_35a"), LAMINATES["m270_35a"])
+    hp = HAIRPIN_MATS.get(payload.get("hairpin_mat", "cu_etp"), HAIRPIN_MATS["cu_etp"])
+    stress = rotor_stress_check(geom, mat, {"n_max": n_max})
+    if not stress.get("ok", True):
+        return None, {"ok": False,
+                      "grund": f"Fliehkraft bei {n_max:.0f} 1/min: SF "
+                               f"{stress.get('safety_factor', 0):.2f}"}
+    return {"geom": geom, "axial": axial, "mat": mat, "st": st, "hp": hp,
+            "kuehl": payload.get("cooling", "water"), "stress": stress}, None
+
+
+def _gemeinsam(payload, ctx, bp, verl, t_dauer, mk, kt, extra: dict) -> dict:
+    """Die Kennzahlen, die ALLE Bauarten in derselben Bedeutung haben."""
+    geom, axial = ctx["geom"], ctx["axial"]
+    verb = connection_assessment(geom, ctx["mat"], ctx["stress"]["n_max_rpm"],
+                                 axial, ctx["kuehl"])
+    aus = {
+        "ok": True, "grund": "",
+        "zusatz_ok": True, "zusatz_hinweis": "",
+        "T_verbind_Nm": round(float(verb.get("T_capacity_Nm", 0.0)), 1),
+        "verbind_ausl": round(float(verb.get("utilization", 0.0)), 3),
+        "Kt_Nm_per_A": round(kt, 5),
+        "I_s_A": float(bp["I_s_A"]),
+        "strom_limit": bool(bp.get("strom_limit", False)),
+        "T_dauer_Nm": round(float(t_dauer), 1),
+        "SF_n_max": round(float(ctx["stress"].get("safety_factor", 0.0)), 2),
+        "P_verlust_W": round(float(verl["P_total"]), 1),
+        "P_Cu_W": verl["P_Cu"], "J_Apmm2": verl["J_Apmm2"],
+        "R_phase_mOhm": verl["R_phase_mOhm"],
+        "gesamt_kg": mk["gesamt_kg"], "magnet_kg": 0.0,
+        "kosten_EUR": mk["kosten"]["gesamt_EUR"],
+        "kt_je_kg": round(kt / max(mk["gesamt_kg"], 1e-6), 6),
+        "kt_je_EUR": round(kt / max(mk["kosten"]["gesamt_EUR"], 1e-6), 8),
+    }
+    aus.update(extra)
+    return aus
+
+
+def _bewerte_synrm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
+    """Kennzahlen einer SynRM-Option -- Reluktanzlaeufer, analytisch (``ema_synrm``).
+
+    Zwei Dinge sind zwangslaeufig anders als bei allen anderen Bauarten:
+
+    * **``Kt`` ist keine Konstante.** Das Moment waechst quadratisch mit dem
+      Strom (derselbe Strom baut erst den Fluss auf und macht dann das Moment).
+      Das ausgewiesene ``Kt`` gilt AM Betriebspunkt und nirgends sonst;
+      ``Kt_konstant = False`` sagt es.
+    * **``rotor_layout_check`` entfaellt nicht.** Die Barrieren sind dieselbe
+      Geometrie wie die Magnettaschen der PMa-SynRM -- nur ohne Magnete darin.
+      Sie muessen ins Blech passen wie jene auch.
+    """
+    ctx, fehler = _grundlast(payload, n_max)
+    if fehler:
+        return fehler
+    geom, axial = ctx["geom"], ctx["axial"]
+
+    lay = rotor_layout_check(geom)
+    if not lay["ok"]:
+        return {"ok": False, "grund": "Barrierenlayout: " + "; ".join(lay["fatal"])[:110]}
+
+    bp = ema_synrm.betriebspunkt(geom, axial, rpm, last_nm)
+    if not bp.get("ok"):
+        return {"ok": False, "grund": bp.get("grund", "SynRM nicht rechenbar")}
+    verl = ema_synrm.verluste(geom, axial, rpm, last_nm, bp, ctx["mat"], ctx["st"],
+                              ctx["hp"], ctx["kuehl"])
+    t_dauer = ema_synrm.dauermoment(geom, axial, ctx["kuehl"], bp)
+    mk = ema_synrm.massen_und_kosten(payload)
+    return _gemeinsam(payload, ctx, bp, verl, t_dauer, mk,
+                      float(bp["Kt_Nm_per_A"]),
+                      {"xi_LqLd": float(bp["xi"]),
+                       "B_gap_T": float(bp["B_gap_T"]),
+                       "i_d_A": float(bp["i_d_A"]),
+                       "Kt_konstant": False,
+                       "P_Laeufer_W": 0.0})
+
+
+def _bewerte_eesm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
+    """Kennzahlen einer EESM-Option -- Schenkelpollaeufer mit Erregerwicklung.
+
+    Der Unterschied zur ASM steht in einer Zeile: dort ist
+    ``I_s = hypot(i_mag, i_q)``, hier ``I_s = i_q``. Der Magnetisierungsstrom
+    sitzt im Laeufer und belastet den Stator nicht -- dafuer macht er dort
+    Verluste und braucht Schleifringe.
+    """
+    ctx, fehler = _grundlast(payload, n_max)
+    if fehler:
+        return fehler
+    geom, axial = ctx["geom"], ctx["axial"]
+
+    bp = ema_eesm.betriebspunkt(geom, axial, rpm, last_nm,
+                                float(payload.get("fieldCurrentA", 0) or 0),
+                                float(payload.get("fieldCurrentDensity", 0) or 0))
+    if not bp.get("ok"):
+        return {"ok": False, "grund": bp.get("grund", "EESM nicht rechenbar")}
+    verl = ema_eesm.verluste(geom, axial, rpm, last_nm, bp, ctx["mat"], ctx["st"],
+                             ctx["hp"], ctx["kuehl"])
+    t_dauer = ema_eesm.dauermoment(geom, axial, ctx["kuehl"], bp)
+    mk = ema_eesm.massen_und_kosten(payload)
+    return _gemeinsam(payload, ctx, bp, verl, t_dauer, mk,
+                      float(bp["Kt_Nm_per_A"]),
+                      {"xi_LqLd": 1.0,
+                       "B_gap_T": float(bp["B_m_T"]),
+                       "mag_anteil": 0.0,
+                       "I_f_A": float(bp["I_f_A"]),
+                       "J_f_Apmm2": float(bp["J_f_Apmm2"]),
+                       "P_Erreger_W": float(bp["P_erreger_W"]),
+                       "P_Schleifring_W": float(bp["P_schleifring_W"]),
+                       "P_Laeufer_W": float(bp["P_laeufer_W"])})
 
 
 def _bewerte_asm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
