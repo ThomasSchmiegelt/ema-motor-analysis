@@ -33,26 +33,39 @@ Wie das Modell gebaut ist
 * Statorstrom als Stromdichte je Nut, aus derselben 60-Grad-Zonenwicklung
   (``ema_em2d_harm.stator_stroeme``).
 
-Was FEHLT, und warum das den Feldlauf heute unbrauchbar macht
---------------------------------------------------------------
+Stand: das 3-D-Feld ist NICHT gueltig -- was ausgeschlossen ist
+----------------------------------------------------------------
 
-In 3-D muss sich der Statorstrom **schliessen**. ``ema_em3d`` loest das fuer die
-Magnetostatik mit zwei Stirnring-Leitern, die den azimutalen Rueckstrom tragen,
-und haelt im Modulkopf fest, was ohne sie passiert: „sonst explodiert das
-Vektorpotential (B~10^4 T)".
+Der Feldlauf dieser Stufe liefert bis heute kein brauchbares Feld, und das
+steht hier, statt dass Kennzahlen daraus gebildet wuerden. ``pruefe_feld``
+weist ein Ergebnis ueber ``B_UNMOEGLICH_T`` ab.
 
-**Diese Ringe gibt es hier nicht.** Der Kopf dieses Moduls hat sie eine Zeit
-lang beschrieben, obwohl sie nirgends gebaut wurden -- und das Ergebnis war
-genau das angekuendigte: gemessen 2,7*10^6 T Flussdichte und eine Stromdichte
-von 1,2*10^10 A/m^2. Das ist kein Feld, sondern ein offener Strompfad.
+Gebaut und ausgeschlossen (jeweils mit einem eigenen Lauf gemessen):
 
-Bis die Rueckleiter da sind, ist der **Feldlauf dieser Stufe nicht gueltig**.
-``pruefe_feld`` weist ein solches Ergebnis darum ausdruecklich ab, statt Zahlen
-herauszugeben, die niemandem widersprechen. Nutzbar ist heute allein
-``netzkosten()`` -- die Netzgroesse und ihre Kosten, und die sind gemessen.
+1. **Kein Rueckweg fuer den Statorstrom.** In 3-D muss sich der Strom
+   schliessen; ``ema_em3d`` haelt fest, was sonst passiert. Je Stirnseite liegt
+   jetzt ein **Wickelkopfring** im Nut-Radiusband, dessen azimutale Stromdichte
+   aus der Stromerhaltung HERGELEITET ist (``wickelkopf_stromdichte``), nicht
+   kalibriert. Ergebnis: unveraendert 8,9*10^7 T.
+2. **Restdivergenz der eingepraegten Stromdichte.** Die Nutstroeme sind je Nut
+   konstant, der Rueckstrom eine stetige Welle -- an den Nutgrenzen bleibt
+   etwas stehen. ``Fix Input Current Density`` ist eingeschaltet. Ergebnis:
+   Ziffer fuer Ziffer dasselbe (8,89*10^7 T), der Jfix-Loeser lief schon vorher
+   von selbst.
+3. **Stagnierender Loeser.** Behoben und nicht die Ursache: der direkte Loeser
+   (MUMPS) rechnet den Fall in 56 s statt in 19 Minuten ohne Ergebnis.
 
-Der Kurzschlussring-Vergleich (``ring_wirkung``) ist damit vorbereitet, aber
-noch nicht belegt: er braucht ein gueltiges Feld.
+Der Befund, an dem der naechste Versuch ansetzen sollte: die Nuten **16 bis 28**
+sind gesund (0,02-0,8 T), alle uebrigen Koerper nicht. Ein
+ZUSAMMENHAENGENDER Block von dreizehn Nuten -- also rund ein Drittel des
+Umfangs -- rechnet richtig, der Rest nicht. Das spricht nicht fuer eine
+Formel und nicht fuer eine fehlende Quelle, sondern fuer etwas Winkelabhaengiges
+oder fuer die Eichung (Tree Gauge) auf einem Netz, das an einer Stelle nicht
+zusammenhaengt.
+
+Bis dahin traegt die Feldstufe des Kaefiglaeufers weiterhin
+``cae_cli.py feld2d`` (Elmer 2-D, harmonisch) -- dort stimmen zwei unabhaengige
+Momentwege auf 0,00 % ueberein. Nutzbar ist hier ``netzkosten()``.
 
 Was hier bewusst NICHT gerechnet wird
 --------------------------------------
@@ -116,9 +129,10 @@ GID_STAEBE = 3
 GID_STEG   = 4
 GID_LUFT   = 5
 GID_STATOR = 6
-GID_RING   = 7          # beide Kurzschlussringe
+GID_RING   = 7          # beide Kurzschlussringe (Laeufer)
 GID_STIRN  = 8          # Luft an den Stirnseiten
-GID_NUT0   = 9          # Nut k -> GID_NUT0 + k
+GID_WKRING = 9          # Wickelkopf-Rueckleiter (Stator), je Stirnseite einer
+GID_NUT0   = 10         # Nut k -> GID_NUT0 + k
 GID_RAND   = 1          # Aussenflaeche (eigener Nummernkreis, 2D)
 
 # Axiale Laenge der Stirnluft, als Vielfaches der Ringbreite. Zu kurz gewaehlt
@@ -175,7 +189,7 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
             nut_v.append(vols[i:i + len(f)])
             i += len(f)
 
-        # Kurzschlussringe an beiden Stirnseiten.
+        # Kurzschlussringe an beiden Stirnseiten (Laeufer).
         ringe = []
         for z0 in (-ring_w, L):
             aussen = occ.addCylinder(0, 0, z0, 0, 0, ring_w, m["r_stab_a"])
@@ -184,28 +198,48 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
             r, _ = occ.cut([(3, aussen)], [(3, innen)])
             ringe.append(r[0][1])
 
+        # Wickelkopf-Rueckleiter (Stator): im NUT-Radiusband, je Stirnseite
+        # einer. Ohne sie hat der eingepraegte Nutstrom keinen Rueckweg, und das
+        # Vektorpotential laeuft davon (s. Modulkopf).
+        wk_h = float(q["nuten"][0]["length"]) / 1000.0          # radiale Nuttiefe
+        wk_t = max(0.5 * float(ring_w), 3.0e-3)                 # axiale Ringdicke
+        wk_ringe = []
+        for z0 in (-wk_t, L):
+            ao = occ.addCylinder(0, 0, z0, 0, 0, wk_t, m["r_si"] + wk_h)
+            ai = occ.addCylinder(0, 0, z0 - 1e-4, 0, 0, wk_t + 2e-4, m["r_si"])
+            r, _ = occ.cut([(3, ao)], [(3, ai)])
+            wk_ringe.append(r[0][1])
+
         # Stirnluft: zwei Zylinder bis r_so, aus denen die Ringe geschnitten sind.
+        # Die Stirnluft muss BEIDE Ringe fassen -- den Kaefigring und den
+        # Wickelkopfring. Zu kurz gewaehlt schnitte die Randbedingung das
+        # Stirnfeld ab, und der Rueckleiter laege halb im Nichts.
+        tief = max(ring_w, wk_t)
+        stirn = max(stirn, 2.0 * tief)
         stirnluft = []
-        for z0 in (-ring_w - stirn, L):
-            zyl = occ.addCylinder(0, 0, z0, 0, 0, ring_w + stirn, m["r_so"])
+        for z0 in (-tief - stirn, L):
+            zyl = occ.addCylinder(0, 0, z0, 0, 0, tief + stirn, m["r_so"])
             stirnluft.append(zyl)
+        alle_ringe = ringe + wk_ringe
         out, abb = occ.fragment([(3, t) for t in stirnluft],
-                                [(3, t) for t in ringe])
+                                [(3, t) for t in alle_ringe])
         occ.synchronize()
-        # Was aus den Ringen kam, IST der Ring; der Rest der Stirnzylinder ist Luft.
-        ring_v = set()
-        for grp in abb[len(stirnluft):]:
-            ring_v.update(t for (d, t) in grp if d == 3)
+        # Was aus den Ringen kam, IST der jeweilige Ring; der Rest ist Luft.
+        ring_v, wk_v = set(), set()
+        for i, grp in enumerate(abb[len(stirnluft):]):
+            ziel = ring_v if i < len(ringe) else wk_v
+            ziel.update(t for (d, t) in grp if d == 3)
         stirn_v = set()
         for grp in abb[:len(stirnluft)]:
             stirn_v.update(t for (d, t) in grp if d == 3)
-        stirn_v -= ring_v
-        if not ring_v:
-            raise RuntimeError("Kurzschlussringe nach dem Verschneiden nicht "
-                               "wiedergefunden")
+        stirn_v -= (ring_v | wk_v)
+        if not ring_v or not wk_v:
+            raise RuntimeError("Ringe nach dem Verschneiden nicht wiedergefunden "
+                               f"(Kaefig {len(ring_v)}, Wickelkopf {len(wk_v)})")
 
         # Alles zusammenkleben, damit die Felder ueber die Stirnflaeche stetig sind.
         alle = ([(3, t) for t in vols] + [(3, t) for t in sorted(ring_v)]
+                + [(3, t) for t in sorted(wk_v)]
                 + [(3, t) for t in sorted(stirn_v)])
         _, abb2 = occ.fragment(alle[:1], alle[1:])
         occ.synchronize()
@@ -226,6 +260,7 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
         gmsh.model.addPhysicalGroup(3, neu(gruppen["stator"]), GID_STATOR, "statoreisen")
         gmsh.model.addPhysicalGroup(3, neu(sorted(ring_v)), GID_RING, "ringe")
         gmsh.model.addPhysicalGroup(3, neu(sorted(stirn_v)), GID_STIRN, "stirnluft")
+        gmsh.model.addPhysicalGroup(3, neu(sorted(wk_v)), GID_WKRING, "wickelkopf")
         for k, v in enumerate(nut_v):
             gmsh.model.addPhysicalGroup(3, neu(v), GID_NUT0 + k, f"nut{k}")
 
@@ -238,7 +273,7 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
             aussen_zyl = abs(weite - m["r_so"]) < 1e-4 * m["r_so"] + 1e-9 \
                 and (z_hi - z_lo) > 1e-6
             stirn_flaeche = abs(z_hi - z_lo) < 1e-9 and (
-                abs(z_lo + ring_w + stirn) < 1e-9 or abs(z_lo - (L + ring_w + stirn)) < 1e-9)
+                abs(z_lo + tief + stirn) < 1e-9 or abs(z_lo - (L + tief + stirn)) < 1e-9)
             if aussen_zyl or stirn_flaeche:
                 rand.append(t)
         if not rand:
@@ -276,15 +311,47 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
             "n_stab": m["n_stab"], "n_nut": len(q["nuten"]),
             "L_m": L, "ring_h_m": ring_h, "ring_w_m": ring_w,
             "A_ring_m2": a_ring, "stirn_m": stirn,
+            "wk_h_m": wk_h, "wk_t_m": wk_t,
             "r_wel": m["r_wel"], "r_rot": m["r_rot"], "r_si": m["r_si"],
             "r_so": m["r_so"], "gap_m": m["gap_m"],
             "lc_gap_m": lc_gap, "lc_eisen_m": lc_eisen,
             "A_nut_m2": q["A_nut_m2"], "A_stab_m2": float(kaefig["A_stab_mm2"]) * 1e-6}
 
 
+def wickelkopf_stromdichte(netz: dict, geom: dict, i_pk_phys: float) -> float:
+    """Amplitude ``K`` der azimutalen Rueckstromdichte im Wickelkopfring [A/m^2].
+
+    Hergeleitet, nicht kalibriert. Der Nutstrom ist als Zeiger
+    ``I(theta) = I_pk * exp(-j*p*theta)`` eingepraegt; ueber den Umfang liegen
+    ``n_slots`` Nuten, also traegt ein Bogenelement
+
+        dI/dtheta = (n_slots / 2pi) * I_pk * exp(-j*p*theta) .
+
+    Was axial hineinfliesst, muss azimutal wieder heraus:
+
+        dI_theta/dtheta = -dI/dtheta
+        I_theta(theta)  = -j * (n_slots * I_pk / (2pi*p)) * exp(-j*p*theta)
+
+    Der Ringquerschnitt ist ``h * t`` (radiale Nuttiefe mal axiale Ringdicke),
+    also
+
+        K = n_slots * I_pk / (2pi * p * h * t) .
+
+    Der Faktor ``1/p`` ist der Kern: eine hoehere Polzahl bedeutet eine kuerzere
+    Halbwelle und damit weniger Strom, der bis zum Vorzeichenwechsel azimutal
+    weitergereicht werden muss. Wer ihn vergisst, laesst eine Restdivergenz
+    stehen -- und die wirkt wie gar kein Rueckweg.
+    """
+    n_slots = max(int(geom["slots"]), 1)
+    p = max(int(geom["p"]), 1)
+    h = max(float(netz["wk_h_m"]), 1e-9)
+    t = max(float(netz["wk_t_m"]), 1e-9)
+    return n_slots * float(i_pk_phys) / (2.0 * math.pi * p * h * t)
+
+
 def schreibe_sif(netz: dict, omega1: float, sigma_eff: float, j_nut: dict,
                  work_dir: str, mu_r_steg: float, mesh_name: str = "mesh",
-                 ring_leitet: bool = True) -> str:
+                 ring_leitet: bool = True, k_wk: float = 0.0, p_pol: int = 1) -> str:
     """``case.sif`` fuer ``WhitneyAVHarmonicSolver`` (3-D, komplex)."""
     os.makedirs(os.path.join(work_dir, "results"), exist_ok=True)
     n_nut = int(netz["n_nut"])
@@ -300,7 +367,8 @@ def schreibe_sif(netz: dict, omega1: float, sigma_eff: float, j_nut: dict,
 
     koerper = [(GID_WELLE, 1, None), (GID_ROTOR, 1, None), (GID_STAEBE, 3, None),
                (GID_STEG, 4, None), (GID_LUFT, 2, None), (GID_STATOR, 1, None),
-               (GID_RING, 3 if ring_leitet else 2, None), (GID_STIRN, 2, None)]
+               (GID_RING, 3 if ring_leitet else 2, None), (GID_STIRN, 2, None),
+               (GID_WKRING, 2, n_nut + 1)]     # Rueckleiter: Luft mit Stromdichte
     koerper += [(GID_NUT0 + k, 2, k + 1) for k in range(n_nut)]
     for i, (gid, mat, bf) in enumerate(koerper, start=1):
         S.append(f"Body {i}\n  Target Bodies(1) = {gid}\n  Equation = 1\n"
@@ -332,12 +400,52 @@ def schreibe_sif(netz: dict, omega1: float, sigma_eff: float, j_nut: dict,
     # bleibt bei 1,5, neunzehn Minuten Rechenzeit und am Ende kein Feld.
     # MUMPS geht auf Tetraedern mit der niedrigst-ordnigen Kantenbasis und dem
     # Tree-Gauge -- beides ist hier der Fall.
+    # Wickelkopf-Rueckleiter: azimutale Stromdichte, komplex.
+    #
+    #   J_theta(theta) = -j * K * exp(-j*p*theta)
+    #                  = -K*sin(p*theta)  -  j*K*cos(p*theta)
+    #
+    # In kartesische Komponenten: J_x = -sin(theta)*J_theta,
+    # J_y = +cos(theta)*J_theta, mit sin/cos aus x und y ueber den Radius. Der
+    # Radius steht ausdruecklich im Nenner: ohne ihn waere die Stromdichte am
+    # Aussenrand des Rings groesser als innen, und die Erhaltung stimmte nur auf
+    # einem Radius.
+    if k_wk > 0:
+        r_ = "sqrt(tx(0)*tx(0)+tx(1)*tx(1))"
+        arg = f"{p_pol}*atan2(tx(1),tx(0))"
+        jt_re = f"(-{k_wk:.8e}*sin({arg}))"
+        jt_im = f"(-{k_wk:.8e}*cos({arg}))"
+        S.append(f"Body Force {n_nut + 1}\n"
+                 f'  Current Density 1 = Variable Coordinate\n'
+                 f'    Real MATC "-tx(1)/{r_}*{jt_re}"\n'
+                 f'  Current Density 2 = Variable Coordinate\n'
+                 f'    Real MATC "tx(0)/{r_}*{jt_re}"\n'
+                 f'  Current Density Im 1 = Variable Coordinate\n'
+                 f'    Real MATC "-tx(1)/{r_}*{jt_im}"\n'
+                 f'  Current Density Im 2 = Variable Coordinate\n'
+                 f'    Real MATC "tx(0)/{r_}*{jt_im}"\n'
+                 f"End\n")
+    else:
+        S.append(f"Body Force {n_nut + 1}\n"
+                 f"  Current Density 3 = Real 0.0\nEnd\n")
+
     S.append("Solver 1\n"
              '  Equation = "MgDyn3DHarmonic"\n'
              '  Procedure = "MagnetoDynamics" "WhitneyAVHarmonicSolver"\n'
              '  Variable = "AV[AV re:1 AV im:1]"\n'
              f"  Angular Frequency = Real {omega1:.9e}\n"
              "  Use Tree Gauge = Logical True\n"
+             # Die eingepraegte Stromdichte ist NICHT exakt divergenzfrei: die
+             # Nutstroeme sind je Nut konstant, der Rueckstrom im Wickelkopfring
+             # dagegen eine stetige Sinuswelle. Was an den Nutgrenzen uebrig
+             # bleibt, muss der Jfix-Loeser wegprojizieren -- ``ema_em3d``
+             # schaltet ihn im Lastfall aus genau diesem Grund ein.
+             "  Fix Input Current Density = Logical True\n"
+             "  Jfix: Linear System Iterative Method = BiCGStabL\n"
+             "  Jfix: Linear System Max Iterations = 10000\n"
+             "  Jfix: Linear System Convergence Tolerance = 1.0e-8\n"
+             "  Jfix: Linear System Preconditioning = ILU1\n"
+             "  Jfix: Linear System Abort Not Converged = False\n"
              "  Linear System Solver = Direct\n"
              "  Linear System Direct Method = MUMPS\n"
              "  Steady State Convergence Tolerance = 1.0e-8\n"
@@ -410,7 +518,8 @@ def netzkosten(geom: dict, kaefig: dict, axial_mm: float, work_dir: str,
 def _loese(ctx: dict, ring_leitet: bool, timeout: int) -> dict:
     """EIN 3-D-Lauf auf dem vorhandenen Netz."""
     schreibe_sif(ctx["netz"], ctx["omega1"], ctx["sigma_eff"], ctx["j_nut"],
-                 ctx["work_dir"], ctx["mu_r_steg"], ring_leitet=ring_leitet)
+                 ctx["work_dir"], ctx["mu_r_steg"], ring_leitet=ring_leitet,
+                 k_wk=ctx["k_wk"], p_pol=ctx["p"])
     rs = elmer_runner.run_elmersolver(os.path.join(ctx["work_dir"], "case.sif"),
                                       ctx["work_dir"], timeout=timeout)
     if not rs.get("ok"):
@@ -476,12 +585,18 @@ def _aufbau(payload: dict, rpm: float, last_nm: float, work_dir: str,
     rg = elmer_runner.run_elmergrid(netz["msh"], mesh_dir)
     if not rg.get("ok"):
         raise RuntimeError("ElmerGrid: " + (rg.get("stderr") or rg.get("error", ""))[:300])
+    # Derselbe Waechter wie in 2-D. Er fehlte hier, obwohl der Kommentar bei den
+    # Gruppennummern ihn beschreibt: ``ElmerGrid -autoclean`` nummeriert die
+    # Koerper um, und wenn die sif dann ins Leere zielt, gibt der Loeser ein
+    # leeres Feld aus, ohne zu widersprechen.
+    H.pruefe_koerpernummern(mesh_dir, GID_NUT0 - 1 + netz["n_nut"])
 
     i_pk_phys = float(bp["I_s_A"]) / max(ema_asm.k_norm(geom), 1e-12)
     return {"geom": geom, "p": p, "bp": bp, "netz": netz, "work_dir": work_dir,
             "omega1": omega1, "sigma_eff": sigma_eff, "schlupf": s,
             "mu_r_steg": mu, "axial_mm": axial,
             "j_nut": H.stator_stroeme(geom, i_pk_phys, netz["A_nut_m2"]),
+            "k_wk": wickelkopf_stromdichte(netz, geom, i_pk_phys),
             "stabmaterial": mat["label"], "i_pk_phys": i_pk_phys}
 
 
@@ -574,6 +689,14 @@ def rechne(payload: dict, rpm: float, last_nm: float, work_dir: str,
 B_UNMOEGLICH_T = 20.0
 
 
+def _finde_vtu(ordner: str) -> str:
+    """Die juengste Ergebnisdatei im Ausgabeordner."""
+    if not os.path.isdir(ordner):
+        return ""
+    treffer = sorted(f for f in os.listdir(ordner) if f.endswith(".vtu"))
+    return os.path.join(ordner, treffer[-1]) if treffer else ""
+
+
 def _lies_vtu_zellen(vtu_pfad: str):
     """Zellwerte der Ergebnisdatei: Koerper-Id, Volumen, Joule-Dichte, |B|.
 
@@ -602,13 +725,23 @@ def _lies_vtu_zellen(vtu_pfad: str):
     joule = hole("joule heating e")
     b_re, b_im = hole("magnetic flux density re e"), hole("magnetic flux density im e")
 
+    # Tetraedervolumen vektorisiert. Die naheliegende Schleife ueber
+    # ``grid.GetCell(i)`` legt je Zelle vier numpy-Arrays an; bei 52.000 Zellen
+    # ist das der langsamste Teil der ganzen Auswertung — und er steht hinter
+    # einem Loeserlauf, faellt also erst auf, wenn man schon gewartet hat.
+    pts3 = vtk_to_numpy(grid.GetPoints().GetData())
+    cells = grid.GetCells()
+    conn = vtk_to_numpy(cells.GetConnectivityArray())
+    offs = vtk_to_numpy(cells.GetOffsetsArray())
+    laenge = np.diff(offs)
     n = grid.GetNumberOfCells()
     vol = np.zeros(n)
-    for i in range(n):
-        c = grid.GetCell(i)
-        if c.GetNumberOfPoints() == 4:                       # Tetraeder
-            p = [np.array(c.GetPoints().GetPoint(k)) for k in range(4)]
-            vol[i] = abs(np.dot(p[1] - p[0], np.cross(p[2] - p[0], p[3] - p[0]))) / 6.0
+    tet = laenge == 4
+    if tet.any():
+        idx = conn[np.repeat(offs[:-1][tet], 4) + np.tile(np.arange(4), int(tet.sum()))]
+        q = pts3[idx].reshape(-1, 4, 3)
+        vol[tet] = np.abs(np.einsum("ij,ij->i", q[:, 1] - q[:, 0],
+                                    np.cross(q[:, 2] - q[:, 0], q[:, 3] - q[:, 0]))) / 6.0
 
     b_abs = None
     if b_re is not None and b_im is not None:
@@ -633,11 +766,11 @@ def pruefe_feld(vtu_pfad: str) -> dict:
     if b_max > B_UNMOEGLICH_T:
         raise RuntimeError(
             f"Das Feld ist keines: groesste Flussdichte {b_max:.3g} T "
-            f"(moeglich waeren hoechstens {B_UNMOEGLICH_T:.0f} T). Ursache ist "
-            f"der fehlende Rueckleiter fuer den Statorstrom — in 3-D muss sich "
-            f"der Strom schliessen, und dieses Modell hat dafuer keinen Weg "
-            f"(s. Modulkopf). Bis das gebaut ist, traegt die Stufe nur "
-            f"netzkosten().")
+            f"(moeglich waeren hoechstens {B_UNMOEGLICH_T:.0f} T). Die Ursache "
+            f"ist NICHT geklaert — was ausgeschlossen ist und was als naechstes "
+            f"zu pruefen waere, steht im Modulkopf. Nutzbar ist heute "
+            f"netzkosten(); die Feldstufe dieser Bauart traegt weiterhin "
+            f"cae_cli.py feld2d (Elmer 2-D).")
     return {"B_max_T": round(b_max, 4), "zellen": int(len(gid))}
 
 

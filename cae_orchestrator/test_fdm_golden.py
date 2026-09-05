@@ -159,6 +159,41 @@ def _cmp(case, key, got, exp, errs):
             errs.append(f"{case}.{key}: {float(got):.12g} statt {float(exp):.12g}")
 
 
+def _stellgroessen() -> dict:
+    """Die Groessen, an denen das FDM-Feld haengt und die NICHT im Fall stehen.
+
+    Warum das mitgeschrieben wird: die Baseline war zwei Tage lang rot, und die
+    Meldung bestand aus vierundzwanzig Zahlenpaaren. Die Ursache -- eine
+    bewusste Aenderung von ``ema_topology.BRIDGE_MM`` von 2,0 auf 1,3 mm --
+    stand nirgends darin. Wer 24 Abweichungen liest, sucht den Fehler im Loeser;
+    wer „BRIDGE_MM: Baseline 2.0, jetzt 1.3" liest, weiss es sofort.
+
+    Die Falldaten (Geometrie, N, Stroeme) stehen in ``CASES_*`` und aendern sich
+    mit dem Test; hier stehen die Modul-Globalen, die von aussen wirken.
+    """
+    import ema_topology as et
+    return {
+        "BRIDGE_MM": float(getattr(et, "BRIDGE_MM", float("nan"))),
+        "Br_NdFeB": float(getattr(ea, "Br_NdFeB", float("nan"))),
+        "MU_R_MAG": float(getattr(ea, "MU_R_MAG", float("nan"))),
+        "MU_R_IRON": float(getattr(ea, "MU_R_IRON", float("nan"))),
+    }
+
+
+def _stellgroessen_pruefen(base: dict) -> list:
+    """Welche Stellgroesse hat sich seit der Baseline geaendert?"""
+    alt = base.get("_stellgroessen") or {}
+    if not alt:
+        return []
+    jetzt = _stellgroessen()
+    aus = []
+    for k, v in sorted(jetzt.items()):
+        a = alt.get(k)
+        if a is not None and not math.isclose(float(a), v, rel_tol=1e-12):
+            aus.append(f"{k}: Baseline {a:g}, jetzt {v:g}")
+    return aus
+
+
 def _load_baseline():
     if not os.path.exists(BASELINE):
         raise AssertionError(
@@ -170,8 +205,13 @@ def _load_baseline():
 
 def _check(cases):
     base = _load_baseline()
+    geaendert = _stellgroessen_pruefen(base)
+    if geaendert:
+        print("  ⓘ Seit der Baseline geaendert: " + "; ".join(geaendert))
     errs = []
     for name, shape, N, iq, id_, *rest in cases:
+        if name.startswith("_"):
+            continue
         if name not in base:
             errs.append(f"{name}: nicht in der Baseline — `--update` nötig?")
             continue
@@ -181,10 +221,13 @@ def _check(cases):
             _cmp(name, key, fp.get(key), exp[key], errs)
         print(f"  ✓ {name:<16} Br_peak={fp['br_peak']:.6f} T  |B|max={fp['b_max']:.4f} T  "
               f"T_maxwell={fp['T_maxwell']:.4g} Nm")
-    assert not errs, ("FDM-Feld hat sich geändert (rtol=%g):\n  " % RTOL
-                      + "\n  ".join(errs)
-                      + "\n\nWar die Änderung beabsichtigt? Dann `python "
-                        "test_fdm_golden.py --update` und den Diff prüfen.")
+    assert not errs, (
+        "FDM-Feld hat sich geändert (rtol=%g):\n  " % RTOL
+        + "\n  ".join(errs)
+        + ("\n\nURSACHE steht wahrscheinlich hier — seit der Baseline geändert:\n  "
+           + "\n  ".join(geaendert) if geaendert else "")
+        + "\n\nWar die Änderung beabsichtigt? Dann `python "
+          "test_fdm_golden.py --update` und den Diff prüfen.")
 
 
 def test_golden_n180():
@@ -355,7 +398,7 @@ def test_lu_cache_bounded():
 
 
 def _update():
-    out = {}
+    out = {"_stellgroessen": _stellgroessen()}
     for name, shape, N, iq, id_, *rest in CASES_FAST + CASES_SLOW + CASES_SAT:
         fp = _fingerprint(name, shape, N, iq, id_, *rest)
         out[name] = fp
@@ -363,7 +406,8 @@ def _update():
     with open(BASELINE, "w") as f:
         json.dump(out, f, indent=1, sort_keys=True)
         f.write("\n")
-    print(f"\nBaseline geschrieben: {BASELINE} ({len(out)} Fälle)")
+    print(f"\nBaseline geschrieben: {BASELINE} ({len(out) - 1} Fälle) "
+          f"mit {out['_stellgroessen']}")
 
 
 if __name__ == "__main__":

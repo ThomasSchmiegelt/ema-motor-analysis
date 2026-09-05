@@ -64,13 +64,13 @@ GEOM = {"p": 3, "slots": 36, "statorID": 190.0, "statorOD": 280.0,
 
 print("\n1. Koerpernummern — derselbe stille Fehler wie in 2-D")
 
-pruefe(sorted({H3.GID_WELLE, H3.GID_ROTOR, H3.GID_STAEBE, H3.GID_STEG,
-               H3.GID_LUFT, H3.GID_STATOR, H3.GID_RING,
-               H3.GID_STIRN}) == [1, 2, 3, 4, 5, 6, 7, 8]
-       and H3.GID_NUT0 == 9,
-       "die festen Koerper belegen luecklos 1..8, die Nuten schliessen ab 9 an "
-       "— ElmerGrid -autoclean nummeriert sonst um und der Loeser gibt ein "
-       "leeres Feld aus, ohne zu widersprechen")
+fest = sorted({H3.GID_WELLE, H3.GID_ROTOR, H3.GID_STAEBE, H3.GID_STEG,
+               H3.GID_LUFT, H3.GID_STATOR, H3.GID_RING, H3.GID_STIRN,
+               H3.GID_WKRING})
+pruefe(fest == list(range(1, len(fest) + 1)) and H3.GID_NUT0 == len(fest) + 1,
+       f"die festen Koerper belegen luecklos 1..{len(fest)}, die Nuten "
+       f"schliessen ab {H3.GID_NUT0} an — ElmerGrid -autoclean nummeriert sonst "
+       f"um und der Loeser gibt ein leeres Feld aus, ohne zu widersprechen")
 pruefe(H3.GID_RING != H3.GID_STAEBE,
        "der Kurzschlussring ist ein EIGENER Koerper — sonst liesse er sich "
        "nicht getrennt abschalten, und genau darauf beruht diese Stufe")
@@ -209,16 +209,28 @@ pruefe(hasattr(H3, "verluste_je_koerper") and hasattr(H3, "pruefe_feld"),
        "sie kommt aus der Ergebnisdatei, und davor prueft pruefe_feld, ob das "
        "Ergebnis ueberhaupt ein Feld ist")
 
-# Der Modulkopf darf keinen Rueckleiter versprechen, den es nicht gibt.
+# Der Modulkopf muss den WIRKLICHEN Stand tragen: was gebaut ist, was
+# ausgeschlossen wurde, und was heute nutzbar ist.
 import inspect
 kopf = inspect.getdoc(H3) or ""
-hat_ringe = "coil_ring" in inspect.getsource(H3.baue_netz)
-pruefe(not hat_ringe, "das Netz baut heute keine Wickelkopf-Rueckleiter")
-pruefe("FEHLT" in kopf and "Rueckleiter" in kopf,
-       "und der Modulkopf sagt das ausdruecklich, statt sie zu beschreiben — "
-       "eine Beschreibung, die nicht zutrifft, ist schlimmer als keine")
-pruefe("netzkosten()" in kopf,
-       "er nennt auch, was heute nutzbar IST")
+quelle = inspect.getsource(H3.baue_netz)
+pruefe("wk_ringe" in quelle and "GID_WKRING" in inspect.getsource(H3.schreibe_sif),
+       "die Wickelkopf-Rueckleiter sind gebaut und werden bestromt")
+pruefe("NICHT gueltig" in kopf and "ausgeschlossen" in kopf,
+       "und der Modulkopf sagt trotzdem, dass das Feld heute nicht gueltig ist "
+       "— gebaut heisst nicht behoben")
+pruefe("16 bis 28" in kopf,
+       "er nennt den Befund, an dem der naechste Versuch ansetzt (der gesunde "
+       "Nutblock), statt nur zu melden, dass es nicht geht")
+pruefe("netzkosten()" in kopf and "feld2d" in kopf,
+       "und was heute stattdessen traegt")
+
+# Die Fehlermeldung darf keine Ursache nennen, die widerlegt ist.
+import ema_em3d_harm as _H
+_q = inspect.getsource(_H.pruefe_feld)
+pruefe("fehlende Rueckleiter" not in _q and "NICHT geklaert" in _q,
+       "der Waechter nennt die Ursache als ungeklaert — die zuvor genannte "
+       "(fehlender Rueckleiter) ist gebaut und widerlegt")
 
 
 # ── 5. Das Tor ────────────────────────────────────────────────────────────────
