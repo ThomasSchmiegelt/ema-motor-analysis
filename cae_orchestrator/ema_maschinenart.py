@@ -59,6 +59,17 @@ class Art:
     stellbarer_fluss: bool        # Fluss ueber einen eigenen Strom einstellbar
     stufen: tuple = ()            # welche Stufen diese Art HEUTE tragen
     ohne_bedeutung: tuple = ()    # Kennzahlen, die es fuer diese Art nicht gibt
+    # WELCHER Loeser die Feldstufe traegt. Die Pipeline rechnet ihr Feld mit der
+    # 2-D-FDM (``fdm``) -- reell, linear, magnetostatisch. Ein Kaefiglaeufer ist
+    # darin grundsaetzlich nicht abbildbar, seine Feldstufe laeuft ueber Elmers
+    # harmonischen Loeser (``elmer2d_harm``, Modul ``ema_em2d_harm``).
+    #
+    # Ohne diese Unterscheidung waere ``stufen`` mehrdeutig: „feld getragen"
+    # haette dann geheissen, die Pipeline duerfe die ASM durch die FDM schicken
+    # -- und die haette klaglos ein magnetostatisches Feld ohne Laeuferstroeme
+    # ausgegeben. Genau die Art stiller Ersatzrechnung, gegen die dieses Modul
+    # gebaut ist.
+    feldweg: str = "fdm"
     hinweis: str = ""
 
 
@@ -103,7 +114,11 @@ ARTEN = {
         hat_laeuferwicklung=True,
         hat_schlupf=True,
         stellbarer_fluss=True,
-        stufen=("analytisch",),
+        # "feld" traegt seit ``ema_em2d_harm`` (harmonische 2-D-Rechnung mit
+        # Elmers MagnetoDynamics2DHarmonic). NICHT die 2-D-FDM: die ist reell
+        # und magnetostatisch, ein Kaefiglaeufer ist darin nicht abbildbar.
+        stufen=("analytisch", "feld"),
+        feldweg="elmer2d_harm",
         ohne_bedeutung=_PM_KENNZAHLEN,
         hinweis=("Der Magnetisierungsstrom liegt DAUERND im Stator, und der "
                  "Schlupfverlust faellt im Laeufer an -- der thermisch "
@@ -198,6 +213,29 @@ def pruefe_stufe(code: str, stufe: str) -> Art:
         f"{art.label}: die Stufe „{STUFEN_LABEL.get(stufe, stufe)}“ traegt diese "
         f"Maschinenart noch nicht. Getragen wird bisher: {kann}. "
         f"Es wird hier bewusst NICHT ersatzweise mit PSM-Physik gerechnet.")
+
+
+FELDWEG_WERKZEUG = {
+    "fdm":          "die Pipeline (run)",
+    "elmer2d_harm": "cae_cli.py feld2d  (Elmer 2-D, harmonisch)",
+}
+
+
+def pruefe_feldweg(code: str, weg: str) -> Art:
+    """Traegt diese Art die Feldstufe **auf diesem Loeser**?
+
+    ``pruefe_stufe(code, "feld")`` sagt nur, dass es fuer diese Art ueberhaupt
+    eine Feldstufe gibt. Welcher Loeser sie traegt, sagt ``Art.feldweg`` -- und
+    wer die ASM in die FDM schickt, bekommt hier einen Fehler mit der Adresse
+    des richtigen Werkzeugs statt ein magnetostatisches Feld ohne Laeuferstroeme.
+    """
+    art = pruefe_stufe(code, "feld")
+    if art.feldweg != weg:
+        raise ArtNichtUnterstuetzt(
+            f"{art.label}: die Feldstufe laeuft nicht ueber "
+            f"'{FELDWEG_WERKZEUG.get(weg, weg)}', sondern ueber "
+            f"'{FELDWEG_WERKZEUG.get(art.feldweg, art.feldweg)}'.")
+    return art
 
 
 def gilt(code: str, kennzahl: str) -> bool:

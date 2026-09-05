@@ -1107,6 +1107,87 @@ def cmd_maschinenart(args) -> int:
     return 0
 
 
+def cmd_feld2d(args) -> int:
+    """ASM-Feld harmonisch rechnen (Elmer 2-D) -- Stufe „feld" der Asynchronmaschine.
+
+    Warum es dieses Verb ueberhaupt gibt
+    -------------------------------------
+
+    Die analytische ASM-Stufe (``ema_asm``) setzt den Schlupf aus einer
+    Leistungsbilanz an und das Luftspaltfeld aus einem angenommenen
+    Carter-Faktor. Beides sind **Annahmen**, und beide entscheiden ueber das
+    Moment. Ob die gezeichnete Maschine sie einloest, kann nur ein Feld sagen.
+
+    Gerechnet wird in drei Messschritten, und keiner davon setzt eine Zahl, die
+    er auch messen koennte:
+
+    1. **Steg saettigen** -- die Permeabilitaet des Blechstegs ueber der
+       Kaefignut wird eingestellt, bis der Steg bei seiner Saettigung steht.
+       Mit dem vollen mu_r des Blechs schliesst er das Hauptfeld kurz
+       (gemessen 12 T im Steg gegen 0,07 T im Joch), mit mu_r = 1 ist die Nut
+       offen und der Carter-Effekt frisst die Hauptinduktivitaet.
+    2. **Leerlauf** -- der Carter-Faktor, den die GEZEICHNETE Nut wirklich hat.
+    3. **Momenten-Schlupf-Kennlinie** -- bei welchem Schlupf das Feld das
+       geforderte Moment traegt, und wo das Kippmoment liegt.
+
+    Die Abweichung gegen die analytische Stufe wird ausgegeben, nicht
+    weggerechnet.
+
+    Exit: 0 = ok, 2 = Bedienfehler, 4 = Rechenfehler.
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    for a in applied:
+        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+
+    if not (payload.get("geom") or {}):
+        return _die("Keine Geometrie im Payload -- feld2d braucht geom.", EXIT_USAGE)
+
+    import ema_maschinenart as MA
+    art = MA.art_code(payload)
+    try:
+        MA.pruefe_stufe(art, "feld")
+    except MA.ArtNichtUnterstuetzt as e:
+        return _die(str(e), EXIT_USAGE)
+    if art != "asm":
+        return _die(f"feld2d ist die Kaefiglaeufer-Stufe; '{art}' gehoert nicht "
+                    f"hierher. 'maschinenart {art}' sagt, was diese Art traegt.",
+                    EXIT_USAGE)
+
+    kennung = getattr(args, "projekt", None) or getattr(args, "_pid", None)
+    pdir = _projekt_pfad(kennung) if kennung else ""
+    import tempfile
+    arbeit = os.path.join(pdir, "feld2d") if pdir else \
+        os.path.join(tempfile.gettempdir(), f"feld2d_{os.getpid()}")
+
+    rpm = float(getattr(args, "rpm", 0) or payload.get("rpm_to")
+                or payload.get("rpm_from") or 3000.0)
+    last = float(getattr(args, "last_nm", 0) or payload.get("load_nm") or 100.0)
+
+    import ema_em2d_harm as EH
+    try:
+        kz = EH.rechne(payload, rpm=rpm, last_nm=last, work_dir=arbeit,
+                       gap_lagen=int(getattr(args, "gap_lagen", 0) or EH.GAP_LAGEN),
+                       mu_r_steg=float(getattr(args, "mu_r_steg", 0) or 0.0),
+                       schlupf_suche=not getattr(args, "ohne_kennlinie", False),
+                       log=lambda t: print(f"  {t}"))
+    except Exception as e:
+        return _die(f"Feldlauf fehlgeschlagen: {type(e).__name__}: {e}", 4)
+
+    text = EH.bericht(kz)
+    print()
+    print(text)
+    _ablegen(args, "feld2d", text,
+             daten={k: v for k, v in kz.items() if k != "analytisch"},
+             pid=kennung)
+    return 0
+
+
 def cmd_aufgabe(args) -> int:
     """Eine neue Aufgabe zerlegen: was ist gefordert, was steht schon da, was fehlt.
 
@@ -2049,6 +2130,37 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("code", nargs="?", help="eine Art im Einzelnen (pmsm|asm|synrm|eesm)")
     _add_globals(s)
     s.set_defaults(fn=cmd_maschinenart)
+
+    s = sub.add_parser("feld2d",
+                       help="ASM-Feld harmonisch rechnen (Elmer 2-D): Steg "
+                            "saettigen, Carter messen, Momenten-Schlupf-Kennlinie")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes); "
+                        "dieses Projekt ist dann auch das Ziel der Ablage")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--projekt",
+                   help="Zielprojekt der Ablage (Vorgabe: das Projekt des Payloads)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar (gegen 'geom' geprueft)")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--rpm", type=float, default=0.0,
+                   help="synchrone Drehzahl (Vorgabe: rpm_to aus dem Payload)")
+    s.add_argument("--last-nm", dest="last_nm", type=float, default=0.0,
+                   help="gefordertes Moment (Vorgabe: load_nm aus dem Payload)")
+    s.add_argument("--gap-lagen", dest="gap_lagen", type=int, default=0,
+                   help="Elementlagen im Luftspalt (Vorgabe 3)")
+    s.add_argument("--mu-r-steg", dest="mu_r_steg", type=float, default=0.0,
+                   help="feste Steg-Permeabilitaet statt der gemessenen Saettigung")
+    s.add_argument("--ohne-kennlinie", dest="ohne_kennlinie", action="store_true",
+                   help="nur den analytischen Schlupf rechnen, keine Kennlinie")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_feld2d)
 
     s = sub.add_parser("steckbrief",
                        help="was ein Projekt IST und was daran gerechnet wurde — "

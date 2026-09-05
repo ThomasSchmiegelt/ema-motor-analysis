@@ -69,9 +69,18 @@ except MA.ArtNichtUnterstuetzt:
 
 pruefe(MA.traegt("pmsm", "em3d") and MA.traegt("asm", "analytisch"),
        "PSM traegt alle vier Stufen, die ASM die analytische")
-pruefe(not MA.traegt("asm", "feld"),
-       "die ASM traegt den Feldlauf NICHT — die 2-D-FDM ist magnetostatisch und "
-       "kann einen Kaefiglaeufer grundsaetzlich nicht abbilden")
+pruefe(MA.traegt("asm", "feld") and MA.ARTEN["asm"].feldweg == "elmer2d_harm",
+       "die ASM traegt den Feldlauf — aber ueber Elmers harmonischen Loeser "
+       "(ema_em2d_harm), nicht ueber die FDM")
+try:
+    MA.pruefe_feldweg("asm", "fdm")
+    pruefe(False, "die ASM darf NICHT in die 2-D-FDM")
+except MA.ArtNichtUnterstuetzt as e:
+    pruefe("feld2d" in str(e),
+           "wer die ASM in die FDM schickt, bekommt die Adresse des richtigen "
+           "Werkzeugs (feld2d) statt ein magnetostatisches Feld ohne Laeuferstroeme")
+pruefe(MA.pruefe_feldweg("pmsm", "fdm").code == "pmsm",
+       "die PSM laeuft weiterhin durch die FDM")
 pruefe(not MA.traegt("synrm", "analytisch") and not MA.traegt("eesm", "analytisch"),
        "SynRM und EESM sind angemeldet, aber noch von keiner Stufe getragen")
 

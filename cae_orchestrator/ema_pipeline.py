@@ -31,16 +31,23 @@ def _gate_maschinenart(data: dict, state: dict | None = None,
     Voreinstellung an einem Fahrrad) -- er faellt nicht auf, weil nichts
     widerspricht. Deshalb wird hier abgewiesen und nicht ersetzt.
 
-    Analytisch (Paarvergleich, ``ema_asm``) ist die ASM getragen; der Feldlauf
-    braucht Elmers ``MagnetoDynamics2DHarmonic`` und ist eine eigene Stufe --
-    die 2-D-FDM dieses Werkzeugs ist reell, linear und magnetostatisch und kann
-    einen Kaefiglaeufer grundsaetzlich nicht abbilden.
+    Analytisch (Paarvergleich, ``ema_asm``) ist die ASM getragen, und seit
+    ``ema_em2d_harm`` auch die Feldstufe -- aber **nicht auf diesem Weg**. Die
+    Feldstufe der Pipeline ist die 2-D-FDM: reell, linear, magnetostatisch, ohne
+    sigma und ohne dA/dt. Ein Kaefiglaeufer ist darin grundsaetzlich nicht
+    abbildbar; seine Feldstufe laeuft ueber Elmers harmonischen Loeser.
+    Deshalb fragt das Tor auf der Feldstufe nicht nur, OB die Art ein Feld
+    kennt, sondern ob sie es auf DIESEM Loeser kennt (``pruefe_feldweg``) -- und
+    nennt sonst das richtige Werkzeug, statt nur abzuweisen.
     """
     code = ema_maschinenart.art_code(data or {})
     art = ema_maschinenart.hole(code)
     if state is not None:
         _log(state, f"\U0001F6E1 Maschinenart: {art.label}", 4)
-    ema_maschinenart.pruefe_stufe(code, stufe)
+    if stufe == "feld":
+        ema_maschinenart.pruefe_feldweg(code, "fdm")
+    else:
+        ema_maschinenart.pruefe_stufe(code, stufe)
 
 
 def _gate_rotor_layout(data: dict, state: dict | None = None,
