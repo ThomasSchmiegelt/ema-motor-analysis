@@ -118,6 +118,40 @@ def index():
 
 # ── Analysis pipeline ─────────────────────────────────────────────────────────
 
+def _payload_auffuellen(payload: dict) -> dict:
+    """Fehlende Schemaschluessel aus den Vorgaben ergaenzen — ohne etwas zu ueberschreiben.
+
+    Die Eingabemaske im Browser ist von Hand geschrieben und fuehrt nicht alle
+    Schluessel, die ``ema_text2ema.SCHEMA`` kennt. Wer einen Feinparameter nur
+    ueber die Parameter-Tabelle setzen kann, dessen Wert steht dann zwar im
+    Payload -- aber die uebrigen fehlen ganz. Das faellt niemandem auf, solange
+    jede lesende Stelle ihren eigenen Vorgabewert mitbringt: die Rechnung
+    stimmt, aber ``meta.json`` beschreibt die Maschine nicht vollstaendig, und
+    der Steckbrief wie der Agent sehen ein halbes Vokabular.
+
+    Genau daran ist ``test_cae_cli.test_schema_vs_payload`` angeschlagen, als
+    das Schema um Maschinenart, Wicklungsart und Bauform wuchs.
+
+    Aufgefuellt wird aus ``cae_cli.frischer_payload()`` -- **derselben** Quelle,
+    aus der auch ``--frisch`` und die Designer-Uebergabe speisen. Vorhandene
+    Werte bleiben unangetastet; die Vorgaben sind genau das bisherige Verhalten
+    (``geom.get(k, vorgabe)``), also aendert das Auffuellen keine Zahl. Es macht
+    nur sichtbar, womit gerechnet wurde.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    try:
+        import cae_cli
+        grund = cae_cli.frischer_payload()
+    except Exception:                                        # noqa: BLE001
+        return payload                 # lieber roh weiterreichen als gar nicht
+    geom = dict(grund.get("geom") or {})
+    geom.update(payload.get("geom") or {})
+    voll = {**grund, **{k: v for k, v in payload.items() if k != "geom"}}
+    voll["geom"] = geom
+    return voll
+
+
 @app.route("/analyse", methods=["POST", "OPTIONS"])
 def analyse():
     if request.method == "OPTIONS":
@@ -125,7 +159,7 @@ def analyse():
     if _state["status"] == "running":
         return jsonify({"error": "Pipeline läuft bereits"}), 409
 
-    data = request.get_json(force=True)
+    data = _payload_auffuellen(request.get_json(force=True))
     _state.update({"status": "running", "progress": 0, "log": [], "results": None})
     for _b in _frames.values():
         _b.clear()
@@ -2775,16 +2809,7 @@ def agent_vorgabe():
     # Vorgabewerte an Stellen, an denen er eine Entscheidung vermutet. Der
     # Grundsatz ist derselbe wie bei `--frisch`: neutraler Grundsatz aus dem
     # Schema, und darueber das, was wirklich gezeichnet wurde.
-    try:
-        import cae_cli
-        grund = cae_cli.frischer_payload()
-        geom = dict(grund.get("geom") or {})
-        geom.update(payload.get("geom") or {})
-        voll = {**grund, **{k: v for k, v in payload.items() if k != "geom"}}
-        voll["geom"] = geom
-        payload = voll
-    except Exception:                                        # noqa: BLE001
-        pass                       # lieber roh uebergeben als gar nicht
+    payload = _payload_auffuellen(payload)
 
     pid = str(body.get("projekt") or "").strip()
     if pid:

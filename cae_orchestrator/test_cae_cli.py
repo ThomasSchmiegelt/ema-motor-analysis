@@ -325,17 +325,52 @@ def test_schema_vs_payload():
     if not metas:
         print("– schema_vs_payload: uebersprungen (kein Projekt mit meta.json)")
         return
-    with open(max(metas, key=os.path.getmtime), encoding="utf-8") as f:
+    quelle = max(metas, key=os.path.getmtime)
+    with open(quelle, encoding="utf-8") as f:
         pl = json.load(f)["payload"]
-    fehlend = []
-    for key, spec in schema.items():
-        name = cae_cli._ALIAS.get(key, key)
-        where = pl.get("geom", {}) if (spec.get("in_geom") and name == key) else pl
-        if name not in where:
-            fehlend.append(f"{key} -> erwartet in {'geom' if where is not pl else 'payload'}")
-    assert not fehlend, ("Schema und Payload driften: " + "; ".join(fehlend)
-                         + " — _ALIAS in cae_cli.py nachziehen")
-    print(f"✓ schema_vs_payload: alle {len(schema)} Schemaschluessel im Payload gefunden")
+
+    def _fehlend(p):
+        aus = []
+        for key, spec in schema.items():
+            name = cae_cli._ALIAS.get(key, key)
+            wo = p.get("geom", {}) if (spec.get("in_geom") and name == key) else p
+            if name not in wo:
+                aus.append(f"{key} -> erwartet in {'geom' if wo is not p else 'payload'}")
+        return aus
+
+    roh = _fehlend(pl)
+
+    # Zwei Ursachen, und sie brauchen zwei verschiedene Antworten:
+    #
+    #   (a) Der Payload ist AELTER als der Schemaschluessel. Dann fehlt der Wert
+    #       in dieser einen Datei, aber jeder neue Lauf bringt ihn mit, weil
+    #       ``server._payload_auffuellen`` aus denselben Schemavorgaben
+    #       auffuellt, aus denen auch ``--frisch`` speist. Das ist kein Fehler,
+    #       sondern das Alter der Datei — und ``_ALIAS`` nachzuziehen waere hier
+    #       genau die falsche Antwort.
+    #
+    #   (b) Auch der aufgefuellte Payload kennt den Schluessel nicht. DANN sind
+    #       Schema und Payload-Vokabular wirklich auseinander, und die Werte
+    #       verschwinden still. Nur darauf schlaegt der Test an.
+    try:
+        import server
+        voll = server._payload_auffuellen(pl)
+    except Exception:                                        # noqa: BLE001
+        voll = pl
+    echt = _fehlend(voll)
+
+    assert not echt, ("Schema und Payload driften: " + "; ".join(echt)
+                      + " — auch nach dem Auffuellen aus den Schemavorgaben "
+                        "fehlen sie. _ALIAS in cae_cli.py nachziehen oder den "
+                        "Schluessel im Payload-Vokabular ergaenzen.")
+    if roh:
+        print(f"✓ schema_vs_payload: alle {len(schema)} Schemaschluessel kommen an. "
+              f"{len(roh)} davon fehlen in {os.path.basename(os.path.dirname(quelle))}/"
+              f"meta.json, weil diese Datei aelter ist als die Schluessel "
+              f"({', '.join(k.split(' ->')[0] for k in roh)}) — jeder neue Lauf "
+              f"bringt sie mit.")
+    else:
+        print(f"✓ schema_vs_payload: alle {len(schema)} Schemaschluessel im Payload gefunden")
 
 
 if __name__ == "__main__":
