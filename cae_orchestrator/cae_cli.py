@@ -1044,7 +1044,9 @@ PFLICHTPUNKTE = [
     dict(name="maschinenart", frage="PSM, ASM, SynRM oder EESM? (geom.machineType)",
          quelle="paarvergleich",
          hinweis="Vorgabe pmsm. 'paarvergleich --achse maschinenart' stellt sie "
-                 "gegeneinander. Getragen: analytisch pmsm+asm; Feld/CAD/3D nur pmsm"),
+                 "gegeneinander. Analytisch getragen: alle vier. Feld: pmsm "
+                 "(FDM, in der Pipeline) und asm (Elmer harmonisch, 'feld2d'). "
+                 "CAD und 3D bisher nur pmsm"),
     dict(name="betriebspunkt", frage="Moment und Drehzahl im Dauerbetrieb",
          quelle="aufgabe", hinweis="load_nm, rpm_from/rpm_to — nicht ableitbar"),
     dict(name="lastfall", frage="Fahrzyklus UND Fahrzeug (oder ausdruecklich keiner)",
