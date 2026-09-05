@@ -40,28 +40,47 @@ Der Feldlauf dieser Stufe liefert bis heute kein brauchbares Feld, und das
 steht hier, statt dass Kennzahlen daraus gebildet wuerden. ``pruefe_feld``
 weist ein Ergebnis ueber ``B_UNMOEGLICH_T`` ab.
 
-Gebaut und ausgeschlossen (jeweils mit einem eigenen Lauf gemessen):
+Gebaut und ausgeschlossen -- jedes mit einem eigenen Lauf gemessen, keines
+geraten:
 
-1. **Kein Rueckweg fuer den Statorstrom.** In 3-D muss sich der Strom
-   schliessen; ``ema_em3d`` haelt fest, was sonst passiert. Je Stirnseite liegt
-   jetzt ein **Wickelkopfring** im Nut-Radiusband, dessen azimutale Stromdichte
-   aus der Stromerhaltung HERGELEITET ist (``wickelkopf_stromdichte``), nicht
-   kalibriert. Ergebnis: unveraendert 8,9*10^7 T.
-2. **Restdivergenz der eingepraegten Stromdichte.** Die Nutstroeme sind je Nut
-   konstant, der Rueckstrom eine stetige Welle -- an den Nutgrenzen bleibt
-   etwas stehen. ``Fix Input Current Density`` ist eingeschaltet. Ergebnis:
-   Ziffer fuer Ziffer dasselbe (8,89*10^7 T), der Jfix-Loeser lief schon vorher
-   von selbst.
-3. **Stagnierender Loeser.** Behoben und nicht die Ursache: der direkte Loeser
-   (MUMPS) rechnet den Fall in 56 s statt in 19 Minuten ohne Ergebnis.
+1. **Kein Rueckweg fuer den Statorstrom.** Je Stirnseite liegt jetzt ein
+   **Wickelkopfring** im Nut-Radiusband, dessen azimutale Stromdichte aus der
+   Stromerhaltung HERGELEITET ist (``wickelkopf_stromdichte``), nicht
+   kalibriert. Er wirkt nachweislich (mit Ring steigt der Median von 0,151 auf
+   0,243 T), behebt aber nichts.
+2. **Restdivergenz der eingepraegten Stromdichte.** ``Fix Input Current
+   Density`` ist an. Ergebnis Ziffer fuer Ziffer dasselbe -- der Jfix-Loeser
+   lief schon vorher von selbst. Die Probe nebenbei: eine KONSTANTE
+   Ringstromdichte aendert gar nichts, weil sie nicht divergenzfrei ist und
+   Jfix sie vollstaendig wegprojiziert. Jfix arbeitet also.
+3. **Stagnierender Loeser.** Behoben, aber nicht die Ursache: MUMPS rechnet den
+   Fall in 56 s statt in 19 Minuten ohne Ergebnis.
+4. **Netz, Eichung, Loeser als solche.** Mit ALLEN Quellen auf null kommt
+   ueberall **exakt** null heraus (p50 = p99 = max = 0). Ein strukturell
+   krankes System haette das nicht getan. Das Feld stammt vollstaendig aus den
+   Quellen.
+5. **Unvollstaendiger Aussenrand.** Das war ein wirklicher Fehler und ist
+   behoben: die beiden Stirnflaechen wurden ueber einen absoluten Vergleich
+   ``abs(z - (L+tief+stirn)) < 1e-9`` gesucht, der nie traf. Das Gebiet war an
+   beiden Enden OFFEN. Gemessen vorher 1129 cm^2 Randflaeche (nur Mantel),
+   nachher 2359 cm^2 mit 2040 Deckeldreiecken. Das Ergebnis aenderte sich
+   dadurch **nicht** -- also war auch das nicht die Ursache. Der Bau weist eine
+   unvollstaendige Randflaeche jetzt ab.
 
-Der Befund, an dem der naechste Versuch ansetzen sollte: die Nuten **16 bis 28**
-sind gesund (0,02-0,8 T), alle uebrigen Koerper nicht. Ein
-ZUSAMMENHAENGENDER Block von dreizehn Nuten -- also rund ein Drittel des
-Umfangs -- rechnet richtig, der Rest nicht. Das spricht nicht fuer eine
-Formel und nicht fuer eine fehlende Quelle, sondern fuer etwas Winkelabhaengiges
-oder fuer die Eichung (Tree Gauge) auf einem Netz, das an einer Stelle nicht
-zusammenhaengt.
+Wie das Feld aussieht: **65 % des Volumens liegen unter 2 T** (gesund, Median
+0,24 T), **18 % ueber 1000 T**, verteilt ueber die ganze Maschine (r 0-138 mm,
+z -47 bis +78 mm), angefuehrt von der Stirnluft. Es ist also keine Zelle und
+kein Zipfel, sondern eine zweite, falsche Loesung, die der richtigen ueberlagert
+ist. Elmer meldet dabei keine unbekannten Schluesselwoerter, und die
+Randbedingung trifft nachweislich ihre Gruppe (4058 Dreiecke, Gruppe 1, Knoten-
+UND Kantenbedingung).
+
+Was als naechstes zu pruefen waere: ob ``AV re {e}`` in DIESEM Elmer die
+Kantenfreiheitsgrade der komplexen Variablen wirklich bindet. Ein
+unbeschraenkter Kantenraum saehe genau so aus -- richtig dort, wo die Quelle
+stark ist, beliebig dort, wo sie es nicht ist. Pruefbar ohne Ratespiel: ein
+Lauf mit ``Calculate Potential`` und ein Blick darauf, ob ``av re`` auf dem
+Rand tatsaechlich null ist.
 
 Bis dahin traegt die Feldstufe des Kaefiglaeufers weiterhin
 ``cae_cli.py feld2d`` (Elmer 2-D, harmonisch) -- dort stimmen zwei unabhaengige
@@ -265,19 +284,41 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
             gmsh.model.addPhysicalGroup(3, neu(v), GID_NUT0 + k, f"nut{k}")
 
         # Aussenrand: alle Flaechen auf r_so plus die beiden aeusseren Stirnflaechen.
-        rand = []
+        # Aussenrand: Mantel UND beide Stirnflaechen.
+        #
+        # Die Stirnflaechen fehlten. Sie wurden ueber ``abs(z - (L+tief+stirn))
+        # < 1e-9`` gesucht -- ein absoluter Vergleich auf Meter, waehrend die
+        # Grenze selbst aus Ringbreiten zusammengerechnet ist und die Huellbox
+        # von OCC gerundet zurueckkommt. Der Vergleich traf nie, und damit war
+        # das Gebiet an beiden Enden OFFEN: dort ist A unbestimmt, und genau
+        # dort sass das unsinnige Feld (gemessen 18 % des Volumens ueber
+        # 1000 T, angefuehrt von der Stirnluft). Mit Quellen null kam trotzdem
+        # exakt null heraus -- ein unbestimmter, aber unangeregter Nullraum
+        # meldet sich nicht.
+        #
+        # Gesucht wird jetzt gegen die WIRKLICHE Huellbox des Modells, mit einer
+        # Toleranz, die sich an ihr bemisst. Und es wird nachgezaehlt: ohne die
+        # beiden Deckel ist die Randflaeche unvollstaendig, und das ist ein
+        # Fehler und keine Warnung.
+        bb_all = gmsh.model.getBoundingBox(-1, -1)
+        z_min, z_max = bb_all[2], bb_all[5]
+        tol = 1e-6 + 1e-6 * max(abs(z_min), abs(z_max), m["r_so"])
+        rand, n_mantel, n_deckel = [], 0, 0
         for (d, t) in gmsh.model.getEntities(2):
             bb = gmsh.model.getBoundingBox(2, t)
             weite = max(bb[3] - bb[0], bb[4] - bb[1]) / 2.0
             z_lo, z_hi = bb[2], bb[5]
-            aussen_zyl = abs(weite - m["r_so"]) < 1e-4 * m["r_so"] + 1e-9 \
-                and (z_hi - z_lo) > 1e-6
-            stirn_flaeche = abs(z_hi - z_lo) < 1e-9 and (
-                abs(z_lo + tief + stirn) < 1e-9 or abs(z_lo - (L + tief + stirn)) < 1e-9)
-            if aussen_zyl or stirn_flaeche:
-                rand.append(t)
-        if not rand:
-            raise ValueError("Aussenrand nicht gefunden")
+            flach = abs(z_hi - z_lo) <= tol
+            if abs(weite - m["r_so"]) < 1e-4 * m["r_so"] + 1e-9 and not flach:
+                rand.append(t); n_mantel += 1
+            elif flach and (abs(z_lo - z_min) <= tol or abs(z_lo - z_max) <= tol):
+                rand.append(t); n_deckel += 1
+        if not n_mantel or not n_deckel:
+            raise ValueError(
+                f"Aussenrand unvollstaendig: {n_mantel} Mantelflaechen, "
+                f"{n_deckel} Stirnflaechen. Fehlt ein Deckel, ist das Gebiet "
+                f"dort offen und das Vektorpotential unbestimmt — das Ergebnis "
+                f"sieht dann aus wie ein Feld.")
         gmsh.model.addPhysicalGroup(2, rand, GID_RAND, "aussenrand")
 
         # KEIN Verfeinerungsband auf den Luftspalt (anders als in 2-D). Gemessen:
@@ -312,6 +353,7 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
             "L_m": L, "ring_h_m": ring_h, "ring_w_m": ring_w,
             "A_ring_m2": a_ring, "stirn_m": stirn,
             "wk_h_m": wk_h, "wk_t_m": wk_t,
+            "rand_mantel": n_mantel, "rand_deckel": n_deckel,
             "r_wel": m["r_wel"], "r_rot": m["r_rot"], "r_si": m["r_si"],
             "r_so": m["r_so"], "gap_m": m["gap_m"],
             "lc_gap_m": lc_gap, "lc_eisen_m": lc_eisen,

@@ -154,6 +154,17 @@ def _solverbloecke(sif: str) -> dict:
 
 bloecke = _solverbloecke(mit)
 solver = [bloecke.get(1, ""), bloecke.get(2, "")]
+# Der Aussenrand muss Mantel UND beide Deckel tragen. Fehlt ein Deckel, ist das
+# Gebiet dort offen und A unbestimmt — und das Ergebnis sieht aus wie ein Feld.
+import inspect as _insp
+_q = _insp.getsource(H3.baue_netz)
+pruefe("n_deckel" in _q and "Aussenrand unvollstaendig" in _q,
+       "der Netzbau zaehlt Mantel- und Deckelflaechen und weist einen "
+       "unvollstaendigen Rand ab")
+pruefe("getBoundingBox(-1, -1)" in _q,
+       "und sucht die Deckel gegen die WIRKLICHE Huellbox des Modells — der "
+       "frueher absolute Vergleich gegen eine zusammengerechnete Grenze traf nie")
+
 pruefe(len(bloecke) == 3 and all(solver),
        f"die Fallbeschreibung hat drei Solver-Bloecke: {sorted(bloecke)}")
 pruefe("Linear System Direct Method = MUMPS" in solver[0],
@@ -219,9 +230,15 @@ pruefe("wk_ringe" in quelle and "GID_WKRING" in inspect.getsource(H3.schreibe_si
 pruefe("NICHT gueltig" in kopf and "ausgeschlossen" in kopf,
        "und der Modulkopf sagt trotzdem, dass das Feld heute nicht gueltig ist "
        "— gebaut heisst nicht behoben")
-pruefe("16 bis 28" in kopf,
-       "er nennt den Befund, an dem der naechste Versuch ansetzt (der gesunde "
-       "Nutblock), statt nur zu melden, dass es nicht geht")
+pruefe("exakt** null" in kopf or "exakt" in kopf,
+       "er nennt die Kontrollprobe (alle Quellen null gibt exakt null), die "
+       "Netz, Eichung und Loeser als Ursache ausschliesst")
+pruefe("2359" in kopf and "1129" in kopf,
+       "und den unvollstaendigen Aussenrand mit den gemessenen Flaechen — ein "
+       "wirklicher Fehler, behoben, und trotzdem nicht die Ursache")
+pruefe("AV re {e}" in kopf,
+       "er sagt, was als naechstes zu pruefen ist, statt nur zu melden, dass "
+       "es nicht geht")
 pruefe("netzkosten()" in kopf and "feld2d" in kopf,
        "und was heute stattdessen traegt")
 
