@@ -1312,20 +1312,24 @@ def _schnittmasse(geom: dict) -> dict:
     ``render_cross_section`` eigenstaendig ist (der Bilddatensatz zeichnet damit ohne
     Beschriftung), waeren es drei Stellen gewesen, die auseinanderlaufen koennen.
     """
+    import ema_wicklung
+    ng       = ema_wicklung.nutgeometrie(geom)
     R_si     = geom["statorID"] / 2
     n_slots  = int(geom["slots"])
     slot_dep = float(geom["slotDepth"])
     dtheta_s = 2 * math.pi / n_slots
-    slot_w   = max(3.0, R_si * dtheta_s * float(geom.get("slotWidthRatio", 0.5)))
-    ins, n_layers = 0.8, 2
+    slot_w   = ng["nut_breite_mm"]
+    # Die Zeichnung zeigt jetzt so viele Leiterlagen, wie die Maschine WIRKLICH
+    # hat. Vorher standen hier fest zwei -- der Schnitt zeigte bei acht Leitern
+    # je Nut also zwei, und niemand konnte am Bild sehen, dass die Wicklung eine
+    # andere ist als die gerechnete.
     return {"R_rot": geom["rotorOD"] / 2, "R_shaft": geom["shaftD"] / 2,
             "R_bore": float(geom.get("shaftBoreD", 0)) / 2,   # hollow shaft (0 = solid)
             "R_si": R_si, "R_so": geom["statorOD"] / 2,
             "n_poles": int(geom["p"]) * 2, "n_slots": n_slots,
             "slot_dep": slot_dep, "dtheta_s": dtheta_s, "slot_w": slot_w,
-            "ins": ins, "n_layers": n_layers,
-            "cond_w": max(1.5, slot_w - 2 * ins),
-            "layer_h": max(2.0, (slot_dep - 2 - (n_layers + 1) * ins) / n_layers)}
+            "ins": ng["isolierung_mm"], "n_layers": ng["n_lagen"],
+            "cond_w": ng["leiter_breite_mm"], "layer_h": ng["lage_hoehe_mm"]}
 
 
 def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
@@ -2695,17 +2699,20 @@ def run_pipeline(data: dict, state: dict, frames: list,
                     results["drivecycle_anhaenger"] = {"error": str(_ae)}
 
         # ── Material estimates ────────────────────────────────────────────────
-        # Fill factor (hairpin conductors / slot area)
-        n_layers  = 2
-        ins       = 0.8
+        # Nutfuellfaktor -- aus ``ema_wicklung``, der einen Quelle.
+        #
+        # Hier standen fest ZWEI Lagen. Der Fuellfaktor haing damit gar nicht an
+        # ``conductorsPerSlot``: acht Leiter je Nut gaben denselben Wert wie
+        # zwei. Er stand im Bericht, war plausibel und hatte mit der gerechneten
+        # Wicklung nichts zu tun.
         import math as _m
+        import ema_wicklung
+        _wk       = ema_wicklung.wicklung(geom, axial)
+        n_layers  = _wk["n_je_nut"]
+        slot_w    = _wk["nut"]["nut_breite_mm"]
+        slot_dep  = _wk["nut"]["nut_tiefe_mm"]
         dtheta_s  = 2 * _m.pi / int(geom["slots"])
-        slot_w    = max(3.0, (geom["statorID"] / 2) * dtheta_s *
-                        float(geom.get("slotWidthRatio", 0.5)))
-        slot_dep  = float(geom["slotDepth"])
-        cond_w    = max(1.5, slot_w - 2 * ins)
-        layer_h   = max(2.0, (slot_dep - 2 - (n_layers + 1) * ins) / n_layers)
-        fill_factor = round(cond_w * layer_h * n_layers / (slot_w * slot_dep), 3)
+        fill_factor = round(_wk["fuellfaktor"], 3)
 
         # Iron-loss estimate (Bertotti simplified, open-circuit no-load)
         f_el      = rpm_fem * int(geom["p"]) / 60

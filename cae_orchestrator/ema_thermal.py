@@ -90,19 +90,15 @@ def _conductors_per_slot(geom: dict) -> int:
 
 
 def copper_volume(geom: dict, axial: float) -> float:
-    """Total conductor volume [m³] in the slots (incl. end-turn overhang)."""
-    n_slots  = int(geom["slots"])
-    R_si     = geom["statorID"] / 2 / 1000
-    slot_dep = float(geom["slotDepth"]) / 1000
-    sw_ratio = float(geom.get("slotWidthRatio", 0.5))
-    L_cond   = axial / 1000 + 2 * 0.018
-    dtheta   = 2 * math.pi / n_slots
-    slot_w   = max(3e-3, R_si * dtheta * sw_ratio)
-    ins      = 0.8e-3
-    n_layers = _conductors_per_slot(geom)
-    cond_w   = max(1.5e-3, slot_w - 2 * ins)
-    layer_h  = max(2e-3, (slot_dep - 2e-3 - (n_layers + 1) * ins) / n_layers)
-    return n_slots * n_layers * (cond_w * layer_h) * L_cond
+    """Total conductor volume [m³] in the slots (incl. end-turn overhang).
+
+    Die Nutgeometrie kommt aus ``ema_wicklung`` -- der EINEN Quelle. Vorher
+    stand sie hier als eine von sieben wortgleichen Kopien; die dritte davon
+    (``mass_and_cost``) war bereits abgewichen (feste zwei Lagen), sodass eine
+    Aenderung von ``conductorsPerSlot`` die Verluste bewegte und die Masse nicht.
+    """
+    import ema_wicklung
+    return ema_wicklung.wicklung(geom, axial)["V_kupfer_m3"]
 
 
 def cycle_loss_series(drv: dict, geom: dict, axial: float, perf: dict,
@@ -188,16 +184,17 @@ def compute_losses(geom: dict, axial: float, rpm: float, iq: float, id_: float,
     end_turn = 0.018                            # m, ~18 mm overhang
     L_cond   = L_st + 2 * end_turn
 
-    # Hairpin conductor cross-section
-    dtheta   = 2 * math.pi / n_slots
-    slot_w   = max(3e-3, R_si * dtheta * sw_ratio)
-    ins      = 0.8e-3
-    n_layers = _conductors_per_slot(geom)
-    cond_w   = max(1.5e-3, slot_w - 2 * ins)
-    layer_h  = max(2e-3, (slot_dep - 2e-3 - (n_layers + 1) * ins) / n_layers)
-    A_cond   = cond_w * layer_h                  # m² per layer
-    # Per-phase: n_slots/3 slots, n_layers per slot, in series
-    R_phase  = hp_mat["rho_el"] * L_cond * n_slots * n_layers / (3 * A_cond)
+    # Leiterquerschnitt und Strangwiderstand aus ``ema_wicklung`` (eine Quelle,
+    # beide Wicklungsarten). Fuer den Hairpin sind es dieselben Zahlen wie zuvor.
+    import ema_wicklung
+    _w       = ema_wicklung.wicklung(geom, axial)
+    n_layers = _w["n_je_nut"]
+    cond_w   = _w["nut"]["leiter_breite_m"]
+    layer_h  = _w["nut"]["lage_hoehe_m"]
+    slot_w   = _w["nut"]["nut_breite_m"]
+    A_cond   = _w["A_leiter_m2"]
+    L_cond   = _w["l_leiter_m"]
+    R_phase  = ema_wicklung.r_strang(geom, axial, hp_mat)
 
     # i_q, i_d are peak phase currents → RMS conversion (i_rms = i_pk/√2)
     i_rms_sq = 0.5 * (iq**2 + id_**2)
@@ -276,13 +273,17 @@ def compute_capacities(geom: dict, axial: float,
     L_st      = axial / 1000
     end_turn  = 0.018
 
-    # Winding mass
-    dtheta   = 2 * math.pi / n_slots
-    slot_w   = max(3e-3, R_si * dtheta * sw_ratio)
-    ins      = 0.8e-3
-    cond_w   = max(1.5e-3, slot_w - 2 * ins)
-    layer_h  = max(2e-3, (slot_dep - 2e-3 - 3*ins) / 2)
-    V_w      = n_slots * 2 * cond_w * layer_h * (L_st + 2 * end_turn)
+    # Winding mass -- aus DEMSELBEN Volumen wie Widerstand und Verluste.
+    #
+    # Diese Stelle war die abgewichene Kopie: sie rechnete mit fest ZWEI Lagen
+    # und ``3*ins`` statt mit ``n_layers`` und ``(n_layers+1)*ins``. Wer
+    # ``conductorsPerSlot`` erhoehte, bekam mehr Verluste, aber dieselbe
+    # Kupfermasse und dieselben Kosten -- beides fuer sich plausibel, zusammen
+    # widerspruechlich, und nirgends sichtbar.
+    import ema_wicklung
+    _w       = ema_wicklung.wicklung(geom, axial)
+    slot_w   = _w["nut"]["nut_breite_m"]
+    V_w      = _w["V_kupfer_m3"]
     m_w      = V_w * hp_mat["density"]
 
     # Stator iron (with slot cut-outs)

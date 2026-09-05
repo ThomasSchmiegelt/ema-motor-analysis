@@ -125,6 +125,7 @@ from itertools import combinations
 import ema_analysis
 import ema_asm
 import ema_maschinenart
+import ema_wicklung
 import ema_referenz
 import ema_thermal
 from ema_analysis import _analytical_Bgap, compute_performance
@@ -296,6 +297,17 @@ ACHSEN = {
         "beschriften": lambda w: TOPOLOGY_LABELS.get(w, w),
         "setzen": _setz_geom("magShape"),
         "braucht_magnete": True,
+    },
+    # Wicklungsart. Sie steht neben der Leiterzahl und nicht in ihr: die Zahl
+    # der Leiter je Nut heisst beim Hairpin „Lagen" und beim Runddraht
+    # „Windungen", und beide Bauarten unterscheiden sich in drei Groessen, die
+    # die Leiterzahl nicht ausdrueckt -- Nutfuellfaktor, Wickelkopflaenge und
+    # Leiterquerschnitt (s. ``ema_wicklung``).
+    "wicklungsart": {
+        "titel": "Wicklungsart (Hairpin oder Runddraht)",
+        "werte": lambda b: list(ema_wicklung.ARTEN),
+        "beschriften": lambda w: ema_wicklung.ART_LABEL.get(w, w),
+        "setzen": _setz_geom("windingType"),
     },
     "hairpins": {
         "titel": "Anzahl Hairpins (Leiter je Nut)",

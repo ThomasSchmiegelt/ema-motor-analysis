@@ -118,8 +118,10 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
     axial     = axial_len
 
     import math as _m
+    import ema_wicklung
+    _ng     = ema_wicklung.nutgeometrie(geom)
     dtheta  = 2 * _m.pi / n_slots
-    slot_w  = max(3.0, R_si * dtheta * sw_ratio)
+    slot_w  = _ng["nut_breite_mm"]
 
     # Magnet placement comes from the single source of truth (ema_topology).
     legs, _meta = magnet_legs(geom)
@@ -134,9 +136,48 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
     if coil_pitch <= 0:
         coil_pitch = max(1, round(n_slots / max(1, poles)))
     coil_pitch = max(1, min(n_slots - 1, coil_pitch))
-    ins       = 0.8
-    cond_w    = max(1.5, slot_w - 2 * ins)
-    layer_h   = max(2.0, (slot_dep - 2 - (n_layers + 1) * ins) / n_layers)
+    ins       = _ng["isolierung_mm"]
+    cond_w    = _ng["leiter_breite_mm"]
+    layer_h   = _ng["lage_hoehe_mm"]
+
+    # Wicklungsart. Der Runddraht bekommt statt der Hairpin-Staebe ein Buendel
+    # je Nut. Gezeichnet wird die AXIALE Ausladung des Wickelkopfs, nicht die
+    # Leiterlaenge darin -- die beiden zu verwechseln gab gemessen 99 mm
+    # Ueberhang an einem 150-mm-Paket. Der Weg einer Windung im Wickelkopf ist
+    #     l_wk  ~  2 * h_axial  +  k * Spulenweite      (k ~ 1,1)
+    # also  h_axial = (l_wk - 1,1 * tau) / 2, mindestens 0,4 Nuttiefen, weil der
+    # Bogen selbst Platz braucht.
+    # Kaefiglaeufer: nur bei machineType == "asm", und die Masse kommen aus
+    # ``ema_asm.kaefig`` -- derselben Funktion, die den analytischen Widerstand
+    # und das Feldnetz speist.
+    cage_json = "None"
+    import ema_maschinenart as _MA
+    if _MA.art_code(geom) == "asm":
+        import ema_asm as _ASM
+        _kf = _ASM.kaefig(geom, axial_len)
+        _r_a = R_rot - _ASM.KAEFIG_STEG_MM               # Aussenkante der Nut
+        cage_json = json.dumps({
+            "n": int(_kf["n_stab"]),
+            "b": float(_kf["stabbreite_mm"]),
+            "t": float(_kf["nuttiefe_mm"]),
+            "r_i": round(_r_a - float(_kf["nuttiefe_mm"]), 4),
+            "l_stab": float(_kf["l_stab_mm"]),
+            # Ringquerschnitt A_ring als Rechteck: radiale Hoehe x axiale Breite,
+            # Seitenverhaeltnis wie der Stab.
+            "ring_h": round(math.sqrt(float(_kf["A_ring_mm2"])
+                                      * float(_kf["nuttiefe_mm"])
+                                      / max(float(_kf["stabbreite_mm"]), 0.1)), 3),
+            "ring_w": round(math.sqrt(float(_kf["A_ring_mm2"])
+                                      * float(_kf["stabbreite_mm"])
+                                      / max(float(_kf["nuttiefe_mm"]), 0.1)), 3),
+        })
+
+    _wk_dat   = ema_wicklung.wicklung(geom, axial_len)
+    wind_art  = _wk_dat["art"]
+    rd_fuell  = ema_wicklung.FUELL_RUNDDRAHT
+    rd_wk_axial = max(0.4 * slot_dep,
+                      1000.0 * (_wk_dat["l_wickelkopf_m"]
+                                - 1.1 * _wk_dat["l_spulenweite_m"]) / 2.0)
 
     # Winding-head (Wickelkopf) shape: smooth loft "Zugkörper" flaring radially out.
     # windingHeadSpread = STUFENWEISE Spreizung je Lage in ° (0 = alle Lagen gleich, wie
@@ -228,6 +269,8 @@ spline_teeth = {spline_teeth}; spline_depth = {spline_depth}
 poly_lobes = {poly_lobes}; poly_ecc = {poly_ecc}
 GEN_SHAFT = {gen_shaft!r}; GEN_ROTOR = {gen_rotor!r}; GEN_MAGNETS = {gen_magnets!r}
 GEN_STATOR = {gen_stator!r}; GEN_HAIRPIN = {gen_hairpin!r}; GEN_WHEAD = {gen_whead!r}
+WINDING_TYPE = {wind_art!r}; RD_FUELL = {rd_fuell}; RD_WK_AXIAL = {rd_wk_axial:.3f}
+CAGE = {cage_json}   # Kaefiglaeufer (ASM) aus ema_asm.kaefig — sonst None
 GEN_BEAR_A = {gen_bear_a!r}; GEN_BEAR_B = {gen_bear_b!r}; GEN_INSUL = {gen_insul!r}
 bearing_od = {bearing_od}; bearing_w = {bearing_w}; bearing_gap = {bearing_gap}
 insul_thk  = {insul_thk}
@@ -379,6 +422,20 @@ if GEN_ROTOR:
                 cap = cap.transformGeometry(m); cap.translate(App.Vector(cx, cy, 0))
                 pocket_shapes.append(cap)
 
+    # Kaefignuten (ASM). Beim Kaefiglaeufer gibt es keine Magnettaschen, sondern
+    # `n` Laeufernuten unter einem Blechsteg. Sie werden AUS DEMSELBEN
+    # ``ema_asm.kaefig`` gezeichnet, aus dem auch der analytische Widerstand und
+    # das 2-D-Feldnetz kommen -- eine zweite Nutgeometrie waere genau die
+    # Vervielfaeltigung, gegen die ``ema_wicklung`` gerade angetreten ist.
+    if CAGE:
+        for _j in range(int(CAGE["n"])):
+            _a = 2 * math.pi * _j / int(CAGE["n"])
+            _nut = Part.makeBox(CAGE["t"], CAGE["b"], axial + 4,
+                                App.Vector(CAGE["r_i"], -CAGE["b"] / 2.0,
+                                           -axial / 2 - 2))
+            _nut.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), math.degrees(_a))
+            pocket_shapes.append(_nut)
+
     rotor_base = rotor_solid                          # valid disc (ring − bore) — ultimate fallback
     if pocket_shapes:
         rotor_cut = rotor_solid.cut(Part.makeCompound(pocket_shapes))
@@ -446,6 +503,29 @@ if GEN_ROTOR:
               "Rotorscheibe (Magnettaschen entfallen in der CAD-Darstellung)")
         rotor_solid = rotor_base
     _add("Rotor", rotor_solid, (0.40, 0.40, 0.46))
+
+    # Der Kaefig selbst: Staebe in den Nuten und die beiden Kurzschlussringe.
+    # Der Ring ist der Grund, warum die analytische Stufe einen Zuschlag traegt
+    # und das 2-D-Feld nicht -- ein Querschnitt hat keine Stirnseite. Hier ist
+    # er zu sehen, und zwar mit dem Querschnitt, den ``ema_asm`` ansetzt.
+    if CAGE:
+        _stab, _l_st = [], CAGE["l_stab"]
+        for _j in range(int(CAGE["n"])):
+            _a = 2 * math.pi * _j / int(CAGE["n"])
+            _bar = Part.makeBox(CAGE["t"], CAGE["b"], _l_st,
+                                App.Vector(CAGE["r_i"], -CAGE["b"] / 2.0, -_l_st / 2))
+            _bar.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), math.degrees(_a))
+            _stab.append(_bar)
+        _rings = []
+        _rh = CAGE["ring_h"]; _rw = CAGE["ring_w"]
+        for _sd in (-1.0, 1.0):
+            _z0 = (_l_st / 2) if _sd > 0 else (-_l_st / 2 - _rw)
+            _ro = Part.makeCylinder(CAGE["r_i"] + CAGE["t"], _rw, App.Vector(0, 0, _z0))
+            _ri = Part.makeCylinder(max(CAGE["r_i"] + CAGE["t"] - _rh, 0.1), _rw + 2,
+                                    App.Vector(0, 0, _z0 - 1))
+            _rings.append(_ro.cut(_ri))
+        _add("Cage_Bars", Part.makeCompound(_stab), (0.75, 0.75, 0.78))
+        _add("Cage_Rings", Part.makeCompound(_rings), (0.70, 0.70, 0.74))
 
 # ── 2b. BALANCE-DISC BOLTS (optional; through the whole stack) ─────────────
 if GEN_BALANCE and bal_nom > 0:
@@ -863,7 +943,46 @@ def _tab(s, k, out):
 # leg(s+pitch,2j+1) + weld tabs. Pins partition all legs uniquely. The U-crown
 # (winding head) is only added when GEN_WHEAD — otherwise the slot bars + weld
 # tabs are emitted without the over-hang loop (straight conductors only).
-if GEN_HAIRPIN:
+# ── 5b. RUNDDRAHT — Nutbuendel statt einzelner Staebe ────────────────────────
+#
+# Eine gewickelte Maschine hat je Nut zwanzig bis zweihundert duenne Windungen.
+# Sie einzeln zu zeichnen waere weder machbar noch aussagekraeftig: was an einer
+# Runddrahtwicklung geometrisch zaehlt, ist das ausgefuellte Kupfervolumen in
+# der Nut und der Wickelkopf, den es aussen braucht. Genau das wird gezeichnet
+# -- ein Buendel je Nut (Querschnitt = Nutquerschnitt mal Fuellfaktor) und je
+# Stirnseite ein Ring, dessen axiale Laenge aus ``ema_wicklung`` kommt.
+#
+# Das ist ausdruecklich KEINE Wicklung mit einzelnen Draehten, und es gibt sich
+# auch nicht als eine aus: die Koerper heissen „Bundle" und „EndWinding".
+if WINDING_TYPE == "rundraht" and GEN_HAIRPIN:
+    _fill_h = slot_dep - 2.0 - ins            # nutzbare Nuttiefe
+    _fill_w = slot_w - 2.0 * ins              # nutzbare Nutbreite
+    # Der Fuellfaktor wird auf die TIEFE gelegt, nicht auf die Breite: eine
+    # gewickelte Nut ist von unten her gefuellt, darueber sitzt der Nutkeil.
+    # Der gezeichnete Querschnitt ist damit genau die Kupferflaeche aus
+    # ``ema_wicklung`` -- und sieht auch so aus, wie er ist.
+    _b_h = _fill_h * RD_FUELL
+    _r0  = R_si + ins
+    _bund, _wk = [], []
+    for s in range(min(n_slots, WH_SLOT_LIMIT)):
+        th = s * (2 * math.pi / n_slots)
+        box = Part.makeBox(_b_h, _fill_w, axial,
+                           App.Vector(_r0, -_fill_w / 2.0, -axial / 2.0))
+        box.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), math.degrees(th))
+        _bund.append(box)
+    for _sd in (-1.0, 1.0):
+        if not GEN_WHEAD:
+            break
+        z0 = (axial / 2.0) if _sd > 0 else (-axial / 2.0 - RD_WK_AXIAL)
+        ring = Part.makeCylinder(_r0 + _b_h, RD_WK_AXIAL, App.Vector(0, 0, z0))
+        ring = ring.cut(Part.makeCylinder(_r0, RD_WK_AXIAL + 2, App.Vector(0, 0, z0 - 1)))
+        _wk.append(ring)
+    if _bund:
+        _add("Winding_Bundles", Part.makeCompound(_bund), _COL[0])
+    if _wk:
+        _add("Winding_EndWinding", Part.makeCompound(_wk), _COL[1])
+
+if GEN_HAIRPIN and WINDING_TYPE != "rundraht":
     pins = []
     for s in range(min(n_slots, WH_SLOT_LIMIT)):
         for j in range(n_layers // 2):
@@ -903,7 +1022,7 @@ if GEN_BEAR_A or GEN_BEAR_B:
         _add(_nm, ring, (0.55, 0.56, 0.60))
 
 # ── 7. WINDING-HEAD INSULATION PAPER — thin shell hugging the crown OD (+z) ──
-if GEN_INSUL and GEN_HAIRPIN and GEN_WHEAD:
+if GEN_INSUL and GEN_HAIRPIN and GEN_WHEAD and WINDING_TYPE != "rundraht":
     r_env = R_si + slot_dep + 2.0 * wh_flare_max + 1.5   # weiteste (äußerste) Lage umschließen
     z_lo  = z_face - insul_thk
     z_hi  = z_face + crown_H + insul_thk

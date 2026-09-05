@@ -179,8 +179,10 @@ def merkmale(geom: dict, tor: dict | None = None) -> dict:
         r_innen.append(rad - halb)
 
     dtheta_s = 2 * math.pi / max(1, nuten)
-    nutbreite = max(3.0, r_si * dtheta_s * float(geom.get("slotWidthRatio", 0.5)))
-    zahnbreite = max(0.0, r_si * dtheta_s - nutbreite)
+    import ema_wicklung
+    _ng = ema_wicklung.nutgeometrie(geom)
+    nutbreite = _ng["nut_breite_mm"]
+    zahnbreite = _ng["zahn_breite_m"] * 1000.0
     polteilung = math.pi * 2 * r_rot / polzahl
 
     import ema_screen as _SC

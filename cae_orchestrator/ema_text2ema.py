@@ -13,6 +13,7 @@ import re
 import urllib.request
 
 import ema_maschinenart
+import ema_wicklung
 from ema_report import OLLAMA_URL, DEFAULT_MODEL, DEFAULT_NUM_CTX
 
 _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
@@ -27,6 +28,7 @@ _SHAPE = ["v", "vasym", "vv", "u", "delta", "pmasynrm", "spm", "halbach", "spoke
 # zweite, handgepflegte Menge daneben lebt -- welche Art welche Rechenstufe
 # heute wirklich traegt, sagt allein dieses Modul.
 _ART   = list(ema_maschinenart.ARTEN)
+_WICKLUNG = list(ema_wicklung.ARTEN)
 _ORIENT = ["transverse", "longitudinal"]
 _POCKET = ["position", "diameter"]
 _THREAD = ["M4", "M5", "M6", "M8", "M10", "M12", "M16", "M20"]
@@ -87,6 +89,10 @@ SCHEMA = {
     #    reine CAD-Schalter (Lager, Splines, Wickelkopfform) bleiben bewusst draussen.
     # Wicklung
     "conductorsPerSlot":   {"kind": "num", "lo": 2,    "hi": 12,   "def": 4,   "int": True, "geom": True, "adv": True, "desc": "Leiter je Nut (Hairpin, geradzahlig)"},
+    # Wicklungsart. Vorgabe bleibt der Hairpin -- alles Bestehende gilt damit
+    # unveraendert; der Runddraht ist die zweite Bauart und keine Umstellung.
+    "windingType":         {"kind": "enum", "opts": _WICKLUNG, "def": ema_wicklung.VORGABE, "geom": True, "adv": True, "desc": "Wicklungsart: hairpin=rechteckige Staebe (Vorgabe), rundraht=gewickelt"},
+    "turnsPerSlot":        {"kind": "num", "lo": 0,    "hi": 400,  "def": 0,   "int": True, "geom": True, "adv": True, "desc": "Windungen je Nut (Runddraht; 0 = wie conductorsPerSlot)"},
     "slotWidthRatio":      {"kind": "num", "lo": 0.2,  "hi": 0.8,  "def": 0.5,  "geom": True, "adv": True, "desc": "Nutbreite / Nutteilung (Rest ist Zahn)"},
     # Magnetlagen und Polkontur
     "magLayers":           {"kind": "num", "lo": 2,    "hi": 4,    "def": 3,   "int": True, "geom": True, "adv": True, "desc": "Magnetlagen je Pol (nur pmasynrm)"},
