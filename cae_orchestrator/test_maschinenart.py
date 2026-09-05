@@ -225,7 +225,7 @@ pruefe(abs(verl["P_total"] - (verl["P_Cu"] + verl["P_Fe_stator"] + verl["P_Fe_ro
        "die Verlustsumme geht auf und enthaelt den Kaefig")
 
 t_geo = ema_thermal.rated_torque(g, L, "water")
-t_asm = ema_asm.dauermoment(g, L, "water", bp)
+t_asm = ema_asm.dauermoment(g, L, "water", bp)["T_thermisch_Nm"]
 pruefe(0.0 < t_asm < t_geo,
        "das ASM-Dauermoment liegt UNTER dem rein geometrischen — der "
        "Magnetisierungsstrom nimmt thermischen Platz weg")

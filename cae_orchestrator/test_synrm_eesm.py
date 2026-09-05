@@ -123,7 +123,7 @@ print("\n3. SynRM — das Dauermoment, das vorher zu hoch war")
 import ema_thermal
 t_geo = ema_thermal.rated_torque(GEOM, AXIAL, "water")
 t_dauer = S.dauermoment(GEOM, AXIAL, "water",
-                        S.betriebspunkt(GEOM, AXIAL, 3000.0, 5.0))
+                        S.betriebspunkt(GEOM, AXIAL, 3000.0, 5.0))["T_thermisch_Nm"]
 pruefe(nah(t_dauer, t_geo / math.sqrt(2.0), rel=1e-3),
        f"T_dauer = T_kuehlbar/sqrt(2) = {t_dauer:.1f} Nm (kuehlbar "
        f"{t_geo:.1f} Nm) — bei MTPA macht nur die Haelfte des Stroms Moment")
@@ -131,16 +131,34 @@ pruefe(t_dauer < 0.75 * t_geo,
        "es liegt DEUTLICH unter dem kuehlbaren Moment — ueber den Kt-Weg kam "
        "es genauso hoch heraus wie bei der PSM")
 
+# Und die zweite Grenze: der Umrichter. Bei der SynRM bindet er am haertesten,
+# weil ihr Moment quadratisch mit dem Strom geht.
+d = S.dauermoment(GEOM, AXIAL, "water", S.betriebspunkt(GEOM, AXIAL, 3000.0, 5.0))
+pruefe(set(d) >= {"T_dauer_Nm", "T_thermisch_Nm", "T_umrichter_Nm", "begrenzt_durch"},
+       "dauermoment gibt BEIDE Grenzen heraus und sagt, welche bindet")
+pruefe(nah(d["T_dauer_Nm"], min(d["T_thermisch_Nm"], d["T_umrichter_Nm"]), rel=1e-9),
+       "das gemeldete Dauermoment ist das kleinere der beiden")
+pruefe(d["begrenzt_durch"] == "Umrichter" and d["T_umrichter_Nm"] < d["T_thermisch_Nm"],
+       f"hier bindet der Umrichter ({d['T_umrichter_Nm']:.1f} gegen "
+       f"{d['T_thermisch_Nm']:.1f} Nm kuehlbar) — das Dauermoment stand vorher "
+       f"bei einem Strom da, der das Achtzehnfache der Grenze gewesen waere")
+
 
 # ── 4. EESM: der Magnetisierungsstrom sitzt im Laeufer ────────────────────────
 
 print("\n4. EESM — der Unterschied zur ASM in einer Zeile")
 
-bpe = E.betriebspunkt(GEOM, AXIAL, 3000.0, 120.0)
-bpa = ema_asm.betriebspunkt(GEOM, AXIAL, 3000.0, 120.0)
+# UNTER der Umrichtergrenze: dort zeigt sich der Unterschied im Strom.
+# Bei 120 Nm haengen beide am Deckel und ziehen zwangslaeufig dasselbe --
+# ein Vergleich dort saehe wie Gleichstand aus und waere keiner.
+bpe = E.betriebspunkt(GEOM, AXIAL, 3000.0, 20.0)
+bpa = ema_asm.betriebspunkt(GEOM, AXIAL, 3000.0, 20.0)
 pruefe(bpe["ok"], "die EESM ist an dieser Geometrie baubar")
+pruefe(not bpe["strom_limit"] and not bpa["strom_limit"],
+       f"bei 20 Nm haengt keine der beiden am Umrichter "
+       f"(EESM {bpe['I_s_A']:.0f} A, ASM {bpa['I_s_A']:.0f} A)")
 pruefe(nah(bpe["I_s_A"], bpe["i_q_A"], rel=1e-6) and bpe["i_mag_A"] == 0.0,
-       f"der Stator fuehrt NUR den Momentstrom ({bpe['I_s_A']:.0f} A = i_q)")
+       f"der Stator der EESM fuehrt NUR den Momentstrom ({bpe['I_s_A']:.0f} A = i_q)")
 pruefe(bpa["I_s_A"] > bpa["i_q_A"],
        f"die ASM traegt dagegen ihren Magnetisierungsstrom mit "
        f"({bpa['I_s_A']:.0f} A gegen {bpa['i_q_A']:.0f} A momentbildend)")
@@ -148,6 +166,19 @@ pruefe(bpe["I_s_A"] < bpa["I_s_A"],
        f"und braucht darum mehr Statorstrom als die EESM ({bpa['I_s_A']:.0f} "
        f"gegen {bpe['I_s_A']:.0f} A) — das ist der eigentliche Unterschied "
        f"zwischen den beiden magnetlosen Bauarten")
+
+# AM Limit kehrt sich die Frage um: nicht wer weniger Strom braucht, sondern
+# wer mit demselben Strom mehr Moment macht.
+bpe_l = E.betriebspunkt(GEOM, AXIAL, 3000.0, 120.0)
+bpa_l = ema_asm.betriebspunkt(GEOM, AXIAL, 3000.0, 120.0)
+pruefe(nah(bpe_l["I_s_A"], bpa_l["I_s_A"], rel=1e-3),
+       f"am Umrichterlimit ziehen beide denselben Strom "
+       f"({bpe_l['I_s_A']:.0f} A) — der Deckel gilt fuer den STRANGSTROM, nicht "
+       f"fuer seinen momentbildenden Anteil")
+pruefe(bpe_l["T_ist_Nm"] > bpa_l["T_ist_Nm"],
+       f"und die EESM macht daraus mehr Moment ({bpe_l['T_ist_Nm']:.1f} gegen "
+       f"{bpa_l['T_ist_Nm']:.1f} Nm), weil ihr Magnetisierungsstrom im Laeufer "
+       f"sitzt und den Stator nicht belegt")
 pruefe(bpe["P_laeufer_W"] > 0,
        f"dafuer macht die EESM Laeuferverluste ({bpe['P_laeufer_W']:.0f} W: "
        f"{bpe['P_erreger_W']:.0f} W Erregung + {bpe['P_schleifring_W']:.0f} W "
@@ -272,9 +303,11 @@ if all(r.get("ok") for r in zeilen.values()):
            f"die SynRM traegt weniger Dauermoment als die PSM "
            f"({zeilen['synrm']['T_dauer_Nm']:.0f} gegen "
            f"{zeilen['pmsm']['T_dauer_Nm']:.0f} Nm)")
-    pruefe(zeilen["eesm"]["I_s_A"] < zeilen["asm"]["I_s_A"],
-           f"die EESM braucht weniger Statorstrom als die ASM "
-           f"({zeilen['eesm']['I_s_A']:.0f} gegen {zeilen['asm']['I_s_A']:.0f} A)")
+    pruefe(zeilen["eesm"]["T_dauer_Nm"] > zeilen["asm"]["T_dauer_Nm"],
+           f"die EESM traegt am selben Umrichter mehr Dauermoment als die ASM "
+           f"({zeilen['eesm']['T_dauer_Nm']:.1f} gegen "
+           f"{zeilen['asm']['T_dauer_Nm']:.1f} Nm) — beide ziehen dort denselben "
+           f"Strom, aber die ASM verbraucht einen Teil davon fuer ihr Feld")
     pruefe(zeilen["pmsm"]["P_verlust_W"] < zeilen["asm"]["P_verlust_W"]
            and zeilen["pmsm"]["P_verlust_W"] < zeilen["synrm"]["P_verlust_W"],
            f"die PSM bleibt die verlustaermste ({zeilen['pmsm']['P_verlust_W']:.0f} W) "

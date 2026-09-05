@@ -130,10 +130,28 @@ pruefe(sp_kt > 50, f"die Anordnung bewegt Kt dagegen deutlich ({sp_kt:.0f} %)")
 
 
 print("\n4. Die Kuehlung ordnet das Dauermoment richtig")
-td = {o["wert"]: o["T_dauer_Nm"] for o in erg["achsen"]["kuehlung"]["optionen"] if o["ok"]}
+opt_k = {o["wert"]: o for o in erg["achsen"]["kuehlung"]["optionen"] if o["ok"]}
 reihe = ["natural", "forced", "water", "oil"]
-pruefe(all(td[a] < td[b] for a, b in zip(reihe, reihe[1:])),
-       f"natural < forced < water < oil ({[td[k] for k in reihe]})")
+# Geprueft wird das KUEHLBARE Moment: das ist es, was die Kuehlung ordnet.
+th = {k: opt_k[k]["T_dauer_therm_Nm"] for k in reihe}
+pruefe(all(th[a] < th[b] for a, b in zip(reihe, reihe[1:])),
+       f"kuehlbar: natural < forced < water < oil ({[th[k] for k in reihe]})")
+
+# Und die zweite Grenze, die es bis hierher gar nicht gab: der Umrichter. Wo er
+# bindet, aendert die Kuehlung NICHTS -- und genau das muss dastehen, statt
+# vier verschiedene Dauermomente vorzuspiegeln, die keines davon liefern kann.
+td = {k: opt_k[k]["T_dauer_Nm"] for k in reihe}
+bind = {k: opt_k[k]["dauer_begrenzt_durch"] for k in reihe}
+pruefe(all(td[k] <= th[k] + 1e-9 for k in reihe),
+       "das gemeldete Dauermoment ist nie groesser als das kuehlbare")
+gebunden = [k for k in reihe if bind[k] == "Umrichter"]
+pruefe(gebunden,
+       f"an dieser Geometrie bindet der Umrichter bei {', '.join(gebunden)} — "
+       f"vorher stand hier ein Moment, fuer das das 6,8-fache des zulaessigen "
+       f"Stroms noetig gewesen waere")
+pruefe(len({round(td[k], 3) for k in gebunden}) == 1,
+       f"und wo er bindet, ist die Kuehlung wirkungslos: alle {len(gebunden)} "
+       f"liefern {td[gebunden[0]]:.1f} Nm")
 pruefe(erg["achsen"]["kuehlung"]["spannweite"]["gesamt_kg"]["spanne_pct"] < 0.5,
        "die Kuehlung aendert die Masse nicht")
 
@@ -228,7 +246,10 @@ print("\n9. Rangfolge — welche Entscheidung zuerst")
 pruefe(erg["rangfolge"]["Kt_Nm_per_A"][0][0] in ("maschinenart", "magnetwerkstoff",
                                                  "anordnung"),
        f"Kt wird am staerksten von {erg['rangfolge']['Kt_Nm_per_A'][0][0]} bewegt")
-pruefe(erg["rangfolge"]["T_dauer_Nm"][0][0] == "kuehlung",
+# Sobald der Umrichter bindet, ordnet nicht mehr die Kuehlung das Dauermoment,
+# sondern das, was Kt bewegt — und das ist die Maschinenart. Die Rangfolge sagt
+# damit die Wahrheit ueber DIESE Maschine, nicht eine allgemeine Regel.
+pruefe(erg["rangfolge"]["T_dauer_Nm"][0][0] in ("kuehlung", "maschinenart"),
        f"das Dauermoment von {erg['rangfolge']['T_dauer_Nm'][0][0]}")
 # Auch bei den Kosten steht die Maschinenart inzwischen mit vorn: Magnete gegen
 # keine Magnete sind gemessen 149 gegen 76 EUR (96 %), waehrend +-20 % im

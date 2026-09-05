@@ -332,8 +332,12 @@ def verluste(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     return aus
 
 
-def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> float:
-    """Dauermoment ueber DENSELBEN thermischen Weg wie PSM, ASM und SynRM."""
+def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> dict:
+    """Dauermoment ueber DENSELBEN Weg wie PSM, ASM und SynRM -- beide Grenzen.
+
+    ``i_mag_A`` ist bei der EESM null (der Magnetisierungsstrom sitzt im
+    Laeufer), der Abschlag entfaellt also -- und genau das ist ihr Vorteil.
+    """
     import ema_asm
     return ema_asm.dauermoment(geom, axial_mm, kuehlung, bp)
 

@@ -364,9 +364,13 @@ ART_BAND = {
             "band": (2.0, 13.3), "nenn": 5.5, "label": "Schlupf",
             "stuetzen": ("ASM_Schlupf_bei_Nennstrom",),
             "bemerkung": ("Am Nennstrom rund 5,5 %, ueber den Strom von 2 % bis "
-                          "13,3 %. Unsere analytische Leistungsbilanz kam auf "
-                          "0,24 % — zwanzigmal kleiner. Die Feldstufe (feld2d) "
-                          "bestaetigt, dass der Schlupf groesser sein muss.")},
+                          "13,3 %. Unsere Leistungsbilanz kam auf 0,24 %, "
+                          "zwanzigmal kleiner — Ursache war ein Kaefig, der den "
+                          "Blechraum fuellte statt nach Stromdichte bemessen zu "
+                          "sein. Seit er das ist, sind es 1,27 %: derselbe "
+                          "Befund, aber nur noch um den Faktor vier daneben. "
+                          "Die Feldstufe (feld2d) hatte unabhaengig dasselbe "
+                          "gesagt.")},
         "staebe_je_nut": {
             "band": (0.85, 1.00), "nenn": 0.917, "label": "Läuferstäbe / Statornuten",
             "stuetzen": ("ASM_Laeuferstaebe",),
@@ -376,10 +380,18 @@ ART_BAND = {
         "stab_tiefe_zu_breite": {
             "band": (1.4, 2.2), "nenn": 1.64, "label": "Stabtiefe / Stabbreite",
             "stuetzen": ("ASM_Stabnut_Hoehe", "ASM_Stabnut_Breite"),
-            "bemerkung": ("15,2 zu 9,29 mm. ema_asm.KAEFIG_TIEFE_ZU_BREITE deckelt "
-                          "erst bei 3,0 — der Deckel greift also spaeter als das "
-                          "Vorbild und laesst tiefere Staebe zu, als hier gebaut "
-                          "wurden.")},
+            "bemerkung": ("15,2 zu 9,29 mm. ACHTUNG beim Lesen: dieses "
+                          "Verhaeltnis haengt an der Durchflutung und damit an "
+                          "der Windungszahl. Das Vorbild hat sieben Windungen je "
+                          "Nut bei 250 A, unsere Hauskonvention EINE bei 800 A — "
+                          "das Vorbild bringt rund die sechsfache Durchflutung "
+                          "auf und braucht darum einen viel groesseren Stab. Ein "
+                          "Wert UNTER dem Band ist hier also kein Mangel, "
+                          "sondern die Folge der Konvention. Aussagekraeftig "
+                          "ist, ob der Stab nach STROMDICHTE bemessen ist "
+                          "(ema_asm.J_STAB_APMM2, 6 A/mm^2) — vorher fuellte er "
+                          "den Blechraum und kam auf 1,14 A/mm^2, was niemand "
+                          "baut.")},
         "leistungsfaktor": {
             "band": (0.30, 0.67), "nenn": 0.63, "label": "Leistungsfaktor",
             "stuetzen": ("SynRM_Leistungsfaktor_Vollast",

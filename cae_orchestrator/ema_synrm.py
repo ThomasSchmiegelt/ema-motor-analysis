@@ -203,8 +203,8 @@ def verluste(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     return aus
 
 
-def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> float:
-    """S1-Dauermoment [Nm] der SynRM.
+def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> dict:
+    """S1-Dauermoment der SynRM -- beide Grenzen, und welche bindet.
 
     ``ema_thermal.rated_torque`` gibt das **kuehlbare** Moment aus der
     Luftspalt-Schubspannung: ``T = 2*sigma*V_Laeufer``. Es unterstellt, dass der
@@ -224,7 +224,13 @@ def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> float:
     t_geo = ema_thermal.rated_torque(geom, axial_mm, kuehlung)
     i_q = float(bp.get("i_q_A", 0.0))
     i_s = max(float(bp.get("I_s_A", 0.0)), 1e-9)
-    return t_geo * min(i_q / i_s, 1.0)
+    t_th = t_geo * min(i_q / i_s, 1.0)
+    # Die SynRM ist die Bauart, bei der die Umrichtergrenze am haertesten bindet:
+    # ihr Moment waechst QUADRATISCH mit dem Strom, also faellt es unter der
+    # Grenze auch quadratisch. Gemessen brauchte das gemeldete Dauermoment das
+    # Achtzehnfache des zulaessigen Stroms.
+    c_rel = float(bp.get("c_rel_Nm_per_A2", 0.0)) or reluktanzkoeffizient(geom, axial_mm)
+    return ema_thermal.mit_umrichtergrenze(t_th, lambda i: c_rel * i * i / 2.0)
 
 
 def massen_und_kosten(payload: dict) -> dict:

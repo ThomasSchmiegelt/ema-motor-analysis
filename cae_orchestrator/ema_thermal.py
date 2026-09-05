@@ -82,6 +82,42 @@ def rated_torque(geom: dict, axial: float, cooling: str) -> float:
     return max(1.0, 2.0 * sigma * V_rot)
 
 
+def mit_umrichtergrenze(t_thermisch: float, t_bei_strom, i_grenze: float = 0.0) -> dict:
+    """Dauermoment: das KLEINERE aus Kuehlung und Umrichter -- und welches bindet.
+
+    ``rated_torque`` gibt das **kuehlbare** Moment aus der Luftspalt-Schubspannung.
+    Ob der Umrichter den dafuer noetigen Strom ueberhaupt liefert, steht dort
+    nicht -- und wurde bis hierher nirgends gefragt. Gemessen an einem
+    190-mm-Blech mit einer Windung je Nut:
+
+        PSM    T_dauer 178,8 Nm  ->  5418 A noetig  =  6,8x die Umrichtergrenze
+        ASM    T_dauer 176,4 Nm  ->  3392 A         =  4,2x
+        SynRM  T_dauer 126,4 Nm  -> 14596 A         = 18,2x
+        EESM   T_dauer 178,8 Nm  ->  3251 A         =  4,1x
+
+    Alle vier meldeten damit praktisch dasselbe Dauermoment, und das sah aus wie
+    ein Ergebnis („die Kuehlung entscheidet"). In Wirklichkeit war es der
+    Schubspannungsansatz allein: die Bauart kam darin gar nicht vor.
+
+    Die beiden Grenzen werden **nicht** zu einer Zahl verschmolzen. Beide stehen
+    da, und ``begrenzt_durch`` sagt, welche bindet -- das ist die Auskunft, die
+    eine Entscheidung braucht. Wer kuehlt, wo der Umrichter bindet, gewinnt
+    nichts; wer den Umrichter vergroessert, wo die Kuehlung bindet, ebenso wenig.
+
+    ``t_bei_strom(i)`` ist das Momentgesetz der jeweiligen Bauart -- bei PSM,
+    ASM und EESM linear im Strom, bei der SynRM quadratisch. Deshalb wird es
+    hereingereicht und nicht hier angenommen.
+    """
+    import ema_analysis
+    i_lim = float(i_grenze) if i_grenze and i_grenze > 0 else ema_analysis.INVERTER_I_MAX
+    t_umr = max(float(t_bei_strom(i_lim)), 0.0)
+    t_th = max(float(t_thermisch), 0.0)
+    bindet = "Kuehlung" if t_th <= t_umr else "Umrichter"
+    return {"T_dauer_Nm": min(t_th, t_umr),
+            "T_thermisch_Nm": t_th, "T_umrichter_Nm": t_umr,
+            "begrenzt_durch": bindet, "I_grenze_A": i_lim}
+
+
 def _conductors_per_slot(geom: dict) -> int:
     """Conductors (radial layers) per slot, clamped to even 2..12 — matches the
     CAD hairpin generator in ema_freecad.build_full_motor_script."""

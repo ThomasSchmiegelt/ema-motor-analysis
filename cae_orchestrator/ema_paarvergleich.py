@@ -151,6 +151,10 @@ GLEICH_UNTER = 0.005
 METRIKEN = {
     "Kt_Nm_per_A":  ("Kt",                  "Nm/A",       "gross", True),
     "T_dauer_Nm":   ("Dauermoment (S1)",    "Nm",         "gross", True),
+    # Das kuehlbare Moment steht daneben, zaehlt aber NICHT in der Bilanz: es ist
+    # eine Einordnung („was ginge, wenn der Umrichter groesser waere"), keine
+    # Eigenschaft dieser Maschine an diesem Umrichter.
+    "T_dauer_therm_Nm": ("davon kühlbar",    "Nm",         "gross", False),
     "SF_n_max":     ("Sicherheit bei n_max", "-",         "gross", True),
     "P_verlust_W":  ("Verlustleistung",     "W",          "klein", True),
     "gesamt_kg":    ("Masse",               "kg",         "klein", True),
@@ -548,6 +552,15 @@ def _grundlast(payload: dict, n_max: float):
             "kuehl": payload.get("cooling", "water"), "stress": stress}, None
 
 
+def _dauer(t) -> dict:
+    """``dauermoment`` gibt jetzt BEIDE Grenzen zurueck. Alte Aufrufer, die eine
+    Zahl erwarteten, bekommen sie weiterhin -- aber die Begrenzung geht mit."""
+    if isinstance(t, dict):
+        return t
+    return {"T_dauer_Nm": float(t), "T_thermisch_Nm": float(t),
+            "T_umrichter_Nm": float("inf"), "begrenzt_durch": "Kuehlung"}
+
+
 def _gemeinsam(payload, ctx, bp, verl, t_dauer, mk, kt, extra: dict) -> dict:
     """Die Kennzahlen, die ALLE Bauarten in derselben Bedeutung haben."""
     geom, axial = ctx["geom"], ctx["axial"]
@@ -561,7 +574,9 @@ def _gemeinsam(payload, ctx, bp, verl, t_dauer, mk, kt, extra: dict) -> dict:
         "Kt_Nm_per_A": round(kt, 5),
         "I_s_A": float(bp["I_s_A"]),
         "strom_limit": bool(bp.get("strom_limit", False)),
-        "T_dauer_Nm": round(float(t_dauer), 1),
+        "T_dauer_Nm": round(_dauer(t_dauer)["T_dauer_Nm"], 1),
+        "T_dauer_therm_Nm": round(_dauer(t_dauer)["T_thermisch_Nm"], 1),
+        "dauer_begrenzt_durch": _dauer(t_dauer)["begrenzt_durch"],
         "SF_n_max": round(float(ctx["stress"].get("safety_factor", 0.0)), 2),
         "P_verlust_W": round(float(verl["P_total"]), 1),
         "P_Cu_W": verl["P_Cu"], "J_Apmm2": verl["J_Apmm2"],
@@ -717,7 +732,9 @@ def _bewerte_asm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dic
         "schlupf_pct":  float(bp["schlupf_pct"]),
         "P_Kaefig_W":   float(verl["P_Kaefig"]),
         "B_gap_T":      float(bp["B_m_T"]),
-        "T_dauer_Nm":   round(float(t_dauer), 1),
+        "T_dauer_Nm":   round(_dauer(t_dauer)["T_dauer_Nm"], 1),
+        "T_dauer_therm_Nm": round(_dauer(t_dauer)["T_thermisch_Nm"], 1),
+        "dauer_begrenzt_durch": _dauer(t_dauer)["begrenzt_durch"],
         "SF_n_max":     round(min(float(stress.get("safety_factor", 0.0)),
                                   float(steg["safety_factor"])), 2),
         "P_verlust_W":  round(float(verl["P_total"]), 1),
@@ -776,7 +793,12 @@ def _bewerte_pmsm(payload: dict, n_max: float, rpm: float, last_nm: float) -> di
         ema_analysis.MU_R_MAG = float(mag["mu_r"])
         b_gap = _analytical_Bgap(geom)
         perf  = compute_performance(geom, b_gap, axial_mm=axial)
-        t_dauer = ema_thermal.rated_torque(geom, axial, kuehl)
+        # Auch die PSM bekommt die zweite Grenze. Bis hierher stand hier das
+        # reine Schubspannungsmoment, fuer das gemessen das 6,8-fache des
+        # zulaessigen Stroms noetig gewesen waere.
+        t_dauer = ema_thermal.mit_umrichtergrenze(
+            ema_thermal.rated_torque(geom, axial, kuehl),
+            lambda i: float(perf["Kt_Nm_per_A"]) * i)
         # design_point_losses und NICHT compute_losses(iq, id_): der Kupferanker
         # dort ist Stromdichte x Kupfervolumen und damit **windungszahl- und
         # Kt-unabhaengig**. Mit den rohen dq-Stroemen behauptete die Hairpin-Achse
@@ -837,7 +859,9 @@ def _bewerte_pmsm(payload: dict, n_max: float, rpm: float, last_nm: float) -> di
         "xi_LqLd":      round(float(xi), 2),
         "T_rel_pct":    round(float(t_rel_pct), 1),
         "B_gap_T":      round(float(b_gap), 4),
-        "T_dauer_Nm":   round(float(t_dauer), 1),
+        "T_dauer_Nm":   round(_dauer(t_dauer)["T_dauer_Nm"], 1),
+        "T_dauer_therm_Nm": round(_dauer(t_dauer)["T_thermisch_Nm"], 1),
+        "dauer_begrenzt_durch": _dauer(t_dauer)["begrenzt_durch"],
         "SF_n_max":     round(float(stress.get("safety_factor", 0.0)), 2),
         "P_verlust_W":  round(float(verl["P_total"]), 1),
         "P_Cu_W":       verl["P_Cu"],
@@ -1119,6 +1143,10 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
             # zwischen zwei Optionen ist er aber das Entscheidende.
             if not o.get("zusatz_ok", True):
                 z.append(f"        ⚠ {o.get('zusatz_hinweis', '')}")
+            if o.get("dauer_begrenzt_durch") == "Umrichter":
+                z.append(f"        ⚠ Dauermoment vom UMRICHTER begrenzt: "
+                         f"{o['T_dauer_Nm']:.1f} Nm statt {o['T_dauer_therm_Nm']:.1f} Nm "
+                         f"kuehlbar — mehr Kuehlung bringt hier nichts")
             if o.get("strom_limit"):
                 z.append(f"        ⚠ Strom am Umrichter-Limit "
                          f"({ema_analysis.INVERTER_I_MAX:.0f} A bei 1 Wdg/Nut) — "

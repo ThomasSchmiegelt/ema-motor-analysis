@@ -153,7 +153,13 @@ def stabzahl(geom: dict) -> int:
     return max(6, n_s - 1)
 
 
-def kaefig(geom: dict, axial_mm: float) -> dict:
+# Stromdichte des Kaefigstabs [A/mm^2, Effektivwert]. **Sie** bemisst den Stab,
+# nicht der verfuegbare Platz. 4-8 A/mm^2 ist der uebliche Bereich fuer einen
+# Aludruckguss-Kaefig; der Laeufer kuehlt schlecht, darum nicht hoeher.
+J_STAB_APMM2 = 6.0
+
+
+def kaefig(geom: dict, axial_mm: float, j_stab_Apmm2: float = 0.0) -> dict:
     """Stab- und Ringgeometrie aus dem Laeuferblech. Alles in mm / mm^2.
 
     Der Nutraum liegt zwischen dem Steg unter dem Luftspalt
@@ -180,7 +186,30 @@ def kaefig(geom: dict, axial_mm: float) -> dict:
     # Iteration bestimmbar (die Teilung nimmt nach innen ab, die Nut wird also
     # keinesfalls breiter als hier angesetzt).
     breite  = 2.0 * math.pi * (r_rot - KAEFIG_STEG_MM) / n_stab * KAEFIG_NUT_ANTEIL
-    nuttiefe = max(min(nutraum, KAEFIG_TIEFE_ZU_BREITE * breite), 2.0)
+
+    # Die Tiefe folgt aus der STROMDICHTE, nicht aus dem verfuegbaren Platz.
+    #
+    # Bis hierher stand hier ``min(nutraum, 3*breite)`` -- der Stab fuellte also
+    # den Laeuferraum bis zum Deckel. Gemessen ergab das 306 mm^2 bei
+    # **1,14 A/mm^2**; gebaut werden 4-8. Der Stabwiderstand kam damit um den
+    # Faktor 5 zu klein heraus, und mit ihm der Schlupf (0,24 % gerechnet gegen
+    # 2-13 % recherchiert). Der Deckel begrenzte nur den Schaden.
+    #
+    # Der Auslegungsstrom kommt aus ``auslegungsstrom_stab`` und braucht keinen
+    # Betriebspunkt: mehr als ``sqrt(I_lim^2 - i_mag^2)`` kann diese Maschine
+    # nie fuehren.
+    j_soll = float(j_stab_Apmm2 or geom.get("barCurrentDensity") or J_STAB_APMM2)
+    j_soll = min(max(j_soll, 1.0), 20.0)
+    a_soll = auslegungsstrom_stab(geom)["I_stab_eff_A"] / j_soll        # mm^2
+    t_strom = a_soll / max(breite * KAEFIG_FUELLUNG, 1e-9)
+    t_deckel = KAEFIG_TIEFE_ZU_BREITE * breite
+    nuttiefe = max(min(t_strom, nutraum, t_deckel), 2.0)
+    if nuttiefe >= nutraum - 1e-9 and t_strom > nutraum:
+        bemessung = "Blechraum"          # der Laeufer ist zu klein fuer den Strom
+    elif nuttiefe >= t_deckel - 1e-9 and t_strom > t_deckel:
+        bemessung = "Tiefe/Breite"       # Stromverdraengung waere nicht mehr erfasst
+    else:
+        bemessung = "Stromdichte"
     r_mitte  = r_rot - KAEFIG_STEG_MM - nuttiefe / 2.0
     a_stab  = breite * nuttiefe * KAEFIG_FUELLUNG                  # [mm^2]
 
@@ -199,6 +228,10 @@ def kaefig(geom: dict, axial_mm: float) -> dict:
         "r_ring_mm": round(r_mitte, 2),
         "nutraum_mm": round(nutraum, 2),          # was das Blech hergaebe
         "tief_begrenzt": bool(nutraum > KAEFIG_TIEFE_ZU_BREITE * breite),
+        "bemessung": bemessung,
+        "J_stab_Apmm2": round(auslegungsstrom_stab(geom)["I_stab_eff_A"]
+                              / max(a_stab, 1e-9), 2),
+        "tiefe_zu_breite": round(nuttiefe / max(breite, 1e-9), 2),
         "eng": nutraum < 2.0,                    # Laeufer hat keinen Platz mehr
     }
 
@@ -242,6 +275,52 @@ def magnetisierungsstrom(geom: dict) -> dict:
 
 # ── Betriebspunkt ─────────────────────────────────────────────────────────────
 
+def stabstrom(geom: dict, i_q_haus: float, n_stab: int) -> float:
+    """Stabstrom [A, Amplitude] aus dem Durchflutungsgleichgewicht.
+
+    Die Laeuferdurchflutung hebt die momentbildende Statordurchflutung auf:
+
+        F_stator = 1.5*(4/pi)*(N_ph*k_w/(2p)) * i_q_phys      [A je Pol]
+        F_kaefig = n_stab * I_stab / (2*pi*p)                 (Strombelag)
+
+    Steht hier und nicht zweimal: der Betriebspunkt braucht sie, und die
+    Kaefigauslegung braucht sie auch -- und zwar dieselbe. Zwei Fassungen davon
+    waeren zwei verschiedene Staebe fuer dieselbe Maschine.
+    """
+    p = max(int(geom["p"]), 1)
+    n_ph = max(int(geom["slots"]) / 3.0, 1.0)
+    i_q_phys = i_q_haus / max(k_norm(geom), 1e-12)
+    f_stator = 1.5 * (4.0 / math.pi) * (n_ph * K_W / (2.0 * p)) * i_q_phys
+    return 2.0 * math.pi * p * f_stator / max(int(n_stab), 1)
+
+
+def auslegungsstrom_stab(geom: dict) -> dict:
+    """Der Strom, fuer den der Kaefig zu bemessen ist -- aus der Geometrie allein.
+
+    Warum das ohne Betriebspunkt geht: der Umrichter begrenzt den Strangstrom
+    auf ``INVERTER_I_MAX``, und der Magnetisierungsstrom liegt durch das
+    Ziel-Luftspaltfeld fest. Mehr momentbildenden Strom als
+    ``sqrt(I_lim^2 - i_mag^2)`` kann diese Maschine nie fuehren -- also ist der
+    zugehoerige Stabstrom ihr groesster ueberhaupt moeglicher. Genau dafuer wird
+    ein Kaefig ausgelegt.
+
+    Das ersetzt die bisherige Bemessung nach PLATZ. Sie fuellte den Laeuferraum
+    bis zum Deckel ``KAEFIG_TIEFE_ZU_BREITE`` und ergab gemessen einen Stab von
+    306 mm^2 bei **1,14 A/mm^2** -- ein Viertel bis ein Fuenftel dessen, was
+    gebaut wird. Die Folge war ein viel zu kleiner Stabwiderstand und damit ein
+    Schlupf von 0,24 %, wo die Recherche 2-13 % ausweist.
+    """
+    mg = magnetisierungsstrom(geom)
+    i_mag = mg["i_mag_A"]
+    i_lim = float(ema_analysis.INVERTER_I_MAX)
+    i_q = math.sqrt(max(i_lim ** 2 - i_mag ** 2, 0.0))
+    n_stab = stabzahl(geom)
+    i_stab = stabstrom(geom, i_q, n_stab)
+    return {"i_mag_A": i_mag, "i_q_max_A": i_q, "n_stab": n_stab,
+            "I_stab_A": i_stab, "I_stab_eff_A": i_stab / math.sqrt(2.0),
+            "am_limit": bool(i_q <= 1e-6)}
+
+
 def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
                   stabmaterial: str | None = None) -> dict:
     """Stationaerer Nennpunkt: Stroeme, Schlupf, Laeuferverlust, Moment.
@@ -257,11 +336,21 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     kt    = max(float(perf["Kt_Nm_per_A"]), 1e-9)
     t_soll = float(last_nm) + ema_analysis.DQ_TORQUE_MARGIN_NM
 
-    i_q_roh = t_soll / kt
-    i_q = min(i_q_roh, ema_analysis.INVERTER_I_MAX)
+    # Der Umrichter begrenzt den STRANGSTROM, nicht seinen momentbildenden
+    # Anteil. Hier stand ``min(i_q, INVERTER_I_MAX)`` -- und weil der
+    # Magnetisierungsstrom danach geometrisch dazukam, meldete die ASM gemessen
+    # 977 A bei einer Grenze von 800 A. Die Zahl stand da, war ueber der Grenze,
+    # und nur ein Warnhinweis daneben sagte es.
+    #
+    # Richtig ist: was nach dem Magnetisierungsstrom uebrig bleibt, ist der
+    # groesste momentbildende Strom. Genau das ist der Preis dieser Bauart.
     i_mag = mg["i_mag_A"]
+    i_lim = float(ema_analysis.INVERTER_I_MAX)
+    i_q_max = math.sqrt(max(i_lim ** 2 - i_mag ** 2, 0.0))
+    i_q_roh = t_soll / kt
+    i_q = min(i_q_roh, i_q_max)
     i_s = math.hypot(i_mag, i_q)
-    am_limit = i_s >= 0.999 * ema_analysis.INVERTER_I_MAX or i_q_roh > i_q
+    am_limit = i_q_roh > i_q
 
     # ── Laeuferkaefig: Stabstrom aus dem Durchflutungsgleichgewicht ───────────
     # Die Laeuferdurchflutung hebt die momentbildende Statordurchflutung auf.
@@ -270,10 +359,7 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     kf   = kaefig(geom, L)
     mat  = HAIRPIN_MATS.get(stabmaterial or geom.get("barMat") or KAEFIG_VORGABE,
                             HAIRPIN_MATS[KAEFIG_VORGABE])
-    n_ph = max(int(geom["slots"]) / 3.0, 1.0)
-    i_q_phys = i_q / mg["k_norm"]
-    f_stator = 1.5 * (4.0 / math.pi) * (n_ph * K_W / (2.0 * p)) * i_q_phys
-    i_stab = 2.0 * math.pi * p * f_stator / max(kf["n_stab"], 1)
+    i_stab = stabstrom(geom, i_q, kf["n_stab"])
 
     r_stab = float(mat["rho_el"]) * (kf["l_stab_mm"] * 1e-3) / max(kf["A_stab_mm2"] * 1e-6, 1e-12)
     p_stab = kf["n_stab"] * 0.5 * i_stab ** 2 * r_stab           # Amplitude -> eff^2
@@ -343,8 +429,8 @@ def verluste(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     return aus
 
 
-def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> float:
-    """S1-Dauermoment [Nm] der ASM.
+def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> dict:
+    """S1-Dauermoment der ASM -- beide Grenzen, und welche bindet.
 
     ``ema_thermal.rated_torque`` ist eine **geometrische** Schubspannungsformel;
     sie kennt weder Magnetisierungsstrom noch Kaefigverlust. Der Abschlag folgt
@@ -357,8 +443,13 @@ def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> float:
     i_max = t_geo / kt                                  # Strangstrom bei T_geo
     i_mag = float(bp["i_mag_A"])
     if i_mag >= i_max:
-        return 0.0                                       # Magnetisierung frisst alles
-    return t_geo * math.sqrt(max(i_max ** 2 - i_mag ** 2, 0.0)) / i_max
+        t_th = 0.0                                       # Magnetisierung frisst alles
+    else:
+        t_th = t_geo * math.sqrt(max(i_max ** 2 - i_mag ** 2, 0.0)) / i_max
+    # Und die zweite Grenze: was der Umrichter hergibt. Ohne sie stand hier ein
+    # Moment, fuer das viermal der zulaessige Strom noetig gewesen waere.
+    return ema_thermal.mit_umrichtergrenze(
+        t_th, lambda i: kt * math.sqrt(max(i ** 2 - i_mag ** 2, 0.0)))
 
 
 # ── Massen und Kosten ─────────────────────────────────────────────────────────
