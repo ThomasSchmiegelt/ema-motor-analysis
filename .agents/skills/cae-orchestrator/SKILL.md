@@ -45,7 +45,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `steckbrief [id]` | **Was dieses Projekt IST und was daran gerechnet wurde** — Maschinenart, Pole/Nuten, Bauraum, Werkstoffe, Betriebspunkt, welche Stufen gelaufen sind, die Kennwerte **samt Herkunft**, und was offen ist. Rechnet nichts; was fehlt, steht als fehlend da. `--laeufe` listet zusätzlich die früheren Agentenläufe und die abgelegten Rechnungen |
 | `welle` | **Vollwelle oder Hohlwelle — gemessen.** Rechnet EIN Feld und sagt, ob durch die Welle Fluss läuft und wie groß die Bohrung höchstens sein darf. Exit 0 = Hohlwelle möglich, 1 = Vollwelle nötig |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
-| `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Dreizehn Achsen (Magnetanordnung, **V-Öffnungswinkel**, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge, **Wellendurchmesser**), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht**. 0,7 s, rein analytisch. `--referenz` zeigt statt eines Vergleichs die **recherchierten Vergleichswerte** mit Quellen |
+| `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Sechzehn Achsen (**Maschinenart** PSM/ASM/SynRM/EESM, **Bauform** Innen-/Außenläufer, **Wicklungsart** Hairpin/Runddraht, Magnetanordnung, **V-Öffnungswinkel**, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge, **Wellendurchmesser**), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht** — beim Kt ist das inzwischen die Maschinenart. 0,7 s, rein analytisch. `--referenz` zeigt statt eines Vergleichs die **recherchierten Vergleichswerte** mit Quellen; die Achse `maschinenart` trägt zusätzlich einen Block **BAUART GEGEN BAUART**, der gerechnete Verhältnisse gegen recherchierte stellt |
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
 | `bilddaten <was>` | **Bilddatensatz zum optischen Bewerten**: `erzeugen` · `seite` · `einlesen` · `regel` · `stand`. Zieht zufaellige Rotorquerschnitte, behaelt nur die, die das Layouttor bestehen, und zeichnet sie. **Die Bewertung macht ein Mensch** — du kannst sie nur vorbereiten und hinterher auswerten |
 | `feldbild` | **Magnetfeldlinien zum Ansehen** in den Projektordner legen: `linien` (Durchsicht) · `schnitt` (Stator ueber einen Sektor weggenommen) · `pol` (ein Polsektor gross) · `laengs` (Achsschnitt, gerechnetes Feld nur mit 3-D-Lauf). Durchsichtige PNG, ein FDM-Lauf, Sekunden bis Minuten — **kein** Pipelinelauf |
@@ -684,6 +684,44 @@ nachgerechnet. Zwei Sorten, sauber getrennt: **wörtlich übernommene Messpunkte
 (mit Zitat) und **abgeleitete Bänder** (unsere Einordnung, jedes nennt die
 Messpunkte, auf denen es ruht). Nenne sie in einer Antwort nie ohne Quelle und nie
 als Ersatz für eine Zahl aus der Rechnungsdatenbank.
+
+### Recherche zu ASM, SynRM und EESM — und was sie an unseren Zahlen findet
+
+Für die drei magnetlosen Bauarten liegen drei Untersuchungen vor, die je **zwei
+Bauarten am GLEICHEN Stator** gegeneinanderstellen — dasselbe, was die Achse
+`maschinenart` tut. Daraus sind Bänder für genau die Größen abgeleitet, die
+unsere analytischen Module bisher **gesetzt und nicht gemessen** hatten.
+
+| Bauart | belegte Größe | recherchiert | Beleg |
+|---|---|---|---|
+| ASM | Schlupf am Nennpunkt | 5,5 % (2–13,3 % über den Strom) | Gundogdu 2023, Fig. 11 |
+| ASM | Läuferstäbe / Statornuten | 44/48 = 0,92 | Gundogdu 2023, Tab. 2 |
+| ASM | Stabtiefe / Stabbreite | 1,64 | Gundogdu 2023, Tab. 2 |
+| ASM | Salienz | genau 1,0 (glatter Läufer) | Gundogdu 2023, S. 680 |
+| SynRM | Leistungsfaktor Vollast | 0,67 — **über** dem der ASM (0,63) | Gerçekcioğlu 2021, Tab. 6 |
+| SynRM | Verluste, bezogen auf die ASM | 0,41 | Gerçekcioğlu 2021, Tab. 6 |
+| EESM | Erregerstrom | 32 A an 210 kW | Carlsson 2026, Tab. 1 |
+| EESM | Statorstrom, bezogen auf die PSM | 0,73 — bei 36 % **mehr** Moment | Carlsson 2026, Tab. 1 |
+
+Das steht im Paarvergleich an zwei Stellen: **je Option** mit ⓘ, wenn eine
+gerechnete Zahl aus dem Band fällt, und als eigener Block **BAUART GEGEN BAUART**
+für die Verhältnisse, die erst zwischen zwei Bauarten eine Aussage sind.
+
+**Was heute gemessen daneben liegt** — sage das in einer Antwort dazu, statt die
+gerechnete Zahl allein zu nennen:
+
+* Der **ASM-Schlupf** kommt analytisch auf rund 0,27 % heraus, recherchiert sind
+  2–13,3 %. Die Feldstufe (`feld2d`) bestätigt unabhängig, dass er größer sein muss.
+* Die **SynRM** erreicht in unserem Modell nur einen Bruchteil des Moments je
+  Ampere einer optimierten SynRM. Unser Barrierenmodell erfasst die Sperrschichten
+  über ein Salienzband, nicht über ihre Einzelgeometrie.
+* Die **EESM-Erregerleistung** kommt zu klein heraus; das Wickelfenster ist im
+  Modell großzügiger als in einer wirklichen Auslegung.
+
+Steht eine der Optionen am **Umrichter-Limit** (800 A), meldet der
+Bauart-Vergleich „NICHT VERGLEICHBAR" statt einer Abweichung — beide Ströme
+laufen dann gegen dieselbe Schranke, und das Verhältnis sagt nichts über die
+Bauart.
 
 Dieselbe Quelle trägt die **Bauverhältnisse** von sieben abgerufenen Maschinen
 (Rotor/Stator, Wellenbohrung/Rotor, Länge/Durchmesser, Luftspalt). Liegt eine Option

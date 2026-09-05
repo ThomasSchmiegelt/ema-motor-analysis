@@ -477,12 +477,45 @@ def _bewerte(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
     except ema_maschinenart.ArtNichtUnterstuetzt as e:
         return {"ok": False, "grund": str(e)}
     if art == "asm":
-        return _bewerte_asm(payload, n_max, rpm, last_nm)
-    if art == "synrm":
-        return _bewerte_synrm(payload, n_max, rpm, last_nm)
-    if art == "eesm":
-        return _bewerte_eesm(payload, n_max, rpm, last_nm)
-    return _bewerte_pmsm(payload, n_max, rpm, last_nm)
+        erg = _bewerte_asm(payload, n_max, rpm, last_nm)
+    elif art == "synrm":
+        erg = _bewerte_synrm(payload, n_max, rpm, last_nm)
+    elif art == "eesm":
+        erg = _bewerte_eesm(payload, n_max, rpm, last_nm)
+    else:
+        erg = _bewerte_pmsm(payload, n_max, rpm, last_nm)
+    if erg.get("ok"):
+        # Die recherchierten Baender je Bauart (``ema_referenz.ART_BAND``) --
+        # kein Tor, sondern eine Einordnung. Sie decken genau die Groessen ab,
+        # die unsere Module bisher GESETZT und nicht gemessen hatten; faellt eine
+        # gerechnete Zahl heraus, ist das der erste Hinweis, dass die Annahme
+        # nicht traegt. Beim ASM-Schlupf ist es genau so ausgegangen.
+        erg["band_art"] = ema_referenz.art_pruefen(art, _bandwerte(art, payload, erg))
+    return erg
+
+
+def _bandwerte(art: str, payload: dict, erg: dict) -> dict:
+    """Die gerechneten Zahlen unter den Namen, die ``ART_BAND`` benutzt."""
+    geom = payload.get("geom") or {}
+    w = {"xi_LqLd": erg.get("xi_LqLd")}
+    if art == "asm":
+        w["schlupf_pct"] = erg.get("schlupf_pct")
+        try:
+            axial = float(geom.get("axialLen") or payload.get("axial_len") or 80.0)
+            kf = ema_asm.kaefig(geom, axial)
+            w["staebe_je_nut"] = kf["n_stab"] / max(int(geom["slots"]), 1)
+            w["stab_tiefe_zu_breite"] = (kf["nuttiefe_mm"]
+                                         / max(kf["stabbreite_mm"], 1e-9))
+        except Exception:
+            pass
+    elif art == "eesm":
+        w["I_f_A"] = erg.get("I_f_A")
+        t = float(erg.get("T_dauer_Nm") or 0.0)
+        rpm = float(payload.get("rpm_from") or 3000.0)
+        p_ab = t * 2.0 * math.pi * rpm / 60.0
+        if p_ab > 1.0 and erg.get("P_Erreger_W"):
+            w["erreger_anteil_pct"] = 100.0 * float(erg["P_Erreger_W"]) / p_ab
+    return w
 
 
 def _grundlast(payload: dict, n_max: float):
@@ -1007,6 +1040,13 @@ def vergleiche(basis: dict, achsen: list | None = None, n_max: float | None = No
     return {"n_max": n_max, "rpm_betriebspunkt": rpm, "last_nm": last_nm,
             "basis_geom": dict(basis["geom"]),
             "band_basis": ema_referenz.bauband_pruefen(basis["geom"]),
+            # Die Verhaeltnisse ZWISCHEN den Bauarten. Sie sind erst dann eine
+            # Aussage, wenn mehrere Arten am selben Betriebspunkt dastehen --
+            # und genau so halten es auch die drei abgerufenen Untersuchungen,
+            # die je zwei Bauarten am GLEICHEN Stator gegeneinanderstellen.
+            "arten_vergleich": ema_referenz.arten_gegenueberstellung(
+                {o["wert"]: o for o in aus.get("maschinenart", {}).get("optionen", [])}
+            ) if "maschinenart" in aus else [],
             "achsen": aus, "rangfolge": rangfolge,
             "hinweis": ("Analytischer Paarvergleich — kein Feldlauf, keine FEM, keine "
                         "Thermiksimulation. Die Kühlung wirkt nur über die Tabelle "
@@ -1075,6 +1115,8 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
             if o.get("band_hinweis"):
                 z.append(f"        ⓘ neu gegenüber der Grundgeometrie: "
                          f"{o['band_hinweis']} [recherchiert, kein Tor]")
+            for b in o.get("band_art", []):
+                z.append(f"        ⓘ {b} [recherchiert, kein Tor — s. ema_referenz]")
         if a["spannweite"]:
             unbewegt = [METRIKEN[m][0] for m, s in a["spannweite"].items()
                         if METRIKEN[m][3] and s["spanne_pct"] < 100 * GLEICH_UNTER]
@@ -1091,6 +1133,19 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
                 z.append(f"      {p['a'][:24]:<24} vs {p['b'][:24]:<24} {p['bilanz']:>5}")
                 z.append(f"          für links:  {fa}")
                 z.append(f"          für rechts: {fb}")
+        z.append("")
+
+    if erg.get("arten_vergleich"):
+        z.append("BAUART GEGEN BAUART — gerechnet gegen recherchiert.")
+        z.append("Diese Verhaeltnisse sind erst zwischen den Arten eine Aussage; die")
+        z.append("drei abgerufenen Untersuchungen halten je zwei Bauarten am GLEICHEN")
+        z.append("Stator fest und tun damit dasselbe wie diese Achse.")
+        for e in erg["arten_vergleich"]:
+            marke = "im Band" if e["im_band"] else "AUSSERHALB"
+            z.append(f"  [{marke}] {e['groesse']}: gerechnet {e['gerechnet']:.3g}, "
+                     f"recherchiert {e['band'][0]:.3g}–{e['band'][1]:.3g} "
+                     f"[{e['beleg']}]")
+            z.append(f"      {e['text']}")
         z.append("")
 
     z.append(erg["hinweis"])

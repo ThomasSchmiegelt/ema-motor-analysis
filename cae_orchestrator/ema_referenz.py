@@ -88,6 +88,38 @@ QUELLEN = {
         "url": "https://dergipark.org.tr/en/download/article-file/1823308",
         "stelle": "Tab. 1 und Abschnitt 4",
     },
+    # ── Die drei neuen Maschinenarten (abgerufen und im Volltext gelesen
+    #    am 05.09.2026). Jede der drei haelt EINE Vergleichsgroesse fest, die
+    #    unsere analytischen Module bisher nur angenommen hatten.
+    "gundogdu2023": {
+        "titel": ("Torque Capability Comparison of Induction and Interior "
+                  "Permanent Magnet Machines for Traction Applications"),
+        "kennung": ("Tayfun Gundogdu, Gazi University Journal of Science 36(2): "
+                    "675-691 (2023), DOI 10.35378/gujs.1067707"),
+        "url": "https://dergipark.org.tr/en/download/article-file/2230751",
+        "stelle": ("Tab. 2 (Auslegung IM und Prius-2010-IPM am GLEICHEN Stator: "
+                   "264 mm Aussen-Ø, 0,73 mm Luftspalt, 48 Nuten, 8 Pole, M270-35), "
+                   "Tab. 3 (Wirkungsgraddifferenz), Fig. 8/11 (Moment, Schlupf)"),
+    },
+    "gercekcioglu2021": {
+        "titel": ("Efficiency and Performance Comparison Between Synchronous "
+                  "Reluctance and Induction Motor in Axial Flux Concept"),
+        "kennung": ("H. S. Gercekcioglu, M. Akar, GU J Sci Part C 9(2): 297-316 "
+                    "(2021), DOI 10.29109/gujsc.910521"),
+        "url": "https://dergipark.org.tr/en/download/article-file/1687918",
+        "stelle": ("Tab. 6 (SynRM gegen ASM am GLEICHEN Stator, 2,2 kW, ueber "
+                   "25-125 % Last), Sekil 12-17. ACHTUNG: AXIALFLUSSMASCHINEN"),
+    },
+    "carlsson2026": {
+        "titel": ("Investigation of Soft Magnetic Composites in Radial-Flux Wound "
+                  "Field Synchronous Machines for Automotive Propulsion"),
+        "kennung": ("A. Carlsson, C. Sandstroem, V. Josefsson, L. Kjellen, "
+                    "T. El Hajji, M. Lenberg (Polestar / Hoeganaes / Alvier), "
+                    "arXiv:2605.05853v1, 07.05.2026"),
+        "url": "https://arxiv.org/pdf/2605.05853",
+        "stelle": ("Tab. 1 (EESM gegen PSM am GLEICHEN Stator-Aussendurchmesser "
+                   "237 mm), Tab. 4 (Kennwerte der Varianten), Tab. 5 (WLTP)"),
+    },
     "scirep2025": {
         "titel": ("Optimization design and torque performance research of interior "
                   "permanent magnet synchronous motors"),
@@ -212,7 +244,221 @@ BAUMUSTER = [
 #
 # code -> (xi_min, xi_max, stuetzen, bemerkung)
 #
-# Das Band ist WEIT, wo die Belege duenn sind. Ein schmales Band ohne Beleg waere
+# ── Die drei neuen Maschinenarten, woertlich uebernommen ─────────────────────
+#
+# Was diese Zahlen wert sind: sie stammen aus drei Untersuchungen, die jeweils
+# ZWEI Bauarten am **gleichen Stator** gegeneinanderstellen. Genau das macht sie
+# fuer den Paarvergleich brauchbar -- er tut dasselbe.
+
+MESSPUNKTE += [
+    # (5) ASM gegen IPM am gleichen Stator: 264 mm Aussen-Ø, 0,73 mm Luftspalt,
+    #     48 Nuten, 8 Pole, M270-35. Der IPM ist der Prius 2010.
+    {"groesse": "ASM_Statorbohrung", "wert": 195.0, "einheit": "mm",
+     "quelle": "gundogdu2023",
+     "zitat": "Stator inner diameter (mm): IM 195, Prius IPM 161.9 (Tab. 2)"},
+    {"groesse": "ASM_Laeuferstaebe", "wert": 44, "einheit": "-",
+     "quelle": "gundogdu2023",
+     "zitat": "PM/Rotor slot number: IM 44, bei 48 Statornuten und 8 Polen (Tab. 2)"},
+    {"groesse": "ASM_Stabnut_Breite", "wert": 9.29, "einheit": "mm",
+     "quelle": "gundogdu2023", "zitat": "Rotor slot width (mm) 9.29 (Tab. 2)"},
+    {"groesse": "ASM_Stabnut_Hoehe", "wert": 15.2, "einheit": "mm",
+     "quelle": "gundogdu2023", "zitat": "Rotor slot height (mm) 15.2 (Tab. 2)"},
+    {"groesse": "ASM_Stabnut_Schlitz", "wert": 1.0, "einheit": "mm",
+     "quelle": "gundogdu2023",
+     "zitat": "Rotor slot opening width (mm) 1 — die Kaefignut ist HALBGESCHLOSSEN "
+              "(Tab. 2)"},
+    {"groesse": "Nutfuellfaktor", "wert": 0.465, "einheit": "-",
+     "quelle": "gundogdu2023",
+     "zitat": "Slot filling factor 0.465, fuer IM und IPM gleich (Tab. 2)"},
+    {"groesse": "ASM_Kaefigwerkstoff", "wert": None, "einheit": "-",
+     "quelle": "gundogdu2023", "zitat": "PM/Cage material: IM Copper (Tab. 2)"},
+    {"groesse": "Luftspalt_ASM_IPM", "wert": 0.73, "einheit": "mm",
+     "quelle": "gundogdu2023",
+     "zitat": "Air-gap length (mm) 0.73 — fuer BEIDE Bauarten gleich (Tab. 2)"},
+    {"groesse": "ASM_Schlupf_bei_Nennstrom", "wert": 5.5, "einheit": "%",
+     "quelle": "gundogdu2023",
+     "zitat": "Slip versus excitation current curve: rund 5,5 % beim Nennstrom "
+              "250 A, rund 2 % bei 125 A und 13,3 % bei 1500 A (Fig. 11)"},
+    {"groesse": "ASM_keine_Salienz", "wert": None, "einheit": "-",
+     "quelle": "gundogdu2023",
+     "zitat": "„these flux components are identical for IM, indicating that there "
+              "is no saliency in the IM“ (S. 680)"},
+    {"groesse": "Wirkungsgrad_IPM_minus_ASM", "wert": None, "einheit": "%-Punkte",
+     "quelle": "gundogdu2023",
+     "zitat": "eta-Differenz IPM gegen IM: +2,06 (125 A), +1,04 (250 A), 0 "
+              "(500 A), -9,41 (1000 A) (Tab. 3)"},
+
+    # (6) SynRM gegen ASM am gleichen Stator, 2,2 kW. ACHTUNG: Axialfluss --
+    #     die Betriebsgroessen sind uebertragbar, die Geometrie nicht.
+    {"groesse": "SynRM_Leistungsfaktor_Vollast", "wert": 0.67, "einheit": "-",
+     "quelle": "gercekcioglu2021",
+     "zitat": "Guec Faktoeru (cos phi) bei 100 % Last: EA-SRM 0.67, EA-IM 0.63 "
+              "(Tab. 6)"},
+    {"groesse": "SynRM_Leistungsfaktor_Teillast", "wert": 0.60, "einheit": "-",
+     "quelle": "gercekcioglu2021",
+     "zitat": "Bei 25 % Last: EA-SRM 0.6 gegen EA-IM 0.3 (Tab. 6)"},
+    {"groesse": "SynRM_Wirkungsgrad_Vollast", "wert": 89.3, "einheit": "%",
+     "quelle": "gercekcioglu2021",
+     "zitat": "Verim (%) bei 100 % Last: EA-SRM 89.3, EA-IM 82.28 (Tab. 6)"},
+    {"groesse": "SynRM_Verluste_Vollast", "wert": 0.26, "einheit": "kW",
+     "quelle": "gercekcioglu2021",
+     "zitat": "Toplam Kayiplar (kW) bei 100 % Last: EA-SRM 0.26, EA-IM 0.63 — "
+              "der ASM-Verlust ist das 2,42-fache (Tab. 6, Sekil 17)"},
+    {"groesse": "SynRM_Moment_je_Ampere", "wert": 2.4, "einheit": "Nm/A",
+     "quelle": "gercekcioglu2021",
+     "zitat": "Akim basina Tork (Nm/A) bei 100 % Last: EA-SRM 2.4, EA-IM 2.2 "
+              "(Tab. 6)"},
+    {"groesse": "SynRM_Strom_Vollast", "wert": 5.8, "einheit": "A",
+     "quelle": "gercekcioglu2021",
+     "zitat": "Vollast: EA-SRM 5,8 A fuer 13,93 Nm, EA-IM 6,36 A fuer 13,96 Nm "
+              "(Sekil 12)"},
+
+    # (7) EESM gegen PSM am gleichen Stator-Aussendurchmesser (237 mm),
+    #     Traktionsantrieb, radialer Fluss.
+    {"groesse": "EESM_Spitzenmoment", "wert": 610.0, "einheit": "Nm",
+     "quelle": "carlsson2026",
+     "zitat": "Peak Torque: WFSM (M0) 610 N.m, PMSM 450 N.m (Tab. 1)"},
+    {"groesse": "EESM_Hoechststrom", "wert": 400.0, "einheit": "A(eff)",
+     "quelle": "carlsson2026",
+     "zitat": "Maximum Current: WFSM 400 Arms, PMSM 550 Arms (Tab. 1)"},
+    {"groesse": "EESM_Erregerstrom", "wert": 32.0, "einheit": "A",
+     "quelle": "carlsson2026", "zitat": "Field Current: WFSM 32 A (Tab. 1)"},
+    {"groesse": "EESM_Erregerleistung", "wert": 8.2, "einheit": "kW",
+     "quelle": "carlsson2026",
+     "zitat": "„a contactless rotating transformer capable of transferring up to "
+              "8.2 kW to the rotor field winding“ bei 210 kW Spitzenleistung "
+              "(Abschn. 3)"},
+    {"groesse": "EESM_Statoraussendurchmesser", "wert": 237.0, "einheit": "mm",
+     "quelle": "carlsson2026",
+     "zitat": "Stator Outer Diameter 237 mm fuer BEIDE; aktive Laenge WFSM 133 mm, "
+              "PMSM 128 mm (Tab. 1)"},
+    {"groesse": "EESM_WLTP_Wirkungsgrad", "wert": 89.7, "einheit": "%",
+     "quelle": "carlsson2026",
+     "zitat": "WLTP Efficiency: WFSM M6 89.7 %, PMSM 88.3 % (Tab. 5)"},
+    {"groesse": "EESM_Wirkungsgrad_Konstantfahrt", "wert": None, "einheit": "%",
+     "quelle": "carlsson2026",
+     "zitat": "70 km/h: WFSM 91.7 gegen PMSM 88.5; 130 km/h: 92.5 gegen 89.9 "
+              "(Tab. 5)"},
+]
+
+
+# ── Bänder je Maschinenart (ABGELEITET) ──────────────────────────────────────
+#
+# Unsere Einordnung der obigen Messpunkte, kein Zitat. Sie sind **kein Tor**:
+# ausserhalb heisst nicht falsch, sondern „keine der abgerufenen Maschinen wurde
+# dort gebaut". Der Paarvergleich zeigt es an der Option an.
+#
+# Warum diese Groessen und keine anderen: es sind genau die, die unsere
+# analytischen Module bisher **gesetzt** hatten. Ein Band um eine gerechnete
+# Zahl ist nutzlos; ein Band um eine angenommene Zahl sagt, ob die Annahme
+# traegt.
+
+ART_BAND = {
+    # Kein Band, sondern ein Hinweistext: die Umrichtergrenzen sind in
+    # ``ema_analysis`` fest verdrahtet und ausdruecklich nicht Teil dieses
+    # Vorhabens (s. CLAUDE.md). Wo sie greifen, ist ein Stromverhaeltnis eine
+    # Aussage ueber den Deckel und nicht ueber die Bauart.
+    "_limit_hinweis": "800 A bei 1 Wdg/Nut, ema_analysis.INVERTER_I_MAX",
+    "asm": {
+        "schlupf_pct": {
+            "band": (2.0, 13.3), "nenn": 5.5, "label": "Schlupf",
+            "stuetzen": ("ASM_Schlupf_bei_Nennstrom",),
+            "bemerkung": ("Am Nennstrom rund 5,5 %, ueber den Strom von 2 % bis "
+                          "13,3 %. Unsere analytische Leistungsbilanz kam auf "
+                          "0,24 % — zwanzigmal kleiner. Die Feldstufe (feld2d) "
+                          "bestaetigt, dass der Schlupf groesser sein muss.")},
+        "staebe_je_nut": {
+            "band": (0.85, 1.00), "nenn": 0.917, "label": "Läuferstäbe / Statornuten",
+            "stuetzen": ("ASM_Laeuferstaebe",),
+            "bemerkung": ("44 Staebe zu 48 Nuten. Gleiche Zahl waere wegen der "
+                          "Nutungskraefte falsch, sehr viel weniger kostet "
+                          "Laeuferquerschnitt.")},
+        "stab_tiefe_zu_breite": {
+            "band": (1.4, 2.2), "nenn": 1.64, "label": "Stabtiefe / Stabbreite",
+            "stuetzen": ("ASM_Stabnut_Hoehe", "ASM_Stabnut_Breite"),
+            "bemerkung": ("15,2 zu 9,29 mm. ema_asm.KAEFIG_TIEFE_ZU_BREITE deckelt "
+                          "erst bei 3,0 — der Deckel greift also spaeter als das "
+                          "Vorbild und laesst tiefere Staebe zu, als hier gebaut "
+                          "wurden.")},
+        "leistungsfaktor": {
+            "band": (0.30, 0.67), "nenn": 0.63, "label": "Leistungsfaktor",
+            "stuetzen": ("SynRM_Leistungsfaktor_Vollast",
+                         "SynRM_Leistungsfaktor_Teillast"),
+            "bemerkung": ("Vollast 0,63, Teillast bis herab zu 0,30 — der "
+                          "Magnetisierungsstrom liegt dauernd im Stator und faellt "
+                          "bei kleiner Last nicht mit. Genau das rechnet ema_asm "
+                          "als hypot(i_mag, i_q).")},
+        "xi_LqLd": {
+            "band": (1.00, 1.00), "nenn": 1.0, "label": "Salienz",
+            "stuetzen": ("ASM_keine_Salienz",),
+            "bemerkung": "Der Kaefiglaeufer ist magnetisch glatt — gemessen, nicht angenommen."},
+    },
+    "synrm": {
+        "leistungsfaktor": {
+            "band": (0.60, 0.72), "nenn": 0.67, "label": "Leistungsfaktor",
+            "stuetzen": ("SynRM_Leistungsfaktor_Vollast",
+                         "SynRM_Leistungsfaktor_Teillast"),
+            "bemerkung": ("Der schlechte Leistungsfaktor ist der bekannte Einwand "
+                          "gegen die SynRM. Gemessen liegt er bei Vollast mit 0,67 "
+                          "UEBER dem der ASM (0,63) und bei Teillast doppelt so "
+                          "hoch — der Einwand traegt in dieser Gegenueberstellung "
+                          "nicht.")},
+        "verlust_anteil_asm": {
+            "band": (0.30, 0.45), "nenn": 0.41,
+            "label": "Verluste, bezogen auf die ASM",
+            "stuetzen": ("SynRM_Verluste_Vollast",),
+            "bemerkung": ("0,26 gegen 0,63 kW bei Vollast. Der Laeufer hat weder "
+                          "Kaefig noch Magnet und damit fast keine eigenen "
+                          "Verluste — das ist ihr Hauptvorteil und steht in "
+                          "ema_synrm als P_Laeufer = 0.")},
+        "moment_je_ampere_anteil_asm": {
+            "band": (1.00, 2.20), "nenn": 1.09,
+            "label": "Moment je Ampere, bezogen auf die ASM",
+            "stuetzen": ("SynRM_Moment_je_Ampere", "SynRM_Strom_Vollast"),
+            "bemerkung": ("Bei Vollast 2,4 gegen 2,2 Nm/A, bei Teillast 1,62 gegen "
+                          "0,75. Eine OPTIMIERTE SynRM erreicht also die ASM und "
+                          "uebertrifft sie in Teillast. Unser analytisches Modell "
+                          "kommt deutlich darunter heraus — die Barrieren sind dort "
+                          "ueber ein Salienzband erfasst, nicht ueber ihre "
+                          "Einzelgeometrie, und genau hier ist der Unterschied.")},
+    },
+    "eesm": {
+        "I_f_A": {
+            "band": (20.0, 45.0), "nenn": 32.0, "label": "Erregerstrom",
+            "stuetzen": ("EESM_Erregerstrom",),
+            "bemerkung": ("32 A an einer 210-kW-Maschine. ema_eesm.I_F_VORGABE_A "
+                          "steht auf 15 A — dieselbe Groessenordnung, aber am "
+                          "unteren Rand; die Wahl bestimmt nur den "
+                          "Schleifringverlust, nicht den Erregerverlust.")},
+        "erreger_anteil_pct": {
+            "band": (2.0, 4.0), "nenn": 3.9,
+            "label": "Erregerleistung / Spitzenleistung",
+            "stuetzen": ("EESM_Erregerleistung",),
+            "bemerkung": ("8,2 kW Uebertragungsvermoegen zu 210 kW Spitzenleistung "
+                          "= 3,9 %. Das ist die OBERE Schranke des Uebertragungs"
+                          "weges, nicht der Dauerwert — als solche zu lesen.")},
+        "strom_anteil_psm": {
+            "band": (0.65, 0.80), "nenn": 0.727,
+            "label": "Statorstrom, bezogen auf die PSM",
+            "stuetzen": ("EESM_Hoechststrom", "EESM_Spitzenmoment"),
+            "bemerkung": ("400 gegen 550 Arms — und dabei 610 statt 450 Nm, am "
+                          "GLEICHEN Stator-Aussendurchmesser. Die EESM macht also "
+                          "36 % mehr Moment mit 27 % weniger Strom. Das ist genau "
+                          "die Aussage von ema_eesm (I_s = i_q, der "
+                          "Magnetisierungsstrom sitzt im Laeufer) — hier gemessen.")},
+        "wirkungsgrad_vorteil_psm_pkt": {
+            "band": (1.4, 3.2), "nenn": 1.4,
+            "label": "Wirkungsgradvorsprung gegenüber der PSM",
+            "stuetzen": ("EESM_WLTP_Wirkungsgrad", "EESM_Wirkungsgrad_Konstantfahrt"),
+            "bemerkung": ("Ueber den WLTP 1,4 Prozentpunkte, bei 70 km/h 3,2 und "
+                          "bei 130 km/h 2,6. Der Vorsprung waechst mit der "
+                          "Drehzahl — die PSM muss ihren Magnetfluss dauernd "
+                          "niederhalten, die EESM schaltet ihn ab.")},
+    },
+}
+
+
+# Das Band ist WEIT, wo die Belege duenn sind.# Das Band ist WEIT, wo die Belege duenn sind. Ein schmales Band ohne Beleg waere
 # eine erfundene Genauigkeit -- und die faellt spaeter niemandem mehr auf, weil
 # sie plausibel aussieht.
 
@@ -335,6 +581,141 @@ def bauband_pruefen(geom: dict) -> list:
     return aus
 
 
+def art_band(code: str, groesse: str):
+    """``(lo, hi)`` fuer eine Maschinenart und eine Groesse -- oder ``None``."""
+    e = ART_BAND.get(str(code or "").lower())
+    e = e.get(groesse) if isinstance(e, dict) else None
+    return tuple(e["band"]) if e else None
+
+
+def art_pruefen(code: str, werte: dict) -> list:
+    """Welche gerechneten Kennwerte liegen ausserhalb des recherchierten Bandes?
+
+    Ausdruecklich **kein Tor** -- wie ``bauband_pruefen``. Ausserhalb heisst
+    nicht falsch; es heisst, dass keine der abgerufenen Maschinen dort lag.
+
+    Der Sinn ist ein anderer als beim Bauband: dort geht es um Masse, hier um
+    **Annahmen**. Jede Groesse in ``ART_BAND`` ist eine, die unsere analytischen
+    Module gesetzt und nicht gemessen haben. Faellt die gerechnete Zahl aus dem
+    Band, ist das der erste Hinweis, dass die Annahme nicht traegt -- und beim
+    ASM-Schlupf war es genau so (0,24 % gerechnet gegen 5,5 % gemessen).
+    """
+    band = ART_BAND.get(str(code or "").lower())
+    if not isinstance(band, dict) or not band:
+        return []
+    aus = []
+    for name, e in band.items():
+        wert = werte.get(name)
+        if wert is None:
+            continue
+        lo, hi = e["band"]
+        if wert < lo or wert > hi:
+            aus.append(f"{e['label']} {wert:.3g} liegt ausserhalb {lo:.3g}–{hi:.3g} "
+                       f"der Vorbilder (Nennwert {e['nenn']:.3g})")
+    return aus
+
+
+def arten_gegenueberstellung(zeilen: dict) -> list:
+    """Die Vergleiche, die erst ZWISCHEN den Bauarten eine Aussage sind.
+
+    Drei der recherchierten Groessen sind Verhaeltnisse und lassen sich an einer
+    einzelnen Option gar nicht pruefen: der Statorstrom der EESM bezogen auf die
+    PSM, die Verluste der SynRM bezogen auf die ASM, ihr Moment je Ampere
+    ebenso. Genau diese Verhaeltnisse sind aber das, was die drei abgerufenen
+    Untersuchungen festhalten -- alle drei stellen zwei Bauarten am **gleichen
+    Stator** gegeneinander, und das tut die Achse „Maschinenart" auch.
+
+    ``zeilen`` ist ``{code: ergebnis}`` aus dem Paarvergleich. Fehlt eine Seite,
+    entfaellt der Vergleich -- er wird nicht ersatzweise gegen etwas anderes
+    gerechnet.
+    """
+    def wert(code, schluessel):
+        z = zeilen.get(code) or {}
+        return z.get(schluessel) if z.get("ok") else None
+
+    def gedeckelt(*codes):
+        """Steht eine der beiden Seiten am Umrichter-Limit?
+
+        Dann ist ein Stromverhaeltnis KEINE Aussage ueber die Bauart, sondern
+        ueber den Deckel: beide Zahlen laufen gegen dieselbe Schranke und muessen
+        sich zwangslaeufig annaehern. Das gehoert dazugesagt, sonst liest sich
+        eine Abweichung wie ein Modellfehler, den es an dieser Stelle nicht gibt.
+        """
+        return [c for c in codes if (zeilen.get(c) or {}).get("strom_limit")]
+
+    aus = []
+    # EESM gegen PSM: Statorstrom.
+    i_e, i_p = wert("eesm", "I_s_A"), wert("pmsm", "I_s_A")
+    if i_e and i_p:
+        v = i_e / i_p
+        lo, hi = ART_BAND["eesm"]["strom_anteil_psm"]["band"]
+        drin = lo <= v <= hi
+        limit = gedeckelt("eesm", "pmsm")
+        aus.append({
+            "groesse": "EESM-Statorstrom / PSM-Statorstrom",
+            "gerechnet": round(v, 3), "band": (lo, hi), "im_band": drin,
+            "vergleichbar": not limit, "beleg": "carlsson2026",
+            "text": (f"EESM braucht {v:.2f} mal den Statorstrom der PSM "
+                     f"({i_e:.0f} gegen {i_p:.0f} A). Gemessen an einer "
+                     f"Traktionsmaschine gleichen Aussendurchmessers: 0,73 "
+                     f"(400 gegen 550 Arms) — und dabei 36 % mehr Moment."
+                     + ("" if drin else
+                        (f"  NICHT VERGLEICHBAR: {', '.join(limit)} steht am "
+                         f"Umrichter-Limit ({ART_BAND['_limit_hinweis']}), beide "
+                         f"Stroeme laufen gegen dieselbe Schranke und muessen sich "
+                         f"annaehern. Das Verhaeltnis sagt hier nichts ueber die "
+                         f"Bauart." if limit else "  ABWEICHEND vom Band.")))})
+    # SynRM gegen ASM: Verluste und Moment je Ampere.
+    p_s, p_a = wert("synrm", "P_verlust_W"), wert("asm", "P_verlust_W")
+    if p_s and p_a:
+        v = p_s / p_a
+        lo, hi = ART_BAND["synrm"]["verlust_anteil_asm"]["band"]
+        drin = lo <= v <= hi
+        aus.append({
+            "groesse": "SynRM-Verluste / ASM-Verluste",
+            "gerechnet": round(v, 3), "band": (lo, hi), "im_band": drin,
+            "beleg": "gercekcioglu2021",
+            "text": (f"SynRM verliert {v:.2f} mal soviel wie die ASM "
+                     f"({p_s:.0f} gegen {p_a:.0f} W). Gemessen am gleichen "
+                     f"Stator: 0,41 (0,26 gegen 0,63 kW) — der SynRM-Laeufer "
+                     f"hat weder Kaefig noch Magnet."
+                     + ("" if drin else "  ABWEICHEND vom Band."))})
+    kt_s, kt_a = wert("synrm", "Kt_Nm_per_A"), wert("asm", "Kt_Nm_per_A")
+    if kt_s and kt_a:
+        v = kt_s / kt_a
+        lo, hi = ART_BAND["synrm"]["moment_je_ampere_anteil_asm"]["band"]
+        drin = lo <= v <= hi
+        aus.append({
+            "groesse": "SynRM-Moment je Ampere / ASM",
+            "gerechnet": round(v, 3), "band": (lo, hi), "im_band": drin,
+            "beleg": "gercekcioglu2021",
+            "text": (f"SynRM erreicht {v:.2f} mal das Moment je Ampere der ASM. "
+                     f"Gemessen an einer OPTIMIERTEN SynRM am gleichen Stator: "
+                     f"1,09 bei Vollast, 2,16 bei Teillast."
+                     + ("" if drin else
+                        "  ABWEICHEND: unser Barrierenmodell erfasst die "
+                        "Sperrschichten ueber ein Salienzband, nicht ueber ihre "
+                        "Einzelgeometrie — genau hier liegt der Unterschied."))})
+    return aus
+
+
+def art_text(code: str) -> str:
+    """Die Recherche zu EINER Maschinenart -- fuer Agent und Bericht."""
+    band = ART_BAND.get(str(code or "").lower())
+    if not isinstance(band, dict) or not band:
+        return f"Zu '{code}' liegt keine eigene Recherche vor."
+    z = [f"Recherchierte Vergleichswerte fuer '{code}' — FREMDTEXT, abgeleitet, kein Tor:"]
+    for name, e in band.items():
+        lo, hi = e["band"]
+        z.append(f"  {e['label']:<38} {lo:>7.3g} – {hi:<7.3g} (Nennwert {e['nenn']:.3g})")
+        z.append(f"      {e['bemerkung']}")
+        for st in e["stuetzen"]:
+            m = messpunkt(st)
+            if m:
+                z.append(f"      Beleg [{m['quelle']}]: „{m['zitat']}“")
+    return "\n".join(z)
+
+
 def als_text() -> str:
     """Die Recherche zum Nachlesen -- fuer Agent, Bericht und Mensch."""
     z = ["RECHERCHIERTE VERGLEICHSWERTE — Fremdtext, nicht gerechnet, nicht nachgerechnet.",
@@ -364,6 +745,14 @@ def als_text() -> str:
     for name, e in BAUBAND.items():
         lo, hi = e["band"]
         z.append(f"  → {e['label']}: {lo:.2f}–{hi:.2f}. {e['bemerkung']}")
+    z.append("")
+    z.append("Baender je Maschinenart (ABGELEITET — die Groessen, die unsere Module")
+    z.append("bisher gesetzt und nicht gemessen hatten):")
+    for code in ART_BAND:
+        if code.startswith("_"):
+            continue
+        z.append("")
+        z.append(art_text(code))
     z.append("")
     z.append("Woertlich uebernommene Zahlen:")
     for m in MESSPUNKTE:
