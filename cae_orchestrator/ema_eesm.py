@@ -97,7 +97,14 @@ U_BUERSTE_V = 1.0
 
 # Vorgabe fuer den Erregerstrom [A]. Sie bestimmt NUR den Schleifringverlust
 # (s. Modulkopf), nicht den Kupferverlust der Erregerwicklung.
-I_F_VORGABE_A = 15.0
+#
+# 32 A ist kein gewaehlter Wert, sondern ein gemessener: der Feldstrom einer
+# ausgefuehrten 210-kW-Traktionsmaschine (``ema_referenz``, Beleg carlsson2026,
+# Tab. 1). Hier stand vorher 15 A -- eine Zahl, die ich gesetzt hatte, ohne sie
+# zu belegen, und die das recherchierte Band (20-45 A) verfehlte. Weil an dieser
+# Groesse NUR der Schleifringverlust haengt und sonst nichts, ist der belegte
+# Wert dem gesetzten in jeder Hinsicht vorzuziehen.
+I_F_VORGABE_A = 32.0
 
 # Stromdichte der Erregerwicklung [A/mm^2]. **Sie** bemisst die Wicklung, nicht
 # das Wickelfenster.
@@ -176,10 +183,26 @@ def erregung(geom: dict, axial_mm: float, i_f_A: float = 0.0,
     g = ema_analysis.luftspalt_mm(geom) / 1000.0
     g_eff = K_CARTER * g
 
-    # Durchflutung je Pol fuer die Grundwelle. Der Faktor 2/pi bringt die
-    # rechteckige Polfeldform auf ihre Grundwelle -- ohne ihn kaeme die
-    # Erregung um 27 % zu klein heraus.
-    f_pol = (b_m * g_eff / MU0) * (math.pi / 2.0) / 2.0        # A je Pol (Amplitude)
+    # Durchflutung je Pol fuer die GRUNDWELLE des Luftspaltfeldes.
+    #
+    # Unter dem Polschuh steht B_scheitel = mu0 * F_pol / g_eff. Ueber den Umfang
+    # ist das Feld rechteckig (Polschuh, dann Luecke), und die Grundwelle einer
+    # solchen Form mit der Polbedeckung ``alpha`` ist
+    #
+    #     B_1 = (4/pi) * B_scheitel * sin(alpha * pi/2)
+    #
+    # Gefordert ist B_1 = b_m, also
+    #
+    #     F_pol = b_m * g_eff / mu0 / [ (4/pi) * sin(alpha*pi/2) ] .
+    #
+    # Dass ``POLBEDECKUNG`` hier eingeht, ist keine Feinheit: ein breiterer
+    # Polschuh braucht fuer dieselbe Grundwelle WENIGER Durchflutung. Vorher
+    # stand hier ein fester Faktor pi/4, der von der Polbedeckung gar nicht
+    # abhing -- und der Kommentar daneben nannte 2/pi, also eine dritte Zahl.
+    # Bei alpha = 0,68 liegt der richtige Faktor bei 0,896; pi/4 = 0,785 war
+    # rund 12 % zu klein, und das ging linear in Erregerverlust und Kupfermasse.
+    formfaktor = (4.0 / math.pi) * math.sin(POLBEDECKUNG * math.pi / 2.0)
+    f_pol = (b_m * g_eff / MU0) / formfaktor                   # A je Pol (Amplitude)
 
     mat = HAIRPIN_MATS.get(geom.get("fieldMat") or ERREGER_MAT,
                            HAIRPIN_MATS[ERREGER_MAT])
@@ -213,6 +236,7 @@ def erregung(geom: dict, axial_mm: float, i_f_A: float = 0.0,
 
     return {
         "B_m_T": b_m, "F_pol_A": round(f_pol, 1),
+        "formfaktor_pol": round(formfaktor, 4),
         "P_erreger_W": round(p_f, 1), "P_schleifring_W": round(p_ring, 1),
         "P_laeufer_W": round(p_f + p_ring, 1),
         "I_f_A": round(i_f, 2), "N_f_windungen": round(n_f, 1),

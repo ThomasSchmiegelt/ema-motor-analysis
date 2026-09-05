@@ -23,7 +23,6 @@ uebersprungen, wenn Elmer fehlt -- dann steht das ausdruecklich da, statt
 stillschweigend zu bestehen.
 """
 
-import cmath
 import math
 import os
 import sys

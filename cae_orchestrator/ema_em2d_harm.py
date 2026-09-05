@@ -90,7 +90,6 @@ from __future__ import annotations
 import cmath
 import math
 import os
-import shutil
 
 import elmer_runner
 

@@ -95,6 +95,47 @@ pruefe(paare[0][1] < paare[-1][1],
        "mehr Leiter je Nut heisst mehr Windungen in Reihe, also mehr Widerstand")
 
 
+# ── 2b. Eine Wicklung, die nicht in die Nut passt, sagt es ────────────────────
+
+print("\n2b. Die Klemme darf keine unmoegliche Nut bauen")
+
+ng2 = W.nutgeometrie(GEOM)
+pruefe(ng2["passt"] and ng2["ueberfuellt_mm"] == 0.0,
+       f"vier Leiter passen in die {GEOM['slotDepth']:.0f}-mm-Nut (belegt "
+       f"{1000 * ng2['belegt_tiefe_m']:.1f} mm)")
+
+for n, soll in ((8, True), (10, True), (12, True)):
+    g = dict(GEOM, conductorsPerSlot=n)
+    ok, ueber = W.passt(g)
+    pruefe(ok is not soll and ueber > 0,
+           f"{n} Leiter passen NICHT: {ueber:.1f} mm zu hoch — vorher gab das "
+           f"Modell dafuer klaglos Masse und Widerstand heraus")
+
+# Der einzige bisher sichtbare Hinweis war die Kupfermasse, die wieder STIEG.
+m = [W.kupfermasse(dict(GEOM, conductorsPerSlot=n), AXIAL, CU) for n in (2, 4, 8, 12)]
+pruefe(m[3] > m[2],
+       f"die Kupfermasse laeuft ab der Klemme wieder nach oben "
+       f"({m[2]:.2f} -> {m[3]:.2f} kg) — das war der einzige Hinweis, und er "
+       f"sah aus wie ein Ergebnis")
+
+import ema_paarvergleich as _P
+import copy as _copy
+_b = {"geom": dict(GEOM, p=3, axialLen=AXIAL, magShape="v", magThick=6.0,
+                   magWidth=32.0, magDist=13.5, magAngle=110.0, magDepthRel=0.6,
+                   magTangLen=0.0, magLayerGap=8.0, magLayers=3, magGapMm=0.1,
+                   shaftBoreD=0.0),
+      "cooling": "water", "magnet": "ndfeb_n42", "axial_len": AXIAL}
+_e = _P.vergleiche(_copy.deepcopy(_b), achsen=["hairpins"], n_max=12000,
+                   rpm=3000, last_nm=120)
+_o = {o["wert"]: o for o in _e["achsen"]["hairpins"]["optionen"]}
+pruefe(all(_o[n]["ok"] for n in (2, 4, 6)),
+       "im Paarvergleich bleiben 2, 4 und 6 Leiter baubar")
+pruefe(all(not _o[n]["ok"] and "passt nicht in die Nut" in _o[n]["grund"]
+           for n in (8, 10, 12)),
+       "8, 10 und 12 werden mit Begruendung ausgeschlossen, statt als Option "
+       "mit erfundenen Kennzahlen dazustehen")
+
+
 # ── 3. Beide Wicklungsarten ───────────────────────────────────────────────────
 
 print("\n3. Hairpin und Runddraht — worin sie sich wirklich unterscheiden")

@@ -30,7 +30,7 @@ Feldanalyse, dann CAD, dann 3D-Elmer. ``STUFEN`` haelt sie in dieser Reihenfolge
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 # Reihenfolge = Ausbaufolge. "analytisch" traegt den Paarvergleich, "feld" die
 # 2-D-Feldrechnung, "cad" den Aufbau in FreeCAD, "em3d" die 3-D-Gegenrechnung.

@@ -23,7 +23,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-import ema_analysis
 import ema_asm
 import ema_eesm as E
 import ema_maschinenart as MA
@@ -190,6 +189,41 @@ pruefe(eng["J_f_Apmm2"] >= 0.5,
        "wird die Stromdichte so niedrig gewaehlt, dass das Fenster nicht "
        "reicht, steht die dann noetige hoehere Stromdichte im Ergebnis "
        "statt eines stillen Deckels")
+
+
+# ── 5b. Die Polform geht in die Erregung ein ─────────────────────────────────
+
+print("\n5b. Ein breiterer Polschuh braucht weniger Durchflutung")
+
+e = E.erregung(GEOM, AXIAL)
+soll = (4.0 / math.pi) * math.sin(E.POLBEDECKUNG * math.pi / 2.0)
+pruefe(nah(e["formfaktor_pol"], soll, rel=1e-3),
+       f"der Formfaktor ist (4/pi)*sin(alpha*pi/2) = {soll:.4f} und nicht eine "
+       f"feste Zahl — vorher stand hier pi/4 = 0,785, das hing von der "
+       f"Polbedeckung gar nicht ab und lag 12 % zu tief")
+
+alt_pol = E.POLBEDECKUNG
+try:
+    f = []
+    for a in (0.55, 0.68, 0.80):
+        E.POLBEDECKUNG = a
+        f.append(E.erregung(GEOM, AXIAL)["F_pol_A"])
+finally:
+    E.POLBEDECKUNG = alt_pol
+pruefe(f[0] > f[1] > f[2],
+       f"und er wirkt in der richtigen Richtung: {f[0]:.0f} > {f[1]:.0f} > "
+       f"{f[2]:.0f} A bei 0,55 / 0,68 / 0,80 Polbedeckung")
+
+# Die Probe an der Physik: mit der so bemessenen Durchflutung muss die
+# Grundwelle des rechteckigen Polfeldes genau b_m ergeben.
+b_scheitel = E.MU0 * e["F_pol_A"] / (E.K_CARTER *
+                                     __import__("ema_analysis").luftspalt_mm(GEOM) / 1000.0)
+b1 = (4.0 / math.pi) * b_scheitel * math.sin(E.POLBEDECKUNG * math.pi / 2.0)
+# rel=1e-3, weil ``F_pol_A`` fuer die Ausgabe auf eine Stelle gerundet ist --
+# die Ruecksubstitution traegt genau diese Rundung, keine Physik.
+pruefe(nah(b1, e["B_m_T"], rel=1e-3),
+       f"die Grundwelle des Polfeldes kommt damit auf {b1:.4f} T heraus — genau "
+       f"das geforderte Ziel-Luftspaltfeld")
 
 
 # ── 6. Beide sind im Begriff und im Paarvergleich angemeldet ──────────────────

@@ -31,10 +31,28 @@ Wie das Modell gebaut ist
   Herleitung wie in Stufe B (dort im Modulkopf), damit beide Stufen denselben
   Betriebspunkt meinen.
 * Statorstrom als Stromdichte je Nut, aus derselben 60-Grad-Zonenwicklung
-  (``ema_em2d_harm.stator_stroeme``). In 3-D muss sich der Strom **schliessen**;
-  dafuer traegt je Stirnseite ein Wickelkopfring den azimutalen Rueckstrom, wie
-  es ``ema_em3d`` fuer die Magnetostatik schon tut. Ohne ihn explodiert das
-  Vektorpotential (dort gemessen: B ~ 10^4 T).
+  (``ema_em2d_harm.stator_stroeme``).
+
+Was FEHLT, und warum das den Feldlauf heute unbrauchbar macht
+--------------------------------------------------------------
+
+In 3-D muss sich der Statorstrom **schliessen**. ``ema_em3d`` loest das fuer die
+Magnetostatik mit zwei Stirnring-Leitern, die den azimutalen Rueckstrom tragen,
+und haelt im Modulkopf fest, was ohne sie passiert: „sonst explodiert das
+Vektorpotential (B~10^4 T)".
+
+**Diese Ringe gibt es hier nicht.** Der Kopf dieses Moduls hat sie eine Zeit
+lang beschrieben, obwohl sie nirgends gebaut wurden -- und das Ergebnis war
+genau das angekuendigte: gemessen 2,7*10^6 T Flussdichte und eine Stromdichte
+von 1,2*10^10 A/m^2. Das ist kein Feld, sondern ein offener Strompfad.
+
+Bis die Rueckleiter da sind, ist der **Feldlauf dieser Stufe nicht gueltig**.
+``pruefe_feld`` weist ein solches Ergebnis darum ausdruecklich ab, statt Zahlen
+herauszugeben, die niemandem widersprechen. Nutzbar ist heute allein
+``netzkosten()`` -- die Netzgroesse und ihre Kosten, und die sind gemessen.
+
+Der Kurzschlussring-Vergleich (``ring_wirkung``) ist damit vorbereitet, aber
+noch nicht belegt: er braucht ein gueltiges Feld.
 
 Was hier bewusst NICHT gerechnet wird
 --------------------------------------
@@ -307,21 +325,30 @@ def schreibe_sif(netz: dict, omega1: float, sigma_eff: float, j_nut: dict,
                  f"  Current Density 3 = Real {j.real:.6e}\n"
                  f"  Current Density Im 3 = Real {j.imag:.6e}\nEnd\n")
 
+    # Direkter Loeser (MUMPS), NICHT iterativ. ``ema_em3d`` hat denselben Fehler
+    # schon einmal gelernt und im Modulkopf festgehalten: „der iterative
+    # BiCGStabL stagniert ohne aufwaendige Vorkonditionierung" am
+    # curl-curl-Kantenelement-System. Gemessen hier: 6000 Iterationen, Residuum
+    # bleibt bei 1,5, neunzehn Minuten Rechenzeit und am Ende kein Feld.
+    # MUMPS geht auf Tetraedern mit der niedrigst-ordnigen Kantenbasis und dem
+    # Tree-Gauge -- beides ist hier der Fall.
     S.append("Solver 1\n"
              '  Equation = "MgDyn3DHarmonic"\n'
              '  Procedure = "MagnetoDynamics" "WhitneyAVHarmonicSolver"\n'
              '  Variable = "AV[AV re:1 AV im:1]"\n'
              f"  Angular Frequency = Real {omega1:.9e}\n"
              "  Use Tree Gauge = Logical True\n"
-             "  Linear System Solver = Iterative\n"
-             "  Linear System Iterative Method = BiCGStabL\n"
-             "  BiCGStabL Polynomial Degree = 4\n"
-             "  Linear System Preconditioning = ILU1\n"
-             "  Linear System Max Iterations = 6000\n"
-             "  Linear System Convergence Tolerance = 1.0e-7\n"
-             "  Linear System Residual Output = 200\n"
-             "  Linear System Abort Not Converged = False\n"
+             "  Linear System Solver = Direct\n"
+             "  Linear System Direct Method = MUMPS\n"
+             "  Steady State Convergence Tolerance = 1.0e-8\n"
              "End\n")
+    # Der Nachbearbeitungsloeser braucht seinen EIGENEN Gleichungsloeser. Ohne
+    # ihn bricht Elmer nach dem Hauptlauf ab:
+    #     ERROR:: SolveLinearSystem: Give "Linear System Solver"
+    # Das kostet den ganzen Lauf, und zwar NACH der teuren Rechnung -- der
+    # Fehler faellt also erst auf, wenn alles gerechnet ist. Dieselben
+    # Einstellungen wie in ``ema_em3d`` (CG + ILU0): das Feld-System dort ist
+    # symmetrisch positiv definit und braucht kein BiCGStabL.
     S.append("Solver 2\n"
              '  Equation = "MgDynCalc"\n'
              '  Procedure = "MagnetoDynamics" "MagnetoDynamicsCalcFields"\n'
@@ -329,6 +356,11 @@ def schreibe_sif(netz: dict, omega1: float, sigma_eff: float, j_nut: dict,
              "  Calculate Magnetic Field Strength = Logical True\n"
              "  Calculate Joule Heating = Logical True\n"
              "  Calculate Current Density = Logical True\n"
+             "  Linear System Solver = Iterative\n"
+             "  Linear System Iterative Method = CG\n"
+             "  Linear System Preconditioning = ILU0\n"
+             "  Linear System Max Iterations = 5000\n"
+             "  Linear System Convergence Tolerance = 1.0e-8\n"
              "End\n")
     S.append("Solver 3\n"
              '  Equation = "ErgebnisAusgabe"\n'
@@ -385,12 +417,23 @@ def _loese(ctx: dict, ring_leitet: bool, timeout: int) -> dict:
         raise RuntimeError("ElmerSolver (3-D): "
                            + (rs.get("stderr") or rs.get("error", ""))[:400]
                            + "\n" + rs.get("stdout", "")[-1500:])
-    joule = _joule_aus_log(rs.get("stdout", ""))
+    vtu = _finde_vtu(os.path.join(ctx["work_dir"], "results"))
+    if not vtu:
+        raise RuntimeError("Keine Ergebnisdatei geschrieben — "
+                           "ResultOutputSolver pruefen")
+    # ERST pruefen, ob es ueberhaupt ein Feld ist. Ein offener Strompfad gibt
+    # keine Fehlermeldung, sondern Zahlen -- und die sehen aus wie Ergebnisse.
+    feld = pruefe_feld(vtu)
+    p_je_koerper = verluste_je_koerper(vtu)
+    joule = sum(p_je_koerper.get(g, 0.0) for g in (GID_STAEBE, GID_RING))
     s = ctx["schlupf"]
     omega_syn_mech = ctx["omega1"] / ctx["p"]
     return {"P_luftspalt_W": round(joule, 1),
             "P_laeufer_W": round(s * joule, 1),
             "T_leistung_Nm": round(joule / max(omega_syn_mech, 1e-12), 3),
+            "P_staebe_W": round(p_je_koerper.get(GID_STAEBE, 0.0), 1),
+            "P_ringe_W": round(p_je_koerper.get(GID_RING, 0.0), 1),
+            "B_max_T": feld["B_max_T"], "vtu": vtu,
             "ring_leitet": ring_leitet}
 
 
@@ -523,24 +566,100 @@ def rechne(payload: dict, rpm: float, last_nm: float, work_dir: str,
     return r
 
 
-def _joule_aus_log(stdout: str) -> float:
-    """Die von ``MagnetoDynamicsCalcFields`` gemeldete Joule-Leistung [W].
+# Groesste Flussdichte, die in einer Maschine noch vorstellbar ist. Kobalt-Eisen
+# saettigt bei rund 2,3 T; an einer Kante rechnet ein P1-Netz auch einmal das
+# Doppelte. 20 T ist also grosszuegig um den Faktor zehn -- wer darueber liegt,
+# hat kein Feld, sondern einen Rechenfehler. Genau dieser Fall ist hier
+# eingetreten (gemessen 2,7*10^6 T, s. Modulkopf).
+B_UNMOEGLICH_T = 20.0
 
-    Sie ist in dieser Formulierung die **Luftspaltleistung**, nicht der
-    Laeuferverlust -- derselbe Zusammenhang wie in Stufe B, und derselbe
-    Lesefehler droht: bei 2 % Schlupf laege er um das Fuenfzigfache daneben.
+
+def _lies_vtu_zellen(vtu_pfad: str):
+    """Zellwerte der Ergebnisdatei: Koerper-Id, Volumen, Joule-Dichte, |B|.
+
+    Ausgewertet werden die ZELLfelder (``… e``), nicht die Knotenfelder: die
+    Joule-Dichte ist eine Groesse je Element, und ihr Volumenintegral ist die
+    Verlustleistung. Ueber die Knoten gemittelt waere sie das nicht.
     """
-    wert = 0.0
-    for zeile in stdout.splitlines():
-        if "Joule Heating" in zeile:
-            teile = zeile.replace(":", " ").split()
-            for t in reversed(teile):
-                try:
-                    wert = float(t)
-                    break
-                except ValueError:
-                    continue
-    return wert
+    import numpy as np
+    import vtk
+    from vtk.util.numpy_support import vtk_to_numpy
+
+    rd = vtk.vtkXMLUnstructuredGridReader()
+    rd.SetFileName(vtu_pfad)
+    rd.Update()
+    grid = rd.GetOutput()
+    cd = grid.GetCellData()
+
+    def hole(name):
+        a = cd.GetArray(name)
+        return vtk_to_numpy(a) if a is not None else None
+
+    gid = hole("GeometryIds")
+    if gid is None:
+        raise KeyError("GeometryIds fehlen in der VTU "
+                       "(Save Geometry Ids = Logical True gesetzt?)")
+    joule = hole("joule heating e")
+    b_re, b_im = hole("magnetic flux density re e"), hole("magnetic flux density im e")
+
+    n = grid.GetNumberOfCells()
+    vol = np.zeros(n)
+    for i in range(n):
+        c = grid.GetCell(i)
+        if c.GetNumberOfPoints() == 4:                       # Tetraeder
+            p = [np.array(c.GetPoints().GetPoint(k)) for k in range(4)]
+            vol[i] = abs(np.dot(p[1] - p[0], np.cross(p[2] - p[0], p[3] - p[0]))) / 6.0
+
+    b_abs = None
+    if b_re is not None and b_im is not None:
+        b_abs = np.sqrt((b_re ** 2).sum(axis=1) + (b_im ** 2).sum(axis=1))
+    return gid.astype(np.int64), vol, joule, b_abs
+
+
+def pruefe_feld(vtu_pfad: str) -> dict:
+    """Ist das gerechnete Feld ueberhaupt eines? Sonst ein klarer Fehler.
+
+    Ein offener Strompfad gibt in 3-D keine Fehlermeldung, sondern ein
+    Vektorpotential, das ins Unermessliche laeuft -- und daraus dann Momente und
+    Verluste, die wie Zahlen aussehen. Diese Pruefung faengt das ab, BEVOR eine
+    einzige Kennzahl gebildet wird.
+    """
+    import numpy as np
+    gid, vol, joule, b_abs = _lies_vtu_zellen(vtu_pfad)
+    if b_abs is None:
+        raise RuntimeError("Die Ergebnisdatei enthaelt keine Flussdichte — "
+                           "MagnetoDynamicsCalcFields hat nicht gerechnet.")
+    b_max = float(np.max(b_abs))
+    if b_max > B_UNMOEGLICH_T:
+        raise RuntimeError(
+            f"Das Feld ist keines: groesste Flussdichte {b_max:.3g} T "
+            f"(moeglich waeren hoechstens {B_UNMOEGLICH_T:.0f} T). Ursache ist "
+            f"der fehlende Rueckleiter fuer den Statorstrom — in 3-D muss sich "
+            f"der Strom schliessen, und dieses Modell hat dafuer keinen Weg "
+            f"(s. Modulkopf). Bis das gebaut ist, traegt die Stufe nur "
+            f"netzkosten().")
+    return {"B_max_T": round(b_max, 4), "zellen": int(len(gid))}
+
+
+def verluste_je_koerper(vtu_pfad: str) -> dict:
+    """Verlustleistung [W] je Koerper -- Volumenintegral der Joule-Dichte.
+
+    Frueher wurde die Joule-Leistung aus der **Bildschirmausgabe** von Elmer
+    gelesen. Sie steht dort nicht: gemessen schreibt dieser Elmer keine Zeile
+    „Joule Heating" auf stdout, und die Auswertung gab darum immer 0,0 W --
+    kommentarlos, und daraus dann ein Moment von 0,000 Nm. Eine angenommene
+    Ausgabe ist keine Schnittstelle; die Ergebnisdatei ist eine.
+    """
+    import numpy as np
+    gid, vol, joule, _b = _lies_vtu_zellen(vtu_pfad)
+    if joule is None:
+        raise KeyError("'joule heating e' fehlt in der VTU — "
+                       "Calculate Joule Heating im Solver gesetzt?")
+    aus = {}
+    for k in np.unique(gid):
+        m = gid == k
+        aus[int(k)] = float(np.sum(joule[m] * vol[m]))
+    return aus
 
 
 def bericht(kz: dict) -> str:
@@ -564,26 +683,3 @@ def bericht(kz: dict) -> str:
     return "\n".join(z)
 
 
-def vergleich_mit_2d(kz3: dict, kz2: dict) -> str:
-    """Was der Kurzschlussring ausmacht -- die Zahl, fuer die es Stufe D gibt."""
-    t2 = float(kz2["T_leistung_Nm"])
-    t3 = float(kz3["T_leistung_Nm"])
-    p2 = float(kz2["P_luftspalt_W"])
-    p3 = float(kz3["P_luftspalt_W"])
-    import ema_asm
-    z = []
-    z.append(f"Stufe B (2-D, OHNE Ring)   T = {t2:8.2f} Nm   "
-             f"P_Luftspalt = {p2:9.0f} W")
-    z.append(f"Stufe D (3-D, MIT Ring)    T = {t3:8.2f} Nm   "
-             f"P_Luftspalt = {p3:9.0f} W")
-    if t2 > 1e-9:
-        z.append(f"Der Ring kostet {100 * (1 - t3 / t2):+.1f} % Moment.")
-        z.append(f"ema_asm rechnet ihn mit einem Zuschlag von "
-                 f"{100 * ema_asm.KURZSCHLUSSRING_ZUSCHLAG:.0f} % auf den "
-                 f"Stabverlust -- gemessen sind es hier "
-                 f"{100 * (p2 / max(p3, 1e-9) - 1.0):+.1f} % mehr Verlust "
-                 f"je Luftspaltleistung.")
-    z.append(f"3-D-Netz: {kz3['tets']} Tetraeder, {kz3['knoten']} Knoten, "
-             f"{kz3['netzzeit_s']:.0f} s Netzbau. Ring "
-             f"{kz3['ring_h_mm']:.1f} x {kz3['ring_w_mm']:.1f} mm.")
-    return "\n".join(z)

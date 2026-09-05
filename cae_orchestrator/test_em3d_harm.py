@@ -130,6 +130,44 @@ pruefe(f"Electric Conductivity = {1.2e5:.6e}" in mit,
 pruefe(re.search(r"Target Boundaries\(1\) = %d" % H3.GID_RAND, mit) is not None,
        "die Randbedingung sitzt auf dem Aussenrand")
 
+# Zwei Loeserfehler, beide gemessen und beide teuer, weil sie erst NACH der
+# Rechnung auffallen.
+def _solverbloecke(sif: str) -> dict:
+    """Die Solver-Bloecke einer Fallbeschreibung, nach Nummer.
+
+    Nicht ueber ``split("Solver ")``: die Zeile ``Linear System Solver = …``
+    enthaelt dieselbe Zeichenfolge, und die Bloecke faelen auseinander. Ein Test,
+    der am eigenen Zerlegen scheitert, meldet einen Fehler, den es nicht gibt.
+    """
+    aus, nr = {}, None
+    for zeile in sif.splitlines():
+        k = zeile.strip()
+        if k.startswith("Solver ") and k[7:].strip().isdigit():
+            nr = int(k[7:].strip())
+            aus[nr] = []
+        elif k == "End":
+            nr = None
+        elif nr is not None:
+            aus[nr].append(k)
+    return {n: "\n".join(z) for n, z in aus.items()}
+
+
+bloecke = _solverbloecke(mit)
+solver = [bloecke.get(1, ""), bloecke.get(2, "")]
+pruefe(len(bloecke) == 3 and all(solver),
+       f"die Fallbeschreibung hat drei Solver-Bloecke: {sorted(bloecke)}")
+pruefe("Linear System Direct Method = MUMPS" in solver[0],
+       "der Hauptloeser rechnet DIREKT — der iterative BiCGStabL stagnierte "
+       "gemessen bei 6000 Iterationen und Residuum 1,5, neunzehn Minuten lang, "
+       "und lieferte am Ende kein Feld")
+pruefe("Linear System Solver" in solver[1],
+       "und der Nachbearbeitungsloeser hat einen EIGENEN Gleichungsloeser — "
+       "ohne ihn bricht Elmer mit 'Give \"Linear System Solver\"' ab, und zwar "
+       "erst NACH der teuren Rechnung")
+for blk in solver:
+    pruefe("Linear System Solver" in blk,
+           f"jeder Rechenloeser sagt, womit er sein Gleichungssystem loest")
+
 
 # ── 4. Das Ergebnis sagt, was es wert ist ─────────────────────────────────────
 
@@ -153,6 +191,34 @@ pruefe(f"{ema_asm.KURZSCHLUSSRING_ZUSCHLAG * 100:.0f} %" in txt,
 kz2 = dict(kz, gap_aufgeloest=True)
 pruefe("NICHT aufgeloest" not in H3.bericht(kz2),
        "bei aufgeloestem Luftspalt entfaellt der Vorbehalt")
+
+
+# ── 4b. Ein Feld, das keines ist, wird abgewiesen ─────────────────────────────
+
+print("\n4b. Stille Nullen und unmoegliche Felder")
+
+pruefe(H3.B_UNMOEGLICH_T > 3.0,
+       f"die Schranke fuer eine unmoegliche Flussdichte liegt bei "
+       f"{H3.B_UNMOEGLICH_T:.0f} T — hoch genug, dass eine gesaettigte Kante "
+       f"sie nicht ausloest")
+pruefe(not hasattr(H3, "_joule_aus_log"),
+       "die Joule-Leistung wird NICHT mehr aus der Bildschirmausgabe gelesen — "
+       "dieser Elmer schreibt dort gemessen gar keine solche Zeile, und die "
+       "Auswertung gab darum kommentarlos 0,0 W und daraus 0,000 Nm")
+pruefe(hasattr(H3, "verluste_je_koerper") and hasattr(H3, "pruefe_feld"),
+       "sie kommt aus der Ergebnisdatei, und davor prueft pruefe_feld, ob das "
+       "Ergebnis ueberhaupt ein Feld ist")
+
+# Der Modulkopf darf keinen Rueckleiter versprechen, den es nicht gibt.
+import inspect
+kopf = inspect.getdoc(H3) or ""
+hat_ringe = "coil_ring" in inspect.getsource(H3.baue_netz)
+pruefe(not hat_ringe, "das Netz baut heute keine Wickelkopf-Rueckleiter")
+pruefe("FEHLT" in kopf and "Rueckleiter" in kopf,
+       "und der Modulkopf sagt das ausdruecklich, statt sie zu beschreiben — "
+       "eine Beschreibung, die nicht zutrifft, ist schlimmer als keine")
+pruefe("netzkosten()" in kopf,
+       "er nennt auch, was heute nutzbar IST")
 
 
 # ── 5. Das Tor ────────────────────────────────────────────────────────────────

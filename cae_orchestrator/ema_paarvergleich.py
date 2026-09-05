@@ -531,6 +531,11 @@ def _grundlast(payload: dict, n_max: float):
     poles = 2 * int(geom["p"])
     if not wicklung_moeglich(int(geom["slots"]), poles):
         return None, {"ok": False, "grund": "keine symmetrische Drehstromwicklung"}
+    _ok_nut, _ueber = ema_wicklung.passt(geom)
+    if not _ok_nut:
+        return None, {"ok": False,
+                      "grund": f"Wicklung passt nicht in die Nut: {_ueber:.1f} mm "
+                               f"zu hoch"}
     mat = LAMINATES.get(payload.get("rotor_lam", "m270_35a"), LAMINATES["m270_35a"])
     st = LAMINATES.get(payload.get("stator_lam", "m270_35a"), LAMINATES["m270_35a"])
     hp = HAIRPIN_MATS.get(payload.get("hairpin_mat", "cu_etp"), HAIRPIN_MATS["cu_etp"])
@@ -742,6 +747,13 @@ def _bewerte_pmsm(payload: dict, n_max: float, rpm: float, last_nm: float) -> di
 
     if not wicklung_moeglich(int(geom["slots"]), poles):
         return {"ok": False, "grund": "keine symmetrische Drehstromwicklung"}
+    # Dieselbe Pruefung wie in ``_grundlast`` -- der PSM-Zweig geht nicht durch
+    # diese Funktion, und ein Tor, das nur fuer drei von vier Bauarten gilt,
+    # waere schlimmer als keines.
+    ok_nut, ueber = ema_wicklung.passt(geom)
+    if not ok_nut:
+        return {"ok": False,
+                "grund": f"Wicklung passt nicht in die Nut: {ueber:.1f} mm zu hoch"}
     lay = rotor_layout_check(geom)
     if not lay["ok"]:
         return {"ok": False, "grund": "Taschenlayout: " + "; ".join(lay["fatal"])[:110]}

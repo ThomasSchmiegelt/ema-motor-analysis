@@ -230,7 +230,13 @@ pruefe(erg["rangfolge"]["Kt_Nm_per_A"][0][0] in ("maschinenart", "magnetwerkstof
        f"Kt wird am staerksten von {erg['rangfolge']['Kt_Nm_per_A'][0][0]} bewegt")
 pruefe(erg["rangfolge"]["T_dauer_Nm"][0][0] == "kuehlung",
        f"das Dauermoment von {erg['rangfolge']['T_dauer_Nm'][0][0]}")
-pruefe(erg["rangfolge"]["kosten_EUR"][0][0] in ("durchmesser", "laenge"),
+# Auch bei den Kosten steht die Maschinenart inzwischen mit vorn: Magnete gegen
+# keine Magnete sind gemessen 149 gegen 76 EUR (96 %), waehrend +-20 % im
+# Durchmesser rund 79 % ausmachen. Dazu kommt, dass das Nut-Tor die kleinste
+# Durchmesser-Variante ausschliesst — sechs Hairpins passen in die flachere Nut
+# nicht mehr, und genau das soll es sagen.
+pruefe(erg["rangfolge"]["kosten_EUR"][0][0] in ("maschinenart", "durchmesser",
+                                                "laenge"),
        f"die Kosten von {erg['rangfolge']['kosten_EUR'][0][0]}")
 
 

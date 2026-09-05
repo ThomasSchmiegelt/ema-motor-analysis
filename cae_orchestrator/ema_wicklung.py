@@ -137,8 +137,19 @@ def nutgeometrie(geom: dict) -> dict:
 
     n_lagen = lagen(geom)
     leiter_b = max(LEITER_MIN_M, breite - 2 * ISOLIERUNG_M)
+    # Die beiden Klemmen (LEITER_MIN_M, LAGE_MIN_M) halten die Rechnung in einem
+    # Bereich, in dem sie gilt -- aber sie koennen eine Wicklung ergeben, die
+    # NICHT MEHR IN DIE NUT PASST. Gemessen an einer 22-mm-Nut: ab acht Leitern
+    # greift LAGE_MIN_M, und die Lagen belegen zusammen 25,2 mm. Das Modell gab
+    # dafuer bisher klaglos Kupfermasse, Widerstand und Verluste heraus -- und
+    # die Masse lief dabei sogar wieder nach oben, was der einzige sichtbare
+    # Hinweis war. Der Rest sah aus wie eine Auslegung.
+    #
+    # Geklemmt wird weiterhin (eine negative Lagenhoehe waere schlimmer), aber
+    # es wird gesagt: ``passt`` und ``ueberfuellt_mm``.
     lage_h = max(LAGE_MIN_M,
                  (tiefe - NUTGRUND_M - (n_lagen + 1) * ISOLIERUNG_M) / n_lagen)
+    belegt = n_lagen * lage_h + (n_lagen + 1) * ISOLIERUNG_M + NUTGRUND_M
 
     # Nutzbarer Nutquerschnitt (nach Abzug der Isolation an beiden Seiten und am
     # Grund). Der Runddraht rechnet mit ihm mal seinem Fuellfaktor.
@@ -150,6 +161,9 @@ def nutgeometrie(geom: dict) -> dict:
         "nut_breite_m": breite, "nut_tiefe_m": tiefe, "zahn_breite_m": zahn,
         "nut_flaeche_m2": breite * tiefe, "nutz_flaeche_m2": a_nutz,
         "n_lagen": n_lagen, "leiter_breite_m": leiter_b, "lage_hoehe_m": lage_h,
+        "belegt_tiefe_m": belegt,
+        "passt": bool(belegt <= tiefe + 1e-12),
+        "ueberfuellt_mm": round(max(0.0, belegt - tiefe) * 1000.0, 3),
         "A_leiter_m2": leiter_b * lage_h,
         # Millimeterfassung fuer die CAD-Erzeugung -- dieselben Zahlen.
         "nut_breite_mm": breite * 1000.0, "nut_tiefe_mm": tiefe * 1000.0,
@@ -218,6 +232,17 @@ def wicklung(geom: dict, axial_mm: float) -> dict:
         "windungen_je_strang": ng["n_slots"] * n_je_nut / 3.0,
         "nut": ng,
     }
+
+
+def passt(geom: dict) -> tuple:
+    """``(passt, ueberfuellung_mm)`` -- passt die Wicklung ueberhaupt in die Nut?
+
+    Getrennt abrufbar, weil das ein **Ausschlussgrund** ist und keine Kennzahl:
+    eine Wicklung, die 3,2 mm zu hoch baut, hat keinen Widerstand, den man mit
+    einer anderen vergleichen koennte.
+    """
+    ng = nutgeometrie(geom)
+    return bool(ng["passt"]), float(ng["ueberfuellt_mm"])
 
 
 def r_strang(geom: dict, axial_mm: float, mat: dict) -> float:
