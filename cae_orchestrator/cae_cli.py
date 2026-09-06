@@ -1280,7 +1280,13 @@ def cmd_feld3d(args) -> int:
                     f"{nz['rand_deckel']} Stirnflaechen.\n"
                     f"  Der Loeser ist der teure Teil, nicht das Netz: das "
                     f"harmonische Kantenelement-System ist komplex und hat "
-                    f"doppelt so viele Unbekannte wie das magnetostatische.")
+                    f"doppelt so viele Unbekannte wie das magnetostatische."
+                    + (f"\n  ACHTUNG: ueber der gemessenen Grenze dieser "
+                       f"Maschine ({E3.TETS_WARNUNG} Tetraeder). Gemessen "
+                       f"rechnen 437.000, bei 1.111.000 bricht MUMPS mit "
+                       f"fehlendem Arbeitsspeicher ab — und Elmer meldet "
+                       f"danach trotzdem 'FINISHED'."
+                       if nz.get("zu_gross") else ""))
             print()
             print(text)
             _ablegen(args, "feld3d", text, daten=nz, pid=kennung)

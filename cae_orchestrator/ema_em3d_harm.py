@@ -145,6 +145,38 @@ Was hier bewusst NICHT gerechnet wird
 * **Kein wirklicher Wickelkopf** -- s. oben; der Statorleiter geht gerade
   durch bis auf den Rand.
 
+Wie weit die Zahl auskonvergiert ist -- gemessen, nicht behauptet
+------------------------------------------------------------------
+
+Dieselbe Maschine, dasselbe Modell, nur das groesste Element im Eisen kleiner
+(60 mm Paket; der Luftspalt hat in allen dreien EINE Elementlage, radial laesst
+er sich so gar nicht verfeinern, s. u.):
+
+    lc_eisen 8,0 mm    166.614 Tets   B_Spalt 0,2726 T   Ring/Stab 87,5 %
+    lc_eisen 5,0 mm    437.294 Tets   B_Spalt 0,2915 T   Ring/Stab 93,0 %
+    lc_eisen 3,5 mm  1.111.784 Tets   MUMPS: kein Arbeitsspeicher
+    2-D am selben Punkt                B_Spalt 0,2870 T
+
+Zwei Dinge stehen damit fest und eines ausdruecklich nicht:
+
+* Die Luftspalt-Grundwelle laeuft auf den 2-D-Wert zu (0,2726 -> 0,2915 gegen
+  0,2870) -- das Modell rechnet dieselbe Maschine.
+* Das Verhaeltnis Ring/Stab ist **nicht auskonvergiert**: es steigt um 6 %, und
+  der Abstand zur analytischen Formel (``ema_asm.kurzschlussring_zuschlag``,
+  99,1 % an dieser Maschine) faellt dabei von 13 % auf 6,6 %. Die Vermutung, der
+  Abstand komme vom Netz, ist damit gestuetzt und nicht bewiesen -- die Formel
+  hat ihre eigenen Annahmen (sinusfoermige Stabstromverteilung), und 6,6 % sind
+  auch dafuer eine uebliche Groessenordnung.
+* Nicht bekannt ist der Grenzwert. Er laege oberhalb dessen, was diese Maschine
+  rechnen kann.
+
+**Die Obergrenze ist der Arbeitsspeicher, nicht die Geduld.** Bei 1,1 Mio.
+Tetraedern bricht MUMPS mit ``INFO(1) = -13`` ab -- und Elmer rechnet danach mit
+einem Nullvektor weiter, meldet FINISHED und schreibt eine Ergebnisdatei. Das
+faengt jetzt ``elmer_runner`` ab (der MUMPS-Code steht in der Bildschirmausgabe,
+nicht im Rueckgabewert); vorher kamen daraus 0,0 W und 0,000 Nm, also Zahlen.
+Zwischen 437.000 und 1.111.000 Tetraedern liegt die Grenze dieser Maschine.
+
 Der Luftspalt ist hier NICHT aufgeloest -- und warum das trotzdem geht
 -----------------------------------------------------------------------
 
@@ -209,6 +241,14 @@ GID_RAND   = 1          # Aussenflaeche (eigener Nummernkreis, 2D)
 # Axiale Laenge der Stirnluft, als Vielfaches der Ringbreite. Zu kurz gewaehlt
 # klemmt die Randbedingung das Stirnfeld ab und der Ring erscheint wirkungslos.
 STIRNLUFT_FAKTOR = 3.0
+
+# Ab wievielen Tetraedern der direkte Loeser auf DIESER Maschine kippt.
+# Gemessen: 437.294 rechnen (56 s), 1.111.784 nicht mehr -- MUMPS bricht mit
+# INFO(1) = -13 ab (Speicher). Die Zahl ist eine Warnschwelle, kein Tor: sie
+# haengt am Arbeitsspeicher, und wer mehr hat, soll es versuchen duerfen. Sie
+# steht hier, damit ``netzkosten()`` es sagen kann, BEVOR jemand eine Stunde
+# wartet und dann ein Nullfeld bekommt.
+TETS_WARNUNG = 600000
 
 
 def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
@@ -616,9 +656,15 @@ def netzkosten(geom: dict, kaefig: dict, axial_mm: float, work_dir: str,
     netz = baue_netz(geom, kaefig, axial_mm, msh, gap_lagen=gap_lagen,
                      lc_eisen_mm=lc_eisen_mm, lagen_axial=lagen_axial)
     netz["netzzeit_s"] = round(time.time() - t0, 1)
+    netz["zu_gross"] = bool(netz["tets"] > TETS_WARNUNG)
     if log:
         log(f"3-D-Netz: {netz['tets']} Tetraeder, {netz['knoten']} Knoten "
             f"in {netz['netzzeit_s']:.0f} s")
+        if netz["zu_gross"]:
+            log(f"ACHTUNG: {netz['tets']} Tetraeder liegen ueber der gemessenen "
+                f"Grenze dieser Maschine ({TETS_WARNUNG}). Der direkte Loeser "
+                f"bricht dort mit fehlendem Arbeitsspeicher ab — der Lauf endet "
+                f"dann mit einem Fehler, nicht mit einem Ergebnis.")
     return netz
 
 
@@ -818,6 +864,23 @@ B_UNMOEGLICH_T = 20.0
 # Zehnerpotenzen auseinander (0,001 % gegen 12,6 %), s. ``pruefe_feld``.
 WILD_ANTEIL = 0.001
 
+# Untergrenze: unterhalb dieser Flussdichte ist gar kein Feld gerechnet worden.
+# Der Waechter fing bis hierher nur den Fall „zu wild" ab -- den Fall „gar
+# nichts" nicht, und der sieht von aussen wie ein Ergebnis aus.
+#
+# Der Anlass, gemessen an einem 1,1-Mio.-Netz: MUMPS steigt mit
+# „** ERROR RETURN ** FROM ZMUMPS INFO(1)= -13" (Speicher) aus, Elmer rechnet
+# mit einem Nullvektor weiter, meldet ordnungsgemaess FINISHED, schreibt eine
+# VTU -- und die Auswertung meldete 0,0 W Verlust und 0,000 Nm Moment.
+#
+# **Gefangen wird dieser Fall in ``elmer_runner``** (der MUMPS-Code ist
+# eindeutig, und dort steht er am Entstehungsort). Diese Schranke ist der
+# zweite Riegel und faengt WENIGER: im gemessenen Fall blieben immerhin
+# 0,1428 T stehen, sie haette also nicht ausgeloest. Sie greift nur, wenn
+# wirklich nichts uebrig ist. Das steht hier, damit niemand sie fuer den
+# vollstaendigen Schutz haelt.
+B_LEER_T = 1.0e-3
+
 
 def _finde_vtu(ordner: str) -> str:
     """Die juengste Ergebnisdatei im Ausgabeordner."""
@@ -917,6 +980,13 @@ def pruefe_feld(vtu_pfad: str) -> dict:
     o = np.argsort(b[tet])
     w = np.cumsum(vol[tet][o])
     b_p999 = float(b[tet][o][int(np.searchsorted(w, 0.999 * w[-1]))]) if tet.any() else 0.0
+    if b_max < B_LEER_T:
+        raise RuntimeError(
+            f"Es ist gar kein Feld gerechnet worden: groesste Flussdichte im "
+            f"ganzen Modell {b_max:.3g} T. Der Statorstrom ist eingepraegt, "
+            f"also kann das kein Ergebnis sein — der Loeser hat abgebrochen und "
+            f"Elmer mit einem Nullvektor weitergerechnet. Haeufigste Ursache: "
+            f"MUMPS ohne genug Arbeitsspeicher (Netz zu gross).")
     if anteil > WILD_ANTEIL:
         raise RuntimeError(
             f"Das Feld ist keines: {100 * anteil:.2f} % des Volumens liegen "

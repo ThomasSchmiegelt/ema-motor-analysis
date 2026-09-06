@@ -314,10 +314,19 @@ def kurzschlussring_zuschlag(kf: dict, p: int) -> float:
     sondern geprueft.
 
     Zwei unabhaengige Wege, dieselbe Groessenordnung und ein gleichbleibendes
-    Verhaeltnis -- die Formel liegt gleichmaessig rund 12 % hoch, was zum
-    unaufgeloesten Luftspalt des 3-D-Netzes passt. Die frueheren 20 % lagen an
-    dieser Maschine um den Faktor FUENF daneben, und zwar nur nach unten, also
-    zugunsten der Maschine.
+    Verhaeltnis -- die Formel liegt an diesem Netz gleichmaessig rund 12 % hoch.
+    Die frueheren 20 % lagen an dieser Maschine um den Faktor FUENF daneben, und
+    zwar nur nach unten, also zugunsten der Maschine.
+
+    **Woher die 12 % kommen, ist nicht bewiesen.** Die 3-D-Werte oben stammen
+    vom groben Netz. Feiner gerechnet (437.000 statt 167.000 Tetraeder) steigt
+    die Messung bei 60 mm von 87,6 auf 93,0 %, der Abstand faellt also von 13
+    auf 6,6 % -- und die Luftspalt-Grundwelle laeuft dabei auf den 2-D-Wert zu
+    (0,2726 -> 0,2915 gegen 0,2870 T). Das stuetzt „Netzfehler", schliesst die
+    eigenen Annahmen dieser Formel aber nicht aus: die Umrechnung setzt eine
+    sinusfoermige Stabstromverteilung an, und 6,6 % sind auch dafuer eine
+    uebliche Groessenordnung. Auskonvergiert ist keiner der beiden Wege -- der
+    naechste Netzschritt sprengt auf dieser Maschine den Arbeitsspeicher.
 
     Kein Deckel nach oben: bei einem sehr kurzen Paket ist der Ringverlust
     wirklich groesser als der Stabverlust. Ein Deckel wuerde genau das verstecken,

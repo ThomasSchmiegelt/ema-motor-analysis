@@ -303,6 +303,50 @@ pruefe("exp(1j" in _lg and "* 2" not in _lg.replace("0.25", ""),
        "verschiedene Groessen")
 
 
+# ── 4d. Ein Loeser, der aussteigt, darf nicht wie ein Ergebnis aussehen ───────
+
+print("\n4d. Wenn MUMPS aufgibt, meldet Elmer trotzdem FINISHED")
+
+import elmer_runner as ER
+
+_stdout_kaputt = """
+MAIN:  MUMPS library linked in.
+ ** ERROR RETURN ** FROM ZMUMPS INFO(1)=  -13
+ ** INFO(2)=           -5525
+ ** ERROR RETURN ** FROM ZMUMPS INFO(1)=   -3
+ComputeChange: NS (ITER=1) (NRM,RELC): ( 0.59085062E-09  2.0000000     )
+MAIN: *** Elmer Solver: ALL DONE ***
+ELMER SOLVER FINISHED AT: 2026/09/06
+"""
+_codes = ER._mumps_fehler(_stdout_kaputt)
+pruefe(len(_codes) == 2 and "-13" in _codes[0],
+       f"die MUMPS-Fehlercodes werden aus der BILDSCHIRMAUSGABE gelesen — sie "
+       f"stehen nicht im Rueckgabewert des Prozesses, und Elmer bricht darauf "
+       f"nicht ab: {_codes}")
+pruefe("Speicher" in _codes[0],
+       "und im Klartext benannt: -13 ist eine fehlgeschlagene "
+       "Speicheranforderung, also ein zu grosses Netz")
+pruefe(ER._mumps_fehler("alles ruhig, ELMER SOLVER FINISHED") == [],
+       "ein sauberer Lauf meldet keine Codes")
+pruefe("_mumps_fehler(out)" in inspect.getsource(ER.run_elmersolver)
+       and "\"ok\": False" in inspect.getsource(ER.run_elmersolver),
+       "und run_elmersolver macht daraus einen FEHLSCHLAG — gemessen an einem "
+       "1,1-Mio.-Netz kamen sonst 0,0 W Verlust und 0,000 Nm Moment heraus, "
+       "also Zahlen, die wie Ergebnisse aussehen")
+
+pruefe(0.0 < H3.B_LEER_T < 0.01,
+       f"der zweite Riegel ist eine Untergrenze fuer die Flussdichte "
+       f"({1000 * H3.B_LEER_T:.1f} mT): ohne sie ist „gar kein Feld\u201c von "
+       f"„gesundes Feld\u201c nicht zu unterscheiden")
+_pf2 = inspect.getsource(H3.pruefe_feld)
+pruefe("B_LEER_T" in _pf2 and "kein Feld gerechnet" in _pf2,
+       "und pruefe_feld weist ein totes Feld ausdruecklich ab")
+pruefe("0,1428" in inspect.getsource(H3).split("def ")[0] or "0,1428" in _pf2
+       or "0,1428" in open(H3.__file__).read(),
+       "wobei im Quelltext steht, was dieser Riegel NICHT faengt: im gemessenen "
+       "Fall blieben 0,1428 T stehen — gefangen hat ihn der MUMPS-Code")
+
+
 # ── 5. Das Tor ────────────────────────────────────────────────────────────────
 
 print("\n5. Nur der Kaefiglaeufer, und nur der Innenlaeufer")

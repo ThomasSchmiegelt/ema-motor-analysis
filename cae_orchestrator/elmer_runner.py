@@ -89,6 +89,32 @@ def run_elmergrid(msh_path: str, out_dir: str, timeout: int = 600) -> dict:
         return {"ok": False, "error": str(e), "stdout": "", "stderr": str(e)}
 
 
+# MUMPS meldet seine Fehler auf stdout, nicht ueber den Rueckgabewert des
+# Prozesses -- und Elmer bricht darauf nicht ab. Die Meldung sieht so aus:
+#
+#      ** ERROR RETURN ** FROM ZMUMPS INFO(1)=  -13
+#      ** INFO(2)=           -5525
+#
+# ``DMUMPS`` fuer reelle, ``ZMUMPS`` fuer komplexe Systeme.
+_MUMPS_GRUND = {
+    -13: "Speicheranforderung fehlgeschlagen (Netz zu gross fuer den Arbeitsspeicher)",
+    -9:  "Arbeitsfeld zu klein",
+    -8:  "Arbeitsfeld zu klein (ganzzahliger Teil)",
+    -3:  "falsche Aufrufreihenfolge (Folgefehler eines frueheren Abbruchs)",
+}
+
+
+def _mumps_fehler(stdout: str) -> list:
+    """Die MUMPS-Fehlercodes aus der Bildschirmausgabe, im Klartext."""
+    import re
+    aus = []
+    for m in re.finditer(r"ERROR RETURN \*\* FROM [DZ]MUMPS\s+INFO\(1\)=\s*(-?\d+)",
+                         stdout or ""):
+        code = int(m.group(1))
+        aus.append(f"INFO(1)={code} ({_MUMPS_GRUND.get(code, 'unbekannter Code')})")
+    return aus
+
+
 def run_elmersolver(sif_path: str, cwd: str, timeout: int = 3600) -> dict:
     """Löst eine Elmer-Fallbeschreibung. ``sif_path`` relativ zu ``cwd`` (ElmerSolver
     sucht standardmäßig ELMERSOLVER_STARTINFO / case.sif im cwd)."""
@@ -114,6 +140,28 @@ def run_elmersolver(sif_path: str, cwd: str, timeout: int = 3600) -> dict:
             return {"ok": False, "aborted": True, "error": "abgebrochen",
                     "stdout": out, "stderr": err or ""}
         ok = "ELMER SOLVER FINISHED" in out.upper() or "*** Elmer Solver: ALL DONE" in out
+        # „FINISHED" heisst NICHT „gerechnet". Gemessen an einem 1,1-Mio.-Netz:
+        # MUMPS steigt mit „** ERROR RETURN ** FROM ZMUMPS INFO(1)= -13" aus
+        # (Speicher), Elmer rechnet mit einem Nullvektor weiter, schreibt eine
+        # Ergebnisdatei und meldet ordnungsgemaess FINISHED. Der Aufrufer
+        # bekommt daraufhin Verluste von 0,0 W und ein Moment von 0,000 Nm --
+        # Zahlen, die wie Ergebnisse aussehen.
+        #
+        # MUMPS-Rueckgabecodes (INFO(1) < 0) sind Fehler, keine Warnungen:
+        # -13 Speicheranforderung fehlgeschlagen, -9/-8 Arbeitsfeld zu klein,
+        # -3 falsche Aufrufreihenfolge (Folgefehler). Sie werden hier zum
+        # Fehlschlag gemacht, damit sie dort auffallen, wo sie entstehen.
+        mumps = _mumps_fehler(out)
+        if mumps:
+            return {"ok": False, "stdout": out, "stderr": err or "",
+                    "returncode": proc.returncode, "mumps": mumps,
+                    "error": "Der direkte Loeser (MUMPS) ist ausgestiegen: "
+                             + "; ".join(mumps)
+                             + ". Elmer meldet trotzdem FINISHED und schreibt "
+                               "eine Ergebnisdatei — sie enthaelt aber kein "
+                               "Feld. Haeufigste Ursache: zu grosses Netz "
+                               "(gemessen ging 437.000 Tetraeder, 1.111.000 "
+                               "nicht mehr)."}
         return {"ok": ok, "stdout": out, "stderr": err or "",
                 "returncode": proc.returncode}
     except Exception as e:
