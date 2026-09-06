@@ -62,8 +62,14 @@ import math
 # ── Feste Groessen der Nut ────────────────────────────────────────────────────
 
 NUT_MIN_M      = 3.0e-3      # kleinste gerechnete Nutbreite
-LEITER_MIN_M   = 1.5e-3      # kleinste gerechnete Leiterbreite
-LAGE_MIN_M     = 2.0e-3      # kleinste gerechnete Lagenhoehe
+LEITER_MIN_M   = 1.5e-3      # kleinste gerechnete Leiterbreite (Runddraht)
+LAGE_MIN_M     = 2.0e-3      # kleinste gerechnete Lagenhoehe (Runddraht)
+
+# Der HAIRPIN hat eine eigene, groebere Untergrenze: 3 x 3 mm. Er ist ein
+# gebogener Rechteckstab, kein Draht -- darunter laesst er sich nicht mehr biegen,
+# verschweissen und in die Nut schieben. Groesser ist selbstverstaendlich moeglich.
+# Die beiden Werte darueber gelten weiter fuer den Runddraht, der duenn sein darf.
+HAIRPIN_MIN_M  = 3.0e-3
 ISOLIERUNG_M   = 0.8e-3      # Nutisolation je Seite / zwischen den Lagen
 NUTGRUND_M     = 2.0e-3      # Abzug am Nutgrund (Keil, Radius)
 
@@ -136,7 +142,12 @@ def nutgeometrie(geom: dict) -> dict:
     zahn = max(0.0, r_si * dtheta - breite)
 
     n_lagen = lagen(geom)
-    leiter_b = max(LEITER_MIN_M, breite - 2 * ISOLIERUNG_M)
+    # Untergrenzen je Wicklungsart: der Hairpin kann 3 x 3 mm nicht unterschreiten
+    # (s. HAIRPIN_MIN_M), der Runddraht schon.
+    _ist_hairpin = art(geom) == "hairpin"
+    _b_min = HAIRPIN_MIN_M if _ist_hairpin else LEITER_MIN_M
+    _h_min = HAIRPIN_MIN_M if _ist_hairpin else LAGE_MIN_M
+    leiter_b = max(_b_min, breite - 2 * ISOLIERUNG_M)
     # Die beiden Klemmen (LEITER_MIN_M, LAGE_MIN_M) halten die Rechnung in einem
     # Bereich, in dem sie gilt -- aber sie koennen eine Wicklung ergeben, die
     # NICHT MEHR IN DIE NUT PASST. Gemessen an einer 22-mm-Nut: ab acht Leitern
@@ -147,7 +158,7 @@ def nutgeometrie(geom: dict) -> dict:
     #
     # Geklemmt wird weiterhin (eine negative Lagenhoehe waere schlimmer), aber
     # es wird gesagt: ``passt`` und ``ueberfuellt_mm``.
-    lage_h = max(LAGE_MIN_M,
+    lage_h = max(_h_min,
                  (tiefe - NUTGRUND_M - (n_lagen + 1) * ISOLIERUNG_M) / n_lagen)
     belegt = n_lagen * lage_h + (n_lagen + 1) * ISOLIERUNG_M + NUTGRUND_M
 
@@ -162,8 +173,15 @@ def nutgeometrie(geom: dict) -> dict:
         "nut_flaeche_m2": breite * tiefe, "nutz_flaeche_m2": a_nutz,
         "n_lagen": n_lagen, "leiter_breite_m": leiter_b, "lage_hoehe_m": lage_h,
         "belegt_tiefe_m": belegt,
-        "passt": bool(belegt <= tiefe + 1e-12),
+        "leiter_min_mm": _b_min * 1000.0,
+        # Passt die Wicklung in die Nut -- in BEIDE Richtungen. Bisher wurde nur
+        # die Tiefe geprueft; ein Hairpin, der breiter sein muesste als die Nut,
+        # ging durch (die Klemme machte ihn stillschweigend schmaler, als er sein
+        # darf).
+        "passt": bool(belegt <= tiefe + 1e-12
+                      and leiter_b + 2 * ISOLIERUNG_M <= breite + 1e-12),
         "ueberfuellt_mm": round(max(0.0, belegt - tiefe) * 1000.0, 3),
+        "zu_schmal_mm": round(max(0.0, leiter_b + 2 * ISOLIERUNG_M - breite) * 1000.0, 3),
         "A_leiter_m2": leiter_b * lage_h,
         # Millimeterfassung fuer die CAD-Erzeugung -- dieselben Zahlen.
         "nut_breite_mm": breite * 1000.0, "nut_tiefe_mm": tiefe * 1000.0,
@@ -337,6 +355,24 @@ def passt(geom: dict) -> tuple:
     """
     ng = nutgeometrie(geom)
     return bool(ng["passt"]), float(ng["ueberfuellt_mm"])
+
+
+def passt_grund(geom: dict) -> str:
+    """Warum die Wicklung nicht in die Nut geht -- im Klartext, beide Richtungen.
+
+    Bis hierher wurde nur die TIEFE gemeldet. Seit der Hairpin 3 mm breit sein
+    muss, kann er auch zu BREIT fuer die Nut sein -- und dann stand als Grund
+    „0,0 mm zu hoch" da, was nach einem Rundungsfehler aussieht statt nach dem,
+    was es ist.
+    """
+    ng = nutgeometrie(geom)
+    teile = []
+    if ng["ueberfuellt_mm"] > 0:
+        teile.append(f"{ng['ueberfuellt_mm']:.1f} mm zu hoch")
+    if ng.get("zu_schmal_mm", 0.0) > 0:
+        teile.append(f"{ng['zu_schmal_mm']:.1f} mm zu breit "
+                     f"(Hairpin mindestens {ng['leiter_min_mm']:.0f} mm)")
+    return " und ".join(teile) or "passt"
 
 
 def r_strang(geom: dict, axial_mm: float, mat: dict) -> float:

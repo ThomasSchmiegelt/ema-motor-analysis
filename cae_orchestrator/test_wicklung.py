@@ -128,8 +128,13 @@ _b = {"geom": dict(GEOM, p=3, axialLen=AXIAL, magShape="v", magThick=6.0,
 _e = _P.vergleiche(_copy.deepcopy(_b), achsen=["hairpins"], n_max=12000,
                    rpm=3000, last_nm=120)
 _o = {o["wert"]: o for o in _e["achsen"]["hairpins"]["optionen"]}
-pruefe(all(_o[n]["ok"] for n in (2, 4, 6)),
-       "im Paarvergleich bleiben 2, 4 und 6 Leiter baubar")
+pruefe(all(_o[n]["ok"] for n in (2, 4)),
+       "im Paarvergleich bleiben 2 und 4 Leiter baubar")
+pruefe(not _o[6]["ok"],
+       f"6 NICHT mehr: seit der Hairpin 3 x 3 mm nicht unterschreiten darf "
+       f"(ema_wicklung.HAIRPIN_MIN_M), braucht dieselbe 25-mm-Nut 25,6 mm — "
+       f"vorher klemmte die Lagenhoehe still auf 2,0 mm und die Wicklung wurde "
+       f"gerechnet, als passte sie. Grund: {_o[6]['grund']}")
 pruefe(all(not _o[n]["ok"] and "passt nicht in die Nut" in _o[n]["grund"]
            for n in (8, 10, 12)),
        "8, 10 und 12 werden mit Begruendung ausgeschlossen, statt als Option "

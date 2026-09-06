@@ -367,6 +367,49 @@ def _build_halbach(geom: dict):
     return legs, meta
 
 
+# ── Offene Magnettasche ───────────────────────────────────────────────────────
+#
+# Der Steg zwischen Tasche und Rotorrand haelt den Polschuh mechanisch UND
+# kurzschliesst den Magneten magnetisch -- er ist beides zugleich, und darum ist
+# seine Breite die eigentliche Entwurfsentscheidung des Speichenlaeufers. Wird er
+# weggelassen, ist die Tasche zum Luftspalt hin OFFEN:
+#
+#   magnetisch  der Streupfad ueber den Steg entfaellt; genau er steckt in
+#               ``ema_analysis._analytical_Bgap`` als ``k_leak``
+#   mechanisch  der Rotorrand ist unterbrochen. Den Polschuh haelt dann nichts
+#               mehr ausser einer Bandage, einer Schwalbenschwanzfuehrung oder
+#               Endscheiben — das ist kein Detail, sondern eine andere Bauart.
+#
+# Deshalb ist es ein eigener Schalter und keine stille Folge von BRIDGE_MM = 0:
+# wer ihn setzt, hat die mechanische Seite zu beantworten, und `rotor_layout_check`
+# sagt es ihm.
+TASCHE_OFFEN = ("nein", "aussen", "innen", "beide")
+TASCHE_OFFEN_LABEL = {
+    "nein":   "geschlossen (Steg am Rand)",
+    "aussen": "zum Luftspalt offen",
+    "innen":  "zur Welle offen",
+    "beide":  "beidseitig offen",
+}
+
+
+def taschenoeffnung(geom: dict) -> str:
+    """Wie die Magnettasche geoeffnet ist -- ``nein`` (Vorgabe) heisst: Steg steht."""
+    w = str((geom or {}).get("magTascheOffen", "nein") or "nein").strip().lower()
+    return w if w in TASCHE_OFFEN else "nein"
+
+
+def stegbreite_mm(geom: dict) -> tuple:
+    """Der WIRKLICHE Steg aussen und innen [mm] -- 0, wo die Tasche offen ist.
+
+    Eine Quelle fuer alle, die den Steg brauchen: die Zeichnung, das Layouttor,
+    die Fliehkraftpruefung und die Streuung im analytischen Luftspaltfeld.
+    """
+    offen = taschenoeffnung(geom)
+    aussen = 0.0 if offen in ("aussen", "beide") else BRIDGE_MM
+    innen = 0.0 if offen in ("innen", "beide") else BRIDGE_MM
+    return aussen, innen
+
+
 def _build_spoke(geom: dict):
     """Spoke-type: one radial slab per pole, tangentially magnetised (flux focus)."""
     r_rot = geom["rotorOD"] / 2
@@ -377,9 +420,16 @@ def _build_spoke(geom: dict):
     # diese Kappe fuer jede Dicke ab 1,8 mm in die Wellenbohrung — bei den ueblichen
     # 6 mm um 2,1 mm.  Der Saum reserviert Steg UND Kappe an beiden Enden.
     gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
-    saum = BRIDGE_MM + mag_h / 2 + gap
-    r_start = r_shaft + saum
-    length = max(r_rot - saum - r_start, 5.0)
+    # Der Saum reserviert Steg UND Kappe -- je Ende einzeln, denn die Tasche kann
+    # aussen offen und innen geschlossen sein (s. ``taschenoeffnung``). Ist ein
+    # Ende offen, laeuft der Magnet bis an die Grenze: aussen bis an den
+    # Luftspalt, innen bis an die Welle. Die runde Kappe ragt dann darueber
+    # hinaus und wird vom Rotorblech abgeschnitten — genau das IST die Oeffnung.
+    steg_a, steg_i = stegbreite_mm(geom)
+    saum_a = (steg_a + mag_h / 2 + gap) if steg_a > 0 else 0.0
+    saum_i = (steg_i + mag_h / 2 + gap) if steg_i > 0 else 0.0
+    r_start = r_shaft + saum_i
+    length = max(r_rot - saum_a - r_start, 5.0)
     legs = [Leg(r_start, 0.0, 0.0, length, mag_h, "tangential", +1)]
     meta = MotorTopoMeta("spoke", TOPOLOGY_LABELS["spoke"], n_legs_per_pole=1,
                          flux_focusing=True, eta_hint=1.0, salient_xi_hint=1.6)

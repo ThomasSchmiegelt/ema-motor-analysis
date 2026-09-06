@@ -258,9 +258,19 @@ def _passt(geom: dict, min_web: float) -> tuple[bool, dict, dict]:
     # Oberflaechenmagnete in einer eigenen Liste und werden nur gegen die Stege und
     # einen Ueberstand am Aussenrand geprueft (Warnung, kein Ausschluss). Ohne Tasche
     # gibt es nichts einzuschliessen; geprueft werden dann die Stege, wie im Tor.
+    # Eine AUSDRUECKLICH offene Tasche ist kein Einschlussfehler, sondern eine
+    # Bauart (``ema_topology.taschenoeffnung``, s. ``rotor_layout_check``): wo der
+    # Steg absichtlich fehlt, DARF die Tasche ueber den Rand stehen. Ohne diese
+    # Zeile faende die Vorauswahl fuer die offene Variante nie eine baubare
+    # Groesse und schmaelerte den Magneten bis auf 40 % herunter — sie wuerde also
+    # genau das wegoptimieren, worum es bei der Oeffnung geht.
+    import ema_topology as _topo
+    _offen = _topo.taschenoeffnung(g)
     radial_ok = True
     if math.isfinite(m["rmax"]):
-        radial_ok = (m["rmax"] <= r_rot + 1e-6 and m["rmin"] >= r_sh - 1e-6)
+        _oben = _offen in ("aussen", "beide") or m["rmax"] <= r_rot + 1e-6
+        _unten = _offen in ("innen", "beide") or m["rmin"] >= r_sh - 1e-6
+        radial_ok = _oben and _unten
     ok = (radial_ok
           and m["steg_im_pol"] >= min_web - 1e-6
           and m["steg_zw_polen"] >= min_web - 1e-6)

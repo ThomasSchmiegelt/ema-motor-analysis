@@ -299,21 +299,52 @@ def rotor_layout_check(geom: dict, min_web_mm: float | None = None) -> dict:
 
     pockets, surface = _magnettaschen(geom)
 
+    # Eine AUSDRUECKLICH offene Tasche ist kein Durchbruch, sondern eine Bauart
+    # (``ema_topology.taschenoeffnung``): der Steg am Rotorrand haelt den Polschuh
+    # und kurzschliesst den Magneten zugleich, und wer ihn weglaesst, will genau
+    # das zweite. Das Tor darf das dann nicht als Fehler melden -- es muss aber
+    # sagen, was mechanisch an seine Stelle treten muss, denn den Polschuh haelt
+    # ohne Steg nichts mehr.
+    import ema_topology as _topo
+    _offen = _topo.taschenoeffnung(geom)
+    _offen_a = _offen in ("aussen", "beide")
+    _offen_i = _offen in ("innen", "beide")
+
     # 1) containment -----------------------------------------------------------
     eps = 1e-6
+    _ueber_a, _ueber_i = 0.0, 0.0
     for base, pk in pockets:
         rmin, rmax = pk.radius_bounds()
         if rmax > r_rot + eps:
-            fatal.append(
-                f"Tasche (Pol {base['pole']}, Leg {base['leg']}) ragt "
-                f"{rmax - r_rot:.2f} mm ausserhalb des Rotors "
-                f"(Aussenradius = {r_rot:.1f} mm) - loest Luftspalt auf / "
-                f"stosst gegen Stator")
+            if _offen_a:
+                _ueber_a = max(_ueber_a, rmax - r_rot)
+            else:
+                fatal.append(
+                    f"Tasche (Pol {base['pole']}, Leg {base['leg']}) ragt "
+                    f"{rmax - r_rot:.2f} mm ausserhalb des Rotors "
+                    f"(Aussenradius = {r_rot:.1f} mm) - loest Luftspalt auf / "
+                    f"stosst gegen Stator")
         if rmin < r_shaft - eps:
-            fatal.append(
-                f"Tasche (Pol {base['pole']}, Leg {base['leg']}) ragt "
-                f"{r_shaft - rmin:.2f} mm in die Bohrung "
-                f"(Bohrradius = {r_shaft:.1f} mm) - Riss / Durchtritt zur Welle")
+            if _offen_i:
+                _ueber_i = max(_ueber_i, r_shaft - rmin)
+            else:
+                fatal.append(
+                    f"Tasche (Pol {base['pole']}, Leg {base['leg']}) ragt "
+                    f"{r_shaft - rmin:.2f} mm in die Bohrung "
+                    f"(Bohrradius = {r_shaft:.1f} mm) - Riss / Durchtritt zur Welle")
+    if _offen_a:
+        warnings.append(
+            f"Magnettasche ist zum Luftspalt OFFEN (ausdruecklich gewaehlt): der "
+            f"Steg am Rotorrand entfaellt, die Tasche steht {_ueber_a:.2f} mm ueber. "
+            f"Magnetisch ist das der Sinn — der Streupfad ueber den Steg faellt weg. "
+            f"Mechanisch haelt den Polschuh dann NICHTS mehr: es braucht eine "
+            f"Bandage, eine Schwalbenschwanzfuehrung oder Endscheiben, und die "
+            f"Fliehkraftpruefung dieses Werkzeugs rechnet sie NICHT.")
+    if _offen_i:
+        warnings.append(
+            f"Magnettasche ist zur Welle OFFEN (ausdruecklich gewaehlt), "
+            f"{_ueber_i:.2f} mm ueber der Bohrung. Der Wellensitz ist damit "
+            f"unterbrochen — die Wellenverbindung (Querpressverband) traegt so nicht.")
 
     # 2) min web over ALL pockets/tiles ----------------------------------------
     allpk = [(b, pk, "Tasche") for b, pk in pockets]

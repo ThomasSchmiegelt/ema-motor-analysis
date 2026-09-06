@@ -45,7 +45,10 @@ def nah(a, b, rel=1e-9):
     return abs(a - b) <= rel * max(abs(a), abs(b), 1e-30)
 
 
-GEOM = {"p": 3, "slots": 36, "conductorsPerSlot": 6,
+  # 4 statt 6 Leiter: sechs Hairpins zu 3 x 3 mm (ema_wicklung.HAIRPIN_MIN_M)
+  # braeuchten 25,6 mm in dieser 22-mm-Nut — die alte Basis war eine Maschine,
+  # die sich nicht wickeln laesst.
+GEOM = {"p": 3, "slots": 36, "conductorsPerSlot": 4,
         "rotorOD": 188.6, "shaftD": 60.0, "shaftBoreD": 0.0, "statorID": 190.0,
         "statorOD": 260.0, "axialLen": 80.0, "slotDepth": 22.0,
         "slotWidthRatio": 0.5, "magShape": "vasym", "magThick": 6.0,

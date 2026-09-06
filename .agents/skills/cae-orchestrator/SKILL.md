@@ -75,6 +75,7 @@ eine Maschine, die es nicht gibt:
 | **Luftspalt** | 0,1 – 2,0 mm | folgt aus `statorID` und `rotorOD` — es gibt **kein** Feld „Luftspalt", eines der beiden Maße gehört geändert |
 | **Wickelkopf außen** | < Stator-Außendurchmesser | `windingHeadFlare` · `windingHeadSpread` · Leiter je Nut · `genInsulation` |
 | **Nuttiefe** | ≤ Statorwand − 1 mm | sonst deckelt das Feld auf 1 mm Restjoch und das CAD schneidet durch — zwei verschiedene Maschinen |
+| **Hairpin-Querschnitt** | ≥ 3 × 3 mm | er ist ein gebogener Rechteckstab, kein Draht. Größer ist frei. Runddraht darf dünner |
 
 Der Regler `windingHeadSpread` geht in der Oberfläche bis 8°, `windingHeadFlare` bis 25 mm;
 **beide können die zweite Grenze reißen** (gemessen an 280/190 mit 6 Leitern: 4° passt mit
@@ -84,6 +85,24 @@ Der Regler `windingHeadSpread` geht in der Oberfläche bis 8°, `windingHeadFlar
 `--set geom.luftspaltFreigabe=true` (bzw. `hairpinFreigabe` / `nuttiefeFreigabe`). Dann läuft
 es durch und die Überschreitung steht als ⚠ im Ergebnis, statt unbemerkt durchzugehen.
 Ohne ausdrückliche Nachfrage des Auftraggebers tust du das **nicht**.
+
+**Folge der 3-mm-Regel, die überrascht:** eine 22-mm-Nut trägt **vier** Hairpins,
+keine sechs (6 × 3 mm + 7 × 0,8 mm Isolierung + 2 mm Nutgrund = 25,6 mm). Vorher klemmte
+die Lagenhöhe still auf 2,0 mm und der Paarvergleich rechnete die Maschine durch, als
+passte sie. Wer mehr Leiter will, braucht eine tiefere Nut — die Meldung sagt, um wieviel.
+
+### Die offene Magnettasche — eine Bauart, kein Durchbruch
+
+`--set geom.magTascheOffen=aussen` (bzw. `innen` / `beide`, Vorgabe `nein`) lässt den Steg
+zwischen Magnettasche und Rotorrand weg. Der Steg hält den Polschuh **und** kurzschließt
+den Magneten — die Achse `paarvergleich --achsen taschenoeffnung` fragt, was er wert ist.
+Gemessen an einem 10-poligen Speichenläufer: **B_gap +37 %**, weil der Magnet dann über
+seine ganze Länge konzentriert statt über den um Steg und Taschenkappe verkürzten Rest.
+
+**Der Preis steht daneben und ist kein Detail:** ohne Steg hält den Polschuh nichts mehr —
+Bandage, Schwalbenschwanz oder Endscheiben. **Die Fliehkraftprüfung dieses Werkzeugs
+rechnet das NICHT**, `SF n_max` gilt für die offene Variante also nicht. Beides sagen
+`rotor-check` und die Achse ausdrücklich; sag es in einer Antwort mit.
 
 **`rotor-check --cad-feld`** stellt zusätzlich beide Geometriewege gegenüber — was das CAD
 zeichnet gegen das, was der Löser rastert. Zwei Unterschiede sind gewollt und stehen als

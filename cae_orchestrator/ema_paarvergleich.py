@@ -131,6 +131,7 @@ import ema_synrm
 import ema_wicklung
 import ema_referenz
 import ema_thermal
+import ema_topology as _TOPO
 from ema_analysis import _analytical_Bgap, compute_performance
 from ema_pipeline import (HAIRPIN_MATS, LAMINATES, MAGNETS,
                           connection_assessment)
@@ -300,6 +301,15 @@ def _setz_barrieren(p, wert):
     g["genFluxBarrierD"] = "d" in wert
 
 
+def _setz_taschenoeffnung(p, wert):
+    """``wert`` aus ``ema_topology.TASCHE_OFFEN``.
+
+    Der Steg zwischen Magnettasche und Rotorrand haelt den Polschuh UND
+    kurzschliesst den Magneten. Diese Achse fragt, was er wert ist.
+    """
+    p["geom"]["magTascheOffen"] = wert
+
+
 def _setz_welle(p, wert):
     """Nur die Welle -- Rotor und Stator bleiben stehen.
 
@@ -414,6 +424,13 @@ ACHSEN = {
                                   "d": "d-Achse (Polmitte)",
                                   "qd": "q- und d-Achse"}[w],
         "setzen": _setz_barrieren,
+    },
+    "taschenoeffnung": {
+        "titel": ("Magnettasche: Steg am Rotorrand — oder offen zum Luftspalt "
+                  "(wirkt heute nur beim Speichenlaeufer)"),
+        "werte": lambda b: ["nein", "aussen", "innen", "beide"],
+        "beschriften": lambda w: _TOPO.TASCHE_OFFEN_LABEL[w],
+        "setzen": _setz_taschenoeffnung,
     },
     "v_oeffnung": {
         "titel": ("V-Öffnungswinkel (nur V-/U-/Delta-/Doppel-V-/PMa-SynRM-Formen; "
@@ -538,8 +555,8 @@ def _grundlast(payload: dict, n_max: float):
     _ok_nut, _ueber = ema_wicklung.passt(geom)
     if not _ok_nut:
         return None, {"ok": False,
-                      "grund": f"Wicklung passt nicht in die Nut: {_ueber:.1f} mm "
-                               f"zu hoch"}
+                      "grund": "Wicklung passt nicht in die Nut: "
+                               + ema_wicklung.passt_grund(geom)}
     mat = LAMINATES.get(payload.get("rotor_lam", "m270_35a"), LAMINATES["m270_35a"])
     st = LAMINATES.get(payload.get("stator_lam", "m270_35a"), LAMINATES["m270_35a"])
     hp = HAIRPIN_MATS.get(payload.get("hairpin_mat", "cu_etp"), HAIRPIN_MATS["cu_etp"])
@@ -770,7 +787,8 @@ def _bewerte_pmsm(payload: dict, n_max: float, rpm: float, last_nm: float) -> di
     ok_nut, ueber = ema_wicklung.passt(geom)
     if not ok_nut:
         return {"ok": False,
-                "grund": f"Wicklung passt nicht in die Nut: {ueber:.1f} mm zu hoch"}
+                "grund": "Wicklung passt nicht in die Nut: "
+                         + ema_wicklung.passt_grund(geom)}
     lay = rotor_layout_check(geom)
     if not lay["ok"]:
         return {"ok": False, "grund": "Taschenlayout: " + "; ".join(lay["fatal"])[:110]}
@@ -1033,6 +1051,15 @@ def vergleiche(basis: dict, achsen: list | None = None, n_max: float | None = No
         werte = achse["werte"](basis)
         optionen = [_option(basis, achse, w, n_max, rpm, last_nm, min_web)
                     for w in werte]
+        # Eine offene Tasche traegt ihre mechanische Kehrseite an der Option mit --
+        # sonst stuende oben eine unveraenderte Sicherheit fuer einen Rotor, dessen
+        # Polschuh gar nicht mehr gehalten wird.
+        _WIE_OFFEN = {"aussen": "zum Luftspalt", "innen": "zur Welle",
+                      "beide": "beidseitig"}
+        for _o in optionen:
+            _off = _WIE_OFFEN.get(_o.get("wert"))
+            if name == "taschenoeffnung" and _off:
+                _o["tasche_offen"] = _off
         _bandhinweise(optionen, basis["geom"])
         gut = [o for o in optionen if o.get("ok")]
         form = str(basis["geom"].get("magShape", "v"))
@@ -1152,6 +1179,13 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
                          f"({ema_analysis.INVERTER_I_MAX:.0f} A bei 1 Wdg/Nut) — "
                          f"diese Option erreicht {erg['last_nm']:.0f} Nm dort NICHT; "
                          f"I_s ist gedeckelt und nicht vergleichbar")
+            if o.get("tasche_offen"):
+                z.append(f"        ⚠ Tasche {o['tasche_offen']} offen: der Steg am "
+                         f"Rotorrand entfaellt — magnetisch ist das der Sinn, "
+                         f"mechanisch haelt den Polschuh dann nichts mehr. "
+                         f"SF n_max oben rechnet DEN STEG NOCH MIT und ist fuer "
+                         f"diese Option KEINE Aussage; es braucht Bandage, "
+                         f"Schwalbenschwanz oder Endscheiben.")
             if o.get("band_hinweis"):
                 z.append(f"        ⓘ neu gegenüber der Grundgeometrie: "
                          f"{o['band_hinweis']} [recherchiert, kein Tor]")

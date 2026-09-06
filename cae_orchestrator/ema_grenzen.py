@@ -6,6 +6,10 @@ Warum dieses Modul entsteht
 Zwei Groessen sind keine Auslegungsentscheidung, sondern Bauwirklichkeit, und
 beide standen bisher nirgends als Tor:
 
+0. **Der Hairpin ist nie kleiner als 3 x 3 mm.** Er ist ein gebogener
+   Rechteckstab, kein Draht. ``ema_wicklung`` klemmte bisher auf 1,5 x 2,0 mm und
+   rechnete klaglos weiter -- eine Wicklung, die nicht in ihre Nut geht, kam als
+   Kupfermasse, Widerstand und Verlustleistung heraus.
 1. **Der Luftspalt liegt zwischen 0,1 und 2,0 mm.** Er war an VIER Stellen
    verschieden gebunden -- ``ema_design_ai`` 0,5-3,0 · ``ema_optimize`` 0,1-3,0 ·
    ``ema_mobil`` 0,3-5,0 · ``ema_analysis`` mit einer stillen Klemme auf 0,3 --
@@ -60,6 +64,7 @@ FREIGABE = {
     "luftspalt": "luftspaltFreigabe",
     "hairpin": "hairpinFreigabe",
     "nuttiefe": "nuttiefeFreigabe",
+    "leiter": "leiterFreigabe",
 }
 
 
@@ -160,7 +165,49 @@ def pruefe_nuttiefe(quelle) -> dict:
     }
 
 
-PRUEFUNGEN = (pruefe_luftspalt, pruefe_hairpin, pruefe_nuttiefe)
+def pruefe_leiterquerschnitt(quelle) -> dict:
+    """Der Hairpin ist nie kleiner als 3 x 3 mm.
+
+    Er ist ein gebogener Rechteckstab, kein Draht: darunter laesst er sich nicht
+    mehr biegen, verschweissen und in die Nut schieben. Groesser ist
+    selbstverstaendlich moeglich -- die Grenze gilt nur nach unten.
+
+    ``ema_wicklung.nutgeometrie`` klemmt auf diesen Wert (eine negative Lagenhoehe
+    waere schlimmer), aber Klemmen heisst hier: die Nut ist ZU KLEIN fuer die
+    verlangte Leiterzahl. Bisher fiel das nur als ``passt``-Merker an und in der
+    Vorauswahl auf; jetzt ist es ein Tor, denn eine Wicklung, die nicht in ihre
+    Nut geht, ist keine Auslegung.
+    """
+    import ema_wicklung
+    g = _geom(quelle)
+    art = ema_wicklung.art(g)
+    ng = ema_wicklung.nutgeometrie(g)
+    if art != "hairpin":
+        return {"name": "leiterquerschnitt", "ok": True, "entfaellt": True,
+                "freigegeben": False,
+                "text": f"Runddraht — die 3-x-3-mm-Grenze gilt fuer Hairpins"}
+    ok = bool(ng["passt"])
+    grund = []
+    if ng["ueberfuellt_mm"] > 0:
+        grund.append(f"{ng['ueberfuellt_mm']:.1f} mm zu tief")
+    if ng["zu_schmal_mm"] > 0:
+        grund.append(f"{ng['zu_schmal_mm']:.1f} mm zu breit fuer die Nut")
+    return {
+        "name": "leiterquerschnitt", "ok": ok, "freigegeben": _frei(g, "leiter"),
+        "leiter_mm": [round(ng["leiter_breite_mm"], 2), round(ng["lage_hoehe_mm"], 2)],
+        "min_mm": ng["leiter_min_mm"], "lagen": ng["n_lagen"],
+        "text": (f"Hairpin {ng['leiter_breite_mm']:.1f} x {ng['lage_hoehe_mm']:.1f} mm, "
+                 f"{ng['n_lagen']} Lagen (Grenze {ng['leiter_min_mm']:.0f} x "
+                 f"{ng['leiter_min_mm']:.0f} mm)"
+                 + ("" if ok else
+                    f" — so passt die Wicklung NICHT in die Nut ({', '.join(grund)}). "
+                    f"Weniger Leiter je Nut, tiefere/breitere Nut oder Runddraht. "
+                    f"Ausdruecklich gewollt? Dann geom.{FREIGABE['leiter']} = true.")),
+    }
+
+
+PRUEFUNGEN = (pruefe_luftspalt, pruefe_hairpin, pruefe_nuttiefe,
+              pruefe_leiterquerschnitt)
 
 
 def pruefe(quelle) -> dict:

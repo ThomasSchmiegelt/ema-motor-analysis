@@ -48,7 +48,12 @@ def pruefe(bedingung, text):
 
 BASIS = {
     "geom": {
-        "p": 3, "slots": 36, "conductorsPerSlot": 6,
+        # 4 statt 6 Leiter je Nut: seit der Hairpin 3 x 3 mm nicht unterschreiten
+        # darf (ema_wicklung.HAIRPIN_MIN_M, Vorgabe des Auftraggebers), braeuchten
+        # sechs Lagen 25,6 mm in dieser 22-mm-Nut. Die alte Basis war also eine
+        # Maschine, die sich nicht wickeln laesst -- vorher klemmte die Lagenhoehe
+        # still auf 2,0 mm und der Paarvergleich rechnete sie durch.
+        "p": 3, "slots": 36, "conductorsPerSlot": 4,
         "rotorOD": 188.6, "shaftD": 60.0, "shaftBoreD": 0.0,
         "statorID": 190.0, "statorOD": 260.0, "axialLen": 80.0, "slotDepth": 22.0,
         "slotWidthRatio": 0.5,

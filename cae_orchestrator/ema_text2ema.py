@@ -109,6 +109,9 @@ SCHEMA = {
     "magAsym":             {"kind": "num", "lo": -60,  "hi": 60,   "def": 0,    "geom": True, "adv": True, "desc": "Asymmetrie der V-Schenkel [°], 0 = symmetrisch (nur vasym)"},
     "magTangLen":          {"kind": "num", "lo": 0,    "hi": 200,  "def": 0,    "geom": True, "adv": True, "desc": "Tangentialmagnet-Länge [mm], 0 = automatisch (nur u, delta)"},
     "magGapMm":            {"kind": "num", "lo": 0.05, "hi": 0.3,  "def": 0.1,  "geom": True, "adv": True, "desc": "Klebespalt Magnet↔Tasche je Seite [mm]"},
+    "magTascheOffen": {"kind": "enum", "opts": ["nein", "aussen", "innen", "beide"],
+                       "def": "nein", "geom": True, "adv": True,
+                       "desc": "Magnettasche offen (nein/aussen=zum Luftspalt/innen=zur Welle/beide)"},
     "magOrient":           {"kind": "enum", "opts": _ORIENT, "def": "transverse", "geom": True, "adv": True, "desc": "Magnetisierungsrichtung (quer / längs)"},
     # Magnettasche
     "pocketMode":          {"kind": "enum", "opts": _POCKET, "def": "position", "geom": True, "adv": True, "desc": "Tasche über Position oder Durchmesser (nur v)"},

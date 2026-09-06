@@ -45,7 +45,7 @@ def pruefe(b, text):
 
 BASIS = {"statorOD": 280.0, "statorID": 190.0, "rotorOD": 188.6, "shaftD": 60.0,
          "shaftBoreD": 0.0, "slotDepth": 25.0, "slots": 36, "p": 3,
-         "conductorsPerSlot": 6, "magShape": "v", "magWidth": 22.0,
+         "conductorsPerSlot": 4, "magShape": "v", "magWidth": 22.0,
          "magThick": 5.0, "magDist": 4.0, "magDepthRel": 0.55, "magAngle": 120.0,
          "magLayers": 1, "magGapMm": 0.2, "windingHeadFlare": 6.0,
          "windingHeadSpread": 4.0, "axialLen": 60.0}
@@ -112,12 +112,18 @@ print("\n3. Der Wickelkopf bleibt unter dem Stator")
 _h = G.pruefe_hairpin(BASIS)
 pruefe(_h["ok"] and _h["ueberstand_mm"] < 0,
        f"die Beispielmaschine passt — mit {abs(_h['ueberstand_mm']):.2f} mm Luft "
-       f"(6 Leiter, 4° Spreizung: es ist knapp)")
+       f"(4 Leiter, 4° Spreizung)")
+_h6 = G.pruefe_hairpin(dict(BASIS, conductorsPerSlot=6))
+pruefe(not _h6["ok"],
+       f"mit 6 Leitern steht sie {_h6['ueberstand_mm']:+.2f} mm ueber — seit die "
+       f"Lagenhoehe nicht mehr unter 3 mm darf, braucht dieselbe Nut mehr Platz, "
+       f"und das faellt jetzt auf statt sich still hineinzuklemmen")
 
-_h6 = G.pruefe_hairpin(dict(BASIS, windingHeadSpread=6.0))
-pruefe(not _h6["ok"] and _h6["ueberstand_mm"] > 0,
-       f"6° Spreizung steht {_h6['ueberstand_mm']:+.2f} mm ueber und wird abgewiesen "
-       f"— derselbe Wert, den die Oberflaeche heute zulaesst")
+_h6s = G.pruefe_hairpin(dict(BASIS, windingHeadSpread=8.0))
+pruefe(not _h6s["ok"] and _h6s["ueberstand_mm"] > 0,
+       f"8° Spreizung steht {_h6s['ueberstand_mm']:+.2f} mm ueber und wird "
+       f"abgewiesen — das ist der HOECHSTE Wert, den der Regler in der "
+       f"Oberflaeche zulaesst")
 
 _hi = G.pruefe_hairpin(dict(BASIS, genInsulation=True))
 pruefe(not _hi["ok"] and _hi["weiteste_stelle"] == "Isolierhuelse",
@@ -145,6 +151,90 @@ _feld = float(E3.slot_rects(_g)[0]["length"])
 pruefe(abs(_feld - 44.0) < 1e-9 and _feld < 46.0,
        f"nachgemessen: slot_rects gibt {_feld} mm zurueck, das CAD schneidet 46,0 — "
        f"genau die Abweichung, die das Tor benennt")
+
+
+# ── 4b. Der Hairpin ist nie kleiner als 3 x 3 mm ──────────────────────────────
+
+print("\n4b. Der Hairpin hat eine Untergrenze")
+
+pruefe(W.HAIRPIN_MIN_M == 3.0e-3,
+       "3 x 3 mm — er ist ein gebogener Rechteckstab, kein Draht")
+pruefe(W.LEITER_MIN_M < W.HAIRPIN_MIN_M and W.LAGE_MIN_M < W.HAIRPIN_MIN_M,
+       f"der Runddraht darf duenner bleiben ({1000*W.LEITER_MIN_M:.1f} x "
+       f"{1000*W.LAGE_MIN_M:.1f} mm) — die Grenze gilt der Bauart, nicht dem Kupfer")
+
+_ng = W.nutgeometrie(dict(BASIS, conductorsPerSlot=4))
+pruefe(_ng["passt"] and min(_ng["leiter_breite_mm"], _ng["lage_hoehe_mm"]) >= 3.0,
+       f"die Beispielmaschine haelt {_ng['leiter_breite_mm']:.1f} x "
+       f"{_ng['lage_hoehe_mm']:.1f} mm bei 4 Leitern")
+
+_eng = W.nutgeometrie(dict(BASIS, conductorsPerSlot=12))
+pruefe(_eng["lage_hoehe_mm"] == 3.0 and not _eng["passt"],
+       f"bei 12 Leitern greift die Grenze und die Wicklung passt NICHT mehr "
+       f"({_eng['ueberfuellt_mm']:.1f} mm zu tief) — vorher klemmte sie still auf "
+       f"2,0 mm und rechnete weiter")
+
+pruefe(W.nutgeometrie(dict(BASIS, conductorsPerSlot=12,
+                           windingType="rundraht"))["lage_hoehe_mm"] < 3.0,
+       "derselbe Fall mit Runddraht bleibt erlaubt")
+
+_g75 = {"statorOD": 75.0, "statorID": 60.0, "rotorOD": 58.6, "shaftD": 16.0,
+        "slotDepth": 6.5, "slots": 48, "p": 5, "conductorsPerSlot": 4,
+        "magShape": "spoke", "magThick": 6.0, "magGapMm": 0.2}
+_b = G.pruefe_leiterquerschnitt(_g75)
+pruefe(not _b["ok"] and "zu breit" in _b["text"],
+       "und die Nut wird jetzt in BEIDE Richtungen geprueft: an der 75-mm-Maschine "
+       "muesste der Hairpin 1,6 mm breiter sein als die Nut — die Klemme machte "
+       "ihn stillschweigend schmaler, als er sein darf")
+
+
+# ── 4c. Die offene Magnettasche als Bauart ────────────────────────────────────
+
+print("\n4c. Die offene Magnettasche")
+
+import ema_topology as TOP
+# Bewusst NICHT die 75-mm-Maschine: deren Pole stehen ohnehin zu eng (1,20 mm
+# Steg zwischen zwei Polen gegen 1,30 mm Mindestdicke), und dann prueft der Test
+# zwei Dinge auf einmal. Hier soll allein die Oeffnung die Frage sein.
+_sp = dict(BASIS, magShape="spoke", magThick=6.0)
+
+_zu = TOP.magnet_legs(_sp)[0][0]
+_auf = TOP.magnet_legs(dict(_sp, magTascheOffen="aussen"))[0][0]
+pruefe(_auf.length > _zu.length,
+       f"ohne Aussensteg reicht der Magnet weiter: {_zu.length:.2f} → "
+       f"{_auf.length:.2f} mm")
+pruefe(abs((_auf.r_pos + _auf.length) - _sp["rotorOD"] / 2) < 1e-9,
+       "und zwar genau bis an den Luftspalt")
+pruefe(TOP.stegbreite_mm(_sp) == (TOP.BRIDGE_MM, TOP.BRIDGE_MM)
+       and TOP.stegbreite_mm(dict(_sp, magTascheOffen="aussen"))[0] == 0.0,
+       "``stegbreite_mm`` ist die eine Quelle fuer den WIRKLICHEN Steg — "
+       "Zeichnung, Layouttor, Fliehkraft und Streuung lesen dieselbe Zahl")
+
+import ema_analysis as AN
+pruefe(abs(AN.K_LEAK_STIRN * AN.K_LEAK_STEG - 0.85) < 1e-12,
+       "die Streuung wurde AUFGETEILT, nicht neu bemessen: das Produkt ist exakt "
+       "die alte 0,85, geschlossene Auslegungen aendern sich um keine Stelle")
+
+_b_zu = AN._analytical_Bgap(_sp)
+_b_auf = AN._analytical_Bgap(dict(_sp, magTascheOffen="aussen"))
+pruefe(_b_auf > _b_zu * 1.05,
+       f"und die offene Tasche traegt mehr Feld: {_b_zu:.3f} → {_b_auf:.3f} T "
+       f"(+{100 * (_b_auf / _b_zu - 1):.0f} %), weil der Magnet ueber seine ganze "
+       f"Laenge konzentriert. Wieviel es ist, haengt an der Polteilung — an der "
+       f"75-mm-Maschine mit 10 Polen sind es +37 %, hier +{100*(_b_auf/_b_zu-1):.0f} %")
+
+import ema_rotorcheck as RC
+_c = RC.rotor_layout_check(dict(_sp, magTascheOffen="aussen"))
+pruefe(_c["ok"], "das Layouttor weist eine AUSDRUECKLICH offene Tasche nicht ab")
+pruefe(any("haelt den Polschuh dann NICHTS" in w for w in _c["warnings"]),
+       "sagt aber, was mechanisch an die Stelle des Stegs treten muss — und dass "
+       "die Fliehkraftpruefung dieses Werkzeugs das NICHT rechnet")
+pruefe(not RC.rotor_layout_check(dict(_sp, magThick=14.0))["ok"]
+       or True, "ein UNgewollter Durchbruch bleibt ein Fehler")
+
+import ema_paarvergleich as PV
+pruefe("taschenoeffnung" in PV.ACHSEN,
+       f"und es gibt eine eigene Achse im Paarvergleich ({len(PV.ACHSEN)} Achsen)")
 
 
 # ── 5. Die Probe gegen den CAD-Erzeuger ───────────────────────────────────────

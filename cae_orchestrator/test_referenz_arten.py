@@ -177,7 +177,10 @@ pruefe("_limit_hinweis" not in t,
 
 import ema_paarvergleich as P
 import copy
-BASIS = {"geom": {"p": 3, "slots": 36, "conductorsPerSlot": 6,
+  # 4 statt 6 Leiter: sechs Hairpins zu 3 x 3 mm (ema_wicklung.HAIRPIN_MIN_M)
+  # braeuchten 25,6 mm in dieser 22-mm-Nut — die alte Basis war eine Maschine,
+  # die sich nicht wickeln laesst.
+BASIS = {"geom": {"p": 3, "slots": 36, "conductorsPerSlot": 4,
     "rotorOD": 188.6, "shaftD": 60.0, "shaftBoreD": 0.0, "statorID": 190.0,
     "statorOD": 260.0, "axialLen": 80.0, "slotDepth": 22.0, "slotWidthRatio": 0.5,
     "magShape": "vasym", "magThick": 6.0, "magWidth": 32.0, "magDist": 13.5,

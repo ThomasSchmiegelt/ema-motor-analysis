@@ -104,6 +104,11 @@ AIR_DOMAIN_FACTOR = 1.25   # outer air-box radius = statorOD/2 · this (Dirichle
 # is preserved.  The band is PHYSICAL (mm) so it is a no-op at low/animation N (sub-
 # pixel → nothing removed) and only resolves the gap once N is high enough.
 AIRGAP_MIN_MM   = 2.5      # target resolved air-gap width [mm] (≈4 px at N=600)
+
+# Streuung, aufgeteilt: K_LEAK_STIRN * K_LEAK_STEG == 0.85 (der alte Wert).
+# Bei offener Magnettasche entfaellt der Steganteil -- s. _analytical_Bgap.
+K_LEAK_STIRN = 0.92        # Stirnstreuung, bleibt immer
+K_LEAK_STEG  = 0.85 / 0.92 # Kurzschluss ueber den Steg am Rotorrand
 AIRGAP_SMOOTH_DEG = 1.5    # angular boxcar on sampled Br/Bt (< slot pitch) — kills
                            # per-pixel staircase spikes, keeps slot/pole harmonics
 AIRGAP_PROFILE_N  = 700    # min FDM resolution for the (static) air-gap Br/Bt chart
@@ -818,7 +823,21 @@ def _analytical_Bgap(geom: dict) -> float:
         # Spoke: tangential magnets concentrate flux into the iron pole. The
         # concentration factor = magnet radial face length / pole-arc width, so
         # B_gap can exceed Br when the pole pitch is small (high pole count).
-        h_rad = max(geom["rotorOD"] / 2 - geom["shaftD"] / 2 - 2 * 1.0, 1.0)
+        # Die konzentrierende Flaeche ist die radiale Laenge DES MAGNETEN, nicht
+        # der Ringraum zwischen Welle und Rotorrand. Hier stand
+        # ``r_rot - r_shaft - 2*1.0`` — also der ganze Ringraum abzueglich eines
+        # hartkodierten 1-mm-Stegs, der weder ``BRIDGE_MM`` noch die runde
+        # Taschenkappe kennt. An der Beispielmaschine (75/60, 10 Pole) sind das
+        # 19,3 mm gegen 12,5 mm wirklich vorhandenen Magneten: das Feld wurde um
+        # die Haelfte zu gross gerechnet, und zwar unabhaengig davon, wie lang
+        # der Magnet gezeichnet ist.
+        #
+        # Jetzt aus ``magnet_legs`` — derselben Quelle, aus der die Zeichnung und
+        # der Rasterer bauen. Damit folgt das Feld dem Magneten, und die OFFENE
+        # Tasche (``ema_topology.taschenoeffnung``) wirkt hier, wo sie hingehoert:
+        # ohne Aussensteg reicht der Magnet bis an den Luftspalt und konzentriert
+        # ueber seine ganze Laenge.
+        h_rad = max((_legs[0].length if _legs else 0.0), 1.0)
         k_fc  = h_rad / pole_pitch
         perm  = hm / (hm + MU_R_MAG * kc * g)
         B_gap = Br_NdFeB * perm * k_fc * f_orient
@@ -826,7 +845,20 @@ def _analytical_Bgap(geom: dict) -> float:
 
     n_legs     = meta.n_legs_per_pole                       # topology leg count
     eta_mag    = meta.eta_hint                              # opening efficiency
-    k_leak     = 0.85                                       # bridge + end leakage
+    # Streuung. Die 0,85 waren EINE Zahl fuer ZWEI Wege: den Steg zwischen Tasche
+    # und Rotorrand (kurzschliesst den Magneten) und die Stirnstreuung (kann man
+    # nicht abstellen). Solange der Steg immer stand, war das gleichgueltig --
+    # seit er sich weglassen laesst (``ema_topology.taschenoeffnung``), ist es das
+    # nicht mehr: eine offene Tasche nimmt genau den ersten Weg heraus.
+    #
+    # Aufgeteilt, NICHT neu bemessen: das Produkt der beiden Faktoren ist bei
+    # geschlossener Tasche exakt die alte 0,85, bestehende Rechnungen aendern sich
+    # also um keine Stelle. Wo die Trennlinie liegt (0,92 Stirnstreuung), ist eine
+    # ANNAHME und keine Messung -- die belastbare Aussage zur offenen Tasche kommt
+    # aus dem Feldlauf (cae_cli.py feld2d), nicht aus dieser Formel.
+    import ema_topology as _topo
+    _steg_a, _steg_i = _topo.stegbreite_mm(geom)
+    k_leak = K_LEAK_STIRN * (1.0 if _steg_a <= 0.0 else K_LEAK_STEG)
     # Flux concentration / pole coverage: magnet source width vs pole arc
     alpha_i    = min(n_legs * float(geom["magWidth"]) / pole_pitch * k_leak * eta_mag, 0.92)
 
