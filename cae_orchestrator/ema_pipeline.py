@@ -54,6 +54,12 @@ def _gate_maschinenart(data: dict, state: dict | None = None,
         _log(state, f"\U0001F6E1 Maschinenart: {art.label}", 4)
     if stufe == "feld":
         ema_maschinenart.pruefe_feldweg(code, "fdm")
+    elif stufe == "em3d":
+        # Auch "em3d" ist nicht gleich "em3d": die Pipeline rechnet hier
+        # ``ema_em3d`` (magnetostatisch, Magnete als Quelle), der Kaefiglaeufer
+        # dagegen ``ema_em3d_harm`` (harmonisch, Kurzschlussring als leitender
+        # Koerper) -- und das ist das Verb ``feld3d``, nicht dieser Weg.
+        ema_maschinenart.pruefe_em3d_weg(code, "elmer3d_stat")
     else:
         ema_maschinenart.pruefe_stufe(code, stufe)
 

@@ -5,8 +5,9 @@ Wozu diese Stufe da ist -- und was sie ausdruecklich NICHT kann
 
 Stufe B (2-D) kann eine Sache grundsaetzlich nicht: ein Querschnitt hat keine
 Stirnseite, also keinen **Kurzschlussring**. ``ema_asm`` schlaegt ihn mit
-``KURZSCHLUSSRING_ZUSCHLAG = 0,20`` auf -- eine Zahl, die gesetzt und nie
-gemessen wurde. Stufe D misst sie.
+rechnerisch auf. Bis zu dieser Stufe war das eine **Konstante**
+(``KURZSCHLUSSRING_ZUSCHLAG = 0,20``), gesetzt und nie gemessen. Stufe D hat sie
+gemessen (87,6 % bei 60 mm Paket, 44,1 % bei 120 mm) und damit abgeloest.
 
 Was sie nicht kann, ist ein absolutes Moment. Gemessen auf dieser Maschine:
 
@@ -65,8 +66,7 @@ GEOM = {"p": 3, "slots": 36, "statorID": 190.0, "statorOD": 280.0,
 print("\n1. Koerpernummern — derselbe stille Fehler wie in 2-D")
 
 fest = sorted({H3.GID_WELLE, H3.GID_ROTOR, H3.GID_STAEBE, H3.GID_STEG,
-               H3.GID_LUFT, H3.GID_STATOR, H3.GID_RING, H3.GID_STIRN,
-               H3.GID_WKRING})
+               H3.GID_LUFT, H3.GID_STATOR, H3.GID_RING, H3.GID_STIRN})
 pruefe(fest == list(range(1, len(fest) + 1)) and H3.GID_NUT0 == len(fest) + 1,
        f"die festen Koerper belegen luecklos 1..{len(fest)}, die Nuten "
        f"schliessen ab {H3.GID_NUT0} an — ElmerGrid -autoclean nummeriert sonst "
@@ -186,18 +186,29 @@ print("\n4. Was das Ergebnis ueber sich selbst sagt")
 
 kz = {"f1_Hz": 150.0, "schlupf": 0.0024, "tets": 79345, "knoten": 15000,
       "netzzeit_s": 14.0, "ring_h_mm": 36.9, "ring_w_mm": 12.3,
-      "gap_aufgeloest": False, "T_mit_Ring_Nm": 8.0, "T_ohne_Ring_Nm": 9.5,
-      "ring_anteil_pct": -18.8, "zuschlag_analytisch_pct": 20.0}
+      "gap_aufgeloest": False, "T_mit_Ring_Nm": 2.299, "T_ohne_Ring_Nm": 0.001,
+      "B_gap_1_mit_T": 0.3047, "P_staebe_W": 513.3, "P_ringe_W": 449.7,
+      "ring_je_stab": 0.8761, "ring_je_stab_pct": 87.6,
+      "ring_anteil_pct": 99.96, "zuschlag_analytisch_pct": 20.0}
 txt = H3.bericht(kz)
 pruefe("NICHT aufgeloest" in txt,
        "ein Netz ohne aufgeloesten Luftspalt sagt das im Bericht — das "
        "absolute Moment ist dann keine Aussage")
-pruefe("Verhaeltnis" in txt,
-       "und weist darauf hin, dass das Verhaeltnis der beiden Laeufe es sehr wohl ist")
-pruefe(f"{ema_asm.KURZSCHLUSSRING_ZUSCHLAG * 100:.0f} %" in txt,
-       f"der analytische Zuschlag von "
-       f"{100 * ema_asm.KURZSCHLUSSRING_ZUSCHLAG:.0f} % steht daneben — das ist "
-       f"die Zahl, die diese Stufe pruefen soll")
+pruefe("87.6 %" in txt and "Stabverlust" in txt,
+       "der Bericht fuehrt den Ringverlust JE STABVERLUST — das ist woertlich "
+       "die Groesse, die ema_asm.kurzschlussring_zuschlag ansetzt")
+pruefe("20 %" in txt,
+       "der analytische Zuschlag steht daneben — das ist die Zahl, die diese "
+       "Stufe pruefen soll")
+pruefe("Paketlaenge" in txt,
+       "und der Bericht sagt dazu, dass der Anteil KEINE Konstante ist: der "
+       "Ring wird nicht laenger, wenn das Paket es wird")
+pruefe("kein" in txt.lower() and "isolierenden Ringen" in txt,
+       "der zweite Lauf wird richtig gelesen: mit isolierenden Ringen gibt es "
+       "keinen Kaefig, nicht einen Kaefig ohne Ring")
+pruefe("Grundwelle" in txt,
+       "und die Luftspalt-Grundwelle steht da — die eine Zahl, an der sich "
+       "2-D und 3-D vergleichen lassen")
 
 kz2 = dict(kz, gap_aufgeloest=True)
 pruefe("NICHT aufgeloest" not in H3.bericht(kz2),
@@ -212,6 +223,14 @@ pruefe(H3.B_UNMOEGLICH_T > 3.0,
        f"die Schranke fuer eine unmoegliche Flussdichte liegt bei "
        f"{H3.B_UNMOEGLICH_T:.0f} T — hoch genug, dass eine gesaettigte Kante "
        f"sie nicht ausloest")
+pruefe(0.0 < H3.WILD_ANTEIL < 0.01,
+       f"verworfen wird nach dem VOLUMENANTEIL ueber der Schranke "
+       f"({100 * H3.WILD_ANTEIL:.2f} %), nicht nach dem Maximum: ein einzelnes "
+       f"Element an einer Nutecke rechnet auch in einem gesunden Feld 40 T "
+       f"(in 2-D gemessen 56 T, bei 0,00 % Momentabweichung)")
+_pf = inspect.getsource(H3.pruefe_feld) if (inspect := __import__("inspect")) else ""
+pruefe("vol" in _pf and "WILD_ANTEIL" in _pf,
+       "und die Pruefung gewichtet wirklich mit dem Zellvolumen")
 pruefe(not hasattr(H3, "_joule_aus_log"),
        "die Joule-Leistung wird NICHT mehr aus der Bildschirmausgabe gelesen — "
        "dieser Elmer schreibt dort gemessen gar keine solche Zeile, und die "
@@ -220,49 +239,68 @@ pruefe(hasattr(H3, "verluste_je_koerper") and hasattr(H3, "pruefe_feld"),
        "sie kommt aus der Ergebnisdatei, und davor prueft pruefe_feld, ob das "
        "Ergebnis ueberhaupt ein Feld ist")
 
-# Der Modulkopf muss den WIRKLICHEN Stand tragen: was gebaut ist, was
-# ausgeschlossen wurde, und was heute nutzbar ist.
-import inspect
+
+# ── 4c. Die beiden Fehler, die diese Stufe gekostet haben ─────────────────────
+
+print("\n4c. Was das Feld gueltig gemacht hat — und was es vorher kaputt machte")
+
+# DER Regressionswaechter dieser Stufe. Elmers Vorgabe fuer Use Tree Gauge ist
+# True; die Zeile zu LOESCHEN reicht also nicht.
+pruefe("Use Tree Gauge = Logical False" in mit,
+       "die Baum-Eichung ist AUSDRUECKLICH aus — Elmers Vorgabe ist True, und "
+       "mit ihr kam am selben Netz 44,06 T statt 0,39 T heraus (2-D: 0,40 T)")
+pruefe("Linear System Solver = Direct" in mit,
+       "und dazu ein DIREKTER Loeser: ohne Eichung ist das System singulaer, "
+       "aber vertraeglich — ein iterativer Loeser darf hier nicht laufen")
+
+_bn = inspect.getsource(H3.baue_netz)
+pruefe("z_lo" in _bn and "z_hi" in _bn and "occ.copy" in _bn,
+       "der Nutleiter wird von Deckel zu Deckel gebaut, nicht nur ueber das "
+       "Paket — sonst endet die eingepraegte Stromdichte mitten im Gebiet und "
+       "die rechte Seite ist unvertraeglich (gemessen 12,6 % wildes Volumen)")
+pruefe(not hasattr(H3, "wickelkopf_stromdichte")
+       and "GID_WKRING" not in inspect.getsource(H3.schreibe_sif),
+       "einen Wickelkopf-Rueckleiter gibt es nicht mehr: er war der Versuch, "
+       "einen im Gebiet endenden Strom zu schliessen, und ohne ihn war das "
+       "Ergebnis genauso falsch (1,40 T gegen 1,98 T, beide unbrauchbar)")
+
+# Der Modulkopf muss den WIRKLICHEN Stand tragen.
 kopf = inspect.getdoc(H3) or ""
-quelle = inspect.getsource(H3.baue_netz)
-pruefe("wk_ringe" in quelle and "GID_WKRING" in inspect.getsource(H3.schreibe_sif),
-       "die Wickelkopf-Rueckleiter sind gebaut und werden bestromt")
-pruefe("NICHT gueltig" in kopf and "ausgeschlossen" in kopf,
-       "und der Modulkopf sagt trotzdem, dass das Feld heute nicht gueltig ist "
-       "— gebaut heisst nicht behoben")
-pruefe("exakt** null" in kopf or "exakt" in kopf,
-       "er nennt die Kontrollprobe (alle Quellen null gibt exakt null), die "
-       "Netz, Eichung und Loeser als Ursache ausschliesst")
+pruefe("Tree Gauge = False" in kopf and "44,06" in kopf,
+       "der Modulkopf traegt die Messreihe zur Baum-Eichung — die Zeile, an "
+       "der diese Stufe fuenf Anlaeufe lang gescheitert ist")
+pruefe("Imaginaerteil" in kopf and "Nullraum" in kopf,
+       "und die Erklaerung, warum es so lange verborgen blieb: die Eichung "
+       "zerstoert nur den Imaginaerteil, und der Ausreisser haengt an nichts "
+       "Physikalischem")
 pruefe("2359" in kopf and "1129" in kopf,
-       "und den unvollstaendigen Aussenrand mit den gemessenen Flaechen — ein "
+       "den unvollstaendigen Aussenrand mit den gemessenen Flaechen — ein "
        "wirklicher Fehler, behoben, und trotzdem nicht die Ursache")
 pruefe("AV re {e}" in kopf and "WIRKUNGSLOS" in kopf,
-       "er fuehrt die Falle auf: von fuenf Schreibweisen der Randbedingung "
-       "bindet nur EINE die Kanten, und Elmer meldet dazu nichts")
-pruefe("Jfix ist jetzt AUS" in kopf and "verstaerker" in kopf.lower(),
-       "und den Befund, dass die Divergenzbereinigung der Verstaerker war")
-pruefe("saettigt" in kopf and "Faktor sechs" in kopf,
-       "sowie die Laengenreihe MIT ihrer ehrlichen Lesart: sie saettigt bei "
-       "0,05 T statt gegen die 0,3 T der 2-D-Stufe zu laufen")
+       "die Falle mit den fuenf Schreibweisen der Randbedingung, von denen nur "
+       "EINE die Kanten bindet und Elmer dazu nichts meldet")
+pruefe("0,3047" in kopf and "0,2870" in kopf,
+       "und die Probe, die die Stufe traegt: 3-D gegen 2-D am selben "
+       "Betriebspunkt")
+pruefe("87,6" in kopf or "Ring/Stab" in kopf,
+       "sowie das Ergebnis, fuer das es diese Stufe gibt")
 
-# Jfix muss AUS sein -- eingeschaltet war er der Verstaerker (20 % gegen 2,7 %).
+# Jfix muss AUS bleiben -- eingeschaltet war er der Verstaerker.
 pruefe("Fix Input Current Density = Logical False" in mit,
-       "Jfix ist ausgeschaltet: eingeschaltet hob er das Luftspaltfeld von "
-       "0,02 auf 3,25 T und den wilden Volumenanteil von 2,7 auf 20,3 %")
+       "Jfix bleibt ausgeschaltet: das Jfix-Problem ist ein reines "
+       "Neumann-Poisson-System und damit singulaer")
 
 # Und die eine wirksame Schreibweise darf nicht verloren gehen.
 pruefe("AV re {e}" in mit and "AV im {e}" in mit,
        "die Randbedingung benutzt die EINZIGE Schreibweise, die die "
        "Kanten-Freiheitsgrade bindet")
-pruefe("netzkosten()" in kopf and "feld2d" in kopf,
-       "und was heute stattdessen traegt")
 
-# Die Fehlermeldung darf keine Ursache nennen, die widerlegt ist.
-import ema_em3d_harm as _H
-_q = inspect.getsource(_H.pruefe_feld)
-pruefe("fehlende Rueckleiter" not in _q and "NICHT geklaert" in _q,
-       "der Waechter nennt die Ursache als ungeklaert — die zuvor genannte "
-       "(fehlender Rueckleiter) ist gebaut und widerlegt")
+# Die Vergleichszahl muss dieselbe Definition haben wie in 2-D.
+_lg = inspect.getsource(H3.luftspalt_grundwelle)
+pruefe("exp(1j" in _lg and "* 2" not in _lg.replace("0.25", ""),
+       "die Luftspalt-Grundwelle ist der komplexe Zeiger OHNE Faktor 2 — genau "
+       "wie in ema_em2d_harm, sonst verglichen die beiden Stufen zwei "
+       "verschiedene Groessen")
 
 
 # ── 5. Das Tor ────────────────────────────────────────────────────────────────

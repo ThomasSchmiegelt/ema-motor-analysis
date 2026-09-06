@@ -117,7 +117,16 @@ ARTEN = {
         # "feld" traegt seit ``ema_em2d_harm`` (harmonische 2-D-Rechnung mit
         # Elmers MagnetoDynamics2DHarmonic). NICHT die 2-D-FDM: die ist reell
         # und magnetostatisch, ein Kaefiglaeufer ist darin nicht abbildbar.
-        stufen=("analytisch", "feld"),
+        #
+        # "em3d" traegt seit ``ema_em3d_harm`` (WhitneyAVHarmonicSolver). Die
+        # Probe dafuer ist die Luftspalt-Grundwelle: 0,3047 T in 3-D gegen
+        # 0,2870 T in 2-D am selben Betriebspunkt, bei einem Spalt, der im
+        # 3-D-Netz gar nicht aufgeloest ist.
+        #
+        # "cad" fehlt mit Absicht und ist keine Luecke im Sinne von „noch nicht
+        # gemacht", sondern eine ehrliche: ``ema_freecad`` zeichnet Magnete und
+        # Hairpins, keinen Druckguss-Kaefig mit Kurzschlussringen.
+        stufen=("analytisch", "feld", "em3d"),
         feldweg="elmer2d_harm",
         ohne_bedeutung=_PM_KENNZAHLEN,
         hinweis=("Der Magnetisierungsstrom liegt DAUERND im Stator, und der "
@@ -219,6 +228,35 @@ FELDWEG_WERKZEUG = {
     "fdm":          "die Pipeline (run)",
     "elmer2d_harm": "cae_cli.py feld2d  (Elmer 2-D, harmonisch)",
 }
+
+
+# Dasselbe fuer die 3-D-Stufe: die Pipeline rechnet dort ``ema_em3d``
+# (magnetostatisch, WhitneyAVSolver, Magnete als Quelle), der Kaefiglaeufer
+# dagegen ``ema_em3d_harm`` (harmonisch, Kurzschlussring als leitender Koerper).
+# Beides heisst "em3d", ist aber nicht derselbe Weg -- und ohne diese
+# Unterscheidung liefe die ASM in die Magnetostatik und bekaeme ein Feld ohne
+# Laeuferstroeme, also PSM-Physik unter fremdem Namen.
+EM3D_WEG = {"pmsm": "elmer3d_stat", "asm": "elmer3d_harm"}
+EM3D_WERKZEUG = {
+    "elmer3d_stat": "die Pipeline (run em3d)",
+    "elmer3d_harm": "cae_cli.py feld3d  (Elmer 3-D, harmonisch)",
+}
+
+
+def pruefe_em3d_weg(code: str, weg: str) -> Art:
+    """Traegt diese Art die 3-D-Stufe **auf diesem Loeser**?
+
+    Der Gegenpart zu ``pruefe_feldweg``, aus demselben Grund: ``traegt(code,
+    "em3d")`` sagt nur, dass es fuer diese Art ueberhaupt eine 3-D-Stufe gibt.
+    """
+    art = pruefe_stufe(code, "em3d")
+    hat = EM3D_WEG.get(code, "elmer3d_stat")
+    if hat != weg:
+        raise ArtNichtUnterstuetzt(
+            f"{art.label}: die 3-D-Stufe laeuft nicht ueber "
+            f"'{EM3D_WERKZEUG.get(weg, weg)}', sondern ueber "
+            f"'{EM3D_WERKZEUG.get(hat, hat)}'.")
+    return art
 
 
 def pruefe_feldweg(code: str, weg: str) -> Art:

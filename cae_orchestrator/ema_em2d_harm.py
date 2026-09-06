@@ -70,7 +70,7 @@ Was dieses Modell nicht enthaelt -- ausgesprochen
 
 * **Keinen Kurzschlussring.** Ein 2-D-Schnitt hat keine Stirnseite; die Staebe
   sind hier ideal kurzgeschlossen. ``ema_asm`` schlaegt den Ring analytisch mit
-  ``KURZSCHLUSSRING_ZUSCHLAG`` auf. Ein Teil der Abweichung zwischen beiden
+  ``ema_asm.kurzschlussring_zuschlag`` auf. Ein Teil der Abweichung zwischen beiden
   Stufen ist genau das und keine Ungenauigkeit.
 * **Lineares Eisen, mu_r = 500**, wie in ``ema_em3d`` -- damit die 2-D- und die
   3-D-Feldstufe DIESELBE Annahme machen und nicht zwei verschiedene.

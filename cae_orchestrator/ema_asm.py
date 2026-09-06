@@ -86,7 +86,12 @@ B_JOCH_MAX_T = 1.5
 # Nutfuellung des Laeuferstabs im Nutraum und Nut/Zahn-Aufteilung am Umfang.
 KAEFIG_NUT_ANTEIL = 0.50     # Anteil der Laeufernutteilung, der Nut ist
 KAEFIG_FUELLUNG   = 0.95     # Druckguss fuellt die Nut nahezu vollstaendig
-KURZSCHLUSSRING_ZUSCHLAG = 0.20   # Ringverlust als Anteil des Stabverlusts
+# Der Ringverlust ist KEINE Konstante mehr -- s. ``kurzschlussring_zuschlag``.
+# Der frueher hier stehende feste Wert 0,20 war gesetzt und nie gemessen; die
+# harmonische 3-D-Stufe (``ema_em3d_harm``) hat ihn nachgerechnet und 87,6 %
+# gefunden, nicht 20 %. Die Zahl bleibt als das stehen, was sie war -- eine
+# Annahme -- damit die Fundstelle nachvollziehbar ist.
+KURZSCHLUSSRING_ZUSCHLAG_ALT = 0.20
 
 # Groesstes zugelassenes Tiefe/Breite-Verhaeltnis der Laeufernut. Darueber wird
 # der Stab zum Hochstab: die Stromverdraengung bestimmt dann den Widerstand, und
@@ -275,6 +280,58 @@ def magnetisierungsstrom(geom: dict) -> dict:
 
 # ── Betriebspunkt ─────────────────────────────────────────────────────────────
 
+def kurzschlussring_zuschlag(kf: dict, p: int) -> float:
+    """Ringverlust als Anteil des Stabverlusts -- aus der Geometrie, nicht gesetzt.
+
+    Hier stand bis hierher eine **Konstante** (0,20). Sie kann nicht stimmen: der
+    Kurzschlussring wird nicht laenger, wenn das Blechpaket es wird. Der Anteil
+    haengt also mindestens an der Paketlaenge, und ausserdem an Ringquerschnitt,
+    Stabzahl und Polzahl.
+
+    Die klassische Umrechnung: der Ringstrom ist um ``1/(2*sin(pi*p/n))`` groesser
+    als der Stabstrom (die Ringsegmente addieren die Stabstroeme laengs des
+    Umfangs auf), und je Stab liegen ZWEI Ringsegmente. Auf den Stab bezogen:
+
+        R_Ring,bez = 2 * R_Segment / (2*sin(pi*p/n))^2
+        R_Segment  = rho * (2*pi*r_Ring/n) / A_Ring
+        R_Stab     = rho * l_Stab / A_Stab
+
+        Zuschlag = R_Ring,bez / R_Stab
+                 = pi * r_Ring * A_Stab / (n * A_Ring * l_Stab * sin^2(pi*p/n))
+
+    ``rho`` faellt heraus -- Ring und Stab sind beim Druckguss aus demselben
+    Werkstoff.
+
+    **Nachgemessen** an der harmonischen 3-D-Stufe (``ema_em3d_harm``), die den
+    Ring als leitenden Koerper fuehrt und seinen Verlust getrennt integriert.
+    Beispielmaschine p=3, 36 Nuten, 28 Staebe, 190 mm Bohrung:
+
+        L =  60 mm    Formel 0,991    3-D gemessen 0,876    Verhaeltnis 1,13
+        L = 120 mm    Formel 0,496    3-D gemessen 0,441    Verhaeltnis 1,12
+        L = 180 mm    Formel 0,330    3-D gemessen 0,298    Verhaeltnis 1,11
+
+    Der letzte Punkt kam NACH der Formel herein und hat sie also nicht gestuetzt,
+    sondern geprueft.
+
+    Zwei unabhaengige Wege, dieselbe Groessenordnung und ein gleichbleibendes
+    Verhaeltnis -- die Formel liegt gleichmaessig rund 12 % hoch, was zum
+    unaufgeloesten Luftspalt des 3-D-Netzes passt. Die frueheren 20 % lagen an
+    dieser Maschine um den Faktor FUENF daneben, und zwar nur nach unten, also
+    zugunsten der Maschine.
+
+    Kein Deckel nach oben: bei einem sehr kurzen Paket ist der Ringverlust
+    wirklich groesser als der Stabverlust. Ein Deckel wuerde genau das verstecken,
+    weswegen es diese Funktion gibt.
+    """
+    n = max(int(kf["n_stab"]), 1)
+    a_stab = max(float(kf["A_stab_mm2"]), 1e-9)
+    a_ring = max(float(kf["A_ring_mm2"]), 1e-9)
+    r_ring = max(float(kf["r_ring_mm"]), 1e-9)
+    l_stab = max(float(kf["l_stab_mm"]), 1e-9)
+    sin2 = max(math.sin(math.pi * max(int(p), 1) / n) ** 2, 1e-12)
+    return math.pi * r_ring * a_stab / (n * a_ring * l_stab * sin2)
+
+
 def stabstrom(geom: dict, i_q_haus: float, n_stab: int) -> float:
     """Stabstrom [A, Amplitude] aus dem Durchflutungsgleichgewicht.
 
@@ -363,7 +420,8 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
 
     r_stab = float(mat["rho_el"]) * (kf["l_stab_mm"] * 1e-3) / max(kf["A_stab_mm2"] * 1e-6, 1e-12)
     p_stab = kf["n_stab"] * 0.5 * i_stab ** 2 * r_stab           # Amplitude -> eff^2
-    p_kaefig = p_stab * (1.0 + KURZSCHLUSSRING_ZUSCHLAG)
+    zuschlag = kurzschlussring_zuschlag(kf, p)
+    p_kaefig = p_stab * (1.0 + zuschlag)
 
     omega_syn = 2.0 * math.pi * float(rpm) / 60.0
     t_ist = min(t_soll, kt * i_q)
@@ -382,7 +440,10 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
         "T_ist_Nm":     round(t_ist, 1),
         "I_stab_A":     round(i_stab, 1),
         "R_stab_uOhm":  round(r_stab * 1e6, 2),
+        "P_stab_W":     round(p_stab, 1),
         "P_kaefig_W":   round(p_kaefig, 1),
+        # Aus der Geometrie gerechnet, nicht gesetzt -- s. kurzschlussring_zuschlag.
+        "ring_zuschlag": round(zuschlag, 4),
         "schlupf":      round(schlupf, 5),
         "schlupf_pct":  round(100.0 * schlupf, 3),
         "n_syn_1pmin":  round(float(rpm), 1),

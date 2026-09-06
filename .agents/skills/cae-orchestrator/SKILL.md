@@ -54,6 +54,8 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `db <was>` | **Rechnungsdatenbank**: `import` · `liste` · `zeige --lauf X` · `guete --lauf X` · `vergleich`. Kennwerte **mit Herkunft je Größe** |
 | `lernen <was>` | **was aus dem eigenen Bestand folgt**: `zeige` · `merke --regel … --beleg …` · `pruefe` · **`probieren`** = geplanter Versuch: jede Bauform ueber jede Polzahl, mit `--merken` landen die Befunde als belegte Regeln im Speicher |
 | `recherche <was>` | **Internet**: `suche <begriffe>` · `hole <adresse>` |
+| `feld2d` | **Die Feldstufe des Käfigläufers** (Elmer 2-D, harmonisch). Sättigt den Läufersteg **durch Messung**, misst den Carter-Faktor der *gezeichneten* Nut (2,27 gegen die 1,15, die `ema_asm` ansetzt) und tastet die Momenten-Schlupf-Kennlinie ab. Zwei unabhängige Momentwege (Arkkio und Leistungsbilanz) stimmen auf 0,00 % überein |
+| `feld3d` | **Was der Kurzschlussring wirklich kostet** (Elmer 3-D, harmonisch). Die eine Größe, die ein Querschnitt grundsätzlich nicht hergibt. Gemessen 87,6 / 44,1 / 29,8 % des Stabverlusts bei 60 / 120 / 180 mm Paket gegen die pauschalen 20 %, die `ema_asm` ansetzte — der Anteil ist keine Konstante, er hängt an der Paketlänge, und `ema_asm.kurzschlussring_zuschlag` rechnet ihn seitdem aus der Geometrie. `--nur-netz` sagt vorher, was der Lauf kostet. **Nicht** für ein absolutes Moment: der 0,7-mm-Luftspalt ist in einem bezahlbaren 3-D-Netz nicht aufgelöst |
 | `raw GET/POST <pfad>` | beliebige Route — Notausgang für alles Übrige |
 
 **`--frisch` gegen `--from-project`** — gilt für `run`, `rotor-check`, `screen`, `paarvergleich`, `bilddaten`, `lernen`, `struktur`, `topopt`, `feldbild`:
@@ -275,9 +277,13 @@ python3 cae_cli.py maschinenart asm      # eine im Einzelnen
 | Art | was | analytisch | Feld | CAD | 3-D |
 |---|---|---|---|---|---|
 | `pmsm` | permanenterregt (Vorgabe) | ✔ | ✔ | ✔ | ✔ |
-| `asm` | Asynchron, Käfigläufer | ✔ | — | — | — |
-| `synrm` | Reluktanz, ohne Magnete | — | — | — | — |
-| `eesm` | fremderregt | — | — | — | — |
+| `asm` | Asynchron, Käfigläufer | ✔ | ✔ `feld2d` | — | ✔ `feld3d` |
+| `synrm` | Reluktanz, ohne Magnete | ✔ | — | — | — |
+| `eesm` | fremderregt | ✔ | — | — | — |
+
+Das CAD-Feld der ASM ist **mit Absicht** leer und keine Lücke im Sinne von „noch
+nicht gemacht": `ema_freecad` zeichnet Magnete und Hairpins, keinen
+Druckguss-Käfig mit Kurzschlussringen.
 
 * **Setzen:** `--set geom.machineType=asm`.
 * **Vergleichen:** `paarvergleich --achse maschinenart` stellt PSM und ASM am
@@ -289,8 +295,9 @@ python3 cae_cli.py maschinenart asm      # eine im Einzelnen
   ∂A/∂t und kann einen Käfigläufer grundsätzlich nicht abbilden. Ein Durchlauf würde
   **PSM-Zahlen unter fremdem Namen** liefern: ein Feld aus Magneten, die es nicht gibt,
   ein Moment ohne Schlupf, eine Entmagnetisierungsreserve für einen Läufer aus Blech
-  und Aluminium. Die ASM-Feldstufe braucht Elmers `MagnetoDynamics2DHarmonic` und ist
-  noch nicht gebaut.
+  und Aluminium. Die Feldstufe des Käfigläufers ist deshalb ein eigenes Verb:
+  **`feld2d`** (Elmer, `MagnetoDynamics2DHarmonic`), und die Gegenrechnung dazu
+  **`feld3d`**.
 * Auch `screen` (Vorauswahl) weist magnetlose Arten ab — sie fährt den Magnet-
   Kombinationsraum ab.
 * **Beim Lesen der ASM-Zeile:** das PSM-Luftspaltfeld ist durch die Magnete
@@ -710,8 +717,12 @@ für die Verhältnisse, die erst zwischen zwei Bauarten eine Aussage sind.
 **Was heute gemessen daneben liegt** — sage das in einer Antwort dazu, statt die
 gerechnete Zahl allein zu nennen:
 
-* Der **ASM-Schlupf** kommt analytisch auf rund 0,27 % heraus, recherchiert sind
+* Der **ASM-Schlupf** kommt analytisch auf rund 1,1 % heraus, recherchiert sind
   2–13,3 %. Die Feldstufe (`feld2d`) bestätigt unabhängig, dass er größer sein muss.
+  Er war bis zur 3-D-Messung noch einmal viermal kleiner (0,27 %): der Ringverlust
+  stand als feste 20 % im Modell. `feld3d` hat gemessen, dass es an einem 60-mm-Paket
+  87,6 % sind, und `ema_asm.kurzschlussring_zuschlag` rechnet ihn seitdem aus der
+  Geometrie. Der Rest der Lücke liegt woanders — sag das so.
 * Die **SynRM** erreicht in unserem Modell nur einen Bruchteil des Moments je
   Ampere einer optimierten SynRM. Unser Barrierenmodell erfasst die Sperrschichten
   über ein Salienzband, nicht über ihre Einzelgeometrie.

@@ -1190,6 +1190,120 @@ def cmd_feld2d(args) -> int:
     return 0
 
 
+def cmd_feld3d(args) -> int:
+    """ASM-Feld harmonisch in 3-D (Elmer) -- Stufe „em3d" der Asynchronmaschine.
+
+    Wofuer es dieses Verb gibt, und wofuer nicht
+    ---------------------------------------------
+
+    Nicht fuer ein besseres Moment. Der Luftspalt (0,7 mm) laesst sich in einem
+    bezahlbaren 3-D-Netz nicht aufloesen -- gemessen bricht das Vernetzen mit
+    Verfeinerungsband nach 1 h 56 min ohne Ergebnis ab. Das absolute Moment aus
+    diesem Netz waere keine Aussage, und ``feld2d`` bleibt die tragende
+    Feldstufe der Asynchronmaschine.
+
+    Es gibt dieses Verb fuer die EINE Groesse, die ein Querschnitt
+    grundsaetzlich nicht hergeben kann: den **Kurzschlussring**. In 2-D sind die
+    Kaefigstaebe ideal kurzgeschlossen; ``ema_asm`` schlaegt den Ring mit
+    ``KURZSCHLUSSRING_ZUSCHLAG = 0,20`` auf den Stabverlust auf -- eine Zahl,
+    die gesetzt und nie gemessen war. Dieses Verb hat sie gemessen, als
+    Verhaeltnis auf EINEM Netz, in dem der Netzfehler in Zaehler und Nenner
+    gleich steckt:
+
+        L =  60 mm   Ring/Stab 87,6 %
+        L = 120 mm   Ring/Stab 44,1 %
+
+    Der Anteil ist also keine Konstante -- der Ring wird nicht laenger, wenn das
+    Paket es wird. ``ema_asm.kurzschlussring_zuschlag`` rechnet ihn seitdem aus
+    der Geometrie (klassische Umrechnung, unabhaengig hergeleitet) und trifft die
+    3-D-Messung an beiden Laengen auf 12-13 %.
+
+    ``--nur-netz`` baut nur das Netz und sagt, was der Lauf kosten wird. Das ist
+    in 3-D die eigentliche Frage, und man soll sie beantworten koennen, BEVOR
+    man eine Stunde wartet.
+
+    Exit: 0 = ok, 2 = Bedienfehler, 4 = Rechenfehler.
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    for a in applied:
+        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+
+    if not (payload.get("geom") or {}):
+        return _die("Keine Geometrie im Payload -- feld3d braucht geom.", EXIT_USAGE)
+
+    import ema_maschinenart as MA
+    art = MA.art_code(payload)
+    try:
+        MA.pruefe_stufe(art, "em3d")
+    except MA.ArtNichtUnterstuetzt as e:
+        return _die(str(e), EXIT_USAGE)
+    if art != "asm":
+        return _die(f"feld3d ist die Kaefiglaeufer-Stufe; '{art}' gehoert nicht "
+                    f"hierher. 'maschinenart {art}' sagt, was diese Art traegt.",
+                    EXIT_USAGE)
+
+    kennung = getattr(args, "projekt", None) or getattr(args, "_pid", None)
+    pdir = _projekt_pfad(kennung) if kennung else ""
+    import tempfile
+    arbeit = os.path.join(pdir, "feld3d") if pdir else \
+        os.path.join(tempfile.gettempdir(), f"feld3d_{os.getpid()}")
+
+    geom = payload.get("geom") or {}
+    rpm = float(getattr(args, "rpm", 0) or payload.get("rpm_to")
+                or payload.get("rpm_from") or 3000.0)
+    last = float(getattr(args, "last_nm", 0) or payload.get("load_nm") or 100.0)
+    axial = float(getattr(args, "axial_mm", 0) or geom.get("axialLen") or 80.0)
+
+    import ema_asm
+    import ema_em3d_harm as E3
+    kf = dict(ema_asm.kaefig(geom, axial))
+    kf["steg_mm"] = ema_asm.KAEFIG_STEG_MM
+    try:
+        if getattr(args, "nur_netz", False):
+            nz = E3.netzkosten(geom, kf, axial, arbeit,
+                               gap_lagen=int(getattr(args, "gap_lagen", 0) or 1),
+                               lc_eisen_mm=float(getattr(args, "lc_eisen_mm", 0) or 8.0),
+                               log=lambda t: print(f"  {t}"))
+            text = (f"3-D-Netz der Kaefiglaeufer-Stufe, {axial:.0f} mm Paket\n"
+                    f"  {nz['tets']} Tetraeder, {nz['knoten']} Knoten, "
+                    f"{nz['netzzeit_s']:.0f} s Netzzeit\n"
+                    f"  kleinstes Element {1000 * nz['lc_gap_m']:.2f} mm bei "
+                    f"{1000 * nz['gap_m']:.2f} mm Luftspalt -- der Spalt ist "
+                    f"{'aufgeloest' if nz['lc_gap_m'] <= nz['gap_m'] else 'NICHT aufgeloest'}.\n"
+                    f"  Aussenrand {nz['rand_mantel']} Mantel- und "
+                    f"{nz['rand_deckel']} Stirnflaechen.\n"
+                    f"  Der Loeser ist der teure Teil, nicht das Netz: das "
+                    f"harmonische Kantenelement-System ist komplex und hat "
+                    f"doppelt so viele Unbekannte wie das magnetostatische.")
+            print()
+            print(text)
+            _ablegen(args, "feld3d", text, daten=nz, pid=kennung)
+            return 0
+        kz = E3.ring_wirkung(payload, rpm=rpm, last_nm=last, work_dir=arbeit,
+                             gap_lagen=int(getattr(args, "gap_lagen", 0) or 1),
+                             lc_eisen_mm=float(getattr(args, "lc_eisen_mm", 0) or 8.0),
+                             mu_r_steg=float(getattr(args, "mu_r_steg", 0) or 0.0),
+                             timeout=int(getattr(args, "timeout_s", 0) or 7200),
+                             log=lambda t: print(f"  {t}"))
+    except Exception as e:
+        was = "Netzbau" if getattr(args, "nur_netz", False) else "Feldlauf"
+        return _die(f"3-D-{was} fehlgeschlagen: {type(e).__name__}: {e}", 4)
+
+    text = E3.bericht(kz)
+    print()
+    print(text)
+    _ablegen(args, "feld3d", text,
+             daten={k: v for k, v in kz.items() if k != "analytisch"},
+             pid=kennung)
+    return 0
+
+
 def cmd_aufgabe(args) -> int:
     """Eine neue Aufgabe zerlegen: was ist gefordert, was steht schon da, was fehlt.
 
@@ -2163,6 +2277,47 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_feld2d)
+
+    s = sub.add_parser("feld3d",
+                       help="ASM-Feld harmonisch in 3-D (Elmer): was der "
+                            "Kurzschlussring wirklich kostet")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes); "
+                        "dieses Projekt ist dann auch das Ziel der Ablage")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--projekt",
+                   help="Zielprojekt der Ablage (Vorgabe: das Projekt des Payloads)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar (gegen 'geom' geprueft)")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--rpm", type=float, default=0.0,
+                   help="synchrone Drehzahl (Vorgabe: rpm_to aus dem Payload)")
+    s.add_argument("--last-nm", dest="last_nm", type=float, default=0.0,
+                   help="gefordertes Moment (Vorgabe: load_nm aus dem Payload)")
+    s.add_argument("--axial-mm", dest="axial_mm", type=float, default=0.0,
+                   help="Paketlaenge (Vorgabe: axialLen aus der Geometrie). Der "
+                        "Ringanteil haengt daran: der Ring wird nicht laenger, "
+                        "wenn das Paket es wird")
+    s.add_argument("--gap-lagen", dest="gap_lagen", type=int, default=0,
+                   help="Elementlagen im Luftspalt (Vorgabe 1 — mehr ist in 3-D "
+                        "meist nicht bezahlbar)")
+    s.add_argument("--lc-eisen-mm", dest="lc_eisen_mm", type=float, default=0.0,
+                   help="groesstes Element im Eisen (Vorgabe 8 mm)")
+    s.add_argument("--mu-r-steg", dest="mu_r_steg", type=float, default=0.0,
+                   help="feste Steg-Permeabilitaet statt der Vorgabe")
+    s.add_argument("--timeout-s", dest="timeout_s", type=int, default=0,
+                   help="Zeitdeckel je Loeserlauf in Sekunden (Vorgabe 7200)")
+    s.add_argument("--nur-netz", dest="nur_netz", action="store_true",
+                   help="nur vernetzen und die Kosten melden, nicht loesen — "
+                        "die Frage, die man VOR einem 3-D-Lauf beantwortet haben will")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_feld3d)
 
     s = sub.add_parser("steckbrief",
                        help="was ein Projekt IST und was daran gerechnet wurde — "

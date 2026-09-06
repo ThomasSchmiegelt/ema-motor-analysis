@@ -69,6 +69,16 @@ except MA.ArtNichtUnterstuetzt:
 
 pruefe(MA.traegt("pmsm", "em3d") and MA.traegt("asm", "analytisch"),
        "PSM traegt alle vier Stufen, die ASM die analytische")
+pruefe(MA.traegt("asm", "em3d") and not MA.traegt("asm", "cad"),
+       "die ASM traegt seit ema_em3d_harm auch die 3-D-Stufe — aber nicht CAD, "
+       "und die Luecke steht als Luecke da statt als stille Vollstaendigkeit")
+try:
+    MA.pruefe_em3d_weg("asm", "elmer3d_stat")
+    pruefe(False, "und sie laeuft NICHT ueber die magnetostatische 3-D-Stufe")
+except MA.ArtNichtUnterstuetzt as e:
+    pruefe("feld3d" in str(e),
+           "und sie laeuft NICHT ueber die magnetostatische 3-D-Stufe der "
+           "Pipeline, sondern ueber feld3d — die Fehlermeldung nennt es")
 pruefe(MA.traegt("asm", "feld") and MA.ARTEN["asm"].feldweg == "elmer2d_harm",
        "die ASM traegt den Feldlauf — aber ueber Elmers harmonischen Loeser "
        "(ema_em2d_harm), nicht ueber die FDM")
@@ -237,6 +247,61 @@ pruefe(mk["magnet_kg"] == 0.0 and mk["kosten"]["magnet_EUR"] == 0.0,
 pruefe(mk["kaefig_kg"] > 0.0, "dafuer ein Kaefig mit eigener Masse")
 pruefe(mk["kosten"]["gesamt_EUR"] < mk_pm["kosten"]["gesamt_EUR"],
        "und in Summe billiger als dieselbe Geometrie mit Magneten")
+
+
+# ── 4b. Der Kurzschlussring: gerechnet statt gesetzt ─────────────────────────
+
+print("\n4b. Der Kurzschlussring — die Zahl, die gesetzt und nie gemessen war")
+
+import math as _math
+_G3 = {"p": 3, "slots": 36, "statorID": 190.0, "statorOD": 280.0,
+       "rotorOD": 188.6, "shaftD": 60.0, "slotDepth": 25.0, "rotorBars": 28}
+_z = {L: ema_asm.kurzschlussring_zuschlag(ema_asm.kaefig(_G3, L), 3)
+      for L in (60.0, 120.0, 180.0)}
+
+pruefe(_z[60.0] > _z[120.0] > _z[180.0],
+       f"der Ringzuschlag FAELLT mit der Paketlaenge "
+       f"({100 * _z[60.0]:.0f} % / {100 * _z[120.0]:.0f} % / "
+       f"{100 * _z[180.0]:.0f} %) — der Ring wird nicht laenger, wenn das "
+       f"Paket es wird, und genau das kann eine Konstante nicht")
+pruefe(abs(_z[60.0] / _z[120.0] - 2.0) < 0.05,
+       "und zwar umgekehrt proportional: doppelte Laenge, halber Anteil")
+
+# Nachgemessen an der harmonischen 3-D-Stufe (ema_em3d_harm), die den Ring als
+# leitenden Koerper fuehrt und seinen Verlust getrennt integriert. Zwei
+# unabhaengige Wege auf dieselbe Groesse -- das ist die Probe, nicht die Formel.
+_gemessen_3d = {60.0: 0.876, 120.0: 0.441, 180.0: 0.298}
+for L, g in _gemessen_3d.items():
+    v = _z[L] / g
+    pruefe(1.0 < v < 1.3,
+           f"bei {L:.0f} mm rechnet die Formel {100 * _z[L]:.1f} % gegen "
+           f"{100 * g:.1f} % aus dem 3-D-Feld — Verhaeltnis {v:.2f}. Die Formel "
+           f"liegt gleichmaessig hoch, was zum unaufgeloesten Luftspalt des "
+           f"3-D-Netzes passt")
+_v = [_z[L] / g for L, g in sorted(_gemessen_3d.items())]
+pruefe(max(_v) - min(_v) < 0.05,
+       f"und das Verhaeltnis ist an ALLEN drei Laengen dasselbe "
+       f"({' / '.join(f'{x:.2f}' for x in _v)}) — die beiden Wege gehen nicht "
+       f"auseinander, sie stehen nur um einen festen Betrag versetzt. Der "
+       f"180-mm-Punkt kam nach der Formel herein und hat sie geprueft, nicht "
+       f"gestuetzt")
+
+pruefe(_z[60.0] / ema_asm.KURZSCHLUSSRING_ZUSCHLAG_ALT > 3.0,
+       f"die frueher gesetzte Konstante (0,20) lag an dieser Maschine um den "
+       f"Faktor {_z[60.0] / ema_asm.KURZSCHLUSSRING_ZUSCHLAG_ALT:.1f} daneben — "
+       f"und zwar nur nach unten, also zugunsten der Maschine")
+pruefe(not hasattr(ema_asm, "KURZSCHLUSSRING_ZUSCHLAG"),
+       "der feste Zuschlag ist als Rechengroesse weg; er steht nur noch als "
+       "_ALT da, damit die Fundstelle nachvollziehbar bleibt")
+
+_bp3 = ema_asm.betriebspunkt(_G3, 60.0, 4000.0, 150.0)
+pruefe(abs(_bp3["ring_zuschlag"] - _z[60.0]) < 5e-5,
+       "der Betriebspunkt rechnet mit genau diesem Zuschlag und gibt ihn aus — "
+       "die Zahl steht im Ergebnis, statt in der Formel zu verschwinden")
+pruefe(_bp3["P_kaefig_W"] > _bp3["P_stab_W"],
+       f"und der Kaefigverlust ({_bp3['P_kaefig_W']:.0f} W) liegt an dieser "
+       f"kurzen Maschine ueber dem reinen Stabverlust "
+       f"({_bp3['P_stab_W']:.0f} W) — kein Deckel verdeckt das")
 
 
 # ── 5. Die 14. Achse im Paarvergleich ─────────────────────────────────────────
