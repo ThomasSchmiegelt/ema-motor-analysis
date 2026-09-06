@@ -98,6 +98,44 @@ def _gate_rotor_layout(data: dict, state: dict | None = None,
             _log(state, "\u26A0 " + w, 5)
 
 
+def _gate_grenzen(data: dict, state: dict | None = None,
+                  fatal: bool = True) -> None:
+    """Die Grenzen, die IMMER gelten (``ema_grenzen``) -- Millisekunden, vor allem.
+
+    Drei Dinge, die keine Auslegungsentscheidung sind: der Luftspalt liegt
+    zwischen 0,1 und 2,0 mm, der Wickelkopf bleibt unter dem
+    Statoraussendurchmesser, und die Nut frisst das Rueckenjoch nicht auf. Jede
+    davon liesse sich bisher einstellen, ohne dass irgendwo etwas dagegen sagte —
+    und jede ergibt eine Maschine, die es nicht gibt.
+
+    Wer eine ausdruecklich will, setzt die Freigabe im Payload
+    (``geom.luftspaltFreigabe`` und Geschwister); dann steht die Ueberschreitung
+    als ⚠ im Protokoll, statt unbemerkt durchzugehen.
+
+    ``fatal=False``: wie bei den Rotor-Toren — beim Nachrechnen eines
+    bestehenden Projekts warnen statt verweigern, denn dessen Geometrie liegt
+    schon auf der Platte und wird gar nicht neu gebaut."""
+    import ema_grenzen
+    geom = (data or {}).get("geom") or {}
+    if not geom:
+        return
+    erg = ema_grenzen.pruefe(data)
+    if state is not None:
+        for b in erg["befunde"]:
+            if b.get("entfaellt"):
+                continue
+            if b["ok"]:
+                _log(state, f"\U0001F6E1 {b['text']}  \u2705", 3)
+            elif b.get("freigegeben"):
+                _log(state, f"\U0001F6E1 {b['text']}  \u26A0\uFE0F "
+                            f"ausdruecklich freigegeben", 3)
+            else:
+                _log(state, f"\U0001F6E1 {b['text']}  \u274C", 3)
+    if erg["verletzt"] and fatal:
+        raise ema_grenzen.GrenzeVerletzt(
+            " · ".join(b["text"] for b in erg["verletzt"]))
+
+
 def _gate_rotor_stress(data: dict, state: dict | None = None,
                        fatal: bool = True) -> None:
     """Hard pre-CAD centrifugal gate.  Reports BOTH 2-D plane states and gates on the
@@ -1730,6 +1768,7 @@ def build_cad_preview(data: dict, state: dict, project_dir: str) -> dict:
     axial = float(data.get("axial_len", 80.0))
 
     _gate_maschinenart(data, state, "cad")
+    _gate_grenzen(data, state)
     _gate_rotor_layout(data, state)
     _gate_rotor_stress(data, state)
     _log(state, "⚙ Erzeuge Motorgeometrie in FreeCAD…", 10)
@@ -1886,6 +1925,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
     # abgewiesen: die Geometrie liegt dort fertig auf der Platte und wird gar nicht
     # neu gebaut — ein hartes Tor würde ein ladbares Altprojekt unrechenbar machen.
     _gate_maschinenart(data, state, "feld")
+    _gate_grenzen(data, state, fatal=not partial)
     _gate_rotor_layout(data, state, fatal=not partial)
     _gate_rotor_stress(data, state, fatal=not partial)
 

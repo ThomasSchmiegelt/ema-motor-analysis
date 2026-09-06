@@ -762,16 +762,23 @@ def _orient_factor(geom: dict) -> float:
 
 
 def luftspalt_mm(geom: dict) -> float:
-    """Luftspalt [mm], fuer BEIDE Bauformen -- und nie unter 0,3 mm.
+    """Luftspalt [mm], fuer BEIDE Bauformen -- und nie unter der Bandgrenze.
 
     Die Formel ``(statorID - rotorOD)/2`` stand hier neunmal. Sie ist nicht nur
     abgeschrieben, sie ist auch **nur fuer den Innenlaeufer richtig**: beim
     Aussenlaeufer liegt der Spalt zwischen ``statorOD`` und ``rotorID``, und die
     alte Formel kaeme dort negativ heraus -- oder, mit der Klemme, bei 0,3 mm.
     Eine Zahl, die nicht widerspricht.
+    Die Klemme lag bis hierher bei **0,3 mm** und war damit hoeher als die
+    untere Bandgrenze: ein ausdruecklich gewollter 0,15-mm-Spalt wurde
+    stillschweigend als 0,3 mm gerechnet, und das Ergebnis widersprach nicht.
+    Sie steht jetzt auf ``ema_grenzen.LUFTSPALT_MM[0]`` und kann damit nur noch
+    greifen, wo das Tor ohnehin abgewiesen haette (Paarvergleich und Screening
+    laufen ohne Tor, dort ist sie der numerische Boden).
     """
+    import ema_grenzen
     import ema_radien
-    return max(ema_radien.radien(geom)["luftspalt_mm"], 0.3)
+    return max(ema_radien.radien(geom)["luftspalt_mm"], ema_grenzen.LUFTSPALT_MM[0])
 
 
 def r_gap_m(geom: dict) -> float:

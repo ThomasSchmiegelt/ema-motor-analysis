@@ -64,6 +64,32 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 * **`--from-project <id>`** erbt ALLE Entscheidungen dieses Projekts. Richtig zum Nachrechnen, Verfeinern und für gezielte Einzeländerungen — sonst nicht.
 
 
+### Drei Grenzen, die immer gelten — und die du nicht einstellst
+
+`ema_grenzen` prüft sie vor **jedem** Geometriebau (und `rotor-check` prüft sie ohne Lauf).
+Sie sind **Tore, keine Warnungen** — eine Zahl außerhalb ist kein ungenauer Entwurf, sondern
+eine Maschine, die es nicht gibt:
+
+| Grenze | Wert | woran es hängt |
+|---|---|---|
+| **Luftspalt** | 0,1 – 2,0 mm | folgt aus `statorID` und `rotorOD` — es gibt **kein** Feld „Luftspalt", eines der beiden Maße gehört geändert |
+| **Wickelkopf außen** | < Stator-Außendurchmesser | `windingHeadFlare` · `windingHeadSpread` · Leiter je Nut · `genInsulation` |
+| **Nuttiefe** | ≤ Statorwand − 1 mm | sonst deckelt das Feld auf 1 mm Restjoch und das CAD schneidet durch — zwei verschiedene Maschinen |
+
+Der Regler `windingHeadSpread` geht in der Oberfläche bis 8°, `windingHeadFlare` bis 25 mm;
+**beide können die zweite Grenze reißen** (gemessen an 280/190 mit 6 Leitern: 4° passt mit
+0,5 mm Luft, 6° steht 9,8 mm über). Das Tor sagt dann, welcher Knopf es war.
+
+**Willst du eine Grenze ausdrücklich überschreiten**, setz die Freigabe im Payload —
+`--set geom.luftspaltFreigabe=true` (bzw. `hairpinFreigabe` / `nuttiefeFreigabe`). Dann läuft
+es durch und die Überschreitung steht als ⚠ im Ergebnis, statt unbemerkt durchzugehen.
+Ohne ausdrückliche Nachfrage des Auftraggebers tust du das **nicht**.
+
+**`rotor-check --cad-feld`** stellt zusätzlich beide Geometriewege gegenüber — was das CAD
+zeichnet gegen das, was der Löser rastert. Zwei Unterschiede sind gewollt und stehen als
+solche da (die Nut ist im CAD ein Rechteck, im Feld ein Winkelsektor; die 3-D-Stufe zeichnet
+keinen Wickelkopf). Taucht dort etwas anderes auf, ist es ein Befund.
+
 ### `struktur` und `topopt` — wann welches
 
 Beide rechnen **lokal**, ohne den Server und ohne FreeCAD; sie bauen das Netz selbst

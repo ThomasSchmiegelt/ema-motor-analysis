@@ -26,6 +26,8 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 # ── Free parameters the optimiser may vary ───────────────────────────────────
 # key → geom field (or special), label, default range, numeric type
+import ema_grenzen as _GRENZEN
+
 FREE_PARAMS = {
     "magWidth":    {"geom": "magWidth",    "label": "Magnet-Länge [mm]",      "lo": 3,   "hi": 300, "type": float},
     "magThick":    {"geom": "magThick",    "label": "Magnet-Dicke [mm]",      "lo": 1,   "hi": 60,  "type": float},
@@ -36,7 +38,9 @@ FREE_PARAMS = {
     "slotDepth":   {"geom": "slotDepth",   "label": "Nuttiefe [mm]",          "lo": 2,   "hi": 150, "type": float},
     "p":           {"geom": "p",           "label": "Polpaare",               "lo": 1,   "hi": 40,  "type": int},
     "axial":       {"special": "axial",    "label": "Blechpaketlänge [mm]",   "lo": 5,   "hi": 600, "type": float},
-    "airgap":      {"special": "airgap",   "label": "Luftspalt Stator-Rotor [mm]", "lo": 0.1, "hi": 3.0, "type": float},
+    "airgap":      {"special": "airgap",   "label": "Luftspalt Stator-Rotor [mm]",
+                    # Grenzen aus ema_grenzen.LUFTSPALT_MM -- eine Quelle fuer alle Wege.
+                    "lo": _GRENZEN.LUFTSPALT_MM[0], "hi": _GRENZEN.LUFTSPALT_MM[1], "type": float},
     "magGap":      {"geom": "magGapMm",    "label": "Magnet-Luftspalt [mm]",  "lo": 0.05,"hi": 0.3, "type": float},
 }
 

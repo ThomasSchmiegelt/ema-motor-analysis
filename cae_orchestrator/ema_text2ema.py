@@ -243,8 +243,16 @@ def _validate(raw: dict) -> dict:
         # Innenlaeufer: statorOD > statorID > rotorOD > shaftD > shaftBoreD
         if out["statorID"] >= out["statorOD"] - 10:
             out["statorID"] = round(out["statorOD"] - 40, 1)
-        if out["rotorOD"] >= out["statorID"] - 0.4:
-            out["rotorOD"] = round(out["statorID"] - 1.4, 1)    # ~0.7 mm air gap each side
+        # Luftspalt IN DAS BAND ziehen, nicht nur nach oben deckeln. Der alte
+        # Zweig fing allein den Fall „Laeufer zu gross" -- ein Laeufer, der 10 mm
+        # zu klein geraten war, blieb unbeanstandet stehen, und die Feldstufe
+        # rechnete ihn. Grenzen aus ema_grenzen.LUFTSPALT_MM, eine Quelle.
+        import ema_grenzen as _gr
+        _lo, _hi = _gr.LUFTSPALT_MM
+        _spalt = (out["statorID"] - out["rotorOD"]) / 2.0
+        if not (_lo <= _spalt <= _hi):
+            _ziel = min(max(0.7, _lo), _hi)                     # 0,7 mm, im Band
+            out["rotorOD"] = round(out["statorID"] - 2.0 * _ziel, 1)
         if out["shaftD"] >= out["rotorOD"] - 5:
             out["shaftD"] = round(out["rotorOD"] * 0.35, 1)
     if out["shaftBoreD"] >= out["shaftD"] - 2:

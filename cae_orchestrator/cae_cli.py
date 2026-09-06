@@ -1779,15 +1779,43 @@ def cmd_rotor_check(args) -> int:
         return _die("Keine Geometrie im Payload — rotor-check braucht geom.", EXIT_USAGE)
 
     from ema_rotorcheck import rotor_layout_check
+    import ema_grenzen
+
     chk = rotor_layout_check(geom, min_web_mm=getattr(args, "web", None))
-    emit(chk, args)
+
+    # Die Grenzen, die IMMER gelten — dieselben, die die Pipeline vor jedem
+    # Geometriebau prueft. Sie stehen hier, weil dies das Verb ist, mit dem man
+    # eine Geometrie OHNE Lauf beurteilt: es waere widersinnig, dafuer erst
+    # vierzig Sekunden FreeCAD zu starten.
+    gr = ema_grenzen.pruefe(payload)
+
+    zeilen = []
+    zeilen.append("Grenzen (Luftspalt · Wickelkopf · Nuttiefe):")
+    zeilen.append(ema_grenzen.als_text(gr))
+    zeilen.append("")
     if chk["ok"]:
-        text = "Layout OK — keine Kollision, Stege ueber Grenze, Taschen im Ring."
+        zeilen.append("Layout OK — keine Kollision, Stege ueber Grenze, Taschen im Ring.")
     else:
-        text = "ABGELEHNT:\n" + "\n".join("  ✗ " + m for m in chk["fatal"])
-    print("ERGEBNIS: " + text)
-    _ablegen(args, "rotor-check", text, daten=chk, ok=chk["ok"])
-    return 0 if chk["ok"] else 1
+        zeilen.append("Layout ABGELEHNT:")
+        zeilen += ["  ✗ " + m for m in chk["fatal"]]
+
+    if getattr(args, "cad_feld", False):
+        axial = float(getattr(args, "axial_mm", 0) or geom.get("axialLen")
+                      or payload.get("axial_len") or 80.0)
+        vgl = ema_grenzen.cad_gegen_feld(payload, axial)
+        chk["cad_gegen_feld"] = vgl
+        zeilen.append("")
+        zeilen.append("Zeichnet das CAD dieselbe Maschine, die das Feld rechnet?")
+        zeilen.append(ema_grenzen.cad_gegen_feld_text(vgl))
+
+    chk["grenzen"] = gr
+    ok = bool(chk["ok"]) and bool(gr["ok"])
+    emit(chk, args)
+    text = "\n".join(zeilen)
+    print("ERGEBNIS:")
+    print(text)
+    _ablegen(args, "rotor-check", text, daten=chk, ok=ok)
+    return 0 if ok else 1
 
 
 # Die baubaren Magnetanordnungen. Aus ema_topology geholt statt abgeschrieben, damit
@@ -2412,6 +2440,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Mindeststege in mm (Vorgabe: ema_topology.BRIDGE_MM = 2.0)")
     _add_ablage(s)
     _add_globals(s)
+    s.add_argument("--cad-feld", dest="cad_feld", action="store_true",
+                   help="zusaetzlich die Geometrie BEIDER Wege gegenueberstellen — "
+                        "was das CAD zeichnet gegen das, was der Loeser rastert")
+    s.add_argument("--axial-mm", dest="axial_mm", type=float, default=0.0,
+                   help="Paketlaenge fuer den Vergleich (Vorgabe: axialLen aus dem Payload)")
     s.set_defaults(fn=cmd_rotor_check)
 
     s = sub.add_parser("feldbild",

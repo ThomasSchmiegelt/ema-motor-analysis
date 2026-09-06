@@ -510,14 +510,20 @@ def design_variants(brief: str, n: int = 3, model: str = DEFAULT_MODEL,
 # den festen Drehzahlen 1000/5000/15000/20000 1/min.
 
 RANGED_RPM_LIST = [1000, 5000, 15000, 20000]
-AIRGAP_RANGE = (0.5, 3.0)            # zulässiger Luftspaltbereich [mm]
+import ema_grenzen as _GR
+# Der zulaessige Luftspalt ist KEINE Meinung dieses Moduls -- er steht in
+# ema_grenzen.LUFTSPALT_MM und gilt fuer jeden Weg gleich. Hier stand bis
+# hierher (0,5 ... 3,0), in ema_optimize (0,1 ... 3,0), in ema_mobil
+# (0,3 ... 5,0) und in ema_analysis eine stille Klemme auf 0,3 -- vier
+# Baender fuer eine Groesse, die es nur einmal gibt.
+AIRGAP_RANGE = _GR.LUFTSPALT_MM      # zulaessiger Luftspaltbereich [mm]
 STATOR_SPLIT = 0.68                  # max. Bohrung/Außen-Verhältnis → echte Statorwand
                                      # (Nuten + Rückeisen), sonst wird der Stator zur Hülse
 
 
 def _sample_dims(ranges: dict) -> dict:
     """Zieht statorOD/axialLen/shaftD UND den Luftspalt aus den Nutzer-Bereichen
-    (Luftspalt hart auf ``AIRGAP_RANGE`` = 0,5–3 mm geklammert)."""
+    (Luftspalt hart auf ``ema_grenzen.LUFTSPALT_MM`` geklammert)."""
     import random
 
     def pick(key, dlo, dhi):

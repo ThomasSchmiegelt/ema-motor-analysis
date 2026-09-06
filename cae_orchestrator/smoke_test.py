@@ -575,10 +575,15 @@ def _ranged_design():
         d = D._sample_dims(rg)
         assert 150 <= d["statorOD"] <= 160 and 80 <= d["axialLen"] <= 90, d
         assert 30 <= d["shaftD"] <= 35 and 1.0 <= d["airgap"] <= 2.5, d
-    # air gap is clamped to the allowed 0.5..3 band even if the user over-/undershoots
+    # Der Luftspalt wird auf das EINE Band geklemmt, auch wenn der Nutzer daneben
+    # greift. Die Grenzen stehen in ema_grenzen.LUFTSPALT_MM -- hier stand bis
+    # hierher eine zweite, handgepflegte Kopie (0,5..3,0), und die driftete beim
+    # ersten Mal, als das Band sich aenderte.
+    import ema_grenzen as _GR
+    _lo, _hi = _GR.LUFTSPALT_MM
     for _ in range(20):
-        d = D._sample_dims({"airgap": [0.1, 9.0]})
-        assert 0.5 <= d["airgap"] <= 3.0, d
+        d = D._sample_dims({"airgap": [0.01, 9.0]})
+        assert _lo <= d["airgap"] <= _hi, d
     # dims forced + statorID/rotorOD derived from the chosen air gap, magnets re-clamped
     v = {"params": {"statorOD": 999, "rotorOD": 140, "shaftD": 99, "p": 4, "slots": 48,
                     "magnet": "N42", "cooling": "water"},

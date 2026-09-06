@@ -253,8 +253,13 @@ FELDER = ["statorOD", "rotorOD", "shaftD", "slots", "p", "slotDepth",
 # (``statorID = rotorOD + 2*airGap``, so macht es auch der Schreibtisch-Designer in
 # ``ema.html:dsnDims``). Die App fragt deshalb den Spalt und rechnet die Bohrung aus —
 # sonst kann der Nutzer eine Bohrung eingeben, die zum Rotor nicht passt.
+import ema_grenzen as _GRENZEN
+
 FELDER_ABGELEITET = {
-    "airGap": {"key": "airGap", "kind": "num", "lo": 0.3, "hi": 5.0, "def": 0.7,
+    # Grenzen aus ema_grenzen.LUFTSPALT_MM -- hier standen 0,3 bis 5,0 mm, also
+    # ein anderes Band als an den drei uebrigen Stellen.
+    "airGap": {"key": "airGap", "kind": "num",
+               "lo": _GRENZEN.LUFTSPALT_MM[0], "hi": _GRENZEN.LUFTSPALT_MM[1], "def": 0.7,
                "desc": "Luftspalt einseitig; die Statorbohrung folgt daraus"},
 }
 ALLE_FELDER = FELDER + list(FELDER_ABGELEITET)

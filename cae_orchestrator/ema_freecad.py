@@ -139,6 +139,14 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
     ins       = _ng["isolierung_mm"]
     cond_w    = _ng["leiter_breite_mm"]
     layer_h   = _ng["lage_hoehe_mm"]
+    # Diese drei gehen mit VOLLER Genauigkeit ins Skript (``!r``), nicht mit vier
+    # Nachkommastellen. Der Unterschied ist physikalisch nichts (0,1 um), aber er
+    # machte die Zeichnung gegenueber dem Modell quantisiert: die importierbare
+    # Zwillingsfassung ``ema_wicklung.hairpin_radien`` -- die das Tor „Wickelkopf
+    # unter Stator-Aussendurchmesser" traegt -- konnte deshalb nie exakt dieselbe
+    # Krone rechnen wie der Erzeuger, und ``test_grenzen.py`` hat genau das
+    # gefunden (5e-6 mm Abweichung je Lage). Ein Anker, der um die letzte Stelle
+    # danebenliegt, ist kein Anker.
 
     # Wicklungsart. Der Runddraht bekommt statt der Hairpin-Staebe ein Buendel
     # je Nut. Gezeichnet wird die AXIALE Ausladung des Wickelkopfs, nicht die
@@ -257,9 +265,9 @@ R_rot     = {R_rot};  R_shaft = {R_shaft}
 R_bore    = {R_bore}
 axial     = {axial}
 poles     = {poles};  n_slots = {n_slots}
-slot_dep  = {slot_dep}; slot_w = {slot_w:.4f}
+slot_dep  = {slot_dep}; slot_w = {slot_w!r}
 legs      = {recs_json}   # pole-local magnet placement records (ema_topology)
-n_layers  = {n_layers}; ins   = {ins}; cond_w = {cond_w:.4f}; layer_h = {layer_h:.4f}
+n_layers  = {n_layers}; ins   = {ins}; cond_w = {cond_w!r}; layer_h = {layer_h!r}   # volle Genauigkeit, s. u.
 coil_pitch = {coil_pitch}
 WIND_DEBUG = {winding_debug!r}
 WH_SLOT_LIMIT = {int(hairpin_slot_limit) if hairpin_slot_limit and hairpin_slot_limit > 0 else n_slots}

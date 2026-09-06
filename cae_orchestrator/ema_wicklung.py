@@ -172,6 +172,100 @@ def nutgeometrie(geom: dict) -> dict:
     }
 
 
+def hairpin_radien(geom: dict) -> dict:
+    """Wie weit die Wicklung RADIAL nach aussen reicht -- in Millimetern.
+
+    Die Staebe selbst liegen in der Nut und koennen den Stator nicht verlassen.
+    Der **Wickelkopf** dagegen faechert ausserhalb des Blechpakets radial auf,
+    und zwar an zwei Stellen mit zwei verschiedenen Formeln:
+
+    * **Kronenseite** -- Grundaufweitung ``windingHeadFlare`` plus, bei
+      eingeschalteter Spreizung, je Lage ein eigener Biegewinkel
+      ``(k+1)*windingHeadSpread``. Auf dem Kronenarm gilt ``dr/dz = f/H_eff``,
+      also ``f = wh_flare + H_eff*tan(alpha)``.
+    * **Schweissseite** -- ``f_weld = H_w*tan(alpha_w)`` mit
+      ``alpha_w = (k//2+1)*windingHeadSpread``. Hier PAARWEISE, nicht je Lage:
+      beide Beine eines Schweisspaares muessen dieselbe Aufweitung teilen,
+      sonst treffen sich die zu verschweissenden Enden nicht mehr.
+    * **Isolierhuelse** (``genInsulation``) umschliesst die aeusserste Lage und
+      liegt damit noch weiter aussen als beide.
+
+    **Warum das hier steht und nicht nur im CAD-Erzeuger.** Der Erzeuger schreibt
+    ein Skript fuer einen fremden Prozess und kann nichts importieren -- die
+    Formeln stehen dort als Text. Ohne eine importierbare Zwillingsfassung liesse
+    sich die Frage „passt der Wickelkopf noch unter den Statoraussendurchmesser?"
+    erst NACH einem FreeCAD-Lauf beantworten, also nach vierzig Sekunden statt
+    nach Millisekunden -- und im Paarvergleich, im Screening und in der
+    KI-Auslegung gar nicht. ``smoke_test.py`` haelt beide Fassungen zusammen,
+    dasselbe Muster wie bei ``ema_purge``.
+    """
+    r_si = float(geom["statorID"]) / 2.0
+    r_so = float(geom["statorOD"]) / 2.0
+    ng = nutgeometrie(geom)
+    ins = float(ng["isolierung_mm"])
+    lage_h = float(ng["lage_hoehe_mm"])
+    n = lagen(geom)
+
+    slots = max(int(geom.get("slots", 1) or 1), 1)
+    pole = max(2 * int(geom.get("p", 1) or 1), 2)
+    weite = int(geom.get("coilPitch", 0) or 0)
+    if weite <= 0:
+        weite = max(1, round(slots / pole))
+    weite = max(1, min(slots - 1, weite))
+
+    # Dieselben Konstanten wie im erzeugten Skript (Block "5. HAIRPIN CONDUCTORS").
+    dick = max(lage_h, float(ng["leiter_breite_mm"]))
+    spiel = 0.6
+    kronen_h = max(10.0, 0.5 * weite * (dick + spiel) * 1.6)
+    wh_ebend = 0.08
+    wh_wapex = min(0.18, 0.28 / max(1, weite)) * (1.0 - wh_ebend)
+    wh_heff = kronen_h / (1.0 - wh_wapex)
+
+    flare = max(0.0, min(25.0, float(geom.get("windingHeadFlare", 6.0) or 0.0)))
+    spreizung = float(geom.get("windingHeadSpread", 0.0) or 0.0)
+
+    def _krone(k: int) -> float:
+        if spreizung <= 1e-9:
+            return flare
+        a = math.radians(min(60.0, (int(k) + 1) * spreizung))
+        return min(80.0, flare + wh_heff * math.tan(a))
+
+    def _schweiss(k: int) -> float:
+        if spreizung <= 1e-9:
+            return 0.0
+        a = math.radians(min(60.0, (int(k) // 2 + 1) * spreizung))
+        return kronen_h * math.tan(a)
+
+    krone = [_krone(k) for k in range(n)]
+    schweiss = [_schweiss(k) for k in range(n)]
+    # Mitte der aeussersten Lage plus ihre halbe Hoehe = Aussenkante des Leiters.
+    r_lage_aussen = r_si + ins + (n - 1) * (lage_h + ins) + lage_h
+    r_krone = r_lage_aussen + max(krone)
+    r_schweiss = r_lage_aussen + max(schweiss)
+    # Die Isolierhuelse umschliesst die weiteste Lage (s. ``genInsulation``).
+    r_isolierung = (r_si + float(geom["slotDepth"]) + 2.0 * max(krone) + 1.5
+                    if bool(geom.get("genInsulation", False)) else 0.0)
+
+    r_aussen = max(r_lage_aussen, r_krone, r_schweiss, r_isolierung)
+    # NICHT gerundet. Diese Zahlen werden gegen die Mathematik des CAD-Erzeugers
+    # gehalten (``test_grenzen.py`` fuehrt sie wirklich aus); eine gerundete Zahl
+    # taugt als Vergleichsanker nicht -- sie laesst eine Abweichung unter der
+    # letzten Stelle stillschweigend durchgehen. Gerundet wird beim Anzeigen.
+    return {
+        "r_stator_aussen_mm": r_so,
+        "r_lage_aussen_mm": r_lage_aussen,
+        "flare_krone_mm": krone,
+        "flare_schweiss_mm": schweiss,
+        "r_krone_aussen_mm": r_krone,
+        "r_schweiss_aussen_mm": r_schweiss,
+        "r_isolierung_aussen_mm": r_isolierung,
+        "r_aussen_mm": r_aussen,
+        "d_aussen_mm": 2.0 * r_aussen,
+        "ueberstand_mm": r_aussen - r_so,
+        "lagen": n, "spulenweite": weite,
+    }
+
+
 def spulenweite(geom: dict) -> float:
     """Spulenweite als Bogenlaenge auf dem mittleren Nutradius [m]."""
     n_slots = max(int(geom["slots"]), 1)
