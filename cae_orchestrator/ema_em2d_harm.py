@@ -253,7 +253,7 @@ def masse(geom: dict, kaefig: dict) -> dict:
     }
 
 
-def quer_flaechen(gmsh, geom: dict, kaefig: dict) -> dict:
+def quer_flaechen(gmsh, geom: dict, kaefig: dict, ring_h_m: float = 0.0) -> dict:
     """Den Querschnitt bauen und die Flaechen den Koerpern zuordnen.
 
     Die Zuordnung nach dem Verschneiden laeuft ueber die **Abbildung von
@@ -263,6 +263,14 @@ def quer_flaechen(gmsh, geom: dict, kaefig: dict) -> dict:
 
     Gibt die Flaechen je Koerper zurueck -- OHNE physikalische Gruppen und ohne
     zu vernetzen, damit die 3-D-Stufe denselben Querschnitt extrudieren kann.
+
+    ``ring_h_m`` > 0 schneidet zusaetzlich das **Ringband** heraus, den
+    Kreisring, in dem der Kurzschlussring liegt (``r_stab_a - ring_h`` bis
+    ``r_stab_a``). Die 3-D-Stufe baut ihr Modell aus SCHEIBEN dieses einen
+    Querschnitts; in der Ringscheibe leitet genau dieses Band, ausserhalb ist
+    Luft. Ohne den Schnitt liesse sich das nicht sagen. In 2-D bleibt der
+    Vorgabewert 0 und damit alles unveraendert -- das Band gehoert dort zum
+    Laeufereisen.
     """
     import ema_em3d
     m = masse(geom, kaefig)
@@ -306,15 +314,25 @@ def quer_flaechen(gmsh, geom: dict, kaefig: dict) -> dict:
         occ.translate([(2, s)], float(n["cx"]) / 1000.0, float(n["cy"]) / 1000.0, 0)
         nut_tags.append(s)
 
-    eingang = [welle, rotor, luft, stator] + staebe + stege + nut_tags
+    band = None
+    if ring_h_m > 0:
+        # Der Ring muss den Stab mindestens treffen -- sonst waere der Kaefig
+        # nicht geschlossen, und ein Band schmaler als der Stab hiesse, dass
+        # ein Teil des Stabendes ins Leere fuehrt.
+        h = max(float(ring_h_m), m["t_stab"])
+        band = _ring(occ, max(m["r_stab_a"] - h, m["r_wel"] + 1e-4), m["r_stab_a"])
+
+    fest = [welle, rotor, luft, stator] + ([band] if band is not None else [])
+    eingang = fest + staebe + stege + nut_tags
     _, abb = occ.fragment([(2, eingang[0])], [(2, t) for t in eingang[1:]])
     occ.synchronize()
 
     aus = [[t for (d, t) in grp if d == 2] for grp in abb]
     i_wel, i_rot, i_luf, i_sta = 0, 1, 2, 3
-    i_stab0 = 4
-    i_steg0 = 4 + n_stab
-    i_nut0 = 4 + 2 * n_stab
+    i_band = 4 if band is not None else -1
+    i_stab0 = len(fest)
+    i_steg0 = i_stab0 + n_stab
+    i_nut0 = i_stab0 + 2 * n_stab
 
     f_rotor = set(aus[i_rot])
     f_stator = set(aus[i_sta])
@@ -342,7 +360,14 @@ def quer_flaechen(gmsh, geom: dict, kaefig: dict) -> dict:
         raise ValueError(f"{len(fehlend)} Statornuten liegen nicht im "
                          f"Statorblech -- slotDepth pruefen")
 
-    belegt = set()
+    alle_steg = set().union(*steg_f) if steg_f else set()
+    band_f = sorted(f_rotor.intersection(aus[i_band]) - alle_stab - alle_steg) \
+        if band is not None else []
+    if band is not None and not band_f:
+        raise ValueError("Ringband nicht gefunden -- ohne es kann die 3-D-Stufe "
+                         "in der Ringscheibe Ring und Luft nicht trennen")
+
+    belegt = set(band_f)
     for f in stab_f + steg_f + nut_f:
         belegt.update(f)
 
@@ -350,6 +375,7 @@ def quer_flaechen(gmsh, geom: dict, kaefig: dict) -> dict:
         "masse": m, "nuten": nuten,
         "welle": sorted(aus[i_wel]),
         "rotor": sorted(f_rotor - belegt),
+        "band": band_f,
         "staebe": sorted(alle_stab),
         "stege": sorted(set().union(*steg_f)),
         "luft": sorted(aus[i_luf]),

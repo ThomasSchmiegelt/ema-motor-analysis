@@ -254,10 +254,18 @@ pruefe("Linear System Solver = Direct" in mit,
        "aber vertraeglich — ein iterativer Loeser darf hier nicht laufen")
 
 _bn = inspect.getsource(H3.baue_netz)
-pruefe("z_lo" in _bn and "z_hi" in _bn and "occ.copy" in _bn,
-       "der Nutleiter wird von Deckel zu Deckel gebaut, nicht nur ueber das "
-       "Paket — sonst endet die eingepraegte Stromdichte mitten im Gebiet und "
-       "die rechte Seite ist unvertraeglich (gemessen 12,6 % wildes Volumen)")
+pruefe("scheiben" in _bn and "z_lo" in _bn,
+       "das Modell wird aus SCHEIBEN eines Querschnitts gebaut — radiale "
+       "Aufloesung kostet damit Dreiecke statt Tetraeder")
+pruefe('ziel = name' in _bn and 'name.startswith("nut")' in _bn,
+       "und der Nutleiter geht durch ALLE Scheiben, also von Deckel zu Deckel: "
+       "sonst endet die eingepraegte Stromdichte mitten im Gebiet und die "
+       "rechte Seite ist unvertraeglich (gemessen 12,6 % wildes Volumen)")
+_sch = inspect.getsource(H3._scheibe)
+pruefe("EINEM Aufruf" in _sch and "numElements" in _sch,
+       "eine Scheibe wird in EINEM extrude-Aufruf gebaut — je Flaeche einzeln "
+       "gaebe es an jeder gemeinsamen Kante zwei deckungsgleiche Mantelflaechen, "
+       "und das Netz waere an jeder Koerpergrenze aufgetrennt")
 pruefe(not hasattr(H3, "wickelkopf_stromdichte")
        and "GID_WKRING" not in inspect.getsource(H3.schreibe_sif),
        "einen Wickelkopf-Rueckleiter gibt es nicht mehr: er war der Versuch, "
@@ -279,11 +287,16 @@ pruefe("2359" in kopf and "1129" in kopf,
 pruefe("AV re {e}" in kopf and "WIRKUNGSLOS" in kopf,
        "die Falle mit den fuenf Schreibweisen der Randbedingung, von denen nur "
        "EINE die Kanten bindet und Elmer dazu nichts meldet")
-pruefe("0,3047" in kopf and "0,2870" in kopf,
-       "und die Probe, die die Stufe traegt: 3-D gegen 2-D am selben "
-       "Betriebspunkt")
-pruefe("87,6" in kopf or "Ring/Stab" in kopf,
-       "sowie das Ergebnis, fuer das es diese Stufe gibt")
+pruefe("0,3880" in kopf and "0,3891" in kopf
+       and "0,2100" in kopf and "0,2097" in kopf,
+       "und die Probe, die die Stufe traegt: 2-D und 3-D an den ZWEI Punkten, "
+       "an denen sie dasselbe meinen (kein Kaefigstrom, idealer Kurzschluss)")
+pruefe("untere schranke" in kopf.lower(),
+       "der Ringanteil steht als untere Schranke da, nicht als Messwert — jede "
+       "Verfeinerung schiebt ihn nach oben und er konvergiert in Reichweite "
+       "dieser Maschine nicht aus")
+pruefe("Stirnluft ist wirkungslos" in kopf,
+       "und der eine Knopf, der nachweislich NICHTS bewegt, steht auch da")
 
 # Jfix muss AUS bleiben -- eingeschaltet war er der Verstaerker.
 pruefe("Fix Input Current Density = Logical False" in mit,

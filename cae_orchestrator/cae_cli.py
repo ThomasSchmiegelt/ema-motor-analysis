@@ -1267,12 +1267,17 @@ def cmd_feld3d(args) -> int:
     try:
         if getattr(args, "nur_netz", False):
             nz = E3.netzkosten(geom, kf, axial, arbeit,
-                               gap_lagen=int(getattr(args, "gap_lagen", 0) or 1),
+                               gap_lagen=int(getattr(args, "gap_lagen", 0) or 2),
+                               lagen_axial=int(getattr(args, "lagen_paket", 0) or 4),
+                               lagen_ring=int(getattr(args, "lagen_ring", 0) or 2),
+                               lagen_stirn=int(getattr(args, "lagen_stirn", 0) or 2),
                                lc_eisen_mm=float(getattr(args, "lc_eisen_mm", 0) or 8.0),
                                log=lambda t: print(f"  {t}"))
             text = (f"3-D-Netz der Kaefiglaeufer-Stufe, {axial:.0f} mm Paket\n"
-                    f"  {nz['tets']} Tetraeder, {nz['knoten']} Knoten, "
-                    f"{nz['netzzeit_s']:.0f} s Netzzeit\n"
+                    f"  {nz['knoten']} Knoten ({nz['tets']} Elemente), "
+                    f"{nz['netzzeit_s']:.0f} s Netzzeit; Lagen "
+                    f"{nz['lagen']['paket']} Paket / {nz['lagen']['ring']} Ring "
+                    f"/ {nz['lagen']['stirn']} Stirn\n"
                     f"  kleinstes Element {1000 * nz['lc_gap_m']:.2f} mm bei "
                     f"{1000 * nz['gap_m']:.2f} mm Luftspalt -- der Spalt ist "
                     f"{'aufgeloest' if nz['lc_gap_m'] <= nz['gap_m'] else 'NICHT aufgeloest'}.\n"
@@ -1282,17 +1287,20 @@ def cmd_feld3d(args) -> int:
                     f"harmonische Kantenelement-System ist komplex und hat "
                     f"doppelt so viele Unbekannte wie das magnetostatische."
                     + (f"\n  ACHTUNG: ueber der gemessenen Grenze dieser "
-                       f"Maschine ({E3.TETS_WARNUNG} Tetraeder). Gemessen "
-                       f"rechnen 437.000, bei 1.111.000 bricht MUMPS mit "
-                       f"fehlendem Arbeitsspeicher ab — und Elmer meldet "
-                       f"danach trotzdem 'FINISHED'."
+                       f"Maschine ({E3.KNOTEN_WARNUNG} Knoten). Gemessen "
+                       f"brauchen 102.918 Knoten 12,9 GB; bei rund 200.000 "
+                       f"bricht MUMPS mit fehlendem Arbeitsspeicher ab — und "
+                       f"Elmer meldet danach trotzdem 'FINISHED'."
                        if nz.get("zu_gross") else ""))
             print()
             print(text)
             _ablegen(args, "feld3d", text, daten=nz, pid=kennung)
             return 0
         kz = E3.ring_wirkung(payload, rpm=rpm, last_nm=last, work_dir=arbeit,
-                             gap_lagen=int(getattr(args, "gap_lagen", 0) or 1),
+                             gap_lagen=int(getattr(args, "gap_lagen", 0) or 2),
+                             lagen_axial=int(getattr(args, "lagen_paket", 0) or 4),
+                             lagen_ring=int(getattr(args, "lagen_ring", 0) or 2),
+                             lagen_stirn=int(getattr(args, "lagen_stirn", 0) or 2),
                              lc_eisen_mm=float(getattr(args, "lc_eisen_mm", 0) or 8.0),
                              mu_r_steg=float(getattr(args, "mu_r_steg", 0) or 0.0),
                              timeout=int(getattr(args, "timeout_s", 0) or 7200),
@@ -2310,8 +2318,17 @@ def build_parser() -> argparse.ArgumentParser:
                         "Ringanteil haengt daran: der Ring wird nicht laenger, "
                         "wenn das Paket es wird")
     s.add_argument("--gap-lagen", dest="gap_lagen", type=int, default=0,
-                   help="Elementlagen im Luftspalt (Vorgabe 1 — mehr ist in 3-D "
-                        "meist nicht bezahlbar)")
+                   help="Elementlagen im Luftspalt (Vorgabe 2). Seit das Netz "
+                        "aus Scheiben eines vernetzten Querschnitts gebaut wird, "
+                        "kostet das Dreiecke statt Tetraeder und ist bezahlbar")
+    s.add_argument("--lagen-paket", dest="lagen_paket", type=int, default=0,
+                   help="axiale Elementlagen ueber dem Blechpaket (Vorgabe 4)")
+    s.add_argument("--lagen-ring", dest="lagen_ring", type=int, default=0,
+                   help="axiale Lagen im Kurzschlussring (Vorgabe 2). Der Knopf, "
+                        "der den gemessenen Ringanteil am staerksten bewegt")
+    s.add_argument("--lagen-stirn", dest="lagen_stirn", type=int, default=0,
+                   help="axiale Lagen in der Stirnluft (Vorgabe 2). Gemessen "
+                        "wirkungslos — mehr Lagen dort sind verschenkt")
     s.add_argument("--lc-eisen-mm", dest="lc_eisen_mm", type=float, default=0.0,
                    help="groesstes Element im Eisen (Vorgabe 8 mm)")
     s.add_argument("--mu-r-steg", dest="mu_r_steg", type=float, default=0.0,

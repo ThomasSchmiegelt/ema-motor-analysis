@@ -109,32 +109,61 @@ nie traf; 1129 cm^2 Randflaeche gegen 2359 cm^2 danach), und
 das Jfix-Problem ist ein reines Neumann-Poisson-System und damit singulaer.
 Beides steht an Ort und Stelle im Quelltext.
 
-Was diese Stufe misst
-----------------------
+Was diese Stufe misst -- und wie weit
+--------------------------------------
 
 Den **Ringverlust je Stabverlust** -- woertlich die Groesse, die
 ``ema_asm.kurzschlussring_zuschlag`` ansetzt (dort:
-``P_kaefig = P_stab * (1 + Zuschlag)``). Sie faellt in EINEM Lauf an, auf einem
-Netz, und braucht keinen Vergleichslauf.
+``P_kaefig = P_stab * (1 + Zuschlag)``). Sie faellt in EINEM Lauf an.
 
-Gemessen an der Beispielmaschine (p=3, 36 Nuten, 28 Staebe, 190 mm Bohrung,
-4000 min^-1, 150 Nm), Ring 5,0 x 12,3 mm:
+Sie ist **nicht auskonvergiert**, und das ist der wichtigste Satz zu dieser
+Zahl. Gemessen an der Beispielmaschine (p=3, 36 Nuten, 28 Staebe, 190 mm
+Bohrung, 60 mm Paket, Ring 5,0 x 12,3 mm), je EIN Knopf gedreht:
 
-    L =  60 mm   P_Stab  513,3 W   P_Ring 449,7 W   Ring/Stab 87,6 %
-    L = 120 mm   P_Stab 1343,1 W   P_Ring 592,8 W   Ring/Stab 44,1 %
-    L = 180 mm   P_Stab 2753,9 W   P_Ring 820,9 W   Ring/Stab 29,8 %
+    Paket 4  Ring 1  Stirn 2  lc 8,0   59.796 Knoten   62,9 %
+    Paket 4  Ring 2  Stirn 2  lc 8,0   70.668 Knoten   69,2 %
+    Paket 4  Ring 4  Stirn 2  lc 8,0   92.412 Knoten   76,3 %
+    Paket 8  Ring 2  Stirn 2  lc 8,0   92.412 Knoten   74,9 %
+    Paket 4  Ring 2  Stirn 2  lc 5,0  114.257 Knoten   77,7 %
+    Paket 4  Ring 2  Stirn 4  lc 8,0   92.412 Knoten   69,2 %  (unveraendert)
 
-Angesetzt waren pauschal 20 %. Der Anteil ist also **keine Konstante**: er haengt
-an der Paketlaenge, denn der Ring wird nicht laenger, wenn das Paket es wird --
-doppelte Laenge, halber Anteil. ``ema_asm.kurzschlussring_zuschlag`` rechnet ihn
-seitdem aus der Geometrie und trifft diese drei Messpunkte auf 1,13 / 1,12 /
-1,11 -- ein gleichbleibender Versatz, kein Auseinanderlaufen. Der 180-mm-Punkt
-kam dabei NACH der Formel herein.
+    analytische Formel an dieser Maschine                99,1 %
+
+**Jede** Verfeinerung schiebt die Messung nach oben, keine nach unten, und die
+Zuwaechse werden nicht kleiner. Die Messung ist damit eine **untere Schranke**,
+die zur Formel hin laeuft -- sie widerspricht ihr nicht, sie bestaetigt sie aber
+auch nicht. Was sie sicher tut: sie widerlegt die frueher hier angesetzte
+Konstante von 20 % vollstaendig, denn schon der kleinste Messwert liegt beim
+Dreifachen.
+
+Die **Laengenabhaengigkeit** ist dagegen sauber bestaetigt. Dasselbe Netz
+(Paket 4, Ring 2, Stirn 2, lc 8,0 -- 70.668 Knoten, unabhaengig von der Laenge,
+weil nur die Lagen zaehlen):
+
+    L =  60 mm   P_Stab  937,6 W   P_Ring 648,7 W   69,2 %   Formel 99,1 %
+    L = 120 mm   P_Stab 2345,9 W   P_Ring 795,7 W   33,9 %   Formel 49,6 %
+    L = 180 mm   P_Stab 3836,0 W   P_Ring 858,9 W   22,4 %   Formel 33,0 %
+
+Doppelte Laenge, halber Anteil -- in der Messung wie in der Formel, und das
+Verhaeltnis der beiden bleibt ueber die ganze Reihe stehen (1,43 / 1,46 / 1,47).
+Der Abstand ist also ein fester Faktor und kein Auseinanderlaufen; und er
+schrumpft mit dem Netz (bei 60 mm von 1,43 auf 1,28, wenn das Eisen von 8 auf
+5 mm verfeinert wird).
+
+Zwei Nebenbefunde, die dabei fallen und die man beim Netzbau braucht:
+
+* Die **Stirnluft ist wirkungslos** -- 69,2 % bei zwei wie bei vier Lagen, auf
+  die Nachkommastelle. Lagen dort sind verschenkt.
+* Die **Summe** ist dagegen stabil: 1583,6 / 1586,2 / 1587,4 W ueber die ersten
+  drei Zeilen (0,2 %). Es wandert also nicht der Kaefigverlust, sondern nur
+  seine Aufteilung auf Stab und Ring -- der Uebergang vom axialen Stabstrom in
+  den azimutalen Ringstrom ist die schlecht aufgeloeste Stelle.
 
 Der zweite Lauf (Ringe isolierend) ist KEIN „Kaefig ohne Ring": mit isolierenden
 Ringen kann der Stabstrom seinen Kreis gar nicht schliessen, es gibt dann also
-gar keinen Kaefig (gemessen 0,001 Nm gegen 2,299 Nm). Er zeigt, dass das Modell
-den Ring wirklich fuehrt -- mehr nicht.
+gar keinen Kaefig (gemessen 3,0 W gegen 1586 W). Er ist die Probe, dass das
+Modell den Ring wirklich fuehrt -- und der zweite Vergleichspunkt gegen 2-D
+(s. u.).
 
 
 Was hier bewusst NICHT gerechnet wird
@@ -145,74 +174,88 @@ Was hier bewusst NICHT gerechnet wird
 * **Kein wirklicher Wickelkopf** -- s. oben; der Statorleiter geht gerade
   durch bis auf den Rand.
 
-Wie weit die Zahl auskonvergiert ist -- gemessen, nicht behauptet
-------------------------------------------------------------------
+Die Probe: dieselbe Maschine in beiden Stufen
+----------------------------------------------
 
-Dieselbe Maschine, dasselbe Modell, nur das groesste Element im Eisen kleiner
-(60 mm Paket; der Luftspalt hat in allen dreien EINE Elementlage, radial laesst
-er sich so gar nicht verfeinern, s. u.):
+2-D und 3-D lassen sich nur dort vergleichen, wo sie DASSELBE meinen -- und das
+ist an genau zwei Stellen der Fall, weil dort der Kurzschlussring keine Rolle
+spielt. Beide gemessen, Betriebspunkt 4000 1/min, 150 Nm, Schlupf 1,58 %:
 
-    lc_eisen 8,0 mm    166.614 Tets   B_Spalt 0,2726 T   Ring/Stab 87,5 %
-    lc_eisen 5,0 mm    437.294 Tets   B_Spalt 0,2915 T   Ring/Stab 93,0 %
-    lc_eisen 3,5 mm  1.111.784 Tets   MUMPS: kein Arbeitsspeicher
-    2-D am selben Punkt                B_Spalt 0,2870 T
+    kein Kaefigstrom
+        2-D bei s = 1e-4 (praktisch synchron)        0,3880 T
+        3-D mit ISOLIERENDEN Ringen                  0,3891 T     0,3 %
 
-Zwei Dinge stehen damit fest und eines ausdruecklich nicht:
+    idealer Kurzschluss (was 2-D grundsaetzlich annimmt)
+        2-D am Betriebspunkt                         0,2100 T
+        3-D als reines Paketmodell, ohne Ringe       0,2097 T     0,14 %
 
-* Die Luftspalt-Grundwelle laeuft auf den 2-D-Wert zu (0,2726 -> 0,2915 gegen
-  0,2870) -- das Modell rechnet dieselbe Maschine.
-* Das Verhaeltnis Ring/Stab ist **nicht auskonvergiert**: es steigt um 6 %, und
-  der Abstand zur analytischen Formel (``ema_asm.kurzschlussring_zuschlag``,
-  99,1 % an dieser Maschine) faellt dabei von 13 % auf 6,6 %. Die Vermutung, der
-  Abstand komme vom Netz, ist damit gestuetzt und nicht bewiesen -- die Formel
-  hat ihre eigenen Annahmen (sinusfoermige Stabstromverteilung), und 6,6 % sind
-  auch dafuer eine uebliche Groessenordnung.
-* Nicht bekannt ist der Grenzwert. Er laege oberhalb dessen, was diese Maschine
-  rechnen kann.
+    der wirkliche Ring -- das, was nur 3-D kann
+        3-D mit leitenden Ringen                     0,2937 T
 
-**Die Obergrenze ist der Arbeitsspeicher, nicht die Geduld.** Bei 1,1 Mio.
-Tetraedern bricht MUMPS mit ``INFO(1) = -13`` ab -- und Elmer rechnet danach mit
-einem Nullvektor weiter, meldet FINISHED und schreibt eine Ergebnisdatei. Das
-faengt jetzt ``elmer_runner`` ab (der MUMPS-Code steht in der Bildschirmausgabe,
-nicht im Rueckgabewert); vorher kamen daraus 0,0 W und 0,000 Nm, also Zahlen.
-Zwischen 437.000 und 1.111.000 Tetraedern liegt die Grenze dieser Maschine.
+Der dritte Wert liegt zwischen den beiden anderen, und das ist die ganze
+Aussage dieser Stufe: der Ring hat Widerstand, der Laeuferstrom faellt
+gegenueber dem idealen Kurzschluss, und das Luftspaltfeld steigt entsprechend.
+Wer die 3-D-Zahl mit Ring gegen die 2-D-Zahl haelt, vergleicht nicht zwei
+Rechenwege, sondern zwei verschiedene Maschinen.
 
-Der Luftspalt ist hier NICHT aufgeloest -- und warum das trotzdem geht
------------------------------------------------------------------------
+Die 2-D-Seite ist dabei ihrerseits auskonvergiert (0,2100 bis 0,2119 ueber
+10.462 bis 146.683 Dreiecke), taugt also als Anker.
 
-Das ist die wichtigste Einschraenkung dieser Stufe, und sie ist gemessen:
+Was am Ringanteil NICHT auskonvergiert ist
+--------------------------------------------
 
-    Verfeinerungsband auf den Luftspalt (0,7 mm), 150 mm Paket:
-        nach 1 h 56 min abgebrochen, kein Netz
-        zweiter Versuch, 500 s Deckel: kein Netz
-    ohne Verfeinerungsband, 3 mm kleinstes Element, 30 mm Paket:
-        30.010 Tetraeder in 3 s
-    ohne Verfeinerungsband, 2 mm kleinstes Element, 60 mm Paket:
-        79.345 Tetraeder in 14 s
-    volles Modell mit Ringen und Stirnluft, 1,5 mm, 60 mm Paket:
-        138.666 Tetraeder in 26 s (Geometrie davon 10 s)
+Die Aufteilung des Kaefigverlusts auf Stab und Ring ist etwas anderes als ein
+Feldmittelwert: sie haengt daran, wie gut der Uebergang vom axialen Stabstrom in
+den azimutalen Ringstrom aufgeloest ist. Gemessen, 60 mm Paket, je EIN Knopf
+gedreht:
 
-Ein Luftspalt von 0,7 mm ueber 0,6 m Umfang und 0,15 m Laenge braucht in 3-D
-Millionen Elemente -- auf dieser Maschine nicht rechenbar. Mit 2-3 mm grossen
-Elementen ist der Spalt dagegen gar nicht aufgeloest, und das **absolute**
-Moment aus einem solchen Netz waere keine Aussage.
+    Paket 4  Ring 1  Stirn 2   59.796 Knoten   B 0,2937 T   Ring/Stab 62,9 %
+    Paket 4  Ring 2  Stirn 2   70.668 Knoten   B 0,2958 T             69,2 %
+    Paket 4  Ring 4  Stirn 2   92.412 Knoten   B 0,2981 T             76,3 %
+    Paket 4  Ring 2  Stirn 4   92.412 Knoten   B 0,2958 T             69,2 %
+    Paket 8  Ring 2  Stirn 2   92.412 Knoten   B 0,2997 T             74,9 %
+
+Drei Dinge stehen damit fest:
+
+* Die **Stirnluft ist wirkungslos** (69,2 % in beiden Faellen, auf die
+  Nachkommastelle) -- sie ist weit genug, und mehr Lagen dort sind verschenkt.
+* Das **Luftspaltfeld ist stabil** (0,2937 bis 0,2997, 2 %).
+* Der **Ringanteil ist es nicht**: er steigt mit den Lagen im Ring UND mit denen
+  im Paket, und die Zuwaechse werden nicht kleiner (+6,3, dann +7,1
+  Prozentpunkte). Das ist keine langsame Konvergenz, sondern eine, die in
+  Reichweite dieser Maschine nicht anlaeuft.
+
+**Die Reichweite ist der Arbeitsspeicher.** Gemessen: 102.918 Knoten belegen
+12,9 GB, und bei rund 200.000 Knoten bricht MUMPS mit ``INFO(1) = -13`` ab --
+und Elmer rechnet danach mit einem Nullvektor weiter und meldet FINISHED (das
+faengt ``elmer_runner`` ab). Der Ringanteil wird deshalb als **Messreihe** und
+mit dieser Einschraenkung berichtet, nicht als eine Zahl.
+
+Der Luftspalt ist jetzt aufgeloest -- warum das frueher nicht ging
+-------------------------------------------------------------------
+
+Bis zum Scheibenbau war er es nicht, und das war die schwerste Einschraenkung
+dieser Stufe:
+
+    Verfeinerungsband auf den Luftspalt (0,7 mm), freies Tetraedernetz,
+    150 mm Paket:  nach 1 h 56 min abgebrochen, kein Netz
+    ohne Band, 1,5 mm kleinstes Element, 60 mm Paket:
+        166.614 Tetraeder -- und der Spalt hatte GENAU EINE Elementlage
+        (50,6 % der Spaltzellen ueberspannten mehr als 90 % des Spalts)
+
+Der Grund ist rechenbar: zwei Lagen brauchen 0,35-mm-Elemente, also allein im
+Spaltring 4,9 Mio. Zellen bei 60 mm Paket und 14,8 Mio. bei 180 mm. Isotrope
+Tetraeder sind hier der falsche Weg, und zwar um zwei Zehnerpotenzen.
+
+Der Scheibenbau dreht das um (Herleitung in ``baue_netz``): radiale Aufloesung
+kostet DREIECKE, axiale nur LAGEN. Dasselbe Modell steht heute mit 59.796
+Knoten und zwei Lagen im Spalt -- weniger als die 166.614 Tetraeder/31.467
+Knoten von vorher, mit aufgeloestem Spalt.
 
 Das Netz ist damit NICHT der teure Teil dieser Stufe -- der Loeser ist es. Ein
 harmonisches Kantenelement-System ist komplex und hat doppelt so viele
 Unbekannte wie das magnetostatische; ``netzkosten()`` laesst sich deshalb
 einzeln aufrufen, um die Netzgroesse zu kennen, BEVOR ein Lauf gestartet wird.
-
-Deshalb misst diese Stufe kein absolutes Moment, sondern **Verhaeltnisse**:
-Ringverlust je Stabverlust (in einem Lauf, s. oben) und -- als Probe, dass das
-Modell den Ring wirklich fuehrt -- zweimal dasselbe Netz mit leitenden und mit
-isolierenden Ringen. Der Netzfehler steckt in beiden Laeufen gleich und faellt
-weitgehend heraus.
-
-Wie gross er ist, laesst sich trotzdem beziffern, seit das Feld gueltig ist:
-die Luftspalt-Grundwelle kommt mit 0,3047 T gegen die 0,2870 T der 2-D-Stufe
-heraus -- 6 % bei einem Spalt, der mit 1,5-mm-Elementen ueber 0,7 mm gar nicht
-aufgeloest ist. Das ist die Groessenordnung des Netzfehlers, und sie steht damit
-nicht mehr als Vermutung da.
 """
 
 from __future__ import annotations
@@ -242,19 +285,87 @@ GID_RAND   = 1          # Aussenflaeche (eigener Nummernkreis, 2D)
 # klemmt die Randbedingung das Stirnfeld ab und der Ring erscheint wirkungslos.
 STIRNLUFT_FAKTOR = 3.0
 
-# Ab wievielen Tetraedern der direkte Loeser auf DIESER Maschine kippt.
-# Gemessen: 437.294 rechnen (56 s), 1.111.784 nicht mehr -- MUMPS bricht mit
-# INFO(1) = -13 ab (Speicher). Die Zahl ist eine Warnschwelle, kein Tor: sie
-# haengt am Arbeitsspeicher, und wer mehr hat, soll es versuchen duerfen. Sie
-# steht hier, damit ``netzkosten()`` es sagen kann, BEVOR jemand eine Stunde
-# wartet und dann ein Nullfeld bekommt.
-TETS_WARNUNG = 600000
+# Ab wievieler Netzgroesse der direkte Loeser auf DIESER Maschine kippt.
+# Gemessen wird in KNOTEN, nicht in Elementen: der Speicherbedarf von MUMPS
+# haengt an den Freiheitsgraden, und die haengen an den Knoten/Kanten.
+#
+#     102.918 Knoten   12,9 GB Arbeitsspeicher, rechnet
+#     rund 200.000     MUMPS bricht mit INFO(1) = -13 ab -- und Elmer rechnet
+#                      danach mit einem Nullvektor weiter und meldet FINISHED
+#
+# Warnschwelle, kein Tor: sie haengt am Arbeitsspeicher, und wer mehr hat, soll
+# es versuchen duerfen. Sie steht hier, damit ``netzkosten()`` es sagen kann,
+# BEVOR jemand wartet und dann ein Nullfeld bekommt.
+KNOTEN_WARNUNG = 150000
+
+
+def _scheibe(occ, faces, dz: float, lagen: int):
+    """EINE axiale Scheibe: alle Flaechen in EINEM Aufruf extrudieren.
+
+    Der eine Aufruf ist die ganze Kunst. Wer je Flaeche einzeln extrudiert,
+    bekommt an jeder gemeinsamen Kante ZWEI deckungsgleiche Mantelflaechen --
+    das Netz ist dann an jeder Koerpergrenze aufgetrennt, und das faellt erst
+    im Loeser auf. Gemeinsam extrudiert teilt gmsh die Flaechen.
+
+    ``extrude`` gibt je Eingangsflaeche zuerst die Deckflaeche, dann das
+    Volumen, dann die Mantelflaechen zurueck. Das Volumen ist damit ueber den
+    unmittelbar davor stehenden 2-D-Eintrag seiner Deckflaeche zuzuordnen --
+    ohne Schwerpunktsuche und ohne Toleranz.
+    """
+    aus = occ.extrude([(2, t) for t in faces], 0, 0, dz,
+                      numElements=[max(int(lagen), 1)], recombine=False)
+    deckel, vols, letzte = [], [], None
+    for (d, t) in aus:
+        if d == 2:
+            letzte = t
+        elif d == 3:
+            deckel.append(letzte)
+            vols.append(t)
+    if len(vols) != len(faces):
+        raise RuntimeError(f"Extrusion gab {len(vols)} Volumen fuer "
+                           f"{len(faces)} Flaechen")
+    return deckel, vols
 
 
 def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
               gap_lagen: int = 2, lc_eisen_mm: float = 0.0,
-              lagen_axial: int = 6) -> dict:
-    """3-D-Netz: Querschnitt extrudiert, plus beide Ringe und die Stirnluft."""
+              lagen_axial: int = 4, lagen_ring: int = 1,
+              lagen_stirn: int = 2) -> dict:
+    """3-D-Netz aus SCHEIBEN eines Querschnitts -- axial extrudiert.
+
+    Jeder Koerper ist ein (2-D-Gebiet x z-Scheibe):
+
+        Scheibe 0   Stirnluft unten     [z_lo, -ring_w]
+        Scheibe 1   Kurzschlussring     [-ring_w, 0]
+        Scheibe 2   Blechpaket          [0, L]
+        Scheibe 3   Kurzschlussring     [L, L+ring_w]
+        Scheibe 4   Stirnluft oben      [L+ring_w, z_hi]
+
+    **Warum nicht wie frueher ein freies Tetraedernetz.** Der Luftspalt ist
+    radial duenn (0,7 mm) und tangential lang (0,6 m Umfang). Ein isotropes
+    Tetraedernetz mit zwei Lagen im Spalt braeuchte 0,35-mm-Elemente und damit
+    ALLEIN im Spaltring 4,9 Mio. Zellen bei 60 mm Paket -- das ganze fruehere
+    Modell hatte 167.000. Genau daran scheiterte das Verfeinerungsband (nach
+    1 h 56 min ohne Netz abgebrochen).
+
+    Radiale Aufloesung ist aber ein **2-D**-Problem. Wird der Querschnitt
+    vernetzt und das NETZ extrudiert, kostet der Spalt Dreiecke statt
+    Tetraeder, und die axiale Richtung kostet nur Lagen. Gemessen an derselben
+    Maschine (Paketmodell, gegen die 2-D-Stufe bei 0,2115 T):
+
+        Lagen  Spaltlagen  Knoten    B_Spalt
+          2         2      15.891    0,2101 T   (0,7 %)
+          6         2      37.079    0,2097 T   (0,9 %)
+         12         2      68.861    0,2104 T   (0,5 %)
+          6         1      29.162    0,2093 T
+          6         4      58.233    0,2092 T
+
+    Das freie Tetraedernetz lag am selben Punkt bei -9,5 %, und zwar mit MEHR
+    Knoten. Der Spalt hat hier zum ersten Mal mehr als eine Elementlage.
+
+    gmsh zerlegt die Prismen beim Vernetzen in Tetraeder; die Knotenzahl -- und
+    damit der Loeseraufwand -- ist die der geschichteten Extrusion.
+    """
     import gmsh
 
     gmsh.initialize()
@@ -262,165 +373,85 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
     try:
         gmsh.model.add("asm3d")
         occ = gmsh.model.occ
-        q = H.quer_flaechen(gmsh, geom, kaefig)
-        m = q["masse"]
-        L = float(axial_mm) / 1000.0
+        m0 = H.masse(geom, kaefig)
 
         # Ringquerschnitt als Rechteck mit dem Seitenverhaeltnis des Stabes --
         # dieselbe Umrechnung wie im CAD (ema_freecad), damit Modell und
         # Zeichnung denselben Ring meinen.
-        a_ring = m["A_ring_m2"]
-        ring_h = math.sqrt(a_ring * m["t_stab"] / max(m["b_stab"], 1e-6))
-        ring_w = math.sqrt(a_ring * m["b_stab"] / max(m["t_stab"], 1e-6))
-        ring_h = min(ring_h, m["r_stab_a"] - m["r_wel"] - 1e-3)
-        tief = ring_w
-        stirn = max(STIRNLUFT_FAKTOR * ring_w, 2.0 * tief)
-        z_lo, z_hi = -(tief + stirn), L + tief + stirn
+        a_ring = m0["A_ring_m2"]
+        ring_h = math.sqrt(a_ring * m0["t_stab"] / max(m0["b_stab"], 1e-6))
+        ring_w = math.sqrt(a_ring * m0["b_stab"] / max(m0["t_stab"], 1e-6))
+        ring_h = min(ring_h, m0["r_stab_a"] - m0["r_wel"] - 1e-3)
+        # Der Ring muss den Stab treffen -- sonst fuehrte ein Teil des
+        # Stabendes ins Leere. ``quer_flaechen`` haelt dieselbe Regel; hier
+        # wird sie mitgerechnet, damit das Ergebnis den WIRKLICHEN Ring meldet.
+        ring_h = max(ring_h, m0["t_stab"])
 
-        # Blechpaket, Welle, Kaefig, Luftspalt: nur ueber die Paketlaenge.
-        paket = [(2, t) for t in q["welle"] + q["rotor"] + q["staebe"]
-                 + q["stege"] + q["luft"] + q["stator"]]
-        aus = occ.extrude(paket, 0, 0, L)
+        # DERSELBE Querschnitt wie Stufe B, nur zusaetzlich mit dem Ringband.
+        q = H.quer_flaechen(gmsh, geom, kaefig, ring_h_m=ring_h)
+        m = q["masse"]
+        L = float(axial_mm) / 1000.0
+        stirn = max(STIRNLUFT_FAKTOR * ring_w, 2.0 * ring_w)
+        z_lo = -(ring_w + stirn)
+
+        NAMEN = ("welle", "rotor", "band", "staebe", "stege", "luft", "stator")
+        basis, lage = [], {}
+        for name in NAMEN:
+            lage[name] = (len(basis), len(q[name]))
+            basis += q[name]
+        for k, f in enumerate(q["nut_f"]):
+            lage[f"nut{k}"] = (len(basis), len(f))
+            basis += f
+        occ.translate([(2, t) for t in basis], 0, 0, z_lo)
         occ.synchronize()
 
-        # ``extrude`` gibt je Eingangsflaeche vier Eintraege zurueck
-        # (Deckflaeche, Volumen, Mantelflaechen); das Volumen ist der Eintrag
-        # mit dim == 3. Die Reihenfolge folgt der Eingabe, also laesst sich
-        # jedem Koerper sein Volumen ohne Schwerpunktsuche zuordnen.
-        vols = [t for (d, t) in aus if d == 3]
-        if len(vols) != len(paket):
-            raise RuntimeError(f"Extrusion gab {len(vols)} Volumen fuer "
-                               f"{len(paket)} Flaechen")
-        i = 0
+        scheiben = [("stirn", stirn, lagen_stirn), ("ring", ring_w, lagen_ring),
+                    ("paket", L, lagen_axial), ("ring", ring_w, lagen_ring),
+                    ("stirn", stirn, lagen_stirn)]
         gruppen = {}
-        for name in ("welle", "rotor", "staebe", "stege", "luft", "stator"):
-            n = len(q[name])
-            gruppen[name] = vols[i:i + n]
-            i += n
-
-        # Der Statorleiter geht von DECKEL zu DECKEL, nicht nur ueber das Paket.
-        #
-        # Das ist der Punkt, an dem diese Stufe vorher falsch rechnete. Endete
-        # der Nutstrom am Paketende mitten in der Stirnluft, war die
-        # eingepraegte Stromdichte dort nicht divergenzfrei -- und die rechte
-        # Seite des curl-curl-Systems damit unvertraeglich. Ein Rueckleiter als
-        # stetige Wickelkopfwelle heilte das nicht (er ist selbst nicht diskret
-        # divergenzfrei), und die nachtraegliche Projektion (Jfix) machte es
-        # schlimmer. Gemessen, dasselbe Netz, nur das Ende verschieden:
-        #
-        #     Leiter endet in der Stirnluft, mit Wickelkopfwelle
-        #         B_Spalt 1,98 T   12,6 % des Volumens ueber 20 T
-        #     Leiter endet in der Stirnluft, ohne Wickelkopfwelle
-        #         B_Spalt 1,40 T   10,8 %
-        #     Leiter bis auf den Rand  (dieser Bau)
-        #         B_Spalt 0,305 T   0,001 %      2-D am selben Punkt: 0,287 T
-        #
-        # Physikalisch heisst das: der Strom tritt durch den Dirichlet-Rand ein
-        # und aus, der Rueckschluss liegt ausserhalb des Gebiets. Genau das ist
-        # auch die stillschweigende Annahme der 2-D-Stufe -- die beiden Stufen
-        # meinen damit denselben Stator, und der Vergleich ist einer. Ein
-        # wirklicher Wickelkopf ist das nicht; er ist hier auch nicht der
-        # Gegenstand. Gegenstand ist der KURZSCHLUSSRING im Laeufer, und der
-        # ist als leitender Koerper gebaut, nicht als eingepraegte Quelle.
-        nut_v = []
-        for f in q["nut_f"]:
-            kopien = occ.copy([(2, t) for t in f])
-            occ.translate(kopien, 0, 0, z_lo)
-            a2 = occ.extrude(kopien, 0, 0, z_hi - z_lo)
-            nut_v.append([t for (d, t) in a2 if d == 3])
+        cur = basis
+        for art, dz, nlag in scheiben:
+            deckel, vols = _scheibe(occ, cur, dz, nlag)
+            for name, (i0_, n) in lage.items():
+                teil = vols[i0_:i0_ + n]
+                if name.startswith("nut"):
+                    # Der Statorleiter geht durch ALLE Scheiben, also von
+                    # Deckel zu Deckel: nur so ist die eingepraegte Stromdichte
+                    # im ganzen Gebiet divergenzfrei (Herleitung im Modulkopf).
+                    ziel = name
+                elif art == "paket":
+                    # Das Ringband ist im Paket gewoehnliches Laeuferblech.
+                    ziel = "rotor" if name == "band" else name
+                elif art == "ring":
+                    # In der Ringscheibe leitet das Band -- und die Staebe, die
+                    # darin liegen. Alles andere ist dort Luft.
+                    ziel = "ring" if name in ("band", "staebe") else "stirn"
+                else:
+                    ziel = "stirn"
+                gruppen.setdefault(ziel, []).extend(teil)
+            cur = deckel
         occ.synchronize()
 
-        # Kurzschlussringe an beiden Stirnseiten (Laeufer).
-        ringe = []
-        for z0 in (-ring_w, L):
-            aussen = occ.addCylinder(0, 0, z0, 0, 0, ring_w, m["r_stab_a"])
-            innen = occ.addCylinder(0, 0, z0 - 1e-4, 0, 0, ring_w + 2e-4,
-                                    max(m["r_stab_a"] - ring_h, 1e-4))
-            r, _ = occ.cut([(3, aussen)], [(3, innen)])
-            ringe.append(r[0][1])
+        for name, gid in (("welle", GID_WELLE), ("rotor", GID_ROTOR),
+                          ("staebe", GID_STAEBE), ("stege", GID_STEG),
+                          ("luft", GID_LUFT), ("stator", GID_STATOR),
+                          ("ring", GID_RING), ("stirn", GID_STIRN)):
+            if not gruppen.get(name):
+                raise RuntimeError(f"Koerpergruppe '{name}' ist leer")
+            gmsh.model.addPhysicalGroup(3, sorted(gruppen[name]), gid, name)
+        for k in range(len(q["nut_f"])):
+            gmsh.model.addPhysicalGroup(3, sorted(gruppen[f"nut{k}"]),
+                                        GID_NUT0 + k, f"nut{k}")
 
-        # Stirnluft: zwei Zylinder bis r_so, aus denen Ringe und Nutleiter
-        # geschnitten werden. Zu kurz gewaehlt klemmt die Randbedingung das
-        # Stirnfeld ab und der Ring erschiene wirkungslos.
-        stirnluft = [occ.addCylinder(0, 0, z0, 0, 0, tief + stirn, m["r_so"])
-                     for z0 in (z_lo, L)]
-        werkzeug = ([(3, t) for t in ringe]
-                    + [(3, t) for v in nut_v for t in v])
-        _, abb = occ.fragment([(3, t) for t in stirnluft], werkzeug)
-        occ.synchronize()
-        # Was aus einem Ring kam, IST der Ring; was aus einem Nutleiter kam, ist
-        # der Nutleiter; der Rest ist Luft. Zugeordnet wird ueber die Abbildung
-        # von ``fragment``, nicht ueber Schwerpunkte -- keine Toleranz, an der
-        # eine Zuordnung kippen koennte.
-        n_s = len(stirnluft)
-        ring_v = set()
-        for grp in abb[n_s:n_s + len(ringe)]:
-            ring_v.update(t for (d, t) in grp if d == 3)
-        nut_neu, k_ = [], n_s + len(ringe)
-        for v in nut_v:
-            teile = set()
-            for grp in abb[k_:k_ + len(v)]:
-                teile.update(t for (d, t) in grp if d == 3)
-            k_ += len(v)
-            nut_neu.append(sorted(teile))
-        stirn_v = set()
-        for grp in abb[:n_s]:
-            stirn_v.update(t for (d, t) in grp if d == 3)
-        stirn_v -= ring_v
-        for v in nut_neu:
-            stirn_v -= set(v)
-        fehlend = [k for k, v in enumerate(nut_neu) if not v]
-        if not ring_v or fehlend:
-            raise RuntimeError("Nach dem Verschneiden nicht wiedergefunden: "
-                               f"{len(ring_v)} Ringstuecke, {len(fehlend)} "
-                               f"Nutleiter ohne Volumen")
-
-        # Alles zusammenkleben, damit die Felder ueber die Stirnflaeche stetig sind.
-        alle = ([(3, t) for t in vols] + [(3, t) for t in sorted(ring_v)]
-                + [(3, t) for t in sorted(stirn_v)]
-                + [(3, t) for v in nut_neu for t in v])
-        _, abb2 = occ.fragment(alle[:1], alle[1:])
-        occ.synchronize()
-        # Ein Wörterbuch statt einer linearen Suche je Koerper: bei 36 Nuten,
-        # die jetzt in mehrere Stuecke zerfallen, lief die alte Schleife ueber
-        # ``alle`` je Eintrag noch einmal durch die ganze Liste.
-        pos = {t: idx for idx, (d, t) in enumerate(alle)}
-
-        def neu(alte):
-            aus_ = []
-            for t in alte:
-                if t in pos:
-                    aus_ += [v for (d, v) in abb2[pos[t]] if d == 3]
-            return sorted(set(aus_))
-
-        gmsh.model.addPhysicalGroup(3, neu(gruppen["welle"]), GID_WELLE, "welle")
-        gmsh.model.addPhysicalGroup(3, neu(gruppen["rotor"]), GID_ROTOR, "rotoreisen")
-        gmsh.model.addPhysicalGroup(3, neu(gruppen["staebe"]), GID_STAEBE, "staebe")
-        gmsh.model.addPhysicalGroup(3, neu(gruppen["stege"]), GID_STEG, "stege")
-        gmsh.model.addPhysicalGroup(3, neu(gruppen["luft"]), GID_LUFT, "luftspalt")
-        gmsh.model.addPhysicalGroup(3, neu(gruppen["stator"]), GID_STATOR, "statoreisen")
-        gmsh.model.addPhysicalGroup(3, neu(sorted(ring_v)), GID_RING, "ringe")
-        gmsh.model.addPhysicalGroup(3, neu(sorted(stirn_v)), GID_STIRN, "stirnluft")
-        for k, v in enumerate(nut_neu):
-            gmsh.model.addPhysicalGroup(3, neu(v), GID_NUT0 + k, f"nut{k}")
-
-        # Aussenrand: alle Flaechen auf r_so plus die beiden aeusseren Stirnflaechen.
-        # Aussenrand: Mantel UND beide Stirnflaechen.
+        # Aussenrand: Mantel UND beide Deckel.
         #
-        # Die Stirnflaechen fehlten. Sie wurden ueber ``abs(z - (L+tief+stirn))
-        # < 1e-9`` gesucht -- ein absoluter Vergleich auf Meter, waehrend die
-        # Grenze selbst aus Ringbreiten zusammengerechnet ist und die Huellbox
-        # von OCC gerundet zurueckkommt. Der Vergleich traf nie, und damit war
-        # das Gebiet an beiden Enden OFFEN: dort ist A unbestimmt, und genau
-        # dort sass das unsinnige Feld (gemessen 18 % des Volumens ueber
-        # 1000 T, angefuehrt von der Stirnluft). Mit Quellen null kam trotzdem
-        # exakt null heraus -- ein unbestimmter, aber unangeregter Nullraum
-        # meldet sich nicht.
-        #
-        # Gesucht wird jetzt gegen die WIRKLICHE Huellbox des Modells, mit einer
-        # Toleranz, die sich an ihr bemisst. Und es wird nachgezaehlt: ohne die
-        # beiden Deckel ist die Randflaeche unvollstaendig, und das ist ein
-        # Fehler und keine Warnung.
+        # Die Stirnflaechen fehlten frueher: sie wurden ueber einen ABSOLUTEN
+        # Vergleich gegen eine zusammengerechnete Grenze gesucht, der nie traf.
+        # Das Gebiet war damit an beiden Enden OFFEN, dort ist A unbestimmt,
+        # und mit Quellen null kam trotzdem exakt null heraus -- ein
+        # unbestimmter, aber unangeregter Nullraum meldet sich nicht. Gesucht
+        # wird jetzt gegen die WIRKLICHE Huellbox, und fehlt ein Deckel, ist das
+        # ein Fehler und keine Warnung.
         bb_all = gmsh.model.getBoundingBox(-1, -1)
         z_min, z_max = bb_all[2], bb_all[5]
         tol = 1e-6 + 1e-6 * max(abs(z_min), abs(z_max), m["r_so"])
@@ -428,11 +459,10 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
         for (d, t) in gmsh.model.getEntities(2):
             bb = gmsh.model.getBoundingBox(2, t)
             weite = max(bb[3] - bb[0], bb[4] - bb[1]) / 2.0
-            zf_lo, zf_hi = bb[2], bb[5]
-            flach = abs(zf_hi - zf_lo) <= tol
+            flach = abs(bb[5] - bb[2]) <= tol
             if abs(weite - m["r_so"]) < 1e-4 * m["r_so"] + 1e-9 and not flach:
                 rand.append(t); n_mantel += 1
-            elif flach and (abs(zf_lo - z_min) <= tol or abs(zf_lo - z_max) <= tol):
+            elif flach and (abs(bb[2] - z_min) <= tol or abs(bb[2] - z_max) <= tol):
                 rand.append(t); n_deckel += 1
         if not n_mantel or not n_deckel:
             raise ValueError(
@@ -442,21 +472,12 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
                 f"sieht dann aus wie ein Feld.")
         gmsh.model.addPhysicalGroup(2, rand, GID_RAND, "aussenrand")
 
-        # KEIN Verfeinerungsband auf den Luftspalt (anders als in 2-D). Gemessen:
-        # mit Band bricht das Netzen bei 0,7 mm Spalt und 150 mm Paket nach
-        # 1 h 56 min ohne Ergebnis ab; ohne Band stehen 30.010 Tetraeder in 3 s.
-        # Der Spalt ist damit nicht aufgeloest -- das absolute Moment aus diesem
-        # Netz waere keine Aussage, das Verhaeltnis zweier Laeufe darauf schon
-        # (s. Modulkopf und ``ring_wirkung``).
-        lc_eisen = (lc_eisen_mm / 1000.0) if lc_eisen_mm > 0 else max(
-            L / max(int(lagen_axial), 1), 4.0e-3)
-        lc_gap = max(m["gap_m"] / max(int(gap_lagen), 1), 1.5e-3)
-        gmsh.option.setNumber("Mesh.MeshSizeFromPoints", 0)
-        gmsh.option.setNumber("Mesh.MeshSizeFromCurvature", 0)
-        gmsh.option.setNumber("Mesh.MeshSizeExtendFromBoundary", 0)
-        gmsh.option.setNumber("Mesh.MeshSizeMin", lc_gap)
-        gmsh.option.setNumber("Mesh.MeshSizeMax", lc_eisen)
-        gmsh.option.setNumber("Mesh.Algorithm3D", 10)      # HXT, schnell
+        # Das Verfeinerungsband um den Luftspalt ist DASSELBE wie in 2-D
+        # (``ema_em2d_harm.groessenfeld``) -- es wirkt jetzt auf den
+        # Querschnitt, und die Extrusion traegt es in die Laenge.
+        lc_eisen = (lc_eisen_mm / 1000.0) if lc_eisen_mm > 0 else 8.0e-3
+        lc_gap = H.groessenfeld(gmsh, m, gap_lagen, lc_eisen)
+        gmsh.option.setNumber("Mesh.Algorithm", 6)
         gmsh.model.mesh.generate(3)
 
         gmsh.option.setNumber("Mesh.MshFileVersion", 2.2)
@@ -472,13 +493,16 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
     return {"msh": msh_pfad, "knoten": int(knoten), "tets": int(tets),
             "n_stab": m["n_stab"], "n_nut": len(q["nuten"]),
             "L_m": L, "ring_h_m": ring_h, "ring_w_m": ring_w,
-            "A_ring_m2": a_ring, "stirn_m": stirn, "tief_m": tief,
-            "z_lo_m": z_lo, "z_hi_m": z_hi,
+            "A_ring_m2": a_ring, "stirn_m": stirn,
+            "z_lo_m": z_lo, "z_hi_m": L + ring_w + stirn,
+            "lagen": {"paket": int(lagen_axial), "ring": int(lagen_ring),
+                      "stirn": int(lagen_stirn)},
             "rand_mantel": n_mantel, "rand_deckel": n_deckel,
             "r_wel": m["r_wel"], "r_rot": m["r_rot"], "r_si": m["r_si"],
             "r_so": m["r_so"], "gap_m": m["gap_m"],
-            "lc_gap_m": lc_gap, "lc_eisen_m": lc_eisen,
-            "A_nut_m2": q["A_nut_m2"], "A_stab_m2": float(kaefig["A_stab_mm2"]) * 1e-6}
+            "lc_gap_m": lc_gap, "lc_eisen_m": max(lc_eisen, lc_gap),
+            "A_nut_m2": q["A_nut_m2"],
+            "A_stab_m2": float(kaefig["A_stab_mm2"]) * 1e-6}
 
 
 def schreibe_sif(netz: dict, omega1: float, sigma_eff: float, j_nut: dict,
@@ -638,9 +662,9 @@ def schreibe_sif(netz: dict, omega1: float, sigma_eff: float, j_nut: dict,
         fh.write("case.sif\n1\n")
     return pfad
 
-
 def netzkosten(geom: dict, kaefig: dict, axial_mm: float, work_dir: str,
-               gap_lagen: int = 2, lagen_axial: int = 6,
+               gap_lagen: int = 2, lagen_axial: int = 4,
+               lagen_ring: int = 1, lagen_stirn: int = 2,
                lc_eisen_mm: float = 0.0, log=None) -> dict:
     """Nur das Netz bauen und **messen**, was diese Stufe kostet.
 
@@ -654,17 +678,19 @@ def netzkosten(geom: dict, kaefig: dict, axial_mm: float, work_dir: str,
     msh = os.path.join(work_dir, "asm3d.msh")
     os.makedirs(work_dir, exist_ok=True)
     netz = baue_netz(geom, kaefig, axial_mm, msh, gap_lagen=gap_lagen,
-                     lc_eisen_mm=lc_eisen_mm, lagen_axial=lagen_axial)
+                     lc_eisen_mm=lc_eisen_mm, lagen_axial=lagen_axial,
+                     lagen_ring=lagen_ring, lagen_stirn=lagen_stirn)
     netz["netzzeit_s"] = round(time.time() - t0, 1)
-    netz["zu_gross"] = bool(netz["tets"] > TETS_WARNUNG)
+    netz["zu_gross"] = bool(netz["knoten"] > KNOTEN_WARNUNG)
     if log:
         log(f"3-D-Netz: {netz['tets']} Tetraeder, {netz['knoten']} Knoten "
             f"in {netz['netzzeit_s']:.0f} s")
         if netz["zu_gross"]:
-            log(f"ACHTUNG: {netz['tets']} Tetraeder liegen ueber der gemessenen "
-                f"Grenze dieser Maschine ({TETS_WARNUNG}). Der direkte Loeser "
-                f"bricht dort mit fehlendem Arbeitsspeicher ab — der Lauf endet "
-                f"dann mit einem Fehler, nicht mit einem Ergebnis.")
+            log(f"ACHTUNG: {netz['knoten']} Knoten liegen ueber der gemessenen "
+                f"Grenze dieser Maschine ({KNOTEN_WARNUNG}). Gemessen brauchen "
+                f"102.918 Knoten 12,9 GB; bei rund 200.000 bricht der direkte "
+                f"Loeser mit fehlendem Arbeitsspeicher ab — der Lauf endet dann "
+                f"mit einem Fehler, nicht mit einem Ergebnis.")
     return netz
 
 
@@ -703,7 +729,8 @@ def _loese(ctx: dict, ring_leitet: bool, timeout: int) -> dict:
 
 def _aufbau(payload: dict, rpm: float, last_nm: float, work_dir: str,
             schlupf: float, mu_r_steg: float, gap_lagen: int,
-            lagen_axial: int, lc_eisen_mm: float, log=None) -> dict:
+            lagen_axial: int, lc_eisen_mm: float, log=None,
+            lagen_ring: int = 1, lagen_stirn: int = 2) -> dict:
     """Betriebspunkt, Netz und ElmerGrid -- alles, was beide Laeufe teilen."""
     import ema_asm
     import ema_maschinenart
@@ -733,7 +760,8 @@ def _aufbau(payload: dict, rpm: float, last_nm: float, work_dir: str,
     omega1 = 2.0 * math.pi * p * float(rpm) / 60.0
 
     netz = netzkosten(geom, kf, axial, work_dir, gap_lagen=gap_lagen,
-                      lagen_axial=lagen_axial, lc_eisen_mm=lc_eisen_mm, log=log)
+                      lagen_axial=lagen_axial, lagen_ring=lagen_ring,
+                      lagen_stirn=lagen_stirn, lc_eisen_mm=lc_eisen_mm, log=log)
     mesh_dir = os.path.join(work_dir, "mesh")
     if log:
         log("ElmerGrid: 3-D-Netz umsetzen…")
@@ -756,7 +784,8 @@ def _aufbau(payload: dict, rpm: float, last_nm: float, work_dir: str,
 
 def ring_wirkung(payload: dict, rpm: float, last_nm: float, work_dir: str,
                  schlupf: float = 0.0, mu_r_steg: float = 0.0,
-                 gap_lagen: int = 1, lagen_axial: int = 6,
+                 gap_lagen: int = 2, lagen_axial: int = 4,
+                 lagen_ring: int = 2, lagen_stirn: int = 2,
                  lc_eisen_mm: float = 8.0, timeout: int = 7200,
                  log=None) -> dict:
     """Was der Kurzschlussring ausmacht -- zweimal dasselbe Netz, einmal ohne ihn.
@@ -778,7 +807,8 @@ def ring_wirkung(payload: dict, rpm: float, last_nm: float, work_dir: str,
             log(t)
 
     ctx = _aufbau(payload, rpm, last_nm, work_dir, schlupf, mu_r_steg,
-                  gap_lagen, lagen_axial, lc_eisen_mm, log=log)
+                  gap_lagen, lagen_axial, lc_eisen_mm, log=log,
+                  lagen_ring=lagen_ring, lagen_stirn=lagen_stirn)
     _log(f"ElmerSolver: 3-D harmonisch MIT Ring "
          f"({ctx['netz']['tets']} Tetraeder)…")
     mit = _loese(ctx, True, timeout)
@@ -819,9 +849,9 @@ def ring_wirkung(payload: dict, rpm: float, last_nm: float, work_dir: str,
 
 
 def rechne(payload: dict, rpm: float, last_nm: float, work_dir: str,
-           schlupf: float = 0.0, mu_r_steg: float = 0.0, gap_lagen: int = 1,
-           lagen_axial: int = 6, lc_eisen_mm: float = 8.0,
-           timeout: int = 7200, log=None) -> dict:
+           schlupf: float = 0.0, mu_r_steg: float = 0.0, gap_lagen: int = 2,
+           lagen_axial: int = 4, lagen_ring: int = 2, lagen_stirn: int = 2,
+           lc_eisen_mm: float = 8.0, timeout: int = 7200, log=None) -> dict:
     """EIN 3-D-Lauf. Das absolute Moment steht unter dem Vorbehalt des Netzes.
 
     Wer wissen will, was der Kurzschlussring ausmacht, nimmt ``ring_wirkung`` --
@@ -830,7 +860,8 @@ def rechne(payload: dict, rpm: float, last_nm: float, work_dir: str,
     Luftspalt ueberhaupt aufgeloest war.
     """
     ctx = _aufbau(payload, rpm, last_nm, work_dir, schlupf, mu_r_steg,
-                  gap_lagen, lagen_axial, lc_eisen_mm, log=log)
+                  gap_lagen, lagen_axial, lc_eisen_mm, log=log,
+                  lagen_ring=lagen_ring, lagen_stirn=lagen_stirn)
     if log:
         log(f"ElmerSolver: 3-D harmonisch, {ctx['netz']['tets']} Tetraeder, "
             f"{ctx['omega1'] / (2 * math.pi):.1f} Hz, "
@@ -1074,11 +1105,14 @@ def bericht(kz: dict) -> str:
              f"Stabverlusts. ema_asm setzt "
              f"{kz['zuschlag_analytisch_pct']:.0f} % an "
              f"(kurzschlussring_zuschlag).")
-    z.append(f"     Das ist der Faktor "
-             f"{kz['ring_je_stab'] / max(0.01 * kz['zuschlag_analytisch_pct'], 1e-9):.1f}. "
-             f"Der Ringanteil haengt an der Paketlaenge: je kuerzer das Paket, "
-             f"desto mehr Ring je Stab. Ein fester Zuschlag kann das nicht "
-             f"treffen.")
+    z.append("     Diese Messung ist eine UNTERE Schranke: jede Netzverfeinerung "
+             "schiebt sie nach oben, keine nach unten, und sie ist in Reichweite "
+             "dieser Maschine nicht auskonvergiert (Messreihe im Modulkopf). Was "
+             "sie sicher sagt: die frueher angesetzte Konstante von 20 % ist um "
+             "ein Mehrfaches zu klein.")
+    z.append("     Der Anteil haengt ausserdem an der Paketlaenge — der Ring wird "
+             "nicht laenger, wenn das Paket es wird. Ein fester Zuschlag kann das "
+             "nicht treffen.")
     z.append(f"  Moment MIT  Kurzschlussring {kz['T_mit_Ring_Nm']:9.3f} Nm")
     z.append(f"  Moment OHNE Kurzschlussring {kz['T_ohne_Ring_Nm']:9.3f} Nm")
     z.append("     Der zweite Wert ist KEIN „Kaefig ohne Ring\u201c: mit "

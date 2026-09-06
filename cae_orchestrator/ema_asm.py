@@ -306,27 +306,39 @@ def kurzschlussring_zuschlag(kf: dict, p: int) -> float:
     Ring als leitenden Koerper fuehrt und seinen Verlust getrennt integriert.
     Beispielmaschine p=3, 36 Nuten, 28 Staebe, 190 mm Bohrung:
 
-        L =  60 mm    Formel 0,991    3-D gemessen 0,876    Verhaeltnis 1,13
-        L = 120 mm    Formel 0,496    3-D gemessen 0,441    Verhaeltnis 1,12
-        L = 180 mm    Formel 0,330    3-D gemessen 0,298    Verhaeltnis 1,11
+    Die 3-D-Messung ist dabei eine **untere Schranke**, kein Messwert: an der
+    Beispielmaschine (p=3, 36 Nuten, 28 Staebe, 190 mm Bohrung, 60 mm Paket)
+    kommt sie je nach Netz auf 62,9 bis 77,7 % gegen die 99,1 % dieser Formel --
+    und JEDE Verfeinerung schiebt sie nach oben, keine nach unten. Die
+    Messreihe steht im Kopf von ``ema_em3d_harm``; auskonvergiert ist sie in
+    Reichweite dieser Maschine nicht (bei rund 200.000 Knoten geht dem direkten
+    Loeser der Arbeitsspeicher aus).
 
-    Der letzte Punkt kam NACH der Formel herein und hat sie also nicht gestuetzt,
-    sondern geprueft.
+    Die **Laengenabhaengigkeit** -- der eigentliche Grund fuer diese Funktion --
+    ist dagegen sauber bestaetigt. Dasselbe Netz, nur das Paket laenger:
 
-    Zwei unabhaengige Wege, dieselbe Groessenordnung und ein gleichbleibendes
-    Verhaeltnis -- die Formel liegt an diesem Netz gleichmaessig rund 12 % hoch.
-    Die frueheren 20 % lagen an dieser Maschine um den Faktor FUENF daneben, und
-    zwar nur nach unten, also zugunsten der Maschine.
+        L =  60 mm   3-D 69,2 %   Formel 99,1 %   Verhaeltnis 1,43
+        L = 120 mm   3-D 33,9 %   Formel 49,6 %                1,46
+        L = 180 mm   3-D 22,4 %   Formel 33,0 %                1,47
 
-    **Woher die 12 % kommen, ist nicht bewiesen.** Die 3-D-Werte oben stammen
-    vom groben Netz. Feiner gerechnet (437.000 statt 167.000 Tetraeder) steigt
-    die Messung bei 60 mm von 87,6 auf 93,0 %, der Abstand faellt also von 13
-    auf 6,6 % -- und die Luftspalt-Grundwelle laeuft dabei auf den 2-D-Wert zu
-    (0,2726 -> 0,2915 gegen 0,2870 T). Das stuetzt „Netzfehler", schliesst die
-    eigenen Annahmen dieser Formel aber nicht aus: die Umrechnung setzt eine
-    sinusfoermige Stabstromverteilung an, und 6,6 % sind auch dafuer eine
-    uebliche Groessenordnung. Auskonvergiert ist keiner der beiden Wege -- der
-    naechste Netzschritt sprengt auf dieser Maschine den Arbeitsspeicher.
+    Doppelte Laenge, halber Anteil -- in der Messung wie in der Formel. Der
+    Abstand ist ein FESTER Faktor ueber die ganze Reihe, kein Auseinanderlaufen.
+
+    Was die Messung damit sicher sagt und was nicht:
+
+    * Sie widerlegt die frueher hier stehende Konstante von 0,20 vollstaendig --
+      schon der KLEINSTE Messwert liegt beim Dreifachen.
+    * Sie widerspricht dieser Formel nicht; sie laeuft auf sie zu.
+    * Sie bestaetigt sie aber auch nicht. Die Formel hat ihre eigene Annahme
+      (sinusfoermige Stabstromverteilung), und der Stab belegt an dieser
+      Maschine 10,4 mm der 19,6 mm Ringteilung -- die freie Ringlaenge zwischen
+      zwei Staeben ist also nur die Haelfte dessen, was die Umrechnung ansetzt.
+      Das spricht dafuer, dass die Formel eher zu hoch liegt als zu niedrig.
+
+    Das Modell, das diese Messung liefert, ist an ZWEI unabhaengigen Punkten
+    gegen die 2-D-Stufe geprueft, an denen der Ring keine Rolle spielt: ohne
+    Kaefigstrom 0,3891 gegen 0,3880 T (0,3 %), bei ideal kurzgeschlossenem
+    Kaefig 0,2097 gegen 0,2100 T (0,14 %).
 
     Kein Deckel nach oben: bei einem sehr kurzen Paket ist der Ringverlust
     wirklich groesser als der Stabverlust. Ein Deckel wuerde genau das verstecken,
