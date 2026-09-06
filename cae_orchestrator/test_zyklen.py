@@ -161,10 +161,17 @@ _pflicht = {p["name"] for p in cae_cli.PFLICHTPUNKTE}
 pruefe({"lastfall", "betriebspunkt", "bauraum", "stromrichter"} <= _pflicht,
        f"die Pflichtliste nennt Lastfall, Betriebspunkt, Bauraum und Stromrichter "
        f"({len(_pflicht)} Punkte)")
-_fest = [p for p in cae_cli.PFLICHTPUNKTE if p["quelle"] == "fest"]
-pruefe(any("800" in p["hinweis"] for p in _fest),
-       "und sagt, dass 800 V / 800 A fest verdrahtet sind — fuer ein 48-V-System falsch "
-       "und NICHT einstellbar")
+# Bis zum 06.09.2026 stand hier, die 800 V/800 A seien FEST verdrahtet -- der Test
+# hielt einen Mangel fest, statt eine Eigenschaft. Jetzt sind sie einstellbar, und
+# der Hinweis muss sagen WIE, samt der Windungszahl, ohne die eine Klemmenspannung
+# in dieser Rechnung nicht darstellbar ist.
+_strom = next(p for p in cae_cli.PFLICHTPUNKTE if p["name"] == "stromrichter")
+pruefe(_strom["quelle"] == "schema" and "inverterVdc" in _strom["hinweis"]
+       and "inverterImax" in _strom["hinweis"],
+       "der Stromrichter ist einstellbar, und der Hinweis nennt die beiden Schluessel")
+pruefe("Windung" in _strom["hinweis"] and "turnsPerSlot" in _strom["hinweis"],
+       "und sagt dazu, dass die Windungszahl der Umrechnungsschluessel ist — ohne sie "
+       "heisst '24 V' in dieser Rechnung nichts")
 pruefe(all(p["quelle"] != "aufgabe" or "erfragt" in p["hinweis"] or
            "nicht ableitbar" in p["hinweis"] or "Bauraum" in p["frage"] or
            "Schemagrenzen" in p["hinweis"]
@@ -293,6 +300,87 @@ pruefe(not _z_lsp["gleich"] and _z_lsp["feld"] > 1.9,
        "cad_gegen_feld fragt den RASTERER, nicht noch einmal dieselben zwei "
        "Durchmesser — sonst verglich die Probe den Spalt mit sich selbst und meldete "
        "'gleich', waehrend das Feld mit einem anderen rechnete")
+
+
+print("\n10. Umrichterspannung und -strom sind einstellbar")
+# Bis zum 06.09.2026 waren 800 V / 800 A Modulglobale. ``aufgabe`` sagte „FEST
+# verdrahtet" an, gerechnet wurde trotzdem damit -- fuer einen 24-V-Roboterantrieb
+# ist jede daraus abgeleitete Aussage die einer anderen Maschine.
+import ema_analysis as _A
+import ema_sicherheit as _S
+import ema_text2ema as _T
+
+_g75 = dict(statorOD=75, statorID=56, rotorOD=54.6, shaftD=16, p=5, slots=24,
+            magShape="bar", magWidth=10.9697, magThick=2.6625, magDist=4.8,
+            magLayerGap=9.6, slotDepth=8, magDepthRel=0.55, axialLen=60,
+            conductorsPerSlot=2)
+
+pruefe({"inverterVdc", "inverterImax"} <= set(_T.SCHEMA),
+       "beide stehen im Schema und sind damit ueber --set erreichbar")
+pruefe(all(_T.SCHEMA[k]["geom"] and not _T.SCHEMA[k].get("adv")
+           for k in ("inverterVdc", "inverterImax")),
+       "und zwar auf der GRUNDebene, nicht bei den Feinparametern — sie beschreiben "
+       "die Quelle, an der die Maschine haengt")
+pruefe("windungenProNut" not in _T.SCHEMA,
+       "die Windungszahl bekommt KEINEN zweiten Schluessel: sie steht schon in "
+       "turnsPerSlot, wo auch Strangwiderstand und Kupfermasse sie lesen")
+
+_u0 = _A.umrichter(_g75)
+pruefe(_u0["v_dc_V"] == 800.0 and _u0["i_max_A"] == 800.0 and _u0["n_wdg"] == 1
+       and _u0["n_quelle"] == "bezugswicklung",
+       "ohne Vorgabe bleibt alles wie bisher: 800 V / 800 A auf 1 Wdg/Nut — jede "
+       "Altrechnung bleibt Ziffer fuer Ziffer dieselbe")
+pruefe(_A.estimate_dq_currents(_g75, 2000, 6.0, b_gap_t=0.463, rpm_base=1500)
+       == _A.estimate_dq_currents(dict(_g75, inverterVdc=800, inverterImax=800),
+                                  2000, 6.0, b_gap_t=0.463, rpm_base=1500),
+       "und die Vorgabe ausdruecklich hinzuschreiben aendert nichts")
+
+_u = _A.umrichter(dict(_g75, inverterVdc=24, inverterImax=200))
+pruefe(_u["n_wdg"] == 2 and _u["n_quelle"] == "wicklung"
+       and _u["v_dc_1t"] == 12.0 and _u["i_max_1t"] == 400.0,
+       f"wer eine Klemmenspannung vorgibt, meint eine wirkliche Klemme: 24 V / 200 A "
+       f"an {_u['n_wdg']} Wdg/Nut sind {_u['v_dc_1t']:.0f} V / {_u['i_max_1t']:.0f} A "
+       f"auf die eine Windung, mit der Kt und psi rechnen")
+pruefe(_u["v_dc_1t"] * _u["n_wdg"] == _u["v_dc_V"]
+       and _u["i_max_1t"] / _u["n_wdg"] == _u["i_max_A"],
+       "u ~ N und i ~ 1/N — bei fester Geometrie und festem Moment liegen die "
+       "Amperewindungen fest, die Windungszahl tauscht nur Strom gegen Spannung")
+
+_iq_klein, _ = _A.estimate_dq_currents(dict(_g75, inverterImax=50), 2000, 60.0,
+                                       b_gap_t=0.463, rpm_base=1500)
+pruefe(_iq_klein <= 50.0 * 2 + 1e-6,
+       f"ein kleiner Umrichter deckelt wirklich: i_q {_iq_klein:.1f} A statt der "
+       f"800-A-Vorgabe")
+
+_p = _A.umrichter_passt(dict(_g75, inverterVdc=24, inverterImax=200), 2500)
+pruefe(_p["ok"] and 0.4 <= _p["spannungsausnutzung"] <= _p["reserve"],
+       f"zwei Windungen passen zu 24 V: die Gegen-EMK belegt "
+       f"{_p['spannungsausnutzung']*100:.0f} % der Klemmenspannung")
+_p_viel = _A.umrichter_passt(dict(_g75, inverterVdc=24, turnsPerSlot=10), 2500)
+pruefe(not _p_viel["ok"] and _p_viel["spannungsausnutzung"] > 1.0
+       and _p_viel["n_soll"] == 2,
+       f"zehn Windungen passen nicht — {_p_viel['spannungsausnutzung']*100:.0f} % der "
+       f"Spannung, die Maschine erreicht die Drehzahl nicht; passend waeren "
+       f"{_p_viel['n_soll']}")
+_p_wenig = _A.umrichter_passt(dict(_g75, inverterVdc=400, turnsPerSlot=2), 2500)
+pruefe(not _p_wenig["ok"] and _p_wenig["spannungsausnutzung"] < 0.4
+       and _p_wenig["n_soll"] > 2,
+       f"und zu WENIGE Windungen sind auch ein Befund: der Umrichter bleibt bei "
+       f"{_p_wenig['spannungsausnutzung']*100:.0f} % ungenutzt, es fliesst unnoetig "
+       f"Strom; passend waeren {_p_wenig['n_soll']}")
+
+_krit = {k["name"]: k for k in _S.pruefen(
+    {"summary": {}}, {"payload": dict(_g75, rpm_to=2500, inverterVdc=24,
+                                      inverterImax=200, turnsPerSlot=10)})["kriterien"]}
+pruefe("umrichter" in _krit and not _krit["umrichter"]["ok"]
+       and "turnsPerSlot=2" in _krit["umrichter"]["text"],
+       "'sicherheit' beanstandet eine Wicklung, die nicht zum Umrichter passt, und "
+       "nennt die Windungszahl, die passen wuerde")
+_krit0 = {k["name"] for k in _S.pruefen(
+    {"summary": {}}, {"payload": dict(_g75, rpm_to=2500)})["kriterien"]}
+pruefe("umrichter" not in _krit0,
+       "ohne vorgegebenen Umrichter wird nichts beanstandet — die 1 Wdg/Nut sind "
+       "dort eine Bezugsgroesse und keine Wicklung, die passen muesste")
 
 
 print("\n" + "=" * 60)

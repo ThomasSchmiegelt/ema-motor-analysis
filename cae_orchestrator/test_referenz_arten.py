@@ -155,8 +155,9 @@ pruefe(not e["im_band"], "800/796 faellt aus dem Band")
 pruefe(e.get("vergleichbar") is False and "NICHT VERGLEICHBAR" in e["text"],
        "aber es wird als NICHT VERGLEICHBAR gemeldet und nicht als Abweichung — "
        "beide Stroeme laufen gegen dieselbe Schranke")
-pruefe("INVERTER_I_MAX" in e["text"],
-       "und der Text nennt die Schranke beim Namen, damit sie nachschlagbar ist")
+pruefe("INVERTER_I_MAX" in e["text"] and "inverterImax" in e["text"],
+       "und der Text nennt die Schranke beim Namen UND den Schluessel, mit dem man "
+       "sie aendert — seit dem 06.09.2026 ist sie einstellbar")
 pruefe(v["EESM-Statorstrom / PSM-Statorstrom"].get("vergleichbar") is True,
        "ohne Deckel ist derselbe Vergleich vergleichbar")
 

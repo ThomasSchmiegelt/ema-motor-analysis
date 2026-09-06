@@ -88,12 +88,34 @@ MU_R_IRON  = 500.0  # electrical steel (linear; see _saturate_mu for the B-H pas
 MU0        = 4e-7 * math.pi
 B_SAT_IRON = 2.0    # T – electrical-steel saturation knee (nonlinear μ pass)
 
-# Inverter limits — the ONLY place they are defined. They were previously buried as
-# literals in `estimate_dq_currents` (v_dc default 800, the 800 A current clamp);
-# `power_envelope` needs exactly the same two numbers, and a torque/speed envelope
-# drawn against different limits than the operating point would be a silent lie.
-INVERTER_V_DC  = 800.0   # DC-link voltage [V]
-INVERTER_I_MAX = 800.0   # phase current amplitude [A_pk], at 1 turn/slot (see Kt)
+# Umrichtergrenzen -- die VORGABE, nicht mehr die einzige Wahrheit. Bis zum
+# 06.09.2026 waren es Modulglobale, die niemand einstellen konnte; ``aufgabe`` sagte
+# das als „FEST verdrahtet" an, gerechnet wurde trotzdem mit 800 V. Fuer einen
+# 24-V-Roboterantrieb ist jede daraus abgeleitete Aussage -- Feldschwaechung,
+# Spannungsgrenze, I_s, Kennfeld -- die einer anderen Maschine.
+#
+# ACHTUNG, und das ist der Grund, aus dem hier mehr steht als zwei Zahlen: das
+# ganze elektrische Modell rechnet mit **1 Windung je Nut** (``N_ph = slots/3``,
+# nachpruefbar in ``_analytical_Barm`` und ``estimate_dq_currents``).
+# ``conductorsPerSlot`` geht NIRGENDS in Kt, psi, Ld/Lq oder das Kennfeld ein -- nur
+# in Kupfermasse und Verluste. Die 800 V/800 A gehoerten also zu einer gedachten
+# Wicklung mit einer Windung, und in dieser Rechnung ist eine echte Klemmenspannung
+# ohne die Windungszahl nicht darstellbar: bei fester Geometrie und festem Moment
+# liegen die AMPEREWINDUNGEN fest, und die Windungszahl N tauscht Strom gegen
+# Spannung (Kt ~ N, i ~ 1/N, u ~ N). Genau so waehlt man eine Wicklung zu einem
+# gegebenen Umrichter.
+#
+# Deshalb ist ``umrichter(geom)`` die eine Stelle, die zwischen beidem umrechnet:
+# hinein gehen die WIRKLICHEN Klemmenwerte, heraus kommen zusaetzlich die auf eine
+# Windung bezogenen, mit denen der Rest des Moduls unveraendert weiterrechnet.
+INVERTER_V_DC  = 800.0   # Zwischenkreisspannung [V] -- Vorgabe, ueber geom aenderbar
+INVERTER_I_MAX = 800.0   # Strangstromamplitude [A_pk] -- Vorgabe, ueber geom aenderbar
+WINDUNGEN_JE_NUT = 1     # historische, stillschweigende Annahme des ganzen Moduls
+# Wieviel der Klemmenspannung die Gegen-EMK bei Hoechstdrehzahl hoechstens belegen
+# darf, wenn die Windungszahl selbst bestimmt wird. Der Rest bleibt fuer den
+# Spannungsabfall an R und L und fuer die Feldschwaechung -- ohne Reserve saesse die
+# Maschine schon im Leerlauf an der Grenze.
+SPANNUNGSRESERVE = 0.85
 AIR_DOMAIN_FACTOR = 1.25   # outer air-box radius = statorOD/2 · this (Dirichlet A=0)
 # A real air gap (0.5–1 mm) is sub-pixel at usable N (e.g. 0.7 mm vs ~1.2 mm/px at
 # N=300), so the rotor/stator iron rings touch and the gap is unresolved.  Sampling
@@ -839,6 +861,91 @@ def luftspalt_im_netz(geom: dict, N: int) -> dict:
     }
 
 
+def umrichter(geom: dict, rpm_max: float = 0.0) -> dict:
+    """Die Umrichtergrenzen dieser Maschine -- klemmenseitig UND auf eine Windung.
+
+    Aus ``geom``, mit den Modulvorgaben als Rueckfall:
+
+    ``inverterVdc``   Zwischenkreisspannung [V] an den KLEMMEN
+    ``inverterImax``  Strangstromamplitude [A_pk] an den KLEMMEN
+
+    Die Windungszahl wird **nicht** hier noch einmal eingefuehrt -- sie steht schon
+    in ``ema_wicklung.windungen`` (``turnsPerSlot``, ersatzweise
+    ``conductorsPerSlot``), von wo auch Strangwiderstand und Kupfermasse sie lesen.
+    Ein eigener Schluessel waere eine zweite Quelle fuer dieselbe Groesse.
+
+    Warum die Umrechnung ueberhaupt noetig ist: das elektrische Modell rechnet
+    durchweg mit **einer** Windung je Nut (``N_ph = slots/3`` in
+    ``_analytical_Barm`` und ``estimate_dq_currents``); ``conductorsPerSlot`` geht in
+    Kt, psi, Ld/Lq und das Kennfeld gar nicht ein. Bei fester Geometrie und festem
+    Moment liegen die AMPEREWINDUNGEN fest, und die Windungszahl N tauscht Strom
+    gegen Spannung: ``Kt ~ N``, ``i ~ 1/N``, ``u ~ N``. Ein Umrichter mit 24 V und
+    200 A treibt dieselbe Maschine wie einer mit 800 V und 6 A -- nur die Wicklung
+    ist eine andere. Ohne diese Umrechnung ist „24 V" in dieser Rechnung nicht
+    darstellbar, und genau daran scheiterte der Roboterarm-Entwurf.
+
+    **Solange niemand den Umrichter einstellt, bleibt N = 1.** Das ist die
+    stillschweigende Annahme, mit der dieses Modul immer gerechnet hat; jede
+    Altrechnung bleibt damit Ziffer fuer Ziffer dieselbe, und die Oberflaeche sagt
+    seit jeher „Stroeme wie Kt auf 1 Wdg/Nut bezogen". Erst wer eine Spannung oder
+    einen Strom vorgibt, meint eine wirkliche Klemme -- und dann wird mit der
+    wirklichen Windungszahl umgerechnet. ``n_quelle`` sagt, welcher Fall vorliegt.
+
+    Zurueck kommt beides, und die Unterscheidung ist der ganze Zweck:
+
+    ``v_dc_V``/``i_max_A``     was am Umrichter steht
+    ``v_dc_1t``/``i_max_1t``   dieselben Grenzen auf die eine Windung umgerechnet,
+                               mit der Kt, psi_pm, Ld/Lq und das Kennfeld rechnen
+    """
+    import ema_wicklung
+
+    g = geom or {}
+    v_roh = g.get("inverterVdc")
+    i_roh = g.get("inverterImax")
+    gesetzt = ((v_roh not in (None, "", 0) and float(v_roh) != INVERTER_V_DC)
+               or (i_roh not in (None, "", 0) and float(i_roh) != INVERTER_I_MAX))
+    v_dc = float(v_roh or 0.0) or INVERTER_V_DC
+    i_max = float(i_roh or 0.0) or INVERTER_I_MAX
+
+    if gesetzt:
+        n_wdg = max(1, int(ema_wicklung.windungen(g)))
+        quelle = "wicklung"
+    else:
+        n_wdg = WINDUNGEN_JE_NUT
+        quelle = "bezugswicklung"
+
+    return {"v_dc_V": v_dc, "i_max_A": i_max, "n_wdg": int(n_wdg),
+            "n_quelle": quelle,
+            "v_dc_1t": v_dc / float(n_wdg),
+            "i_max_1t": i_max * float(n_wdg)}
+
+
+def umrichter_passt(geom: dict, rpm_max: float) -> dict:
+    """Passt die Wicklung zum eingestellten Umrichter? -- gerechnet, nicht geraten.
+
+    Der Entwurfsschritt, den sonst niemand macht: bei ``rpm_max`` muss die
+    Gegen-EMK unter die Spannungsgrenze passen, aber nicht beliebig weit darunter
+    liegen -- sonst wird der Umrichter nie ausgenutzt und die Maschine braucht fuer
+    dasselbe Moment unnoetig viel Strom. Zurueck kommt die Windungszahl, die passen
+    wuerde (``n_soll``), statt sie stillschweigend selbst zu setzen: welche Wicklung
+    gebaut wird, entscheidet nicht das Rechenwerkzeug.
+    """
+    u = umrichter(geom, rpm_max)
+    try:
+        emf_1t = float(compute_performance(
+            geom, _analytical_Bgap(geom), float(rpm_max))["emf_peak_V"])
+    except Exception as e:                              # noqa: BLE001
+        return {"ok": True, "unbestimmt": str(e), **u}
+    if emf_1t <= 1e-9 or not rpm_max:
+        return {"ok": True, "unbestimmt": "keine Gegen-EMK bestimmbar", **u}
+    v_ph = u["v_dc_V"] / math.sqrt(3.0)
+    n_soll = max(1, int(math.floor(SPANNUNGSRESERVE * v_ph / emf_1t)))
+    ausnutzung = emf_1t * u["n_wdg"] / v_ph
+    return {"ok": bool(0.4 <= ausnutzung <= SPANNUNGSRESERVE),
+            "n_soll": n_soll, "spannungsausnutzung": round(ausnutzung, 3),
+            "emf_1t_V": round(emf_1t, 4), "reserve": SPANNUNGSRESERVE, **u}
+
+
 def r_gap_m(geom: dict) -> float:
     """Mittlerer Luftspaltradius [m], fuer beide Bauformen."""
     import ema_radien
@@ -1064,7 +1171,7 @@ def estimate_saliency(geom: dict) -> float:
 # ── main entry point ──────────────────────────────────────────────────────────
 
 def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
-                          v_dc: float = INVERTER_V_DC, b_gap_t: float = 1.0,
+                          v_dc: float | None = None, b_gap_t: float = 1.0,
                           rpm_base: float | None = None) -> tuple[float, float]:
     """Physics-based i_q (load) + i_d (field-weakening) for a given RPM/load.
 
@@ -1075,12 +1182,23 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
     ξ≈1) keep i_d=0. Above base speed, field-weakening adds a further demagnetising
     d-current on top of the MTPA point (geometry-derived ξ; continuous at rpm_base).
     """
+    # Die Grenzen kommen aus ``geom`` (``umrichter``), nicht mehr aus Modulglobalen.
+    # Gerechnet wird durchweg auf EINE Windung je Nut -- dieselbe Bezugsgroesse wie
+    # Kt und psi_pm --, also mit den auf sie umgerechneten Grenzen. Ein ausdruecklich
+    # uebergebenes ``v_dc`` gilt als schon umgerechnet und sticht (alte Aufrufer).
+    _u     = umrichter(geom, rpm)
+    i_lim  = _u["i_max_1t"]
+    v_dc   = _u["v_dc_1t"] if v_dc is None else float(v_dc)
     perf   = compute_performance(geom, b_gap_t, rpm)
     Kt     = max(perf["Kt_Nm_per_A"], 1e-3)
     psi_pm = max(float(perf.get("psi_pm_Wb", 0.0)), 1e-6)
     p      = int(geom["p"])
     T_req  = float(load_nm) + DQ_TORQUE_MARGIN_NM
-    iq_pure = max(min(T_req / Kt, INVERTER_I_MAX), 5.0)  # pure-q current for this torque
+    # Die Untergrenze von 5 A war fuer eine 800-A-Maschine gedacht und waere bei
+    # einem kleinen Antrieb schon die halbe Stromgrenze. Sie bleibt, skaliert aber
+    # mit: nie mehr als ein Hundertstel dessen, was der Umrichter kann.
+    i_min  = min(5.0, 0.01 * i_lim)
+    iq_pure = max(min(T_req / Kt, i_lim), i_min)  # pure-q current for this torque
 
     if rpm_base is None or rpm_base <= 0:
         v_max = v_dc / math.sqrt(3)
@@ -1104,7 +1222,7 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
         def _torque(iqv):
             idv = (psi_pm - math.sqrt(psi_pm ** 2 + 8.0 * dL ** 2 * iqv ** 2)) / (4.0 * dL)
             return 1.5 * p * (psi_pm * iqv + (Ld - Lq) * idv * iqv), idv
-        lo, hi = 0.0, INVERTER_I_MAX                     # T monotonic ↑ in iq → bisection
+        lo, hi = 0.0, i_lim                              # T monotonic ↑ in iq → bisection
         for _ in range(40):
             mid = 0.5 * (lo + hi)
             Tm, _ = _torque(mid)
@@ -1113,9 +1231,9 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
         iq0 = 0.5 * (lo + hi)
         _, id0 = _torque(iq0)
         Is = math.hypot(iq0, id0)                        # respect inverter current limit
-        if Is > INVERTER_I_MAX:
-            iq0 *= INVERTER_I_MAX / Is; id0 *= INVERTER_I_MAX / Is
-        iq0 = max(iq0, 5.0)
+        if Is > i_lim:
+            iq0 *= i_lim / Is; id0 *= i_lim / Is
+        iq0 = max(iq0, i_min)
 
     if rpm <= rpm_base:
         return float(iq0), float(id0)
@@ -1123,8 +1241,8 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
     # ── field weakening above base: add demagnetising d-current on top of MTPA ──
     fw     = min((rpm - rpm_base) / max(rpm_base, 1.0), 1.5)
     id_fw  = iq_pure * fw / xi                          # ∝ load, ∝ 1/ξ
-    id_    = -min(abs(id0) + id_fw, 0.9 * INVERTER_I_MAX)  # cap at 90 % of inverter limit
-    iq     = max(iq0 * (1.0 - 0.25 * fw), 5.0)          # MTPV: slight iq reduction in FW
+    id_    = -min(abs(id0) + id_fw, 0.9 * i_lim)        # cap at 90 % of inverter limit
+    iq     = max(iq0 * (1.0 - 0.25 * fw), i_min)        # MTPV: slight iq reduction in FW
     return float(iq), float(id_)
 
 
@@ -1202,6 +1320,19 @@ def compute_advanced_em(geom: dict, perf: dict, axial_mm: float,
     margin = B_op - B_arm
     demag_risk = margin < 0.1 * Br_T
 
+    # Alles hier ist auf EINE Windung je Nut bezogen (s. Kopf). Sobald jemand einen
+    # wirklichen Umrichter vorgibt, kommen die KLEMMENwerte daneben -- sonst liest
+    # sich ein Kurzschlussstrom von 1452 A wie eine Aussage ueber die gebaute
+    # Maschine, waehrend es die einer gedachten Einwindungswicklung ist.
+    _u = umrichter(geom, rpm_max)
+    _klemme = {}
+    if _u["n_wdg"] > 1:
+        _klemme = {"n_wdg": _u["n_wdg"],
+                   "Isc_klemme_A": round(Isc / _u["n_wdg"], 1),
+                   "psi_pm_klemme_Wb": round(psi_pm * _u["n_wdg"], 4),
+                   "Ld_klemme_mH": round(Ld * _u["n_wdg"] ** 2 * 1e3, 4),
+                   "Lq_klemme_mH": round(Lq * _u["n_wdg"] ** 2 * 1e3, 4)}
+
     return {
         "Ld_mH":  round(Ld * 1e3, 4),
         "Lq_mH":  round(Lq * 1e3, 4),
@@ -1209,6 +1340,7 @@ def compute_advanced_em(geom: dict, perf: dict, axial_mm: float,
         "psi_pm_Wb": round(psi_pm, 4),
         "Isc_A":  round(Isc, 1),
         "mtpa":   mtpa,
+        **_klemme,
         "demag": {
             "magnet_temp_C": round(magnet_temp_C, 1),
             "Br_T":          round(Br_T, 3),
@@ -1223,7 +1355,7 @@ def compute_advanced_em(geom: dict, perf: dict, axial_mm: float,
 
 def power_envelope(geom: dict, adv: dict, rpm_max: float,
                    T_rated_Nm: float = 0.0,
-                   v_dc: float = INVERTER_V_DC, i_max: float = INVERTER_I_MAX,
+                   v_dc: float | None = None, i_max: float | None = None,
                    n_pts: int = 80) -> dict:
     """Torque/power over speed — the machine's CAPABILITY, not the demanded load.
 
@@ -1251,6 +1383,13 @@ def power_envelope(geom: dict, adv: dict, rpm_max: float,
     electromagnetic power, not inverter input). ``rpm_max`` should be the
     structurally safe speed, so a rotor that cannot spin does not book power.
     """
+    # Grenzen aus geom, auf die eine Windung bezogen -- dieselbe Bezugsgroesse wie
+    # psi_pm, Ld und Lq, aus denen dieses Kennfeld gebaut wird. Ein Kennfeld gegen
+    # andere Grenzen als der Betriebspunkt waere eine stille Luege, und das war der
+    # Grund, aus dem die beiden Zahlen ueberhaupt an EINER Stelle standen.
+    _u     = umrichter(geom, rpm_max)
+    v_dc   = _u["v_dc_1t"] if v_dc is None else float(v_dc)
+    i_max  = _u["i_max_1t"] if i_max is None else float(i_max)
     p      = int(geom["p"])
     psi    = float(adv.get("psi_pm_Wb") or 0.0)
     Ld     = float(adv.get("Ld_mH") or 0.0) / 1e3
@@ -1302,8 +1441,14 @@ def power_envelope(geom: dict, adv: dict, rpm_max: float,
         "T_rated_Nm":     round(float(T_rated_Nm), 1),
         "rpm_base":       round(float(rpms[i_base])),
         "rpm_max":        round(rpm_hi),
-        "v_dc_V":         round(float(v_dc)),
-        "i_max_A":        round(float(i_max)),
+        # Angezeigt werden die Klemmenwerte -- die stehen am Umrichter. Gerechnet
+        # wurde mit den auf eine Windung bezogenen; beide stehen da, sonst ist nicht
+        # zu erkennen, welche Wicklung gemeint ist.
+        "v_dc_V":         round(_u["v_dc_V"]),
+        "i_max_A":        round(_u["i_max_A"]),
+        "v_dc_1t_V":      round(float(v_dc), 2),
+        "i_max_1t_A":     round(float(i_max), 1),
+        "n_wdg":          _u["n_wdg"],
         # Which limit actually binds the continuous curve: with generous cooling the
         # inverter current runs out first, and then "Dauer" == "Spitze" — worth
         # saying out loud, otherwise two identical curves look like a bug.

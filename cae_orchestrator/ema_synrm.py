@@ -130,7 +130,7 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float) -> di
                           f"gerechnetes waere keines")}
 
     i_roh = math.sqrt(2.0 * t_soll / c_rel)
-    i_s = min(i_roh, ema_analysis.INVERTER_I_MAX)
+    i_s = min(i_roh, float(ema_analysis.umrichter(geom)["i_max_1t"]))
     am_limit = i_roh > i_s
     i_d = i_q = i_s / math.sqrt(2.0)
     t_ist = c_rel * i_d * i_q
@@ -230,7 +230,7 @@ def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> dict:
     # Grenze auch quadratisch. Gemessen brauchte das gemeldete Dauermoment das
     # Achtzehnfache des zulaessigen Stroms.
     c_rel = float(bp.get("c_rel_Nm_per_A2", 0.0)) or reluktanzkoeffizient(geom, axial_mm)
-    return ema_thermal.mit_umrichtergrenze(t_th, lambda i: c_rel * i * i / 2.0)
+    return ema_thermal.mit_umrichtergrenze(t_th, lambda i: c_rel * i * i / 2.0, geom=geom)
 
 
 def massen_und_kosten(payload: dict) -> dict:

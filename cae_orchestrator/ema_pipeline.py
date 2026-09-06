@@ -2674,7 +2674,10 @@ def run_pipeline(data: dict, state: dict, frames: list,
             results["em_advanced"] = adv
             _log(state,
                  f"✓ EM-Advanced: Ld={adv['Ld_mH']} Lq={adv['Lq_mH']} mH | "
-                 f"Isc={adv['Isc_A']} A | Demag-Reserve={adv['demag']['margin_T']} T"
+                 f"Isc={adv['Isc_A']} A"
+                 + (f" (an den Klemmen {adv['Isc_klemme_A']} A bei {adv['n_wdg']} Wdg/Nut)"
+                    if adv.get("Isc_klemme_A") else "")
+                 + f" | Demag-Reserve={adv['demag']['margin_T']} T"
                  + ("  ⚠ DEMAG-RISIKO" if adv['demag']['risk'] else ""), 96)
         except Exception as _ae:
             _log(state, f"⚠ EM-Advanced fehlgeschlagen: {_ae}", 96)

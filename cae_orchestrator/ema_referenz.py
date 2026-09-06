@@ -354,11 +354,13 @@ MESSPUNKTE += [
 # traegt.
 
 ART_BAND = {
-    # Kein Band, sondern ein Hinweistext: die Umrichtergrenzen sind in
-    # ``ema_analysis`` fest verdrahtet und ausdruecklich nicht Teil dieses
-    # Vorhabens (s. CLAUDE.md). Wo sie greifen, ist ein Stromverhaeltnis eine
-    # Aussage ueber den Deckel und nicht ueber die Bauart.
-    "_limit_hinweis": "800 A bei 1 Wdg/Nut, ema_analysis.INVERTER_I_MAX",
+    # Kein Band, sondern ein Hinweistext: wo die Umrichtergrenze greift, ist ein
+    # Stromverhaeltnis eine Aussage ueber den Deckel und nicht ueber die Bauart.
+    # Seit dem 06.09.2026 ist die Grenze einstellbar (``geom.inverterImax``); der
+    # Text nennt sie weiter beim Namen, damit nachschlagbar bleibt, WELCHE Schranke
+    # zwei nicht vergleichbare Stroeme erzeugt hat.
+    "_limit_hinweis": ("geom.inverterImax, Vorgabe INVERTER_I_MAX = 800 A bei 1 Wdg/Nut "
+                        "— ema_analysis.umrichter"),
     "asm": {
         "schlupf_pct": {
             "band": (2.0, 13.3), "nenn": 5.5, "label": "Schlupf",

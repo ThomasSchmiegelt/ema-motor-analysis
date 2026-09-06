@@ -10553,7 +10553,11 @@ function renderPower(pw) {
       + `(${pw.T_rated_Nm} Nm) als der Umrichter bei ${pw.i_max_A} A liefert.`;
   document.getElementById('power-note').innerHTML =
     `Wellenleistung aus ψ_pm, L_d/L_q und den Umrichtergrenzen `
-    + `<b>${pw.v_dc_V} V / ${pw.i_max_A} A</b> (Ströme wie Kt auf <b>1 Wdg/Nut</b> bezogen). `
+    + `<b>${pw.v_dc_V} V / ${pw.i_max_A} A</b> an den Klemmen`
+    + ((pw.n_wdg && pw.n_wdg > 1)
+       ? ` bei <b>${pw.n_wdg} Wdg/Nut</b> — gerechnet mit ${pw.v_dc_1t_V} V / ${pw.i_max_1t_A} A `
+         + `auf 1 Wdg/Nut, der Bezugsgröße von K_t und ψ. `
+       : ` (Ströme wie K_t auf <b>1 Wdg/Nut</b> bezogen). `)
     + cont + ` `
     + `<b>Grenzen der Aussage:</b> L_d/L_q sind ungesättigt (der FDM rechnet linear), `
     + `das echte Moment bei Volllast liegt darunter; Verluste sind nicht abgezogen `

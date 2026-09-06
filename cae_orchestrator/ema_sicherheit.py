@@ -199,6 +199,34 @@ def pruefen(results: dict, meta: dict | None = None) -> dict:
                        f"{dem.get('magnet_temp_C', '?')} °C",
                        dem.get("margin_T"), 0.0, "T", quelle="em_advanced.demag"))
 
+    # ── Umrichter und Wicklung passen zueinander ────────────────────────────
+    # Die Wicklung ist der Umrechnungsschluessel zwischen Klemme und Rechnung: bei
+    # fester Geometrie tauscht die Windungszahl Strom gegen Spannung. Wer die
+    # Spannung stellt und die Windungszahl stehen laesst, rechnet eine Maschine, die
+    # ihren Umrichter entweder nie ausnutzt oder ihn schon im Leerlauf sprengt --
+    # beides laeuft klaglos durch und ist an keiner Kennzahl zu sehen.
+    _rpm_to = payload.get("rpm_to")
+    if isinstance(_rpm_to, (int, float)) and _rpm_to > 0:
+        try:
+            import ema_analysis
+            _g = {**payload, **(payload.get("geom") or {})}
+            _u = ema_analysis.umrichter_passt(_g, float(_rpm_to))
+        except Exception:                                    # noqa: BLE001
+            _u = None
+        if _u and "unbestimmt" not in _u and _u["n_quelle"] == "wicklung":
+            _a = _u["spannungsausnutzung"]
+            krit.append(_k(
+                "umrichter", _u["ok"],
+                f"Gegen-EMK bei {_rpm_to:.0f} 1/min belegt {_a*100:.0f} % der "
+                f"Klemmenspannung ({_u['v_dc_V']:.0f} V bei {_u['n_wdg']} Wdg/Nut)"
+                + ("" if _u["ok"] else
+                   f" — passend waeren {_u['n_soll']} Wdg/Nut "
+                   f"(--set turnsPerSlot={_u['n_soll']}); "
+                   + ("die Maschine erreicht diese Drehzahl nicht"
+                      if _a > 1.0 else
+                      "so bleibt der Umrichter ungenutzt und es fliesst unnoetig Strom")),
+                _a, _u["reserve"], quelle="ema_analysis.umrichter_passt"))
+
     # ── Fahrzyklus und Fahrzeug ─────────────────────────────────────────────
     zyklus = payload.get("cycle")
     fahrzeug = payload.get("vehicle")
@@ -210,7 +238,14 @@ def pruefen(results: dict, meta: dict | None = None) -> dict:
                        None, None, schwere="verletzt", quelle="meta.payload"))
     elif zyklus and zyklus != "off":
         m = (fahrzeug or {}).get("mass_kg")
+        # Ein LASTSPIEL hat kein Fahrzeug -- hier stand sonst „Fahrzeug 1600 kg"
+        # unter einer Roboterachse, also wieder das Auto, das dieser Zweig
+        # eigentlich abstellen soll. Ob es eines ist, sagen die Punkte selbst.
+        _ls = (zyklus == "lastspiel"
+               or (results.get("drivecycle") or {}).get("art") == "lastspiel")
         krit.append(_k("fahrprofil", True,
+                       (f"Lastspiel '{s.get('cycle_name') or zyklus}' — kein Fahrzeug, "
+                        f"Drehzahl und Moment der Welle sind vorgegeben") if _ls else
                        f"Zyklus '{s.get('cycle_name') or zyklus}'"
                        + (f", Fahrzeug {m:.0f} kg" if isinstance(m, (int, float))
                           else ", Fahrzeug: Vorgabe (1600 kg Pkw)"),

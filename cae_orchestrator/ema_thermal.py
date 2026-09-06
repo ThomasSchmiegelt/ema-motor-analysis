@@ -82,7 +82,8 @@ def rated_torque(geom: dict, axial: float, cooling: str) -> float:
     return max(1.0, 2.0 * sigma * V_rot)
 
 
-def mit_umrichtergrenze(t_thermisch: float, t_bei_strom, i_grenze: float = 0.0) -> dict:
+def mit_umrichtergrenze(t_thermisch: float, t_bei_strom, i_grenze: float = 0.0,
+                        geom: dict | None = None) -> dict:
     """Dauermoment: das KLEINERE aus Kuehlung und Umrichter -- und welches bindet.
 
     ``rated_torque`` gibt das **kuehlbare** Moment aus der Luftspalt-Schubspannung.
@@ -109,7 +110,11 @@ def mit_umrichtergrenze(t_thermisch: float, t_bei_strom, i_grenze: float = 0.0) 
     hereingereicht und nicht hier angenommen.
     """
     import ema_analysis
-    i_lim = float(i_grenze) if i_grenze and i_grenze > 0 else ema_analysis.INVERTER_I_MAX
+    # Reihenfolge: ausdrueckliche Grenze, sonst die des Umrichters aus ``geom``,
+    # sonst die Modulvorgabe. ``geom`` ist erst seit dem einstellbaren Umrichter
+    # dabei und bleibt darum wahlfrei -- ohne es gilt weiter 800 A.
+    i_lim = (float(i_grenze) if i_grenze and i_grenze > 0
+             else float(ema_analysis.umrichter(geom or {})["i_max_1t"]))
     t_umr = max(float(t_bei_strom(i_lim)), 0.0)
     t_th = max(float(t_thermisch), 0.0)
     bindet = "Kuehlung" if t_th <= t_umr else "Umrichter"

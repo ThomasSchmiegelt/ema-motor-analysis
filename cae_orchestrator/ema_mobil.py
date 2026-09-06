@@ -101,7 +101,9 @@ def eckdrehzahl(geom: dict, b_gap_t: float) -> float:
     emf1 = ema_analysis.compute_performance(geom, b_gap_t, 1000.0)["emf_peak_V"]
     if emf1 <= 0:
         return 0.0
-    return 1000.0 * 0.4 * (ema_analysis.INVERTER_V_DC / math.sqrt(3)) / emf1
+    # Spannungsgrenze auf 1 Wdg/Nut -- dieselbe Bezugsgroesse wie emf1, das aus
+    # ``compute_performance`` kommt und ebenfalls fuer eine Windung gilt.
+    return 1000.0 * 0.4 * (ema_analysis.umrichter(geom)["v_dc_1t"] / math.sqrt(3)) / emf1
 
 
 # ── Token ─────────────────────────────────────────────────────────────────────

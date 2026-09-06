@@ -292,9 +292,13 @@ def test_schema_has_no_second_geom_table():
     bekannt und beim Payload-Bau unbekannt sein — der Wert landete dann still eine
     Ebene zu hoch. Prueft die Quelle, nicht die Route (laeuft ohne Server)."""
     import ema_text2ema as T2E
+    # inverterVdc/inverterImax stehen bewusst auf der GRUNDebene und nicht bei den
+    # Feinparametern: sie beschreiben nicht eine Feinheit der Maschine, sondern die
+    # Quelle, an der sie haengt -- ohne sie ist jede Aussage ueber Spannungsgrenze,
+    # Feldschwaechung und I_s die einer 800-V-Maschine.
     alt = {"statorOD", "statorID", "rotorOD", "shaftD", "shaftBoreD", "slots",
            "slotDepth", "p", "magShape", "magAngle", "magDepthRel", "magWidth",
-           "magThick", "magDist", "nAx", "nCirc"}
+           "magThick", "magDist", "nAx", "nCirc", "inverterVdc", "inverterImax"}
     basis = {k for k, v in T2E.SCHEMA.items() if v.get("geom") and not v.get("adv")}
     assert basis == alt, f"Basis-geom hat sich verschoben: {basis ^ alt}"
     assert all("geom" in v for v in T2E.SCHEMA.values() if v.get("adv")), \

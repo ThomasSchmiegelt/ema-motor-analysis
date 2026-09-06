@@ -1097,9 +1097,14 @@ PFLICHTPUNKTE = [
     dict(name="anordnung", frage="Magnetanordnung, Pol- und Nutzahl",
          quelle="paarvergleich", hinweis="'paarvergleich --frisch' entscheidet das"),
     dict(name="stromrichter", frage="Zwischenkreisspannung und Strangstromgrenze",
-         quelle="fest", hinweis="FEST verdrahtet: 800 V / 800 A (ema_analysis.INVERTER_*). "
-                                "Fuer ein 48-V-System ist das falsch und NICHT einstellbar "
-                                "— im Bericht sagen"),
+         quelle="schema",
+         hinweis="--set inverterVdc=<V> --set inverterImax=<A_pk> (Klemmenwerte). "
+                 "Vorgabe 800 V / 800 A. WICHTIG: das elektrische Modell rechnet mit "
+                 "EINER Windung je Nut; sobald du eine Klemmenspannung vorgibst, wird "
+                 "mit der wirklichen Windungszahl (turnsPerSlot, ersatzweise "
+                 "conductorsPerSlot) umgerechnet. Passt sie nicht zur Spannung, sagt "
+                 "'sicherheit' welche passen wuerde — bei 24 V sind 800 V-Windungszahlen "
+                 "sinnlos"),
     dict(name="sicherheit", frage="Geforderter Sicherheitsfaktor, Isolierklasse, Grenztemperaturen",
          quelle="fest", hinweis="SF 1,5 · Klasse H 180 °C · Magnetgrenze aus der "
                                 "Werkstofftabelle ('sicherheit' prueft danach)"),

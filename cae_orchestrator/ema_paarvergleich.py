@@ -83,7 +83,7 @@ Speiche und Doppel-V liefern beide ~400 Nm, die Speiche braucht 393,9 A, das
 Doppel-V 291,8 A. Ueber Kt allein waere dieser Unterschied unsichtbar geblieben.
 
 **Wo I_s aufhoert, eine Zahl zu sein:** am Umrichter-Limit
-(``INVERTER_I_MAX``) wird der Strom gedeckelt -- die Option erreicht das
+(``ema_analysis.umrichter``) wird der Strom gedeckelt -- die Option erreicht das
 Sollmoment dann gar nicht, und zwei gedeckelte Optionen sehen mit demselben Wert
 gleich aus. Solche Zeilen tragen deshalb eine eigene Warnung.
 
@@ -816,7 +816,7 @@ def _bewerte_pmsm(payload: dict, n_max: float, rpm: float, last_nm: float) -> di
         # zulaessigen Stroms noetig gewesen waere.
         t_dauer = ema_thermal.mit_umrichtergrenze(
             ema_thermal.rated_torque(geom, axial, kuehl),
-            lambda i: float(perf["Kt_Nm_per_A"]) * i)
+            lambda i: float(perf["Kt_Nm_per_A"]) * i, geom=geom)
         # design_point_losses und NICHT compute_losses(iq, id_): der Kupferanker
         # dort ist Stromdichte x Kupfervolumen und damit **windungszahl- und
         # Kt-unabhaengig**. Mit den rohen dq-Stroemen behauptete die Hairpin-Achse
@@ -841,7 +841,7 @@ def _bewerte_pmsm(payload: dict, n_max: float, rpm: float, last_nm: float) -> di
         # zwei gedeckelte Optionen sehen mit denselben 800 A gleich aus, obwohl die
         # eine 900 und die andere 1500 braeuchte. Das muss als Befund dastehen,
         # nicht als Messwert.
-        am_limit = i_s >= 0.999 * ema_analysis.INVERTER_I_MAX
+        am_limit = i_s >= 0.999 * float(ema_analysis.umrichter(geom)["i_max_1t"])
         # Anteil des Reluktanzmoments am Sollmoment. Der Magnetanteil ist exakt
         # 1.5*p*psi_pm*i_q; das Gesamtmoment am zurueckgegebenen Arbeitspunkt ist
         # per Konstruktion das Sollmoment einschliesslich des Zuschlags, den
@@ -1176,7 +1176,8 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
                          f"kuehlbar — mehr Kuehlung bringt hier nichts")
             if o.get("strom_limit"):
                 z.append(f"        ⚠ Strom am Umrichter-Limit "
-                         f"({ema_analysis.INVERTER_I_MAX:.0f} A bei 1 Wdg/Nut) — "
+                         f"({o.get('i_grenze_1t_A') or ema_analysis.INVERTER_I_MAX:.0f} A "
+                         f"bei {o.get('n_wdg') or 1} Wdg/Nut) — "
                          f"diese Option erreicht {erg['last_nm']:.0f} Nm dort NICHT; "
                          f"I_s ist gedeckelt und nicht vergleichbar")
             if o.get("tasche_offen"):

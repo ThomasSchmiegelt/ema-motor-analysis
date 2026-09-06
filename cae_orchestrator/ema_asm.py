@@ -376,7 +376,7 @@ def auslegungsstrom_stab(geom: dict) -> dict:
     """Der Strom, fuer den der Kaefig zu bemessen ist -- aus der Geometrie allein.
 
     Warum das ohne Betriebspunkt geht: der Umrichter begrenzt den Strangstrom
-    auf ``INVERTER_I_MAX``, und der Magnetisierungsstrom liegt durch das
+    auf die Umrichtergrenze, und der Magnetisierungsstrom liegt durch das
     Ziel-Luftspaltfeld fest. Mehr momentbildenden Strom als
     ``sqrt(I_lim^2 - i_mag^2)`` kann diese Maschine nie fuehren -- also ist der
     zugehoerige Stabstrom ihr groesster ueberhaupt moeglicher. Genau dafuer wird
@@ -390,7 +390,9 @@ def auslegungsstrom_stab(geom: dict) -> dict:
     """
     mg = magnetisierungsstrom(geom)
     i_mag = mg["i_mag_A"]
-    i_lim = float(ema_analysis.INVERTER_I_MAX)
+    # Stromgrenze aus ``geom`` (``ema_analysis.umrichter``), auf 1 Wdg/Nut bezogen
+    # -- dieselbe Bezugsgroesse wie Kt. Ohne geom-Eintrag ist es die Vorgabe 800 A.
+    i_lim = float(ema_analysis.umrichter(geom)["i_max_1t"])
     i_q = math.sqrt(max(i_lim ** 2 - i_mag ** 2, 0.0))
     n_stab = stabzahl(geom)
     i_stab = stabstrom(geom, i_q, n_stab)
@@ -415,7 +417,7 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     t_soll = float(last_nm) + ema_analysis.DQ_TORQUE_MARGIN_NM
 
     # Der Umrichter begrenzt den STRANGSTROM, nicht seinen momentbildenden
-    # Anteil. Hier stand ``min(i_q, INVERTER_I_MAX)`` -- und weil der
+    # Anteil. Hier stand ``min(i_q, <Stromgrenze>)`` -- und weil der
     # Magnetisierungsstrom danach geometrisch dazukam, meldete die ASM gemessen
     # 977 A bei einer Grenze von 800 A. Die Zahl stand da, war ueber der Grenze,
     # und nur ein Warnhinweis daneben sagte es.
@@ -423,7 +425,9 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     # Richtig ist: was nach dem Magnetisierungsstrom uebrig bleibt, ist der
     # groesste momentbildende Strom. Genau das ist der Preis dieser Bauart.
     i_mag = mg["i_mag_A"]
-    i_lim = float(ema_analysis.INVERTER_I_MAX)
+    # Stromgrenze aus ``geom`` (``ema_analysis.umrichter``), auf 1 Wdg/Nut bezogen
+    # -- dieselbe Bezugsgroesse wie Kt. Ohne geom-Eintrag ist es die Vorgabe 800 A.
+    i_lim = float(ema_analysis.umrichter(geom)["i_max_1t"])
     i_q_max = math.sqrt(max(i_lim ** 2 - i_mag ** 2, 0.0))
     i_q_roh = t_soll / kt
     i_q = min(i_q_roh, i_q_max)
@@ -531,7 +535,7 @@ def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> dict:
     # Und die zweite Grenze: was der Umrichter hergibt. Ohne sie stand hier ein
     # Moment, fuer das viermal der zulaessige Strom noetig gewesen waere.
     return ema_thermal.mit_umrichtergrenze(
-        t_th, lambda i: kt * math.sqrt(max(i ** 2 - i_mag ** 2, 0.0)))
+        t_th, lambda i: kt * math.sqrt(max(i ** 2 - i_mag ** 2, 0.0)), geom=geom)
 
 
 # ── Massen und Kosten ─────────────────────────────────────────────────────────

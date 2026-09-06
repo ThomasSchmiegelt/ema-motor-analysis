@@ -86,6 +86,17 @@ Der Regler `windingHeadSpread` geht in der Oberfläche bis 8°, `windingHeadFlar
 es durch und die Überschreitung steht als ⚠ im Ergebnis, statt unbemerkt durchzugehen.
 Ohne ausdrückliche Nachfrage des Auftraggebers tust du das **nicht**.
 
+### Der Umrichter: `inverterVdc` und `inverterImax`
+
+```bash
+--set inverterVdc=24 --set inverterImax=200   # Klemmenwerte, Vorgabe 800 V / 800 A
+--set turnsPerSlot=2                          # Windungen je Nut
+```
+
+**Lies das, bevor du eine Spannung setzt.** Das elektrische Modell rechnet mit **einer Windung je Nut** — K_t, ψ, L_d/L_q und das Kennfeld; `conductorsPerSlot` geht dort gar nicht ein. Eine wirkliche Klemmenspannung ist darin ohne die Windungszahl nicht darstellbar: bei fester Geometrie und festem Moment liegen die **Amperewindungen** fest, und N tauscht Strom gegen Spannung (K_t ∝ N, i ∝ 1/N, u ∝ N). 24 V mit 200 A und 800 V mit 6 A sind **dieselbe Maschine** mit zwei Wicklungen.
+
+Deshalb: wer eine Spannung setzt, setzt auch `turnsPerSlot`. `sicherheit` prüft es und nennt die passende Zahl — die Gegen-EMK bei `rpm_to` soll 40–85 % der Klemmenspannung belegen; darüber erreicht die Maschine die Drehzahl nicht, darunter bleibt der Umrichter ungenutzt. **Ohne Vorgabe ändert sich nichts**: 800 V / 800 A auf 1 Wdg/Nut wie bisher, jede Altrechnung bleibt gleich.
+
 ### Der Lastfall: fährt sie, oder dreht sie nur?
 
 **Diese Frage kommt VOR der Frage, welcher Zyklus.** `aufgabe` stellt sie, `zyklus liste` stellt sie noch einmal:

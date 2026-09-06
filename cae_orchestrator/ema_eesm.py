@@ -268,10 +268,11 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     kt = max(float(perf["Kt_Nm_per_A"]), 1e-9)
     t_soll = float(last_nm) + ema_analysis.DQ_TORQUE_MARGIN_NM
 
+    i_lim = float(ema_analysis.umrichter(geom)["i_max_1t"])
     i_q_roh = t_soll / kt
-    i_q = min(i_q_roh, ema_analysis.INVERTER_I_MAX)
+    i_q = min(i_q_roh, i_lim)
     i_s = i_q                                   # kein Magnetisierungsstrom im Stator
-    am_limit = i_s >= 0.999 * ema_analysis.INVERTER_I_MAX or i_q_roh > i_q
+    am_limit = i_s >= 0.999 * i_lim or i_q_roh > i_q
     t_ist = min(t_soll, kt * i_q)
 
     return {

@@ -85,6 +85,18 @@ SCHEMA = {
     "load_nm":    {"kind": "num", "lo": 0,   "hi": 1000,  "def": 120,   "desc": "Auslegungs-Lastmoment [Nm]"},
     "T_ambient":  {"kind": "num", "lo": -40, "hi": 80,    "def": 25,    "desc": "Umgebungstemperatur [°C]"},
 
+    # ── Umrichter. Bis zum 06.09.2026 waren das Modulglobale in ema_analysis, die
+    #    niemand einstellen konnte -- fuer einen 24-V-Antrieb war damit jede Aussage
+    #    ueber Spannungsgrenze, Feldschwaechung und I_s die einer anderen Maschine.
+    #    Die Vorgaben sind die alten Zahlen, also aendert sich ohne Zutun nichts.
+    "inverterVdc":  {"kind": "num", "lo": 12,  "hi": 1500, "def": 800, "geom": True,
+                     "desc": "Zwischenkreisspannung an den Klemmen [V]"},
+    "inverterImax": {"kind": "num", "lo": 1,   "hi": 2000, "def": 800, "geom": True,
+                     "desc": "Strangstromamplitude an den Klemmen [A_pk]"},
+    # Die Windungszahl steht schon in ``turnsPerSlot`` (weiter unten, ersatzweise
+    # ``conductorsPerSlot``) -- sie ist der Umrechnungsschluessel zwischen Klemme und
+    # Rechnung und bekommt hier ausdruecklich KEINEN zweiten Schluessel.
+
     # ── Feinparameter (adv) — vom LLM nicht erfragt, ueber die Parametertabelle und
     #    ``cae_cli --set`` aber voll gepflegt. Aufgenommen ist, was die Rechnung
     #    nachweislich liest (ema_analysis / ema_topology / ema_thermal / ema_em3d);
