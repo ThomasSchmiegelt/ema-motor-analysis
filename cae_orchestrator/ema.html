@@ -10576,7 +10576,7 @@ function renderEmCurve(em) {
     `<tr><td>${r.rpm}</td><td>${r.emf_peak_V.toFixed(1)}</td>
          <td>${r.emf_rms_V.toFixed(1)}</td>
          <td>${r.Kt_Nm_per_A.toFixed(4)}</td>
-         <td>${r.T_cogging_Nm.toFixed(3)}</td></tr>`
+         <td>${r.T_cogging_Nm.toFixed(3)} <span class="hint">gesch\u00e4tzt (Zhu/Howe) \u2014 Nutschlitz, Luftspalt, kgV und Schr\u00e4gung; nicht gemessen</span></td></tr>`
   ).join('');
 }
 

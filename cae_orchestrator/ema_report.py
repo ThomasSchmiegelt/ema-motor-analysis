@@ -387,7 +387,7 @@ Schreibe einen strukturierten, sachlichen Bericht in Markdown mit genau diesen A
 
 1. **Zusammenfassung** — 3–5 Sätze zur Gesamtbewertung (qualitativ, ohne Zahlen)
 2. **Geometrie und Konstruktion** — Abmessungen, Polzahl/Nutzahl, gewählte Magnet-Topologie (`geometry.magTopologie`) und ihre Eignung, Masse
-3. **Elektromagnetische Auslegung** — B_gap, Kt, Drehmoment, Rastmoment (LCM); falls `em_erweitert` vorhanden: Ld/Lq und Salienz ξ, Magnet- vs. Reluktanzmoment-Anteil (besonders bei PMa-SynRM/Spoke), MTPA-Stromwinkel, Kurzschlussstrom Isc; falls `segmentierung` vorhanden: Wirkung der Magnetsegmentierung auf die Wirbelstromverluste (Verlustfaktor, Skintiefe, ggf. Wirkungslos-Warnung)
+3. **Elektromagnetische Auslegung** — B_gap, Kt, Drehmoment, Rastmoment (analytisch nach Zhu/Howe: kgV aus Nut- und Polzahl, Nutschlitzbreite, Luftspalt, Schrägung — GESCHÄTZT, nicht gemessen; der FDM kann es nicht, seine gedrehte Rastergeometrie erzeugt ein größeres Scheinmoment); falls `em_erweitert` vorhanden: Ld/Lq und Salienz ξ, Magnet- vs. Reluktanzmoment-Anteil (besonders bei PMa-SynRM/Spoke), MTPA-Stromwinkel, Kurzschlussstrom Isc; falls `segmentierung` vorhanden: Wirkung der Magnetsegmentierung auf die Wirbelstromverluste (Verlustfaktor, Skintiefe, ggf. Wirkungslos-Warnung)
 4. **Festigkeit** — σ_v,max, Sicherheitsfaktor, Verschiebung, max. sichere Drehzahl
 5. **Thermisches Verhalten** — Kühlung, Endtemperaturen, Gesamtverluste, ggf. Warnungen; falls `em_erweitert.demag` vorhanden: Demagnetisierungs-Reserve bei Magnettemperatur (Risiko ja/nein)
 {fahrzyklus_section}

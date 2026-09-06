@@ -884,12 +884,19 @@ def umrichter(geom: dict, rpm_max: float = 0.0) -> dict:
     ist eine andere. Ohne diese Umrechnung ist „24 V" in dieser Rechnung nicht
     darstellbar, und genau daran scheiterte der Roboterarm-Entwurf.
 
-    **Solange niemand den Umrichter einstellt, bleibt N = 1.** Das ist die
-    stillschweigende Annahme, mit der dieses Modul immer gerechnet hat; jede
-    Altrechnung bleibt damit Ziffer fuer Ziffer dieselbe, und die Oberflaeche sagt
-    seit jeher „Stroeme wie Kt auf 1 Wdg/Nut bezogen". Erst wer eine Spannung oder
-    einen Strom vorgibt, meint eine wirkliche Klemme -- und dann wird mit der
-    wirklichen Windungszahl umgerechnet. ``n_quelle`` sagt, welcher Fall vorliegt.
+    **Worauf sich die Grenzen beziehen, sagt ``umrichterBezug``** und nicht ihr
+    Wert. Vorgabe ``"einwindung"``: sie gelten bei EINER Windung je Nut -- die
+    stillschweigende Annahme, mit der dieses Modul immer gerechnet hat, und der
+    Grund, aus dem jede Altrechnung Ziffer fuer Ziffer dieselbe bleibt (die
+    Oberflaeche sagt seit jeher „Stroeme wie Kt auf 1 Wdg/Nut bezogen").
+    ``"wicklung"``: sie sind Klemmenwerte und werden mit der wirklichen
+    Windungszahl umgerechnet.
+
+    Das war zuerst anders geloest -- aus „weicht von der Vorgabe ab" wurde auf
+    „ist eine wirkliche Klemme" geschlossen. Das brach sichtbar auf: in der
+    Paarvergleichs-Stromachse lieferten 800 A weniger Moment als 400 A, weil
+    ausgerechnet der Vorgabewert auf den anderen Bezug zurueckfiel. Ein Bezug, den
+    man aus dem Zahlenwert erraet, ist keiner.
 
     Zurueck kommt beides, und die Unterscheidung ist der ganze Zweck:
 
@@ -900,14 +907,23 @@ def umrichter(geom: dict, rpm_max: float = 0.0) -> dict:
     import ema_wicklung
 
     g = geom or {}
-    v_roh = g.get("inverterVdc")
-    i_roh = g.get("inverterImax")
-    gesetzt = ((v_roh not in (None, "", 0) and float(v_roh) != INVERTER_V_DC)
-               or (i_roh not in (None, "", 0) and float(i_roh) != INVERTER_I_MAX))
-    v_dc = float(v_roh or 0.0) or INVERTER_V_DC
-    i_max = float(i_roh or 0.0) or INVERTER_I_MAX
+    v_dc = float(g.get("inverterVdc") or 0.0) or INVERTER_V_DC
+    i_max = float(g.get("inverterImax") or 0.0) or INVERTER_I_MAX
 
-    if gesetzt:
+    # WORAUF sich die beiden Grenzen beziehen, wird gesagt und nicht aus ihrem Wert
+    # erraten. Der erste Entwurf schloss aus „weicht von der Vorgabe ab" auf „ist
+    # eine wirkliche Klemme" -- das brach in der Paarvergleichs-Stromachse sichtbar
+    # auf: 800 A lieferten dort WENIGER Moment als 400 A, weil ausgerechnet der
+    # Vorgabewert auf den anderen Bezug zurueckfiel. Innerhalb einer Achse muessen
+    # alle Optionen dasselbe meinen.
+    #
+    #   "einwindung" (Vorgabe)  die Grenzen gelten bei EINER Windung je Nut -- die
+    #                           stillschweigende Annahme, mit der dieses Modul immer
+    #                           gerechnet hat. Jede Altrechnung bleibt damit gleich.
+    #   "wicklung"              die Grenzen sind KLEMMENwerte und werden mit der
+    #                           wirklichen Windungszahl umgerechnet.
+    bezug = str(g.get("umrichterBezug") or "einwindung").strip().lower()
+    if bezug == "wicklung":
         n_wdg = max(1, int(ema_wicklung.windungen(g)))
         quelle = "wicklung"
     else:
@@ -931,6 +947,19 @@ def umrichter_passt(geom: dict, rpm_max: float) -> dict:
     gebaut wird, entscheidet nicht das Rechenwerkzeug.
     """
     u = umrichter(geom, rpm_max)
+    # Die Falle, die genau hier auffallen muss: eine Klemmenspannung vorgeben und
+    # den Bezug stehen lassen. Dann gelten die 24 V fuer eine Wicklung mit EINER
+    # Windung je Nut -- rechnerisch widerspruchsfrei, gemeint war es nie.
+    v_gesetzt = float((geom or {}).get("inverterVdc") or 0.0)
+    i_gesetzt = float((geom or {}).get("inverterImax") or 0.0)
+    if u["n_quelle"] != "wicklung" and (
+            (v_gesetzt and abs(v_gesetzt - INVERTER_V_DC) > 1e-9)
+            or (i_gesetzt and abs(i_gesetzt - INVERTER_I_MAX) > 1e-9)):
+        return {"ok": False, "bezug_fehlt": True,
+                "text": (f"Umrichtergrenzen sind gesetzt ({u['v_dc_V']:.0f} V / "
+                         f"{u['i_max_A']:.0f} A), gelten aber weiter fuer EINE Windung "
+                         f"je Nut. Als Klemmenwerte: --set umrichterBezug=wicklung"),
+                **u}
     try:
         emf_1t = float(compute_performance(
             geom, _analytical_Bgap(geom), float(rpm_max))["emf_peak_V"])
@@ -1076,7 +1105,19 @@ def compute_performance(geom: dict, B_gap: float, rpm: float = 1000.0,
 
     from math import gcd
     lcm = poles * n_slots // gcd(poles, n_slots)
-    T_cogging_est = Br_NdFeB * R_gap * L_ax * 0.05 / lcm * 1000  # rough [Nm]
+    # Rastmoment aus ``ema_rastmoment`` statt aus der frueheren Zeile
+    #     T = Br_NdFeB * R_gap * L_ax * 0.05 / lcm * 1000
+    # die die Remanenz des WERKSTOFFS statt des Luftspaltfelds nahm, einen Beiwert
+    # 0,05 ohne Herkunft trug und -- der eigentliche Mangel -- die NUTOEFFNUNG gar
+    # nicht kannte. Sie ist der staerkste Hebel ueberhaupt: zwei Auslegungen mit
+    # gleicher Pol- und Nutzahl bekamen dieselbe Zahl, egal wie weit die Nut zum
+    # Luftspalt hin aufging. Faellt der Aufruf aus (unvollstaendige Geometrie), gilt
+    # weiter die alte Zeile, damit ``compute_performance`` nie an ihr scheitert.
+    try:
+        import ema_rastmoment
+        T_cogging_est = ema_rastmoment.rastmoment(geom, B_gap, L_ax * 1000.0)["T_rast_Nm"]
+    except Exception:                                                # noqa: BLE001
+        T_cogging_est = Br_NdFeB * R_gap * L_ax * 0.05 / lcm * 1000  # Rueckfall
 
     return {
         "B_gap_T":          round(B_gap, 3),

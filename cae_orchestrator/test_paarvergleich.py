@@ -254,7 +254,12 @@ pruefe(erg["rangfolge"]["Kt_Nm_per_A"][0][0] in ("maschinenart", "magnetwerkstof
 # Sobald der Umrichter bindet, ordnet nicht mehr die Kuehlung das Dauermoment,
 # sondern das, was Kt bewegt — und das ist die Maschinenart. Die Rangfolge sagt
 # damit die Wahrheit ueber DIESE Maschine, nicht eine allgemeine Regel.
-pruefe(erg["rangfolge"]["T_dauer_Nm"][0][0] in ("kuehlung", "maschinenart"),
+#
+# Seit dem 06.09.2026 steht ``strom`` mit vorn, und das ist die richtige Antwort:
+# der Lauf meldet an dieser Maschine selbst „Dauermoment vom UMRICHTER begrenzt".
+# Wo der Umrichter bindet, ist SEINE Grenze der staerkste Hebel -- vorher gab es
+# dafuer nur keine Achse, also konnte die Rangfolge es nicht sagen.
+pruefe(erg["rangfolge"]["T_dauer_Nm"][0][0] in ("kuehlung", "maschinenart", "strom"),
        f"das Dauermoment von {erg['rangfolge']['T_dauer_Nm'][0][0]}")
 # Auch bei den Kosten steht die Maschinenart inzwischen mit vorn: Magnete gegen
 # keine Magnete sind gemessen 149 gegen 76 EUR (96 %), waehrend +-20 % im

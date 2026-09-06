@@ -109,9 +109,11 @@ available next time.
 
 The screening section below answers "which variant do I take?". One step earlier a
 different question stands: **what does the machine actually depend on?**
-`ema_paarvergleich` puts eight axes — magnet arrangement, conductors per slot, magnet
-/ lamination / conductor material, cooling, diameter, length — option against option,
-all eight in **0.4 s**.
+`ema_paarvergleich` puts **twenty axes** — machine type, magnet arrangement, inner/outer
+rotor, winding type, conductors per slot, magnet / lamination / conductor material,
+cooling, shaft joint, bolting, flux barriers, pocket opening, **skew**, **DC-link
+voltage**, **current limit**, V opening angle, shaft diameter, diameter, length —
+option against option, in seconds.
 
 ```bash
 python3 cae_orchestrator/cae_cli.py paarvergleich --from-project last
@@ -152,6 +154,70 @@ overlap by 5.95 mm), and gate and fit agree on that.
 
 All analytical: no field run, no FEM, no thermal simulation. Cooling acts only through
 a table of shear stresses per cooling type, not through a computed heat transfer.
+
+### Cogging torque — the quantity behind "very precise"
+
+One brief asked for a robot-arm drive, "very precise, including rotational accuracy".
+The tool did not know that quantity. There was one line:
+
+```python
+T_cogging_est = Br_NdFeB * R_gap * L_ax * 0.05 / lcm * 1000   # before
+```
+
+The remanence of the **material** instead of the air-gap field, a coefficient 0.05
+with no provenance — and above all: **the slot opening does not appear in it.** It is
+the single strongest lever. Two designs with the same pole and slot count got the same
+number, no matter how wide the slot opened towards the air gap.
+
+**It is not measured, and that is stated.** The obvious route — rotate the rotor
+through one cogging period in the FDM — does not work here, measured on a 24-slot /
+10-pole machine (cogging period 3.0°). After a full period the *same* value must
+appear:
+
+| Resolution | T(0°) | T(3°) | Difference |
+|---|---:|---:|---:|
+| N=500 | 8.70 Nm | 0.30 Nm | **−8.40** |
+| N=700 | 0.90 Nm | 4.10 Nm | **+3.20** |
+| N=900 | 5.50 Nm | 3.70 Nm | **−1.80** |
+
+It does not converge. The cause is staircasing: the rotor sits on a fixed Cartesian
+grid, and rotating it flips pixels between iron, magnet and air, producing a spurious
+torque many times larger than the one sought. Cogging needs a body-fitted mesh.
+
+`ema_rastmoment` therefore computes it analytically after Zhu/Howe, and separates
+cleanly what is **exact** from what stays an **estimate**:
+
+- **Exact**, pure counting: `n_c = LCM(slots, poles)` (cogging periods per
+  revolution), the cogging factor `2p·Q/n_c` after Gieras, and the skew factor.
+  Skewing by exactly **one slot pitch** cancels the fundamental **exactly** — that is
+  an integral over a full period, not an approximation.
+- **Estimated**, factor ~2: the amplitude itself. Sound for *comparing* two designs
+  (both carry the same error), not as an absolute promise. Every output says so.
+
+**The important side finding:** this tool draws **open slots**. There is no slot
+closure, no bridge — `nut_breite` at the bore *is* the opening, measured 4.03 mm over
+a 0.70 mm gap. That is the worst arrangement for cogging, and the assessment says so
+on every design.
+
+In the pairwise comparison cogging runs as a **permanent column** but does **not**
+count in the balance: how much rotational smoothness matters is decided by the
+application, not by the tool.
+
+### Inverter: voltage and current are settable
+
+`--set inverterVdc=24 --set inverterImax=200 --set umrichterBezug=wicklung`
+
+Previously 800 V / 800 A were module globals nobody could change. It is more than
+passing two numbers through: the electrical model computes with **one turn per slot**
+(`conductorsPerSlot` does not enter K_t, ψ, L_d/L_q or the envelope at all), so the
+800 V belonged to an imagined single-turn winding. At fixed geometry and torque the
+**ampere-turns** are fixed, and the turns count trades current against voltage
+(K_t ∝ N, i ∝ 1/N, u ∝ N): 24 V at 200 A and 800 V at 6 A are the **same machine**
+with two different windings.
+
+`umrichterBezug` states which is meant — it is not inferred from the value. The first
+attempt did infer it, and that broke visibly: in the current axis 800 A produced less
+torque than 400 A, because the default value alone fell back to the other reference.
 
 ## Screening the configuration before computing one
 

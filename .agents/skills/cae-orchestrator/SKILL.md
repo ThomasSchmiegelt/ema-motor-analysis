@@ -86,6 +86,18 @@ Der Regler `windingHeadSpread` geht in der Oberfläche bis 8°, `windingHeadFlar
 es durch und die Überschreitung steht als ⚠ im Ergebnis, statt unbemerkt durchzugehen.
 Ohne ausdrückliche Nachfrage des Auftraggebers tust du das **nicht**.
 
+### Rastmoment — wenn nach Drehgenauigkeit gefragt wird
+
+Es läuft in **jedem** Paarvergleich als Spalte `Rast [%]` mit und steht in `sicherheit`. Drei Hebel, in dieser Reihenfolge:
+
+| Hebel | Wirkung | Wie |
+|---|---|---|
+| **Nut-/Polzahl** | kgV hoch = rastet fein. 30N/10P (kgV 30) ist unbrauchbar, 24N/10P (kgV 120) brauchbar, 27N/10P (kgV 270) sehr gut | `--set slots=…` |
+| **Schrägung** | eine ganze Nutteilung löscht die Grundwelle **exakt** aus, eine halbe lässt noch 13 % stehen | `--set skew_deg=…`, Achse `schraegung` |
+| **Nutschlitz** | der stärkste Hebel — **dieses Werkzeug kann ihn nicht**: es zeichnet offene Nuten, `nut_breite` am Bohrungsrand *ist* die Öffnung | — |
+
+**Sag immer dazu, dass es geschätzt ist.** Analytisch nach Zhu/Howe, Amplitude auf etwa Faktor 2. Gemessen wird es nicht: den Läufer im FDM zu drehen gibt bei einer vollen Rastperiode ±8 Nm Unterschied ohne Konvergenz — Rasterrauschen der gedrehten Geometrie. Der *Vergleich* zweier Auslegungen trägt, die absolute Zusage nicht.
+
 ### Der Umrichter: `inverterVdc` und `inverterImax`
 
 ```bash
@@ -95,7 +107,7 @@ Ohne ausdrückliche Nachfrage des Auftraggebers tust du das **nicht**.
 
 **Lies das, bevor du eine Spannung setzt.** Das elektrische Modell rechnet mit **einer Windung je Nut** — K_t, ψ, L_d/L_q und das Kennfeld; `conductorsPerSlot` geht dort gar nicht ein. Eine wirkliche Klemmenspannung ist darin ohne die Windungszahl nicht darstellbar: bei fester Geometrie und festem Moment liegen die **Amperewindungen** fest, und N tauscht Strom gegen Spannung (K_t ∝ N, i ∝ 1/N, u ∝ N). 24 V mit 200 A und 800 V mit 6 A sind **dieselbe Maschine** mit zwei Wicklungen.
 
-Deshalb: wer eine Spannung setzt, setzt auch `turnsPerSlot`. `sicherheit` prüft es und nennt die passende Zahl — die Gegen-EMK bei `rpm_to` soll 40–85 % der Klemmenspannung belegen; darüber erreicht die Maschine die Drehzahl nicht, darunter bleibt der Umrichter ungenutzt. **Ohne Vorgabe ändert sich nichts**: 800 V / 800 A auf 1 Wdg/Nut wie bisher, jede Altrechnung bleibt gleich.
+**`--set umrichterBezug=wicklung` gehört dazu**, sonst gelten die 24 V weiter für eine gedachte Einwindungswicklung — `sicherheit` beanstandet das. Und wer eine Spannung setzt, setzt auch `turnsPerSlot`. `sicherheit` prüft es und nennt die passende Zahl — die Gegen-EMK bei `rpm_to` soll 40–85 % der Klemmenspannung belegen; darüber erreicht die Maschine die Drehzahl nicht, darunter bleibt der Umrichter ungenutzt. **Ohne Vorgabe ändert sich nichts**: 800 V / 800 A auf 1 Wdg/Nut wie bisher, jede Altrechnung bleibt gleich.
 
 ### Der Lastfall: fährt sie, oder dreht sie nur?
 

@@ -168,6 +168,16 @@ METRIKEN = {
     # fuer dasselbe Moment braucht, braucht weniger Umrichter und macht weniger
     # Kupferverlust -- das ist der Unterschied, den die Anordnung wirklich macht.
     "I_s_A":        ("Strangstrom @ Punkt", "A",          "klein", True),
+    # Rastmoment als ANTEIL am Dauermoment -- absolut sagt es nichts: 0,2 Nm sind
+    # an einem 200-Nm-Traktionsmotor nichts und an einem 2-Nm-Robotergelenk viel.
+    # Es zaehlt bewusst NICHT in der Bilanz: ob Rasten stoert, entscheidet der
+    # Einsatz und nicht das Werkzeug -- an einer Roboterachse ist es die wichtigste
+    # Zahl der Tabelle, an einer Pumpe belanglos. Die Stufe daneben sagt, wofuer es
+    # reicht; gewichten muss der, der die Maschine bestellt.
+    "T_rast_pct":   ("Rastmoment / T_dauer", "%",         "klein", False),
+    "T_rast_Nm":    ("Rastmoment",          "Nm",         "klein", False),
+    "U_dc_V":       ("Zwischenkreis",       "V",          "gross", False),
+    "I_grenze_A":   ("Stromgrenze",         "A",          "gross", False),
     "B_gap_T":      ("B_gap",               "T",          "gross", False),
     "xi_LqLd":      ("Salienz Lq/Ld",       "-",          "gross", False),
     "T_rel_pct":    ("davon Reluktanzmoment", "%",        "gross", False),
@@ -188,10 +198,28 @@ METRIKEN = {
 
 # Kurznamen fuer die Tabellenkoepfe -- 13 Zeichen je Spalte, sonst rutscht die
 # Zeile auseinander und niemand liest sie mehr.
+# Spalten, die IMMER mitlaufen, ohne in der Bilanz zu zaehlen. Das Rastmoment ist
+# der Fall, fuer den es sie gibt: es zaehlen zu lassen hiesse zu entscheiden, wie
+# wichtig Drehgenauigkeit ist -- das entscheidet der Einsatz. Es wegzulassen hiesse,
+# eine Schraegungsachse zu zeigen, unter der „bewegt NICHT: ..." steht, obwohl sie
+# genau das bewegt, wofuer sie da ist. Also: zeigen, nicht gewichten.
+ZUSATZSPALTEN = ("T_rast_pct",)
+
 KURZ = {"Kt_Nm_per_A": "Kt [Nm/A]", "T_dauer_Nm": "T_dauer [Nm]",
         "SF_n_max": "SF n_max", "P_verlust_W": "Verlust [W]",
         "gesamt_kg": "Masse [kg]", "kosten_EUR": "Kosten [EUR]",
-        "T_verbind_Nm": "Welle [Nm]", "I_s_A": "I_s [A]"}
+        "T_verbind_Nm": "Welle [Nm]", "I_s_A": "I_s [A]",
+        "T_rast_pct": "Rast [%]"}
+
+# Schraegung als Anteil EINER Nutteilung. 0 = ungeschraegt, 1 = eine ganze
+# Nutteilung; dort ist das Rastmoment-Integral ueber eine volle Periode und damit
+# exakt null. Die Zwischenwerte zeigen, dass es dazwischen nicht linear zugeht --
+# eine halbe Nutteilung laesst noch gut 13 % stehen.
+SCHRAEGUNG_ANTEILE = (0.0, 0.25, 0.5, 0.75, 1.0)
+# Zwischenkreisspannungen, die man wirklich baut: Kleinantrieb/Batterie, 48-V-Bordnetz,
+# Industrie-Zwischenkreis am 400-V-Netz, Fahrzeug-Hochvolt.
+SPANNUNGEN_V = (24.0, 48.0, 400.0, 800.0)
+STROM_FAKTOREN = (0.25, 0.5, 1.0, 2.0)
 
 DURCHMESSER_FAKTOREN = (0.8, 0.9, 1.0, 1.1, 1.2)
 LAENGEN_FAKTOREN     = (0.7, 0.85, 1.0, 1.15, 1.3)
@@ -308,6 +336,31 @@ def _setz_taschenoeffnung(p, wert):
     kurzschliesst den Magneten. Diese Achse fragt, was er wert ist.
     """
     p["geom"]["magTascheOffen"] = wert
+
+
+def _setz_umrichter(schluessel):
+    """Eine Umrichtergrenze setzen -- und dabei den BEZUG mitsetzen.
+
+    Ohne die zweite Zeile meinte die Option mit dem Vorgabewert etwas anderes als
+    ihre Nachbarn (s. ``ema_analysis.umrichter``), und die Achse zeigte 800 A mit
+    weniger Moment als 400 A. Innerhalb einer Achse muessen alle Optionen dasselbe
+    meinen: hier sind es KLEMMENwerte.
+    """
+    def f(p, wert):
+        p["geom"][schluessel] = wert
+        p["geom"]["umrichterBezug"] = "wicklung"
+    return f
+
+
+def _setz_schraegung(p, wert):
+    """Schraegung in Grad -- und zugleich die Stufung, wenn sie gestaffelt ist.
+
+    Die Achse faehrt Vielfache der NUTTEILUNG, nicht runde Gradzahlen: die
+    Wirkung haengt am Verhaeltnis zur Nutteilung, und die Nullstelle liegt bei
+    genau einer. Zehn Grad sagen ohne die Nutzahl gar nichts.
+    """
+    p["geom"]["skew_deg"] = float(wert)
+    p["skew_deg"] = float(wert)          # der 3-D-Zweig liest ihn auf oberer Ebene
 
 
 def _setz_welle(p, wert):
@@ -432,6 +485,34 @@ ACHSEN = {
         "beschriften": lambda w: _TOPO.TASCHE_OFFEN_LABEL[w],
         "setzen": _setz_taschenoeffnung,
     },
+    # Rastmoment: die Achse faehrt den einen Hebel, den dieses Werkzeug wirklich
+    # rechnen kann. Nutverschluss gibt es zeichnerisch nicht, die Nut-/Polzahl ist
+    # eine eigene Achse -- bleibt die Schraegung, und deren Wirkung ist exakt.
+    "schraegung": {
+        "titel": ("Schraegung gegen das Rastmoment (in Nutteilungen — eine ganze "
+                  "loescht die Grundwelle exakt aus)"),
+        "werte": lambda b: [round(f * 360.0 / max(int(b["geom"]["slots"]), 1), 3)
+                            for f in SCHRAEGUNG_ANTEILE],
+        "beschriften": lambda w: f"{w:.2f}° Schrägung",
+        "setzen": _setz_schraegung,
+    },
+    # Umrichter. Beide Achsen aendern KLEMMENwerte; wie sie sich auswirken, haengt
+    # an der Windungszahl (``ema_analysis.umrichter``) -- deshalb steht sie in der
+    # Kennzahlspalte daneben.
+    "spannung": {
+        "titel": "Zwischenkreisspannung (Klemmenwert)",
+        "werte": lambda b: list(SPANNUNGEN_V),
+        "beschriften": lambda w: f"{w:.0f} V Zwischenkreis",
+        "setzen": _setz_umrichter("inverterVdc"),
+    },
+    "strom": {
+        "titel": "Strangstromgrenze des Umrichters (Klemmenwert)",
+        "werte": lambda b: [round(float(b["geom"].get("inverterImax")
+                                        or ema_analysis.INVERTER_I_MAX) * f, 1)
+                            for f in STROM_FAKTOREN],
+        "beschriften": lambda w: f"{w:.0f} A Stromgrenze",
+        "setzen": _setz_umrichter("inverterImax"),
+    },
     "v_oeffnung": {
         "titel": ("V-Öffnungswinkel (nur V-/U-/Delta-/Doppel-V-/PMa-SynRM-Formen; "
                   "Literatur-Kompromiss 115°)"),
@@ -506,6 +587,36 @@ def _bewerte(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
     else:
         erg = _bewerte_pmsm(payload, n_max, rpm, last_nm)
     if erg.get("ok"):
+        # Rastmoment fuer JEDE Art an EINER Stelle -- es haengt an Nut-/Polzahl,
+        # Nutoeffnung, Luftspalt und Schraegung, und die gibt es bei allen vieren.
+        # Der Kaefiglaeufer hat kein Rastmoment im engeren Sinn (keine Magnete),
+        # aber Nutungsmomente aus derselben Geometrie; deshalb steht die Zahl auch
+        # dort, mit dem Vermerk der Maschinenart an der Auswertung.
+        try:
+            import ema_rastmoment
+            _geom = payload.get("geom") or payload
+            _rb = ema_rastmoment.bewerte(
+                _geom, float(erg.get("B_gap_T") or 0.0),
+                float(payload.get("axial_len") or _geom.get("axialLen") or 0.0),
+                float(erg.get("T_dauer_Nm") or 0.0) or float(last_nm))
+            erg["T_rast_Nm"] = _rb["T_rast_Nm"]
+            erg["T_rast_pct"] = _rb["anteil_pct"]
+            erg["rast_stufe"] = _rb["stufe"]
+            erg["rast_kgv"] = _rb["ordnung"]["n_c"]
+            erg["rast_hinweise"] = _rb["hinweise"]
+        except Exception:                                    # noqa: BLE001
+            pass
+        # Was am Umrichter steht -- damit eine Spannungs- oder Stromachse eine
+        # Kennzahl hat und nicht nur eine Beschriftung.
+        try:
+            import ema_analysis as _A
+            _u = _A.umrichter(payload.get("geom") or payload, n_max)
+            erg["U_dc_V"] = _u["v_dc_V"]
+            erg["I_grenze_A"] = _u["i_max_A"]
+            erg["n_wdg"] = _u["n_wdg"]
+            erg["i_grenze_1t_A"] = _u["i_max_1t"]
+        except Exception:                                    # noqa: BLE001
+            pass
         # Die recherchierten Baender je Bauart (``ema_referenz.ART_BAND``) --
         # kein Tor, sondern eine Einordnung. Sie decken genau die Groessen ab,
         # die unsere Module bisher GESETZT und nicht gemessen hatten; faellt eine
@@ -1152,7 +1263,7 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
             z.append(f"    ⓘ {a['hinweis']}")
         kopf = f"  {'Option':<34}"
         for m, (lab, einheit, _r, zaehlt) in METRIKEN.items():
-            if zaehlt:
+            if zaehlt or m in ZUSATZSPALTEN:
                 kopf += f"{KURZ.get(m, lab)[:12]:>13}"
         z.append(kopf)
         for o in a["optionen"]:
@@ -1161,9 +1272,20 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
                 continue
             zeile = f"  {o['name'][:34]:<34}"
             for m, (_lab, _e, _r, zaehlt) in METRIKEN.items():
-                if zaehlt:
-                    zeile += f"{o[m]:>13.4g}"
+                if zaehlt or m in ZUSATZSPALTEN:
+                    zeile += (f"{o[m]:>13.4g}" if isinstance(o.get(m), (int, float))
+                              else f"{'—':>13}")
             z.append(zeile)
+            # Das Rastmoment als Stufe UNTER der Zeile: der Prozentwert allein sagt
+            # nicht, wofuer er reicht, und genau danach war die Frage („sehr praezise
+            # auch von der Drehgenauigkeit").
+            if o.get("rast_stufe") and o["rast_stufe"] != "praezise":
+                z.append(f"        ⚠ Rastmoment {o.get('T_rast_Nm', 0):.3f} Nm = "
+                         f"{o.get('T_rast_pct', 0):.2f} % — {o['rast_stufe']}, "
+                         f"kgV {o.get('rast_kgv', '?')} (geschaetzt, s. ema_rastmoment)")
+                if float(o.get("T_rast_pct") or 0) > 50.0:
+                    z.append("          jenseits von 50 % sagt das Modell nur noch "
+                             "„so nicht brauchbar\" und keine Zahl mehr")
             # Der Zusatzteil-Befund steht UNTER der Zeile und nicht als Spalte: er
             # ist kein Messwert, sondern ein Ausschlussgrund, und er muss im Klartext
             # dastehen. Das Layouttor meldet ihn nur als Warnung -- fuer die Wahl
@@ -1197,6 +1319,24 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
                         if METRIKEN[m][3] and s["spanne_pct"] < 100 * GLEICH_UNTER]
             if unbewegt:
                 z.append(f"    bewegt NICHT: {', '.join(unbewegt)}")
+            # Eine Achse kann in JEDER gezaehlten Kennzahl gleich sein und trotzdem
+            # das Entscheidende bewegen -- die Schraegung ist genau dieser Fall.
+            # Ohne diese Zeile stuende dort „bewegt NICHT: alles" unter einer
+            # Achse, deren ganzer Zweck die Zeile darueber ist.
+            for m in ZUSATZSPALTEN:
+                sp = a["spannweite"].get(m)
+                if sp and sp["spanne_pct"] >= 100 * GLEICH_UNTER:
+                    # Prozentspanne nur, wo sie etwas heisst. Geht der kleinste
+                    # Wert gegen null -- bei einer Schraegung um eine ganze
+                    # Nutteilung ist er exakt null --, waeren es "1.835.800 %", und
+                    # das ist keine Auskunft, sondern eine Division.
+                    if sp["min"] > 1e-6 and sp["spanne_pct"] < 10000:
+                        wie = f" ({sp['spanne_pct']:.0f} % Spanne)"
+                    else:
+                        wie = " (der kleinste Wert geht gegen null)"
+                    z.append(f"    bewegt aber (ungewichtet): {METRIKEN[m][0]} "
+                             f"{sp['min']:.4g} … {sp['max']:.4g} "
+                             f"{METRIKEN[m][1]}{wie}")
         if paare and a["paare"]:
             z.append(f"    Paare ({len(a['paare'])}, gezeigt {min(max_paare, len(a['paare']))}):")
             for p in a["paare"][:max_paare]:

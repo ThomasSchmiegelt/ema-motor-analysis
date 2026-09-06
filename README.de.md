@@ -352,9 +352,11 @@ Rechenaufgabe ausgelagert.
 
 Die Vorauswahl unten beantwortet „welche Variante nehme ich?". Eine Stufe früher
 steht eine andere Frage: **woran hängt die Maschine überhaupt?** `ema_paarvergleich`
-stellt acht Achsen — Magnetanordnung, Leiter je Nut, Magnet-, Blech- und
-Leiterwerkstoff, Kühlung, Durchmesser, Länge — Option gegen Option, alle acht in
-**0,4 s**.
+stellt **zwanzig Achsen** — Maschinenart, Magnetanordnung, Bauform, Wicklungsart,
+Leiter je Nut, Magnet-, Blech- und Leiterwerkstoff, Kühlung, Wellenverbindung,
+Verschraubung, Flussbarrieren, Taschenöffnung, **Schrägung**, **Zwischenkreis-
+spannung**, **Stromgrenze**, V-Öffnungswinkel, Wellendurchmesser, Durchmesser,
+Länge — Option gegen Option, in Sekunden.
 
 ```bash
 python3 cae_orchestrator/cae_cli.py paarvergleich --from-project last
@@ -397,6 +399,90 @@ Einpassung sind sich darin einig.
 Alles analytisch: kein Feldlauf, keine FEM, keine Thermiksimulation. Die Kühlung
 wirkt nur über eine Tabelle von Schubspannungen je Kühlart, nicht über einen
 gerechneten Wärmeübergang.
+
+### Rastmoment — die Größe hinter „sehr präzise"
+
+Ein Auftrag lautete: Roboterarm-Antrieb, „sehr präzise auch von der
+Drehgenauigkeit". Genau diese Größe kannte das Werkzeug nicht. Es gab eine Zeile:
+
+```python
+T_cogging_est = Br_NdFeB * R_gap * L_ax * 0.05 / lcm * 1000   # vorher
+```
+
+Die Remanenz des **Werkstoffs** statt des Luftspaltfelds, ein Beiwert 0,05 ohne
+Herkunft — und vor allem: **die Nutöffnung kommt darin nicht vor.** Sie ist der
+stärkste Hebel überhaupt. Zwei Auslegungen mit gleicher Pol- und Nutzahl bekamen
+dieselbe Zahl, egal wie weit die Nut zum Luftspalt hin aufging.
+
+**Gemessen wird es nicht — und das steht dabei.** Der naheliegende Weg wäre, den
+Läufer im FDM über eine Rastperiode zu drehen. Das geht hier nicht, nachgemessen an
+einer 24N/10P-Maschine (Rastperiode 3,0°); nach einer vollen Periode *muss*
+derselbe Wert stehen:
+
+| Auflösung | T(0°) | T(3°) | Differenz |
+|---|---:|---:|---:|
+| N=500 | 8,70 Nm | 0,30 Nm | **−8,40** |
+| N=700 | 0,90 Nm | 4,10 Nm | **+3,20** |
+| N=900 | 5,50 Nm | 3,70 Nm | **−1,80** |
+
+Es konvergiert nicht. Ursache ist die Treppung: der Läufer liegt auf einem festen
+kartesischen Raster, beim Drehen springen Bildpunkte zwischen Eisen, Magnet und
+Luft, und das erzeugt ein Scheinmoment, das um ein Vielfaches größer ist als das
+gesuchte. Ein Rastmoment braucht ein körperangepasstes Netz.
+
+`ema_rastmoment` rechnet es deshalb analytisch nach Zhu/Howe — und trennt sauber,
+was **exakt** ist von dem, was **geschätzt** bleibt:
+
+- **Exakt**, reine Zählerei: `n_c = kgV(Nutzahl, Polzahl)` (Rastperioden je
+  Umdrehung), der Rastfaktor `2p·Q/n_c` nach Gieras, und der Schrägungsfaktor. Eine
+  Schrägung um genau **eine Nutteilung** löscht die Grundwelle **exakt** aus — das
+  ist ein Integral über eine volle Periode, keine Näherung.
+- **Geschätzt**, Faktor ~2: die Amplitude selbst. Für den *Vergleich* zweier
+  Auslegungen tragfähig (beide Seiten tragen denselben Fehler), als absolute Zusage
+  nicht. So steht es in jeder Ausgabe.
+
+Was die neue Rechnung kann und die alte Zeile nicht (an einem 75-mm-Antrieb, 6 Nm):
+
+| Änderung | Rastmoment |
+|---|---:|
+| Ausgang, offene Nut 4,03 mm | 0,136 Nm (2,3 %) |
+| Nutschlitz gedacht auf 1,0 mm | 0,045 Nm |
+| Nutschlitz gedacht auf 0,5 mm | 0,015 Nm |
+| Schrägung um eine halbe Nutteilung | 0,017 Nm |
+| Schrägung um eine ganze Nutteilung | **0,000 Nm** |
+| 27 Nuten statt 24 (kgV 270 statt 120) | 0,002 Nm |
+| 30 Nuten zu 10 Polen (kgV 30) | unbrauchbar |
+
+**Der wichtigste Befund nebenbei:** dieses Werkzeug zeichnet **offene Nuten**. Es
+gibt keinen Nutverschluss, keinen Schlitzsteg — `nut_breite` am Bohrungsrand *ist*
+die Öffnung, gemessen 4,03 mm über 0,70 mm Luftspalt. Das ist die ungünstigste
+Anordnung für das Rastmoment, und die Bewertung sagt es bei jeder Auslegung dazu.
+
+Im Paarvergleich läuft das Rastmoment als **stehende Spalte** mit, zählt aber
+**nicht** in der Bilanz: wie wichtig Drehgenauigkeit ist, entscheidet der Einsatz
+und nicht das Werkzeug — an einer Roboterachse ist es die wichtigste Zahl der
+Tabelle, an einer Pumpe belanglos. Es wegzulassen wäre trotzdem falsch gewesen:
+unter der Schrägungsachse stünde sonst „bewegt NICHT: alles", obwohl sie genau das
+bewegt, wofür sie da ist.
+
+### Umrichter: Spannung und Strom sind einstellbar
+
+`--set inverterVdc=24 --set inverterImax=200 --set umrichterBezug=wicklung`
+
+Vorher waren 800 V / 800 A Modulglobale, die niemand ändern konnte. Es ist mehr als
+zwei Zahlen durchzureichen: das elektrische Modell rechnet mit **einer Windung je
+Nut** (`conductorsPerSlot` geht in K_t, ψ, L_d/L_q und das Kennfeld gar nicht ein),
+also gehörten die 800 V zu einer gedachten Einwindungswicklung. Bei fester Geometrie
+und festem Moment liegen die **Amperewindungen** fest, und die Windungszahl tauscht
+Strom gegen Spannung (K_t ∝ N, i ∝ 1/N, u ∝ N): 24 V mit 200 A und 800 V mit 6 A
+sind **dieselbe Maschine** mit zwei Wicklungen.
+
+`umrichterBezug` sagt, was gemeint ist — es wird nicht aus dem Zahlenwert erraten.
+Der erste Entwurf tat genau das, und es brach sichtbar auf: in der Stromachse
+lieferten 800 A weniger Moment als 400 A, weil ausgerechnet der Vorgabewert auf den
+anderen Bezug zurückfiel. `sicherheit` prüft außerdem, ob die Wicklung zum Umrichter
+passt, und nennt die Windungszahl, die passen würde — gewählt wird sie nicht: welche
+Wicklung gebaut wird, entscheidet nicht das Rechenwerkzeug.
 
 ## Vorauswahl: erst die Bauform durchspielen, dann eine rechnen
 

@@ -199,6 +199,36 @@ def pruefen(results: dict, meta: dict | None = None) -> dict:
                        f"{dem.get('magnet_temp_C', '?')} °C",
                        dem.get("margin_T"), 0.0, "T", quelle="em_advanced.demag"))
 
+    # ── Rastmoment ──────────────────────────────────────────────────────────
+    # Kein Tor mit fester Schranke: ob Rasten stoert, entscheidet der Einsatz. An
+    # einer Roboterachse sind 3 % unbrauchbar, an einer Pumpe belanglos. Beanstandet
+    # wird deshalb nur, was fuer JEDEN geregelten Antrieb zu grob ist; darunter
+    # steht die Stufe als Einordnung da.
+    _t_dauer = s.get("T_dauer_Nm") or s.get("T_rated_Nm") or payload.get("load_nm")
+    if isinstance(_t_dauer, (int, float)) and _t_dauer > 0:
+        try:
+            import ema_analysis
+            import ema_rastmoment
+            _g = {**payload, **(payload.get("geom") or {})}
+            _b = ema_rastmoment.bewerte(
+                _g, float(s.get("B_gap_T") or ema_analysis._analytical_Bgap(_g)),
+                float(payload.get("axial_len") or _g.get("axialLen") or 0.0),
+                float(_t_dauer))
+        except Exception:                                    # noqa: BLE001
+            _b = None
+        if _b:
+            krit.append(_k(
+                "rastmoment", _b["stufe"] != "grob",
+                f"Rastmoment {_b['T_rast_Nm']:.3f} Nm = {_b['anteil_pct']:.2f} % von "
+                f"{_b['T_nenn_Nm']:.2f} Nm — {_b['stufe']}: {_b['stufe_text']} "
+                f"(kgV {_b['ordnung']['n_c']}, "
+                + ("nicht geschraegt" if _b["schraegung"]["faktor"] >= 0.999
+                   else f"{_b['schraegung']['skew_grad']:.2f}° geschraegt")
+                + "). GESCHAETZT, nicht gemessen — s. ema_rastmoment",
+                _b["anteil_pct"], ema_rastmoment.BAND_TRAKTION, "%",
+                schwere="hinweis" if _b["stufe"] != "grob" else "verletzt",
+                quelle="ema_rastmoment.bewerte"))
+
     # ── Umrichter und Wicklung passen zueinander ────────────────────────────
     # Die Wicklung ist der Umrechnungsschluessel zwischen Klemme und Rechnung: bei
     # fester Geometrie tauscht die Windungszahl Strom gegen Spannung. Wer die
@@ -213,7 +243,10 @@ def pruefen(results: dict, meta: dict | None = None) -> dict:
             _u = ema_analysis.umrichter_passt(_g, float(_rpm_to))
         except Exception:                                    # noqa: BLE001
             _u = None
-        if _u and "unbestimmt" not in _u and _u["n_quelle"] == "wicklung":
+        if _u and _u.get("bezug_fehlt"):
+            krit.append(_k("umrichter", False, _u["text"], None, None,
+                           schwere="verletzt", quelle="ema_analysis.umrichter_passt"))
+        elif _u and "unbestimmt" not in _u and _u["n_quelle"] == "wicklung":
             _a = _u["spannungsausnutzung"]
             krit.append(_k(
                 "umrichter", _u["ok"],

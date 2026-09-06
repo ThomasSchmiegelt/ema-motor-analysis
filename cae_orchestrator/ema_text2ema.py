@@ -93,9 +93,28 @@ SCHEMA = {
                      "desc": "Zwischenkreisspannung an den Klemmen [V]"},
     "inverterImax": {"kind": "num", "lo": 1,   "hi": 2000, "def": 800, "geom": True,
                      "desc": "Strangstromamplitude an den Klemmen [A_pk]"},
+    # Worauf sich die beiden Grenzen beziehen. Vorgabe ist der alte Bezug (eine
+    # Windung je Nut), damit sich ohne Zutun nichts aendert; "wicklung" macht sie zu
+    # Klemmenwerten und rechnet mit turnsPerSlot um.
+    "umrichterBezug": {"kind": "enum", "opts": ("einwindung", "wicklung"),
+                       "def": "einwindung", "geom": True, "adv": True,
+                       "desc": "Bezug der Umrichtergrenzen (1 Wdg/Nut oder Klemme)"},
     # Die Windungszahl steht schon in ``turnsPerSlot`` (weiter unten, ersatzweise
     # ``conductorsPerSlot``) -- sie ist der Umrechnungsschluessel zwischen Klemme und
     # Rechnung und bekommt hier ausdruecklich KEINEN zweiten Schluessel.
+
+    # ── Schraegung. Sie stand bisher NUR im 3-D-Zweig (``ema_em3d`` liest
+    #    ``skew_deg``/``skew_segments`` aus dem Payload) und war ueber das Schema
+    #    nicht erreichbar -- also weder mit ``--set`` einstellbar noch im
+    #    Paarvergleich als Achse. Dabei ist sie der wirksamste Hebel gegen das
+    #    Rastmoment, den dieses Werkzeug wirklich rechnen kann: eine Schraegung um
+    #    genau eine Nutteilung loescht dessen Grundwelle exakt aus. Derselbe
+    #    Schluessel, kein zweiter -- 2-D-Rastmoment und 3-D-Netz lesen denselben Wert.
+    "skew_deg":      {"kind": "num", "lo": 0, "hi": 30, "def": 0, "adv": True, "geom": True,
+                      "desc": "Schraegung ueber die Paketlaenge [Grad mech]"},
+    "skew_segments": {"kind": "num", "lo": 1, "hi": 12, "def": 1, "int": True,
+                      "adv": True, "geom": True,
+                      "desc": "Stufen der Schraegung (1 = kontinuierlich)"},
 
     # ── Feinparameter (adv) — vom LLM nicht erfragt, ueber die Parametertabelle und
     #    ``cae_cli --set`` aber voll gepflegt. Aufgenommen ist, was die Rechnung

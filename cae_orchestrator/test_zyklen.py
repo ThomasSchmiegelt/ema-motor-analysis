@@ -335,7 +335,8 @@ pruefe(_A.estimate_dq_currents(_g75, 2000, 6.0, b_gap_t=0.463, rpm_base=1500)
                                   2000, 6.0, b_gap_t=0.463, rpm_base=1500),
        "und die Vorgabe ausdruecklich hinzuschreiben aendert nichts")
 
-_u = _A.umrichter(dict(_g75, inverterVdc=24, inverterImax=200))
+_u = _A.umrichter(dict(_g75, inverterVdc=24, inverterImax=200,
+                       umrichterBezug="wicklung"))
 pruefe(_u["n_wdg"] == 2 and _u["n_quelle"] == "wicklung"
        and _u["v_dc_1t"] == 12.0 and _u["i_max_1t"] == 400.0,
        f"wer eine Klemmenspannung vorgibt, meint eine wirkliche Klemme: 24 V / 200 A "
@@ -352,17 +353,20 @@ pruefe(_iq_klein <= 50.0 * 2 + 1e-6,
        f"ein kleiner Umrichter deckelt wirklich: i_q {_iq_klein:.1f} A statt der "
        f"800-A-Vorgabe")
 
-_p = _A.umrichter_passt(dict(_g75, inverterVdc=24, inverterImax=200), 2500)
+_p = _A.umrichter_passt(dict(_g75, inverterVdc=24, inverterImax=200,
+                            umrichterBezug="wicklung"), 2500)
 pruefe(_p["ok"] and 0.4 <= _p["spannungsausnutzung"] <= _p["reserve"],
        f"zwei Windungen passen zu 24 V: die Gegen-EMK belegt "
        f"{_p['spannungsausnutzung']*100:.0f} % der Klemmenspannung")
-_p_viel = _A.umrichter_passt(dict(_g75, inverterVdc=24, turnsPerSlot=10), 2500)
+_p_viel = _A.umrichter_passt(dict(_g75, inverterVdc=24, turnsPerSlot=10,
+                                 umrichterBezug="wicklung"), 2500)
 pruefe(not _p_viel["ok"] and _p_viel["spannungsausnutzung"] > 1.0
        and _p_viel["n_soll"] == 2,
        f"zehn Windungen passen nicht — {_p_viel['spannungsausnutzung']*100:.0f} % der "
        f"Spannung, die Maschine erreicht die Drehzahl nicht; passend waeren "
        f"{_p_viel['n_soll']}")
-_p_wenig = _A.umrichter_passt(dict(_g75, inverterVdc=400, turnsPerSlot=2), 2500)
+_p_wenig = _A.umrichter_passt(dict(_g75, inverterVdc=400, turnsPerSlot=2,
+                                  umrichterBezug="wicklung"), 2500)
 pruefe(not _p_wenig["ok"] and _p_wenig["spannungsausnutzung"] < 0.4
        and _p_wenig["n_soll"] > 2,
        f"und zu WENIGE Windungen sind auch ein Befund: der Umrichter bleibt bei "
@@ -371,16 +375,117 @@ pruefe(not _p_wenig["ok"] and _p_wenig["spannungsausnutzung"] < 0.4
 
 _krit = {k["name"]: k for k in _S.pruefen(
     {"summary": {}}, {"payload": dict(_g75, rpm_to=2500, inverterVdc=24,
-                                      inverterImax=200, turnsPerSlot=10)})["kriterien"]}
+                                      inverterImax=200, turnsPerSlot=10,
+                                      umrichterBezug="wicklung")})["kriterien"]}
 pruefe("umrichter" in _krit and not _krit["umrichter"]["ok"]
        and "turnsPerSlot=2" in _krit["umrichter"]["text"],
        "'sicherheit' beanstandet eine Wicklung, die nicht zum Umrichter passt, und "
        "nennt die Windungszahl, die passen wuerde")
+_krit_falle = {k["name"]: k for k in _S.pruefen(
+    {"summary": {}}, {"payload": dict(_g75, rpm_to=2500, inverterVdc=24)})["kriterien"]}
+pruefe(not _krit_falle["umrichter"]["ok"]
+       and "umrichterBezug=wicklung" in _krit_falle["umrichter"]["text"],
+       "wer eine Klemmenspannung setzt und den Bezug vergisst, wird beanstandet — "
+       "sonst gaelten die 24 V still fuer eine Einwindungswicklung")
+
 _krit0 = {k["name"] for k in _S.pruefen(
     {"summary": {}}, {"payload": dict(_g75, rpm_to=2500)})["kriterien"]}
 pruefe("umrichter" not in _krit0,
        "ohne vorgegebenen Umrichter wird nichts beanstandet — die 1 Wdg/Nut sind "
        "dort eine Bezugsgroesse und keine Wicklung, die passen muesste")
+
+
+print("\n11. Rastmoment — die Groesse hinter 'sehr praezise'")
+import ema_paarvergleich as _PV
+import ema_rastmoment as _RM
+
+_g75r = dict(_g75, axialLen=60)
+_B = _A._analytical_Bgap(_g75r)
+
+# (a) Was EXAKT ist: die Zaehlerei ueber Nut- und Polzahl.
+_o = _RM.ordnung(_g75r)
+pruefe(_o["n_c"] == 120 and abs(_o["periode_grad"] - 3.0) < 1e-9
+       and abs(_o["rastfaktor"] - 2.0) < 1e-9,
+       "24 Nuten und 10 Pole geben kgV 120: 120 Rastperioden je Umdrehung, alle 3,0 "
+       "Grad, Rastfaktor 2,0 — reine Zaehlerei, kein Modell")
+
+# (b) Die Schraegung ist ein Integral, keine Naeherung: eine ganze Nutteilung
+#     loescht die Grundwelle EXAKT aus.
+_nt = 360.0 / 24
+pruefe(_RM.schraegungsfaktor(dict(_g75r, skew_deg=_nt))["faktor"] < 1e-9,
+       f"eine Schraegung um genau eine Nutteilung ({_nt:.1f} Grad) loescht die "
+       f"Grundwelle exakt aus — das ist das Integral ueber eine volle Periode")
+pruefe(0.12 < _RM.schraegungsfaktor(dict(_g75r, skew_deg=_nt / 2))["faktor"] < 0.14,
+       "eine halbe Nutteilung laesst noch rund 13 % stehen — dazwischen geht es "
+       "nicht linear zu")
+pruefe(_RM.schraegungsfaktor(dict(_g75r, skew_deg=_nt, skew_segments=3))["faktor"] < 1e-9,
+       "und gestaffelt in 3 Stufen ueber dieselbe Weite ebenso (Zonenfaktor)")
+pruefe(_RM.schraegungsfaktor(_g75r)["faktor"] == 1.0,
+       "ohne Schraegung bleibt alles stehen")
+
+# (c) Die TRENDS des geschaetzten Teils. Absolut ist es eine Schaetzung, aber die
+#     Richtungen muessen stimmen, sonst taugt der Vergleich nichts.
+def _t(gg, nb=None):
+    return _RM.bewerte(gg, _A._analytical_Bgap(gg), 60.0, 6.0,
+                       nut_breite_mm=nb)["T_rast_Nm"]
+_basis = _t(_g75r)
+pruefe(_t(_g75r, 1.0) < 0.4 * _basis and _t(_g75r, 0.5) < 0.2 * _basis,
+       f"ein engerer Nutschlitz senkt das Rastmoment stark ({_basis:.3f} -> "
+       f"{_t(_g75r, 1.0):.3f} -> {_t(_g75r, 0.5):.3f} Nm bei 4,03 / 1,0 / 0,5 mm) — "
+       f"die alte Zeile in compute_performance kannte die Nutoeffnung gar nicht")
+pruefe(_t(dict(_g75r, statorID=57.0)) < 0.5 * _basis,
+       "ein weiterer Luftspalt glaettet — die Nutwelle klingt ueber ihn ab")
+pruefe(_t(dict(_g75r, slots=27)) < 0.1 * _basis,
+       "27 Nuten (kgV 270) rasten viel feiner als 24 (kgV 120)")
+pruefe(_t(dict(_g75r, slots=30)) > 10.0 * _basis,
+       "und 30 Nuten zu 10 Polen (kgV 30, ganzzahlige Lochzahl) sind die "
+       "schlechteste Wahl — genau das sagt der Rastfaktor voraus")
+
+# (d) Ohne Abklingen ueber den Luftspalt taugte das Modell nicht.
+pruefe(_RM._abklingen(5, 0.00733, 0.00035) < 0.25
+       and _RM._abklingen(10, 0.00651, 0.00035) < 0.05,
+       "hohe Ordnungen kommen ueber den Spalt kaum an (Laplace) — ohne das lag eine "
+       "27-Nut-Auslegung mit kgV 270 kaum besser als eine 24-Nut mit kgV 120, was "
+       "der Erfahrung widerspricht")
+
+# (e) Es steht als SCHAETZUNG da, und warum nicht gemessen wird.
+_bw = _RM.bewerte(_g75r, _B, 60.0, 6.0)
+pruefe(_bw["guete"] == "schaetzung", "die Guete steht im Ergebnis")
+_txt = " ".join(_RM.als_text(_bw))
+pruefe("GESCHAETZT" in _txt and "FDM" in _txt,
+       "und der Text sagt beides: dass es geschaetzt ist, und dass der FDM es nicht "
+       "kann (die gedrehte Rastergeometrie erzeugt ein groesseres Scheinmoment)")
+pruefe(any("OFFEN" in h for h in _bw["hinweise"]),
+       "die offene Nut wird benannt — dieses Werkzeug zeichnet keinen Nutverschluss, "
+       "und das ist der staerkste einzelne Beitrag")
+
+# (f) Im Paarvergleich: drei neue Achsen, und das Rastmoment als stehende Spalte.
+for _a in ("schraegung", "spannung", "strom"):
+    pruefe(_a in _PV.ACHSEN, f"Achse '{_a}' ist da")
+pruefe("T_rast_pct" in _PV.METRIKEN and not _PV.METRIKEN["T_rast_pct"][3],
+       "das Rastmoment ist eine Kennzahl, zaehlt aber NICHT in der Bilanz: wie "
+       "wichtig Drehgenauigkeit ist, entscheidet der Einsatz und nicht das Werkzeug")
+pruefe("T_rast_pct" in _PV.ZUSATZSPALTEN,
+       "es wird trotzdem IMMER angezeigt — sonst stuende unter der Schraegungsachse "
+       "'bewegt NICHT: alles', obwohl sie genau das bewegt, wofuer sie da ist")
+pruefe(_PV.SCHRAEGUNG_ANTEILE[-1] == 1.0 and _PV.SCHRAEGUNG_ANTEILE[0] == 0.0,
+       "die Schraegungsachse faehrt Anteile EINER Nutteilung, nicht runde Gradzahlen "
+       "— zehn Grad sagen ohne die Nutzahl nichts")
+
+# (g) Der Bezug der Umrichtergrenzen wird GESAGT, nicht aus dem Wert erraten.
+_ei = _A.umrichter(dict(_g75, inverterImax=400))
+_wi = _A.umrichter(dict(_g75, inverterImax=400, umrichterBezug="wicklung"))
+pruefe(_ei["n_wdg"] == 1 and _wi["n_wdg"] == 2,
+       "umrichterBezug entscheidet, nicht der Zahlenwert — der erste Entwurf schloss "
+       "aus 'weicht von der Vorgabe ab' auf 'ist eine Klemme', und dann lieferten in "
+       "der Stromachse 800 A weniger Moment als 400 A")
+
+_kr = {k["name"]: k for k in _S.pruefen(
+    {"summary": {"T_dauer_Nm": 6.0}},
+    {"payload": dict(_g75r, rpm_to=2500, axial_len=60)})["kriterien"]}
+pruefe("rastmoment" in _kr and "GESCHAETZT" in _kr["rastmoment"]["text"],
+       "'sicherheit' fuehrt das Rastmoment mit — als Einordnung samt Stufe, nicht "
+       "als Tor mit fester Schranke")
 
 
 print("\n" + "=" * 60)
