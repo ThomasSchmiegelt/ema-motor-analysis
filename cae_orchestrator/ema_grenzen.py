@@ -275,9 +275,27 @@ def cad_gegen_feld(quelle, axial_mm: float = 0.0) -> dict:
                    "cad": round(r_si, 4), "feld": round(r_feld["r_stator_innen_mm"], 4)})
     zeilen.append({"groesse": "Stator aussen r_so [mm]",
                    "cad": round(r_so, 4), "feld": round(r_feld["r_stator_aussen_mm"], 4)})
+    # Der Luftspalt, und zwar der, den das FDM-Netz WIRKLICH oeffnet. ``ema_radien``
+    # rechnet ihn aus denselben zwei Durchmessern wie das CAD, also verglich diese
+    # Zeile bisher den gezeichneten Spalt mit sich selbst und meldete pflichtschuldig
+    # „gleich" -- waehrend der Rasterer daneben 2,5 mm oeffnete, indem er Rotorrand
+    # wegnahm. Genau der Fall, gegen den diese Probe gebaut wurde, lief durch sie
+    # hindurch. Gefragt wird deshalb der Rasterer selbst, bei der Aufloesung, mit
+    # der auch gerechnet wird.
+    gez = (float(g["statorID"]) - float(g["rotorOD"])) / 2.0
+    n_fdm = int(g.get("fdm_resolution") or 0) or ema_analysis.AIRGAP_PROFILE_N
+    netz = ema_analysis.luftspalt_im_netz(g, n_fdm)
     zeilen.append({"groesse": "Luftspalt [mm]",
-                   "cad": round((float(g["statorID"]) - float(g["rotorOD"])) / 2.0, 4),
-                   "feld": round(r_feld["luftspalt_mm"], 4)})
+                   "cad": round(gez, 4),
+                   "feld": round(netz["air_gap_effective_mm"], 4)})
+    if netz["air_gap_widened"]:
+        hinweise.append(
+            f"Das FDM-Netz (N={n_fdm}) loest {netz['air_gap_px']:.1f} Bildpunkte im "
+            f"Spalt auf und braucht mindestens {ema_analysis.AIRGAP_MIN_PX:.0f}; es "
+            f"rechnet deshalb mit {netz['air_gap_effective_mm']:.3f} statt "
+            f"{gez:.3f} mm und nimmt den Unterschied vom Rotorrand. Feinere "
+            f"Aufloesung (fdm_resolution) macht das kleiner; die analytischen "
+            f"Kennwerte (B_gap, Kt) sind davon NICHT betroffen.")
 
     # Nut -- die eine Stelle, an der die beiden Wege verschieden BAUEN
     ng = ema_wicklung.nutgeometrie(g)

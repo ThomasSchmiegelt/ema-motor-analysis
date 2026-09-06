@@ -150,12 +150,21 @@ def build_context(project_dir: str) -> dict:
             "warnings":   therm.get("warnings", []),
         },
         "drivecycle": {
+            # ``art`` entscheidet ueber Ueberschrift und Zeilen: Weg, Verbrauch und
+            # v_max sind beim Lastspiel None und fallen in ``_tbl`` von selbst weg;
+            # dafuer traegt es die Groessen, nach denen eine Achse ausgelegt wird.
+            "art":           cyc.get("art", "fahrt"),
             "name":          cyc.get("cycle_name"),
             "distance_km":   cyc.get("distance_km"),
             "kWh_per_100km": cyc.get("E_per_100km_kWh"),
             "eta_drive":     cyc.get("eta_drive"),
             "regen_share":   cyc.get("regen_share"),
             "v_max_kmh":     cyc.get("v_max_kmh"),
+            "duration_s":    cyc.get("duration_s"),
+            "rpm_max":       cyc.get("rpm_max"),
+            "T_rms_Nm":      cyc.get("T_rms"),
+            "T_rated_Nm":    cyc.get("T_rated_Nm"),
+            "E_verlust_Wh":  (cyc.get("losses") or {}).get("E_total_Wh"),
         },
         "vollast_zyklus": {
             "name":          vollast.get("cycle_name"),
@@ -1297,9 +1306,21 @@ def _single_md_tables(ctx: dict) -> str:
         ("Gesamtverluste", th.get("P_total_W"),  "W", 0),
     ]))
     if dc:
-        blocks.append(_tbl(f"Fahrzyklus ({dc.get('name') or '—'})", [
+        _art = "Lastspiel" if dc.get("art") == "lastspiel" else "Fahrzyklus"
+        blocks.append(_tbl(f"{_art} ({dc.get('name') or '—'})", [
             ("Strecke",          dc.get("distance_km"),   "km", 1),
             ("Verbrauch",        dc.get("kWh_per_100km"), "kWh/100km", 2),
+            ("Dauer je Spiel",   dc.get("duration_s") if dc.get("art") == "lastspiel"
+                                 else None,               "s", 0),
+            ("n_max",            dc.get("rpm_max") if dc.get("art") == "lastspiel"
+                                 else None,               "1/min", 0),
+            ("T_eff (RMS)",      dc.get("T_rms_Nm") if dc.get("art") == "lastspiel"
+                                 else None,               "Nm", 2),
+            ("Dauer-Nennmoment", dc.get("T_rated_Nm") if dc.get("art") == "lastspiel"
+                                 else None,               "Nm", 2),
+            ("Verlustenergie je Spiel",
+                                 dc.get("E_verlust_Wh") if dc.get("art") == "lastspiel"
+                                 else None,               "Wh", 1),
             ("Antriebswirkungsgrad", dc.get("eta_drive"), "", 3),
             ("Rekuperationsanteil",  dc.get("regen_share"), "", 3),
             ("v_max",            dc.get("v_max_kmh"),     "km/h", 0),

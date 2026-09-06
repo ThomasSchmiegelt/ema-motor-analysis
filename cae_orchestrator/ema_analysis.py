@@ -103,7 +103,40 @@ AIR_DOMAIN_FACTOR = 1.25   # outer air-box radius = statorOD/2 · this (Dirichle
 # read in genuine air while the stator-iron boundary (which pins B_t→0 at the bore)
 # is preserved.  The band is PHYSICAL (mm) so it is a no-op at low/animation N (sub-
 # pixel → nothing removed) and only resolves the gap once N is high enough.
-AIRGAP_MIN_MM   = 2.5      # target resolved air-gap width [mm] (≈4 px at N=600)
+# Wieviel LUFT der Loeser im Spalt braucht, um dort ueberhaupt rechnen zu koennen:
+# vier Bildpunkte. Die Zahl ist eine Eigenschaft des NETZES, nicht der Maschine --
+# darum steht sie in Pixeln.
+#
+# Vorher stand hier ``AIRGAP_MIN_MM = 2.5`` mit dem Zusatz "(≈4 px at N=600)", und
+# genau daran sieht man, wie es gemeint war: geeicht an der Ur-Maschine mit 280 mm
+# Aussendurchmesser, wo 2,5 mm tatsaechlich gut vier Pixel sind. Nur ist eine
+# Millimeterangabe an eine Maschine gebunden und nicht an ein Netz. Der Rasterer
+# oeffnete das Luftband deshalb IMMER auf 2,5 mm -- indem er Rotoreisen wegnahm,
+# denn das Statoreisen an der Bohrung bleibt ausdruecklich stehen.
+#
+# Gemessen, und der Grund, aus dem das hier steht: bei einem 75-mm-Antrieb mit
+# 0,7 mm Spalt frisst das 1,8 mm Rotorrand. Der Laeufer endete im Feldmodell bei
+# r = 25,50 mm statt bei 27,30 mm, der Spalt war 2,50 statt 0,70 mm -- **3,6-fach**,
+# und zwar bei JEDER Netzfeinheit gleich, also kein Aufloesungsfehler, sondern eine
+# andere Maschine. Weggefressen wurde genau der Bereich, in dem Steg und
+# Taschenkappe liegen. Im Bild standen die gezeichneten Kreise fuer rotorOD und
+# statorID danach frei in der Luft, 1,8 mm ausserhalb des Eisens, das sie meinen.
+# An der Ur-Maschine mit 140-mm-Laeuferhalbmesser waren dieselben 1,8 mm 1,9 % --
+# unauffaellig; an einem 27-mm-Laeufer sind es 6,6 %.
+#
+# Die Zahl ist EIN Pixel, und mehr darf sie nicht sein. Ein Pixel ist die einzige
+# Forderung, die wirklich aus dem Verfahren kommt: Rotor- und Statoreisen duerfen
+# sich im Raster nicht beruehren, sonst ist der magnetische Kreis kurzgeschlossen
+# und das ganze Feld -- nicht nur der Spalt -- ist Unsinn. Weniger als ein Bildpunkt
+# Luft laesst sich nicht darstellen; das ist Quantisierung, keine Entscheidung.
+#
+# Alles darueber waere wieder eine: 4 px klingen harmlos, sind aber bei N=180 an der
+# 280-mm-Maschine 7,8 mm Spalt. Der Versuch, dem Loeser Rechenraum zu verschaffen,
+# baut dann eine noch fremdere Maschine als die 2,5 mm vorher. Wer B_t im Spalt
+# braucht, muss das Netz verfeinern (``AIRGAP_PROFILE_N``), nicht den Spalt
+# aufblasen -- der Zwei-Kreis-Fit faellt sonst auf 0 zurueck, und das ist die
+# ehrliche Antwort: in einem nicht aufgeloesten Spalt gibt es nichts zu fitten.
+AIRGAP_MIN_PX   = 1.0      # Mindestbreite des Luftbandes im Netz [Bildpunkte]
 
 # Streuung, aufgeteilt: K_LEAK_STIRN * K_LEAK_STEG == 0.85 (der alte Wert).
 # Bei offener Magnettasche entfaellt der Steganteil -- s. _analytical_Bgap.
@@ -354,13 +387,14 @@ def _rasterise(geom: dict, N: int, rotor_angle: float = 0.0,
 
     J += dMy_dx - dMx_dy
 
-    # Resolve the air gap (see AIRGAP_MIN_MM): open a clean air band of width
-    # max(physical gap, AIRGAP_MIN_MM) just BELOW the stator bore by removing the
+    # Resolve the air gap (see AIRGAP_MIN_PX): open a clean air band of width
+    # max(physical gap, AIRGAP_MIN_PX) just BELOW the stator bore by removing the
     # rotor-rim IRON there (magnets / slot air kept — iron-only mask).  The stator
     # iron at r_si is deliberately left intact so its boundary condition keeps the
-    # radial component dominant.  Physical width ⇒ sub-pixel (no-op) at animation N,
-    # a properly resolved band once N is high enough (chart runs at AIRGAP_PROFILE_N).
-    band_px = max(r_si - r_ro, AIRGAP_MIN_MM * sc)
+    # radial component dominant.  Bei genuegend feinem Netz ist der wirkliche Spalt
+    # schon breiter als vier Pixel und hier passiert NICHTS -- die gezeichnete
+    # Maschine wird dann auch gerechnet.
+    band_px = max(r_si - r_ro, AIRGAP_MIN_PX)
     ring = (R >= r_si - band_px) & (R < r_si) & (mu >= MU_R_IRON - 1e-3)
     mu[ring] = 1.0
 
@@ -697,14 +731,14 @@ def _sample_airgap(A, geom, sc, ctr, N, mu=None):
 
     # Bt = −∂A/∂r.  A finite difference across the sub-pixel gap is meaningless, so
     # fit the air-gap field to angular harmonics on TWO circles inside the resolved
-    # air band (the rasteriser guarantees ≥ AIRGAP_MIN_MM of air below the bore) and
+    # air band (the rasteriser guarantees ≥ AIRGAP_MIN_PX of air below the bore) and
     # evaluate the analytic derivative at r_ev — spike-free by construction.  In the
     # current-free gap A is harmonic: A_n(r) = a_n (r/r_ev)^n + b_n (r/r_ev)^{-n}, so
     # Bt_n = −(n/r_ev)(a_n − b_n).  Limit to physical orders (≤ ~2.5·slots); higher
     # orders are grid noise.  If the band is too thin to resolve (low/animation N),
     # the 2×2 system is singular and Bt falls back to ~0 (physically correct: the
     # iron pins it) rather than the old staircase garbage.
-    band = max(r_si_px - r_ro_px, AIRGAP_MIN_MM * sc)
+    band = max(r_si_px - r_ro_px, AIRGAP_MIN_PX)     # dieselbe Regel wie im Rasterer
     r_in  = r_si_px - band + 0.5
     r_out = r_si_px - 0.5
     Bt    = np.zeros(n_th)
@@ -784,6 +818,25 @@ def luftspalt_mm(geom: dict) -> float:
     import ema_grenzen
     import ema_radien
     return max(ema_radien.radien(geom)["luftspalt_mm"], ema_grenzen.LUFTSPALT_MM[0])
+
+
+def luftspalt_im_netz(geom: dict, N: int) -> dict:
+    """Gezeichneter und im Raster wirklich vorhandener Luftspalt, in mm.
+
+    Der Rasterer oeffnet ein Luftband von mindestens ``AIRGAP_MIN_PX`` Bildpunkten
+    (sonst kann im Spalt nicht gerechnet werden) und nimmt dafuer Rotorrandeisen
+    weg. Bei feinem Netz ist das ein Nullschritt; bei grobem nicht, und dann rechnet
+    das Feld eine andere Maschine als die gezeichnete. Diese Funktion sagt, welche.
+    """
+    sc = N / (float(geom["statorOD"]) * AIR_DOMAIN_FACTOR)
+    gezeichnet = (float(geom["statorID"]) - float(geom["rotorOD"])) / 2.0
+    wirklich = max(gezeichnet, AIRGAP_MIN_PX / sc)
+    return {
+        "air_gap_drawn_mm":     round(gezeichnet, 4),
+        "air_gap_effective_mm": round(wirklich, 4),
+        "air_gap_widened":      wirklich > gezeichnet * 1.02,
+        "air_gap_px":           round(gezeichnet * sc, 2),
+    }
 
 
 def r_gap_m(geom: dict) -> float:
@@ -1464,4 +1517,9 @@ def run_em_analysis(geom: dict, N: int = 150, rotor_angle: float = 0.0,
         "scale":     sc,
         "center":    ctr,
         "N":         N,
+        # Welchen Luftspalt dieses Netz WIRKLICH gerechnet hat. Nicht nur eine
+        # Auskunft: solange die beiden Zahlen auseinanderliegen, ist jede aus
+        # diesem Feld abgeleitete Groesse die einer anderen Maschine -- und das
+        # muss dastehen, nicht in einer Konstanten verborgen sein.
+        **luftspalt_im_netz(geom, N),
     }

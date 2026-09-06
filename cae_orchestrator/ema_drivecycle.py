@@ -476,28 +476,59 @@ def trailer_mountain_cycle(max_grade_pct: float = DEFAULT_TRAILER_GRADE_PCT) -> 
 
 
 def load_csv_cycle(text: str) -> dict:
-    """Parse a `t[s], v[km/h]` CSV upload. Header row optional, ',' or ';' separator."""
+    """Parse a cycle CSV. TWO forms, told apart by the number of columns.
+
+    ``t[s], v[km/h]``           — a DRIVING cycle: speed over time. What becomes
+                                  torque out of it is decided by the vehicle
+                                  (mass, wheel, gear) in ``compute_drivetrain``.
+    ``t[s], rpm, T[Nm]``        — a DUTY cycle (Lastspiel): the shaft itself over
+                                  time. No vehicle, no wheel, no distance.
+
+    The second form exists because the first one cannot express a machine that
+    does not drive anything on wheels. Measured, on a robot-arm joint: to write
+    "2200 rpm" the caller had to invent a wheel radius of 0,12 m and a gear ratio
+    of 4 — and the run then reported the joint as covering **14,2 km at 345
+    kWh/100 km**. Those numbers were not computed wrongly; they described a
+    vehicle nobody had ordered. A spindle, a pump, a test rig and a robot joint
+    are all in that position.
+
+    Header row optional, ',' or ';' separator.
+    """
     lines = [ln for ln in text.splitlines() if ln.strip() and not ln.startswith("#")]
     if not lines:
         raise ValueError("Leere CSV-Datei")
     sep = ";" if lines[0].count(";") > lines[0].count(",") else ","
     reader = csv.reader(lines, delimiter=sep)
-    rows = list(reader)
+    rows = [r for r in reader if r and any(str(c).strip() for c in r)]
     # Skip header if first cell is non-numeric
     try:
         float(rows[0][0])
     except ValueError:
         rows = rows[1:]
-    t  = np.array([float(r[0]) for r in rows])
-    v  = np.array([float(r[1]) for r in rows])
-    # Resample to 1 Hz if necessary
-    if len(t) < 5:
+    if len(rows) < 5:
         raise ValueError("Zu wenige Datenpunkte")
+    spalten = min(len(r) for r in rows)
+    t = np.array([float(r[0]) for r in rows])
+
+    if spalten >= 3:                                  # ── Lastspiel: t, rpm, T
+        rpm = np.array([float(r[1]) for r in rows])
+        T   = np.array([float(r[2]) for r in rows])
+        if not np.allclose(np.diff(t), 1.0, atol=0.1):
+            t_neu = np.arange(t[0], t[-1] + 1)
+            rpm = np.interp(t_neu, t, rpm)
+            T   = np.interp(t_neu, t, T)
+            t   = t_neu
+        return {"t": t, "rpm": rpm, "T_Nm": T,
+                "v_kmh": np.zeros_like(t),            # es gibt keine Geschwindigkeit
+                "art": "lastspiel", "name": "Lastspiel (csv)",
+                "phases": [], "duration": float(t[-1] - t[0])}
+
+    v = np.array([float(r[1]) for r in rows])         # ── Fahrzyklus: t, v
     if not np.allclose(np.diff(t), 1.0, atol=0.1):
         t_new = np.arange(t[0], t[-1] + 1)
         v = np.interp(t_new, t, v)
         t = t_new
-    return {"t": t, "v_kmh": v, "name": "Custom CSV",
+    return {"t": t, "v_kmh": v, "name": "Custom CSV", "art": "fahrt",
             "phases": [], "duration": float(t[-1] - t[0])}
 
 
@@ -526,8 +557,24 @@ def compute_drivetrain(cycle: dict, vehicle: dict) -> dict:
     ``vehicle["slope_deg"]`` when no profile is present.
     Returns dict with arrays. All units SI except rpm.
     """
+    t = np.asarray(cycle["t"], dtype=float)
+
+    # Ein LASTSPIEL bringt Drehzahl und Moment schon mit -- das Fahrzeugmodell
+    # hat daran nichts zu rechnen und wird gar nicht erst angefasst. Der Weg
+    # hierher ist der einzige Unterschied; alles danach (Verlustreihen,
+    # Energiebilanz, Betriebspunktwolke) ist fuer beide Arten dasselbe, weil es
+    # ohnehin nur ``rpm_motor`` und ``T_motor`` liest.
+    if cycle.get("art") == "lastspiel":
+        rpm = np.asarray(cycle["rpm"],  dtype=float)
+        T   = np.asarray(cycle["T_Nm"], dtype=float)
+        omega = rpm * 2 * math.pi / 60
+        null = np.zeros_like(t)
+        return {"t": t, "v_kmh": null, "v_ms": null, "a": null,
+                "rpm_motor": rpm, "T_motor": T,
+                "P_wheel": T * omega,                  # Wellenleistung, kein Rad
+                "F_wheel": null, "art": "lastspiel"}
+
     v_kmh = np.asarray(cycle["v_kmh"], dtype=float)
-    t     = np.asarray(cycle["t"], dtype=float)
     v     = v_kmh / 3.6                                # m/s
 
     a = np.gradient(v, t)
@@ -589,6 +636,7 @@ def compute_drivetrain(cycle: dict, vehicle: dict) -> dict:
         "T_motor":   T_motor,
         "P_wheel":   P_wheel,
         "F_wheel":   F_wheel,
+        "art":       "fahrt",
     }
 
 
@@ -608,6 +656,11 @@ def cycle_energy(drv: dict, loss_series: dict, vehicle: dict) -> dict:
     T     = drv["T_motor"]
     P_w   = drv["P_wheel"]
     v_ms  = drv["v_ms"]
+    # Ein Lastspiel hat kein Fahrzeug, also auch keinen Weg und keinen Verbrauch
+    # je 100 km. Beides wird unten **None** und nicht 0: eine 0 liest sich wie
+    # ein gemessener Wert, und genau daraus ist der Fehler entstanden, den
+    # dieser Zweig abstellt (ein Roboterarmgelenk mit "14,2 km · 345 kWh/100 km").
+    lastspiel = drv.get("art") == "lastspiel"
 
     # Mechanical motor power
     omega = rpm * 2 * math.pi / 60
@@ -626,7 +679,11 @@ def cycle_energy(drv: dict, loss_series: dict, vehicle: dict) -> dict:
     # Electrical input power: motor power + losses (when motoring), regen partial
     # In motoring: P_elec = P_mech + P_loss
     # In braking : P_elec = -|P_mech| * regen_frac + P_loss   (energy back to battery)
-    regen = float(vehicle.get("regen_frac", 0.5))
+    # Rueckspeisung: beim Fahrzeug eine Eigenschaft des Antriebsstrangs, beim
+    # Lastspiel eine des Umrichters -- und die hat niemand angegeben, weil es
+    # kein Fahrzeug gibt. Vorgabe deshalb 0: nicht rueckgespeiste Bremsenergie
+    # ist die pessimistische und die ehrlichere Annahme.
+    regen = float((vehicle or {}).get("regen_frac", 0.0 if lastspiel else 0.5))
     P_elec = np.where(P_mech_signed >= 0,
                       P_mech_signed + P_loss_total,
                       P_mech_signed * regen + P_loss_total)
@@ -642,11 +699,12 @@ def cycle_energy(drv: dict, loss_series: dict, vehicle: dict) -> dict:
     E_loss_Bear = float(np.sum(P_Bear)     * dt / 3600)
     E_loss_total= E_loss_Cu + E_loss_Fe + E_loss_Mag + E_loss_Bear
 
-    # Distance
-    d_m  = float(np.sum(v_ms) * dt)
-    d_km = d_m / 1000
-
-    E_per_100km = (E_elec_net_Wh / d_km) * 100 if d_km > 0 else 0
+    if lastspiel:
+        d_km = None
+        E_per_100km = None
+    else:
+        d_km = float(np.sum(v_ms) * dt) / 1000
+        E_per_100km = (E_elec_net_Wh / d_km) * 100 if d_km > 0 else 0
 
     # RMS values
     rpm_rms = float(np.sqrt(np.mean(rpm**2)))
@@ -669,14 +727,15 @@ def cycle_energy(drv: dict, loss_series: dict, vehicle: dict) -> dict:
     }
 
     return {
+        "art":            "lastspiel" if lastspiel else "fahrt",
         "duration_s":     float(t[-1] - t[0]),
-        "distance_km":    round(d_km, 3),
+        "distance_km":    None if d_km is None else round(d_km, 3),
         "E_elec_net_Wh":  round(E_elec_net_Wh, 1),
         "E_elec_drv_Wh":  round(E_elec_drv_Wh, 1),
         "E_mech_drv_Wh":  round(E_mech_drv_Wh, 1),
         "E_regen_Wh":     round(E_regen_Wh, 1),
-        "E_per_100km_Wh": round(E_per_100km, 1),
-        "E_per_100km_kWh":round(E_per_100km / 1000, 3),
+        "E_per_100km_Wh": None if E_per_100km is None else round(E_per_100km, 1),
+        "E_per_100km_kWh":None if E_per_100km is None else round(E_per_100km / 1000, 3),
         "losses": {
             "E_Cu_Wh":    round(E_loss_Cu, 1),
             "E_Fe_Wh":    round(E_loss_Fe, 1),
@@ -686,8 +745,8 @@ def cycle_energy(drv: dict, loss_series: dict, vehicle: dict) -> dict:
         },
         "eta_drive":      round(E_mech_drv_Wh / max(1, E_elec_drv_Wh), 3),
         "regen_share":    round(E_regen_Wh / max(1, E_elec_drv_Wh), 3),
-        "v_max_kmh":      round(float(np.max(drv["v_kmh"])), 1),
-        "v_avg_kmh":      round(float(np.mean(drv["v_kmh"])), 1),
+        "v_max_kmh":      None if lastspiel else round(float(np.max(drv["v_kmh"])), 1),
+        "v_avg_kmh":      None if lastspiel else round(float(np.mean(drv["v_kmh"])), 1),
         "rpm_max":        round(float(np.max(rpm)), 0),
         "rpm_rms":        round(rpm_rms, 0),
         "T_max":          round(float(np.max(np.abs(T))), 1),

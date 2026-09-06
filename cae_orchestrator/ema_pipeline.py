@@ -1190,12 +1190,21 @@ def _power_chart(env: dict) -> str:
 
 
 def _drivecycle_chart(cyc: dict, drv: dict, res: dict) -> str:
-    """4-panel chart: v(t), motor operating points, cumulative energy, loss split."""
+    """4-panel chart: Verlauf, Betriebspunkte, kumulierte Energie, Verlustaufteilung.
+
+    Die drei rechten/unteren Tafeln gelten fuer beide Lastfallarten unveraendert --
+    sie leben von ``rpm`` und ``T``, die es immer gibt. Nur die erste Tafel und die
+    Ueberschriften muessen wissen, ob gefahren oder nur gedreht wird: bei einem
+    Lastspiel gibt es keine Geschwindigkeit, keinen Weg und kein kWh/100 km, und
+    eine Ueberschrift, die trotzdem Kilometer nennt, ist genau der Fehler, den der
+    Lastspiel-Zweig abstellt.
+    """
     import matplotlib.gridspec as gs
     t        = np.asarray(cyc["t"])
     v        = np.asarray(cyc["v_kmh"])
     rpm      = np.asarray(drv["rpm_motor"])
     T_arr    = np.asarray(drv["T_motor"])
+    lastspiel = res.get("art") == "lastspiel"
 
     fig = plt.figure(figsize=(14, 8), facecolor="#111")
     g = gs.GridSpec(2, 2, figure=fig, hspace=0.32, wspace=0.22)
@@ -1208,19 +1217,35 @@ def _drivecycle_chart(cyc: dict, drv: dict, res: dict) -> str:
         ax.tick_params(colors="#aaa", labelsize=8)
         for sp in ax.spines.values(): sp.set_color("#444")
 
-    # 1. Speed profile
-    ax_v.plot(t / 60, v, color="#00d4ff", lw=1.0)
-    # Phase markers
-    cum = 0
-    for ph in cyc.get("phases", []):
-        ax_v.axvline(ph["t_end"] / 60, color="#555", lw=0.5, ls=":")
-        ax_v.text(((cum + ph["t_end"]) / 2) / 60, v.max() * 0.95,
-                  ph["name"], color="#888", fontsize=7, ha="center")
-        cum = ph["t_end"]
-    ax_v.set_xlabel("Zeit [min]", color="#aaa", fontsize=9)
-    ax_v.set_ylabel("v [km/h]",   color="#aaa", fontsize=9)
-    ax_v.set_title(f"{cyc['name']}  ·  v_max={res['v_max_kmh']:.0f}  v_⌀={res['v_avg_kmh']:.0f} km/h",
-                   color="white", fontsize=10)
+    # 1. Der Verlauf -- Geschwindigkeit beim Fahrzyklus, Welle beim Lastspiel
+    if lastspiel:
+        ax_v.plot(t, rpm, color="#00d4ff", lw=1.0, label="Drehzahl")
+        ax_T = ax_v.twinx()
+        ax_T.plot(t, T_arr, color="#ff9f43", lw=1.0, label="Moment")
+        ax_T.axhline(0, color="#666", lw=0.5)
+        ax_T.set_ylabel("T [Nm]", color="#ff9f43", fontsize=9)
+        ax_T.tick_params(colors="#ff9f43", labelsize=8)
+        for sp in ax_T.spines.values():
+            sp.set_color("#444")
+        ax_v.set_xlabel("Zeit [s]", color="#aaa", fontsize=9)
+        ax_v.set_ylabel("n [1/min]", color="#00d4ff", fontsize=9)
+        ax_v.set_title(f"{cyc['name']}  ·  n_max={res['rpm_max']:.0f} 1/min  ·  "
+                       f"T_eff={res['T_rms']:.2f} Nm",
+                       color="white", fontsize=10)
+    else:
+        ax_v.plot(t / 60, v, color="#00d4ff", lw=1.0)
+        # Phase markers
+        cum = 0
+        for ph in cyc.get("phases", []):
+            ax_v.axvline(ph["t_end"] / 60, color="#555", lw=0.5, ls=":")
+            ax_v.text(((cum + ph["t_end"]) / 2) / 60, v.max() * 0.95,
+                      ph["name"], color="#888", fontsize=7, ha="center")
+            cum = ph["t_end"]
+        ax_v.set_xlabel("Zeit [min]", color="#aaa", fontsize=9)
+        ax_v.set_ylabel("v [km/h]",   color="#aaa", fontsize=9)
+        ax_v.set_title(f"{cyc['name']}  ·  v_max={res['v_max_kmh']:.0f}  "
+                       f"v_⌀={res['v_avg_kmh']:.0f} km/h",
+                       color="white", fontsize=10)
     ax_v.grid(color="#333", lw=0.4)
 
     # 2. Operating-point cloud (rpm × T)
@@ -1250,8 +1275,11 @@ def _drivecycle_chart(cyc: dict, drv: dict, res: dict) -> str:
                        alpha=0.7, label="Verluste")
     ax_E.set_xlabel("Zeit [min]", color="#aaa", fontsize=9)
     ax_E.set_ylabel("kumul. Energie [Wh]", color="#aaa", fontsize=9)
-    ax_E.set_title(f"Energie-Aufbau  ·  {res['E_per_100km_kWh']:.1f} kWh/100 km",
-                   color="white", fontsize=10)
+    ax_E.set_title(
+        (f"Energie-Aufbau  ·  {res['losses']['E_total_Wh']:.1f} Wh Verlust je Spiel"
+         if lastspiel else
+         f"Energie-Aufbau  ·  {res['E_per_100km_kWh']:.1f} kWh/100 km"),
+        color="white", fontsize=10)
     ax_E.legend(facecolor="#222", labelcolor="white", fontsize=8, framealpha=0.85, loc="upper left")
     ax_E.grid(color="#333", lw=0.4)
 
@@ -1266,9 +1294,14 @@ def _drivecycle_chart(cyc: dict, drv: dict, res: dict) -> str:
     ax_L.set_title(f"Verluste über Zyklus  ·  ⌀ η = {res['eta_drive']*100:.1f} %",
                    color="white", fontsize=10)
 
-    fig.suptitle(f"Fahrzyklus-Analyse  ·  {res['distance_km']:.1f} km  ·  "
-                 f"E_netto = {res['E_elec_net_Wh']:.0f} Wh  ·  Regen = {res['E_regen_Wh']:.0f} Wh",
-                 color="white", fontsize=11, y=0.995)
+    fig.suptitle(
+        (f"Lastspiel-Analyse  ·  {res['duration_s']:.0f} s je Spiel  ·  "
+         f"T_eff = {res['T_rms']:.2f} Nm von {res['T_rated_Nm']:.2f} Nm Dauermoment  ·  "
+         f"E_netto = {res['E_elec_net_Wh']:.0f} Wh"
+         if lastspiel else
+         f"Fahrzyklus-Analyse  ·  {res['distance_km']:.1f} km  ·  "
+         f"E_netto = {res['E_elec_net_Wh']:.0f} Wh  ·  Regen = {res['E_regen_Wh']:.0f} Wh"),
+        color="white", fontsize=11, y=0.995)
     return _fig_b64(fig)
 
 
@@ -1986,7 +2019,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
     rpm_thermal = float(data.get("rpm_thermal",   rpm_to))     # design point for steady-state
 
     # Drive-cycle inputs (optional)
-    cycle_kind   = str(data.get("cycle",          "wltp3"))    # "wltp3" | "stadtland" | "vollast" | "anhaenger" | "csv" | "off"
+    cycle_kind   = str(data.get("cycle",          "wltp3"))    # "wltp3" | "stadtland" | "vollast" | "anhaenger" | "csv" | "lastspiel" | "off"
     cycle_csv    = data.get("cycle_csv",          "")
     vehicle_in   = data.get("vehicle",            {}) or {}
 
@@ -2089,6 +2122,22 @@ def run_pipeline(data: dict, state: dict, frames: list,
         em0    = ema_analysis.run_em_analysis(geom, N=em_n, rotor_angle=0.0)
         sf_ref = em0["sf_ref"]   # OC calibration factor — reused for all loaded frames
         perf   = em0["performance"]
+        # Welchen Luftspalt dieses Netz wirklich geoeffnet hat. Bei genuegend feinem
+        # Netz ist das der gezeichnete und die Zeile faellt weg; sonst muss sie
+        # dastehen, denn dann ist jede aus DIESEM Feld abgeleitete Groesse die einer
+        # etwas anderen Maschine. Die analytischen Kennwerte (B_gap, Kt) haengen
+        # nicht daran -- sie kommen aus der Formel, nicht aus dem Raster.
+        if em0.get("air_gap_widened"):
+            _log(state,
+                 f"⚠ Luftspalt im FDM-Netz {em0['air_gap_effective_mm']:.3f} mm statt "
+                 f"gezeichneter {em0['air_gap_drawn_mm']:.3f} mm — bei N={em_n} sind das "
+                 f"nur {em0['air_gap_px']:.1f} Bildpunkte, und unter einem Bildpunkt "
+                 f"beruehren sich Rotor- und Statoreisen. Feldbilder, Luftspaltprofil "
+                 f"und T_maxwell gelten fuer den weiteren Spalt; B_gap und Kt nicht.", 23)
+        results.setdefault("em", {})
+        results["em"].update({k: em0[k] for k in
+                              ("air_gap_drawn_mm", "air_gap_effective_mm",
+                               "air_gap_widened", "air_gap_px")})
         airgap_b64 = _airgap_chart(em0)
         _save_png_b64(airgap_b64, os.path.join(proj, "charts", "airgap.png"))
         # UPDATE (not replace) so a partial re-run keeps any saved field-animation
@@ -2697,9 +2746,14 @@ def run_pipeline(data: dict, state: dict, frames: list,
 
             # Primary cycle
             try:
-                if cycle_kind == "csv" and cycle_csv:
+                if cycle_kind in ("csv", "lastspiel") and cycle_csv:
+                    # Beide lesen dieselbe Datei -- welche Art es ist, sagen die
+                    # Punkte selbst (zwei Spalten Fahrt, drei Spalten Lastspiel),
+                    # nicht der Schluessel. So kann ein alter Payload mit
+                    # cycle="csv" ein Lastspiel tragen und wird trotzdem richtig
+                    # gerechnet.
                     cyc_primary = ema_drivecycle.load_csv_cycle(cycle_csv)
-                    veh_primary = vehicle
+                    veh_primary = {} if cyc_primary.get("art") == "lastspiel" else vehicle
                 elif cycle_kind == "vollast":
                     cyc_primary = ema_drivecycle.fullload_cycle()
                     veh_primary = vehicle
@@ -2715,10 +2769,20 @@ def run_pipeline(data: dict, state: dict, frames: list,
 
                 cyc_res = _run_one_cycle(cyc_primary, veh_primary, "drivecycle")
                 results["drivecycle"] = cyc_res
-                _log(state,
-                     f"🚗 Zyklus ({cyc_primary['name']}): {cyc_res['distance_km']:.1f} km · "
-                     f"{cyc_res['E_per_100km_kWh']:.2f} kWh/100 km · "
-                     f"η={cyc_res['eta_drive']*100:.1f}%", 96)
+                if cyc_res.get("art") == "lastspiel":
+                    # Kein Weg, kein Verbrauch je 100 km -- die Welle faehrt
+                    # nirgendwohin. Was hier steht, ist das, wonach ein Lastspiel
+                    # ausgelegt wird: das effektive Moment gegen das Dauermoment.
+                    _log(state,
+                         f"⚙ Lastspiel ({cyc_primary['name']}): {cyc_res['duration_s']:.0f} s · "
+                         f"n bis {cyc_res['rpm_max']:.0f} 1/min · "
+                         f"T_eff {cyc_res['T_rms']:.2f} Nm von {cyc_res['T_rated_Nm']:.2f} Nm "
+                         f"Dauermoment · Verlust {cyc_res['losses']['E_total_Wh']:.1f} Wh", 96)
+                else:
+                    _log(state,
+                         f"🚗 Zyklus ({cyc_primary['name']}): {cyc_res['distance_km']:.1f} km · "
+                         f"{cyc_res['E_per_100km_kWh']:.2f} kWh/100 km · "
+                         f"η={cyc_res['eta_drive']*100:.1f}%", 96)
             except Exception as _ce:
                 _log(state, f"⚠ Primärer Drive-Cycle fehlgeschlagen: {_ce}", 96)
                 results["drivecycle"] = {"error": str(_ce)}

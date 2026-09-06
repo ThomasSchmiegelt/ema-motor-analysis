@@ -86,6 +86,18 @@ Der Regler `windingHeadSpread` geht in der Oberfläche bis 8°, `windingHeadFlar
 es durch und die Überschreitung steht als ⚠ im Ergebnis, statt unbemerkt durchzugehen.
 Ohne ausdrückliche Nachfrage des Auftraggebers tust du das **nicht**.
 
+### Der Lastfall: fährt sie, oder dreht sie nur?
+
+**Diese Frage kommt VOR der Frage, welcher Zyklus.** `aufgabe` stellt sie, `zyklus liste` stellt sie noch einmal:
+
+| Antwort | Was du wählst | Ergebnis |
+|---|---|---|
+| fährt auf Rädern | **Fahrzyklus** — v(t) **plus Fahrzeug** (Masse, Rad, Übersetzung). Passt keiner: `zyklus anlegen --phasen 'ziel_kmh:dauer_s,...' --fahrzeug mass_kg=…` | km, kWh/100 km |
+| dreht nur — Roboter-/Werkzeugachse, Spindel, Pumpe, Lüfter, Winde, Prüfstand | **Lastspiel** — `zyklus anlegen --lastspiel 'rpm:Nm:dauer_s,...'`. Kein Fahrzeug; negatives Moment ist Bremsen | T_eff gegen Dauermoment, Verlustenergie je Spiel |
+| weder noch | `--zyklus off` | nur Auslegungspunkt und Kennfeld |
+
+**Warum das eine eigene Zeile wert ist:** am 06.09.2026 hat ein Agent für einen Roboterarm richtig erkannt, dass keiner der abgelegten Zyklen passt, und sich einen gebaut — nur ging das damals **nur in km/h**. Um „2200 1/min" zu schreiben, musste er ein Fahrzeug erfinden (Rad 0,12 m, Übersetzung 4), und der Lauf meldete für ein Gelenk **14,2 km bei 345 kWh/100 km**. Beim Lastspiel stehen Weg und Verbrauch je 100 km jetzt als **—**, nicht als 0.
+
 **Folge der 3-mm-Regel, die überrascht:** eine 22-mm-Nut trägt **vier** Hairpins,
 keine sechs (6 × 3 mm + 7 × 0,8 mm Isolierung + 2 mm Nutgrund = 25,6 mm). Vorher klemmte
 die Lagenhöhe still auf 2,0 mm und der Paarvergleich rechnete die Maschine durch, als
@@ -103,6 +115,8 @@ seine ganze Länge konzentriert statt über den um Steg und Taschenkappe verkür
 Bandage, Schwalbenschwanz oder Endscheiben. **Die Fliehkraftprüfung dieses Werkzeugs
 rechnet das NICHT**, `SF n_max` gilt für die offene Variante also nicht. Beides sagen
 `rotor-check` und die Achse ausdrücklich; sag es in einer Antwort mit.
+
+**Der Luftspalt, den das FDM-Netz wirklich rechnet.** Das Raster braucht mindestens **einen Bildpunkt** Luft zwischen Rotor- und Statoreisen — sonst ist der magnetische Kreis kurzgeschlossen. Reicht die Auflösung nicht, weitet es den Spalt auf diesen einen Bildpunkt und nimmt den Unterschied vom **Rotorrand**. Das steht seit dem 06.09.2026 im Ergebnis (`air_gap_effective_mm`), die Pipeline warnt, und `rotor-check --cad-feld` zeigt es als Abweichung. Vorher stand dort eine feste Millimeterzahl (2,5 mm) und der Spalt war **immer** 2,5 mm: an einem 75-mm-Antrieb mit 0,7 mm Spalt fraß das 1,8 mm Rotorrand, der Läufer endete bei r=25,5 statt 27,3 mm, und die gezeichneten Kreise im Feldbild standen frei in der Luft. **Betroffen sind Feldbilder, Luftspaltprofil und T_maxwell — nicht B_gap und Kt**, die kommen aus der Formel. Ist die Abweichung zu groß, hilft `--set fdm_resolution=…` bzw. `--guete detail`.
 
 **`rotor-check --cad-feld`** stellt zusätzlich beide Geometriewege gegenüber — was das CAD
 zeichnet gegen das, was der Löser rastert. Zwei Unterschiede sind gewollt und stehen als

@@ -15,6 +15,8 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import numpy as np
+
 import cae_cli
 import ema_db
 import ema_drivecycle
@@ -168,6 +170,129 @@ pruefe(all(p["quelle"] != "aufgabe" or "erfragt" in p["hinweis"] or
            "Schemagrenzen" in p["hinweis"]
            for p in cae_cli.PFLICHTPUNKTE),
        "was nur der Auftraggeber weiss, ist als solches gekennzeichnet")
+
+
+print("\n8. Das Lastspiel — ein Lastfall fuer alles, was dreht ohne zu fahren")
+# Der Fall, aus dem das entstanden ist: ein Roboterarm-Antrieb. Der Agent erkannte
+# richtig, dass kein abgelegter Zyklus passt, und baute sich einen -- konnte das aber
+# nur in km/h. Um "2200 1/min" zu schreiben, erfand er Rad 0,12 m und Uebersetzung 4,
+# und der Lauf meldete fuer ein Gelenk 14,2 km bei 345 kWh/100 km.
+import ema_drivecycle
+import ema_zyklen
+
+_csv_ls = ema_zyklen.aus_lastspiel(
+    ema_zyklen.lastspiel_lesen("0:0:5,2200:6:4,2200:6:20,0:-3:4,0:0:12"))
+pruefe(_csv_ls.splitlines()[0] == "t_s,rpm,T_Nm",
+       "aus_lastspiel schreibt Zeit, Drehzahl und Moment — keine Geschwindigkeit")
+pruefe(ema_zyklen.art_von(_csv_ls) == "lastspiel"
+       and ema_zyklen.art_von("t_s,v_kmh\n0,0\n1,5\n2,10\n3,15\n4,20") == "fahrt",
+       "die Art steht in den Punkten selbst (3 Spalten / 2 Spalten), nicht in einer "
+       "zweiten Quelle, die abweichen koennte")
+
+_z = ema_drivecycle.load_csv_cycle(_csv_ls)
+pruefe(_z["art"] == "lastspiel" and abs(_z["rpm"].max() - 2200) < 1e-6
+       and abs(_z["T_Nm"].min() + 3.0) < 1e-6,
+       "load_csv_cycle liest Drehzahl und Moment zurueck, negatives Moment (Bremsen) "
+       "bleibt erhalten")
+
+_drv = ema_drivecycle.compute_drivetrain(_z, {})
+pruefe(_drv["art"] == "lastspiel"
+       and abs(_drv["rpm_motor"].max() - 2200) < 1e-6
+       and float(np.abs(_drv["v_ms"]).max()) == 0.0,
+       "compute_drivetrain reicht die Welle DURCH — ohne Fahrzeug, ohne Rad, ohne "
+       "Geschwindigkeit (das Fahrzeugmodell wird gar nicht erst angefasst)")
+
+_n = len(_drv["t"])
+_verluste = {"P_Cu": np.full(_n, 30.0), "P_Fe_stator": np.full(_n, 5.0),
+             "P_Fe_rotor": np.zeros(_n), "P_Mag_eddy": np.zeros(_n),
+             "P_Bearing": np.zeros(_n), "T_rated": 3.0}
+_e = ema_drivecycle.cycle_energy(_drv, _verluste, {})
+pruefe(_e["distance_km"] is None and _e["E_per_100km_Wh"] is None
+       and _e["v_max_kmh"] is None,
+       "Weg, Verbrauch je 100 km und v_max sind None — NICHT 0: eine 0 liest sich "
+       "wie ein Messwert, und genau daraus wurde '14,2 km' fuer ein Gelenk")
+pruefe(_e["T_rms"] > 0 and _e["rpm_max"] == 2200 and _e["overload_warning"],
+       f"was ein Lastspiel WIRKLICH beantwortet, steht da: T_eff {_e['T_rms']} Nm "
+       f"gegen {_e['T_rated_Nm']} Nm Dauermoment, samt Ueberlastwarnung")
+
+_conn = ema_db.oeffne()
+try:
+    ema_zyklen.speichern(_conn, "_pruef_lastspiel", _csv_ls, fahrzeug_dict={"mass_kg": 15})
+    pruefe(False, "ein Lastspiel MIT Fahrzeug muss abgewiesen werden")
+except ValueError as _e2:
+    pruefe("kein Fahrzeug" in str(_e2),
+           "ein Lastspiel mit Fahrzeug wird abgewiesen — Drehzahl und Moment stehen "
+           "schon in den Punkten, ein Fahrzeug daneben koennte ihnen widersprechen")
+ema_zyklen.speichern(_conn, "_pruef_lastspiel", _csv_ls)
+_p = ema_zyklen.anwenden({"vehicle": {"mass_kg": 1600}}, "_pruef_lastspiel", _conn)
+pruefe(_p["cycle"] == "lastspiel" and "vehicle" not in _p,
+       "anwenden ENTFERNT ein geerbtes Fahrzeug — sonst stuende neben der "
+       "Wellenvorgabe ein 1600-kg-Pkw")
+_liste = {z["name"]: z for z in ema_zyklen.liste(_conn)}
+pruefe(_liste["_pruef_lastspiel"]["art"] == "lastspiel"
+       and "n_max_rpm" in _liste["_pruef_lastspiel"]
+       and "weg_km" not in _liste["_pruef_lastspiel"],
+       "die Liste zeigt ein Lastspiel mit n_max und T_eff statt mit v_max und Weg")
+ema_zyklen.loeschen(_conn, "_pruef_lastspiel")
+
+pruefe(all(e.get("art") == "fahrt" for k, e in ema_zyklen.EINGEBAUT.items() if k != "off"),
+       "alle mitgelieferten Zyklen sind Fahrzyklen — deshalb muss die Frage nach der "
+       "ART vor der Frage nach dem Namen kommen")
+_lf = next(p for p in cae_cli.PFLICHTPUNKTE if p["name"] == "lastfall")
+pruefe("Lastspiel" in _lf["frage"] and "Fahrzyklus" in _lf["frage"],
+       "die Pflichtfrage lautet ZUERST 'faehrt sie oder dreht sie nur?' und erst "
+       "dann 'welcher Zyklus?'")
+pruefe(cae_cli._ist_lastspiel(_csv_ls) and not cae_cli._ist_lastspiel("t,v\n0,0\n1,5"),
+       "die CLI erkennt ein Lastspiel am Kopf der Punkte, ohne NumPy zu laden")
+
+
+print("\n9. Der Luftspalt im FDM-Netz ist der gezeichnete — oder er sagt es")
+# Gemessen am 06.09.2026: der Rasterer oeffnete das Luftband IMMER auf 2,5 mm, indem
+# er Rotorrandeisen wegnahm. Am 75-mm-Antrieb endete der Laeufer bei r=25,50 statt
+# 27,30 mm und der Spalt war 2,50 statt 0,70 mm -- bei JEDER Aufloesung gleich.
+import ema_analysis
+
+pruefe(ema_analysis.AIRGAP_MIN_PX == 1.0 and not hasattr(ema_analysis, "AIRGAP_MIN_MM"),
+       "die Mindestbreite steht in BILDPUNKTEN (1 px), nicht in Millimetern — ein "
+       "Millimeterwert ist an eine Maschinengroesse gebunden, ein Netz nicht")
+
+_g75 = dict(statorOD=75, statorID=56, rotorOD=54.6, shaftD=16, p=5, slots=24,
+            magShape="bar", magWidth=10.9697, magThick=2.6625, magDist=4.8,
+            magLayerGap=9.6, slotDepth=8, magDepthRel=0.55)
+for _N in (300, 600):
+    _d = ema_analysis.luftspalt_im_netz(_g75, _N)
+    pruefe(not _d["air_gap_widened"] and _d["air_gap_effective_mm"] == 0.7,
+           f"75-mm-Antrieb bei N={_N}: gerechnet wird der gezeichnete Spalt 0,700 mm "
+           f"({_d['air_gap_px']:.1f} Bildpunkte)")
+
+_mu, _J, _sc, _ctr = ema_analysis._rasterise(_g75, 600)[:4]
+_ix = np.arange(600) - _ctr
+_X, _Y = np.meshgrid(_ix, _ix)
+_R = np.hypot(_X, _Y) / _sc
+_eisen = _mu > 5
+_r_rot = float(_R[_eisen & (_R < 27.65)].max())
+pruefe(abs(_r_rot - 27.3) < 0.05,
+       f"und das Rotoreisen endet im Raster bei r={_r_rot:.3f} mm, wo es gezeichnet "
+       f"ist (27,300) — vorher bei 25,50, also 1,8 mm zu klein")
+
+_grob = ema_analysis.luftspalt_im_netz(
+    dict(statorOD=280, statorID=190, rotorOD=188.6, shaftD=60), 180)
+pruefe(_grob["air_gap_widened"] and _grob["air_gap_effective_mm"] > 1.9,
+       f"wo das Netz den Spalt wirklich nicht traegt (0,4 Bildpunkte), wird auf einen "
+       f"Bildpunkt aufgeweitet ({_grob['air_gap_effective_mm']:.3f} mm) — und das "
+       f"steht im Ergebnis, statt in einer Konstanten zu verschwinden")
+
+import ema_grenzen
+_z_lsp = [z for z in ema_grenzen.cad_gegen_feld(
+              dict(statorOD=280, statorID=190, rotorOD=188.6, shaftD=60, p=3, slots=54,
+                   axialLen=80, magShape="v", magWidth=24.72, magThick=6.0, magDist=8.0,
+                   magLayerGap=16.0, slotDepth=25, conductorsPerSlot=4,
+                   windingType="hairpin", fdm_resolution=180))["zeilen"]
+          if "Luftspalt" in z["groesse"]][0]
+pruefe(not _z_lsp["gleich"] and _z_lsp["feld"] > 1.9,
+       "cad_gegen_feld fragt den RASTERER, nicht noch einmal dieselben zwei "
+       "Durchmesser — sonst verglich die Probe den Spalt mit sich selbst und meldete "
+       "'gleich', waehrend das Feld mit einem anderen rechnete")
 
 
 print("\n" + "=" * 60)

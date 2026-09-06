@@ -57,12 +57,21 @@ CASES_FAST = [
 # kostet ~2 s pro Lösung.
 #
 # ACHTUNG beim Lesen der Baseline (kein Fehler, sondern dokumentiertes Verhalten):
-# `bt_norm`/`bt_peak`/`T_maxwell` sind bei N ≤ 256 **exakt 0**. `_sample_airgap`
+# `bt_norm`/`bt_peak`/`T_maxwell` sind bei kleinem N **exakt 0**. `_sample_airgap`
 # gewinnt B_t aus einem Zwei-Kreis-Harmonischen-Fit im aufgelösten Luftspaltband und
-# fällt auf 0 zurück, solange das Band sub-pixelig ist (`AIRGAP_MIN_MM = 2.5` mm gegen
-# ~1,5 mm/px bei N=180). Erst ab N≈360 wird B_t ungleich 0 — und dann nicht monoton
-# (gemessen max|B_t| = 0.67 / 1.01 / 0.22 T bei N = 360 / 512 / 700). `T_maxwell` ist
-# daher KEINE auflösungsstabile Größe; als Regressionsanker taugt es nur pro festem N.
+# fällt auf 0 zurück, solange das Band sub-pixelig ist. `T_maxwell` ist daher KEINE
+# auflösungsstabile Größe; als Regressionsanker taugt es nur pro festem N.
+#
+# Die Baseline wurde am 06.09.2026 neu gesetzt: `AIRGAP_MIN_MM = 2.5` (Millimeter)
+# wurde zu `AIRGAP_MIN_PX = 1.0` (ein Bildpunkt). Der alte Wert öffnete das Luftband
+# IMMER auf 2,5 mm, indem er Rotorrandeisen wegnahm — an der 280-mm-Maschine 1,8 mm,
+# also 1,9 % des Läuferhalbmessers, an einem 75-mm-Antrieb dieselben 1,8 mm und damit
+# 6,6 %: gerechnet wurde eine andere Maschine als die gezeichnete, und zwar bei JEDER
+# Auflösung gleich. Ein Bildpunkt ist das, was das Verfahren wirklich fordert (Rotor-
+# und Statoreisen dürfen sich nicht berühren); alles darüber ist Modellwahl. Die
+# Zahlen unten sind deshalb NICHT schlechter geworden, sondern beschreiben ab jetzt
+# die Maschine, die im CAD steht. `bt`/`T_maxwell` bleiben bei N=180 null — dort ist
+# der Spalt weiterhin sub-pixelig, und ein Fit in nicht aufgelöster Luft wäre erfunden.
 CASES_SLOW = [
     ("v_oc_512",        "v",        512,   0.0, 0.0),
     ("spm_oc_512",      "spm",      512,   0.0, 0.0),

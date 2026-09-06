@@ -1006,6 +1006,22 @@ def cmd_topopt(args) -> int:
     return EXIT_OK
 
 
+def _ist_lastspiel(csv_text) -> bool:
+    """Drei Spalten heisst Lastspiel — ohne NumPy, die CLI laeuft im System-Python.
+
+    Nur der Kopf wird angesehen: ``ema_drivecycle`` einzubinden zoege NumPy und
+    SciPy in eine Kommandozeile, die ohne beides auskommt (der Kern ist bewusst
+    stdlib-only).
+    """
+    for zeile in str(csv_text or "").splitlines():
+        zeile = zeile.strip()
+        if not zeile or zeile.startswith("#"):
+            continue
+        trenner = ";" if zeile.count(";") > zeile.count(",") else ","
+        return len([f for f in zeile.split(trenner) if f.strip()]) >= 3
+    return False
+
+
 def _lastfall_zeile(payload: dict) -> str:
     """Fahrzyklus und Fahrzeug in einer Zeile — der Lastfall auf einen Blick."""
     zyk = payload.get("cycle")
@@ -1015,6 +1031,9 @@ def _lastfall_zeile(payload: dict) -> str:
                 "(+ Autobahn-Volllast) am 1600-kg-Pkw")
     if zyk == "off":
         return "Lastfall: kein Fahrzyklus (cycle=off) — nur Auslegungspunkt und Kennfeld"
+    if zyk == "lastspiel" or (zyk == "csv" and _ist_lastspiel(payload.get("cycle_csv"))):
+        return ("Lastfall: Lastspiel (Drehzahl und Moment der Welle) — kein Fahrzeug, "
+                "kein Weg, kein Verbrauch je 100 km")
     name = zyk
     if zyk == "csv":
         name = "eigener Zyklus (csv)"
@@ -1049,8 +1068,24 @@ PFLICHTPUNKTE = [
                  "CAD und 3D bisher nur pmsm"),
     dict(name="betriebspunkt", frage="Moment und Drehzahl im Dauerbetrieb",
          quelle="aufgabe", hinweis="load_nm, rpm_from/rpm_to — nicht ableitbar"),
-    dict(name="lastfall", frage="Fahrzyklus UND Fahrzeug (oder ausdruecklich keiner)",
-         quelle="zyklen", hinweis="'zyklus liste'; passt keiner: selbst anlegen"),
+    # Die Frage lautet ZUERST "faehrt die Maschine ueberhaupt?" und erst danach
+    # "welcher Zyklus?". Andersherum gefragt zwingt sie zu einer Antwort aus einer
+    # Liste, in der nur Fahrzeuge stehen -- gemessen am 06.09.2026 an einem
+    # Roboterarm, dessen Gelenk daraufhin als 14,2-km-Fahrt mit 345 kWh/100 km
+    # herauskam, weil der Agent zum Ausdruecken von "2200 1/min" ein Rad erfinden
+    # musste. Die drei Antworten stehen deshalb hier, nicht in einer Fussnote.
+    dict(name="lastfall",
+         frage="Faehrt die Maschine (Fahrzyklus) oder dreht sie nur (Lastspiel) "
+               "— oder genuegt der Auslegungspunkt?",
+         quelle="zyklen",
+         hinweis="ERST entscheiden, DANN waehlen. 'zyklus liste' zeigt beides. "
+                 "Fahrzeug auf Raedern -> Fahrzyklus (braucht Masse, Rad, "
+                 "Uebersetzung; passt keiner der abgelegten: 'zyklus anlegen "
+                 "--phasen'). Achse, Spindel, Pumpe, Luefter, Winde, Pruefstand "
+                 "-> Lastspiel in Drehzahl und Moment ('zyklus anlegen "
+                 "--lastspiel'). Weder noch -> 'off'. Ein Fahrzyklus fuer etwas, "
+                 "das nicht faehrt, verlangt ein erfundenes Rad und liefert Weg "
+                 "und kWh/100 km einer Maschine, die es nicht gibt"),
     dict(name="bauraum", frage="Aussendurchmesser, Baulaenge, Wellendurchmesser",
          quelle="aufgabe", hinweis="die Schemagrenzen sind die Suchbox, nicht der Bauraum"),
     dict(name="kuehlung", frage="Welche Kuehlung ist vorgesehen?",
@@ -1365,10 +1400,18 @@ def cmd_aufgabe(args) -> int:
     zeilen = []
     for pkt in PFLICHTPUNKTE:
         stand, wie = "OFFEN", pkt["hinweis"]
-        if pkt["quelle"] == "zyklen" and bestand["zyklen"]:
-            stand = "PRUEFEN"
-            wie = ("abgelegt: " + ", ".join(z["name"] for z in bestand["zyklen"][:5])
-                   + " — passt einer? sonst neu anlegen")
+        if pkt["quelle"] == "zyklen":
+            # Der Bestand ERGAENZT die Entscheidung, er ersetzt sie nicht. Frueher
+            # stand hier nur "abgelegt: <fuenf Namen> — passt einer?", und weil
+            # alle fuenf Fahrzeuge waren, war die einzige angebotene Antwort ein
+            # Fahrzeug. Nach Art getrennt ist auch das Fehlen eine Auskunft:
+            # "Lastspiele: keines" sagt, dass ein Roboterarm eines BRAUCHT.
+            stand = "PRUEFEN" if bestand["zyklen"] else "OFFEN"
+            fahrten = [z["name"] for z in bestand["zyklen"] if z.get("art") != "lastspiel"]
+            spiele = [z["name"] for z in bestand["zyklen"] if z.get("art") == "lastspiel"]
+            wie = (pkt["hinweis"]
+                   + "\n  abgelegte Fahrzyklen: " + (", ".join(fahrten[:5]) or "keine")
+                   + "\n  abgelegte Lastspiele: " + (", ".join(spiele[:5]) or "keines"))
         elif pkt["quelle"] == "fest":
             # Nicht „ableitbar", sondern unverrueckbar: das sind Annahmen der
             # Toolchain, die man nur NENNEN, nicht einstellen kann.
@@ -1439,13 +1482,41 @@ def cmd_zyklus(args) -> int:
         eintraege = ema_zyklen.liste(conn)
         if getattr(args, "json", False):
             return emit(eintraege, args)
+        # Die Liste beantwortet die zweite Frage. Die erste steht darueber, weil
+        # sie sonst uebersprungen wird: wer nur Fahrzeuge sieht, waehlt ein
+        # Fahrzeug -- auch fuer einen Roboterarm.
+        print("Zuerst entscheiden, DANN waehlen:")
+        print("  faehrt auf Raedern      -> Fahrzyklus (v ueber t) + Fahrzeug")
+        print("  dreht nur (Achse, Spindel, Pumpe, Luefter, Winde, Pruefstand)")
+        print("                          -> Lastspiel (Drehzahl und Moment ueber t)")
+        print("  weder noch              -> 'off': Auslegungspunkt und Kennfeld genuegen")
+        print("Passt nichts Abgelegtes, wird eines gebaut: 'zyklus anlegen "
+              "--phasen ...' bzw. '--lastspiel ...'.\n")
+
+        fahrten = [z for z in eintraege if z.get("art") == "fahrt"]
+        spiele = [z for z in eintraege if z.get("art") == "lastspiel"]
+        keiner = [z for z in eintraege if z.get("art") == "keiner"]
+
+        print(f"FAHRZYKLEN — Geschwindigkeit ueber der Zeit, Moment aus dem Fahrzeug")
         print(f"{'Name':22} {'Herkunft':10} {'v_max':>7} {'Dauer':>7} {'Weg':>7}  gedacht fuer")
-        for z in eintraege:
+        for z in fahrten:
             print(f"{z['name']:22} {z['herkunft']:10} "
                   f"{z.get('v_max_kmh', '—'):>7} {z.get('dauer_s', '—'):>7} "
                   f"{z.get('weg_km', '—'):>7}  {z['gedacht_fuer']}")
             if z.get("achtung"):
                 print(f"{'':22} ACHTUNG: {z['achtung']}")
+
+        print(f"\nLASTSPIELE — Drehzahl und Moment der Welle, kein Fahrzeug")
+        if not spiele:
+            print("  (keines abgelegt — fuer eine Maschine, die dreht ohne zu fahren, "
+                  "ist das die zu bauende Art)")
+        print(f"{'Name':22} {'Herkunft':10} {'n_max':>7} {'Dauer':>7} {'T_eff':>7}  gedacht fuer")
+        for z in spiele:
+            print(f"{z['name']:22} {z['herkunft']:10} "
+                  f"{z.get('n_max_rpm', '—'):>7} {z.get('dauer_s', '—'):>7} "
+                  f"{z.get('T_rms_Nm', '—'):>7}  {z['gedacht_fuer']}")
+        for z in keiner:
+            print(f"\nKEIN LASTFALL\n{z['name']:22} {z['herkunft']:10}  {z['gedacht_fuer']}")
         return EXIT_OK
 
     if was == "zeigen":
@@ -1464,23 +1535,44 @@ def cmd_zyklus(args) -> int:
         return emit(z, args)
 
     if was == "anlegen":
+        # Genau EINE der beiden Arten. Beides zugleich waere zweierlei Wahrheit
+        # ueber dieselbe Welle, keines von beidem eine leere Ablage.
+        if bool(args.phasen) == bool(getattr(args, "lastspiel", None)):
+            return _die(
+                "Genau eines von beidem angeben:\n"
+                "  --phasen   'ziel_kmh:dauer_s,...'      Fahrzyklus (braucht --fahrzeug)\n"
+                "  --lastspiel 'rpm:Nm:dauer_s,...'       Lastspiel der Welle (kein Fahrzeug)\n"
+                "Faehrt die Maschine auf Raedern, ist es das erste. Dreht sie nur "
+                "(Roboterachse, Spindel, Pumpe, Luefter, Winde, Pruefstand), das zweite.",
+                EXIT_USAGE)
         try:
-            phasen = ema_zyklen.phasen_lesen(args.phasen)
-            csv = ema_zyklen.aus_phasen(phasen)
             fahrzeug = {}
             for zuweisung in (args.fahrzeug or []):
                 if "=" not in zuweisung:
                     return _die(f"'{zuweisung}': erwartet wird GROESSE=WERT", EXIT_USAGE)
                 k, v = zuweisung.split("=", 1)
                 fahrzeug[k.strip()] = float(v)
+            if getattr(args, "lastspiel", None):
+                csv = ema_zyklen.aus_lastspiel(ema_zyklen.lastspiel_lesen(args.lastspiel))
+            else:
+                csv = ema_zyklen.aus_phasen(ema_zyklen.phasen_lesen(args.phasen))
             z = ema_zyklen.speichern(conn, args.name, csv,
                                      beschreibung=args.beschreibung or "",
                                      fahrzeug_dict=fahrzeug)
         except ValueError as e:
             return _die(str(e), EXIT_USAGE)
-        print(f"Zyklus '{z['name']}' abgelegt ({len(z['punkte'].splitlines()) - 1} s, "
-              f"Fahrzeug {z['fahrzeug']['mass_kg']:.0f} kg). "
-              f"Verwenden mit: run analyse --zyklus {z['name']}")
+        dauer = len(z["punkte"].splitlines()) - 1
+        if z["art"] == "lastspiel":
+            eck = next((x for x in ema_zyklen.liste(conn) if x["name"] == z["name"]), {})
+            print(f"Lastspiel '{z['name']}' abgelegt ({dauer} s, bis "
+                  f"{eck.get('n_max_rpm', 0):.0f} 1/min, {eck.get('T_max_Nm', 0):.2f} Nm "
+                  f"Spitze, {eck.get('T_rms_Nm', 0):.2f} Nm effektiv). Kein Fahrzeug — "
+                  f"kein Weg, kein Verbrauch je 100 km.\n"
+                  f"Verwenden mit: run analyse --zyklus {z['name']}")
+        else:
+            print(f"Fahrzyklus '{z['name']}' abgelegt ({dauer} s, "
+                  f"Fahrzeug {z['fahrzeug']['mass_kg']:.0f} kg). "
+                  f"Verwenden mit: run analyse --zyklus {z['name']}")
         return EXIT_OK
 
     if was == "loeschen":
@@ -2267,14 +2359,21 @@ def build_parser() -> argparse.ArgumentParser:
     z2.add_argument("name")
     z2.add_argument("--punkte", action="store_true", help="auch die CSV-Punkte ausgeben")
     _add_globals(z2)
-    z3 = zs.add_parser("anlegen", help="eigenen Zyklus bauen und ablegen")
+    z3 = zs.add_parser("anlegen", help="eigenen Lastfall bauen und ablegen — "
+                                       "Fahrzyklus (--phasen) ODER Lastspiel (--lastspiel)")
     z3.add_argument("name")
-    z3.add_argument("--phasen", required=True, metavar="ZIEL:DAUER,...",
-                    help="Phasen als ziel_kmh:dauer_s, z. B. '0:5,25:20,25:300,0:15' — "
-                         "in jeder Phase laeuft v linear auf das Ziel")
+    z3.add_argument("--phasen", metavar="ZIEL:DAUER,...",
+                    help="FAHRZYKLUS: Phasen als ziel_kmh:dauer_s, z. B. "
+                         "'0:5,25:20,25:300,0:15' — in jeder Phase laeuft v linear "
+                         "auf das Ziel. Braucht --fahrzeug")
+    z3.add_argument("--lastspiel", metavar="RPM:NM:DAUER,...",
+                    help="LASTSPIEL: Phasen als drehzahl:moment:dauer_s, z. B. "
+                         "'0:0:5,2200:6:4,2200:6:20,0:-3:4' — fuer alles, was dreht, "
+                         "ohne zu fahren (Roboterachse, Spindel, Pumpe, Pruefstand). "
+                         "Kein Fahrzeug, negatives Moment ist Bremsen")
     z3.add_argument("--fahrzeug", action="append", metavar="GROESSE=WERT",
-                    help="mass_kg, r_wheel_m, gear_ratio, cwA_m2, cr, eta_drive, "
-                         "regen_frac, slope_deg — mehrfach angebbar")
+                    help="nur zum Fahrzyklus: mass_kg, r_wheel_m, gear_ratio, cwA_m2, "
+                         "cr, eta_drive, regen_frac, slope_deg — mehrfach angebbar")
     z3.add_argument("--beschreibung", default="")
     _add_globals(z3)
     z4 = zs.add_parser("loeschen", help="abgelegten Zyklus entfernen")
