@@ -49,6 +49,88 @@ from dataclasses import dataclass
 # nagelt beide gegeneinander fest.
 BRIDGE_MM = 1.3
 
+# ── Die Waende der Magnettasche ───────────────────────────────────────────────
+#
+# Bis hierher entstand eine V-Tasche aus DREI geratenen Zahlen: ``magDepthRel``
+# (relative radiale Lage 0…1), ``magWidth`` (Laenge in mm) und ``magDist``
+# (Stegabstand in mm). Keine davon ist eine Wand, keine folgt aus den anderen, und
+# ob sie zusammen passen, sagt erst das Layouttor. Gemessen am Agentenlauf
+# 20260907_074942: VIER Abbrueche an Stufe 0 hintereinander, die Tasche ragte
+# 2,45 / 0,15 / 1,96 mm ueber den Rotorrand bzw. kollidierte um 0,77 mm mit dem
+# Nachbarpol -- jedes Mal ein neuer Rateversuch.
+#
+# Eine Tasche hat aber Waende, und die sind die eigentliche Entwurfsgroesse:
+#
+#   Rand    zwischen Tasche und Rotoraussenrand -- haelt den Polschuh gegen die
+#           Fliehkraft UND kurzschliesst den Magneten (s. ``stegbreite_mm``)
+#   Achse   zwischen Tasche und Polsymmetrieachse (d-Achse). Der Steg dort traegt
+#           die beiden V-Schenkel gegeneinander. Er war NIRGENDS ausgedrueckt --
+#           am frischen Payload fiel er aus ``magDist=8`` zufaellig mit 0,81 mm ab.
+#   q-Achse zwischen den Taschen ZWEIER BENACHBARTER Pole. Er fuehrt den
+#           Reluktanzpfad und begrenzt, wie lang ein V-Schenkel werden darf.
+#
+# Gemeint ist immer die TASCHE (Rechteck + Endkappen + Klebespalt ``magGapMm``),
+# nicht der Magnetkoerper -- dieselbe Groesse, die ``ema_rotorcheck.Pocket`` prueft.
+# Der JS-Spiegel in ``ema.html`` (``magnetLegs``) fuehrt dieselben Werte;
+# ``test_topology.py`` nagelt beide gegeneinander fest.
+WAND_RAND_MM      = BRIDGE_MM   # 1,3 -- Tasche → Rotoraussenrand (V-artig)
+WAND_ACHSE_MM     = 1.5         # Tasche → Polsymmetrieachse (d-Achse)
+WAND_QACHSE_MM    = 2.0         # Tasche → Tasche des Nachbarpols (q-Achse)
+WAND_SPEICHE_A_MM = 1.5         # Speiche: Tasche → Rotoraussenrand
+WAND_SPEICHE_I_MM = 2.0         # Speiche: Tasche → Wellenaussenrand
+
+
+def _spalt(geom: dict) -> float:
+    """Klebespalt Magnet↔Tasche [mm] -- dieselbe Klemme wie in ``ema_freecad``."""
+    return max(0.05, min(0.3, float((geom or {}).get("magGapMm", 0.1))))
+
+
+def pocket_mode(geom: dict) -> str:
+    """Wie die V-Tasche parametriert ist: ``position`` (Vorgabe) | ``diameter`` | ``wand``."""
+    m = str((geom or {}).get("pocketMode", "position") or "position").strip().lower()
+    return m if m in ("position", "diameter", "wand") else "position"
+
+
+def sitz_aus_waenden(r_rot: float, halb_winkel: float, mag_h: float,
+                     gap: float, laenge: float,
+                     wand_rand: float = None, wand_achse: float = None):
+    """``(d_half, r_pos)`` so, dass die Tasche BEIDE Waende genau beruehrt.
+
+    Geschlossene Form, keine Iteration, kein Tor -- ``ema_rotorcheck`` importiert
+    dieses Modul, ein Import zurueck waere ein Zirkel. Die Groesse der Tasche
+    (``laenge``) kommt von aussen; wer sie erst suchen muss, tut das in
+    ``ema_screen.einpassen`` mit dem echten Layouttor als Pruefstein.
+
+    ``d_half`` folgt aus der Achswand: die INNERE Kappe ist die dichteste Stelle an
+    der d-Achse (der Rechteckrand liegt bei ``ht*cos t <= ht`` weiter weg), ihr
+    Mittelpunkt sitzt bei ``d_half - gap*sin t``, ihr Radius ist ``ht``.
+
+    ``r_pos`` folgt daraus, dass die AEUSSERE Kappe die Randwand genau beruehrt --
+    das ist „so weit aussen wie moeglich" bei gegebener Laenge: ihr Mittelpunkt
+    laeuft auf dem Kreis ``R = r_rot - wand_rand - ht``.
+
+    **``r_pos`` ist das INNERE ENDE des Magneten, nicht die Taschenmitte** (so liest
+    es ``leg_center``). Vom inneren Ende bis zum aeusseren Kappenmittelpunkt sind es
+    darum ``L/2 + hl = L + gap`` und nicht ``hl``. Der Unterschied ist keiner auf
+    dem Papier: mit ``hl`` gerechnet stand die Tasche einer 84-mm-Auslegung
+    **36,2 mm** ausserhalb des Rotors, und weil der Positionsmodus die Laenge
+    zusaetzlich klemmt, fiel das in einer Vergleichsmessung nicht auf.
+    """
+    wand_rand = WAND_RAND_MM if wand_rand is None else wand_rand
+    wand_achse = WAND_ACHSE_MM if wand_achse is None else wand_achse
+    ht = mag_h / 2.0 + gap                       # halbe Taschendicke = Kappenradius
+    d = max(laenge, 0.0) + gap                   # inneres Ende → aeusserer Kappenmittelpunkt
+    d_half = wand_achse + ht + gap * math.sin(halb_winkel)
+    R = r_rot - wand_rand - ht
+    y = d_half + d * math.sin(halb_winkel)
+    if R <= 0 or y >= R:
+        # Der Slot passt bei dieser Laenge/Dicke gar nicht mehr zwischen die Waende.
+        # Kein Ersatzwert, der wie ein Entwurf aussieht: der Sitz faellt auf den
+        # innersten moeglichen zurueck und das Layouttor sagt es dann deutlich.
+        return d_half, max(r_rot * 0.05, 1.0)
+    r_pos = math.sqrt(R * R - y * y) - d * math.cos(halb_winkel)
+    return d_half, r_pos
+
 
 @dataclass(frozen=True)
 class Leg:
@@ -125,6 +207,62 @@ def _common(geom: dict):
     return r_rot, r_shaft, r_pos
 
 
+def slot_laenge_max(r_rot: float, r_shaft: float, half_ang: float, mag_h: float,
+                    gap: float, wand_rand: float = None, wand_achse: float = None) -> float:
+    """Laengster Magnet, der zwischen Achswand, Randwand und Welle in den Slot geht.
+
+    Dieselbe Quadratik wie ``_max_magnet_width``, nur nach der LAENGE aufgeloest
+    statt nach dem Sitz: gesucht ist ``d = L + gap`` (inneres Ende → aeusserer
+    Kappenmittelpunkt, s. ``sitz_aus_waenden``) mit
+    ``sqrt(R^2 - (d_half + d*sin t)^2) - d*cos t = r_min``.
+
+    Der Nachbarpol steht hier NICHT drin -- den kennt erst das Layouttor, und
+    ``ema_screen.einpassen`` zieht die Laenge daran nach unten. Dieses Modul liefert
+    die obere Schranke aus der eigenen Polgeometrie, damit ``magnet_legs`` auch bei
+    ``magWidth = 0`` („Slot fuellen") eine vollstaendige Geometrie zurueckgibt statt
+    einer mit Magneten der Laenge null.
+    """
+    wand_rand = WAND_RAND_MM if wand_rand is None else wand_rand
+    wand_achse = WAND_ACHSE_MM if wand_achse is None else wand_achse
+    ht = mag_h / 2.0 + gap
+    d_half = wand_achse + ht + gap * math.sin(half_ang)
+    R = r_rot - wand_rand - ht
+    r_min = r_shaft + wand_achse + mag_h / 2.0 + 2.0 * gap
+    a, b = math.sin(half_ang), math.cos(half_ang)
+    P = d_half * a + r_min * b
+    Q = r_min * r_min + d_half * d_half - R * R
+    disc = P * P - Q
+    if disc <= 0:
+        return 0.0
+    return max(-P + math.sqrt(disc) - gap, 0.0)
+
+
+def _v_sitz(geom: dict, half_ang: float, mag_h: float, mag_w: float,
+            wand_rand: float = None):
+    """``(r_pos, d_half, laenge)`` fuer die V-artigen Bauformen, je nach ``pocketMode``.
+
+    ``position``/``diameter`` (bisher, Vorgabe fuer bestehende Projekte): der Sitz
+    kommt aus ``magDepthRel``/``magDist``, die Laenge wird gegen die Randwand
+    geklemmt. ``wand`` (s. ``sitz_aus_waenden``): die Laenge ist die Vorgabe, der
+    Sitz folgt aus den Waenden -- ``magDist`` und ``magDepthRel`` sind dann
+    ABGELEITET und werden von ``ema_screen.einpassen`` zurueckgeschrieben, damit im
+    Payload die Maschine steht, die wirklich gebaut wird.
+    """
+    r_rot, r_shaft, r_pos = _common(geom)
+    d_half = float(geom["magDist"]) / 2
+    if pocket_mode(geom) == "wand":
+        gap = _spalt(geom)
+        if mag_w <= 0:                      # „Slot fuellen" -- s. slot_laenge_max
+            mag_w = slot_laenge_max(r_rot, r_shaft, half_ang, mag_h, gap,
+                                    wand_rand=wand_rand)
+        d_half, r_pos = sitz_aus_waenden(r_rot, half_ang, mag_h, gap,
+                                         mag_w, wand_rand=wand_rand)
+        return r_pos, d_half, mag_w
+    eb = (WAND_RAND_MM if wand_rand is None else wand_rand) + mag_h / 2
+    return r_pos, d_half, min(mag_w, _max_magnet_width(r_pos, d_half, half_ang,
+                                                       r_rot, eb))
+
+
 def _build_v(geom: dict):
     r_rot, _r_shaft, r_pos = _common(geom)
     mag_h = float(geom["magThick"])
@@ -134,15 +272,15 @@ def _build_v(geom: dict):
     # The inner magnet corner (at tangential offset d_half) sits at radius
     # pocketInnerD/2 → r_pos = sqrt(r_inner² − d_half²); the length follows from
     # the outer corner reaching pocketOuterD/2 (same quadratic as the OD clamp).
-    if geom.get("pocketMode") == "diameter":
+    if pocket_mode(geom) == "diameter":
         r_pos = math.sqrt(max(25.0, (float(geom["pocketInnerD"]) / 2) ** 2 - d_half ** 2))
         mag_w = _max_magnet_width(r_pos, d_half, half_ang, float(geom["pocketOuterD"]) / 2, 0.0)
+        # Thickness-aware clamp: keep the magnet CORNER (not just its centreline)
+        # inside r_rot - BRIDGE by reserving half the thickness.
+        mag_w = min(mag_w, _max_magnet_width(r_pos, d_half, half_ang, r_rot,
+                                             WAND_RAND_MM + mag_h / 2))
     else:
-        mag_w = float(geom["magWidth"])
-    # Thickness-aware clamp: keep the magnet CORNER (not just its centreline)
-    # inside r_rot - BRIDGE by reserving half the thickness.
-    mag_w = min(mag_w,
-                _max_magnet_width(r_pos, d_half, half_ang, r_rot, BRIDGE_MM + mag_h / 2))
+        r_pos, d_half, mag_w = _v_sitz(geom, half_ang, mag_h, float(geom["magWidth"]))
     legs = [
         Leg(r_pos,  d_half,  half_ang, mag_w, mag_h, "perp", +1),
         Leg(r_pos, -d_half, -half_ang, mag_w, mag_h, "perp", -1),
@@ -166,15 +304,16 @@ def _build_vasym(geom: dict):
     d_half = float(geom["magDist"]) / 2
     half_ang = math.radians(float(geom["magAngle"]) / 2)
     asym = math.radians(float(geom.get("magAsym", 0.0)))
-    eb = BRIDGE_MM + mag_h / 2
     # Per-arm opening angle (clamped to a sane V range so corners stay inside).
     ha_top = min(max(half_ang + asym, math.radians(5)), math.radians(85))
     ha_bot = min(max(half_ang - asym, math.radians(5)), math.radians(85))
-    w_top = min(float(geom["magWidth"]), _max_magnet_width(r_pos, d_half, ha_top, r_rot, eb))
-    w_bot = min(float(geom["magWidth"]), _max_magnet_width(r_pos, d_half, ha_bot, r_rot, eb))
+    # Jeder Arm sitzt an SEINEN Waenden -- bei verschiedenen Oeffnungswinkeln sind
+    # das verschiedene Sitze, und genau das ist der Sinn der asymmetrischen Form.
+    r_top, d_top, w_top = _v_sitz(geom, ha_top, mag_h, float(geom["magWidth"]))
+    r_bot, d_bot, w_bot = _v_sitz(geom, ha_bot, mag_h, float(geom["magWidth"]))
     legs = [
-        Leg(r_pos,  d_half,  ha_top, w_top, mag_h, "perp", +1),
-        Leg(r_pos, -d_half, -ha_bot, w_bot, mag_h, "perp", -1),
+        Leg(r_top,  d_top,  ha_top, w_top, mag_h, "perp", +1),
+        Leg(r_bot, -d_bot, -ha_bot, w_bot, mag_h, "perp", -1),
     ]
     meta = MotorTopoMeta("vasym", TOPOLOGY_LABELS["vasym"], n_legs_per_pole=2,
                          eta_hint=math.sin((ha_top + ha_bot) / 2))
@@ -198,8 +337,7 @@ def _build_u(geom: dict):
     mag_h = float(geom["magThick"])
     d_half = float(geom["magDist"]) / 2
     half_ang = math.radians(float(geom["magAngle"]) / 2)
-    mag_w = min(float(geom["magWidth"]),
-                _max_magnet_width(r_pos, d_half, half_ang, r_rot, BRIDGE_MM + mag_h / 2))
+    r_pos, d_half, mag_w = _v_sitz(geom, half_ang, mag_h, float(geom["magWidth"]))
     # Bottom bar BELOW the arm feet (r_pos) → radial gap, disjoint from the arms
     # regardless of its tangential length.  The clearance has to be reserved between
     # POCKETS, not between magnet bodies: each pocket is one CAD gap wider than its
@@ -210,8 +348,13 @@ def _build_u(geom: dict):
     # magThick, magAngle and magWidth, i.e. the U-cup never passed the layout gate
     # at any parameter setting.  The 15 % on the bridge covers the difference
     # between the cap-to-cap and the box-to-box measure (~0.05 mm).
-    gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
-    bar_r = max(r_pos - mag_h - 2 * gap - BRIDGE_MM * 1.15,
+    gap = _spalt(geom)
+    # Im Wandmodus gilt fuer JEDEN Steg im Blech ``WAND_QACHSE_MM`` (s.
+    # ``ema_screen._einpassen_wand``); der Bodenbalken muss diesen Abstand zu den
+    # Armfuessen halten, sonst faellt die U-Form dort durch, wo sie frueher gerade
+    # eben durchkam.
+    _steg = WAND_QACHSE_MM if pocket_mode(geom) == "wand" else BRIDGE_MM
+    bar_r = max(r_pos - mag_h - 2 * gap - _steg * 1.15,
                 r_bore + mag_h / 2 + 1.0)
     tang = float(geom.get("magTangLen", 0))
     bar_len = tang if tang > 0 else 2 * d_half
@@ -234,17 +377,36 @@ def _build_vv(geom: dict):
     half_ang = math.radians(float(geom["magAngle"]) / 2)            # inner
     half_ang2 = math.radians(float(geom.get("magAngle2", float(geom["magAngle"])))) / 2  # outer
     d_layer = float(geom.get("magLayerGap", 8.0))
-    eb = BRIDGE_MM + mag_h / 2
-    w0 = min(float(geom["magWidth"]),
-             _max_magnet_width(r_pos, d_half, half_ang, r_rot, eb))
-    r1 = r_pos + d_layer
-    w1 = min(float(geom["magWidth"]) * 1.05,
-             _max_magnet_width(r1, d_half, half_ang2, r_rot, eb))
+    if pocket_mode(geom) == "wand":
+        # Die AEUSSERE Lage sitzt an der Randwand; die innere haengt um
+        # ``magLayerGap`` darunter. Dass sich die beiden dabei nicht beruehren, ist
+        # der Punkt, an dem das Doppel-V kippt -- geprueft wird es mit
+        # ``ema_rotorcheck.pocket_distance`` in ``ema_screen.einpassen``, das
+        # ``magLayerGap`` noetigenfalls anhebt und die Anhebung MELDET. Hier steht
+        # nur die Bauvorschrift, kein Tor: dieses Modul kennt das Tor nicht
+        # (Importzirkel), und ein zweites Abstandsmass daneben waere die naechste
+        # stille Abschrift.
+        gap = _spalt(geom)
+        r1, d1, w1 = _v_sitz(geom, half_ang2, mag_h, float(geom["magWidth"]))
+        w0 = float(geom["magWidth"])
+        if w0 <= 0:                          # „Slot fuellen" auch fuer die innere Lage
+            w0 = slot_laenge_max(r_rot, _r_shaft, half_ang, mag_h, gap,
+                                 wand_rand=WAND_RAND_MM + d_layer)
+        d_half, r_pos = sitz_aus_waenden(r_rot, half_ang, mag_h, gap, w0,
+                                         wand_rand=WAND_RAND_MM + d_layer)
+    else:
+        eb = WAND_RAND_MM + mag_h / 2
+        d1 = d_half
+        w0 = min(float(geom["magWidth"]),
+                 _max_magnet_width(r_pos, d_half, half_ang, r_rot, eb))
+        r1 = r_pos + d_layer
+        w1 = min(float(geom["magWidth"]) * 1.05,
+                 _max_magnet_width(r1, d_half, half_ang2, r_rot, eb))
     legs = [
         Leg(r_pos,  d_half,  half_ang, w0, mag_h, "perp", +1, layer=0),
         Leg(r_pos, -d_half, -half_ang, w0, mag_h, "perp", -1, layer=0),
-        Leg(r1,  d_half,  half_ang2, w1, mag_h, "perp", +1, layer=1),
-        Leg(r1, -d_half, -half_ang2, w1, mag_h, "perp", -1, layer=1),
+        Leg(r1,  d1,  half_ang2, w1, mag_h, "perp", +1, layer=1),
+        Leg(r1, -d1, -half_ang2, w1, mag_h, "perp", -1, layer=1),
     ]
     meta = MotorTopoMeta("vv", TOPOLOGY_LABELS["vv"], n_legs_per_pole=4,
                          eta_hint=math.sin(half_ang))
@@ -258,16 +420,19 @@ def _build_delta(geom: dict):
     d_half = float(geom["magDist"]) / 2
     half_ang = math.radians(float(geom["magAngle"]) / 2)
     # Reserve radial room above the arms for the deck (one thickness + 2 bridges).
-    arm_bridge = 2 * BRIDGE_MM + 1.5 * mag_h
-    mag_w = min(float(geom["magWidth"]),
-                _max_magnet_width(r_pos, d_half, half_ang, r_rot, arm_bridge))
+    # Im Wandmodus ist das eine groessere RANDWAND fuer die Arme -- das Deck steht
+    # dann an der eigentlichen Randwand, die Arme eine Deckhoehe darunter.
+    _steg = WAND_QACHSE_MM if pocket_mode(geom) == "wand" else WAND_RAND_MM
+    arm_bridge = WAND_RAND_MM + _steg + 1.5 * mag_h
+    r_pos, d_half, mag_w = _v_sitz(geom, half_ang, mag_h, float(geom["magWidth"]),
+                                   wand_rand=arm_bridge - mag_h / 2)
     r_tip = r_pos + mag_w * math.cos(half_ang)
     y_tip = d_half + mag_w * math.sin(half_ang)
-    deck_r = min(r_tip + mag_h + BRIDGE_MM, r_rot - mag_h / 2 - BRIDGE_MM)
+    deck_r = min(r_tip + mag_h + _steg, r_rot - mag_h / 2 - WAND_RAND_MM)
     tang = float(geom.get("magTangLen", 0))
     deck_len = tang if tang > 0 else 1.6 * y_tip
     # keep the deck corner inside r_rot - BRIDGE
-    max_half = math.sqrt(max((r_rot - BRIDGE_MM) ** 2 - (deck_r + mag_h / 2) ** 2, 0.0))
+    max_half = math.sqrt(max((r_rot - WAND_RAND_MM) ** 2 - (deck_r + mag_h / 2) ** 2, 0.0))
     deck_len = min(deck_len, 2 * max_half)
     legs = [
         Leg(r_pos,  d_half,  half_ang, mag_w, mag_h, "perp", +1),
@@ -293,7 +458,7 @@ def _build_pmasynrm(geom: dict):
         rk = max(rk, r_shaft + mag_h + 2.0)
         hak = max(half_ang - k * math.radians(8), math.radians(20))
         wk = min(float(geom["magWidth"]) * (0.8 + 0.15 * k),
-                 _max_magnet_width(rk, d_half, hak, r_rot, BRIDGE_MM + mag_h / 2))
+                 _max_magnet_width(rk, d_half, hak, r_rot, WAND_RAND_MM + mag_h / 2))
         legs.append(Leg(rk,  d_half,  hak, wk, mag_h, "perp", +1, layer=k))
         legs.append(Leg(rk, -d_half, -hak, wk, mag_h, "perp", -1, layer=k))
     meta = MotorTopoMeta("pmasynrm", TOPOLOGY_LABELS["pmasynrm"],
@@ -419,15 +584,25 @@ def _build_spoke(geom: dict):
     # Kappe vom Radius ``mag_h/2 + Spalt``.  Mit ``r_start = r_shaft + 1.0`` schnitt
     # diese Kappe fuer jede Dicke ab 1,8 mm in die Wellenbohrung — bei den ueblichen
     # 6 mm um 2,1 mm.  Der Saum reserviert Steg UND Kappe an beiden Enden.
-    gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
+    gap = _spalt(geom)
     # Der Saum reserviert Steg UND Kappe -- je Ende einzeln, denn die Tasche kann
     # aussen offen und innen geschlossen sein (s. ``taschenoeffnung``). Ist ein
     # Ende offen, laeuft der Magnet bis an die Grenze: aussen bis an den
     # Luftspalt, innen bis an die Welle. Die runde Kappe ragt dann darueber
     # hinaus und wird vom Rotorblech abgeschnitten — genau das IST die Oeffnung.
+    #
+    # Die Waende der Speichentasche stehen jetzt ausdruecklich (WAND_SPEICHE_*) und
+    # gelten fuer die TASCHE, nicht fuer den Magneten. Nachgemessen lieferte der
+    # frueherer Saum ``steg + mag_h/2 + gap`` an beiden Enden **1,20 mm**, obwohl
+    # ``BRIDGE_MM`` 1,3 sagt: die Endkappe sitzt um ``gap`` AUSSERHALB des
+    # Magnetendes (halbe Taschenlaenge ist ``L/2 + gap``) und traegt selbst den
+    # Radius ``mag_h/2 + gap`` -- der Klebespalt geht also ZWEIMAL ein. Der Saum
+    # rechnet ihn jetzt zweimal, und dann steht die Wand, die dransteht.
     steg_a, steg_i = stegbreite_mm(geom)
-    saum_a = (steg_a + mag_h / 2 + gap) if steg_a > 0 else 0.0
-    saum_i = (steg_i + mag_h / 2 + gap) if steg_i > 0 else 0.0
+    wand_a = WAND_SPEICHE_A_MM if steg_a > 0 else 0.0
+    wand_i = WAND_SPEICHE_I_MM if steg_i > 0 else 0.0
+    saum_a = (wand_a + mag_h / 2 + 2 * gap) if steg_a > 0 else 0.0
+    saum_i = (wand_i + mag_h / 2 + 2 * gap) if steg_i > 0 else 0.0
     r_start = r_shaft + saum_i
     length = max(r_rot - saum_a - r_start, 5.0)
     legs = [Leg(r_start, 0.0, 0.0, length, mag_h, "tangential", +1)]

@@ -400,6 +400,97 @@ Alles analytisch: kein Feldlauf, keine FEM, keine Thermiksimulation. Die Kühlun
 wirkt nur über eine Tabelle von Schubspannungen je Kühlart, nicht über einen
 gerechneten Wärmeübergang.
 
+### Die Magnettasche kommt aus ihren Wänden
+
+Die V-Tasche entstand aus drei Zahlen, von denen keine eine Wand ist: `magDepthRel`
+(relative radiale Lage 0…1), `magWidth` (Länge in mm) und `magDist` (Stegabstand in
+mm). Keine folgt aus den anderen, und ob sie zusammen passen, sagt erst das
+Layouttor. In einem gemessenen Agentenlauf vom 07.09.2026 kostete das **vier
+Abbrüche an Stufe 0 hintereinander**:
+
+| | Rotorradius | Befund |
+|---|---:|---|
+| 1 | 25,8 mm | Tasche ragt **2,45 mm** heraus |
+| 2 | 25,2 mm | Tasche ragt **0,15 mm** heraus |
+| 3 | 25,5 mm | Tasche ragt **1,96 mm** heraus |
+| 4 | 25,5 mm | Kollision mit dem Nachbarpol, **0,77 mm** |
+
+Das Tor hatte jedes Mal recht. Falsch war, dass es nichts gab, woraus sich die Tasche
+ableiten ließ — also blieb nur Probieren.
+
+Eine Tasche hat aber Wände, und die sind die eigentliche Entwurfsgröße. Gemeint ist
+dabei immer die **Tasche** einschließlich Endkappen und Klebespalt, nicht der
+Magnetkörper — das ist es ja, was geschnitten wird:
+
+| Wand | mm | wogegen | was sie hält |
+|---|---:|---|---|
+| Rand | 1,3 | Rotoraußenrand | Polschuh gegen Fliehkraft; kurzschließt den Magneten zugleich |
+| d-Achse | 1,5 | Polsymmetrieachse | trägt die beiden V-Schenkel gegeneinander |
+| q-Achse | 2,0 | Tasche des Nachbarpols | führt den Reluktanzpfad, begrenzt die Schenkellänge |
+| Speiche | 1,5 / 2,0 | Rotorrand / Wellenaußenrand | |
+
+Die Wand zur d-Achse war vorher **nirgends ausgedrückt** — am Ausgangsentwurf fiel
+sie aus `magDist = 8` zufällig mit **0,81 mm** ab.
+
+Daraus folgen Sitz und Stegabstand in geschlossener Form, gesucht wird nur noch die
+**Länge** — und zwar gegen das echte Layouttor, nicht gegen ein zweites Abstandsmaß
+daneben. Am Ausgangsentwurf (Läufer-Ø 188,6, 6 Pole, 120°, 6 mm dick):
+
+| | Magnetlänge | Stegabstand | Position | Wand zur d-Achse |
+|---|---:|---:|---:|---:|
+| bisher (geraten) | 24,72 mm | 8,00 mm | 0,681 | 0,81 mm |
+| aus den Wänden | **42,24 mm** | 9,37 mm | 0,446 | **1,50 mm** |
+
+**Eine Zahl war dabei falsch, und sie sah richtig aus.** Der Sitz `r_pos` ist das
+*innere Ende* des Magneten, nicht die Taschenmitte — vom inneren Ende bis zum äußeren
+Kappenmittelpunkt sind es `L + Spalt` und nicht `L/2 + Spalt`. Mit dem falschen
+Abstand gerechnet stand die Tasche einer 84-mm-Auslegung **36,2 mm außerhalb** des
+Rotors. Aufgefallen ist das erst beim Gegenrechnen: eine erste Messung hatte den
+Fehler nicht gezeigt, weil der alte Positionsmodus die Länge zusätzlich klemmt und
+damit genau die zu lange Tasche wieder wegschnitt.
+
+**Wo es gilt: nur bei neuen Auslegungen** (`--frisch`). Bestehende Projekte tragen
+ihren Modus im gespeicherten Payload und ändern sich um keine Ziffer — über alle
+Bauformen mit 2430 Fällen bitgleich nachgerechnet.
+
+**Ehrlich scheitern gehört dazu.** Zehn Pole auf einem 51-mm-Läufer mit 3 mm dicken
+Magneten lassen zwischen den Wänden 1,38 mm Schenkel übrig. Ein Magnet, der kürzer
+ist als er dick ist, wird nicht gebaut; statt der Zahl kommt eine Absage mit den vier
+Hebeln (weniger Pole, größerer Rotor, dünnerer Magnet, flacherer Winkel). Eine 1,38
+als „ok" zurückzugeben wäre schlimmer, weil danach eine ganze Kette darauf rechnet.
+
+**Nebenbefund bei der Speiche:** dort standen beide Wände gemessen bei **1,20 mm**,
+obwohl der Code 1,3 meinte — der Klebespalt geht zweimal ein (die Endkappe sitzt um
+einen Spalt außerhalb des Magnetendes **und** trägt selbst den Radius
+`Dicke/2 + Spalt`). Jetzt 1,5 mm außen und 2,0 mm zur Welle, und zwar unbedingt: hier
+wird kein Freiheitsgrad genommen, sondern eine Wand berichtigt, die das Werkzeug
+ohnehin einhalten wollte.
+
+### Ein Buchstabe, fünfundzwanzig Minuten
+
+Im selben Lauf setzte der Agent `--set windingType=runddraht` — die richtige deutsche
+Schreibweise — und bekam:
+
+```
+FEHLER: windingType: 'runddraht' unbekannt. Zulaessig: hairpin, rundraht
+```
+
+Der zulässige Wert heißt `rundraht` mit **einem** „d". Das Werkzeug schreibt beide
+Schreibweisen selbst: `ARTEN = ("hairpin", "rundraht")` steht neben
+`ART_LABEL["rundraht"] = "Runddraht (…)"`. Danach konnte der Agent den Unterschied
+nicht mehr sehen: rund dreißig Aufrufe, die dieselbe Sache immer wieder nachrechnen
+(`printf 'runddraht' 'rundraht'`, `cand.count('d')`, `[c for c in g]`, viermal
+`curl /param_schema` mit selbstgebauten Suchfunktionen), zwischendurch eine förmliche
+Zurücknahme („mein Tippfehler, kein Tool-Fehler") — und zwei Zeilen später derselbe
+Fehler noch einmal. Netto: **null Erkenntnis, ~25 Minuten, ~60 Aufrufe.**
+
+Zwei Zeilen Werkzeug, nicht zwei Zeilen Prompt: bekannte deutsche Schreibweisen
+werden umgeschrieben statt abgewiesen (und die Umschreibung steht in der Ausgabe),
+und ein unbekannter **Wert** bekommt jetzt denselben Tippfehler-Vorschlag, den ein
+unbekannter **Name** längst bekam — `Meinten Sie 'hairpin'?`. Umbenannt wurde der
+Wert bewusst nicht: er steht im erzeugten FreeCAD-Skript, in vier Testdateien und in
+jeder gespeicherten Projektdatei.
+
 ### Rastmoment — die Größe hinter „sehr präzise"
 
 Ein Auftrag lautete: Roboterarm-Antrieb, „sehr präzise auch von der

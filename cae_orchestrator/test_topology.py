@@ -41,6 +41,7 @@ except ModuleNotFoundError:                      # allow `python test_topology.p
     pytest = _PytestShim()
 
 import ema_topology as T
+from ema_screen import WAND_BAUFORMEN as T_WAND_BAUFORMEN
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 EMA_HTML = os.path.join(HERE, "ema.html")
@@ -238,6 +239,110 @@ def test_js_mirror_diameter_mode():
                 assert str(pv) == str(jv), f"diameter leg{i}.{fld}: py={pv} js={jv}"
 
 
+def _vergleiche(geom, marke):
+    py_legs, _ = T.magnet_legs(geom)
+    js_legs = _js_legs(geom)
+    assert len(js_legs) == len(py_legs), \
+        f"{marke}: leg count {len(js_legs)} vs {len(py_legs)}"
+    for i, (pl, jl) in enumerate(zip(py_legs, js_legs)):
+        for fld in _FIELDS:
+            pv = getattr(pl, fld)
+            jv = jl.get(_JS_KEY.get(fld, fld))
+            if isinstance(pv, (int, float)) and not isinstance(pv, bool):
+                assert abs(float(pv) - float(jv)) < 1e-6, \
+                    f"{marke} leg{i}.{fld}: py={pv} js={jv}"
+            else:
+                assert str(pv) == str(jv), f"{marke} leg{i}.{fld}: py={pv} js={jv}"
+
+
+@pytest.mark.parametrize("shape", list(T_WAND_BAUFORMEN))
+@pytest.mark.parametrize("magw", [0, 30])
+def test_js_mirror_wandmodus(shape, magw):
+    """Der Wandmodus muss im Browser dieselbe Maschine zeichnen wie im Rechenwerk.
+
+    Beide ``magWidth``-Faelle: 0 heisst „Slot fuellen" (die Laenge kommt dann aus
+    ``slot_laenge_max``), ein gesetzter Wert heisst „so lang bauen und so weit
+    aussen setzen, wie die Randwand zulaesst". Liefen die beiden Fassungen
+    auseinander, zeigte die Leinwand eine andere Tasche als die, die gerechnet und
+    gebaut wird -- und beide saehen plausibel aus.
+    """
+    _vergleiche(dict(BASE, magShape=shape, pocketMode="wand", magWidth=magw),
+                f"wand/{shape}/W{magw}")
+
+
+@pytest.mark.parametrize("offen", ["nein", "aussen", "innen", "beide"])
+def test_js_mirror_speiche_oeffnung(offen):
+    """Die Speichentasche und ihre ausdrueckliche Oeffnung, py gegen js."""
+    _vergleiche(dict(BASE, magShape="spoke", magTascheOffen=offen), f"spoke/{offen}")
+
+
+def test_waende_py_gegen_js():
+    """Die fuenf Wandmasse stehen in BEIDEN Fassungen -- und mit denselben Zahlen.
+
+    Sie sind der Kern des Wandmodus; eine stille Abweichung waere eine andere
+    Maschine bei gleichem Payload. Gelesen wird der JS-Block, nicht nachgetippt.
+    """
+    block = _extract_js_mirror()
+    if block is None:
+        pytest.skip("MIRROR sentinels not found in ema.html")
+    for name, wert in (("WAND_RAND", T.WAND_RAND_MM), ("WAND_ACHSE", T.WAND_ACHSE_MM),
+                       ("WAND_QACHSE", T.WAND_QACHSE_MM),
+                       ("WAND_SP_A", T.WAND_SPEICHE_A_MM),
+                       ("WAND_SP_I", T.WAND_SPEICHE_I_MM)):
+        assert f"{name} = {wert}" in block, \
+            f"{name} = {wert} steht nicht im JS-Spiegel (ema_topology sagt {wert})"
+    # Und sie stehen NUR dort: kein Wandmass darf als nacktes Literal in einer
+    # Formel wiederauftauchen, sonst laeuft eine Aenderung nur halb durch.
+    formeln = block.split("magnetLegs")[0]
+    for wert in (T.WAND_ACHSE_MM, T.WAND_QACHSE_MM):
+        assert f"= {wert} +" not in formeln and f" {wert} + ht" not in formeln, \
+            f"{wert} steht als Literal in einer JS-Formel statt als WAND_*-Konstante"
+
+
+def test_wandmodus_haelt_seine_waende():
+    """Was der Wandmodus baut, haelt Rand-, d-Achsen- und q-Achsenwand ein.
+
+    Gemessen wird an der TASCHE (``ema_rotorcheck.Pocket``, also einschliesslich
+    Klebespalt und Endkappen) -- nicht am Magnetkoerper, denn geschnitten wird die
+    Tasche. Das ist genau die Stelle, an der die alte Klemme danebenlag: sie hielt
+    die Magnetmittellinie, das Tor mass die Taschenecken.
+    """
+    import ema_rotorcheck as RC
+    from ema_screen import einpassen
+    for shape in T_WAND_BAUFORMEN:
+        g = einpassen(dict(BASE, magShape=shape, pocketMode="wand", magWidth=0))
+        assert g["ok"], f"{shape}: {g['grund']}"
+        geom = g["geom"]
+        r_rot = geom["rotorOD"] / 2.0
+        taschen, _ = RC._magnettaschen(geom)
+        for base, pk in taschen:
+            _rmin, rmax = pk.radius_bounds()
+            assert rmax <= r_rot - T.WAND_RAND_MM + 1e-6, \
+                f"{shape}: Tasche steht {r_rot - rmax:.3f} mm vom Rand statt {T.WAND_RAND_MM}"
+        chk = RC.rotor_layout_check(geom, min_web_mm=T.WAND_QACHSE_MM)
+        assert chk["ok"], f"{shape}: {chk['fatal'][:1]}"
+        assert chk["layout"]["min_web_found_mm"] >= T.WAND_QACHSE_MM - 1e-6
+
+
+def test_speiche_haelt_ihre_waende():
+    """Speiche: aussen 1,5 mm, innen 2,0 mm — an der Tasche gemessen.
+
+    Vorher standen dort BEIDE bei 1,20 mm, obwohl der Code 1,3 meinte: der
+    Klebespalt geht zweimal ein (die Kappe sitzt um ``gap`` ausserhalb des
+    Magnetendes UND traegt selbst den Radius ``magThick/2 + gap``).
+    """
+    import ema_rotorcheck as RC
+    for th in (3.0, 6.0, 10.0):
+        geom = dict(BASE, magShape="spoke", magThick=th)
+        r_rot, r_sh = geom["rotorOD"] / 2.0, geom["shaftD"] / 2.0
+        taschen, _ = RC._magnettaschen(geom)
+        rmin, rmax = taschen[0][1].radius_bounds()
+        assert abs((r_rot - rmax) - T.WAND_SPEICHE_A_MM) < 1e-6, \
+            f"magThick={th}: Wand aussen {r_rot - rmax:.3f} statt {T.WAND_SPEICHE_A_MM}"
+        assert abs((rmin - r_sh) - T.WAND_SPEICHE_I_MM) < 1e-6, \
+            f"magThick={th}: Wand innen {rmin - r_sh:.3f} statt {T.WAND_SPEICHE_I_MM}"
+
+
 # ── slow tests (opt-in: pytest -m slow) ─────────────────────────────────────
 
 @pytest.mark.slow
@@ -307,6 +412,37 @@ def _main():
     for s, ov, bd, mir in rows:
         print(f"{s:<{w}}  {ov:<16} {bd:<10} {mir}")
     print(f"\n{failures} topolog{'y' if failures==1 else 'ies'} with geometry violations")
+
+    # ── Wandmodus ────────────────────────────────────────────────────────────
+    print("\nWandmodus (Rand %.1f / d-Achse %.1f / q-Achse %.1f mm)"
+          % (T.WAND_RAND_MM, T.WAND_ACHSE_MM, T.WAND_QACHSE_MM))
+    pruefungen = [("Waende py<->js", test_waende_py_gegen_js),
+                  ("Waende gehalten", test_wandmodus_haelt_seine_waende),
+                  ("Speichenwaende", test_speiche_haelt_ihre_waende)]
+    if js_ok:
+        for shape in T_WAND_BAUFORMEN:
+            for magw in (0, 30):
+                pruefungen.append((f"Spiegel wand/{shape}/W{magw}",
+                                   lambda sh=shape, w=magw: test_js_mirror_wandmodus(sh, w)))
+        for offen in ("nein", "aussen", "innen", "beide"):
+            pruefungen.append((f"Spiegel spoke/{offen}",
+                               lambda o=offen: test_js_mirror_speiche_oeffnung(o)))
+    for name, fn in pruefungen:
+        try:
+            fn()
+            print(f"  OK   {name}")
+        except Exception as e:                                   # noqa: BLE001
+            failures += 1
+            print(f"  FEHL {name}: {str(e)[:140]}")
+
+    # Was der frische Payload wirklich baut -- die Zahl, an der der Agent haengt.
+    try:
+        from ema_screen import einpassen
+        g = einpassen(dict(BASE, magShape="v", pocketMode="wand", magWidth=0))["geom"]
+        print(f"\n  frischer V-Laeufer: magWidth {g['magWidth']} mm - "
+              f"magDist {g['magDist']} mm - magDepthRel {g['magDepthRel']}")
+    except Exception as e:                                       # noqa: BLE001
+        print(f"  (Einpassung nicht lesbar: {e})")
     return 1 if failures else 0
 
 

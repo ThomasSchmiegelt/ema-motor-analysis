@@ -3330,7 +3330,8 @@ def param_schema():
     orient_labels = {"transverse": "Lange Seite N/S (quer magnetisiert)",
                      "longitudinal": "Kurze Seite N/S (längs, 90° gedreht)"}
     pocket_labels = {"position": "Position (Radius) + Länge",
-                     "diameter": "Durchmesser (Außen-Ø / Innen-Ø) + Winkel"}
+                     "diameter": "Durchmesser (Außen-Ø / Innen-Ø) + Winkel — nur V",
+                     "wand": "Wände (Rand 1,3 / d-Achse 1,5 mm) — Lage abgeleitet"}
     enum_opts = {
         "magShape":    _opts(getattr(T2E, "_SHAPE", []), labelmap=topo_labels),
         "rotor_lam":   _opts(getattr(T2E, "_LAM", []),  table=LAMINATES),

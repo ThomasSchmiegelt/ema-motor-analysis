@@ -48,8 +48,10 @@ from ema_analysis import _analytical_Bgap, compute_performance
 from ema_pipeline import HAIRPIN_MATS, LAMINATES, MAGNETS
 from ema_rotorcheck import (Pocket, _rot2, pocket_distance,
                             rotor_layout_check, rotor_stress_check)
-from ema_topology import (BRIDGE_MM, TOPOLOGY_LABELS, balance_bolt_holes,
-                          flux_barrier_slots, leg_center, magnet_legs)
+from ema_topology import (BRIDGE_MM, TOPOLOGY_LABELS, WAND_ACHSE_MM,
+                          WAND_QACHSE_MM, WAND_RAND_MM, balance_bolt_holes,
+                          flux_barrier_slots, leg_center, magnet_legs,
+                          pocket_mode, slot_laenge_max)
 
 # Platzhalterpreise 2026 — fuer das Rangieren, nicht als Angebot. Was zaehlt, ist das
 # Verhaeltnis: NdFeB ~5x Kupfer, ~34x Elektroblech.
@@ -277,6 +279,188 @@ def _passt(geom: dict, min_web: float) -> tuple[bool, dict, dict]:
     return ok, g, m
 
 
+# Bauformen, die den Wandmodus kennen. ``pmasynrm`` fehlt mit Absicht: seine Lagen
+# tragen eine eigene Winkelstaffelung (``hak = half_ang - k*8 Grad``) und einen
+# eigenen Laengenverlauf, das ist ein eigener Fall und keine V-Tasche.
+WAND_BAUFORMEN = ("v", "vasym", "u", "vv", "delta")
+
+
+def _wand_geom(basis: dict, laenge: float) -> dict:
+    """Geometrie mit dieser Magnetlaenge -- ``magDist``/``magDepthRel`` mitgeschrieben.
+
+    Im Wandmodus liest ``magnet_legs`` die beiden Werte gar nicht mehr (sie fallen
+    aus den Waenden), aber sie stehen im Payload, in ``meta.json``, im Steckbrief
+    und im Paarvergleich. Blieben dort die Eingabewerte stehen, verglichen alle
+    diese Stellen eine Zahl, die im Blech nicht vorkommt -- derselbe Fehler, gegen
+    den der Rueckschreib von ``magWidth`` schon einmal gebaut wurde.
+    """
+    g = dict(basis)
+    g["magWidth"] = round(float(laenge), 4)
+    if g.get("magShape") == "vv":
+        g["magLayerGap"] = _vv_lagenabstand(g)
+    legs, _meta = magnet_legs(g)
+    innen = [l for l in legs if l.placement == "interior" and l.length > 0]
+    if innen:
+        l0 = innen[0]
+        r_rot = float(g["rotorOD"]) / 2.0
+        r_sh = float(g["shaftD"]) / 2.0
+        g["magDist"] = round(2.0 * abs(l0.offset), 4)
+        g["magDepthRel"] = round((l0.r_pos - r_sh) / max(r_rot - r_sh, 1e-6), 5)
+        g["magWidth"] = round(max(l.length for l in innen), 4)
+    return g
+
+
+def _vv_lagenabstand(geom: dict) -> float:
+    """Kleinster ``magLayerGap``, bei dem sich die beiden V-Lagen nicht beruehren.
+
+    Muss IM Laengensuchlauf stehen und nicht davor: die beiden Lagen laufen mit
+    wachsender Magnetlaenge aufeinander zu (gemessen an der Ur-Maschine geht ihr
+    Abstand von 8,8 auf 5,0 mm zurueck, waehrend die Laenge von 1 auf 30 mm
+    waechst), weil die aeussere Lage an der Randwand haengt und die innere eine
+    Lagenhoehe darunter -- bei verschiedenen Oeffnungswinkeln sind das verschiedene
+    Sitze. Ein einmal vorab bestimmter Abstand gilt darum nur fuer die Laenge, bei
+    der er bestimmt wurde.
+
+    Der Ausgangswert wird nie UNTERschritten: ``magLayerGap`` ist eine
+    Entwurfsentscheidung (Reluktanzpfad zwischen den Lagen), hier wird nur
+    dazugegeben, was die Geometrie erzwingt.
+    """
+    gap = max(0.05, min(0.3, float(geom.get("magGapMm", 0.1))))
+    d0 = float(geom.get("magLayerGap", 8.0))
+    d = d0
+    for _ in range(80):
+        legs = [l for l in magnet_legs(dict(geom, magLayerGap=round(d, 4)))[0]
+                if l.placement == "interior" and l.length > 0]
+        oben = [l for l in legs if l.offset > 0]
+        if len({l.layer for l in oben}) < 2:
+            break
+        a = min(oben, key=lambda l: l.layer)
+        b = max(oben, key=lambda l: l.layer)
+        pa = Pocket(leg_center(a), a.tilt, a.length / 2 + gap, a.thickness / 2 + gap)
+        pb = Pocket(leg_center(b), b.tilt, b.length / 2 + gap, b.thickness / 2 + gap)
+        if pocket_distance(pa, pb) >= WAND_QACHSE_MM - 1e-6:
+            break
+        d += 0.25
+    return round(d, 4)
+
+
+def _einpassen_wand(basis: dict, s_lage: float, min_web: float = None) -> dict:
+    """Wandmodus: die Waende stehen fest, gesucht ist nur noch die MAGNETLAENGE.
+
+    Zwei der drei geratenen Zahlen sind damit weg. ``magDist`` folgt aus der
+    Achswand, ``magDepthRel`` aus der Randwand (``ema_topology.sitz_aus_waenden``),
+    und die Laenge wird gegen den Nachbarpol gesucht -- mit dem ECHTEN Layouttor
+    als Pruefstein, nicht mit einem zweiten Abstandsmass daneben.
+
+    **Ein Mindeststeg fuer alle Paare, ``WAND_QACHSE_MM``.** Der groesste der drei
+    Waende, und damit die strengere Aussage: jeder Steg im Blech haelt 2,0 mm. Die
+    Alternative waere ein Steg je Paarart (Rand 1,3 / d-Achse 3,0 / q-Achse 2,0 /
+    Lage-zu-Lage 1,3) -- die kennt ``rotor_layout_check`` nicht, und sie
+    nachzubauen hiesse, das Tor ein zweites Mal zu schreiben.
+
+    Gemessen (45 Halbierungsschritte, ~0,3 s je Fall): Ur-Maschine 188,6/60 p=3
+    120 Grad -> magWidth 84,2 mm bei magDist 9,37 und magDepthRel 0,447; derselbe
+    Laeufer traegt heute 24,7 mm, weil ``magDepthRel = 0,681`` den Sitz so weit
+    aussen setzt, dass die Randwand den Schenkel abschneidet.
+    """
+    # Ein vom Aufrufer verlangter groesserer Mindeststeg gilt weiter (der
+    # Kaefiglaeufer bringt seinen eigenen mit); kleiner als die q-Achsenwand wird
+    # der Wandmodus aber nicht -- sie ist seine Zusage.
+    steg = max(WAND_QACHSE_MM, float(min_web or 0.0))
+
+    def gate(g):
+        return rotor_layout_check(g, min_web_mm=steg)
+
+    r_rot = float(basis["rotorOD"]) / 2.0
+    r_sh = float(basis["shaftD"]) / 2.0
+    half_ang = math.radians(float(basis.get("magAngle", 120)) / 2.0)
+    gap = max(0.05, min(0.3, float(basis.get("magGapMm", 0.1))))
+    hinweise: list[str] = []
+
+    obergrenze = slot_laenge_max(r_rot, r_sh, half_ang,
+                                 float(basis.get("magThick", 6.0)), gap)
+    if obergrenze <= 0:
+        g = _wand_geom(basis, 5.0)
+        return {"geom": g, "ok": False, "s_koerper": 0.0, "s_lage": round(s_lage, 4),
+                "magDepthRel": g.get("magDepthRel"), "steg_im_pol": None,
+                "steg_zw_polen": None, "hinweise": hinweise,
+                "grund": (f"Zwischen Achswand ({WAND_ACHSE_MM:.1f} mm) und Randwand "
+                          f"({WAND_RAND_MM:.1f} mm) bleibt bei {basis.get('magThick')} mm "
+                          f"Magnetdicke kein Slot uebrig — duennerer Magnet, "
+                          f"groesserer Rotor oder flacherer V-Winkel")}
+
+    # Grobe Leiter, dann Halbieren -- wie im Positionsmodus. Ein einzelner Probe-
+    # wert (etwa 1 mm) genuegt NICHT: bei mehrteiligen Bauformen (U-Bodenbalken,
+    # Delta-Deck) haengen weitere Masse an der Magnetlaenge, und ein sehr kurzer
+    # Magnet kann durchfallen, waehrend ein mittlerer traegt.
+    stufen = [obergrenze * f for f in
+              (1.0, .85, .7, .6, .5, .42, .35, .28, .22, .17, .13, .10, .07, .05, .03)]
+    lo, hi, treffer = 0.0, obergrenze, None
+    for L in stufen:
+        g = _wand_geom(basis, L)
+        if gate(g)["ok"]:
+            lo, treffer = L, g
+            break
+        hi = L
+    if treffer is not None:
+        for _ in range(30):
+            mitte = (lo + hi) / 2.0
+            g = _wand_geom(basis, mitte)
+            if gate(g)["ok"]:
+                lo, treffer = mitte, g
+            else:
+                hi = mitte
+
+    if treffer is None:
+        g = _wand_geom(basis, min(10.0, obergrenze))
+        c = gate(g)
+        return {"geom": g, "ok": False, "s_koerper": 0.0, "s_lage": round(s_lage, 4),
+                "magDepthRel": g.get("magDepthRel"), "steg_im_pol": None,
+                "steg_zw_polen": None, "hinweise": hinweise,
+                "grund": ("Auch der kuerzeste Magnet passt nicht zwischen die Waende: "
+                          + (c["fatal"][0] if c["fatal"] else "Layouttor abgewiesen"))}
+
+    # Ein Magnet, der kuerzer ist als er dick ist, ist keiner mehr -- das ist dann
+    # kein Entwurf, sondern eine Auslegung, die zwischen die Waende nicht passt.
+    # Gemessen: 10 Pole auf einem 51-mm-Laeufer mit 3 mm dicken Magneten lassen
+    # 1,38 mm Schenkel uebrig. Diese Zahl als „ok" zurueckzugeben waere schlimmer
+    # als ein klares Nein, weil danach eine ganze Kette darauf rechnet.
+    mindest = max(2.0, float(basis.get("magThick", 6.0)))
+    if lo < mindest - 1e-6:
+        return {"geom": treffer, "ok": False, "s_koerper": 0.0,
+                "s_lage": round(s_lage, 4), "magDepthRel": treffer.get("magDepthRel"),
+                "steg_im_pol": None, "steg_zw_polen": None, "hinweise": hinweise,
+                "grund": (f"Zwischen den Waenden (Rand {WAND_RAND_MM:.1f} / d-Achse "
+                          f"{WAND_ACHSE_MM:.1f} / q-Achse {steg:.1f} mm) "
+                          f"bleiben bei {2 * int(basis.get('p', 3))} Polen nur "
+                          f"{lo:.2f} mm Magnetlaenge — weniger als die Magnetdicke. "
+                          f"Weniger Pole, groesserer Rotor, duennerer Magnet oder "
+                          f"flacherer V-Winkel")}
+
+    # Eine ausdrueckliche magWidth wird geachtet -- sie darf nur nicht groesser sein
+    # als das, was zwischen die Waende geht.
+    gewuenscht = float(basis.get("magWidth", 0) or 0)
+    if gewuenscht > 0:
+        if gewuenscht > lo + 1e-6:
+            hinweise.append(f"magWidth {gewuenscht:.2f} -> {lo:.2f} mm: laenger geht "
+                            f"zwischen den Waenden nicht")
+        else:
+            treffer = _wand_geom(basis, gewuenscht)
+
+    if basis.get("magShape") == "vv":
+        d0, d1 = float(basis.get("magLayerGap", 8.0)), float(treffer.get("magLayerGap", 0))
+        if d1 > d0 + 1e-6:
+            hinweise.append(f"magLayerGap {d0:.2f} -> {d1:.2f} mm angehoben, sonst "
+                            f"beruehren sich die beiden V-Lagen")
+
+    m = _masse(treffer, abbruch_unter=None)
+    return {"geom": treffer, "ok": True, "s_koerper": 1.0, "s_lage": round(s_lage, 4),
+            "magDepthRel": treffer.get("magDepthRel"),
+            "steg_im_pol": round(m["steg_im_pol"], 3) if math.isfinite(m["steg_im_pol"]) else None,
+            "steg_zw_polen": round(m["steg_zw_polen"], 3) if math.isfinite(m["steg_zw_polen"]) else None,
+            "hinweise": hinweise, "grund": ""}
+
+
 def einpassen(geom: dict, p_neu: int | None = None,
               min_web: float = BRIDGE_MM) -> dict:
     """Eine Konfiguration so einpassen, dass sie baubar ist -- oder ehrlich scheitern.
@@ -310,6 +494,10 @@ def einpassen(geom: dict, p_neu: int | None = None,
         return {"geom": g, "ok": ok, "s_koerper": 1.0, "s_lage": 1.0,
                 "magDepthRel": g.get("magDepthRel"), "steg_im_pol": m["steg_im_pol"],
                 "steg_zw_polen": m["steg_zw_polen"], "grund": "" if ok else "Taschenlayout"}
+
+    # Wandmodus: magDist und magDepthRel sind abgeleitet, gesucht ist nur die Laenge.
+    if pocket_mode(basis) == "wand" and basis.get("magShape") in WAND_BAUFORMEN:
+        return _einpassen_wand(basis, s_lage, min_web)
 
     def sweep(s_l: float):
         """Groesstmoegliches ``s_koerper`` bei fester Anordnung -- oder None."""

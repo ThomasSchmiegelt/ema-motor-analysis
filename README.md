@@ -155,6 +155,94 @@ overlap by 5.95 mm), and gate and fit agree on that.
 All analytical: no field run, no FEM, no thermal simulation. Cooling acts only through
 a table of shear stresses per cooling type, not through a computed heat transfer.
 
+### The magnet pocket now comes from its WALLS
+
+A V-pocket used to be built from three numbers, none of which is a wall:
+`magDepthRel` (relative radial seat, 0…1), `magWidth` (length in mm) and `magDist`
+(web spacing in mm). None follows from the others, and whether they fit together is
+something only the layout gate can say. In a measured agent run on 2026-09-07 that
+cost **four stage-0 aborts in a row**:
+
+| | rotor radius | finding |
+|---|---:|---|
+| 1 | 25.8 mm | pocket sticks out **2.45 mm** |
+| 2 | 25.2 mm | pocket sticks out **0.15 mm** |
+| 3 | 25.5 mm | pocket sticks out **1.96 mm** |
+| 4 | 25.5 mm | collision with the neighbouring pole, **0.77 mm** |
+
+The gate was right every time. What was wrong is that there was nothing to derive the
+pocket *from* — so guessing was the only option left.
+
+But a pocket has walls, and those are the real design quantity. "Pocket" here always
+means the pocket **including its end caps and the glue gap**, not the magnet body —
+that is what actually gets cut:
+
+| Wall | mm | against | what it holds |
+|---|---:|---|---|
+| rim | 1.3 | rotor OD | pole shoe against centrifugal load; also short-circuits the magnet |
+| d-axis | 1.5 | pole symmetry axis | carries the two V arms against each other |
+| q-axis | 2.0 | the neighbouring pole's pocket | carries the reluctance path, caps the arm length |
+| spoke | 1.5 / 2.0 | rotor OD / shaft OD | |
+
+The d-axis wall was **nowhere expressed** before — on the baseline design it fell out
+of `magDist = 8` by accident, at **0.81 mm**.
+
+Seat and web spacing follow from the walls in closed form; only the **length** is
+searched, and against the real layout gate rather than a second distance formula
+sitting beside it. On the baseline rotor (Ø 188.6, 6 poles, 120°, 6 mm thick):
+
+| | magnet length | web spacing | seat | d-axis wall |
+|---|---:|---:|---:|---:|
+| before (guessed) | 24.72 mm | 8.00 mm | 0.681 | 0.81 mm |
+| from the walls | **42.24 mm** | 9.37 mm | 0.446 | **1.50 mm** |
+
+**One number in that derivation was wrong, and it looked right.** The seat `r_pos` is
+the magnet's *inner end*, not the pocket centre — from the inner end to the outer cap
+centre is `L + gap`, not `L/2 + gap`. Computed with the wrong distance, the pocket of
+an 84 mm design sat **36.2 mm outside** the rotor. It only showed up on a
+cross-check: a first measurement had hidden it, because the old position mode clamps
+the length as well and therefore cut the over-long pocket back down again.
+
+**Where it applies: new designs only** (`--frisch`). Existing projects carry their
+mode in their stored payload and do not move by a single digit — verified bit-identical
+across all topologies over 2430 cases.
+
+**Failing honestly is part of it.** Ten poles on a 51 mm rotor with 3 mm thick magnets
+leave 1.38 mm of arm between the walls. A magnet shorter than it is thick does not get
+built; instead of the number you get a refusal naming the four levers (fewer poles,
+bigger rotor, thinner magnet, shallower angle). Returning 1.38 as "ok" would be worse,
+because a whole chain then computes on it.
+
+**Side finding on the spoke type:** both its walls measured **1.20 mm** although the
+code intended 1.3 — the glue gap enters twice (the end cap sits one gap *outside* the
+magnet end **and** carries the radius `thickness/2 + gap` itself). Now 1.5 mm at the
+rim and 2.0 mm to the shaft, and unconditionally: no degree of freedom is taken away
+here, a wall is corrected that the tool meant to hold anyway.
+
+### One letter, twenty-five minutes
+
+In the same run the agent set `--set windingType=runddraht` — the correct German
+spelling — and got:
+
+```
+FEHLER: windingType: 'runddraht' unbekannt. Zulaessig: hairpin, rundraht
+```
+
+The accepted value is `rundraht` with **one** "d". The tool writes both spellings
+itself: `ARTEN = ("hairpin", "rundraht")` sits next to
+`ART_LABEL["rundraht"] = "Runddraht (…)"`. After that the agent could no longer see
+the difference: some thirty calls recomputing the same thing over and over
+(`printf 'runddraht' 'rundraht'`, `cand.count('d')`, `[c for c in g]`, four
+`curl /param_schema` invocations with hand-written search functions), a formal
+retraction in between ("my typo, not a tool bug") — and two lines later the same
+mistake again. Net result: **no insight, ~25 minutes, ~60 calls.**
+
+Two lines of tool, not two lines of prompt: known German spellings are now rewritten
+rather than refused (and the rewrite is printed), and an unknown **value** gets the
+same typo suggestion an unknown **key** has had all along — `Meinten Sie 'hairpin'?`.
+The enum value itself was deliberately not renamed: it appears in the generated
+FreeCAD script, in four test files and in every stored project file.
+
 ### Cogging torque — the quantity behind "very precise"
 
 One brief asked for a robot-arm drive, "very precise, including rotational accuracy".

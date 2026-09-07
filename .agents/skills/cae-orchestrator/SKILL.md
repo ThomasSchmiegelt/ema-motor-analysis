@@ -126,6 +126,52 @@ keine sechs (6 × 3 mm + 7 × 0,8 mm Isolierung + 2 mm Nutgrund = 25,6 mm). Vorh
 die Lagenhöhe still auf 2,0 mm und der Paarvergleich rechnete die Maschine durch, als
 passte sie. Wer mehr Leiter will, braucht eine tiefere Nut — die Meldung sagt, um wieviel.
 
+### Die Magnettasche kommt aus ihren WÄNDEN — nicht aus drei geratenen Zahlen
+
+`--frisch` legt neue Auslegungen seit dem 07.09.2026 mit `pocketMode = "wand"` an.
+Bestehende Projekte behalten `position` und ändern sich um keine Ziffer.
+
+**Warum.** Die Tasche entstand aus `magDepthRel` (relative Lage 0…1), `magWidth` (mm)
+und `magDist` (mm). Keine davon ist eine Wand, keine folgt aus den anderen, und ob sie
+zusammen passen, sagt erst das Layouttor. Gemessen an einem Agentenlauf vom 07.09.2026:
+**vier Abbrüche an Stufe 0 hintereinander** — die Tasche stand 2,45 / 0,15 / 1,96 mm
+außerhalb des Rotors bzw. kollidierte um 0,77 mm mit dem Nachbarpol, jedes Mal ein neuer
+Ratewurf. Das Tor hatte jedes Mal recht.
+
+**Die drei Wände** (gemeint ist immer die **Tasche** mit Endkappen und Klebespalt, also
+das, was wirklich geschnitten wird):
+
+| Wand | mm | wogegen |
+|---|---:|---|
+| Rand | 1,3 | Rotoraußenrand |
+| d-Achse | 1,5 | Polsymmetrieachse (Steg zwischen den beiden V-Schenkeln) |
+| q-Achse | 2,0 | Tasche des **Nachbarpols** |
+| Speiche | 1,5 / 2,0 | Rotorrand / Wellenaußenrand |
+
+Daraus folgen `magDist` und `magDepthRel`; gesucht wird nur noch die **Länge**, und
+zwar gegen das echte Layouttor. `--set magWidth=0` heißt **„Slot füllen"** (Vorgabe bei
+`--frisch`), ein gesetzter Wert wird gebaut und so weit außen platziert, wie die Randwand
+zulässt.
+
+**Was das für dich heißt:**
+
+* `magDepthRel`, `magDist` und `magWidth` sind im Wandmodus **abgeleitet**. Sie zu setzen
+  ist nicht falsch, aber `magWidth` ist der einzige, der noch etwas bewirkt.
+* Nach **jeder** Maßänderung zieht `--set` den Sitz automatisch nach und sagt es:
+  `pocketMode=wand: abgeleitet -> magDist 9,37 -> 6,37; …  [Sitz aus den Waenden nachgezogen]`.
+* Passt gar nichts, kommt eine **Absage mit den vier Hebeln** statt einer Geometrie:
+  *„bleiben bei 10 Polen nur 1,38 mm Magnetlänge — weniger als die Magnetdicke. Weniger
+  Pole, größerer Rotor, dünnerer Magnet oder flacherer V-Winkel."* Ein Magnet, der kürzer
+  ist als er dick ist, wird nicht gebaut.
+* Gilt für `v`, `vasym`, `u`, `vv`, `delta`. `pmasynrm` hat eine eigene Lagenstaffelung
+  und bleibt beim Positionsmodus; `spm`/`halbach` haben gar keine Tasche.
+* **Doppel-V:** `magLayerGap` wird angehoben, wenn sich die beiden Lagen sonst berühren —
+  und die Anhebung steht im Protokoll (gemessen 8,00 → 13,25 mm).
+
+Am frischen Läufer (Ø 188,6, p=3, 120°, 6 mm): `magWidth` **24,72 → 42,24 mm**, die Wand
+zur d-Achse **0,81 → 1,50 mm**. Nenne beim Übertragen einer Empfehlung immer den
+`pocketMode` mit — sonst bedeuten `magDist` und `magDepthRel` beim Empfänger etwas anderes.
+
 ### Die offene Magnettasche — eine Bauart, kein Durchbruch
 
 `--set geom.magTascheOffen=aussen` (bzw. `innen` / `beide`, Vorgabe `nein`) lässt den Steg
@@ -316,6 +362,14 @@ python3 cae_cli.py run cad     --from-project last --wait \
   Verschachteltes per Punktpfad: `--set vehicle.mass_kg=1750`.
 * **Ein unbekannter Name wird abgewiesen**, mit Vorschlag bei Tippfehlern. Ein Name,
   der nicht durchkommt, ist nicht gesetzt worden — nie so tun, als sei er es.
+* **Ein unbekannter WERT bekommt denselben Vorschlag** (`windingType: 'hairpn' unbekannt.
+  Meinten Sie 'hairpin'?`), und die bekannten deutschen Schreibweisen werden
+  umgeschrieben statt abgewiesen: `windingType=runddraht` (richtiges Deutsch, zwei „d")
+  wird als `rundraht` gelesen und **das steht auch in der Ausgabe**. Anlass war ein
+  gemessener Lauf, in dem ein Agent 25 Minuten und rund 60 Werkzeugaufrufe damit
+  verbrachte, sich den Unterschied zweier Zeichenketten vorzurechnen. **Wenn eine
+  Zuweisung abgewiesen wird, lies die Fehlermeldung und nimm den vorgeschlagenen Wert —
+  rechne den Namen nicht nach.**
 * Grenzverletzungen werden **abgewiesen, nicht geklemmt** (Exit-Code 2, nichts gestartet).
   `--force` hebt die Prüfung auf, `--dry-run` baut den Payload und zeigt ihn, ohne
   irgendetwas zu starten.
@@ -326,7 +380,7 @@ python3 cae_cli.py run cad     --from-project last --wait \
 Stellschrauben unterhalb der Grundgeometrie — Wicklung (`conductorsPerSlot`,
 `slotWidthRatio`), Magnetlagen und Polkontur (`magLayers`, `magLayerGap`, `poleArcFrac`,
 `segPerPole`, `magAngle2`, `magAsym`, `magTangLen`, `magGapMm`, `magOrient`), Magnettasche
-(`pocketMode`, `pocketOuterD`, `pocketInnerD`), Flusssperren (`genFluxBarrierD/Q`,
+(`pocketOuterD`, `pocketInnerD` — `pocketMode` steht auf der Grundebene, s. o.), Flusssperren (`genFluxBarrierD/Q`,
 `fluxBarrierDepth`, `fluxBarrierWidth`) und Wuchtbohrungen (`genBalanceBolts`,
 `balanceBoltCircleD`, `balanceBoltOffsetDeg`, `balanceBoltThread`). Alle mit Grenzen,
 Typ und Auswahlliste — `python3 cae_cli.py raw GET /param_schema` zeigt sie samt `desc`.

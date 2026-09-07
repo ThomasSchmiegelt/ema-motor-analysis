@@ -35,6 +35,8 @@ SCHEMA = {
                         "adv": True, "def": False},
     "magOrient":       {"key": "magOrient", "kind": "enum", "in_geom": True, "adv": True,
                         "options": [{"value": "transverse"}, {"value": "longitudinal"}]},
+    "windingType":     {"key": "windingType", "kind": "enum", "in_geom": True, "adv": True,
+                        "options": [{"value": "hairpin"}, {"value": "rundraht"}]},
 }
 
 
@@ -285,6 +287,62 @@ def test_bool_kind_is_strict():
     print("✓ bool: nur true/false, kein 1/0/ja — sonst wirkt ein Tippfehler still")
 
 
+def test_schreibweise_runddraht():
+    """Die richtige deutsche Schreibweise darf nicht am Namen scheitern.
+
+    Gemessen am Agentenlauf 20260907_074942: der zulaessige Wert heisst
+    ``rundraht`` (ein „d"), das deutsche Wort ist ``Runddraht`` (zwei) — und
+    ``ema_wicklung.ART_LABEL`` schreibt genau das hin. Der Agent gab die richtige
+    Schreibweise ein, wurde abgewiesen und verbrachte danach rund 25 Minuten und
+    ~60 Werkzeugaufrufe damit, sich den Unterschied zwischen zwei Zeichenketten
+    vorzurechnen. Der Alias kostet drei Zeilen.
+    """
+    _stub_schema()
+    pl, applied, errors = _apply(["windingType=runddraht"])
+    assert not errors, errors
+    assert pl["geom"]["windingType"] == "rundraht", pl["geom"]["windingType"]
+    # und es wird GESAGT, dass umgeschrieben wurde — still waere schlimmer.
+    assert applied and "rundraht" in (applied[0].get("notiz") or ""), applied
+    print("✓ Schreibweise: 'runddraht' wird als 'rundraht' gelesen und gemeldet")
+
+
+def test_enumwert_bekommt_vorschlag():
+    """Ein unbekannter WERT bekommt denselben Vorschlag wie ein unbekannter NAME.
+
+    Fuer Schluessel gab es den ``difflib``-Vorschlag laengst; fuer Werte fehlte er,
+    und ein Tippfehler endete in „unbekannt. Zulaessig: …" ohne Hinweis darauf,
+    welcher der aufgezaehlten Werte gemeint war.
+    """
+    _stub_schema()
+    _, _, errors = _apply(["windingType=hairpn"])
+    assert errors and "Meinten Sie 'hairpin'?" in errors[0], errors
+    # Ein Wert, der nach nichts aussieht, bekommt keinen erfundenen Vorschlag.
+    _, _, errors = _apply(["magShape=xyzzy"])
+    assert errors and "Meinten Sie" not in errors[0], errors
+    print("✓ Auswahllisten: Vorschlag bei Tippfehler, keiner bei Unsinn")
+
+
+def test_frischer_payload_baut_aus_waenden():
+    """``--frisch`` liefert eine Tasche, die das Layouttor besteht — ohne Raten.
+
+    Genau hier scheiterte der Agentenlauf viermal hintereinander: die Tasche stand
+    2,45 / 0,15 / 1,96 mm ausserhalb des Rotors bzw. kollidierte um 0,77 mm mit dem
+    Nachbarpol, und jeder Versuch war ein neuer Ratewurf auf ``magDepthRel``,
+    ``magWidth`` und ``magDist``.
+    """
+    import ema_rotorcheck as RC
+    import ema_topology as T
+    g = cae_cli.frischer_payload()["geom"]
+    assert g["pocketMode"] == "wand", g.get("pocketMode")
+    chk = RC.rotor_layout_check(g, min_web_mm=T.WAND_QACHSE_MM)
+    assert chk["ok"], chk["fatal"][:1]
+    assert chk["layout"]["min_web_found_mm"] >= T.WAND_QACHSE_MM - 1e-6
+    # Und der Sitz steht im Payload, nicht nur im Kopf des Bauers.
+    assert g["magWidth"] > 0 and g["magDist"] > 0
+    print(f"✓ --frisch: Tasche aus Waenden — magWidth {g['magWidth']} mm, "
+          f"magDist {g['magDist']} mm, magDepthRel {g['magDepthRel']}")
+
+
 def test_schema_has_no_second_geom_table():
     """``in_geom`` kommt aus dem Schema selbst, nicht aus einer Liste in server.py.
 
@@ -296,9 +354,15 @@ def test_schema_has_no_second_geom_table():
     # Feinparametern: sie beschreiben nicht eine Feinheit der Maschine, sondern die
     # Quelle, an der sie haengt -- ohne sie ist jede Aussage ueber Spannungsgrenze,
     # Feldschwaechung und I_s die einer 800-V-Maschine.
+    # ``pocketMode`` steht seit dem Wandmodus ebenfalls auf der Grundebene: er
+    # entscheidet, ob ``magDepthRel``/``magDist`` Eingaben oder abgeleitete Werte
+    # sind. Als Feinparameter waere er von Text->Auslegung und von der
+    # Parametertabelle nicht erreichbar gewesen -- und genau die beiden Zahlen
+    # daneben haetten dann etwas anderes bedeutet, als dort steht.
     alt = {"statorOD", "statorID", "rotorOD", "shaftD", "shaftBoreD", "slots",
            "slotDepth", "p", "magShape", "magAngle", "magDepthRel", "magWidth",
-           "magThick", "magDist", "nAx", "nCirc", "inverterVdc", "inverterImax"}
+           "magThick", "magDist", "nAx", "nCirc", "inverterVdc", "inverterImax",
+           "pocketMode"}
     basis = {k for k, v in T2E.SCHEMA.items() if v.get("geom") and not v.get("adv")}
     assert basis == alt, f"Basis-geom hat sich verschoben: {basis ^ alt}"
     assert all("geom" in v for v in T2E.SCHEMA.values() if v.get("adv")), \
@@ -391,6 +455,9 @@ if __name__ == "__main__":
     test_rotor_check_runs_without_server()
     test_adv_params()
     test_bool_kind_is_strict()
+    test_schreibweise_runddraht()
+    test_enumwert_bekommt_vorschlag()
+    test_frischer_payload_baut_aus_waenden()
     test_schema_has_no_second_geom_table()
     test_schema_vs_payload()
     print("\nALLE CAE-CLI-TESTS BESTANDEN ✅")

@@ -27,6 +27,7 @@ import sys
 import ema_analysis
 import ema_paarvergleich as PV
 from ema_pipeline import LAMINATES, MAGNETS
+import ema_topology as T_WAND
 from ema_rotorcheck import rotor_layout_check
 
 _n_ok = _n_bad = 0
@@ -178,6 +179,50 @@ for name, a in erg["achsen"].items():
         if not rotor_layout_check(g)["ok"]:
             fehl.append((name, o["name"]))
 pruefe(not fehl, f"alle als baubar gemeldeten Optionen bestehen das Tor ({fehl[:3]})")
+
+
+print("\n5b. Dasselbe im WANDMODUS — dem Modus, in dem neue Auslegungen ankommen")
+# ``--frisch`` legt seit dem 07.09.2026 mit ``pocketMode="wand"`` an: Sitz und
+# Stegabstand fallen aus den Waenden, gesucht wird nur die Laenge. Der Paarvergleich
+# faehrt Achsen, die den Rotor VERAENDERN (Durchmesser, Laenge, Welle, Oeffnungs-
+# winkel) -- der Sitz muss also je Option NEU abgeleitet werden. Traegt eine Option
+# die Magnetlaenge des Ausgangslaeufers in einen kleineren, steht die Tasche
+# ausserhalb des Rotors: genau der Fehler, gegen den der Wandmodus gebaut ist.
+BASIS_WAND = {k: v for k, v in BASIS.items() if k != "geom"}
+BASIS_WAND["geom"] = dict(BASIS["geom"], magShape="v", pocketMode="wand", magWidth=0)
+from ema_screen import einpassen as _einpassen
+_start = _einpassen(dict(BASIS_WAND["geom"]))
+pruefe(_start["ok"], f"der Wand-Ausgangslaeufer passt ({_start['grund']})")
+BASIS_WAND["geom"] = _start["geom"]
+
+erg_w = PV.vergleiche(BASIS_WAND, ["durchmesser", "laenge", "wellendurchmesser",
+                                   "v_oeffnung", "anordnung"])
+fehl_w, gezaehlt = [], 0
+for name, a in erg_w["achsen"].items():
+    achse = PV.ACHSEN[name]
+    for o in a["optionen"]:
+        if not o.get("ok"):
+            continue
+        gezaehlt += 1
+        p = {k: v for k, v in BASIS_WAND.items() if k != "geom"}
+        p["geom"] = dict(BASIS_WAND["geom"])
+        achse["setzen"](p, o["wert"])
+        g = _einpassen(p["geom"], None)["geom"]
+        if not rotor_layout_check(g, min_web_mm=T_WAND.WAND_QACHSE_MM)["ok"]:
+            fehl_w.append((name, o["name"]))
+pruefe(gezaehlt > 0, f"im Wandmodus bleiben ueberhaupt Optionen baubar ({gezaehlt})")
+pruefe(not fehl_w,
+       f"im Wandmodus besteht jede baubare Option das Tor mit "
+       f"{T_WAND.WAND_QACHSE_MM} mm Mindeststeg ({fehl_w[:3]})")
+
+# Und die Waende stehen wirklich -- an der TASCHE gemessen, nicht am Magneten.
+_g = BASIS_WAND["geom"]
+import ema_rotorcheck as _RC
+_taschen, _ = _RC._magnettaschen(_g)
+_rmax = max(pk.radius_bounds()[1] for _b, pk in _taschen)
+pruefe(abs((_g["rotorOD"] / 2 - _rmax) - T_WAND.WAND_RAND_MM) < 1e-3,
+       f"die Randwand steht bei {_g['rotorOD']/2 - _rmax:.3f} mm "
+       f"(Vorgabe {T_WAND.WAND_RAND_MM})")
 
 
 print("\n6. Durchmesser: geometrisch aehnlich, Luftspalt bleibt")

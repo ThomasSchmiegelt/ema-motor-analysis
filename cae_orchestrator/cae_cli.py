@@ -233,9 +233,30 @@ def frischer_payload() -> dict:
     except Exception:                                        # noqa: BLE001
         pass
 
+    # Die Magnettasche wird aus ihren WAENDEN gebaut, nicht geraten. Der frueher
+    # hier stehende Suchlauf ueber ``magDist`` (er steht unten weiter, fuer alles,
+    # was den Wandmodus nicht kennt) drehte an drei Zahlen, von denen keine eine
+    # Wand ist: ``magDepthRel``, ``magWidth``, ``magDist``. Gemessen am Agentenlauf
+    # 20260907_074942 kostete das VIER Abbrueche am Layouttor hintereinander, jedes
+    # Mal mit einem neuen Rateversuch. Im Wandmodus stehen Rand-, d-Achsen- und
+    # q-Achsen-Wand fest, ``magDist``/``magDepthRel`` folgen daraus, und gesucht
+    # wird nur noch die Laenge (``magWidth = 0`` heisst „Slot fuellen").
+    # NUR im frischen Payload: bestehende Projekte tragen ``pocketMode`` in ihrem
+    # gespeicherten Payload und aendern sich um keine Ziffer.
+    payload["geom"]["pocketMode"] = "wand"
+    payload["geom"]["magWidth"] = 0
+
     try:
-        from ema_screen import einpassen
+        from ema_screen import einpassen, WAND_BAUFORMEN
         pas = einpassen(payload["geom"])
+        if not pas["ok"] and payload["geom"].get("magShape") in WAND_BAUFORMEN:
+            # Der Wandmodus kann ehrlich scheitern (zu viele Pole fuer den Laeufer).
+            # Dann NICHT stillschweigend auf den Ratemodus zurueckfallen -- lieber
+            # der alte Weg mit sichtbarem Grund, als eine Geometrie, die aussieht,
+            # als waere sie aus Waenden gebaut.
+            payload["geom"]["pocketMode"] = "position"
+            payload["geom"]["magWidth"] = T2E.SCHEMA["magWidth"]["def"]
+            pas = einpassen(payload["geom"])
         if not pas["ok"] or pas["s_koerper"] < 0.999:
             # Der Stegabstand wird aufgemacht, bis der Magnet UNGESCHMAELERT
             # hineinpasst -- nicht bis er irgendwie hineinpasst.
@@ -333,6 +354,22 @@ PROJECTS_ROOT = os.path.expanduser("~/cae_projekte")
 _ALIAS  = {"axialLen": "axial_len"}            # Schemaname -> Payloadname
 _MIRROR = {"axial_len": ("geom", "axialLen")}  # Payloadname -> mitzufuehrender Spiegel
 
+# Schreibweisen, die das Werkzeug SELBST benutzt, aber nicht als Wert annimmt.
+# Anlass ist gemessen (Lauf 20260907_074942, [04:56] bis [30:44]): der zulaessige
+# Wert heisst ``rundraht`` mit EINEM d, das deutsche Wort ist ``Runddraht`` mit
+# zweien -- und ``ema_wicklung.ART_LABEL["rundraht"]`` schreibt genau das hin. Der
+# Agent gab die richtige deutsche Schreibweise ein, wurde abgewiesen, und verbrachte
+# danach rund 25 Minuten und ~60 Aufrufe damit, sich den Unterschied zwischen den
+# beiden Zeichenketten vorzurechnen (``cand.count('d')``, ``[c for c in g]``, eine
+# foermliche Zuruecknahme, dann derselbe Fehler wieder). Ein Wert, den das Werkzeug
+# in seinen eigenen Beschriftungen so schreibt, darf nicht am Namen scheitern.
+# Umbenannt wird der Enum-Wert NICHT: er steht in ``ema_wicklung.ARTEN``, im
+# erzeugten FreeCAD-Skript, in vier Testdateien und in jeder gespeicherten
+# meta.json. Ein Alias kostet drei Zeilen, eine Umbenennung bricht die Altprojekte.
+_ALIAS_WERT = {
+    "windingType": {"runddraht": "rundraht"},
+}
+
 _SCHEMA_CACHE: dict | None = None
 
 
@@ -365,31 +402,44 @@ def _parse_value(raw: str):
 
 
 def _check_value(key: str, val, spec: dict):
-    """(bereinigter Wert, Fehlertext|None) gegen eine Schema-Zeile."""
+    """(bereinigter Wert, Fehlertext|None, Hinweis|None) gegen eine Schema-Zeile."""
     if spec.get("kind") == "bool":
         # Nur echte Booleans. "true"/1 waeren bequem, aber ``genFluxBarrierQ=1`` liest
         # sich wie eine Anzahl — und die Pipeline prueft mit ``bool(...)``, wo jede
         # nichtleere Zeichenkette wahr ist. Ein Tippfehler wuerde dann still wirken.
         if not isinstance(val, bool):
-            return val, f"{key}: true oder false erwartet, '{val}' bekommen"
-        return val, None
+            return val, f"{key}: true oder false erwartet, '{val}' bekommen", None
+        return val, None, None
     if spec.get("kind") == "num":
         if isinstance(val, bool) or not isinstance(val, (int, float)):
-            return val, f"{key}: Zahl erwartet, '{val}' bekommen"
+            return val, f"{key}: Zahl erwartet, '{val}' bekommen", None
         if spec.get("int"):
             if float(val) != int(val):
-                return val, f"{key}: ganze Zahl erwartet, {val} bekommen"
+                return val, f"{key}: ganze Zahl erwartet, {val} bekommen", None
             val = int(val)
         lo, hi = spec.get("lo"), spec.get("hi")
         if lo is not None and val < lo:
-            return val, f"{key}: {val} liegt unter der Untergrenze {lo}"
+            return val, f"{key}: {val} liegt unter der Untergrenze {lo}", None
         if hi is not None and val > hi:
-            return val, f"{key}: {val} liegt ueber der Obergrenze {hi}"
-        return val, None
+            return val, f"{key}: {val} liegt ueber der Obergrenze {hi}", None
+        return val, None, None
     opts = [o.get("value") for o in (spec.get("options") or [])]
-    if opts and val not in opts:
-        return val, f"{key}: '{val}' unbekannt. Zulaessig: {', '.join(map(str, opts))}"
-    return val, None
+    if not opts:
+        return val, None, None
+    if val in opts:
+        return val, None, None
+    # Erst die bekannten Schreibweisen (s. _ALIAS_WERT), dann ein Vorschlag. Fuer
+    # unbekannte SCHLUESSEL gibt es den difflib-Vorschlag laengst (apply_sets);
+    # fuer unbekannte WERTE fehlte er, und genau daran haengt der Lauf oben.
+    kurz = str(key).rsplit(".", 1)[-1]
+    ersatz = _ALIAS_WERT.get(kurz, {}).get(str(val).strip().lower())
+    if ersatz is not None and ersatz in opts:
+        return ersatz, None, f"'{val}' als '{ersatz}' gelesen"
+    import difflib
+    near = difflib.get_close_matches(str(val), [str(o) for o in opts], n=1, cutoff=0.6)
+    tipp = f" Meinten Sie '{near[0]}'?" if near else ""
+    return val, (f"{key}: '{val}' unbekannt.{tipp} "
+                 f"Zulaessig: {', '.join(map(str, opts))}"), None
 
 
 def _locate(key: str, payload: dict, schema: dict):
@@ -415,6 +465,22 @@ def _locate(key: str, payload: dict, schema: dict):
     if isinstance(geom, dict) and key in geom:
         return geom, key
     return None
+
+
+def echo_sets(applied) -> None:
+    """Die angewandten ``--set`` ausgeben -- an EINER Stelle formatiert.
+
+    Die Notiz gehoert dazu und stand frueher nur beim Verb ``run``: an den acht
+    anderen Aufrufstellen war eine umgeschriebene Schreibweise (``runddraht`` ->
+    ``rundraht``) oder ein aus den Waenden nachgezogener Sitz zwar wirksam, aber
+    unsichtbar -- und eine Aenderung, die man nicht sieht, ist eine, die man beim
+    naechsten Mal wieder nicht erwartet.
+    """
+    for a in applied or []:
+        mark = "" if a.get("geprueft") else "  (ohne Schema, ungeprueft)"
+        if a.get("notiz"):
+            mark += f"  [{a['notiz']}]"
+        print(f"  {a['key']}: {a['alt']} -> {a['neu']}{mark}")
 
 
 def apply_sets(payload: dict, assignments, url: str, force: bool = False):
@@ -450,14 +516,17 @@ def apply_sets(payload: dict, assignments, url: str, force: bool = False):
         # an der Schemapruefung vorbeikommen als 'slotDepth=999'. Wer das braucht,
         # nimmt --force.
         spec = schema.get(spec_key.rsplit(".", 1)[-1])
+        hinweis = None
         if spec is not None and not force:
-            val, err = _check_value(spec_key, val, spec)
+            val, err, hinweis = _check_value(spec_key, val, spec)
             if err:
                 errors.append(err)
                 continue
         old = container.get(name, "<nicht gesetzt>")
         container[name] = val
         note = f"{spec_key} -> {name}" if spec_key != name else None
+        if hinweis:
+            note = f"{note} ({hinweis})" if note else hinweis
         mirror = _MIRROR.get(name)
         if mirror and isinstance(payload.get(mirror[0]), dict) \
                 and mirror[1] in payload[mirror[0]]:
@@ -465,6 +534,36 @@ def apply_sets(payload: dict, assignments, url: str, force: bool = False):
             note = f"{note or name} (+ {mirror[0]}.{mirror[1]})"
         applied.append({"key": spec_key, "alt": old, "neu": val,
                         "geprueft": spec is not None, "notiz": note})
+
+    # Im Wandmodus sind magDist/magDepthRel/magWidth ABGELEITET -- also muessen sie
+    # nach JEDER Massaenderung neu abgeleitet werden, nicht nur beim frischen
+    # Payload. Ohne das trug ein ``--frisch --set rotorOD=51`` die Magnetlaenge des
+    # 188-mm-Laeufers in einen 51-mm-Laeufer: die Tasche stand dann 21,84 mm
+    # ausserhalb des Rotors und 5,77 mm in der Bohrung -- also genau der Zustand,
+    # gegen den der Wandmodus gebaut ist.
+    if applied and isinstance(payload.get("geom"), dict) \
+            and str(payload["geom"].get("pocketMode", "")).lower() == "wand":
+        vorher = {k: payload["geom"].get(k)
+                  for k in ("magDist", "magDepthRel", "magWidth", "magLayerGap")}
+        try:
+            from ema_screen import einpassen
+            pas = einpassen(payload["geom"])
+        except Exception as e:                                   # noqa: BLE001
+            errors.append(f"Wandmodus: Sitz nicht nachziehbar ({e})")
+        else:
+            if pas["ok"]:
+                payload["geom"] = pas["geom"]
+                geaendert = [f"{k} {vorher[k]} -> {pas['geom'].get(k)}"
+                             for k in vorher
+                             if vorher[k] is not None
+                             and abs(float(vorher[k] or 0)
+                                     - float(pas["geom"].get(k) or 0)) > 1e-6]
+                if geaendert:
+                    applied.append({"key": "pocketMode=wand", "alt": "abgeleitet",
+                                    "neu": "; ".join(geaendert), "geprueft": True,
+                                    "notiz": "Sitz aus den Waenden nachgezogen"})
+            else:
+                errors.append(f"Wandmodus: {pas['grund']}")
     return applied, errors
 
 
@@ -555,11 +654,7 @@ def cmd_run(args) -> int:
             print(f"FEHLER: {e}", file=sys.stderr)
         return _die(f"{len(errors)} Zuweisung(en) abgewiesen — nichts gestartet.",
                     EXIT_USAGE)
-    for a in applied:
-        mark = "" if a["geprueft"] else "  (ohne Schema, ungeprueft)"
-        if a.get("notiz"):
-            mark += f"  [{a['notiz']}]"
-        print(f"  {a['key']}: {a['alt']} -> {a['neu']}{mark}")
+    echo_sets(applied)
     if applied and args.stage not in ("cad", "smoke"):
         geom_touched = any(a["geprueft"] or "." in a["key"] for a in applied)
         if geom_touched:
@@ -857,8 +952,7 @@ def _geom_und_material(args):
         for e in errors:
             print(f"FEHLER: {e}", file=sys.stderr)
         raise SystemExit(_die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE))
-    for a in applied:
-        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    echo_sets(applied)
 
     geom = payload.get("geom") or {}
     if not geom:
@@ -1184,8 +1278,7 @@ def cmd_feld2d(args) -> int:
         for e in errors:
             print(f"FEHLER: {e}", file=sys.stderr)
         return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
-    for a in applied:
-        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    echo_sets(applied)
 
     if not (payload.get("geom") or {}):
         return _die("Keine Geometrie im Payload -- feld2d braucht geom.", EXIT_USAGE)
@@ -1271,8 +1364,7 @@ def cmd_feld3d(args) -> int:
         for e in errors:
             print(f"FEHLER: {e}", file=sys.stderr)
         return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
-    for a in applied:
-        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    echo_sets(applied)
 
     if not (payload.get("geom") or {}):
         return _die("Keine Geometrie im Payload -- feld3d braucht geom.", EXIT_USAGE)
@@ -1736,8 +1828,7 @@ def cmd_feldbild(args) -> int:
         for e in errors:
             print(f"FEHLER: {e}", file=sys.stderr)
         return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
-    for a in applied:
-        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    echo_sets(applied)
 
     geom = payload.get("geom") or {}
     if not geom:
@@ -1825,8 +1916,7 @@ def cmd_welle(args) -> int:
         for e in errors:
             print(f"FEHLER: {e}", file=sys.stderr)
         return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
-    for a in applied:
-        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    echo_sets(applied)
     geom = payload.get("geom") or {}
     if not geom:
         return _die("Keine Geometrie im Payload — welle braucht geom.", EXIT_USAGE)
@@ -1868,8 +1958,7 @@ def cmd_rotor_check(args) -> int:
         for e in errors:
             print(f"FEHLER: {e}", file=sys.stderr)
         return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
-    for a in applied:
-        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    echo_sets(applied)
 
     geom = payload.get("geom") or {}
     if not geom:
@@ -1974,8 +2063,7 @@ def cmd_screen(args) -> int:
         for e in errors:
             print(f"FEHLER: {e}", file=sys.stderr)
         return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
-    for a in applied:
-        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    echo_sets(applied)
     if not payload.get("geom"):
         return _die("Keine Geometrie im Payload — screen braucht geom.", EXIT_USAGE)
 
@@ -2050,8 +2138,7 @@ def cmd_paarvergleich(args) -> int:
         for e in errors:
             print(f"FEHLER: {e}", file=sys.stderr)
         return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
-    for a in applied:
-        print(f"  {a['key']}: {a['alt']} -> {a['neu']}")
+    echo_sets(applied)
     if not payload.get("geom"):
         return _die("Keine Geometrie im Payload — paarvergleich braucht geom.", EXIT_USAGE)
 

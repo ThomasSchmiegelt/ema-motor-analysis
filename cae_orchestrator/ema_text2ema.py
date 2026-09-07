@@ -32,7 +32,7 @@ _ART   = list(ema_maschinenart.ARTEN)
 _WICKLUNG = list(ema_wicklung.ARTEN)
 _BAUFORM  = list(ema_radien.BAUFORMEN)
 _ORIENT = ["transverse", "longitudinal"]
-_POCKET = ["position", "diameter"]
+_POCKET = ["position", "diameter", "wand"]
 _THREAD = ["M4", "M5", "M6", "M8", "M10", "M12", "M16", "M20"]
 
 # field → spec.
@@ -66,7 +66,7 @@ SCHEMA = {
     "magShape":   {"kind": "enum", "opts": _SHAPE, "def": "v", "geom": True, "desc": "Magnet-Topologie"},
     "magAngle":   {"kind": "num", "lo": 40,  "hi": 170, "def": 120, "geom": True, "desc": "V-Öffnungswinkel [°] (kleiner → mehr Flusskonzentration)"},
     "magDepthRel":{"kind": "num", "lo": 0.4, "hi": 0.92,"def": 0.7, "geom": True, "desc": "radiale Magnetposition (0=Welle … 1=Rotorrand)"},
-    "magWidth":   {"kind": "num", "lo": 10,  "hi": 90,  "def": 45, "geom": True,  "desc": "Magnetlänge [mm]"},
+    "magWidth":   {"kind": "num", "lo": 0,   "hi": 90,  "def": 45, "geom": True,  "desc": "Magnetlänge [mm] (0 = Slot füllen, nur pocketMode=wand)"},
     "magThick":   {"kind": "num", "lo": 2,   "hi": 15,  "def": 6, "geom": True,   "desc": "Magnetdicke [mm]"},
     # 2 mm war die Vorgabe und ist an der Vorgabegeometrie (V, p=3, magAngle 120)
     # nicht baubar: die beiden V-Schenkel kommen nie aneinander vorbei --
@@ -145,7 +145,7 @@ SCHEMA = {
                        "desc": "Magnettasche offen (nein/aussen=zum Luftspalt/innen=zur Welle/beide)"},
     "magOrient":           {"kind": "enum", "opts": _ORIENT, "def": "transverse", "geom": True, "adv": True, "desc": "Magnetisierungsrichtung (quer / längs)"},
     # Magnettasche
-    "pocketMode":          {"kind": "enum", "opts": _POCKET, "def": "position", "geom": True, "adv": True, "desc": "Tasche über Position oder Durchmesser (nur v)"},
+    "pocketMode":          {"kind": "enum", "opts": _POCKET, "def": "position", "geom": True, "desc": "Magnettasche: position=magDepthRel/magWidth · diameter=Innen-/Außen-Ø · wand=aus den Wänden abgeleitet (v, vasym, u, vv, delta)"},
     "pocketOuterD":        {"kind": "num", "lo": 10,   "hi": 2970, "def": 178,  "geom": True, "adv": True, "desc": "Taschen-Außendurchmesser [mm] (pocketMode=diameter)"},
     "pocketInnerD":        {"kind": "num", "lo": 5,    "hi": 2960, "def": 150,  "geom": True, "adv": True, "desc": "Taschen-Innendurchmesser [mm] (pocketMode=diameter)"},
     # Flusssperren
@@ -250,6 +250,13 @@ def _validate(raw: dict) -> dict:
             out[key] = int(round(v)) if spec.get("int") else round(v, 3)
     # slots → nearest multiple of 3 (>=6)
     out["slots"] = max(6, int(round(out["slots"] / 3)) * 3)
+    # ``magWidth = 0`` heisst „Slot fuellen" und gilt NUR im Wandmodus
+    # (``pocketMode``, ein Feinparameter, den Text->Auslegung gar nicht erfragt).
+    # Ohne den Modus waere die Null keine Ansage, sondern ein Magnet der Laenge
+    # null -- die Untergrenze steht im Schema deshalb bei 0, die Bedeutung hier.
+    if out.get("magWidth", 0) <= 0 and \
+            str(raw.get("pocketMode", "") or "").strip().lower() != "wand":
+        out["magWidth"] = SCHEMA["magWidth"]["def"]
     # Radiale Ordnung erzwingen -- je nach BAUFORM eine andere.
     #
     # Diese Zurechtrueckung war fest auf den Innenlaeufer geschrieben. An einem

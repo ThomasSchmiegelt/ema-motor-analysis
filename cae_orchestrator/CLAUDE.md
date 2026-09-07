@@ -1529,6 +1529,94 @@ This feeds all consumers (field frames, thermal, drive cycle).
 V-shaped magnet pockets are auto-shortened to the longest length that still fits the
 rotor: solves a quadratic so the outer pocket corner stays ≤ `R_rotor − bridge` (2 mm).
 
+### Die Magnettasche aus ihren WAENDEN (`pocketMode = "wand"`)
+
+**Die Tasche entstand aus drei geratenen Zahlen.** `magDepthRel` (relative radiale
+Lage 0…1), `magWidth` (Laenge in mm) und `magDist` (Stegabstand in mm) — keine davon
+ist eine Wand, keine folgt aus den anderen, und ob sie zusammen passen, sagt erst das
+Layouttor. Gemessen am Agentenlauf `20260907_074942`: **vier Abbrueche an Stufe 0
+hintereinander**, die Tasche stand 2,45 / 0,15 / 1,96 mm ausserhalb des Rotors bzw.
+kollidierte um 0,77 mm mit dem Nachbarpol — jedes Mal ein neuer Ratewurf. Das Tor
+hatte jedes Mal recht; falsch war, dass es nichts gab, woraus sich die Tasche
+ableiten liess.
+
+**Drei Waende, benannt** (`ema_topology.WAND_*`, gemeint ist immer die TASCHE
+einschliesslich Endkappen und Klebespalt `magGapMm` — dieselbe Groesse, die
+`ema_rotorcheck.Pocket` prueft):
+
+| Wand | mm | wogegen | was sie haelt |
+|---|---:|---|---|
+| `WAND_RAND_MM` (= `BRIDGE_MM`) | 1,3 | Rotoraussenrand | Polschuh gegen Fliehkraft; kurzschliesst den Magneten zugleich |
+| `WAND_ACHSE_MM` | 1,5 | Polsymmetrieachse (d-Achse) | traegt die beiden V-Schenkel gegeneinander |
+| `WAND_QACHSE_MM` | 2,0 | Tasche des NACHBARPOLS (q-Achse) | fuehrt den Reluktanzpfad, begrenzt die Schenkellaenge |
+| `WAND_SPEICHE_A_MM` / `_I_MM` | 1,5 / 2,0 | Rotorrand / Wellenaussenrand | Speiche |
+
+Die Achswand war vorher **nirgends ausgedrueckt** — am frischen Payload fiel sie aus
+`magDist = 8` zufaellig mit **0,81 mm** ab.
+
+**Die Formel** (`sitz_aus_waenden`, geschlossen, keine Iteration): `d_half` folgt aus
+der Achswand (die INNERE Kappe ist die dichteste Stelle an der d-Achse — der
+Rechteckrand liegt bei `ht·cos t ≤ ht` weiter weg), `r_pos` daraus, dass die
+AEUSSERE Kappe die Randwand genau beruehrt. **`r_pos` ist das innere ENDE des
+Magneten, nicht die Taschenmitte** (so liest es `leg_center`): vom inneren Ende bis
+zum aeusseren Kappenmittelpunkt sind es `L + gap`, nicht `L/2 + gap`. Der
+Unterschied ist keiner auf dem Papier — mit `hl` gerechnet stand die Tasche einer
+84-mm-Auslegung **36,2 mm ausserhalb** des Rotors, und weil der Positionsmodus die
+Laenge zusaetzlich klemmt, faellt das in einer Vergleichsmessung nicht auf.
+
+**Gesucht wird nur noch die Laenge** (`ema_screen._einpassen_wand`): grobe Leiter,
+dann Halbieren, Pruefstein ist das ECHTE `rotor_layout_check` mit
+`min_web_mm = WAND_QACHSE_MM` — nicht ein zweites Abstandsmass daneben. Ein
+einzelner Probewert genuegt nicht: beim U haengt der Bodenbalken, beim Delta das
+Deck an der Magnetlaenge, und ein sehr kurzer Magnet kann durchfallen, waehrend ein
+mittlerer traegt. **Ein Mindeststeg fuer alle Paare** (2,0 mm) statt einer je
+Paarart — die strengere und die einzige Aussage, die das Tor kennt.
+
+`magWidth = 0` heisst **„Slot fuellen"**; ein gesetzter Wert wird gebaut und nur so
+weit aussen platziert, wie die Randwand zulaesst. `magDist` und `magDepthRel` sind
+abgeleitet und werden **zurueckgeschrieben** — sonst vergliche der Paarvergleich eine
+Zahl, die im Blech nicht vorkommt.
+
+**Wo es Vorgabe ist: nur `--frisch`.** Bestehende Projekte tragen `pocketMode` in
+ihrem gespeicherten Payload und aendern sich um keine Ziffer (2430 Faelle ueber alle
+Bauformen nachgerechnet, `position` und `diameter` bitgleich). Am frischen Payload:
+
+| | magWidth | magDist | magDepthRel | Achswand |
+|---|---:|---:|---:|---:|
+| bisher (geraten) | 24,72 mm | 8,00 mm | 0,681 | 0,81 mm |
+| Wandmodus | **42,24 mm** | 9,37 mm | 0,446 | **1,50 mm** |
+
+**Ehrlich scheitern:** ein Magnet, der kuerzer ist als er dick ist, wird nicht
+gebaut — gemessen lassen 10 Pole auf einem 51-mm-Laeufer mit 3 mm dicken Magneten
+1,38 mm Schenkel uebrig. Diese Zahl als „ok" zurueckzugeben waere schlimmer als ein
+klares Nein, weil danach eine ganze Kette darauf rechnet. `--frisch` faellt in dem
+Fall sichtbar auf `position` zurueck statt stillschweigend etwas zu bauen.
+
+**Doppel-V:** die aeussere Lage haengt an der Randwand, die innere eine
+`magLayerGap` darunter — und die beiden laufen mit wachsender Magnetlaenge
+aufeinander zu (gemessen 8,8 → 5,0 mm, waehrend die Laenge von 1 auf 30 mm waechst),
+weil sie bei verschiedenen Oeffnungswinkeln verschiedene Sitze haben. `magLayerGap`
+wird deshalb IM Laengensuchlauf angehoben, nicht davor, und die Anhebung wird
+gemeldet (Ur-Maschine: 8,00 → 13,25 mm).
+
+**`pmasynrm` bleibt aussen vor:** seine Lagen tragen eine eigene Winkelstaffelung
+(`hak = half_ang − k·8°`) und einen eigenen Laengenverlauf — ein eigener Fall, keine
+V-Tasche.
+
+**Speiche:** die Waende gelten auch dort, und zwei Zahlen waren falsch. Der frueherer
+Saum `steg + mag_h/2 + gap` lieferte an beiden Enden gemessen **1,20 mm**, obwohl
+`BRIDGE_MM` 1,3 sagt: die Endkappe sitzt um `gap` AUSSERHALB des Magnetendes und
+traegt selbst den Radius `mag_h/2 + gap` — der Klebespalt geht **zweimal** ein. Jetzt
+1,5 mm aussen und 2,0 mm zur Welle, **unbedingt** (nicht nur im Wandmodus): hier wird
+kein Freiheitsgrad genommen, sondern eine Wand berichtigt, die das Werkzeug ohnehin
+einhalten wollte. Die ausdruecklich **offene** Tasche (`magTascheOffen`) bleibt
+unberuehrt — wo der Steg per Bauart entfaellt, gibt es keine Wand zu halten.
+
+Der JS-Spiegel in `ema.html` fuehrt dieselben Konstanten und dieselben drei Formeln;
+`test_topology.py` nagelt sie fest (Wandwerte py↔js, beide `magWidth`-Faelle je
+Bauform, Speichenoeffnung) und misst zusaetzlich am gebauten Sitz nach, dass die
+Waende wirklich stehen.
+
 **Defensiver Rotor-Bau (`build_full_motor_script`, „Rotor wird nicht erzeugt"-Fix):** ein
 ungültiger Solid nach den Taschen-/Barrieren-Schnitten (aggressive Multi-Lagen-Taschen → dünne
 entartete Eisenstege) darf NICHT mehr das ganze Skript per `raise` abbrechen (das verlor Rotor
