@@ -543,9 +543,17 @@ async function videoStart(){
     links('sys', 'Aufnahme: dieser Browser bietet keine Bildschirmaufnahme an.'); return;
   }
   let strom;
+  // Was aufgenommen wird, entscheidet die SEITE. Der Schreibtisch will den
+  // ganzen Reiter (oder ein anderes Fenster), das Studio nur seine Buehne — und
+  // dafuer muss die Anfrage schon anders gestellt werden (`preferCurrentTab`,
+  // sonst laesst sich hinterher kein Bereich daraus schneiden). Ohne eigene
+  // Angabe bleibt es beim Bisherigen.
+  let opt = {video: {frameRate: {ideal: VIDEO_FPS, max: 8}}, audio: false};
+  if(typeof aufnahmeOptionen === 'function'){
+    try{ opt = aufnahmeOptionen(opt) || opt; }catch(_){}
+  }
   try{
-    strom = await navigator.mediaDevices.getDisplayMedia({
-      video: {frameRate: {ideal: VIDEO_FPS, max: 8}}, audio: false});
+    strom = await navigator.mediaDevices.getDisplayMedia(opt);
   }catch(e){
     if(e.name !== 'NotAllowedError') links('sys', 'Aufnahme: ' + e.message);
     return;
@@ -573,6 +581,16 @@ async function videoStart(){
   };
   // Der Betrachter kann die Freigabe auch im Browser beenden.
   strom.getVideoTracks()[0].addEventListener('ended', () => videoStopp('freigabe'));
+  // Die Seite darf den Strom zurechtschneiden, BEVOR aufgezeichnet wird — sonst
+  // lagen die ersten Sekunden ungeschnitten in der Datei. Sie haelt hier auch
+  // fest, WOHIN aufgenommen wird (die Studio-Seite schreibt ihr Buehnenrechteck
+  // in die Markenliste; wer den Ausschnitt hinterher im Bild suchen muss, findet
+  // ihn nicht mehr genau). Der Recorder ist dafuer schon gebaut, aber noch nicht
+  // gestartet: ``rekTaetig`` schreibt seine Marke nur, wenn es einen gibt.
+  // ``await``, weil Zuschneiden eine Zusage ist.
+  if(typeof nachAufnahmeStart === 'function'){
+    try{ await nachAufnahmeStart(strom); }catch(_){}
+  }
   REK.start(VIDEO_STUECK_MS);
   $('b_video').textContent = '⏹ Aufnahme beenden';
   $('p_rek').style.display = '';
@@ -583,13 +601,6 @@ async function videoStart(){
   const beobachtet = $(SPALTEN.r) || $(SPALTEN.l);
   if(beobachtet) beobachtet.addEventListener('scroll', () => rekTaetig(), {passive: true});
   rekTaetig('start', 'Aufnahme begonnen');
-  // Die Seite darf festhalten, WOHIN sie aufgenommen wird. Die Studio-Seite
-  // schreibt hier ihr Buehnenrechteck in die Markenliste — daraus wird spaeter
-  // die Zuschnittzeile aufs Hochformat. Wer den Ausschnitt hinterher im Bild
-  // suchen muss, findet ihn naemlich nicht mehr genau.
-  if(typeof nachAufnahmeStart === 'function'){
-    try{ nachAufnahmeStart(strom); }catch(_){}
-  }
   REK_WACHE = setInterval(rekWache, 2000); rekWache();
   links('sys', '🎥 Aufnahme läuft → ' + a.pfad);
 }
@@ -646,6 +657,12 @@ async function videoStopp(grund){
       links('sys', '✂ ' + (a.n_marken || 0) + ' Marken, ' + (a.stuecke || 0) +
                    ' Stück(e) mit Inhalt → ' + a.schnitt +
                    '   (ausführen schneidet die Aufnahme; Liste: ' + a.marken + ')');
+    // Und die Seite darf die fertige Aufnahme ZEIGEN. Ein Pfad im Verlauf ist
+    // fuer den, der davorsitzt, dasselbe wie nichts — am Handy erst recht, dort
+    // gibt es kein Dateisystem zum Nachsehen.
+    if(typeof nachAufnahmeEnde === 'function'){
+      try{ nachAufnahmeEnde(a); }catch(_){}
+    }
   }
 }
 // Ein weggeklicktes Fenster soll keine halbe Datei hinterlassen.

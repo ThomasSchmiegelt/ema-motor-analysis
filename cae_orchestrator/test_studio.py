@@ -346,6 +346,16 @@ def test_hochformat_und_zuschnitt():
     assert ema_beitrag.zuschnitt(marke("3024x2204")) == "crop=1180:2100:920:104,scale=1080:1920"
     # Ganzer Bildschirm: das Fenster sitzt irgendwo darin. Geraten wird nicht.
     assert ema_beitrag.zuschnitt(marke("2560x1440")) == ""
+    # Und die drei Faelle sind zu unterscheiden: schon zugeschnitten ist etwas
+    # anderes als „Lage unbekannt", auch wenn beide keine ffmpeg-Zeile ergeben.
+    assert ema_beitrag.zuschnitt_lage(marke("1512x1102")) == "berechnet"
+    assert ema_beitrag.zuschnitt_lage(marke("2560x1440")) == "unbekannt"
+    bereich = [{"s": 1.0, "uhr": "x", "art": "format",
+                "text": "Hochformat 1080x1920 · Bereichsaufnahme der Bühne "
+                        "· Aufnahme 527x937"}]
+    assert ema_beitrag.zuschnitt_lage(bereich) == "fertig"
+    assert ema_beitrag.zuschnitt(bereich) == "", \
+        "eine schon zugeschnittene Aufnahme darf nicht ein zweites Mal beschnitten werden"
     assert ema_beitrag.zuschnitt([{"s": 1.0, "uhr": "x", "art": "bild",
                                    "text": "feld.png"}]) == ""
     print("✓ hochformat: 1080x1920 als Vorgabe, Zuschnittzeile aus der Marke")
@@ -644,6 +654,85 @@ def test_fussleiste_zeigt_wer_was_macht():
     print("✓ fussleiste: zwei Zeilen, kein Pfad, acht Lampen — wer gerade was macht")
 
 
+def test_bilder_und_video_im_verlauf():
+    """Bilder auf Kachelbreite, Hoehe im Verhaeltnis — und die fertige Aufnahme.
+
+    Anlass: „die Bilder werden im Studio-Tab nicht dargestellt, da sind dann nur
+    Linien. Auch waere das fertige Video cool. Das Ganze muss natuerlich auf die
+    korrekte Breite skaliert werden, auch ist die Hoehe im richtigen Verhaeltnis
+    anzupassen."
+    """
+    h = open(os.path.join(HIER, "ema_studio.html"), encoding="utf-8").read()
+    eigen = _inline("ema_studio.html")
+    geteilt = open(os.path.join(HIER, "agent_gemein.js"), encoding="utf-8").read()
+
+    # 1) DIE Ursache der „Linien": #strom ist eine Spalten-Flexbox, und deren
+    # Kinder schrumpfen per Vorgabe, sobald der Verlauf laenger wird als die
+    # Buehne. Ein <img> mit height:auto hat nichts, was das aufhaelt.
+    assert "#strom > *{flex:0 0 auto}" in h, \
+        "ohne das staucht der Browser die Bildkacheln zu Strichen"
+
+    # 2) Breite von der Kachel, Hoehe aus dem Verhaeltnis — und beides braucht es.
+    assert "width:100%;height:auto;background:#fff" in h.replace("\n", "").replace("  ", ""), \
+        "width:100% fehlt (kleines Diagramm bliebe klein) oder height:auto (verzerrt)"
+    # Der Deckel auf der Buehne darf nicht in die Breite ziehen.
+    fest = h.split("#buehne.fest .karte.erg img,")[1][:220]
+    assert "max-height:980px" in fest and "object-fit:contain" in fest, \
+        "ohne object-fit zieht der Hoehendeckel ein hochkantes Bild in die Breite"
+
+    # 3) Ein Bild, das nicht kommt, sagt das — sonst ist es von einem
+    # gestauchten nicht zu unterscheiden.
+    assert "Bild nicht abrufbar" in eigen and ".karte.erg .bildfehler" in h
+    for datei in ("ema_agent.html", "ema_studio.html"):
+        assert "Bild nicht abrufbar" in _inline(datei), datei
+
+    # 4) Bild- UND Videoadresse gehen durch K(): vom Handy aus tragen sie damit
+    # Kopf und Token wie jede andere Adresse.
+    assert "K('/agent/bild/" in eigen, "die Bildadresse umgeht K()"
+    assert "K('/agent/video/datei/" in eigen, "die Videoadresse umgeht K()"
+
+    # 5) Die fertige Aufnahme ist ein Rueckruf der Seite, kein Sonderweg in der
+    # geteilten Datei — und beide Seiten haben ihn.
+    assert "nachAufnahmeEnde" in geteilt, "agent_gemein.js ruft ihn nicht"
+    for datei in ("ema_agent.html", "ema_studio.html"):
+        assert "function nachAufnahmeEnde(" in _inline(datei), datei
+    assert "<video controls playsinline" in eigen
+    assert ".karte.erg video{" in h and "#buehne.fest .karte.erg video" in h
+
+    # 6) Und der Weg dorthin: die Route liefert die Datei, streng begrenzt.
+    srv = open(os.path.join(HIER, "server.py"), encoding="utf-8").read()
+    assert '@app.route("/agent/video/datei/<name>")' in srv
+    block = srv.split('@app.route("/agent/video/datei/<name>")')[1][:1200]
+    assert "_safe_name(name)" in block, "Pfadschutz fehlt"
+    assert '(".webm", ".mp4")' in block, "jede Endung waere lieferbar"
+    assert "conditional=True" in block, "ohne Bereichsanfragen kein Springen im Video"
+    # Und ``beenden`` liefert den Dateinamen, damit die Seite keinen absoluten
+    # Pfad zusammensetzen muss.
+    ag = open(os.path.join(HIER, "ema_agent.py"), encoding="utf-8").read()
+    assert '"datei": os.path.basename(self.pfad or "")' in ag
+
+    # 7) Aufgenommen wird die BUEHNE, nicht der Reiter.
+    assert "function aufnahmeOptionen(" in eigen, \
+        "ohne preferCurrentTab gibt es nichts, worauf ein Zuschnitt sich bezieht"
+    for teil in ("preferCurrentTab: true", "selfBrowserSurface", "surfaceSwitching"):
+        assert teil in eigen, teil
+    assert "CropTarget.fromElement($('buehne'))" in eigen and "cropTo" in eigen
+    assert "aufnahmeOptionen" in geteilt and "await nachAufnahmeStart" in geteilt, \
+        "der Zuschnitt muss VOR dem ersten aufgezeichneten Bild stehen"
+    # Und er steht vor REK.start(), nicht davor oder danach irgendwo.
+    vor = geteilt.split("REK.start(VIDEO_STUECK_MS)")[0]
+    assert "await nachAufnahmeStart(strom)" in vor, \
+        "sonst liegen die ersten Sekunden ungeschnitten in der Datei"
+    assert "new MediaRecorder" in vor.split("await nachAufnahmeStart")[0], \
+        "rekTaetig schreibt seine Marke nur, wenn es schon einen Recorder gibt"
+    # Der Browser, der es nicht kann, bekommt einen Satz statt eines stillen
+    # Reiter-Mitschnitts.
+    assert "keinen Bereich aufnehmen" in eigen
+
+    print("✓ bilder/video: volle Kachelbreite, Hoehe im Verhaeltnis, Aufnahme "
+          "abspielbar — und aufgenommen wird die Bühne, nicht der Reiter")
+
+
 if __name__ == "__main__":
     test_dritter_kopf()
     test_systemzusatz_je_kopf()
@@ -668,4 +757,5 @@ if __name__ == "__main__":
     test_studio_seite_gehoert_dem_studio_kopf()
     test_studio_reiter_in_der_oberflaeche()
     test_fussleiste_zeigt_wer_was_macht()
+    test_bilder_und_video_im_verlauf()
     print("\nALLE STUDIO-TESTS BESTANDEN ✅")

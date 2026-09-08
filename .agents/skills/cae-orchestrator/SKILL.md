@@ -1078,7 +1078,7 @@ Bei langen Läufen nicht in einer engen Schleife pollen — `wait` macht das mit
 
 ## Alles Übrige
 
-Die 172 Routen sind über `raw` erreichbar; `routes --grep` findet sie.
+Die 173 Routen sind über `raw` erreichbar; `routes --grep` findet sie.
 
 ```bash
 python3 cae_cli.py routes --grep oilspray

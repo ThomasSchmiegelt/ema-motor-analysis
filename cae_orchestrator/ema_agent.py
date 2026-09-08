@@ -2181,7 +2181,12 @@ class Aufnahme:
                 self.f = None
             pause = self._pause_gesamt()
             gesamt = time.time() - self.start_ts
-            aus = {"ok": True, "pfad": self.pfad, "bytes": self.bytes,
+            # Der Dateiname getrennt vom Pfad: die Seite spielt die Aufnahme
+            # ueber ``/agent/video/datei/<name>`` ab und darf dafuer keinen
+            # absoluten Pfad zusammensetzen muessen.
+            aus = {"ok": True, "pfad": self.pfad,
+                   "datei": os.path.basename(self.pfad or ""),
+                   "bytes": self.bytes,
                    "sekunden": round(gesamt - pause, 1),
                    "pause_s": round(pause, 1),
                    "verstrichen_s": round(gesamt, 1),

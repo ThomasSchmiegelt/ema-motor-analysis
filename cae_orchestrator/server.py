@@ -4415,6 +4415,29 @@ def agent_video_ende():
     return jsonify(ema_agent.VIDEO.beenden())
 
 
+@app.route("/agent/video/datei/<name>")
+def agent_video_datei(name: str):
+    """Die fertige Aufnahme abspielen — lesend, aus ``VIDEO_ORDNER``.
+
+    Bisher endete eine Aufnahme mit zwei Zeilen im Verlauf, die den PFAD
+    nannten. Das ist dieselbe Lage wie bei den Agentenlaeufen vor
+    ``/agent/laeufe``: geschrieben, aber unerreichbar ist fuer den, der
+    davorsitzt, dasselbe wie nicht vorhanden — erst recht am Handy, wo es kein
+    Dateisystem zum Nachsehen gibt.
+
+    Streng auf den Ordner und die beiden Endungen begrenzt, die der Recorder
+    ueberhaupt schreibt; ``send_from_directory`` beantwortet Bereichsanfragen
+    selbst, sodass ein Video nicht erst ganz geladen werden muss.
+    """
+    import ema_agent
+    if not _safe_name(name) or not name.lower().endswith((".webm", ".mp4")):
+        return jsonify({"error": "ungueltiger Name"}), 403
+    d = ema_agent.VIDEO_ORDNER
+    if not os.path.isfile(os.path.join(d, name)):
+        return jsonify({"error": "nicht gefunden"}), 404
+    return send_from_directory(d, name, conditional=True)
+
+
 @app.route("/agent/video/status")
 def agent_video_status():
     import ema_agent

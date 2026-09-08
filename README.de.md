@@ -938,6 +938,65 @@ Handy bleiben sie eine wischbare Zeile, umbrechend nahmen sie dort gemessen sech
 Was es weiterhin **nicht** gibt, ist eine Lampe „Modell denkt": Ollama meldet nur,
 welches Modell im Speicher *liegt*, nicht ob es rechnet.
 
+### Bilder in voller Breite — und die fertige Aufnahme
+
+Zwei Dinge fehlten im Verlauf, und das erste war ein Fehler mit einer sehr
+konkreten Ursache: **die Bilder waren nur noch Striche.** Der Verlauf ist eine
+Spalten-Flexbox, und deren Kinder schrumpfen von sich aus, sobald der Inhalt
+länger wird als die Bühne — statt zu scrollen, staucht der Browser. Ein Bild mit
+automatischer Höhe hat nichts, was das aufhält; es wird zuerst und am stärksten
+zusammengedrückt, übrig bleibt ein weißer Strich. Jetzt schrumpft nichts im
+Verlauf, gescrollt wird — dafür ist der Überlauf da. (Die Schreibtischseite war
+nie betroffen: ihr Verlauf ist ein gewöhnlicher Block. Das ist zugleich die
+Gegenprobe.)
+
+Die Größe selbst folgt jetzt einer Regel: **die Kachel gibt die Breite vor, die
+Höhe folgt dem Seitenverhältnis.** Beides ist nötig — nur die Breite zu setzen
+ließ ein 700 Punkte breites Diagramm auf der 1080er Bühne klein und verloren
+stehen; nur die Höhe automatisch zu lassen verzerrte es, sobald der Höhendeckel
+der Bühne greift. Ein Bild, das gar nicht kommt, sagt das jetzt: vorher war es
+von einem gestauchten nicht zu unterscheiden, beides ein weißer Strich, und man
+sucht den Fehler an der falschen Stelle.
+
+**Die fertige Aufnahme liegt im Verlauf, nicht nur ihr Pfad.** Sie endete
+bisher mit zwei Zeilen, die den Ablageort nannten — dieselbe Lage wie bei den
+Agentenläufen, bevor es einen Weg zurück gab: geschrieben, aber unerreichbar ist
+dasselbe wie nicht vorhanden, und am Handy erst recht, dort gibt es kein
+Dateisystem zum Nachsehen. Beide Agentenseiten hängen jetzt eine Kachel mit
+einem Abspieler an derselben Stelle in den Verlauf, an der auch jedes andere
+Ergebnis steht; der Server liefert die Datei aus dem Videoordner, beschränkt auf
+die zwei Endungen, die der Recorder überhaupt schreibt, und beantwortet
+Bereichsanfragen — man kann also springen, ohne achtzig Megabyte vorher zu
+laden.
+
+### Aufgenommen wird die Bühne, nicht der Reiter
+
+Der Bildschirmrecorder nahm den ganzen Browser-Reiter auf. Heraus kam ein Bild in
+Fensterform, in dem die hochkante Bühne irgendwo saß — der Ausschnitt fürs Reel
+entstand erst hinterher beim Schneiden, und bis dahin wusste niemand genau, was
+im Bild landet. Das ist genau der Fehler, gegen den die feste Bühne überhaupt
+gebaut wurde.
+
+Der Browser kann das selbst: **Region Capture** schneidet eine Selbstaufnahme auf
+ein Element zu. Zwei Bedingungen hängen daran, und beide sind erfüllt — die
+Aufnahme muss der eigene Reiter sein (die Seite fragt deshalb anders an), und der
+Zuschnitt muss stehen, **bevor** das erste Bild aufgezeichnet wird; die
+gemeinsame Aufnahmelogik wartet dafür jetzt auf die Seite, zwischen dem Bau des
+Recorders und seinem Start. Danach ist die Datei die Bühne — kein Nachschneiden
+mehr.
+
+Was das **nicht** ändert, ist die Auflösung: geschnitten wird in den Bildpunkten,
+die der Reiter wirklich hat. Eine auf 527×937 verkleinerte Bühne liefert 527×937,
+und die Pille oben sagt das weiterhin. Wer echte 1080×1920 will, macht das
+Fenster hoch genug.
+
+Und die Schnittliste unterscheidet jetzt **drei** Fälle statt zwei: schon
+zugeschnitten, hinterher berechenbar, oder Lage unbekannt (Bildschirmaufnahme).
+Die ersten beiden ergeben beide keine `ffmpeg`-Zeile — sie zusammenzuwerfen
+hieße, unter einem perfekt zugeschnittenen Reel „ohne Zuschnitt" zu schreiben.
+Kann ein Browser die Bereichsaufnahme nicht, sagt die Seite es und fällt auf den
+gerechneten Zuschnitt zurück.
+
 ## Das Werkzeug ist der Maßstab, nicht der Gegenstand
 
 Bei einer Zielwertoptimierung stellt sich eine unangenehme Frage: was hindert den

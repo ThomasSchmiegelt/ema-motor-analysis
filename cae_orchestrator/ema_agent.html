@@ -84,7 +84,9 @@
   .kachel.fehler > .kk{color:var(--err)}
   .kachel pre{margin:0;padding:11px 13px;overflow-x:auto;
               font:12.5px/1.5 var(--mono);white-space:pre;color:var(--tx)}
-  .kachel img{display:block;width:100%;background:#fff}
+  .kachel img{display:block;width:100%;height:auto;background:#fff}
+  .kachel video{display:block;width:100%;height:auto;background:#000}
+  .kachel .bildfehler{padding:8px 10px;font:11.5px/1.4 var(--mono);color:var(--warn)}
   /* Die Feldbilder aus `ema_feldbild` tragen einen Alphakanal — auf dem weissen
      Vorgabegrund darueber waere die Durchsicht nicht als solche zu erkennen. Ein
      dunkles Schachbrett ist das uebliche Zeichen fuer „hier ist nichts". */
@@ -454,7 +456,37 @@ function kachelBild(e){
   k.dataset.markeText = e.datei || '';
   const bild = k.querySelector('img'), ziel = SPALTEN.r;
   bild.addEventListener('load',  () => runter($(ziel)));
-  bild.addEventListener('error', () => runter($(ziel)));
+  // Ein Bild, das nicht kommt, war ein 4 px hoher weisser Strich — man sucht
+  // den Fehler dann an der falschen Stelle. Es sagt jetzt, WAS fehlt.
+  bild.addEventListener('error', () => {
+    bild.remove();
+    const w = document.createElement('div');
+    w.className = 'bildfehler';
+    w.textContent = '⚠ Bild nicht abrufbar: ' + (e.unter || '') + '/' + (e.datei || '');
+    k.insertBefore(w, k.querySelector('.bu'));
+    runter($(ziel));
+  });
+  rechts(k);
+}
+
+// ── Die fertige Aufnahme ─────────────────────────────────────────────────────
+// Rueckruf aus agent_gemein.js. Bis hierher endete eine Aufnahme mit zwei Zeilen,
+// die den PFAD nannten — dieselbe Lage wie bei den Agentenlaeufen vor
+// /agent/laeufe: geschrieben, aber unerreichbar ist dasselbe wie nicht da.
+function nachAufnahmeEnde(a){
+  if(!a || !a.datei) return;
+  const k = document.createElement('div');
+  k.className = 'kachel';
+  const url = K('/agent/video/datei/' + encodeURIComponent(a.datei));
+  const mb = (a.bytes / 1048576).toFixed(1);
+  k.innerHTML =
+    `<div class="kk">🎬 Aufnahme<span class="zeit">${esc(uhrText(a.sekunden))}</span></div>` +
+    `<video controls playsinline preload="metadata" src="${url}"></video>` +
+    `<div class="bu">${esc(a.datei)} · ${mb} MB` +
+    (a.n_marken ? ` · ${a.n_marken} Marken, ${a.stuecke || 0} Stück(e)` : '') +
+    `</div>`;
+  k.dataset.markeArt = '';
+  k.dataset.markeText = '';
   rechts(k);
 }
 function rechts(k){

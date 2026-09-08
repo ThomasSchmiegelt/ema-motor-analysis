@@ -817,6 +817,60 @@ phone they stay one swipeable row (wrapping, they measured six).
 What still does not exist is a "model is thinking" lamp: Ollama only reports which model
 is *loaded*, not whether it is computing.
 
+### Images at full width — and the finished recording
+
+Two things were missing from the transcript, and the first was a bug with a very
+concrete cause: **the images were nothing but lines.** The transcript is a column
+flexbox, and its children shrink by themselves once the content grows taller than
+the stage — instead of scrolling, the browser squashes. An image with automatic
+height has nothing to stop that; it is compressed first and hardest, and what
+remains is a white stripe. Now nothing in the transcript shrinks; it scrolls,
+which is what the overflow is for. (The desk page was never affected: its
+transcript is an ordinary block. That is the counter-check on the cause.)
+
+The size itself now follows one rule: **the card sets the width, the height
+follows the aspect ratio.** Both halves are needed — setting only the width left
+a 700-pixel chart small and lost on the 1080-pixel stage; leaving only the height
+automatic distorted it as soon as the stage's height cap kicked in. An image that
+does not arrive now says so: before, it was indistinguishable from a squashed
+one — both a white stripe — and you go looking for the fault in the wrong place.
+
+**The finished recording sits in the transcript, not just its path.** It used to
+end with two lines naming where the file went — the same situation as the agent
+runs before there was a way back: written but unreachable is the same as not
+there, and on a phone all the more so, since there is no file system to go
+looking in. Both agent pages now append a card with a player at the same place in
+the transcript where every other result appears; the server hands out the file
+from the video folder, limited to the two extensions the recorder ever writes,
+and it answers range requests — so you can seek without loading eighty megabytes
+first.
+
+### The recording captures the stage, not the tab
+
+The screen recorder captured the whole browser tab. What came out was a
+window-shaped picture with the portrait stage sitting somewhere inside it — the
+reel's crop only came into being later, at cutting time, and until then nobody
+knew exactly what would end up in frame. That is precisely the failure the fixed
+stage was built against.
+
+The browser can do this itself: **Region Capture** crops a self-capture down to
+one element. Two conditions come with it, and both are now met — the capture has
+to be the page's own tab (so the page asks differently), and the crop has to be
+in place **before** the first frame is recorded; the shared recording logic now
+waits for the page, between building the recorder and starting it. After that the
+file *is* the stage — nothing left to crop.
+
+What this does **not** change is resolution: the crop happens in the pixels the
+tab actually has. A stage scaled down to 527×937 yields 527×937, and the pill at
+the top still says so. Anyone who wants true 1080×1920 makes the window tall
+enough.
+
+And the cut list now distinguishes **three** cases instead of two: already
+cropped, computable afterwards, or position unknown (a full-screen capture). The
+first two both yield no `ffmpeg` line — conflating them would mean writing "no
+crop" under a perfectly cropped reel. If a browser cannot do region capture, the
+page says so and falls back to the computed crop.
+
 ## The tool is the yardstick, not the object
 
 Target-value optimisation raises an uncomfortable question: what stops the agent from

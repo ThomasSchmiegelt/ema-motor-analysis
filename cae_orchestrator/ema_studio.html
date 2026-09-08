@@ -97,7 +97,14 @@
   /* Ein Feldbild ist ungefaehr quadratisch und fuellte bei 1080 px Breite mehr
      als die halbe Buehne — dann steht kein Satz mehr daneben, der sagt, was
      man sieht. */
-  #buehne.fest .karte.erg img{max-height:980px;object-fit:contain;
+  /* Ein Feldbild ist ungefaehr quadratisch und fuellte bei 1080 px Breite mehr
+     als die halbe Buehne — dann steht kein Satz mehr daneben, der sagt, was man
+     sieht. Der Deckel wirkt auf die HOEHE; `object-fit:contain` haelt dabei das
+     Seitenverhaeltnis (ohne es waere das Bild in die Breite gezogen). Nur ein
+     hochkantes Bild bekommt dadurch Raender — die uebrigen Diagramme liegen
+     unter dem Deckel und fuellen die Breite ganz aus. */
+  #buehne.fest .karte.erg img,
+  #buehne.fest .karte.erg video{max-height:980px;object-fit:contain;
               object-position:center}
   #buehne.fest #unten{padding:16px 20px 20px}
   #buehne.fest .arbeitzeile{padding-bottom:12px;gap:12px}
@@ -112,8 +119,17 @@
      niemand, was im Bild landet. */
   #buehne.fest::after{content:"";position:absolute;inset:0;pointer-events:none;
                       border:2px dashed #ffffff22}
-  #strom{flex:1;overflow-y:auto;padding:14px 12px 20px;
+  #strom{flex:1;min-height:0;overflow-y:auto;padding:14px 12px 20px;
          display:flex;flex-direction:column;gap:10px}
+  /* Der entscheidende Punkt fuer die Bilder: in einer Spalten-Flexbox hat jedes
+     Kind `flex-shrink:1`. Sobald der Verlauf laenger ist als die Buehne, staucht
+     der Browser die Kacheln in der Hoehe statt zu scrollen — und ein <img> mit
+     `height:auto` hat keine feste Inhaltshoehe, die das verhindern koennte. Es
+     wird deshalb zuerst und am staerksten zusammengedrueckt: gemessen blieb von
+     einem Feldbild ein weisser Strich uebrig („die Bilder werden nicht
+     dargestellt, da sind nur Linien"). Nichts im Strom schrumpft; gescrollt
+     wird, dafuer ist `overflow-y` da. */
+  #strom > *{flex:0 0 auto}
   .zeile{max-width:min(760px,100%);width:fit-content;white-space:pre-wrap;
          word-break:break-word}
   .zeile.frage{align-self:flex-end;background:#1d3550;border:1px solid #2c4c6e;
@@ -201,7 +217,18 @@
      Beschwerde. Der Verlauf scrollt ohnehin und zieht von selbst nach; eine
      lange Kachel kostet also Scrollweg, aber sie verliert nichts. Der Server
      deckelt die Ausgabe bereits bei MAX_AUSGABE=4000 Zeichen. */
-  .karte.erg img{display:block;width:100%;background:#fff}
+  /* Die Kachel gibt die BREITE vor, die Hoehe folgt dem Seitenverhaeltnis.
+     Beides ist noetig: `width:100%` allein skalierte ein 700 px breites
+     Diagramm nicht auf die 1080 px der Buehne hoch (es stand dann klein und
+     verloren mittendrin), `height:auto` allein liesse es verzerren, sobald ein
+     Deckel greift. */
+  .karte.erg img{display:block;width:100%;height:auto;background:#fff}
+  /* Ein Bild, das nicht laedt, war bisher ein 4 px hoher weisser Strich —
+     nicht von einem geladenen, gestauchten zu unterscheiden. Jetzt sagt die
+     Kachel es. */
+  .karte.erg .bildfehler{padding:10px 12px;font-size:12.5px;color:var(--warn);
+                         font-family:var(--mono)}
+  .karte.erg video{display:block;width:100%;height:auto;background:#000}
   .karte.erg img.durchsicht{
     background:
       linear-gradient(45deg,#0b0e13 25%,transparent 25%,transparent 75%,#0b0e13 75%),
@@ -566,15 +593,69 @@ function buehneRechteck(){
           soll: FORMATE[FORMAT]};
 }
 // Wird von agent_gemein.js aufgerufen, sobald eine Aufnahme laeuft.
-function nachAufnahmeStart(strom){
+// ── Aufgenommen wird die BUEHNE, nicht der Reiter ────────────────────────────
+// Diese Seite ist die, von der aufgenommen wird, und ihr Zweck ist ein Reel.
+// Nimmt man den ganzen Reiter auf, entsteht ein Bild in Fensterform, in dem die
+// Buehne irgendwo sitzt — der Hochkantausschnitt entsteht dann erst hinterher
+// beim Schneiden, und bis dahin weiss niemand genau, was im Bild landet.
+//
+// Der Browser kann das selbst: `CropTarget.fromElement` + `track.cropTo`
+// (Region Capture) schneidet eine SELBSTaufnahme auf ein DOM-Element zu. Zwei
+// Bedingungen haengen daran, und beide stehen deshalb hier: die Aufnahme muss
+// der EIGENE Reiter sein (`preferCurrentTab`, sonst gibt es nichts, worauf sich
+// ein Element beziehen liesse), und der Zuschnitt muss VOR dem ersten
+// aufgezeichneten Bild stehen (dafuer wartet `agent_gemein.js` auf den
+// Rueckruf).
+//
+// Was das NICHT aendert: die Aufloesung. Zugeschnitten wird in den Bildpunkten,
+// die der Reiter wirklich hat — eine auf 527x937 verkleinerte Buehne liefert
+// 527x937 und nicht 1080x1920. Die Pille oben sagt das weiterhin.
+function aufnahmeOptionen(vorgabe){
+  return Object.assign({}, vorgabe, {
+    preferCurrentTab: true,        // nur der eigene Reiter ist zuschneidbar
+    selfBrowserSurface: 'include',
+    surfaceSwitching: 'exclude',   // ein Wechsel machte den Zuschnitt ungueltig
+    audio: false,
+  });
+}
+
+async function nachAufnahmeStart(strom){
+  const spur = strom.getVideoTracks()[0];
   const b = buehneRechteck();
+
+  // 1) Zuschneiden, solange noch nichts aufgezeichnet ist.
+  let zugeschnitten = false;
+  if(b && spur && window.CropTarget && typeof spur.cropTo === 'function'){
+    try{
+      await spur.cropTo(await CropTarget.fromElement($('buehne')));
+      zugeschnitten = true;
+    }catch(e){
+      links('sys', 'Bereichsaufnahme nicht möglich (' + e.name +
+                   ') — es wird der ganze Reiter aufgenommen und hinterher ' +
+                   'zugeschnitten.');
+    }
+  }else if(b){
+    links('sys', 'Dieser Browser kann keinen Bereich aufnehmen — der ganze ' +
+                 'Reiter kommt aufs Band, die Schnittliste trägt den Zuschnitt.');
+  }
+
+  // 2) Und festhalten, WAS aufgenommen wird. Die Groesse steht erst nach dem
+  // Zuschnitt fest, deshalb hier und nicht davor.
   if(!b) return;
   let s = {};
-  try{ s = strom.getVideoTracks()[0].getSettings() || {}; }catch(_){}
-  rekTaetig('format',
-    `Hochformat ${b.soll[0]}x${b.soll[1]} · Buehne ${b.x},${b.y} ${b.w}x${b.h} ` +
-    `im Fenster ${Math.round(innerWidth)}x${Math.round(innerHeight)} ` +
-    `· Aufnahme ${s.width || 0}x${s.height || 0}`);
+  try{ s = spur.getSettings() || {}; }catch(_){}
+  if(zugeschnitten){
+    // Kein Zuschnitt hinterher: das Band IST schon die Buehne. Der Satz sagt es
+    // ausdruecklich, sonst rechnet ``ema_beitrag.zuschnitt`` ein zweites Mal.
+    rekTaetig('format',
+      `Hochformat ${b.soll[0]}x${b.soll[1]} · Bereichsaufnahme der Bühne ` +
+      `· Aufnahme ${s.width || 0}x${s.height || 0}`);
+  }else{
+    rekTaetig('format',
+      `Hochformat ${b.soll[0]}x${b.soll[1]} · Buehne ${b.x},${b.y} ${b.w}x${b.h} ` +
+      `im Fenster ${Math.round(innerWidth)}x${Math.round(innerHeight)} ` +
+      `· Aufnahme ${s.width || 0}x${s.height || 0}`);
+  }
 }
 
 // ── Startmaske ───────────────────────────────────────────────────
@@ -892,8 +973,12 @@ function kachelText(e){
 function kachelBild(e){
   const k = document.createElement('div');
   k.className = 'karte erg';
-  const url = '/agent/bild/' + encodeURIComponent(e.projekt) + '/' +
-              encodeURIComponent(e.unter) + '/' + encodeURIComponent(e.datei);
+  // Durch K(): vom Handy aus traegt die Adresse dann Kopf und Token wie jede
+  // andere. Ohne das haengt an einer tokengeschuetzten Seite ein ungeschuetztes
+  // Bild — und wer die Wache spaeter auf /agent/bild ausdehnt, hat auf der
+  // einen Seite, die sie braucht, lauter kaputte Bilder.
+  const url = K('/agent/bild/' + encodeURIComponent(e.projekt) + '/' +
+                encodeURIComponent(e.unter) + '/' + encodeURIComponent(e.datei));
   // Feldbilder sind durchsichtig gerendert — sie bekommen das Schachbrett statt
   // des weissen Grundes, sonst sieht man die Durchsicht nicht.
   const durch = /^feld_/i.test(e.datei) ? ' class="durchsicht"' : '';
@@ -904,7 +989,40 @@ function kachelBild(e){
   k.dataset.markeText = e.datei || '';
   const bild = k.querySelector('img'), ziel = SPALTEN.r;
   bild.addEventListener('load',  () => runter($(ziel)));
-  bild.addEventListener('error', () => runter($(ziel)));
+  // Ein Bild, das nicht kommt, hinterliess einen weissen Strich — von einem
+  // gestauchten Bild nicht zu unterscheiden, und man sucht den Fehler an der
+  // falschen Stelle. Es sagt jetzt, WAS fehlt.
+  bild.addEventListener('error', () => {
+    bild.remove();
+    const w = document.createElement('div');
+    w.className = 'bildfehler';
+    w.textContent = '⚠ Bild nicht abrufbar: ' + (e.unter || '') + '/' + (e.datei || '');
+    k.insertBefore(w, k.querySelector('.bu'));
+    runter($(ziel));
+  });
+  karte(k);
+}
+
+// ── Die fertige Aufnahme ─────────────────────────────────────────────────────
+// Rueckruf aus agent_gemein.js beim Ende einer Aufnahme. Bis hierher endete sie
+// mit zwei Zeilen, die den PFAD nannten — am Schreibtisch umstaendlich, am Handy
+// nutzlos, weil es dort kein Dateisystem zum Nachsehen gibt. Das Video gehoert
+// an dieselbe Stelle im Verlauf wie jedes andere Ergebnis.
+function nachAufnahmeEnde(a){
+  if(!a || !a.datei) return;
+  const k = document.createElement('div');
+  k.className = 'karte erg';
+  const url = K('/agent/video/datei/' + encodeURIComponent(a.datei));
+  const mb = (a.bytes / 1048576).toFixed(1);
+  const dauer = uhrText(a.sekunden);
+  k.innerHTML =
+    `<div class="kk">🎬 Aufnahme<span class="zeit">${esc(dauer)}</span></div>` +
+    `<video controls playsinline preload="metadata" src="${url}"></video>` +
+    `<div class="bu">${esc(a.datei)} · ${mb} MB` +
+    (a.n_marken ? ` · ${a.n_marken} Marken, ${a.stuecke || 0} Stück(e)` : '') +
+    `</div>`;
+  k.dataset.markeArt = '';        // die Aufnahme markiert sich nicht selbst
+  k.dataset.markeText = '';
   karte(k);
 }
 
@@ -1166,9 +1284,12 @@ async function beitragBauen(){
          a.clips.map(c => `<div style="margin-bottom:8px"><b>${c.ab.toFixed(0)}–${c.bis.toFixed(0)} s</b> ` +
            `(${c.dauer.toFixed(0)} s) ${esc(c.worum)}` +
            `<div style="color:var(--tx2);font-size:12px">` +
-           (c.zuschnitt ? '↳ schneidet auf das Hochformat zu (' + esc(c.zuschnitt) + ')'
-                        : '↳ ohne Zuschnitt: die Aufnahme war der ganze Bildschirm, ' +
-                          'die Lage der Bühne darin ist nicht bekannt') +
+           ({fertig:  '↳ kein Zuschnitt nötig — aufgenommen wurde schon nur die Bühne',
+             berechnet:'↳ schneidet auf das Hochformat zu (' + esc(c.zuschnitt || '') + ')',
+             unbekannt:'↳ ohne Zuschnitt: die Aufnahme war der ganze Bildschirm, ' +
+                       'die Lage der Bühne darin ist nicht bekannt',
+             keine:    '↳ ohne Zuschnitt: die Aufnahme lief nicht im Hochformat'
+            }[c.zuschnitt_lage] || '↳ ohne Zuschnitt') +
            `</div><pre style="font-size:11.5px">${esc(c.ffmpeg)}</pre></div>`).join('');
   h += '<div style="color:var(--tx2);font-size:12px;margin-top:14px">Herkunft der Zahlen:<pre style="font-size:11.5px">' +
        esc(a.herkunft || '') + '</pre></div>';

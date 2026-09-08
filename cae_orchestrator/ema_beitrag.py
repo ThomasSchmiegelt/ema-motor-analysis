@@ -160,6 +160,38 @@ def zuschnitt(marken: list) -> str:
     return ""
 
 
+# Die Studio-Seite schneidet die Aufnahme seit dem 08.09.2026 schon im Browser
+# auf die Buehne zu (Region Capture). Dann gibt es hinterher nichts mehr zu
+# schneiden — und das ist etwas ANDERES als „die Lage ist unbekannt", auch wenn
+# in beiden Faellen keine ffmpeg-Zeile herauskommt. Wer das nicht unterscheidet,
+# liest unter einem perfekt zugeschnittenen Reel „ohne Zuschnitt".
+_BEREICH_MARKE = re.compile(r"Bereichsaufnahme")
+
+
+def zuschnitt_lage(marken: list) -> str:
+    """Woher der Hochkantausschnitt kommt: ``fertig`` · ``berechnet`` ·
+    ``unbekannt`` · ``keine`` (die Aufnahme lief gar nicht im Hochformat)."""
+    hat_format = False
+    for m in marken:
+        t = m.get("text") or ""
+        if m.get("art") == "format" or "Hochformat" in t:
+            hat_format = True
+            if _BEREICH_MARKE.search(t):
+                return "fertig"
+    if zuschnitt(marken):
+        return "berechnet"
+    return "unbekannt" if hat_format else "keine"
+
+
+LAGE_TEXT = {
+    "fertig":    "kein Zuschnitt noetig — aufgenommen wurde bereits nur die Buehne",
+    "berechnet": "schneidet auf das Hochformat zu",
+    "unbekannt": ("ohne Zuschnitt — die Aufnahme war der ganze Bildschirm, "
+                  "die Lage der Buehne darin ist unbekannt"),
+    "keine":     "ohne Zuschnitt — die Aufnahme lief nicht im Hochformat",
+}
+
+
 def clips(marken_tsv: str) -> list:
     """Schnittvorschlaege aus einer Markenliste -- Sekunden, Dauer, ffmpeg-Zeile.
 
@@ -176,6 +208,7 @@ def clips(marken_tsv: str) -> list:
         marken, ema_agent.Aufnahme.VOR_S, ema_agent.Aufnahme.NACH_S,
         ema_agent.Aufnahme.VERSCHMELZEN_S)
     schnitt = zuschnitt(marken)
+    lage = zuschnitt_lage(marken)
     vf = f' -vf "{schnitt}"' if schnitt else ""
     aus = []
     for ab, bis, mm in stuecke:
@@ -187,7 +220,7 @@ def clips(marken_tsv: str) -> list:
         aus.append({
             "ab": round(ab, 2), "bis": round(bis, 2), "dauer": round(dauer, 1),
             "worum": worum[:200],
-            "marken": len(mm), "zuschnitt": schnitt,
+            "marken": len(mm), "zuschnitt": schnitt, "zuschnitt_lage": lage,
             "ffmpeg": (f"ffmpeg -ss {ab:.2f} -i {_sh(video)} -t {dauer:.2f}"
                        f"{vf} -c:v libx264 -crf 22 -an clip_{int(ab)}s.mp4"),
         })
@@ -504,10 +537,8 @@ def als_text(erg: dict) -> str:
         for c in erg["clips"]:
             z.append(f"  {c['ab']:.0f}–{c['bis']:.0f} s ({c['dauer']:.0f} s) "
                      f"{c['worum']}")
-            z.append("    " + ("schneidet auf das Hochformat zu"
-                               if c.get("zuschnitt") else
-                               "ohne Zuschnitt — die Aufnahme war der ganze "
-                               "Bildschirm, die Lage der Buehne darin ist unbekannt"))
+            z.append("    " + LAGE_TEXT.get(c.get("zuschnitt_lage"),
+                                            LAGE_TEXT["unbekannt"]))
             z.append(f"    {c['ffmpeg']}")
         z.append("")
     for h in erg["hinweise"]:
