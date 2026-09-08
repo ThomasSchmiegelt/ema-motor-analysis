@@ -115,6 +115,15 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
         rpm_t   = op["rpm_thermal"]
         iq, id_ = ema_analysis.estimate_dq_currents(
             geom, rpm_t, op["load_nm"], b_gap_t=perf["B_gap_T"], rpm_base=op["rpm_base"])
+
+        # Kein zweiter, belasteter Solve fuer das Maxwell-Moment. Gemessen: die
+        # Tangentialkomponente im Luftspalt ist bei diesen Aufloesungen
+        # IDENTISCH NULL -- ``_sample_airgap`` faellt darauf zurueck, sobald das
+        # aufgeloeste Luftband schmaler als 2,5 Bildpunkte ist, und das ist es
+        # hier immer (N=140 ueber 350 mm Gebiet sind 2,5 mm je Punkt bei 0,7 mm
+        # Spalt). Ein Lastlauf kostete also und lieferte garantiert 0,0.
+        # ``T_maxwell`` bleibt deshalb das, was ``run_em_analysis`` sagt -- und
+        # das ist jetzt ``None`` statt 0,0, wo es nicht aufgeloest ist.
         losses = ema_thermal.compute_losses(geom, axial, rpm_t, iq, id_, perf,
                                             mat, st_mat, hp_mat, mag)
         G  = ema_thermal.conductances(geom, axial, cooling, rpm_t)
@@ -128,7 +137,8 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
                         ss[0]["rpm"])
         return {
             "Kt":           round(perf["Kt_Nm_per_A"], 4),
-            "T_maxwell":    round(perf.get("T_maxwell_Nm", 0.0), 2),
+            "T_maxwell":    (None if perf.get("T_maxwell_Nm") is None
+                             else round(perf["T_maxwell_Nm"], 2)),
             "B_gap":        round(perf["B_gap_T"], 4),
             "max_safe_rpm": round(float(max_safe), 0),
             "mass_g":       round(mass, 0),

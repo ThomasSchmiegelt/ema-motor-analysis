@@ -889,6 +889,65 @@ a model change). The page remembers the state it saw when it opened and says so
 **once** when it changes. It does not reload by itself: in the middle of a run
 that is a person's decision, not the page's.
 
+## The fast evaluator could not read a drawing
+
+Before building a free magnet search, the ground it would stand on was measured —
+and it did not hold. The fast evaluator behind AI design, per-magnet fine
+optimisation, parameter studies and target-value search was handed six **drawn**
+layouts differing in one thing each:
+
+| drawn | Kt | B_gap |
+|---|---:|---:|
+| 2 magnets, 24 mm long, 6 mm thick | 0.0270 | 0.413 T |
+| 2 magnets, **6 mm** long | 0.0270 | 0.413 T |
+| 2 magnets, **60 mm** long | 0.0270 | 0.413 T |
+| 2 magnets, **2 mm** thick | 0.0270 | 0.413 T |
+| 2 magnets, **tilted 35°** | 0.0270 | 0.413 T |
+| **4** magnets, 24 mm | 0.0540 | 0.827 T |
+
+Length, thickness and tilt moved **nothing**; only the magnet count moved
+anything, and that exactly linearly. For a drawn geometry the air-gap formula was
+reading the *parametric* "magnet width" and "magnet thickness", which say nothing
+about the drawing.
+
+The heaviest consequence: the per-magnet fine optimiser ("🎯 fine-optimise
+magnets") moves magnet coordinates and scores them with exactly this evaluator —
+so its objective never changed and it optimised nothing. The same held for the
+AI-design pre-sort and its labels in the training set. The defect stayed hidden
+because the tool that would have exposed it was itself blind.
+
+It now sums **per magnet**: permeance from its thickness, contribution from its
+length, and the tilt as the radial projection of the magnetisation. For identical
+magnets that is exactly the old formula — the parametric topologies do not shift
+by a digit, and a drawn V, asymmetric V or U now matches its parametric twin to
+six decimals. Length, thickness and tilt move the number; four short magnets are
+as good as two long ones of the same total length, instead of twice as good.
+
+**And a zero that looked like a measurement:** the Maxwell torque from the solved
+field read 0.0 Nm in every project, with "FDM" as its provenance. The cause is the
+air gap in the raster — the tangential component is fitted on two circles inside
+the resolved air band, and for a 280 mm machine with a 0.7 mm gap that band is
+only 0.6 pixels wide even at 800 points, where more than 2.5 are needed. So there
+never was a measurement there. Now there is nothing there — and next to it, why.
+
+## Calculation runs for the agent: `studie` and `zielwert`
+
+Parameter studies and target-value optimisation existed only as browser buttons.
+For an agent a button only the interface has does not exist — it drives the chain
+through the CLI. Both are verbs now, and one verb serves all three heads: they
+read the same instructions.
+
+`studie` prints a table and, above it, the answer to the actual question: which
+metric moves most across the range and which does not move at all. A hundred lines
+of numbers are not a result for a language model.
+
+`zielwert` is also the clean answer to "reach this value": there the model only
+proposes **parameter vectors**, which are clamped and ranked — instead of
+hand-searching and being tempted to move a limit in the model. When the search
+finds no feasible design it says so, **naming the constraint that binds** and by
+how much it is violated. Declaring the least-bad candidate the winner would be the
+more dangerous answer.
+
 ## The tool is the yardstick, not the object
 
 Target-value optimisation raises an uncomfortable question: what stops the agent from

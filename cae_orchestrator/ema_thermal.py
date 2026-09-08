@@ -276,7 +276,10 @@ def compute_losses(geom: dict, axial: float, rpm: float, iq: float, id_: float,
 
     # Bearing / windage — proportional to mechanical power
     omega    = rpm * 2 * math.pi / 60
-    T_mech   = perf.get("T_maxwell_Nm", 0.0)
+    # ``or 0.0``: das Maxwell-Moment ist None, wenn der Luftspalt im Raster nicht
+    # aufgeloest ist (s. ema_analysis). Fuer die Lagerreibung ist das dasselbe wie
+    # null -- hier wird nichts verschwiegen, nur nicht multipliziert.
+    T_mech   = perf.get("T_maxwell_Nm") or 0.0
     P_mech   = abs(T_mech * omega)
     P_Bearing = 0.005 * P_mech + 5.0             # +5 W base drag
 

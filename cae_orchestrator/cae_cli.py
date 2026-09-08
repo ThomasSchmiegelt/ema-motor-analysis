@@ -2070,6 +2070,22 @@ def _magshapes() -> list[str]:
                 "halbach", "spoke"]
 
 
+def _freie_param_hilfe() -> str:
+    try:
+        import ema_optimize as O
+        return ", ".join(sorted(O.FREE_PARAMS))
+    except Exception:                                        # noqa: BLE001
+        return "(ema_optimize nicht ladbar)"
+
+
+def _ziel_hilfe() -> str:
+    try:
+        import ema_optimize as O
+        return ", ".join(sorted(O.METRICS))
+    except Exception:                                        # noqa: BLE001
+        return "(ema_optimize nicht ladbar)"
+
+
 _MAGSHAPES = _magshapes()
 _VERSUCH_P = [2, 3, 4, 5, 6, 8]
 
@@ -2097,6 +2113,269 @@ def _pv_achsen() -> str:
 
 
 _PV_ACHSEN = _pv_achsen()
+
+
+def _payload_fuer_lauf(args):
+    """Payload laden, ``--set`` anwenden, Geometrie pruefen. Gemeinsam fuer
+    ``studie`` und ``zielwert`` — zwei Abschriften waeren zwei Vorstellungen
+    davon, was ein gueltiger Ausgangspunkt ist."""
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return None, _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    echo_sets(applied)
+    if not payload.get("geom"):
+        return None, _die("Keine Geometrie im Payload.", EXIT_USAGE)
+    return payload, 0
+
+
+def _chart_ablegen(b64: str, name: str, args) -> str:
+    """Ein Diagramm in ``<projekt>/charts/`` legen — dort findet es die rechte
+    Spalte der Agentenseiten von selbst (ueber die Datei-Aenderungszeit, wie jedes
+    andere Projektbild). Ohne Projekt: nichts, und das wird gesagt."""
+    kennung = getattr(args, "projekt", "") or getattr(args, "_pid", "") or ""
+    if not b64 or not kennung or getattr(args, "ohne_ablage", False):
+        return ""
+    pdir = _projekt_pfad(kennung)
+    if not pdir:
+        return ""
+    import base64
+    ordner = os.path.join(pdir, "charts")
+    try:
+        os.makedirs(ordner, exist_ok=True)
+        pfad = os.path.join(ordner, name)
+        with open(pfad, "wb") as f:
+            f.write(base64.b64decode(b64))
+    except (OSError, ValueError):
+        return ""
+    return pfad
+
+
+def cmd_studie(args) -> int:
+    """EINEN Parameter von x nach y durchfahren und ALLE Kennwerte mitschreiben.
+
+    Es gab das schon — im Berechnungs-Reiter des Browsers. Fuer einen Agenten
+    existiert ein Knopf, den nur die Oberflaeche hat, nicht: er bedient die Kette
+    ueber dieses CLI. Damit genuegt EIN Verb fuer alle drei Koepfe (PI, Hermes,
+    Studio) — sie lesen dieselbe SKILL.md.
+
+    Die Ausgabe ist eine TABELLE und kein Bild: ein Modell kann ein PNG nicht
+    lesen, und Base64 wuerde ohnehin herausgefiltert. Das Diagramm wandert
+    trotzdem ins Projekt, wo es die rechte Spalte findet.
+
+    Exit: 0 = gerechnet, 1 = kein Punkt brauchbar, 2 = Bedienfehler.
+    """
+    payload, rc = _payload_fuer_lauf(args)
+    if payload is None:
+        return rc
+
+    import ema_optimize as O
+    import ema_paramstudy as PS
+    if args.param not in O.FREE_PARAMS:
+        moegl = ", ".join(sorted(O.FREE_PARAMS))
+        return _die(f"Unbekannter Parameter '{args.param}'. Bekannt: {moegl}",
+                    EXIT_USAGE)
+    spec = O.FREE_PARAMS[args.param]
+    von = args.von if args.von is not None else spec["lo"]
+    bis = args.bis if args.bis is not None else spec["hi"]
+    if von == bis:
+        return _die("--von und --bis duerfen nicht gleich sein.", EXIT_USAGE)
+
+    print(f"Parameterstudie: {spec['label']}  {von:g} → {bis:g} "
+          f"in {args.punkte} Schritten")
+    erg = PS.run_study(payload, args.param, von, bis, steps=args.punkte,
+                       rpm=args.rpm,
+                       progress_cb=(lambda m, p=None: None) if args.json
+                                   else (lambda m, p=None: print(f"  {m}")))
+
+    zeilen = _studie_tabelle(erg, spec)
+    text = "\n".join(zeilen)
+    if args.json:
+        # Ohne die Kurven: eine Studie mit 200 Punkten x 8 Kennwerten ist als
+        # JSON groesser als der Kontext eines Modells.
+        schlank = {k: v for k, v in erg.items()
+                   if k not in ("chart_b64", "field_images")}
+        print(json.dumps(schlank, ensure_ascii=False, indent=1, default=str))
+    else:
+        print()
+        print(text)
+
+    bild = _chart_ablegen(erg.get("chart_b64"), f"studie_{args.param}.png", args)
+    if bild:
+        print(f"  Diagramm: {os.path.relpath(bild, os.path.dirname(os.path.dirname(bild)))}")
+    _ablegen(args, "studie", text,
+             daten={k: v for k, v in erg.items()
+                    if k not in ("chart_b64", "field_images")},
+             ok=bool(erg.get("n_ok")))
+    return 0 if erg.get("n_ok") else 1
+
+
+def _studie_tabelle(erg: dict, spec: dict) -> list:
+    """Die Studie als Text — samt der ANTWORT, nicht nur der Tabelle.
+
+    Hundert Zeilen Zahlen sind fuer ein Sprachmodell kein Ergebnis. Deshalb steht
+    oben, welcher Kennwert sich ueber den Bereich am staerksten bewegt und wo er
+    am besten liegt; die Tabelle darunter belegt es.
+    """
+    import ema_paramstudy as PS
+    xs = erg.get("x") or []
+    reihen = erg.get("metrics") or {}
+    z = [f"PARAMETERSTUDIE  {spec['label']}  bei {erg.get('rpm', 0):.0f} 1/min",
+         f"  {erg.get('n_ok', 0)} von {len(xs)} Punkten gerechnet"
+         + (f", {erg['n_fail']} gescheitert" if erg.get("n_fail") else ""),
+         ""]
+
+    # Welche Groesse bewegt sich am staerksten? Relativ, sonst gewinnt immer die
+    # mit den groessten Zahlen.
+    bewegung = []
+    for key, label, einheit in PS._STUDY_METRICS:
+        werte = [v for v in (reihen.get(key) or []) if isinstance(v, (int, float))]
+        if len(werte) < 2:
+            continue
+        lo, hi = min(werte), max(werte)
+        nenner = max(abs(lo), abs(hi), 1e-12)
+        bewegung.append(((hi - lo) / nenner, key, label, einheit, lo, hi))
+    bewegung.sort(reverse=True)
+    if bewegung:
+        sp, _k, label, einheit, lo, hi = bewegung[0]
+        z += [f"  Am staerksten bewegt sich {label}: {lo:.4g} … {hi:.4g} {einheit}"
+              f"  ({100 * sp:.0f} % Spanne)",
+              "  Ohne Wirkung: " + (", ".join(l for s, _kk, l, _e, _lo, _hi
+                                              in bewegung if s < 0.005) or "—"),
+              ""]
+
+    kopf = f"{spec['label'][:18]:>18s}"
+    schluessel = [k for k, _l, _e in PS._STUDY_METRICS]
+    z.append(kopf + "".join(f"{l[:11]:>13s}" for _k, l, _e in PS._STUDY_METRICS))
+    z.append(" " * 18 + "".join(f"{e[:11]:>13s}" for _k, _l, e in PS._STUDY_METRICS))
+    for i, x in enumerate(xs):
+        zeile = f"{x:>18.6g}"
+        for k in schluessel:
+            v = (reihen.get(k) or [None] * len(xs))[i]
+            zeile += f"{'—':>13s}" if v is None else f"{v:>13.4g}"
+        z.append(zeile)
+    return z
+
+
+def cmd_zielwert(args) -> int:
+    """Zielwertoptimierung — dieselbe wie im Browser, nur ohne Browser.
+
+    Warum als Verb: ein Agent, der ein Ziel erreichen soll, sucht sonst von Hand
+    mit ``run --set`` — und geraet dabei in Versuchung, eine Grenze im Modell zu
+    verschieben, statt die Geometrie zu aendern (s. BEFUNDE.md und die
+    Werkzeugregel in der SKILL.md). Hier schlaegt das Modell nur
+    PARAMETERVEKTOREN vor, ``_clamp`` haelt sie in ihren Grenzen und ``_fitness``
+    rangiert sie; der Quelltext ist unerreichbar.
+
+    Findet die Suche keinen ZULAESSIGEN Punkt, wird das gesagt — samt der
+    Randbedingung, die bindet. Den am-wenigsten-schlechten Entwurf als Sieger
+    auszugeben waere die gefaehrlichere Antwort.
+
+    Exit: 0 = zulaessige Loesung, 1 = keine, 2 = Bedienfehler.
+    """
+    payload, rc = _payload_fuer_lauf(args)
+    if payload is None:
+        return rc
+
+    import ema_optimize as O
+    if args.ziel not in O.METRICS:
+        return _die(f"Unbekannte Zielgroesse '{args.ziel}'. Bekannt: "
+                    + ", ".join(sorted(O.METRICS)), EXIT_USAGE)
+    frei = [f.strip() for f in (args.frei or "").split(",") if f.strip()] \
+        or ["magWidth", "magThick", "magAngle"]
+    unbekannt = [f for f in frei if f not in O.FREE_PARAMS]
+    if unbekannt:
+        return _die(f"Unbekannte freie Parameter: {', '.join(unbekannt)}. Bekannt: "
+                    + ", ".join(sorted(O.FREE_PARAMS)), EXIT_USAGE)
+
+    grenzen = []
+    for roh in (args.grenze or []):
+        teile = roh.split(":")
+        if len(teile) != 3 or teile[1] not in ("le", "ge"):
+            return _die(f"--grenze '{roh}' unverstaendlich. Form: "
+                        f"KENNWERT:le|ge:WERT (z.B. T_magnet:le:150)", EXIT_USAGE)
+        name, op_, wert = teile
+        if name not in O.METRICS:
+            return _die(f"Unbekannter Kennwert '{name}' in --grenze.", EXIT_USAGE)
+        try:
+            grenzen.append({"metric": name, "op": "<=" if op_ == "le" else ">=",
+                            "value": float(wert)})
+        except ValueError:
+            return _die(f"--grenze '{roh}': '{wert}' ist keine Zahl.", EXIT_USAGE)
+
+    spec = {"base_payload": payload,
+            "objective": {"metric": args.ziel,
+                          "goal": "min" if args.min else
+                                  ("target" if args.zielwert is not None else "max"),
+                          **({"target": args.zielwert} if args.zielwert is not None else {})},
+            "constraints": grenzen,
+            "free": [{"param": f, "min": O.FREE_PARAMS[f]["lo"],
+                      "max": O.FREE_PARAMS[f]["hi"]} for f in frei],
+            "iterations": args.laeufe, "batch": args.batch}
+
+    erg = O.optimize(spec, progress_cb=None if args.json
+                     else (lambda m, p=None: print(f"  {m}")))
+    text = "\n".join(_zielwert_text(erg, O))
+    if args.json:
+        print(json.dumps(erg, ensure_ascii=False, indent=1, default=str))
+    else:
+        print()
+        print(text)
+    _ablegen(args, "zielwert", text, daten=erg, ok=bool(erg.get("best_feasible")))
+    return 0 if erg.get("best_feasible") else 1
+
+
+def _zielwert_text(erg: dict, O) -> list:
+    """Das Ergebnis als Text — und im Fall ohne Loesung die BINDENDE Grenze."""
+    bm = erg.get("best_metrics") or {}
+    ziel = erg.get("objective") or {}
+    z = [f"ZIELWERTSUCHE  {ziel.get('metric')} → {ziel.get('goal')}"
+         + (f" {ziel.get('target')}" if ziel.get("goal") == "target" else ""),
+         f"  {erg.get('n_evaluated', 0)} Entwuerfe bewertet", ""]
+    if not erg.get("best_feasible"):
+        z.append("KEIN ZULAESSIGER ENTWURF gefunden.")
+        # Welche Randbedingung bindet? Ueber die besten Entwuerfe gezaehlt --
+        # „irgendetwas passt nicht" waere keine Auskunft.
+        zaehler, weiteste = {}, {}
+        for h in (erg.get("top") or []):
+            m = h.get("metrics") or {}
+            for c in (erg.get("constraints") or []):
+                v = m.get(c["metric"])
+                if v is None:
+                    continue
+                lim, sk = float(c["value"]), max(abs(float(c["value"])), 1e-9)
+                ab = (lim - v) / sk if c["op"] == ">=" else (v - lim) / sk
+                if ab > 1e-9:
+                    name = f"{c['metric']} {c['op']} {c['value']:g}"
+                    zaehler[name] = zaehler.get(name, 0) + 1
+                    weiteste[name] = max(weiteste.get(name, 0.0), ab)
+        if zaehler:
+            z.append("  Es scheitert an:")
+            for name, n in sorted(zaehler.items(), key=lambda kv: -kv[1]):
+                z.append(f"    {name}  — verletzt in {n} der besten Entwuerfe, "
+                         f"schlimmstenfalls um {100 * weiteste[name]:.0f} %")
+        else:
+            z.append("  (keine Randbedingung gesetzt — dann liegt es an der "
+                     "Bewertung selbst, s. Fehler in den Entwuerfen)")
+        z.append("")
+        z.append("  Das ist eine Antwort: mit diesen freien Parametern in diesen "
+                 "Grenzen gibt es den Punkt nicht. Aendere den Bauraum, die "
+                 "Randbedingung oder die Freiheiten — nicht das Modell.")
+        return z
+
+    z.append("Bester zulaessiger Entwurf:")
+    for k, v in sorted((erg.get("best_params") or {}).items()):
+        z.append(f"    {k:14s} {v}")
+    z.append("")
+    z.append("  Kennwerte:")
+    for k, spec in O.METRICS.items():
+        if k in bm:
+            v = bm[k]
+            z.append(f"    {spec['label']:24s} {'—' if v is None else v}")
+    return z
 
 
 def cmd_screen(args) -> int:
@@ -2783,6 +3062,58 @@ def build_parser() -> argparse.ArgumentParser:
     _add_globals(s, json_hilfe="vollstaendig als JSON — je Zeile mit der EINGEPASSTEN "
                                "Geometrie, aus der sich die Variante nachbauen laesst")
     s.set_defaults(fn=cmd_screen)
+
+    # ── studie / zielwert: Rechenlaeufe, die es nur im Browser gab ───────────
+    def _basis(sp):
+        g = sp.add_mutually_exclusive_group()
+        g.add_argument("--payload", help="JSON direkt")
+        g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+        g.add_argument("--from-project",
+                       help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+        g.add_argument("--frisch", action="store_true",
+                       help="neutraler Grundpayload aus den Schemavorgaben")
+        sp.add_argument("--set", action="append", metavar="KEY=WERT",
+                        help="einzelnen Parameter der Basis aendern, mehrfach angebbar")
+        sp.add_argument("--force", action="store_true",
+                        help="Grenzen und Typen aus dem Schema nicht pruefen")
+
+    s = sub.add_parser("studie",
+                       help="EINEN Parameter von x nach y durchfahren und alle Kennwerte mitschreiben")
+    _basis(s)
+    s.add_argument("--param", required=True,
+                   help="welcher Parameter, z.B. magAngle. Bekannt: " + _freie_param_hilfe())
+    s.add_argument("--von", type=float, default=None,
+                   help="Anfang (Vorgabe: untere Schemagrenze)")
+    s.add_argument("--bis", type=float, default=None,
+                   help="Ende (Vorgabe: obere Schemagrenze)")
+    s.add_argument("--punkte", type=int, default=60,
+                   help="Zahl der Stuetzstellen (2-500, Vorgabe 60; ~0,5 s je Punkt)")
+    s.add_argument("--rpm", type=float, default=None,
+                   help="feste Drehzahl fuer die Studie (Vorgabe: rpm_to des Payloads)")
+    _add_ablage(s)
+    _add_globals(s, json_hilfe="vollstaendig als JSON (ohne die Bilder)")
+    s.set_defaults(fn=cmd_studie)
+
+    s = sub.add_parser("zielwert",
+                       help="Zielwertoptimierung: freie Parameter suchen lassen, bis Ziel und Randbedingungen halten")
+    _basis(s)
+    s.add_argument("--ziel", required=True,
+                   help="Zielgroesse, z.B. Kt. Bekannt: " + _ziel_hilfe())
+    s.add_argument("--max", action="store_true", help="Zielgroesse maximieren (Vorgabe)")
+    s.add_argument("--min", action="store_true", help="Zielgroesse minimieren")
+    s.add_argument("--zielwert", type=float, default=None,
+                   help="einen WERT treffen statt maximieren/minimieren")
+    s.add_argument("--grenze", action="append", metavar="KENNWERT:le|ge:WERT",
+                   help="Randbedingung, mehrfach angebbar, z.B. T_magnet:le:150")
+    s.add_argument("--frei", default="",
+                   help="freie Parameter mit Komma (Vorgabe: magWidth,magThick,magAngle)")
+    s.add_argument("--laeufe", type=int, default=24,
+                   help="Zahl der bewerteten Entwuerfe (Vorgabe 24)")
+    s.add_argument("--batch", type=int, default=6,
+                   help="wie viele Vorschlaege je Runde (Vorgabe 6)")
+    _add_ablage(s)
+    _add_globals(s, json_hilfe="vollstaendig als JSON")
+    s.set_defaults(fn=cmd_zielwert)
 
     s = sub.add_parser("paarvergleich",
                        help="Gestaltungsentscheidungen gegeneinanderstellen (Anordnung, V-Öffnungswinkel, Hairpins, Material, Kühlung, Durchmesser, Länge, Welle) — vor der Geometrie")

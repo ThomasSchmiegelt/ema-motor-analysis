@@ -5428,7 +5428,10 @@ async function openOptimizer() {
   document.getElementById('opt-modal').style.display = 'block';
   if (!_optMeta) _optMeta = await fetch('/optimize/meta').then(r => r.json());
   document.getElementById('opt-obj-metric').innerHTML = _optMetricOpts();
-  document.getElementById('opt-obj-metric').value = 'T_maxwell';
+  // Kt und nicht T_maxwell: das Maxwell-Moment kommt aus dem geloesten Feld und
+  // ist ohne aufgeloesten Luftspalt None — als Vorgabe einer Zielwertsuche also
+  // eine Groesse, an der sich nichts messen laesst (s. ema_analysis).
+  document.getElementById('opt-obj-metric').value = 'Kt';
   document.getElementById('opt-free').innerHTML = Object.entries(_optMeta.free_params).map(([k, f]) => `
     <div style="display:flex;gap:6px;align-items:center;margin-bottom:4px;font-size:.76rem">
       <label style="flex:1;display:flex;gap:5px;align-items:center;cursor:pointer">
@@ -10172,7 +10175,8 @@ function renderSummary(s) {
   const html = [
     metric('Luftspalt B_peak',   s.B_gap_T.toFixed(3) + ' T',          'analytisch'),
     metric('Kt',                 s.Kt_Nm_per_A.toFixed(3) + ' Nm/A',   '1 Wdg/Nut'),
-    metric('Maxwell-Moment',     s.T_maxwell_Nm.toFixed(1) + ' Nm',    'FDM'),
+    metric('Maxwell-Moment',     s.T_maxwell_Nm != null ? s.T_maxwell_Nm.toFixed(1) + ' Nm' : '–',
+                                 s.T_maxwell_Nm != null ? 'FDM' : 'Luftspalt im Raster nicht aufgelöst'),
     metric('Maximalleistung',    s.P_max_kW != null ? s.P_max_kW.toFixed(0) + ' kW' : '–',
                                  s.P_max_rpm != null ? 'bei ' + s.P_max_rpm.toLocaleString() + ' U/min' : 'Tab 🔄 EM-Kennlinie'),
     metric('Max. Drehmoment',    s.T_peak_max_Nm != null ? s.T_peak_max_Nm.toFixed(0) + ' Nm' : '–',

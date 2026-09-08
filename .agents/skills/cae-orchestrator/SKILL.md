@@ -285,6 +285,39 @@ Besonders zu beachten: **`structural_basis`** sagt, ob die Festigkeitsaussage au
 FEM-Rechnung beruht (`fem`) oder nur auf der Ringformel (`analytisch`), weil die FEM
 nichts geliefert hat. Ein grünes `structural_ok` allein sagt das nicht.
 
+### `studie` und `zielwert` — Rechenläufe, die es nur im Browser gab
+
+Beide sind **analytisch und schnell** (kein FreeCAD, kein Server, ~0,5 s je Punkt)
+und beide legen ihr Ergebnis im Projekt ab.
+
+```bash
+# EINEN Parameter durchfahren und ALLE Kennwerte mitschreiben
+python3 cae_cli.py studie --from-project last --param magAngle --von 60 --bis 160 --punkte 60
+
+# Ein Ziel suchen lassen, mit Randbedingungen
+python3 cae_cli.py zielwert --from-project last --ziel Kt --max \
+        --grenze T_magnet:le:150 --frei magWidth,magThick,magAngle
+```
+
+* `studie` gibt eine **Tabelle** aus und darüber die Antwort: welcher Kennwert
+  sich über den Bereich am stärksten bewegt und welcher gar nicht. Das Diagramm
+  landet unter `<projekt>/charts/studie_<param>.png`.
+* `zielwert` ist der **richtige Weg zu einem Zielwert**. Von Hand mit `run --set`
+  zu suchen ist der Umweg — und der Weg, auf dem die Versuchung entsteht, eine
+  Grenze im Modell zu verschieben (s. „Was NICHT zu tun ist"). Hier schlägt das
+  Modell nur Parametervektoren vor, sie werden geklemmt und rangiert.
+* **Exit 1 heißt: keinen zulässigen Entwurf gefunden** — und die Ausgabe nennt
+  die Randbedingung, die bindet, samt Höhe der Verletzung. Das ist eine
+  vollständige Antwort. Sie wird weitergegeben, nicht umgangen: nicht die
+  Randbedingung lockern, um Exit 0 zu bekommen, sondern sagen, woran es liegt.
+* Freie Parameter (`--frei`) und Kennwerte (`--ziel`, `--grenze`) sind die aus
+  `ema_optimize`; `--help` listet beide vollständig auf.
+
+**Eine Grenze, die dazugehört:** beide arbeiten auf dem **analytischen**
+Schnellbewerter. Er kennt Magnetbreite, -dicke und -neigung, aber er ist eine
+Kreisersatzschaltung und kein Feldlauf. Was er als bestes findet, gehört danach
+durch `run analyse` und `feld2d`, bevor es als Ergebnis gilt.
+
 ### Geltungsbereich — die zweite Hälfte der Herkunft
 
 Die Herkunft sagt, mit **welchem Verfahren** eine Zahl entstanden ist. Der

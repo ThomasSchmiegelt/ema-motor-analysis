@@ -711,6 +711,12 @@ def _curl_a(A, lbl=None):
     return _d(0), -_d(1)
 
 
+# Wie breit das aufgeloeste Luftband beim letzten Abtasten war und ob der
+# Bt-Fit lief. Eine Modulvariable und kein sechster Rueckgabewert: ``_sample_airgap``
+# hat vier Aufrufer, und fuenf davon interessiert nur Br.
+_AIRGAP_BAND_PX = [0.0, 0.0]
+
+
 def _sample_airgap(A, geom, sc, ctr, N, mu=None):
     """Air-gap radial/tangential flux profile + the full-grid Cartesian B arrays.
 
@@ -764,7 +770,14 @@ def _sample_airgap(A, geom, sc, ctr, N, mu=None):
     r_in  = r_si_px - band + 0.5
     r_out = r_si_px - 0.5
     Bt    = np.zeros(n_th)
-    if r_out - r_in > 1.5:                                  # enough air to fit
+    # Ob der Fit ueberhaupt stattgefunden hat, ist keine Nebensache: aus Bt faellt
+    # das Maxwell-Moment, und ein Bt von exakt null ergibt ein Moment von exakt
+    # null -- das sieht wie ein gerechnetes Ergebnis aus und ist keines. Der
+    # Aufrufer bekommt es deshalb gesagt.
+    bt_aufgeloest = bool(r_out - r_in > 1.5)
+    _AIRGAP_BAND_PX[0] = float(r_out - r_in)
+    _AIRGAP_BAND_PX[1] = float(bt_aufgeloest)
+    if bt_aufgeloest:                                       # enough air to fit
         c_in  = np.fft.rfft(_A_on(r_in))
         c_out = np.fft.rfft(_A_on(r_out))
         n_max = min(len(c_in), int(2.5 * int(geom["slots"])) + 1)
@@ -1048,7 +1061,53 @@ def _analytical_Bgap(geom: dict) -> float:
     import ema_topology as _topo
     _steg_a, _steg_i = _topo.stegbreite_mm(geom)
     k_leak = K_LEAK_STIRN * (1.0 if _steg_a <= 0.0 else K_LEAK_STEG)
-    # Flux concentration / pole coverage: magnet source width vs pole arc
+    # Flux concentration / pole coverage: magnet source width vs pole arc.
+    #
+    # GEZEICHNETE Geometrien rechnen je Leg. Grund, gemessen am 08.09.2026 an
+    # einer 280er-Maschine mit ``magShape:"custom"``: mit ``n_legs*magWidth`` und
+    # ``perm(magThick)`` liest die Formel die PARAMETRISCHEN Felder, die bei einer
+    # gezeichneten Geometrie nichts ueber die Zeichnung aussagen. Zwei Magnete zu
+    # 6 mm und zwei zu 60 mm Laenge ergaben beide 0,4134 T, 2 mm und 6 mm Dicke
+    # ebenso, 0 Grad und 35 Grad Neigung ebenso -- allein die ANZAHL bewegte etwas,
+    # und die genau linear (2 -> 0,4134, 4 -> 0,8268).
+    #
+    # Das ist der Anker, an dem das FDM-Feld kalibriert wird, und er traegt Kt,
+    # den Strom und ueber ihn die Verluste. Der Magnetfeinschliff
+    # (``ema_design_optimize``) verschiebt Magnetkoordinaten und bewertet damit --
+    # seine Zielgroesse aenderte sich also nie; dasselbe traf die Vorsortierung der
+    # KI-Entwuerfe und das Auto-Label im Trainingssatz. Siehe BEFUNDE.md.
+    #
+    # Fuer lauter GLEICHE Legs ist die Summe unten exakt die alte Formel -- das
+    # ist die Probe, dass hier nichts neu bemessen, sondern nur richtig zugeordnet
+    # wurde. Die parametrischen Bauformen aendern sich um keine Stelle.
+    #
+    # Grenze, die dazugehoert: die Formel wird damit EMPFINDLICH fuer die
+    # Zeichnung, nicht automatisch RICHTIG fuer jede denkbare Anordnung.
+    # ``len_i/pole_pitch`` unterstellt, dass der Magnet zum Spalt hin wirkt; ein
+    # tangential tief im Laeufer liegender traegt anders bei. Die belastbare
+    # Aussage kommt aus ``feld2d``, nicht von hier.
+    if meta.code == "custom" and _legs:
+        alpha_i = 0.0
+        for lg in _legs:
+            h_i = max(float(lg.thickness), 0.01)
+            perm_i = h_i / (h_i + MU_R_MAG * kc * g)
+            # Die NEIGUNG gehoert dazu, und sie ist keine Zutat: bei einem
+            # quermagnetisierten Magneten (``perp``, der Normalfall) zeigt die
+            # Magnetisierung senkrecht zur Langachse, ihre radiale Projektion ist
+            # also |sin(tilt)| -- genau das, was die parametrischen Bauformen als
+            # ``eta_hint = sin(magAngle/2)`` mitfuehren. Ohne diesen Faktor lag
+            # dieselbe V-Geometrie gezeichnet 15,5 % ueber der parametrischen,
+            # und ein waagerecht liegender Magnet zaehlte so viel wie ein
+            # steiler. Dieselbe Projektion rechnet ``_orient_factor``.
+            if lg.mag_mode == "perp":
+                eta_i = abs(math.sin(lg.tilt))
+            else:                                   # radial magnetisiert
+                eta_i = 1.0
+            alpha_i += perm_i * float(lg.length) / pole_pitch * eta_i
+        alpha_i = min(alpha_i * k_leak, 0.92)
+        B_gap = Br_NdFeB * alpha_i * f_orient
+        return float(np.clip(B_gap, 0.05, 1.5))
+
     alpha_i    = min(n_legs * float(geom["magWidth"]) / pole_pitch * k_leak * eta_mag, 0.92)
 
     perm  = hm / (hm + MU_R_MAG * kc * g)                   # magnet load-line permeance
@@ -1683,11 +1742,30 @@ def run_em_analysis(geom: dict, N: int = 150, rotor_angle: float = 0.0,
     L_ax = (axial_mm / 1000.0) if axial_mm is not None else 0.080
     perf = compute_performance(geom, B_analytical, axial_mm=axial_mm)
 
-    # Maxwell-stress torque estimate from FDM (in physical units)
+    # Maxwell-stress torque estimate from FDM (in physical units).
+    #
+    # NUR wenn der Luftspalt im Raster ueberhaupt aufgeloest ist. Sonst faellt
+    # ``_sample_airgap`` fuer Bt auf exakt null zurueck (das 2x2-System ist
+    # singulaer), und daraus wird ein Moment von exakt 0,0 Nm -- mit der Herkunft
+    # ``fdm2d`` daneben, also aussehend wie ein gerechnetes Ergebnis. Gemessen am
+    # 08.09.2026: an einer 280er-Maschine mit 0,7 mm Spalt ist das Band bei N=140
+    # 0,0 und selbst bei N=800 nur 0,6 Bildpunkte breit -- gebraucht werden mehr
+    # als 2,5. ``T_maxwell_Nm`` war dort also IMMER null, in jedem Projekt, bei
+    # jeder Guetestufe. Dieselbe Falle wie die 0,0 Nm der ASM: eine Null liest
+    # sich wie eine Messung. Jetzt steht ``None`` da und daneben, warum.
     R_gap_m  = r_gap_m(geom)
-    T_maxwell = (2 * math.pi * R_gap_m * L_ax / MU0 *
-                 float(np.mean(Br_T * Bt_T)))
-    perf["T_maxwell_Nm"] = round(abs(T_maxwell), 1)
+    band_px, aufgeloest = _AIRGAP_BAND_PX[0], bool(_AIRGAP_BAND_PX[1])
+    if aufgeloest:
+        T_maxwell = (2 * math.pi * R_gap_m * L_ax / MU0 *
+                     float(np.mean(Br_T * Bt_T)))
+        perf["T_maxwell_Nm"] = round(abs(T_maxwell), 1)
+        perf["T_maxwell_grund"] = ""
+    else:
+        perf["T_maxwell_Nm"] = None
+        perf["T_maxwell_grund"] = (
+            f"nicht aufgeloest: das Luftband ist bei N={N} nur {band_px:.1f} "
+            f"Bildpunkte breit, der Fit fuer die Tangentialkomponente braucht "
+            f"mehr als 2,5 — ohne Bt gibt es kein Maxwell-Moment")
 
     return {
         "A":         A,

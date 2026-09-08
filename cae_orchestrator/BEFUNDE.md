@@ -17,6 +17,91 @@ kann.
 
 ---
 
+## 2026-09-08 — Der Schnellbewerter sah die gezeichnete Geometrie nicht
+
+**Beobachtung.** Vor dem Bau einer freien („wilden") Magnetsuche wurde die
+Grundlage nachgemessen: `ema_optimize._eval_geom`, der Schnellbewerter hinter
+KI-Entwurf, Magnetfeinschliff, Parameterstudie und Zielwertsuche. Sechs
+gezeichnete Layouts (`magShape:"custom"`, 280er-Maschine, sonst identisch):
+
+| gezeichnet | Kt | B_gap | T_maxwell | T_Magnet | P_ges |
+|---|---:|---:|---:|---:|---:|
+| 2 Magnete, 24 mm lang, 6 mm dick | 0,0270 | 0,413 | 0,00 | 125,8 | 5504 |
+| 2 Magnete, **6 mm** lang | 0,0270 | 0,413 | 0,00 | 125,8 | 5504 |
+| 2 Magnete, **60 mm** lang | 0,0270 | 0,413 | 0,00 | 125,8 | 5504 |
+| 2 Magnete, **2 mm** dick | 0,0270 | 0,413 | 0,00 | 125,8 | 5504 |
+| 2 Magnete, **35° geschrägt** | 0,0270 | 0,413 | 0,00 | 125,8 | 5504 |
+| **4** Magnete, 24 mm | 0,0540 | 0,827 | 0,00 | 126,8 | 5217 |
+
+**Länge, Dicke und Neigung bewegten nichts; allein die Anzahl bewegte alles, und
+die genau linear.**
+
+### 1. Der Anker las die parametrischen Felder
+
+**Messung/Fundstelle.** `ema_analysis._analytical_Bgap` rechnete im
+Innenläufer-Zweig `alpha_i = n_legs · geom["magWidth"] / pole_pitch · …` und
+`perm = f(geom["magThick"])` — also mit den **parametrischen** Schemafeldern, die
+bei einer gezeichneten Geometrie nichts über die Zeichnung aussagen. Der Wert ist
+zugleich der Anker, an dem das FDM-Feld kalibriert wird; er trägt `Kt`, den Strom
+und über ihn die Verluste.
+
+**Was daran am schwersten wiegt:** der Magnetfeinschliff
+(`ema_design_optimize`, Knopf „🎯 Magnete fein-optimieren") verschiebt
+Magnetkoordinaten und bewertet mit genau diesem Bewerter — seine Zielgröße
+änderte sich also nie, er optimierte nichts. Dasselbe traf die
+Qualitäts-Vorsortierung der KI-Entwürfe (`ema_design_ai._quick_eval`), das
+Auto-Label und damit die Zeilen im Trainingsdatensatz. Der Defekt hat sich
+versteckt, weil das Werkzeug, das ihn aufgedeckt hätte, selbst blind war.
+
+**Status: behoben.** Für `meta.code == "custom"` wird je Leg gerechnet:
+`Σ perm(h_i) · (len_i / pole_pitch) · |sin(tilt_i)|`. Für lauter gleiche Legs ist
+das exakt die alte Formel — die parametrischen Bauformen ändern sich um **keine
+Stelle** (zehn Bauformen nachgemessen, `test_bewerter.py`). Die Neigung geht als
+radiale Projektion der Magnetisierung ein, dieselbe, die `_orient_factor`
+rechnet — damit trifft eine gezeichnete V-, VAsym- oder U-Geometrie ihren
+parametrischen Zwilling jetzt **auf sechs Nachkommastellen**. Bei VV und Delta
+bleibt eine Abweichung (28 % / 54 %), und das ist richtig: die parametrische
+Fassung mittelt dort über zwei verschieden geneigte Lagen bzw. trägt einen
+eigenen Beiwert für das tangentiale Deck.
+
+**Was sich für bestehende Projekte ändert:** Designer- und KI-Entwürfe
+(`magShape:"custom"`) bekommen ein anderes `B_gap`. Sie standen bisher auf einer
+Zahl, die ihre eigene Zeichnung nicht kannte.
+
+**Grenze, die bleibt:** die Formel ist damit *empfindlich* für die Zeichnung,
+nicht automatisch *richtig* für jede denkbare Anordnung. `len_i/pole_pitch`
+unterstellt, dass der Magnet zum Spalt hin wirkt. Die belastbare Aussage kommt
+aus `feld2d`.
+
+### 2. `T_maxwell` war überall 0,0 — und sah wie eine Messung aus
+
+**Messung.** Die einzige Kennzahl aus dem **gelösten** Feld war in jedem Fall
+0,00 Nm — auch in `results.json` echter Projekte, mit der Herkunft `fdm2d`
+daneben. Ursache: `_sample_airgap` fittet die Tangentialkomponente auf zwei
+Kreisen im aufgelösten Luftband und fällt auf **exakt null** zurück, wenn das Band
+schmaler als 2,5 Bildpunkte ist. Nachgemessen an einer 280er-Maschine mit 0,7 mm
+Spalt: das Band ist bei N=140 **0,0** und selbst bei N=800 nur **0,6** Bildpunkte
+breit. `T_maxwell` war dort also immer null, bei jeder Gütestufe.
+
+**Fundstelle.** `ema_analysis._sample_airgap` (`if r_out - r_in > 1.5`),
+`ema_analysis.run_em_analysis` (Maxwell-Block).
+
+**Status: behoben** — dieselbe Falle wie die 0,0 Nm der ASM: eine Null liest sich
+wie eine Messung. `T_maxwell_Nm` ist jetzt **`None`** mit einer Begründung
+(`T_maxwell_grund`) daneben, wo der Luftspalt im Raster nicht aufgelöst ist. Die
+Verbraucher tragen es: Steckbrief zeigt „—", Trainingssatz lässt es leer, die
+Lagerreibung rechnet mit 0, die Oberfläche ruft kein `toFixed` auf `null`. Die
+Zielwertoptimierung stand als **Vorgabe** auf genau dieser Kennzahl — jetzt auf
+`Kt`.
+
+**Verworfen (gemessen, nicht vermutet):** ein zweiter, *belasteter* FDM-Lauf im
+Schnellbewerter, um ein echtes Moment zu bekommen. Er kostet — und liefert
+garantiert null, solange das Luftband unter 2,5 Bildpunkten liegt. Ein
+aufgelöstes Band bräuchte für diese Maschine N ≳ 1250, das ist drei
+Größenordnungen über dem, was ein Schnellbewerter kosten darf.
+
+---
+
 ## 2026-09-08 — Der 230-V-Ventilatorantrieb: eine Kette aus drei Punkten
 
 **Beobachtung.** Der Versuch, einen netzgespeisten Ventilatorantrieb zu rechnen

@@ -145,7 +145,13 @@ def _fingerprint(name, shape, N, iq, id_, sat=False):
         "B_gap_T":    float(perf["B_gap_T"]),
         "Kt":         float(perf["Kt_Nm_per_A"]),
         "psi_pm_Wb":  float(perf["psi_pm_Wb"]),
-        "T_maxwell":  float(perf["T_maxwell_Nm"]),
+        # ``None``, wenn der Luftspalt im Raster nicht aufgeloest ist -- und das
+        # ist er in JEDEM dieser Faelle, auch bei N=512 (s. ema_analysis:
+        # der Bt-Fit braucht ein Luftband von mehr als 2,5 Bildpunkten). Die
+        # gespeicherten 0,0 waren deshalb keine gemessenen Momente, sondern die
+        # Abwesenheit einer Messung; genau das steht jetzt da.
+        "T_maxwell":  (None if perf["T_maxwell_Nm"] is None
+                       else float(perf["T_maxwell_Nm"])),
     }
 
 
@@ -162,6 +168,11 @@ def _cmp(case, key, got, exp, errs):
             i = int(np.argmax(np.abs(g - e)))
             errs.append(f"{case}.{key}[{i}]: {g[i]:.12g} statt {e[i]:.12g} "
                         f"(max Δ {np.max(np.abs(g - e)):.3g})")
+    elif got is None or exp is None:
+        # ``None`` heisst „nicht gemessen" und ist gegen eine Zahl kein
+        # Rundungsfehler, sondern ein anderer Sachverhalt (s. T_maxwell).
+        if got is not exp:
+            errs.append(f"{case}.{key}: {got!r} statt {exp!r}")
     else:
         if not math.isclose(float(got), float(exp), rel_tol=RTOL,
                             abs_tol=RTOL * max(abs(float(exp)), 1e-30)):
@@ -228,8 +239,9 @@ def _check(cases):
         exp = base[name]
         for key in sorted(exp):
             _cmp(name, key, fp.get(key), exp[key], errs)
+        _tm = fp["T_maxwell"]
         print(f"  ✓ {name:<16} Br_peak={fp['br_peak']:.6f} T  |B|max={fp['b_max']:.4f} T  "
-              f"T_maxwell={fp['T_maxwell']:.4g} Nm")
+              f"T_maxwell=" + ("nicht aufgeloest" if _tm is None else f"{_tm:.4g} Nm"))
     assert not errs, (
         "FDM-Feld hat sich geändert (rtol=%g):\n  " % RTOL
         + "\n  ".join(errs)

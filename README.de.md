@@ -1016,6 +1016,75 @@ wie eine Modelländerung). Die Seite merkt sich den Stand beim Öffnen und sagt
 **einmal** Bescheid, wenn er sich ändert. Neu geladen wird nicht von selbst:
 mitten in einem Lauf ist das eine Entscheidung des Menschen, nicht der Seite.
 
+## Der Schnellbewerter sah die Zeichnung nicht
+
+Vor dem Bau einer freien Magnetsuche wurde erst die Grundlage nachgemessen — und
+die trug nicht. Der Schnellbewerter, der hinter KI-Entwurf, Magnetfeinschliff,
+Parameterstudie und Zielwertoptimierung steht, bekam sechs **gezeichnete**
+Anordnungen vorgesetzt, die sich nur in einer Sache unterschieden:
+
+| gezeichnet | Kt | B_gap |
+|---|---:|---:|
+| 2 Magnete, 24 mm lang, 6 mm dick | 0,0270 | 0,413 T |
+| 2 Magnete, **6 mm** lang | 0,0270 | 0,413 T |
+| 2 Magnete, **60 mm** lang | 0,0270 | 0,413 T |
+| 2 Magnete, **2 mm** dick | 0,0270 | 0,413 T |
+| 2 Magnete, **35° geschrägt** | 0,0270 | 0,413 T |
+| **4** Magnete, 24 mm | 0,0540 | 0,827 T |
+
+Länge, Dicke und Neigung bewegten **nichts**, allein die Anzahl bewegte alles —
+und die genau linear. Die Formel für das Luftspaltfeld las bei einer gezeichneten
+Geometrie die *parametrischen* Felder „Magnetbreite" und „Magnetdicke", die mit
+der Zeichnung nichts zu tun haben.
+
+Am schwersten wiegt die Folge: der Magnetfeinschliff („🎯 Magnete
+fein-optimieren") verschiebt Magnetkoordinaten und bewertet mit genau diesem
+Bewerter — seine Zielgröße änderte sich also nie, er optimierte nichts. Dasselbe
+traf die Vorsortierung der KI-Entwürfe und deren Label im Trainingsdatensatz. Der
+Defekt hat sich versteckt, weil das Werkzeug, das ihn aufgedeckt hätte, selbst
+blind war.
+
+Jetzt wird **je Magnet** gerechnet: Permeanz aus seiner Dicke, Beitrag aus seiner
+Länge, und die Neigung als radiale Projektion der Magnetisierung. Für lauter
+gleiche Magnete ist das exakt die alte Formel — die parametrischen Bauformen
+ändern sich um keine Stelle, und eine gezeichnete V-, VAsym- oder U-Anordnung
+trifft ihren parametrischen Zwilling jetzt auf sechs Nachkommastellen. Länge,
+Dicke und Neigung bewegen die Zahl; vier kurze Magnete sind so gut wie zwei lange
+gleicher Gesamtlänge, statt doppelt so gut.
+
+**Und eine Null, die wie eine Messung aussah:** das Maxwell-Moment aus dem
+gelösten Feld stand in jedem Projekt auf 0,0 Nm, mit der Herkunft „FDM" daneben.
+Ursache ist der Luftspalt im Raster — die Tangentialkomponente wird auf zwei
+Kreisen im aufgelösten Luftband gefittet, und das Band ist bei einer 280er
+Maschine mit 0,7 mm Spalt selbst bei 800 Punkten nur 0,6 Bildpunkte breit;
+gebraucht werden mehr als 2,5. Es stand also nie eine Messung da. Jetzt steht dort
+nichts — und daneben, warum.
+
+## Rechenläufe für den Agenten: `studie` und `zielwert`
+
+Parameterstudie und Zielwertoptimierung gab es nur als Knopf im Browser. Für einen
+Agenten existiert ein Knopf, den nur die Oberfläche hat, nicht — er bedient die
+Kette über das CLI. Beide sind jetzt Verben, und damit gilt: **ein Verb genügt für
+alle drei Köpfe**, sie lesen dieselbe Anleitung.
+
+```bash
+python3 cae_orchestrator/cae_cli.py studie --from-project last \
+        --param magAngle --von 60 --bis 160 --punkte 60
+python3 cae_orchestrator/cae_cli.py zielwert --from-project last \
+        --ziel Kt --max --grenze T_magnet:le:150
+```
+
+`studie` gibt eine Tabelle aus und darüber die Antwort auf die eigentliche Frage:
+welcher Kennwert sich über den Bereich am stärksten bewegt und welcher gar nicht.
+Hundert Zeilen Zahlen sind für ein Sprachmodell kein Ergebnis.
+
+`zielwert` ist zugleich die saubere Antwort auf „erreiche diesen Wert": dort
+schlägt das Modell nur **Parametervektoren** vor, die geklemmt und rangiert
+werden — statt von Hand zu suchen und dabei in Versuchung zu geraten, eine Grenze
+im Modell zu verschieben. Findet die Suche keinen zulässigen Entwurf, sagt sie das
+**samt der Randbedingung, die bindet** und wie weit sie verletzt ist. Der
+am-wenigsten-schlechte Entwurf als Sieger wäre die gefährlichere Antwort.
+
 ## Das Werkzeug ist der Maßstab, nicht der Gegenstand
 
 Bei einer Zielwertoptimierung stellt sich eine unangenehme Frage: was hindert den
