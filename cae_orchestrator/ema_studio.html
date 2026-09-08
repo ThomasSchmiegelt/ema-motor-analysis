@@ -623,20 +623,44 @@ async function nachAufnahmeStart(strom){
   const spur = strom.getVideoTracks()[0];
   const b = buehneRechteck();
 
-  // 1) Zuschneiden, solange noch nichts aufgezeichnet ist.
-  let zugeschnitten = false;
-  if(b && spur && window.CropTarget && typeof spur.cropTo === 'function'){
-    try{
-      await spur.cropTo(await CropTarget.fromElement($('buehne')));
-      zugeschnitten = true;
-    }catch(e){
-      links('sys', 'Bereichsaufnahme nicht möglich (' + e.name +
-                   ') — es wird der ganze Reiter aufgenommen und hinterher ' +
-                   'zugeschnitten.');
+  // 1) Zuschneiden, solange noch nichts aufgezeichnet ist. ZWEI Verfahren, und
+  // die Reihenfolge ist nicht beliebig:
+  //
+  //   restrictTo (Element Capture) nimmt NUR diesen Teilbaum auf. Was darueber
+  //   liegt — eine Schublade, ein Fenster des Betriebssystems, eine
+  //   Browsermeldung — ist nicht im Bild.
+  //   cropTo (Region Capture) schneidet das Reiterbild auf das Rechteck des
+  //   Elements zu. Verdeckendes bleibt drin, weil es im Reiterbild drinsteht.
+  //
+  // Also erst das schaerfere, dann das gaengigere. Geprueft wird an der SPUR und
+  // nicht an `MediaStreamTrack.prototype`: die Methoden haengen an
+  // `BrowserCaptureMediaStreamTrack`, das nur eine Selbstaufnahme liefert —
+  // gemessen ist `MediaStreamTrack.prototype.cropTo` `undefined`, waehrend die
+  // Spur die Methode sehr wohl hat.
+  let zugeschnitten = '';
+  const buehne = $('buehne');
+  if(b && spur){
+    if(window.RestrictionTarget && typeof spur.restrictTo === 'function'){
+      try{
+        await spur.restrictTo(await RestrictionTarget.fromElement(buehne));
+        zugeschnitten = 'Elementaufnahme';
+      }catch(e){ /* faellt auf den Zuschnitt zurueck */ }
     }
-  }else if(b){
-    links('sys', 'Dieser Browser kann keinen Bereich aufnehmen — der ganze ' +
-                 'Reiter kommt aufs Band, die Schnittliste trägt den Zuschnitt.');
+    if(!zugeschnitten && window.CropTarget && typeof spur.cropTo === 'function'){
+      try{
+        await spur.cropTo(await CropTarget.fromElement(buehne));
+        zugeschnitten = 'Bereichsaufnahme';
+      }catch(e){
+        links('sys', 'Bereichsaufnahme nicht möglich (' + e.name + ': ' +
+                     e.message + ') — es wird der ganze Reiter aufgenommen und ' +
+                     'hinterher zugeschnitten.');
+      }
+    }
+    if(!zugeschnitten && !(window.CropTarget || window.RestrictionTarget))
+      links('sys', 'Dieser Browser kann keinen Bereich aufnehmen — der ganze ' +
+                   'Reiter kommt aufs Band, die Schnittliste trägt den Zuschnitt.');
+    if(zugeschnitten)
+      links('sys', '🎯 ' + zugeschnitten + ': aufgenommen wird nur die Bühne.');
   }
 
   // 2) Und festhalten, WAS aufgenommen wird. Die Groesse steht erst nach dem
@@ -647,9 +671,11 @@ async function nachAufnahmeStart(strom){
   if(zugeschnitten){
     // Kein Zuschnitt hinterher: das Band IST schon die Buehne. Der Satz sagt es
     // ausdruecklich, sonst rechnet ``ema_beitrag.zuschnitt`` ein zweites Mal.
+    // Das Wort „Bereichsaufnahme" traegt beide Verfahren — danach sucht
+    // ``zuschnitt_lage``, und welches es war, steht im Klartext daneben.
     rekTaetig('format',
       `Hochformat ${b.soll[0]}x${b.soll[1]} · Bereichsaufnahme der Bühne ` +
-      `· Aufnahme ${s.width || 0}x${s.height || 0}`);
+      `(${zugeschnitten}) · Aufnahme ${s.width || 0}x${s.height || 0}`);
   }else{
     rekTaetig('format',
       `Hochformat ${b.soll[0]}x${b.soll[1]} · Buehne ${b.x},${b.y} ${b.w}x${b.h} ` +

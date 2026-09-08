@@ -375,7 +375,31 @@ async function arbeitTick(){
     if(++AR_FEHLER > 2) arbeitZeigen(null);
     return;
   }
+  seiteVeraltet(d.seite);
   arbeitZeigen(d);
+}
+
+// ── Ist diese Seite noch die, die auf der Platte liegt? ──────────────────────
+// Ein Agentenlauf dauert Stunden, und die Seite bleibt so lange offen. Wird in
+// der Zwischenzeit an ihr gearbeitet, bedient man weiter die ALTE Oberflaeche —
+// gemessen am 08.09.2026: die Bereichsaufnahme war seit 10:19 gebaut, der
+// Mitschnitt um 10:27 nahm trotzdem den ganzen Reiter auf, weil der Reiter seit
+// 09:44 offen war. Nichts sagte es, und die Suche ging in den Code statt auf
+// „Strg+R".
+//
+// Gemerkt wird der Stand, den die Seite beim OEFFNEN gesehen hat. Aendert er
+// sich, sagt sie es EINMAL — und drueckt nicht selbst auf Neuladen: mitten in
+// einem Lauf ist das eine Entscheidung des Menschen, nicht der Seite.
+let SEITE_STAND = null, SEITE_GEMELDET = false;
+function seiteVeraltet(stand){
+  if(!stand) return;
+  if(SEITE_STAND === null){ SEITE_STAND = stand; return; }
+  if(stand === SEITE_STAND || SEITE_GEMELDET) return;
+  SEITE_GEMELDET = true;
+  links('hinweis', '↻ Diese Seite ist älter als der Server — sie wurde ' +
+        'geändert, während sie offen war. Neu laden (Strg+R/⌘R), sonst ' +
+        'bedienst du weiter die alte Oberfläche. Der laufende Agent bleibt ' +
+        'davon unberührt, die Seite knüpft wieder an ihn an.');
 }
 
 // ── Archiv: frueher gelaufene Zuege ──────────────────────────────────────────

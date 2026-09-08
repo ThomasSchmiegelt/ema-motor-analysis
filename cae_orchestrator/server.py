@@ -4287,6 +4287,16 @@ def agent_arbeit():
     except Exception:                                        # noqa: BLE001
         # Nicht "alles in Ordnung" melden, wenn es nicht messbar war.
         stand["werkzeug"] = {"abweichend": False, "hash": "nicht messbar"}
+    # Und der Stand der SEITEN. Eine Agentenseite steht stundenlang offen; eine
+    # Aenderung an ihr wirkt erst nach dem Neuladen, und bis dahin bedient man
+    # eine alte Oberflaeche, ohne dass etwas darauf hinweist. Sie vergleicht
+    # diesen Wert mit dem, den sie beim Oeffnen gesehen hat.
+    try:
+        import ema_werkzeugstand
+        stand["seite"] = ema_werkzeugstand.stand_oberflaeche()["hash"]
+    except Exception:                                        # noqa: BLE001
+        stand["seite"] = ""
+
     # Der Kopf selbst gehoert in die Leiste: "arbeitet noch" war bisher eine
     # Behauptung ohne Beleg, und wenn ein Zug haengt, stimmt sie nicht mehr.
     z = k.zustand()

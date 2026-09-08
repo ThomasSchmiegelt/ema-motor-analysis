@@ -716,7 +716,18 @@ def test_bilder_und_video_im_verlauf():
         "ohne preferCurrentTab gibt es nichts, worauf ein Zuschnitt sich bezieht"
     for teil in ("preferCurrentTab: true", "selfBrowserSurface", "surfaceSwitching"):
         assert teil in eigen, teil
-    assert "CropTarget.fromElement($('buehne'))" in eigen and "cropTo" in eigen
+    # Zwei Verfahren, und die Reihenfolge ist nicht beliebig: restrictTo nimmt
+    # NUR den Teilbaum auf (Verdeckendes ist nicht im Bild), cropTo schneidet das
+    # Reiterbild zu. Also erst das schaerfere.
+    assert "RestrictionTarget.fromElement(buehne)" in eigen
+    assert "CropTarget.fromElement(buehne)" in eigen
+    assert eigen.index("restrictTo") < eigen.index("spur.cropTo"), \
+        "Element- vor Bereichsaufnahme"
+    # Geprueft wird an der SPUR: die Methoden haengen an
+    # BrowserCaptureMediaStreamTrack, nicht an MediaStreamTrack.prototype —
+    # gemessen ist letzteres undefined, waehrend die Spur sie hat.
+    assert "typeof spur.restrictTo === 'function'" in eigen
+    assert "typeof spur.cropTo === 'function'" in eigen
     assert "aufnahmeOptionen" in geteilt and "await nachAufnahmeStart" in geteilt, \
         "der Zuschnitt muss VOR dem ersten aufgezeichneten Bild stehen"
     # Und er steht vor REK.start(), nicht davor oder danach irgendwo.
@@ -726,8 +737,30 @@ def test_bilder_und_video_im_verlauf():
     assert "new MediaRecorder" in vor.split("await nachAufnahmeStart")[0], \
         "rekTaetig schreibt seine Marke nur, wenn es schon einen Recorder gibt"
     # Der Browser, der es nicht kann, bekommt einen Satz statt eines stillen
-    # Reiter-Mitschnitts.
+    # Reiter-Mitschnitts. Und der, der es kann, auch — sonst weiss niemand, was
+    # gerade aufs Band geht.
     assert "keinen Bereich aufnehmen" in eigen
+    assert "aufgenommen wird nur die Bühne" in eigen
+    # Beide Verfahren tragen dasselbe Wort in die Marke, damit zuschnitt_lage
+    # nicht zwei Muster kennen muss.
+    assert "Bereichsaufnahme der Bühne" in eigen
+    assert ema_beitrag.zuschnitt_lage([{"s": 0.0, "uhr": "x", "art": "format",
+        "text": "Hochformat 1080x1920 · Bereichsaufnahme der Bühne "
+                "(Elementaufnahme) · Aufnahme 506x900"}]) == "fertig"
+
+    # 8) Eine Seite, die offen bleibt, waehrend an ihr gearbeitet wird, sagt es.
+    # Genau das fehlte: die Bereichsaufnahme war um 10:19 gebaut, der Mitschnitt
+    # um 10:27 nahm den ganzen Reiter auf, weil der Reiter seit 09:44 offen war.
+    assert "function seiteVeraltet(" in geteilt
+    assert "seiteVeraltet(d.seite)" in geteilt, "wird nie gerufen"
+    assert "SEITE_GEMELDET" in geteilt, "sonst steht der Hinweis im Sekundentakt da"
+    srv2 = open(os.path.join(HIER, "server.py"), encoding="utf-8").read()
+    assert 'stand["seite"] = ema_werkzeugstand.stand_oberflaeche()["hash"]' in srv2
+    import ema_werkzeugstand
+    assert "ema_studio.html" in ema_werkzeugstand.OBERFLAECHE
+    # GETRENNT von PHYSIK: ein Knopfumbau darf nicht wie eine Modelaenderung
+    # aussehen.
+    assert not (set(ema_werkzeugstand.OBERFLAECHE) & set(ema_werkzeugstand.PHYSIK))
 
     print("✓ bilder/video: volle Kachelbreite, Hoehe im Verhaeltnis, Aufnahme "
           "abspielbar — und aufgenommen wird die Bühne, nicht der Reiter")

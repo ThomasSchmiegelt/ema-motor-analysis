@@ -75,6 +75,23 @@ PHYSIK: tuple[str, ...] = (
     "ema_pipeline.py",      # die Reihenfolge, in der all das laeuft
 )
 
+# Die Dateien der Oberflaeche. GETRENNT von PHYSIK, und zwar mit Absicht: eine
+# geaenderte Seite bewegt keine Kennzahl, und beides in einen Fingerabdruck zu
+# werfen hiesse, dass ein Knopfumbau wie eine Modelaenderung aussieht.
+#
+# Wozu er dann gut ist: eine Agentenseite steht STUNDENLANG offen (ein Lauf
+# dauert so lange), und eine Aenderung an ihr wirkt erst nach dem Neuladen.
+# Gemessen am 08.09.2026: die Studio-Seite war seit 09:44 offen, die
+# Bereichsaufnahme kam um 10:19 dazu, und der Mitschnitt um 10:27 nahm weiter
+# den ganzen Reiter auf -- der Browser fuhr die alte Seite, und nichts sagte es.
+# Der Server meldet den Stand jetzt in der Arbeitsanzeige mit; aendert er sich,
+# waehrend eine Seite offen ist, sagt sie es EINMAL.
+OBERFLAECHE: tuple[str, ...] = (
+    "ema_studio.html",      # Studio-Seite
+    "ema_agent.html",       # Schreibtischseite (PI/Hermes)
+    "agent_gemein.js",      # das gemeinsame Verhalten beider
+)
+
 _HIER = os.path.dirname(os.path.abspath(__file__))
 _GIT_SEK = 30.0
 
@@ -155,6 +172,22 @@ def stand() -> dict:
             "dateien": dateien, "fehlt": fehlt,
             "git": g["kopf"], "schmutzig": g["schmutzig"],
             "zeit": round(time.time(), 1)}
+
+
+def stand_oberflaeche() -> dict:
+    """Fingerabdruck der Agentenseiten -- damit eine offene Seite merkt, dass sie
+    veraltet ist. Keine Git-Abfrage: das hier wird im Sekundentakt gebraucht und
+    beantwortet nur die Frage „liegt auf der Platte noch dasselbe wie vorhin"."""
+    dateien, fehlt = {}, []
+    for name in OBERFLAECHE:
+        h = _datei_hash(os.path.join(_HIER, name))
+        if h is None:
+            fehlt.append(name)
+        else:
+            dateien[name] = h
+    roh = "\n".join(f"{n}:{dateien[n]}" for n in sorted(dateien))
+    return {"hash": hashlib.sha1(roh.encode("utf-8")).hexdigest()[:12],
+            "dateien": dateien, "fehlt": fehlt}
 
 
 def abweichung(a: dict, b: dict) -> list:

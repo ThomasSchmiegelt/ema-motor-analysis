@@ -869,7 +869,25 @@ And the cut list now distinguishes **three** cases instead of two: already
 cropped, computable afterwards, or position unknown (a full-screen capture). The
 first two both yield no `ffmpeg` line — conflating them would mean writing "no
 crop" under a perfectly cropped reel. If a browser cannot do region capture, the
-page says so and falls back to the computed crop.
+page says so and falls back to the computed crop. **Two** mechanisms are tried,
+in this order: *Element Capture* records only that subtree — anything on top of
+it, a drawer, an OS window, is not in frame; *Region Capture* crops the tab image
+to the element's rectangle and leaves occluding content in. So the sharper one
+first.
+
+### And the page notices when it is stale
+
+An agent run takes hours, and the page stays open that long. If it is changed in
+the meantime, you keep operating the old interface — and nothing says so. That is
+exactly what happened: region capture was on disk at 10:19, the recording at
+10:27 still captured the whole tab, because the tab had been open since 09:44.
+The search went into the code instead of into Ctrl+R.
+
+The server now reports the fingerprint of the page files in the work display (its
+own list next to the physics modules — a button rearrangement must not look like
+a model change). The page remembers the state it saw when it opened and says so
+**once** when it changes. It does not reload by itself: in the middle of a run
+that is a person's decision, not the page's.
 
 ## The tool is the yardstick, not the object
 

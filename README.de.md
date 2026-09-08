@@ -995,7 +995,26 @@ zugeschnitten, hinterher berechenbar, oder Lage unbekannt (Bildschirmaufnahme).
 Die ersten beiden ergeben beide keine `ffmpeg`-Zeile — sie zusammenzuwerfen
 hieße, unter einem perfekt zugeschnittenen Reel „ohne Zuschnitt" zu schreiben.
 Kann ein Browser die Bereichsaufnahme nicht, sagt die Seite es und fällt auf den
-gerechneten Zuschnitt zurück.
+gerechneten Zuschnitt zurück. Versucht werden **zwei** Verfahren, in dieser
+Reihenfolge: *Element Capture* nimmt nur den Teilbaum auf — was darüber liegt,
+eine Schublade, ein Fenster des Betriebssystems, ist nicht im Bild; *Region
+Capture* schneidet das Reiterbild auf das Rechteck zu und lässt Verdeckendes
+drin. Also erst das schärfere.
+
+### Und die Seite merkt, wenn sie veraltet ist
+
+Ein Agentenlauf dauert Stunden, und die Seite bleibt so lange offen. Wird in der
+Zwischenzeit an ihr gearbeitet, bedient man weiter die alte Oberfläche — und
+nichts weist darauf hin. Genau so ist es passiert: die Bereichsaufnahme lag um
+10:19 auf der Platte, der Mitschnitt um 10:27 nahm trotzdem den ganzen Reiter
+auf, weil der Reiter seit 09:44 offen war. Die Suche ging in den Code statt auf
+„Strg+R".
+
+Der Server meldet den Stand der Seitendateien jetzt in der Arbeitsanzeige mit
+(eine eigene Liste neben den Physikmodulen — ein Knopfumbau darf nicht aussehen
+wie eine Modelländerung). Die Seite merkt sich den Stand beim Öffnen und sagt
+**einmal** Bescheid, wenn er sich ändert. Neu geladen wird nicht von selbst:
+mitten in einem Lauf ist das eine Entscheidung des Menschen, nicht der Seite.
 
 ## Das Werkzeug ist der Maßstab, nicht der Gegenstand
 
