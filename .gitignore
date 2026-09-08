@@ -90,3 +90,9 @@ AGENTS.projekt.md
 # Das Muster ohne Schraegstrich greift auf jeder Ebene.
 # ACHTUNG: kein Kommentar hinter das Muster -- das macht die Regel still wirkungslos.
 restart.sh
+
+# Laufzeitartefakt einer laufenden Messreihe, kein Quellcode: das Skript wird je
+# Lauf angepasst und die Log waechst dabei. Sie sind mit 8a1570e versehentlich
+# hereingerutscht und mit dem naechsten Commit wieder herausgenommen worden.
+magnetvergleich_warteschlange.sh
+magnetvergleich_warteschlange.log
