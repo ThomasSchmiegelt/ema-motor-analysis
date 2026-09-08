@@ -835,6 +835,12 @@ def _bewerte_asm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dic
                           f"{steg['safety_factor']:.2f}")}
 
     bp   = ema_asm.betriebspunkt(geom, axial, rpm, last_nm)
+    # Ein begruendetes Nein ist hier dasselbe wie eine verletzte Fliehkraft-
+    # grenze darueber: die Option existiert nicht, und der Grund steht dabei.
+    # Vorher lief die Rechnung weiter und legte eine Zeile mit 0,0 Nm neben
+    # Zeilen mit echten Zahlen -- als waere die Maschine nur schlecht.
+    if not bp.get("erreichbar", True):
+        return {"ok": False, "grund": ema_asm.nicht_erreichbar_text(bp)}
     verl = ema_asm.verluste(geom, axial, rpm, last_nm, bp, mat, st, hp, kuehl)
     t_dauer = ema_asm.dauermoment(geom, axial, kuehl, bp)
     verb = connection_assessment(geom, mat, n_max, axial, kuehl)

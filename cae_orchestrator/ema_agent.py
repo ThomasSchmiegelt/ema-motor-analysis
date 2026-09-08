@@ -54,6 +54,8 @@ import sys
 import threading
 import time
 
+import ema_werkzeugstand
+
 # PI sortiert Sitzungen nach dem Arbeitsverzeichnis -- derselbe Grund, aus dem
 # ``start_agent.sh`` immer aus der Repo-Wurzel startet. Von woanders faende PI
 # weder ``AGENTS.md`` noch ``.agents/skills/``, und ``--continue`` griffe in die
@@ -311,6 +313,65 @@ def _umgebung(pfade=PI_PFADE) -> dict:
     return env
 
 
+def bilder_im_projekt(pid: str) -> list:
+    """Alle Bilder EINES Projekts -- ``charts/`` und ``cad_images/``, aeltestes
+    zuerst.
+
+    Ueber die Datei-Aenderungszeit und nicht ueber den Werkzeugausgabetext:
+    welche Bilder ein Lauf erzeugt, steht dort naemlich gar nicht drin -- die
+    Pipeline schreibt sie nebenbei dorthin. Wer sie aus dem Text klauben wollte,
+    muesste jede Stufe einzeln kennen.
+
+    Steht hier und nicht in ``Kopf``, weil auch ``ema_beitrag`` die Bilder eines
+    Projekts braucht: zwei Suchen waeren zwei Vorstellungen davon, was ein Bild
+    dieses Projekts ist.
+    """
+    aus = []
+    pdir = os.path.join(PROJEKTE, str(pid))
+    for unter in ("charts", "cad_images"):
+        d = os.path.join(pdir, unter)
+        if not os.path.isdir(d):
+            continue
+        try:
+            namen = os.listdir(d)
+        except OSError:
+            continue
+        for name in namen:
+            if not name.lower().endswith(BILD_ENDUNGEN):
+                continue
+            voll = os.path.join(d, name)
+            try:
+                mt = os.path.getmtime(voll)
+            except OSError:
+                continue
+            aus.append({"projekt": str(pid), "unter": unter, "datei": name,
+                        "pfad": voll, "mtime": mt})
+    aus.sort(key=lambda b: b["mtime"])
+    return aus
+
+
+def stuecke_aus_marken(marken: list, vor_s: float, nach_s: float,
+                       verschmelzen_s: float) -> list:
+    """Marken zu Stuecken ``[ab, bis, [marken]]`` zusammenfassen.
+
+    Eine Liste von Zeitpunkten ist noch keine Arbeit, die jemand gerne von Hand
+    macht. Benachbarte Marken werden mit Vor- und Nachlauf zu EINEM Stueck --
+    daraus entsteht sowohl das ``schnitt.sh`` neben der Aufnahme als auch der
+    Vorschlag, welche Sekunden ein Reel zeigen sollte. Beides aus derselben
+    Funktion, sonst schneidet das Skript etwas anderes als der Vorschlag zeigt.
+    """
+    stuecke: list = []
+    for m in sorted(marken, key=lambda x: x["s"]):
+        ab = max(0.0, m["s"] - vor_s)
+        bis = m["s"] + nach_s
+        if stuecke and ab - stuecke[-1][1] <= verschmelzen_s:
+            stuecke[-1][1] = max(stuecke[-1][1], bis)
+            stuecke[-1][2].append(m)
+        else:
+            stuecke.append([ab, bis, [m]])
+    return stuecke
+
+
 def _zerlegen(inhalt: str) -> list:
     """Den Inhalt einer ``role='tool'``-Zeile in die einzelnen Ergebnisse zerlegen.
 
@@ -449,6 +510,12 @@ class Kopf:
         # keinen Weg zurueck ausser den Agenten zu beenden.
         self.letztes_ts = 0.0
         self.zug_ab = 0.0                 # seit wann dieser Zug laeuft
+        # Welches Werkzeug bei DIESEM Start galt. Aendert der Agent unterwegs eine
+        # Physikdatei, rechnet er ab da mit einem anderen Werkzeug als dem, mit
+        # dem der Lauf begonnen hat -- und das gehoert gesagt, waehrend jemand
+        # hinsieht. Siehe ema_werkzeugstand.py.
+        self._werkzeug0: dict = {}
+        self._werkzeug_gemeldet: list = []
 
     # ── Ereignisse verteilen ────────────────────────────────────────────────
     def _sende(self, art: str, **felder) -> None:
@@ -501,29 +568,18 @@ class Kopf:
         aus = []
         try:
             for pid in os.listdir(PROJEKTE):
-                pdir = os.path.join(PROJEKTE, pid)
-                if not os.path.isdir(pdir) or pid.startswith("_"):
+                if pid.startswith("_") or not os.path.isdir(
+                        os.path.join(PROJEKTE, pid)):
                     continue
-                for unter in ("charts", "cad_images"):
-                    d = os.path.join(pdir, unter)
-                    if not os.path.isdir(d):
+                for b in bilder_im_projekt(pid):
+                    if b["mtime"] <= self._bild_marke:
                         continue
-                    for name in os.listdir(d):
-                        if not name.lower().endswith(BILD_ENDUNGEN):
-                            continue
-                        voll = os.path.join(d, name)
-                        try:
-                            mt = os.path.getmtime(voll)
-                        except OSError:
-                            continue
-                        if mt <= self._bild_marke:
-                            continue
-                        schluessel = (voll, round(mt, 2))
-                        if schluessel in self._gesehen:
-                            continue
-                        self._gesehen.add(schluessel)
-                        aus.append({"projekt": pid, "unter": unter,
-                                    "datei": name, "mtime": mt})
+                    schluessel = (b["pfad"], round(b["mtime"], 2))
+                    if schluessel in self._gesehen:
+                        continue
+                    self._gesehen.add(schluessel)
+                    aus.append({"projekt": pid, "unter": b["unter"],
+                                "datei": b["datei"], "mtime": b["mtime"]})
         except OSError:
             aus = []
         # Der Deckel begrenzt, wie viele Bilder AUF EINMAL nach rechts gehen --
@@ -589,7 +645,57 @@ class Kopf:
         aus.sort(key=lambda r: r["mtime"])
         return aus
 
+    # ── Der Werkzeugstand ───────────────────────────────────────────────────
+    def werkzeug(self) -> dict:
+        """Womit rechnet dieser Lauf -- und ist es noch dasselbe wie beim Start?
+
+        Laeuft kein Kopf, gibt es keinen Startstand, gegen den zu vergleichen
+        waere; dann ist die Abweichung die gegen ``git HEAD``. Beides ist
+        dieselbe Frage: stehen diese Zahlen auf dem Werkzeug, das im Baum steht?
+        """
+        jetzt = ema_werkzeugstand.stand()
+        # ``getattr``, weil ein Kopf auch ohne ``__init__`` entstehen kann (die
+        # Pruefungen bauen ihn mit ``__new__`` und setzen nur, was sie brauchen).
+        # Ein AttributeError waere hier der teuerste Weg, "kein Startstand" zu
+        # sagen.
+        start = getattr(self, "_werkzeug0", None)
+        if start:
+            geaendert = ema_werkzeugstand.abweichung(start, jetzt)
+            grund = "seit dem Start dieses Laufs"
+        else:
+            geaendert = list(jetzt.get("schmutzig") or [])
+            grund = "gegenüber git HEAD"
+        return {"hash": jetzt["hash"], "git": jetzt.get("git"),
+                "schmutzig": jetzt.get("schmutzig") or [],
+                "abweichend": bool(geaendert), "geaendert": geaendert,
+                "grund": grund, "kurz": ema_werkzeugstand.kurz(jetzt)}
+
+    def _werkzeug_pruefen(self) -> None:
+        """Aendert sich das Werkzeug mitten im Lauf, steht das im Strom.
+
+        Nicht als Sperre -- verhindern laesst sich das nicht (s. Modulkopf von
+        ``ema_werkzeugstand``). Aber JEDE Datei wird genau einmal gemeldet, in
+        dem Augenblick, in dem der Mensch ohnehin auf die Seite sieht, und der
+        Hinweis steht danach im ``protokoll_*.md`` dieses Laufs.
+        """
+        start = getattr(self, "_werkzeug0", None)     # s. werkzeug()
+        if not start:
+            return
+        neu = ema_werkzeugstand.abweichung(start, ema_werkzeugstand.stand())
+        gemeldet = getattr(self, "_werkzeug_gemeldet", [])
+        offen = [n for n in neu if n not in gemeldet]
+        if not offen:
+            return
+        self._werkzeug_gemeldet = gemeldet + offen
+        self._sende("hinweis", text=(
+            "🔧 Werkzeug während des Laufs geändert: " + ", ".join(offen) +
+            " — Zahlen aus diesem Lauf stammen ab hier aus einem anderen "
+            "Werkzeug als die davor."))
+
     def _rechnungen_melden(self) -> None:
+        # Zuerst: rechnet noch dasselbe Werkzeug wie beim Start? Der Zugwechsel
+        # ist der richtige Augenblick dafuer -- genau hier landen die Zahlen.
+        self._werkzeug_pruefen()
         for r in self._neue_rechnungen():
             try:
                 with open(r["pfad"], encoding="utf-8") as f:
@@ -644,6 +750,8 @@ class Kopf:
         self._mitschrift_schliessen()
         self._mitschrift_oeffnen()
         akte = self.projektakte_schreiben(system_zusatz)
+        self._werkzeug0 = ema_werkzeugstand.stand()
+        self._werkzeug_gemeldet = []
 
         befehl = self._befehl(prog, modell, sitzung, system_zusatz)
         try:
@@ -657,7 +765,8 @@ class Kopf:
         self.laeuft = True
         threading.Thread(target=self._lesen, daemon=True).start()
         self._sende("start", modell=modell, projekt=projekt, kopf=self.NAME,
-                    befehl=" ".join(befehl), ordner=ordner, akte=akte)
+                    befehl=" ".join(befehl), ordner=ordner, akte=akte,
+                    werkzeug=ema_werkzeugstand.kurz(self._werkzeug0))
         bereit = self._nach_start(modell, sitzung, system_zusatz)
         if not bereit.get("ok"):
             self.fehler = str(bereit.get("grund", ""))
@@ -893,12 +1002,179 @@ class Kopf:
             kopf += ["", "## Stehender Auftrag fuer diesen Lauf", "",
                      "Das Folgende gilt fuer den ganzen Lauf, nicht nur fuer die",
                      "erste Frage:", "", str(system_zusatz).strip()]
+        # Nicht ueberschreiben, solange ein ANDERER Kopf laeuft. Die Datei liegt
+        # EINMAL in der Repo-Wurzel, und seit es einen dritten Kopf gibt, ist das
+        # Nebeneinanderlaufen kein Sonderfall mehr, sondern der Zweck: der
+        # Studio-Kopf steht am Handy neben einem rechnenden PI. Wer sie dann neu
+        # schreibt, taeuscht dem anderen Lauf ein fremdes Projekt vor, sobald der
+        # sie das naechste Mal liest. Die Fakten dieses Laufs reisen ohnehin ueber
+        # ``--append-system-prompt`` mit (``KANN_SYSTEMZUSATZ``); nur wer das
+        # nicht kann, verliert hier etwas -- und das wird gesagt statt verschwiegen.
+        fremd = [k for k in KOEPFE.values() if k is not self and k.laeuft]
+        if fremd:
+            anderer = fremd[0]
+            self._sende("gemerkt", text=(
+                f"AGENTS.projekt.md nicht ueberschrieben — {anderer.LABEL} laeuft "
+                f"gerade ({anderer.projekt or 'ohne Projektbindung'}). "
+                + ("Der Auftrag dieses Laufs kommt ueber den Systemzusatz."
+                   if self.KANN_SYSTEMZUSATZ else
+                   "Dieser Kopf liest die Akte beim Start — er sieht deshalb die "
+                   "des anderen Laufs.")))
+            return ""
         try:
             with open(pfad, "w", encoding="utf-8") as f:
                 f.write("\n".join(kopf) + "\n")
         except OSError:
             return ""
         return pfad
+
+    # ── Der stehende Auftrag ────────────────────────────────────────────────
+    # Gilt fuer JEDEN Kopf, und darum steht sie hier und nicht dreimal.
+    #
+    # Anlass ist gemessen (08.09.2026): ein Lauf sollte einen Betriebspunkt
+    # erreichen, den das analytische Modell nicht darstellen kann, und die
+    # naechstliegende Abkuerzung waere gewesen, die Grenze im Modell zu
+    # verschieben. Die Koepfe haben Schreibrecht im Repo und werden im
+    # Browserpfad nicht um Freigabe gefragt -- verhindern laesst sich das nicht
+    # (s. ema_werkzeugstand.py). Was hilft, ist dreierlei: es zu sagen, es zu
+    # messen, und einen richtigen Weg danebenzustellen.
+    WERKZEUGREGEL = (
+        "WERKZEUG: Die Rechenmodule dieser Kette (cae_orchestrator/ema_*.py) "
+        "sind der MASSSTAB, nicht der Gegenstand. Ein Ziel wird ueber Geometrie, "
+        "Werkstoff und Betriebspunkt erreicht -- nie dadurch, dass du eine "
+        "Formel, eine Grenze oder eine Vorgabe im Quelltext aenderst, damit die "
+        "Zahl passt. Ist ein Ziel mit dem vorhandenen Werkzeug nicht erreichbar, "
+        "dann ist 'nicht erreichbar, weil ...' die richtige und vollstaendige "
+        "Antwort; ein Nein mit Begruendung ist hier ein Ergebnis, kein "
+        "Fehlschlag. Haeltst du das Werkzeug selbst fuer falsch, schreib einen "
+        "Befund nach cae_orchestrator/BEFUNDE.md (was beobachtet, wo gemessen, "
+        "welche Fundstelle) und sag Bescheid -- repariere es nicht still mitten "
+        "im Lauf. Jede abgelegte Rechnung traegt den Fingerabdruck der "
+        "Physikmodule mit; eine Aenderung waehrend eines Laufs erscheint "
+        "unmittelbar in der Arbeitsanzeige und im Protokoll. ")
+
+    def systemzusatz(self, projekt: str, akte: dict, schleifen: int) -> str:
+        """Was fuer den ganzen Lauf gilt, nicht nur fuer die erste Frage.
+
+        Stand bis zum dritten Kopf inline in ``server.py`` und war damit
+        stillschweigend fuer ALLE Koepfe derselbe: eine Auslegungsanweisung
+        (Entwurfsschleifen, Fahrzyklus, Wellenmessung, 3D-Gegenprobe). Fuer
+        einen Kopf, der ueber Gerechnetes schreibt statt zu rechnen, ist das
+        der falsche Auftrag -- er faengt an, Fahrzyklen zu rechnen, waehrend
+        jemand am Handy auf einen Satz wartet. Der Text ist unveraendert
+        hierher gezogen; ``StudioKopf`` setzt einen eigenen dagegen.
+
+        ``akte`` ist die gelesene ``project.json`` (leer, wenn es keine gibt),
+        ``schleifen`` die vom Menschen vorgegebene Zahl der Entwurfsrunden.
+        """
+        # Das gebundene Projekt kommt als Systemzusatz herein, nicht als Prompt: ein
+        # Prompt kann vom Modell ueberschrieben oder vergessen werden, der
+        # Systemzusatz nicht. Und es wird ausdruecklich gesagt, dass das Projekt KEINE
+        # Vorlage ist -- genau die Verwechslung war der Anlass fuer ``--frisch``.
+        zusatz = ""
+        if projekt:
+            # Ablageort ODER Vorgabe. Beides falschherum zu sagen ist gleich teuer:
+            # eine uebernommene Altgeometrie ist der Fehler, gegen den ``--frisch``
+            # gebaut wurde -- eine IGNORIERTE Vorgabe ist der umgekehrte, und er
+            # aergert mehr, weil jemand sie eigens hingelegt hat.
+            entwurf = akte.get("design") or {}
+            brief = str(entwurf.get("brief") or "").strip()
+            if entwurf.get("vorgabe"):
+                zusatz = (f"Gebundenes Projekt: {projekt} (unter ~/cae_projekte). "
+                          f"Ergebnisse dieses Laufs gehoeren dorthin. In ihm liegt eine "
+                          f"VON HAND VORGEZEICHNETE GEOMETRIE, die ausdruecklich als "
+                          f"Startpunkt uebergeben wurde: 'python3 "
+                          f"cae_orchestrator/cae_cli.py steckbrief {projekt}' zeigt sie, "
+                          f"und '--from-project {projekt}' uebernimmt sie in jedes Verb. "
+                          f"Fang damit an. Aendern darfst du sie -- sag dann aber, WAS du "
+                          f"geaendert hast und warum. Benutze hier NICHT '--frisch': das "
+                          f"wuerfe genau die Vorgabe weg, um die es geht. ")
+            else:
+                zusatz = (f"Gebundenes Projekt: {projekt} (unter ~/cae_projekte). "
+                          f"Ergebnisse dieses Laufs gehoeren dorthin. Es ist AUSDRUECKLICH "
+                          f"KEINE Vorlage: uebernimm daraus keine Polzahl, Nutzahl, "
+                          f"Magnetanordnung, Kuehlung oder Werkstoffwahl. Fuer eine neue "
+                          f"Auslegung beginnst du mit "
+                          f"'python3 cae_orchestrator/cae_cli.py paarvergleich --frisch'. ")
+            # Die Beschreibung, die beim Anlegen des Projekts eingegeben wurde. Ohne
+            # sie muesste sie ein zweites Mal getippt werden -- und beim zweiten Mal
+            # steht etwas anderes da als beim ersten.
+            if brief:
+                zusatz += (f"Der Mensch hat das Projekt so beschrieben: \"{brief[:1200]}\" "
+                           f"Das ist der Auftrag; frag nach, was darin offen bleibt, "
+                           f"statt es zu erfinden. ")
+        # ── Entwurfsschleifen ───────────────────────────────────────────────────
+        #
+        # Der Mensch gibt die ZAHL vor, nicht der Agent. Ohne sie faellt er in eines
+        # von zwei Extremen: einen einzigen Detaillauf von Stunden, an dem sich
+        # nichts mehr entscheiden laesst -- oder endloses Herumprobieren. Beides
+        # wurde beobachtet.
+        #
+        # Die Guetestufen sind gemessen (ema_text2ema.GUETE): 'entwurf' liefert
+        # DIESELBEN Kennwerte wie 'detail' (B_gap und Kt kommen aus der analytischen
+        # Formel und haengen nicht an der Aufloesung), nur groebere Bilder und eine
+        # groebere Luftspaltwelle. Genau deshalb laesst sich damit entscheiden.
+        if schleifen:
+            zusatz += (
+                f"ARBEITSWEISE: fahre die ersten {schleifen} Auslegungsrunden im "
+                f"ENTWURFSMODUS -- 'run analyse ... --guete entwurf' (Minuten statt "
+                f"Stunden; gleiche Kennwerte, nur groebere Bilder). Nach jeder Runde "
+                f"'sicherheit --from-project <pid>' und daraus die naechste Aenderung "
+                f"ableiten. Erst wenn ein Stand alle Kriterien haelt, EINEN Lauf mit "
+                f"'--guete detail' -- das ist die Zahl, die in den Bericht geht. Zaehle "
+                f"die Runden mit und sag, in welcher du bist. Brauchst du mehr als "
+                f"{schleifen} Runden, sag das und frag, statt stillschweigend "
+                f"weiterzulaufen. ")
+        else:
+            zusatz += ("ARBEITSWEISE: keine Entwurfsschleifen vorgegeben — rechne "
+                       "gleich mit '--guete detail'. ")
+        # Ueber die Welle entscheidest DU, und zwar gemessen:
+        zusatz += ("Ob die Maschine eine Vollwelle braucht, entscheidest du selbst und "
+                   "MISST es: 'python3 cae_orchestrator/cae_cli.py welle --from-project "
+                   "<pid>' rechnet ein Feld und sagt, ob durch die Welle Fluss laeuft "
+                   "und wie gross die Bohrung hoechstens sein darf. Eine Bohrung spart "
+                   "Masse und Traegheit und ist erst dann falsch, wenn sie im "
+                   "magnetischen Pfad sitzt. Der Befund ist magnetisch — die "
+                   "Festigkeit sagt 'struktur'/'sicherheit'. ")
+
+        # Der 3D-Lauf steht auch im Skill, aber der Systemzusatz ueberlebt einen langen
+        # Zug: das 2D-FDM-Feld ist zweidimensional, erst Elmer prueft es unabhaengig nach.
+        # Fahrzyklus und Sicherheitskriterien: beides steht im Skill, aber beides ist
+        # eine Entscheidung AM ANFANG bzw. eine Pflicht AM ENDE -- und dazwischen
+        # liegen Stunden Rechenzeit, in denen ein langer Zug den Skilltext verdraengt.
+        zusatz += ("Bei einer NEUEN Aufgabe zuerst "
+                   "'python3 cae_orchestrator/cae_cli.py aufgabe \"<Aufgabe>\"': das stellt "
+                   "nebeneinander, was feststehen muss, was der eigene Bestand schon hergibt "
+                   "und was offen ist. Erst DANN recherchieren, und nur nach dem Offenen. "
+                   "Was nur der Auftraggeber wissen kann (Bauraum, Betriebspunkt, Einsatz, "
+                   "Spannungsebene) wird GEFRAGT, nicht recherchiert. Recherchiertes wird mit "
+                   "woertlichem Zitat abgelegt ('recherche merke ... --wert \"x=1 mm :: Zitat\"') "
+                   "und ersetzt nie eine gerechnete Zahl. ")
+        zusatz += ("Erste Entscheidung jeder Auslegung ist der LASTFALL: "
+                   "'python3 cae_orchestrator/cae_cli.py zyklus liste' zeigt die "
+                   "waehlbaren Fahrzyklen samt dem Fahrzeug, fuer das sie gedacht sind. "
+                   "Passt keiner, lege selbst einen an ('zyklus anlegen <name> --phasen "
+                   "ziel_kmh:dauer_s,... --fahrzeug mass_kg=... --fahrzeug gear_ratio=...') "
+                   "-- er bleibt in der gemeinsamen Datenbank und steht beim naechsten Mal "
+                   "schon da. Der Lauf bekommt ihn ueber 'run analyse --zyklus <name>', was "
+                   "Zyklus UND Fahrzeug setzt. Ohne Wahl rechnet '--frisch' mit cycle=off; "
+                   "NIE einen Pkw-Zyklus auf eine Maschine legen, die kein Pkw ist. "
+                   "Nach jedem Lauf: "
+                   "'python3 cae_orchestrator/cae_cli.py sicherheit --from-project <pid>' "
+                   "(Exit 1 = Kriterium verletzt: Festigkeit, Drehzahl, Magnet- und "
+                   "Wicklungstemperatur ueber ALLE Zyklen, Entmagnetisierung, Fahrprofil). "
+                   "Ein verletztes Kriterium wird behoben oder ausdruecklich als "
+                   "'so nicht einsetzbar' gemeldet, nicht in einem Nebensatz erwaehnt. "
+                   "safety_factor_fem=null heisst 'keine FEM gerechnet', nicht 'sicher'. ")
+        zusatz += ("Zu einer Auslegung gehoert die 3D-Gegenprobe: nach jedem erfolgreichen "
+                   "'run analyse --wait' folgt "
+                   "'python3 cae_orchestrator/cae_cli.py run em3d --from-project <pid> --wait' "
+                   "(5-30 min, Elmer) auf DEMSELBEN Projekt, und erst danach der Bericht "
+                   "ueber 'raw POST /project/<pid>/report' -- nur dann enthaelt er den "
+                   "3D-Abschnitt und die 2D-gegen-3D-Tabelle. Antwortet die Route mit 503, "
+                   "fehlt Elmer: das melden, nicht stillschweigend ueberspringen. ")
+        return zusatz + self.WERKZEUGREGEL
+
 
     def marke(self) -> str:
         """Kennung dieses Laufs. Ein PROJEKTordner nimmt mehrere Laeufe auf --
@@ -1704,13 +1980,81 @@ class HermesKopf(Kopf):
         return []
 
 
+class StudioKopf(PiKopf):
+    """Derselbe ``pi``, eigener Prozess -- und ein ganz anderer Auftrag.
+
+    Dieser Kopf bedient den Reiter 📱 Studio: einspaltiger Chat, vom Handy aus
+    erreichbar, und die Werkstatt fuer Beitraege nach Instagram und X. Er steht
+    ausdruecklich NEBEN einem rechnenden PI, nicht an dessen Stelle -- deshalb
+    ein eigener Prozess mit eigenem Ring, eigener Sitzung und eigener Mitschrift
+    statt eines zweiten Fensters auf denselben Lauf.
+
+    Warum eine Unterklasse und keine zweite Datei: PI, Hermes und Studio lesen
+    EINE ``SKILL.md`` und benutzen EINEN Ereignisstrom. Was sich unterscheidet,
+    ist genau eine Sache -- der stehende Auftrag -- und die steht unten.
+    """
+
+    NAME = "studio"
+    LABEL = "Studio"
+
+    def systemzusatz(self, projekt: str, akte: dict, schleifen: int) -> str:
+        """Ueber Gerechnetes schreiben, nicht rechnen.
+
+        Der Auslegungsauftrag der anderen Koepfe waere hier schaedlich: er
+        schickt den Agenten in Fahrzyklen und 3D-Gegenproben, waehrend jemand
+        am Handy auf einen Satz wartet. ``schleifen`` hat hier keine Bedeutung
+        und wird bewusst nicht verwendet -- die Startmaske zeigt das Feld
+        deshalb gar nicht erst.
+        """
+        zusatz = (
+            "Du bist der Studio-Kopf. Deine Aufgabe ist es, ueber das zu "
+            "SCHREIBEN, was gerechnet wurde -- nicht, es zu rechnen. Der Mensch "
+            "sitzt womoeglich am Handy: antworte knapp, in ganzen Saetzen, ohne "
+            "Tabellenwuesten. ")
+        if projekt:
+            entwurf = (akte or {}).get("design") or {}
+            brief = str(entwurf.get("brief") or "").strip()
+            zusatz += (
+                f"Gebundenes Projekt: {projekt} (unter ~/cae_projekte). Die "
+                f"Fakten holst du mit 'python3 cae_orchestrator/cae_cli.py "
+                f"steckbrief {projekt} --laeufe' -- dort steht auch, welche "
+                f"Stufe eine Zahl geliefert hat und was noch fehlt. ")
+            if brief:
+                zusatz += (f"Der Mensch hat das Projekt so beschrieben: "
+                           f"\"{brief[:1200]}\" ")
+        else:
+            zusatz += ("Kein Projekt gebunden: 'projects' zeigt, was da ist, "
+                       "'steckbrief <pid>' was daraus geworden ist. Frag, "
+                       "worueber geschrieben werden soll, statt es zu raten. ")
+        zusatz += (
+            "JEDE Zahl in einem Beitrag steht im Steckbrief oder sie steht "
+            "nicht im Beitrag -- eine gerundete, geschaetzte oder aus dem "
+            "Gedaechtnis ergaenzte Kennzahl ist hier schlimmer als gar keine, "
+            "weil sie veroeffentlicht wird. Fehlt eine Stufe, sag das; erfinde "
+            "sie nicht. ")
+        zusatz += (
+            "Beitragsentwuerfe erzeugst du mit "
+            "'python3 cae_orchestrator/cae_cli.py beitrag instagram|x|beide "
+            "--from-project <pid>' und nicht von Hand: das Verb sammelt das "
+            "Material, haelt die Zeichengrenzen ein und legt den Entwurf im "
+            "Projekt ab. Veroeffentlicht wird NICHTS -- der Mensch kopiert den "
+            "Entwurf selbst. ")
+        zusatz += (
+            "Rechenlaeufe startest du nur, wenn du ausdruecklich darum gebeten "
+            "wirst. 'run analyse' kostet Stunden, und niemand wartet am Handy "
+            "darauf. Wird darum gebeten, dann mit '--guete entwurf' und mit "
+            "einem Satz dazu, wie lange es dauert. ")
+        return zusatz + self.WERKZEUGREGEL
+
+
 LAUF = PiKopf()
 HERMES = HermesKopf()
+STUDIO = StudioKopf()
 
-# Beide Koepfe unter ihrem Namen -- die Routen schlagen hier nach, statt je Kopf
-# eine eigene Route zu tragen. Ein dritter Kopf braucht dann eine Zeile, keine
-# fuenfzehn Routen.
-KOEPFE = {LAUF.NAME: LAUF, HERMES.NAME: HERMES}
+# Alle Koepfe unter ihrem Namen -- die Routen schlagen hier nach, statt je Kopf
+# eine eigene Route zu tragen. Der dritte Kopf hat dann tatsaechlich eine Zeile
+# gekostet und keine fuenfzehn Routen.
+KOEPFE = {LAUF.NAME: LAUF, HERMES.NAME: HERMES, STUDIO.NAME: STUDIO}
 
 
 def kopf(name: str = "") -> Kopf:
@@ -1897,16 +2241,8 @@ class Aufnahme:
         except OSError:
             return {}
 
-        # Marken zu Stuecken zusammenfassen.
-        stuecke: list = []
-        for m in sorted(self.marken, key=lambda x: x["s"]):
-            ab = max(0.0, m["s"] - self.VOR_S)
-            bis = m["s"] + self.NACH_S
-            if stuecke and ab - stuecke[-1][1] <= self.VERSCHMELZEN_S:
-                stuecke[-1][1] = max(stuecke[-1][1], bis)
-                stuecke[-1][2].append(m)
-            else:
-                stuecke.append([ab, bis, [m]])
+        stuecke = stuecke_aus_marken(self.marken, self.VOR_S, self.NACH_S,
+                                     self.VERSCHMELZEN_S)
 
         try:
             with open(skript, "w", encoding="utf-8") as f:

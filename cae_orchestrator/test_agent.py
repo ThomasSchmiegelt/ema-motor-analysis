@@ -277,17 +277,26 @@ pruefe("switchTab('agent')" in _ema and "id=\"tbtn-agent\"" in _ema,
        "die Reiterleiste hat einen Knopf 🤖 PI")
 pruefe("switchTab('agenth')" in _ema and "id=\"tbtn-agenth\"" in _ema,
        "und daneben einen zweiten Knopf 🪽 Hermes")
-pruefe("'compare','agent','agenth']" in _ema.replace(" ", "")
+pruefe("'compare','agent','agenth','studio']" in _ema.replace(" ", "")
        and "agent:'panel-agent'" in _ema
-       and "agenth:'panel-agent-hermes'" in _ema,
-       "beide Reiter sind in TABS und PANEL_OF angemeldet — sonst schaltet switchTab sie nie sichtbar")
+       and "agenth:'panel-agent-hermes'" in _ema
+       and "studio:'panel-agent-studio'" in _ema,
+       "alle drei Reiter sind in TABS und PANEL_OF angemeldet — sonst schaltet switchTab sie nie sichtbar")
 pruefe('id="agent-rahmen"' in _ema and 'id="agent-rahmen-hermes"' in _ema
        and 'src="/agent"' not in _ema,
        "je Kopf ein eigener Rahmen, beide erst nach dem ersten Oeffnen geladen (kein Strom beim Seitenstart)")
-pruefe("_agSrc = k => k === 'hermes' ? '/agent?kopf=hermes' : '/agent'" in _ema,
-       "agActivate() setzt die Quelle nach — EINE Seite, unterschieden durch ?kopf=")
+pruefe("k === 'hermes' ? '/agent?kopf=hermes'" in _ema
+       and "k === 'studio' ? '/studio?kopf=studio' : '/agent'" in _ema,
+       "agActivate() setzt die Quelle nach — PI und Hermes teilen EINE Seite "
+       "(unterschieden durch ?kopf=), Studio hat eine eigene, weil es ein anderes "
+       "LAYOUT ist und nicht ein anderer Kopf")
 
-_ag = io.open(os.path.join(_hier, "ema_agent.html"), encoding="utf-8").read()
+# Seit dem dritten Kopf steht das VERHALTEN der Agentenseiten in
+# ``agent_gemein.js`` -- ema_agent.html und ema_studio.html binden dieselbe
+# Datei ein, damit keine zweite Abschrift entsteht. Geprueft wird deshalb
+# die Seite ZUSAMMEN mit ihrem geteilten Verhalten.
+_ag = (io.open(os.path.join(_hier, "ema_agent.html"), encoding="utf-8").read() +
+       io.open(os.path.join(_hier, "agent_gemein.js"), encoding="utf-8").read())
 pruefe("anknuepfen" in _ag and "'/agent/status'" in _ag,
        "die Seite fragt beim Laden erst, ob schon ein Lauf haengt")
 pruefe("if (!await anknuepfen()) auswahlLaden()" in _ag,
@@ -557,7 +566,8 @@ _w.fragen = lambda t: {"ok": True, "direkt": True}
 pruefe(_w.merken("jetzt")["ok"] and not _w.hinweise,
        "wartet der Agent ohnehin, geht der Hinweis sofort durch")
 
-_html = io.open(os.path.join(_hier, "ema_agent.html"), encoding="utf-8").read()
+_html = (io.open(os.path.join(_hier, "ema_agent.html"), encoding="utf-8").read() +
+         io.open(os.path.join(_hier, "agent_gemein.js"), encoding="utf-8").read())
 pruefe("b_hinweis" in _html and "/agent/hinweis" in _html,
        "die Seite hat ein eigenes Zwischenruf-Feld")
 pruefe("$('b_hinweis').disabled = !LAEUFT" in _html,
@@ -686,8 +696,10 @@ pruefe(_h3._zug_id == _raus["id"],
        "und die Nummer wird gemerkt — an ihr erkennt der Strom das Zugende")
 
 # ── Die Seite bedient BEIDE Koepfe ──────────────────────────────
-pruefe("const KOPF = (new URLSearchParams(location.search).get('kopf') || 'pi')" in _html,
-       "die Seite liest ?kopf= (Vorgabe pi) statt ein zweites HTML zu sein")
+pruefe("new URLSearchParams(location.search).get('kopf') ||" in _html
+       and "window.KOPF_VORGABE || 'pi'" in _html,
+       "die Seite liest ?kopf= (Vorgabe pi, oder was die Seite selbst vorgibt) "
+       "statt ein zweites HTML je Kopf zu sein")
 pruefe(_html.count("fetch('/agent") == 0 and _html.count("fetch(K('/agent") >= 10,
        "und schickt JEDE Adresse durch K() — eine vergessene traefe sonst still PI")
 pruefe("PROJEKTPFLICHT && !$('f_projekt').value" in _html,
@@ -704,7 +716,7 @@ try:
            "/agent/auswahl?kopf=hermes antwortet fuer Hermes — mit Projektpflicht")
     pruefe(_b["kopf"] == "pi" and _b["projektpflicht"] is False,
            "ohne Angabe bleibt es PI, ohne Projektpflicht")
-    pruefe({x["name"] for x in _a["koepfe"]} == {"pi", "hermes"},
+    pruefe({x["name"] for x in _a["koepfe"]} == {"pi", "hermes", "studio"},
            "die Maske erfaehrt, welche Koepfe es gibt")
     pruefe(_c.get("/agent/status?kopf=hermes").get_json()["kopf"] == "hermes",
            "auch der Zustand ist je Kopf abfragbar — sonst zeigte der Hermes-Reiter PIs Uhr")

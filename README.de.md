@@ -833,6 +833,216 @@ Als einzige Routengruppe verlangt `/m…` ein Token; die übrigen Routen bleiben
 wie bisher. Grenzen des Pfads: nur 2D-Feld — kein CAD, keine Festigkeit, keine
 Thermik, kein Fahrzyklus, kein Bericht.
 
+## Der dritte Kopf: ein Chat, der mitkommt (`/studio`)
+
+Die Agentenseite mit den zwei Spalten ist für den Schreibtisch gebaut — links der
+Agent, rechts die Ergebnisse, dazwischen ein Ziehgriff, der auf Mausereignisse hört.
+Auf einem Handy ist sie unbedienbar. Genau derselbe Befund hatte schon den Handy-Pfad
+`/m` hervorgebracht, und die Antwort ist dieselbe: **nicht das Layout teilen, sondern
+alles darunter.**
+
+Der Reiter **📱 Studio** zeigt denselben Agentenlauf **einspaltig** — Frage, Denken,
+Werkzeugaufruf, Ergebnis, Bild, alles untereinander in der Reihenfolge, in der es
+geschieht. Zwei Spalten sind zwei Zeitachsen; man liest unwillkürlich die eine als
+Fortsetzung der anderen. Eine Ergebniskachel steht hier an der Stelle, an der sie
+entstanden ist.
+
+Dahinter läuft ein **eigener, dritter Agent** neben 🤖 PI und 🪽 Hermes — eigener
+Prozess, eigene Sitzung, eigenes Gedächtnis. Er steht ausdrücklich *neben* einem
+rechnenden PI, nicht an dessen Stelle, und bekommt deshalb einen anderen stehenden
+Auftrag als die beiden: **er schreibt über das, was gerechnet wurde, und rechnet nicht
+von sich aus.** Die Auslegungsanweisung der anderen Köpfe (Entwurfsschleifen,
+Fahrzykluswahl, 3D-Gegenprobe) wäre hier schädlich — sie schickte ihn in einen
+Stundenlauf, während jemand am Handy auf einen Satz wartet.
+
+Zwei Dinge fielen erst durch dieses Nebeneinander auf, und beide sind jetzt behoben
+statt beschrieben: `AGENTS.projekt.md` wurde bei **jedem** Agentenstart überschrieben —
+der zweite Kopf täuschte dem ersten damit beim nächsten Lesen ein fremdes Projekt vor;
+und die Bildschirmaufnahme gibt es **einmal je Server**, nicht je Kopf, was die Seite
+jetzt ehrlich sagt, statt einen zweiten Rekorder vorzutäuschen.
+
+**Vom Handy aus** ist es derselbe Chat: „📱 Handy" zeigt Adresse und QR-Code, das
+Telefon steigt mitten im Gespräch ein und schreibt weiter. Als einzige Agentenseite
+steht sie absichtlich im Heimnetz und trägt deshalb dasselbe Token wie `/m` — ein QR
+deckt beide Wege. Vom Rechner selbst ist sie offen (dort ist sie ein Reiter), von außen
+nur mit Token; PI und Hermes bleiben unberührt.
+
+### Hochkant, mit fester Auflösung
+
+Ein Reel und ein Short sind **1080×1920**. Nimmt man ein Fenster in Fensterform auf,
+entsteht ein 16:9-Video, aus dem der Hochkantausschnitt erst hinterher geschnitten wird —
+und dann entscheidet sich *beim Schneiden*, was im Bild ist. Deshalb steht der Verlauf im
+Studio-Reiter in einer **Bühne mit genau dieser Pixelgröße** (9:16 als Vorgabe, dazu 4:5,
+1:1 und „frei"), die als Ganzes ins Fenster skaliert wird: die Anordnung ist unabhängig
+von der Fenstergröße, der gestrichelte Rand ist die Schnittkante, und der Zuschnitt steht
+**vor** der Aufnahme fest. Skaliert wird die Bühne, nicht ihre Schriftgrößen — die feste
+Bühne hat einen eigenen, etwa doppelt so großen Schriftsatz, weil ein Reel auf einem
+Telefon gelesen wird. Am Handy entfällt das Ganze: dort *ist* der Schirm schon hochkant.
+
+Daneben steht, was **wirklich** aufgenommen wird. Die Bühne ist 1080×1920 groß, sitzt
+aber verkleinert auf dem Schirm, und aufgenommen werden dessen Bildpunkte — ein 1000 px
+hohes Fenster liefert gemessen 527×937, die der Zuschnitt auf 1920 hochrechnet. Das steht
+mit Zahl und Warnfarbe da, statt dass hinterher jemand rätselt, warum das Reel weich
+aussieht; Abhilfe ist ein höheres Fenster oder ein Bildschirm mit doppelter Punktdichte.
+
+Der Zuschnitt selbst wird nicht geraten: beim Aufnahmestart schreibt die Seite eine Marke
+mit Bühnenrechteck, Fenster- und Aufnahmegröße, und daraus entsteht die fertige
+`crop=…,scale=1080:1920`-Zeile — **nur** bei einer Reiter- oder Fensteraufnahme. Wurde der
+ganze Bildschirm aufgenommen, sitzt das Fenster irgendwo darin; das lässt sich nicht
+wissen, also steht dort keine Zeile, sondern der Satz, warum nicht.
+
+### Gesetzt statt roh — und die Feldanalyse behält ihre Spalten
+
+Das Modell antwortet in Markdown. Roh gesetzt stehen im Bild Sternchen, Rauten und
+Rohrzeichen; im Studio-Reiter wird stattdessen gesetzt: Überschriften, Fett, Kursiv,
+Code, Listen, Zitate — und **Tabellen**. Die Tabelle ist der eigentliche Grund: eine
+Feldanalyse *ist* eine Tabelle, und `| B_gap | 0,799 T |` als Rohtext ist keine. Der
+Renderer ist ein knapper eigener Block (keine Bibliothek), er sieht nur den Text, den das
+Modell geschrieben hat, und `test_studio.py` prüft ihn mit `node` gegen feste Beispiele —
+dasselbe Verfahren wie beim JS-Spiegel der Topologie.
+
+Zwei Feinheiten, die den Unterschied zwischen „gesetzt" und „ordentlich" ausmachen: ein
+weicher Zeilenumbruch des Modells wird zum **Leerzeichen** statt zu einem Umbruch — sonst
+franst die rechte Kante genau dort aus, wo das Modell bei achtzig Zeichen umbrach; und
+Kursivschrift gilt nur an Wortgrenzen, sonst zerlegt `em_field_load.png` sich selbst.
+
+Die **Werkzeugausgabe** geht den umgekehrten Weg: sie behält ihre Spalten, und angepasst
+wird die *Schrift*. Umbrechen zerstört eine Kennwertetabelle, Scrollen versteckt sie, und
+ein Höhendeckel schnitt mitten hinein — der Steckbrief war nach `safety_factor_fem` zu
+Ende. Der Schriftgrad folgt jetzt den **ausgerichteten** Zeilen, erkannt an der
+Spaltenlücke; Prosa darf umbrechen. Drei Anläufe hat das gebraucht, jeder wegen einer
+Messung: ein Hundertstelwert über alle Zeilen fiel auf die 228 Zeichen Prosa der
+`welle`-Ausgabe herein; ein bloßes „enthält ein Rohrzeichen" hielt denselben Satz für eine
+Tabelle, weil `(|B| p95 …)` darin steht; und ohne ein Zeichen Luft brach eine 94 Zeichen
+breite Tabelle um, weil nach dem Abrunden 93 passten. Passt eine Tabelle wirklich nicht —
+der Paarvergleich ist gemessen 418 Zeichen breit —, steht das an der Kachel, statt still
+umzubrechen.
+
+### Die Fußleiste: zwei Zeilen, und man sieht, wer gerade was macht
+
+Am Handy saß sie richtig, am Schreibtisch nicht. Vier Zeilen übereinander, davon eine
+allein für den Ablagepfad — abgeschnitten mit Auslassungspunkten, dauerhaft im Weg für
+eine Angabe, die man einmal am Tag braucht. Der Pfad sitzt jetzt am Sicherungsknopf
+(anfassen genügt) und erscheint bei einer Sicherung **von Hand** als Zeile im Verlauf,
+wo er chronologisch hingehört. Das Häkchen „Denken zeigen" zog an das rechte Ende der
+Arbeitszeile; damit fällt die vierte Zeile weg, und die Eingabe bekommt die volle Breite
+für ihre Symbole.
+
+An der Stelle der abgeschnittenen Zeile steht jetzt dieselbe **Lampenzeile** wie am
+Schreibtisch: der Agent (immer, solange er läuft — „arbeitet · 0:42", „wartet auf dich",
+bernstein „still seit 8:13" samt Freigabe), dazu Rechnung mit Fortschritt, Recherche,
+Löser, Grafikkarte, geladenes Modell, Tempo und die Werkzeuglampe. Am Schreibtisch
+stehen alle Lampen immer, hier nur die tätigen — die Bühne ist 1080 Punkte breit; am
+Handy bleiben sie eine wischbare Zeile, umbrechend nahmen sie dort gemessen sechs.
+
+Was es weiterhin **nicht** gibt, ist eine Lampe „Modell denkt": Ollama meldet nur,
+welches Modell im Speicher *liegt*, nicht ob es rechnet.
+
+## Das Werkzeug ist der Maßstab, nicht der Gegenstand
+
+Bei einer Zielwertoptimierung stellt sich eine unangenehme Frage: was hindert den
+Agenten daran, den Quellcode zu ändern, bis die Zahl stimmt? Die Köpfe sind
+Codieragenten mit Schreibrecht in diesem Verzeichnis, und im Browser wird keine Freigabe
+erfragt. Die ehrliche Antwort ist: **verhindern lässt es sich nicht.** Der Agent läuft
+als derselbe Benutzer, ohne Sandkasten; wem eine Datei gehört, der darf sie schreiben,
+und ein `chmod` zurück kostet eine Zeile. Ein Schloss, das man von innen aufschließen
+kann, ist kein Schloss, sondern eine Behauptung.
+
+**Verbergen** lässt es sich sehr wohl verhindern, und darauf läuft es hier hinaus. Ein
+Fingerabdruck über die zwölf Module, deren Änderung eine Kennzahl bewegt, reist mit
+jeder abgelegten Rechnung, jeder Zeile im Projekttagebuch und dem Steckbrief mit — und
+stehen dort mehrere Stände, sagt der Steckbrief ausdrücklich, dass diese Zahlen nicht
+ohne Weiteres vergleichbar sind. Ändert sich eine dieser Dateien **während** ein Agent
+läuft, erscheint es sofort als bernsteinfarbene Lampe 🔧 in der Arbeitszeile und als
+Zeile im Protokoll des Laufs, also genau dann, wenn ohnehin jemand hinsieht.
+
+Daneben steht die Regel im Klartext — in `AGENTS.md`, in der `SKILL.md` und im stehenden
+Auftrag jedes der drei Köpfe: ein Ziel wird über Geometrie, Werkstoff und Betriebspunkt
+erreicht, nie durch eine verschobene Grenze im Quelltext. Hält man das Werkzeug für
+falsch, schreibt man einen **Befund** nach `cae_orchestrator/BEFUNDE.md` (was beobachtet,
+wo gemessen, welche Fundstelle) statt still zu reparieren — sonst stammen die Zahlen vor
+und nach der Reparatur aus zwei verschiedenen Werkzeugen, und man sieht ihnen das nicht
+an.
+
+Die **Zielwertsuche selbst** braucht davon nichts: dort schlägt das Modell nur
+Parametervektoren vor, sie werden auf ihre Bereiche geklemmt, und jede unzulässige
+Lösung rangiert unter jeder zulässigen. Der Quelltext ist für sie unerreichbar.
+Gefährdet ist der Weg, den ein Agent von Hand geht.
+
+## Ein Nein ist auch eine gute Antwort
+
+Der Anlass war ein 230-V-Ventilatorantrieb. Er ließ sich nicht rechnen — und statt das zu
+sagen, lieferte das Modell Zahlen: 0,0 Nm Moment und daneben eine Verlustleistung von
+**2,8·10²⁰ W**. Wer das liest, sucht den Rechenfehler. Der Befund war die ganze Zeit
+„andere Maschinenklasse"; es gab nur keinen Ort, an dem er hätte stehen können.
+
+Die Ursache ist eine Kette aus drei Stufen, jede für sich unauffällig, und sie steht mit
+allen Messwerten und Fundstellen in `cae_orchestrator/BEFUNDE.md`. Der Kern: allein zum
+Magnetisieren braucht diese Maschine 1686 A gegen eine Umrichtergrenze von 800 A, es
+bleibt kein momentbildender Strom — und das Verlustglied teilte durch diesen Strom mit
+einem Boden von 10⁻⁹. Eine Division durch fast Null ist kein Ergebnis, sondern die
+Stelle, an der die Rechnung hätte aufhören müssen.
+
+Jetzt entscheidet der Betriebspunkt zuerst, ob es ihn **gibt**. Unter einem Tausendstel
+der Stromgrenze kommt kein Zahlenwert zurück, sondern `erreichbar: nein` mit einer
+Begründung, die die beiden Ströme und die Stellschraube nennt; Moment, Schlupf und
+Verluste sind dann ausdrücklich **leer und nicht 0,0** — eine Null liest sich wie ein
+gerechnetes Ergebnis, und genau so wurde sie gelesen. Der Käfig fällt nicht mehr still
+auf seine Fertigungsuntergrenze zurück, und die 2-D-Feldstufe weigert sich, daraus einen
+Rotor zu vernetzen, statt eine halbe Stunde an eine Maschine zu hängen, die es nicht
+gibt.
+
+### Müssen Antworten gewichtet werden?
+
+Ja — aber nicht mit einer Vertrauenszahl. Die wäre selbst wieder eine erfundene Größe.
+Was eine Zahl wägbar macht, sind zwei Angaben, und beide waren schon halb da: ihre
+**Herkunft** (welches Verfahren sie geliefert hat — das steht seit jeher an jedem
+Kennwert im Steckbrief) und ihr **Geltungsbereich** (liegt der Fall in der Klasse, auf
+die diese Kette geeicht ist).
+
+Der Geltungsbereich ist ausdrücklich **kein Tor**: außerhalb heißt nicht falsch, sondern
+„dafür ist diese Kette nicht geeicht, und keine der gerechneten Auslegungen liegt dort".
+Drei Angaben, jede gemessen statt behauptet: ob überhaupt ein Umrichter gesetzt ist oder
+die Traktionsvorgabe 800 V / 800 A gilt (dann ist jede Stromaussage eine Aussage über
+diesen Deckel); ob die Maschine mehr Magnetisierung braucht, als diese Klasse hergibt —
+**der unmittelbare Netzbetrieb ohne Stromrichter ist nicht modelliert**, und das steht
+jetzt wortwörtlich da; und ob die Leistung in dem Band liegt, in dem hier tatsächlich
+schon gerechnet wurde (aus der Datenbank ausgelesen: 0,2 bis 419 kW aus 57 Läufen).
+
+Steckbrief, `sicherheit` und `beitrag` tragen das mit. Damit ist „nicht darstellbar, weil
+das Modell keinen Netzbetrieb kennt" eine vollständige Antwort — kein Fehlschlag.
+
+## Beiträge für Instagram und X — aus dem, was gerechnet wurde
+
+Die zweite Aufgabe des Studio-Reiters, und als Verb auch dem Agenten zugänglich:
+
+```bash
+python3 cae_orchestrator/cae_cli.py beitrag x --from-project last
+python3 cae_orchestrator/cae_cli.py beitrag instagram --from-project last --ton begeistert
+```
+
+Das Material kommt aus dem **Steckbrief** des Projekts, nicht aus dem Gesprächsverlauf.
+Der Unterschied ist der ganze Punkt: der Steckbrief weiß, welche Stufe eine Kennzahl
+geliefert hat und was fehlt — ein Beitrag aus dem Chat übernähme jede Zahl, die der
+Agent unterwegs einmal geschätzt hat, und **veröffentlicht sie**.
+
+Aus demselben Grund steht die Regel „keine Zahl ohne Deckung im Material" nicht nur im
+Prompt: jede Zahl des Entwurfs wird hinterher **nachgemessen** und als Hinweis gemeldet,
+wenn sie im Material nicht vorkommt. Runden ist gedeckt (0,7994 → 0,80), Erfinden nicht.
+Eine Bitte an ein Sprachmodell ist keine Zusicherung.
+
+Was der Entwurf mitbringt: Text in der Form des Kanals (X 280 Zeichen je Beitrag, Faden
+bis drei — **zu lang heißt umbrechen, nicht abschneiden**; im ersten echten Lauf endete
+Teil 1 bei 274 von 280 Zeichen mit „Achtung: Sicherheitskriterien…", es fiel also
+ausgerechnet die Einschränkung weg, wegen der man den Beitrag lesen sollte), Hashtags,
+eine Bildauswahl mit Alternativtexten, eine **Herkunftsfußzeile** (welche Kennzahl aus
+welcher Stufe) — und, wenn eine Bildschirmaufnahme mitlief, Schnittvorschläge aus deren
+Marken samt fertiger `ffmpeg`-Zeile. Geschnitten wird sie nicht; gezeigt schon.
+
+**Veröffentlicht wird nichts.** Es gibt keinen Netzweg nach draußen, keine Zugangsdaten
+und keinen Knopf dafür. Der Entwurf landet unter `<projekt>/beitraege/` und in den
+abgelegten Rechnungen des Projekts; kopiert und gepostet wird von Hand.
+
 ## Geteilte Toolchain (systemweit / /opt, nicht in diesem Repo)
 
 - FreeCAD-1.1-Quellbuild + CalculiX → `/opt/cae-tools/freecad_1.1_quellcode` (Symlink `~/freecad_1.1_quellcode`). `ccx` 2.23 wird von dort auch **ohne** FreeCAD aufgerufen

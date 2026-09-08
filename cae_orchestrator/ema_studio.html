@@ -1,0 +1,1185 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0e1116">
+<link rel="manifest" href="/m/studio.webmanifest">
+<title>Studio</title>
+<style>
+  /* Dieselben Farben wie ema_agent.html — es ist dasselbe Werkzeug, nur ein
+     anderes Layout. Was hier ANDERS ist: EINE Spalte, alles untereinander in der
+     Reihenfolge, in der es geschieht, und jede Groesse so, dass ein Daumen sie
+     trifft. Deshalb steht diese Seite auch als einzige Agentenseite im WLAN. */
+  :root{
+    --bg:#0e1116; --bg2:#151a21; --bg3:#1c232c; --rand:#2a333f;
+    --tx:#dfe6ee; --tx2:#93a1b1; --ak:#4ea1ff; --ok:#4ec98f; --warn:#ffb454; --err:#ff6b6b;
+    --mono:ui-monospace,"JetBrains Mono","SF Mono",Menlo,Consolas,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--tx);
+       font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+       display:flex;flex-direction:column;overflow:hidden;
+       -webkit-text-size-adjust:100%}
+
+  header{display:flex;align-items:center;gap:9px;padding:9px 12px;flex-wrap:wrap;
+         background:var(--bg2);border-bottom:1px solid var(--rand);flex:0 0 auto;
+         padding-top:calc(9px + env(safe-area-inset-top))}
+  header h1{font-size:15px;margin:0 6px 0 0;font-weight:650}
+  .pille{font:12px/1 var(--mono);padding:6px 9px;border-radius:999px;
+         background:var(--bg3);color:var(--tx2);border:1px solid var(--rand);
+         white-space:nowrap}
+  .pille.an{color:var(--ok);border-color:#2c5a45}
+  .pille.arbeit{color:var(--warn);border-color:#5a4526}
+  .pille.rek{color:var(--err);border-color:#5a2c2c}
+  .wachs{flex:1}
+  button{font:inherit;background:var(--bg3);color:var(--tx);border:1px solid var(--rand);
+         border-radius:9px;padding:9px 13px;cursor:pointer;min-height:44px}
+  button:hover:not(:disabled){border-color:var(--ak);color:#fff}
+  button:disabled{opacity:.45;cursor:not-allowed}
+  button.haupt{background:var(--ak);border-color:var(--ak);color:#04121f;font-weight:600}
+  button.klein{min-height:34px;padding:5px 10px;font-size:12.5px}
+  select,input[type=text],textarea{width:100%;background:var(--bg);color:var(--tx);
+        border:1px solid var(--rand);border-radius:9px;padding:11px;font:inherit;
+        min-height:44px}
+  textarea{resize:vertical}
+  label{display:block;margin:14px 0 6px;font-size:12px;color:var(--tx2);
+        text-transform:uppercase;letter-spacing:.6px}
+
+  /* ── Startmaske ─────────────────────────────────────────────── */
+  #start{flex:1;overflow:auto;padding:16px}
+  .karte{background:var(--bg2);border:1px solid var(--rand);border-radius:14px;
+         padding:18px;max-width:640px;margin:0 auto}
+  .karte h2{margin:0 0 6px;font-size:18px}
+  .karte p.hint{margin:0 0 8px;color:var(--tx2);font-size:13px}
+  .fehler{color:var(--err);font-size:13px}
+
+  /* ── Der Verlauf: EINE Spalte ───────────────────────────────── */
+  /* ── Hochformat: die Buehne hat eine FESTE Aufloesung ─────────
+     Diese Seite ist die, von der aufgenommen wird. Ein Reel oder ein Short ist
+     1080x1920 — nimmt man ein Fenster in Fensterform auf, entsteht ein
+     16:9-Video, aus dem hinterher ein Hochkantausschnitt geschnitten werden
+     muss, und WAS darin steht, entscheidet sich erst beim Schneiden. Deshalb
+     steht der Verlauf in einem Kasten mit genau dieser Pixelgroesse, der ueber
+     `transform: scale()` ins Fenster passt: die Anordnung ist dieselbe, egal wie
+     gross das Fenster ist, und der Zuschnitt steht vor der Aufnahme fest.
+     Skaliert wird die ganze Buehne und nicht ihre Schriftgroessen — sonst
+     saehe die Aufnahme bei jedem Fenster anders aus.
+     Am Handy entfaellt das: dort IST der Bildschirm schon hochkant, und eine
+     Buehne von 1080 px auf 400 px herunterskaliert waere nur klein. */
+  #rahmen{flex:1;min-height:0;display:none;position:relative;overflow:hidden;
+          background:#07090c;align-items:center;justify-content:center}
+  #rahmen.an{display:flex}
+  #buehne{display:flex;flex-direction:column;min-height:0;position:relative;
+          width:100%;height:100%;background:var(--bg)}
+  #buehne.fest{flex:none;transform-origin:center center;
+               box-shadow:0 0 0 1px var(--rand),0 24px 70px #000c}
+  /* In der festen Buehne ist der Kasten 1080 px breit — die Schrift der freien
+     Ansicht waere darin eine Ameisenstrasse. Die Groessen hier sind fuer das
+     ZIELFORMAT gewaehlt, nicht fuer den Schreibtisch: was auf einem Telefon in
+     einem Reel lesbar sein soll, ist ungefaehr doppelt so gross wie eine
+     Bedienoberflaeche. */
+  #buehne.fest{font-size:26px}
+  #buehne.fest #strom{padding:30px 28px 40px;gap:22px}
+  #buehne.fest .zeile{max-width:100%;font-size:27px;line-height:1.5}
+  #buehne.fest .zeile.frage,
+  #buehne.fest .zeile.text{padding:18px 24px;border-radius:26px 26px 8px 26px}
+  #buehne.fest .zeile.text{border-radius:26px 26px 26px 8px}
+  #buehne.fest .zeile.denken{font-size:24px;padding-left:20px;border-left-width:4px}
+  #buehne.fest .zeile.wz{font-size:23px;padding:16px 20px;border-radius:16px}
+  #buehne.fest .zeile.sys{font-size:21px}
+  #buehne.fest .zeile.hinweis{font-size:25px;padding:16px 22px}
+  #buehne.fest .karte.erg{border-radius:20px}
+  #buehne.fest .karte.erg > .kk{font-size:22px;padding:14px 20px}
+  #buehne.fest .karte.erg pre{font-size:21px;padding:18px 20px}
+  #buehne.fest .karte.erg .bu{font-size:21px;padding:12px 20px}
+  /* Ein Feldbild ist ungefaehr quadratisch und fuellte bei 1080 px Breite mehr
+     als die halbe Buehne — dann steht kein Satz mehr daneben, der sagt, was
+     man sieht. */
+  #buehne.fest .karte.erg img{max-height:980px;object-fit:contain;
+              object-position:center}
+  #buehne.fest #unten{padding:16px 20px 20px}
+  #buehne.fest .arbeitzeile{padding-bottom:12px;gap:12px}
+  #buehne.fest #arbeit{font-size:20px;gap:9px}
+  #buehne.fest .lampe{font-size:19px;padding:8px 13px;gap:7px}
+  #buehne.fest .lampe .pkt{width:11px;height:11px}
+  #buehne.fest .denkwahl{font-size:19px}
+  #buehne.fest .eingabezeile textarea{font-size:25px;min-height:70px;padding:16px}
+  #buehne.fest .eingabezeile button{font-size:25px;min-height:70px;padding:14px 22px}
+  #buehne.fest .chip{font-size:22px;padding:12px 26px;bottom:190px}
+  /* Der Rand der Buehne ist die Schnittkante — sie muss man sehen, sonst weiss
+     niemand, was im Bild landet. */
+  #buehne.fest::after{content:"";position:absolute;inset:0;pointer-events:none;
+                      border:2px dashed #ffffff22}
+  #strom{flex:1;overflow-y:auto;padding:14px 12px 20px;
+         display:flex;flex-direction:column;gap:10px}
+  .zeile{max-width:min(760px,100%);width:fit-content;white-space:pre-wrap;
+         word-break:break-word}
+  .zeile.frage{align-self:flex-end;background:#1d3550;border:1px solid #2c4c6e;
+               border-radius:14px 14px 4px 14px;padding:10px 13px;max-width:88%}
+  /* Die Antwort wird als Markdown gesetzt (s. <<MD-START>> weiter unten) --
+     deshalb `normal` statt `pre-wrap`: die Absaetze kommen jetzt aus <p>, und
+     mit erhaltenen Zeilenumbruechen stuende zwischen zweien eine leere Zeile.
+     Roh war das ein Reel voller Sternchen. */
+  .zeile.text{align-self:flex-start;background:var(--bg2);border:1px solid var(--rand);
+              border-radius:14px 14px 14px 4px;padding:10px 13px;max-width:92%;
+              white-space:normal}
+  .zeile.text > :first-child{margin-top:0}
+  .zeile.text > :last-child{margin-bottom:0}
+  .zeile.text p{margin:0 0 .65em}
+  .zeile.text h3,.zeile.text h4,.zeile.text h5,.zeile.text h6{
+              margin:.9em 0 .4em;font-size:1.06em;font-weight:650;color:#fff;
+              line-height:1.3}
+  .zeile.text h3{font-size:1.16em}
+  .zeile.text ul,.zeile.text ol{margin:.2em 0 .65em;padding-left:1.5em}
+  .zeile.text li{margin:.18em 0}
+  .zeile.text code{font:.92em/1.4 var(--mono);background:#0b0e13;
+              border:1px solid var(--rand);border-radius:5px;padding:1px 5px}
+  .zeile.text pre.mdcode{margin:.5em 0;padding:10px 12px;background:#0b0e13;
+              border:1px solid var(--rand);border-radius:9px;overflow:hidden;
+              font:.9em/1.5 var(--mono);white-space:pre-wrap;overflow-wrap:anywhere}
+  .zeile.text pre.mdcode code{background:none;border:0;padding:0}
+  .zeile.text blockquote{margin:.5em 0;padding-left:.8em;color:var(--tx2);
+              border-left:3px solid var(--rand)}
+  .zeile.text hr{border:0;border-top:1px solid var(--rand);margin:.8em 0}
+  /* Tabellen sind der Grund, warum das ueberhaupt gesetzt wird: eine
+     Feldanalyse ist eine Tabelle, und `| B_gap | 0,799 T |` als Rohtext ist
+     keine. Ziffern in Tabellenstellung, damit die Spalten stehen. */
+  .zeile.text table{border-collapse:collapse;margin:.5em 0;width:100%;
+              font-size:.92em;font-variant-numeric:tabular-nums}
+  .zeile.text th,.zeile.text td{border:1px solid var(--rand);padding:5px 9px;
+              text-align:left;vertical-align:top}
+  .zeile.text thead th{background:var(--bg3);color:#fff;font-weight:650;
+              white-space:nowrap}
+  .zeile.text tbody tr:nth-child(even){background:#ffffff06}
+  .zeile.denken{align-self:flex-start;color:var(--tx2);font-style:italic;
+                font-size:13.5px;border-left:2px solid var(--rand);padding-left:11px;
+                max-width:92%}
+  /* Der gelbe Kasten traegt EINE Kommandozeile, oft mit langen Pfaden. Vorher
+     stand hier `white-space:pre` mit `overflow-x:auto` — in einem Flex-Element
+     mit `min-width:auto` durfte der Kasten aber nicht schmaler werden als sein
+     Inhalt: er lief rechts hinaus, statt zu scrollen, und der Befehl war
+     abgeschnitten. In einer Aufnahme ist das endgueltig, denn dort scrollt
+     niemand. Also `min-width:0` UND umbrechen statt scrollen. */
+  .zeile.wz{align-self:stretch;min-width:0;width:auto;
+            font:12.5px/1.5 var(--mono);color:var(--warn);
+            background:#1a1712;border:1px solid #3a3120;border-radius:9px;
+            padding:8px 11px;max-width:100%;
+            white-space:pre-wrap;overflow-wrap:anywhere}
+  .zeile.sys{align-self:center;color:var(--tx2);font-size:12px;text-align:center;
+             max-width:100%}
+  .zeile.fehl{align-self:flex-start;color:var(--err)}
+  .zeile.hinweis{align-self:flex-end;background:#241d10;border:1px solid #5a4526;
+                 border-radius:14px;padding:9px 12px;color:var(--warn);max-width:88%}
+
+  /* Ergebnisse und Bilder stehen MITTEN im Verlauf — an der Stelle, an der sie
+     entstanden sind. Genau das ist der Unterschied zur zweispaltigen Seite:
+     dort liest man zwei Zeitachsen nebeneinander, hier eine. */
+  .karte.erg{align-self:stretch;min-width:0;background:var(--bg2);
+             border:1px solid var(--rand);
+             border-radius:12px;overflow:hidden;padding:0;margin:0;max-width:100%}
+  .karte.erg > .kk{display:flex;gap:9px;align-items:center;padding:8px 11px;
+        background:var(--bg3);border-bottom:1px solid var(--rand);
+        font:12px/1.3 var(--mono);color:var(--tx2)}
+  .karte.erg.fehler > .kk{color:var(--err)}
+  .karte.erg .kk .zeit{margin-left:auto;opacity:.75}
+  /* Die Ergebniskachel traegt AUSGERICHTETE Ausgabe -- die Feldkennwerte, den
+     Steckbrief, den Paarvergleich. Umbrechen zerstoert die Spalten, scrollen
+     versteckt sie: in einer Aufnahme zieht niemand eine Spalte auf. Deshalb
+     wird stattdessen die SCHRIFT eingepasst (`preAnpassen`), und zwar auf das
+     90. Hundertstel der Zeilenlaengen -- eine einzige lange Prosazeile drueckte
+     sonst die ganze Tabelle auf Ameisengroesse; Prosa darf umbrechen, eine
+     Tabellenzeile nicht. `min-width:0` an der Kachel, damit sie ueberhaupt
+     schmaler werden darf als ihr laengster Text. */
+  .karte.erg pre{margin:0;padding:10px 12px;
+              font:12.5px/1.5 var(--mono);white-space:pre-wrap;
+              overflow-wrap:anywhere;color:var(--tx);
+              font-variant-numeric:tabular-nums}
+  /* KEIN Hoehendeckel. Er war da, damit eine lange Ausgabe nicht alles
+     wegdrueckt — und schnitt dafuer mitten in die Kennwertetabelle. Genau die
+     Beschwerde. Der Verlauf scrollt ohnehin und zieht von selbst nach; eine
+     lange Kachel kostet also Scrollweg, aber sie verliert nichts. Der Server
+     deckelt die Ausgabe bereits bei MAX_AUSGABE=4000 Zeichen. */
+  .karte.erg img{display:block;width:100%;background:#fff}
+  .karte.erg img.durchsicht{
+    background:
+      linear-gradient(45deg,#0b0e13 25%,transparent 25%,transparent 75%,#0b0e13 75%),
+      linear-gradient(45deg,#0b0e13 25%,#151b23 25%,#151b23 75%,#0b0e13 75%);
+    background-size:18px 18px; background-position:0 0,9px 9px}
+  .karte.erg .bu{padding:6px 11px;font-size:12px;color:var(--tx2)}
+
+  .chip{position:absolute;left:50%;transform:translateX(-50%);z-index:6;display:none;
+        background:var(--ak);border:0;color:#04121f;font-weight:600;font-size:12px;
+        border-radius:999px;padding:7px 15px;box-shadow:0 5px 16px #0009;cursor:pointer;
+        bottom:96px;min-height:0}
+
+  /* ── Eingabe ────────────────────────────────────────────────── */
+  #unten{flex:0 0 auto;border-top:1px solid var(--rand);background:var(--bg2);
+         padding:9px 10px calc(9px + env(safe-area-inset-bottom))}
+  /* Zwei Zeilen, mehr nicht: oben WER GERADE WAS MACHT, unten die Eingabe.
+     Die dritte Zeile trug bis zum 08.09.2026 den Ablagepfad und war damit
+     dauerhaft belegt von etwas, das man einmal am Tag braucht — er sitzt jetzt
+     am Sicherungsknopf (title) und beim Sichern von Hand im Verlauf. */
+  .arbeitzeile{display:flex;gap:8px;align-items:flex-start;padding:0 2px 7px}
+  #arbeit{flex:1;min-width:0;display:flex;flex-wrap:wrap;gap:6px;
+          font:11.5px/1.4 var(--mono);color:var(--tx2)}
+  #arbeit .warn{color:var(--warn)}
+  .denkwahl{flex:0 0 auto;font-size:11.5px;color:var(--tx2);white-space:nowrap;
+            display:flex;align-items:center;gap:5px;margin:0;padding-top:2px;
+            text-transform:none;letter-spacing:0}
+  .denkwahl input{margin:0}
+  /* Aus ema_agent.html uebernommen (dort Zeile 118 ff.) — GLEICHE Klassen und
+     gleiche Signatur von lampe(), damit beide Seiten gleich zu lesen sind. */
+  .lampe{display:inline-flex;align-items:center;gap:5px;font:11.5px/1 var(--mono);
+         padding:5px 8px;border-radius:999px;background:var(--bg3);
+         border:1px solid var(--rand);color:var(--tx2);white-space:nowrap}
+  .lampe b{font-weight:600;color:var(--tx)}
+  .lampe .pkt{width:7px;height:7px;border-radius:50%;background:#3a4450;
+              flex:0 0 auto}
+  .lampe.an{border-color:#2c5a45;color:#cfe}
+  .lampe.an .pkt{background:var(--ok);animation:pulsen 1.4s ease-in-out infinite}
+  .lampe.aus{opacity:.62}
+  .lampe.still{border-color:#5a4526;color:var(--warn)}
+  .lampe.still .pkt{background:var(--warn)}
+  .lampe.fehlt{opacity:.4}
+  .lampe.werkzeug{border-color:#5a4526;color:var(--warn)}
+  .lampe.werkzeug .pkt{background:var(--warn)}
+  @keyframes pulsen{0%,100%{opacity:1}50%{opacity:.25}}
+  /* Am Handy bleibt die Leiste EINE Zeile und wird gewischt. Umbrechend
+     nahm sie dort gemessen sechs Zeilen (alle Lampen sind waehrend eines Laufs
+     taetig) und schob das Gespraech aus dem Bild — und auf dem Handy sass die
+     Fussleiste vorher richtig. Ueber FEST_AB_PX (760) darf sie umbrechen: dort
+     ist die Buehne hoch genug. */
+  @media (max-width: 759px){
+    .arbeitzeile{align-items:center}
+    #arbeit{flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none}
+    #arbeit::-webkit-scrollbar{display:none}
+  }
+  .eingabezeile{display:flex;gap:8px;align-items:flex-end}
+  .eingabezeile textarea{flex:1;min-height:44px;max-height:34vh}
+  #b_ruf.an{border-color:var(--warn);color:var(--warn)}
+  #rufhinweis{font-size:12px;color:var(--warn);padding:0 2px 5px;display:none}
+
+  /* ── Ueberlagerungen: Handy-Zugang, Beitrag, Archiv ─────────── */
+  .lage{position:fixed;inset:0;z-index:40;background:var(--bg);display:none;
+        grid-template-rows:auto 1fr}
+  .lage.an{display:grid}
+  .lage > .kopf{display:flex;gap:10px;align-items:center;padding:10px 12px;
+        background:var(--bg2);border-bottom:1px solid var(--rand);font-size:13px;
+        padding-top:calc(10px + env(safe-area-inset-top))}
+  .lage > .koerper{overflow-y:auto;padding:14px 12px calc(20px + env(safe-area-inset-bottom))}
+  .leer{color:var(--tx2);text-align:center;margin-top:14vh;font-size:13px}
+
+  #qr_bild{image-rendering:pixelated;width:min(280px,72vw);height:auto;
+           background:#fff;padding:8px;border-radius:10px;display:block;margin:0 auto}
+  .adr{font:12.5px/1.5 var(--mono);word-break:break-all;background:var(--bg2);
+       border:1px solid var(--rand);border-radius:9px;padding:10px;margin:12px 0}
+
+  .kanalreihe{display:flex;gap:8px;flex-wrap:wrap}
+  .kanalreihe button.an{background:var(--ak);border-color:var(--ak);color:#04121f}
+  .bildwahl{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .bildwahl label{display:block;margin:0;text-transform:none;letter-spacing:0;
+                  border:1px solid var(--rand);border-radius:9px;padding:6px;
+                  cursor:pointer;font-size:11.5px;color:var(--tx2);width:104px}
+  .bildwahl label.an{border-color:var(--ak);color:var(--tx)}
+  .bildwahl img{width:100%;height:64px;object-fit:cover;border-radius:5px;
+                background:#fff;display:block;margin-bottom:4px}
+  .bildwahl input{display:none}
+  #b_ergebnis pre{white-space:pre-wrap;font:13px/1.55 var(--mono);
+       background:var(--bg2);border:1px solid var(--rand);border-radius:10px;padding:12px}
+  .achtung{color:var(--warn);border-left:3px solid var(--warn);padding-left:10px;
+           margin:10px 0}
+
+  .lauf{background:var(--bg2);border:1px solid var(--rand);border-radius:10px;
+        padding:10px 12px;margin-bottom:9px;cursor:pointer}
+  .lauf.an{border-color:var(--ak);background:#12212b}
+  .lauf .z1{display:flex;gap:8px;align-items:center;flex-wrap:wrap;
+            font:12px/1.4 var(--mono);color:var(--tx2)}
+  .lauf .z1 b{color:var(--tx);font-weight:600}
+  .lauf .auf{font-size:12.5px;color:var(--tx);margin-top:5px}
+  .lauf .leerlauf{font-size:12.5px;color:var(--tx2);margin-top:5px;font-style:italic}
+  #a_links{padding:12px;overflow-y:auto;display:flex;flex-direction:column;gap:10px}
+
+  @media (max-width: 720px){
+    header h1{font-size:14px;width:100%}
+    header{gap:7px;padding:8px 10px}
+    .pille{font-size:11px;padding:5px 8px}
+    button{padding:8px 11px}
+    .kopfknopf span.wort{display:none}   /* am Handy zaehlt das Sinnbild */
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="h_titel">📱 Studio</h1>
+  <span class="pille" id="p_zustand">bereit</span>
+  <span class="pille" id="p_uhr">⏱ 00:00</span>
+  <span class="pille" id="p_projekt" style="display:none"></span>
+  <span class="pille rek" id="p_rek" style="display:none"></span>
+  <span class="wachs"></span>
+  <label class="pille" id="l_luecken" style="display:none;cursor:pointer"
+         title="Aus: alles aufnehmen und hinterher mit dem erzeugten schnitt.sh schneiden">
+    <input type="checkbox" id="c_luecken" checked> Leerlauf aus</label>
+  <select id="f_format" class="pille" onchange="formatWahl(this.value)" style="width:auto"
+          title="Feste Bühnengröße für die Aufnahme — Reel/Short sind 1080x1920">
+    <option value="9:16">📐 9:16 · 1080×1920</option>
+    <option value="4:5">📐 4:5 · 1080×1350</option>
+    <option value="1:1">📐 1:1 · 1080×1080</option>
+    <option value="frei">📐 frei · füllt das Fenster</option>
+  </select>
+  <span class="pille" id="p_aufloesung" title="So groß ist die Bühne wirklich auf dem Schirm — das sind die Bildpunkte, die in der Aufnahme landen"></span>
+  <button class="klein kopfknopf" id="b_beitrag" onclick="beitragAuf()"
+          title="Entwurf für Instagram oder X aus diesem Projekt">📣 <span class="wort">Beitrag</span></button>
+  <button class="klein kopfknopf" onclick="handyAuf()"
+          title="Diese Seite auf dem Handy öffnen">📱 <span class="wort">Handy</span></button>
+  <button class="klein kopfknopf" id="b_video" onclick="videoUm()"
+          title="Bildschirm mitschneiden — 5 B/s, ~5 MB je Minute">🎥 <span class="wort">Aufnahme</span></button>
+  <button class="klein kopfknopf" onclick="archivAuf()">🗂 <span class="wort">Läufe</span></button>
+  <button class="klein kopfknopf" id="b_sichern" onclick="sichernJetzt()"
+          style="display:none">💾</button>
+  <button class="klein kopfknopf" id="b_stopp" onclick="stoppen()" style="display:none">⛔</button>
+</header>
+
+<!-- ── Startmaske ───────────────────────────────────────────────── -->
+<div id="start">
+  <div class="karte">
+    <h2>Studio starten</h2>
+    <p class="hint">Ein eigener Agent, neben PI und Hermes. Er <b>schreibt über
+       das, was gerechnet wurde</b> — er rechnet nicht von sich aus. Fakten holt
+       er aus dem Steckbrief des Projekts, Beiträge baut er mit
+       <code>cae_cli.py beitrag</code>.</p>
+    <label for="f_projekt">Projekt</label>
+    <select id="f_projekt"></select>
+    <label for="f_sitzung">Sitzung</label>
+    <select id="f_sitzung"></select>
+    <label for="f_modell">Modell</label>
+    <input type="text" id="f_modell" value="">
+    <label for="f_prompt">Erster Auftrag (optional)</label>
+    <textarea id="f_prompt" rows="3"
+      placeholder="z. B.: Was ist beim letzten Lauf herausgekommen? Danach ein Beitrag für X."></textarea>
+    <div style="display:flex;align-items:center;gap:12px;margin-top:16px">
+      <button class="haupt" id="b_start" onclick="starten()">▶ Starten</button>
+      <span class="fehler" id="f_fehler"></span>
+    </div>
+    <p class="hint" style="margin-top:14px">
+      Läuft schon ein Studio-Agent, knüpft diese Seite von selbst an ihn an —
+      auch vom Handy aus, mitten im Gespräch.</p>
+  </div>
+</div>
+
+<!-- ── Der Verlauf. Der Rahmen ist der schwarze Grund, die Buehne der Kasten
+     mit fester Aufloesung, aus dem das Reel entsteht. ─────────────── -->
+<div id="rahmen">
+<div id="buehne">
+  <div id="strom"></div>
+  <button class="chip" id="chip_strom" onclick="nachUnten('strom')">⤓ Neues</button>
+  <div id="unten">
+    <!-- Zeile 1: wer gerade was macht — und rechts das Haekchen, das frueher
+         eine eigene vierte Zeile brauchte. -->
+    <div class="arbeitzeile">
+      <div id="arbeit"></div>
+      <label class="denkwahl">
+        <input type="checkbox" id="c_denken" checked onchange="denkenUm()"> Denken zeigen
+      </label>
+    </div>
+    <div id="rufhinweis">📣 Zwischenruf: wird nach dem laufenden Zug übergeben.</div>
+    <!-- Zeile 2: die Eingabe, ueber die volle Breite. -->
+    <div class="eingabezeile">
+      <button class="klein" id="b_ruf" onclick="rufUm()"
+              title="Zwischenruf — geht auch mitten im Zug">📣</button>
+      <textarea id="eingabe" rows="1" placeholder="Auftrag …"
+                onkeydown="tastatur(event)"></textarea>
+      <button class="haupt" id="b_senden" onclick="senden()">➤</button>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ── Handy-Zugang ─────────────────────────────────────────────── -->
+<div class="lage" id="handy">
+  <div class="kopf">📱 <b>Auf dem Handy öffnen</b><span class="wachs"></span>
+    <button class="klein" onclick="$('handy').classList.remove('an')">← zurück</button></div>
+  <div class="koerper" id="handy_inhalt"></div>
+</div>
+
+<!-- ── Beitragswerkstatt ────────────────────────────────────────── -->
+<div class="lage" id="beitrag">
+  <div class="kopf">📣 <b>Beitrag</b>
+    <span id="b_zustand" style="color:var(--tx2);font-size:12px"></span>
+    <span class="wachs"></span>
+    <button class="klein" onclick="$('beitrag').classList.remove('an')">← zurück</button></div>
+  <div class="koerper">
+    <p class="hint" style="color:var(--tx2);font-size:13px;margin-top:0">
+      Aus dem, was <b>gerechnet</b> wurde: Text, Hashtags, Bildauswahl,
+      Alternativtexte — und aus den Marken der Bildschirmaufnahme
+      Schnittvorschläge. <b>Veröffentlicht wird nichts</b>: der Entwurf wird
+      abgelegt und kopiert.</p>
+    <label for="b_projekt">Projekt</label>
+    <select id="b_projekt" onchange="beitragMaterial()"></select>
+    <label>Kanal</label>
+    <div class="kanalreihe" id="b_kanal">
+      <button class="klein an" data-k="instagram" onclick="kanalWahl(this)">Instagram</button>
+      <button class="klein" data-k="x" onclick="kanalWahl(this)">X</button>
+    </div>
+    <label>Ton und Sprache</label>
+    <div class="kanalreihe">
+      <select id="b_ton" style="width:auto">
+        <option value="sachlich">sachlich</option>
+        <option value="begeistert">begeistert</option>
+        <option value="trocken">trocken</option>
+      </select>
+      <select id="b_sprache" style="width:auto">
+        <option value="de">Deutsch</option>
+        <option value="en">English</option>
+      </select>
+    </div>
+    <label>Bilder <span id="b_bildzahl" style="text-transform:none"></span></label>
+    <div class="bildwahl" id="b_bilder"></div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:16px;flex-wrap:wrap">
+      <button class="haupt" id="b_los" onclick="beitragBauen()">✍ Entwurf erzeugen</button>
+      <span id="b_lauf" style="color:var(--tx2);font-size:12.5px"></span>
+    </div>
+    <div id="b_ergebnis" style="margin-top:16px"></div>
+  </div>
+</div>
+
+<!-- ── Archiv ───────────────────────────────────────────────────── -->
+<div class="lage" id="archiv">
+  <div class="kopf">🗂 <b id="a_titel">Frühere Läufe</b>
+    <span id="a_wo" style="color:var(--tx2);font-size:12px"></span>
+    <span class="wachs"></span>
+    <span id="a_hinweis" style="color:var(--tx2);font-size:12px"></span>
+    <button class="klein" onclick="archivZu()">← zurück</button></div>
+  <div class="koerper" style="display:grid;grid-template-rows:auto 1fr;min-height:0;padding:0">
+    <div id="a_liste" style="max-height:38vh;overflow-y:auto;padding:12px"></div>
+    <div id="a_links"></div>
+  </div>
+</div>
+
+<!-- Welcher Kopf: die Studio-SEITE gehoert dem Studio-KOPF. Ueber den QR
+     kommt sie ohne ?kopf= herein -- ohne diese Zeile triebe das Handy PI. -->
+<script>window.KOPF_VORGABE = "studio";</script>
+<script src="/agent_gemein.js"></script>
+<script>
+// ── Diese Seite ist EINE Spalte ──────────────────────────────────
+// Verhalten (Strom, Uhr, Mitlaufen, Archiv, Aufnahme) steht in
+// agent_gemein.js — dieselbe Datei, die ema_agent.html einbindet. Hier steht
+// nur das Aussehen: alles untereinander, in der Reihenfolge des Geschehens.
+// Deshalb zeigen BEIDE Spaltennamen auf denselben Behälter.
+SPALTEN = {l:'strom', r:'strom'};
+let RUFMODUS = false;
+
+// ── Hochformat: die Buehne hat eine feste Aufloesung ─────────────
+// Ein Reel und ein Short sind 1080x1920. Nimmt man ein Fenster in Fensterform
+// auf, entsteht ein 16:9-Video, aus dem der Hochkantausschnitt erst hinterher
+// geschnitten wird — und dann entscheidet sich beim Schneiden, was drin ist.
+// Hier steht der Kasten VOR der Aufnahme fest; skaliert wird er als Ganzes, die
+// Anordnung darin ist damit unabhaengig von der Fenstergroesse.
+const FORMATE = {'9:16': [1080, 1920], '4:5': [1080, 1350],
+                 '1:1': [1080, 1080], 'frei': null};
+const FORMAT_VORGABE = '9:16';
+// Unter dieser Breite ist das Fenster selbst schon ein Hochformat (ein Telefon).
+// Eine 1080er Buehne auf 400 px herunterzuskalieren machte sie nur klein.
+const FEST_AB_PX = 760;
+let FORMAT = FORMAT_VORGABE;
+
+function formatWahl(name){
+  FORMAT = FORMATE[name] !== undefined ? name : FORMAT_VORGABE;
+  try{ localStorage.setItem('studio_format', FORMAT); }catch(_){}
+  $('f_format').value = FORMAT;
+  buehneMessen();
+}
+function buehneMessen(){
+  const r = $('rahmen'), b = $('buehne');
+  const f = FORMATE[FORMAT];
+  if(!f || innerWidth < FEST_AB_PX){
+    b.classList.remove('fest');
+    b.style.width = b.style.height = b.style.transform = '';
+    // Am Handy hat die Formatwahl keine Wirkung — der Schirm IST schon hochkant.
+    // Das Auswahlfeld stehen zu lassen, ohne es zu sagen, waere eine Behauptung.
+    const eng = innerWidth < FEST_AB_PX;
+    $('f_format').style.opacity = eng ? '.45' : '';
+    $('f_format').title = eng
+      ? 'Am Handy ohne Wirkung — der Schirm ist schon hochkant.'
+      : 'Feste Bühnengröße für die Aufnahme — Reel/Short sind 1080x1920';
+    const p = $('p_aufloesung');
+    p.style.display = eng ? '' : 'none';
+    p.className = 'pille';
+    p.textContent = eng ? '📱 füllt den Schirm' : '';
+    return;
+  }
+  $('f_format').style.opacity = '';
+  b.classList.add('fest');
+  b.style.width  = f[0] + 'px';
+  b.style.height = f[1] + 'px';
+  // Ganzzahlig NICHT runden: eine Buehne, die um zwei Pixel zu gross ist,
+  // schneidet unten die Eingabezeile ab.
+  const k = Math.min(r.clientWidth / f[0], r.clientHeight / f[1]);
+  b.style.transform = 'scale(' + k + ')';
+  aufloesungZeigen(f, k);
+  // Die Buehne ist in allen Formaten 1080 breit; die freie Ansicht nicht.
+  // Nach jedem Wechsel wird deshalb neu eingepasst.
+  document.querySelectorAll('#strom pre').forEach(preAnpassen);
+}
+
+// Was WIRKLICH aufgenommen wird. Die Bühne ist 1080x1920 gross, aber sie steht
+// verkleinert auf dem Schirm — und aufgenommen werden die Bildpunkte des
+// Schirms, nicht die der Bühne. Ein 1102 px hohes Fenster liefert rund 950
+// Zeilen; der Zuschnitt rechnet sie hinterher auf 1920 hoch, und genau das
+// sieht man dem Reel an. Diese Zahl steht deshalb daneben, statt dass hinterher
+// jemand raetselt, warum das Video weich aussieht: ein hoeheres Fenster oder
+// ein Bildschirm mit doppelter Punktdichte ist die einzige Abhilfe.
+function aufloesungZeigen(f, k){
+  const p = $('p_aufloesung');
+  if(!p) return;
+  if(!f){ p.style.display = 'none'; return; }
+  const dpr = window.devicePixelRatio || 1;
+  const bx = Math.round(f[0] * k * dpr), by = Math.round(f[1] * k * dpr);
+  const knapp = by < f[1] * 0.98;
+  p.style.display = '';
+  p.textContent = (knapp ? '⚠ ' : '✓ ') + bx + '×' + by + ' aufgenommen';
+  p.className = 'pille' + (knapp ? ' arbeit' : ' an');
+  p.title = knapp
+    ? `Die Bühne steht ${bx}×${by} Bildpunkte gross auf dem Schirm — der `
+      + `Zuschnitt rechnet sie auf ${f[0]}×${f[1]} hoch, das Reel wird weicher. `
+      + `Abhilfe: höheres Fenster (Vollbild F11) oder ein Bildschirm mit `
+      + `doppelter Punktdichte.`
+    : `Die Bühne wird in voller Zielauflösung aufgenommen.`;
+}
+addEventListener('resize', buehneMessen);
+try{
+  const gemerkt = localStorage.getItem('studio_format');
+  if(gemerkt && FORMATE[gemerkt] !== undefined) FORMAT = gemerkt;
+}catch(_){}
+
+// Wohin die Buehne im Fenster faellt — in Fensterpixeln, wie die Aufnahme sie
+// sieht. Daraus wird die Zuschnittzeile fuers ffmpeg (s. ema_beitrag.clips):
+// ohne sie muesste jemand den Ausschnitt hinterher im Bild suchen.
+function buehneRechteck(){
+  const b = $('buehne');
+  if(!b.classList.contains('fest')) return null;
+  const r = b.getBoundingClientRect();
+  return {x: Math.round(r.left), y: Math.round(r.top),
+          w: Math.round(r.width), h: Math.round(r.height),
+          soll: FORMATE[FORMAT]};
+}
+// Wird von agent_gemein.js aufgerufen, sobald eine Aufnahme laeuft.
+function nachAufnahmeStart(strom){
+  const b = buehneRechteck();
+  if(!b) return;
+  let s = {};
+  try{ s = strom.getVideoTracks()[0].getSettings() || {}; }catch(_){}
+  rekTaetig('format',
+    `Hochformat ${b.soll[0]}x${b.soll[1]} · Buehne ${b.x},${b.y} ${b.w}x${b.h} ` +
+    `im Fenster ${Math.round(innerWidth)}x${Math.round(innerHeight)} ` +
+    `· Aufnahme ${s.width || 0}x${s.height || 0}`);
+}
+
+// ── Startmaske ───────────────────────────────────────────────────
+const fehler = t => { $('f_fehler').textContent = t; };
+
+async function auswahlLaden(){
+  try{
+    const d = await (await fetch(K('/agent/auswahl'))).json();
+    LABEL = d.kopf_label || 'Studio';
+    $('f_modell').value = d.modell || '';
+    const opt = (d.projekte||[]).map(x =>
+      `<option value="${esc(x.id)}">${esc(x.id)}${x.gerechnet?' · gerechnet':' · offen'}</option>`).join('');
+    $('f_projekt').innerHTML = '<option value="">— kein Projekt binden —</option>' + opt;
+    $('b_projekt').innerHTML = opt || '<option value="last">letztes Projekt</option>';
+    $('f_sitzung').innerHTML = '<option value="">neue Sitzung</option>' +
+      (d.sitzungen||[]).map(x => `<option value="${esc(x.id)}">${esc(x.stand)} · ${esc(x.titel||x.id.slice(0,8))}</option>`).join('');
+    const wunsch = new URLSearchParams(location.search).get('projekt') || '';
+    if(wunsch) $('f_projekt').value = wunsch;
+    if(!d.programm) fehler('Der Agent (pi) ist nicht installiert oder nicht auffindbar.');
+  }catch(e){ fehler('Auswahl nicht ladbar: ' + e.message); }
+}
+
+// An einen schon laufenden Agenten wieder anknuepfen. Am Handy ist das der
+// Normalfall und nicht die Ausnahme: das Gespraech laeuft am Schreibtisch, und
+// unterwegs wird weitergeschrieben. Der Ringpuffer (?ab=0) zeichnet den
+// bisherigen Verlauf nach, statt ein leeres Fenster zu zeigen.
+async function anknuepfen(){
+  try{
+    const z = await (await fetch(K('/agent/status'))).json();
+    if(!z.laeuft) return false;
+    buehneAn(z.modell, z.projekt);
+    zustand(z.beschaeftigt ? 'arbeitet' : 'bereit');
+    T0 = z.start_ts || (Date.now()/1000 - (z.sekunden || 0)); uhrTick();
+    if(z.ordner) ordnerZeigen(z.ordner);
+    LETZT = 0;
+    LAEUFT = true; lauschen();
+    return true;
+  }catch(e){ return false; }
+}
+
+function buehneAn(modell, projekt){
+  $('start').style.display = 'none';
+  $('rahmen').classList.add('an');
+  buehneMessen();
+  $('b_stopp').style.display = '';
+  $('b_sichern').style.display = '';
+  const p = $('p_projekt');
+  p.style.display = ''; p.textContent = projekt || 'ohne Projekt';
+  if(projekt) $('b_projekt').value = projekt;
+  arbeitStart();
+}
+
+async function starten(){
+  fehler('');
+  $('b_start').disabled = true;
+  const koerper = {modell: $('f_modell').value.trim(),
+                   projekt: $('f_projekt').value,
+                   sitzung: $('f_sitzung').value,
+                   prompt: $('f_prompt').value.trim(),
+                   // Entwurfsschleifen sind eine Anweisung ans Auslegen. Dieser
+                   // Kopf legt nichts aus; das Feld waere eine Behauptung.
+                   schleifen: 0};
+  try{
+    const a = await (await fetch(K('/agent/start'), {method:'POST',
+        headers:{'Content-Type':'application/json'}, body: JSON.stringify(koerper)})).json();
+    if(!a.ok){ fehler(a.grund || 'Start fehlgeschlagen.'); $('b_start').disabled = false; return; }
+    buehneAn(a.modell, a.projekt);
+    T0 = Date.now()/1000; ZUG0 = ZUG_LETZT = 0; uhrTick();
+    LAEUFT = true; lauschen();
+  }catch(e){ fehler(e.message); $('b_start').disabled = false; }
+}
+
+// ── Markdown ─────────────────────────────────────────────────────
+// Das Modell antwortet in Markdown, und roh gesetzt stehen im Bild Sternchen,
+// Rauten und Rohrzeichen. In einer Bedienoberflaeche ist das haesslich; in
+// einem Reel ist es der Unterschied zwischen fertig und unfertig — und eine
+// Feldanalyse ist eine TABELLE, die als `| B_gap | 0,799 T |` keine ist.
+//
+// Bewusst KEINE Bibliothek: der ganze Block ist kleiner als ihr Ladevorgang,
+// und er darf nur, was hier vorkommt. Der Text ist vorher durch `esc()`
+// gegangen — es wird also gesetzt, was das Modell schrieb, und nicht, was es
+// an HTML hineinschmuggeln wollte.
+//
+// Der Block zwischen den Marken wird von test_studio.py mit `node` gegen feste
+// Beispiele geprueft; er darf deshalb nichts ausser `esc` voraussetzen.
+// <<MD-START>>
+function mdSpalten(z){
+  return z.replace(/^\s*\|/, '').replace(/\|\s*$/, '').split('|').map(c => c.trim());
+}
+function mdTrenner(z){
+  return /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/.test(z || '');
+}
+function mdListe(z){ return /^\s*([-*•]|\d+[.)])\s+/.test(z || ''); }
+
+function mdText(s){
+  // Code zuerst herausnehmen: in `a**b**c` ist das keine Fettschrift.
+  const code = [];
+  s = s.replace(/`([^`]+)`/g, (_, c) => '\u0000' + (code.push(c) - 1) + '\u0000');
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+  s = s.replace(/~~([^~]+)~~/g, '<s>$1</s>');
+  // Kursiv nur an Wortgrenzen — sonst zerlegt ein Dateiname mit Unterstrich
+  // (`em_field_load.png`) sich selbst in Kursivschrift.
+  s = s.replace(/(^|[\s(\[])\*([^*\n]+)\*(?=[\s.,;:)\]!?]|$)/g, '$1<i>$2</i>');
+  s = s.replace(/(^|[\s(\[])_([^_\n]+)_(?=[\s.,;:)\]!?]|$)/g, '$1<i>$2</i>');
+  return s.replace(/\u0000(\d+)\u0000/g, (_, n) => '<code>' + code[+n] + '</code>');
+}
+
+function markdown(roh){
+  // Zerlegt wird der ROHE Text, gesetzt wird jedes Stueck einzeln durch esc().
+  // Andersherum -- erst escapen, dann zerlegen -- waere ein Zitat kein Zitat
+  // mehr: aus `>` ist dann `&gt;` geworden, und die Blockerkennung sieht es
+  // nicht. (Genau so gemessen.)
+  const z = String(roh == null ? '' : roh).split('\n');
+  const aus = [];
+  let i = 0;
+  while(i < z.length){
+    const zeile = z[i];
+
+    if(/^\s*```/.test(zeile)){                       // Codeblock
+      const inhalt = [];
+      i++;
+      while(i < z.length && !/^\s*```/.test(z[i])) inhalt.push(z[i++]);
+      i++;                                          // schliessende Zeile (oder Ende)
+      aus.push('<pre class="mdcode">' + esc(inhalt.join('\n')) + '</pre>');
+      continue;
+    }
+    if(zeile.includes('|') && mdTrenner(z[i + 1])){  // Tabelle
+      const kopf = mdSpalten(zeile);
+      i += 2;
+      const reihen = [];
+      while(i < z.length && z[i].includes('|') && z[i].trim()) reihen.push(mdSpalten(z[i++]));
+      aus.push('<table><thead><tr>' +
+               kopf.map(c => '<th>' + mdText(esc(c)) + '</th>').join('') +
+               '</tr></thead><tbody>' +
+               reihen.map(r => '<tr>' + r.map(c => '<td>' + mdText(esc(c)) + '</td>').join('') +
+                               '</tr>').join('') +
+               '</tbody></table>');
+      continue;
+    }
+    let m = zeile.match(/^(#{1,6})\s+(.*)$/);        // Ueberschrift
+    if(m){
+      // Zwei Stufen tiefer: eine Blase im Verlauf ist kein Dokument, und ein
+      // <h1> darin waere so gross wie die Kopfzeile der Seite.
+      const n = Math.min(6, m[1].length + 2);
+      aus.push('<h' + n + '>' + mdText(esc(m[2])) + '</h' + n + '>');
+      i++;
+      continue;
+    }
+    if(/^\s*([-*_])\s*\1\s*\1[\s\-*_]*$/.test(zeile)){  // Trennlinie
+      aus.push('<hr>');
+      i++;
+      continue;
+    }
+    if(mdListe(zeile)){                              // Liste
+      const geordnet = /^\s*\d+[.)]\s/.test(zeile);
+      const punkte = [];
+      while(i < z.length && mdListe(z[i]))
+        punkte.push(z[i++].replace(/^\s*([-*•]|\d+[.)])\s+/, ''));
+      const t = geordnet ? 'ol' : 'ul';
+      aus.push('<' + t + '>' +
+               punkte.map(p => '<li>' + mdText(esc(p)) + '</li>').join('') + '</' + t + '>');
+      continue;
+    }
+    if(/^\s*>\s?/.test(zeile)){                      // Zitat
+      const teile = [];
+      while(i < z.length && /^\s*>\s?/.test(z[i])) teile.push(z[i++].replace(/^\s*>\s?/, ''));
+      aus.push('<blockquote>' + mdText(esc(teile.join(' '))) + '</blockquote>');
+      continue;
+    }
+    if(!zeile.trim()){ i++; continue; }              // Leerzeile
+
+    const absatz = [];                               // Absatz
+    while(i < z.length && z[i].trim() && !/^\s*(```|#{1,6}\s|>)/.test(z[i]) &&
+          !mdListe(z[i]) && !(z[i].includes('|') && mdTrenner(z[i + 1])))
+      absatz.push(z[i++]);
+    if(!absatz.length) absatz.push(z[i++]);          // Sicherung: nie stehenbleiben
+    // Ein Zeilenumbruch INNERHALB eines Absatzes ist keiner: das Modell bricht
+    // seinen Text bei achtzig Zeichen um, und als <br> gesetzt ergibt das eine
+    // ausgefranste rechte Kante — im Reel sieht man nichts anderes. Ein
+    // AUSDRUECKLICHER harter Umbruch (zwei Leerzeichen am Zeilenende) bleibt
+    // einer; so ist es in Markdown auch gemeint.
+    const fluss = absatz.map((zz, n) =>
+      zz.replace(/\s+$/, '') +
+      (n < absatz.length - 1 && /(  |\\)$/.test(zz) ? '\u0001' : '')).join(' ');
+    // Der harte Umbruch verschluckt das Trennzeichen, das der Fluss sonst
+    // gesetzt haette — sonst begaenne die naechste Zeile mit einem Leerzeichen.
+    aus.push('<p>' + mdText(esc(fluss)).split('\u0001 ').join('<br>')
+                                       .split('\u0001').join('<br>') + '</p>');
+  }
+  return aus.join('');
+}
+// <<MD-END>>
+
+// Wie eine Blase gefuellt wird — der Rueckruf, den agent_gemein.js sucht.
+// Neu gesetzt wird je Bild und nicht je Zeichen: PI schickt fuer eine Antwort
+// gut hundert Deltas, und hundert Neuaufbauten waeren hundert zerstoerte
+// Textmarkierungen.
+function blaseFuellen(b, art){
+  if(art !== 'text'){ b.textContent = b.dataset.roh || ''; return; }
+  if(b._md) return;
+  b._md = requestAnimationFrame(() => {
+    b._md = 0;
+    b.innerHTML = markdown(b.dataset.roh || '');
+    b.querySelectorAll('pre.mdcode').forEach(preAnpassen);
+    runter($(SPALTEN.l));
+  });
+}
+
+// ── Ausgerichtete Ausgabe einpassen ──────────────────────────────
+// Gemessen an echten Ausgaben dieses Werkzeugs: `steckbrief` 97 Zeichen breit,
+// `sicherheit` 212, `paarvergleich` 418. Umbrechen zerstoert die Spalten,
+// scrollen versteckt sie (in einer Aufnahme zieht niemand etwas auf). Also wird
+// die Schrift eingepasst — auf das 90. Hundertstel der Zeilenlaengen, nicht auf
+// die laengste: eine einzelne Prosazeile drueckte sonst die ganze Tabelle auf
+// Ameisengroesse, und Prosa DARF umbrechen.
+const PRE_MIN_PX = 13;
+let ZEICHEN_K = 0;                 // Zeichenbreite je Schriftgrad, gemessen
+function zeichenBreite(el){
+  if(ZEICHEN_K) return ZEICHEN_K;
+  const p = document.createElement('span');
+  p.style.cssText = 'position:absolute;visibility:hidden;white-space:pre;font:100px ' +
+                    getComputedStyle(el).fontFamily;
+  p.textContent = '0123456789';
+  document.body.appendChild(p);
+  ZEICHEN_K = p.getBoundingClientRect().width / 10 / 100;
+  p.remove();
+  return ZEICHEN_K || 0.6;
+}
+// Welche Zeile den Ausschlag gibt. Ein Hundertstelwert ueber ALLE Zeilen war
+// gemessen falsch: die `welle`-Ausgabe hat drei Prosazeilen von 190-228 Zeichen
+// neben einem Block ausgerichteter Zeilen von 35-65 — auf die Prosa eingepasst
+// schrumpfte die ganze Kachel auf den Boden, obwohl die Prosa umbrechen DARF.
+// Unterschieden wird an der Spaltenluecke: zwei oder mehr Leerzeichen mitten in
+// der Zeile (oder ein Tabulator, oder ein Rohrzeichen) heisst „hier stehen
+// Spalten"; Prosa hat einfache Wortabstaende.
+function _sollBreite(text){
+  const zeilen = String(text || '').split('\n');
+  // Nur die Spaltenluecke und der Tabulator zaehlen. Ein Rohrzeichen NICHT:
+  // gemessen an der `welle`-Ausgabe steht `(|B| p95 ...)` mitten in einem
+  // Prosasatz von 228 Zeichen — damit galt die Prosa als Tabelle und drueckte
+  // die ganze Kachel auf den Boden. Eine echte Tabellenzeile faengt mit einem
+  // Rohrzeichen an und hoert damit auf.
+  const spalten = zeilen.filter(z => /\S {2,}\S/.test(z) || z.includes('\t') ||
+                                     /^\s*\|.*\|\s*$/.test(z));
+  if(spalten.length) return Math.max.apply(null, spalten.map(z => z.length));
+  const l = zeilen.map(z => z.length).sort((a, b) => a - b);
+  return l[Math.min(l.length - 1, Math.floor(l.length * 0.75))] || 1;
+}
+function preAnpassen(pre){
+  pre.style.fontSize = '';
+  const basis = parseFloat(getComputedStyle(pre).fontSize) || 13;
+  const breite = pre.clientWidth - 6;
+  const text = pre.textContent || '';
+  if(breite <= 0 || !text) return null;
+  const k = zeichenBreite(pre);
+  // Ein Zeichen Luft: ohne das brach eine 94 Zeichen breite Tabelle um, weil
+  // nach dem Abrunden 93 passten — ein Pixel Unterschied, aber zwei umbrochene
+  // Zeilen und ein Hinweis, der nichts sagt.
+  const fs = Math.max(PRE_MIN_PX, Math.min(basis, breite / (_sollBreite(text) + 1) / k));
+  pre.style.fontSize = fs.toFixed(1) + 'px';
+  const laengen = text.split('\n').map(x => x.length);
+  return {soll: _sollBreite(text), max: Math.max.apply(null, laengen),
+          passt: Math.floor(breite / (fs * k))};
+}
+
+// ── Zeichnen: alles untereinander ────────────────────────────────
+function links(art, text){
+  const d = document.createElement('div');
+  d.className = 'zeile ' + art;
+  d.textContent = text;
+  const sp = $(SPALTEN.l);
+  sp.appendChild(d); runter(sp);
+  return d;
+}
+function denkenUm(){
+  const zeig = $('c_denken').checked;
+  document.querySelectorAll('.zeile.denken').forEach(x => x.style.display = zeig ? '' : 'none');
+}
+
+function karte(k){
+  const sp = $(SPALTEN.r);
+  sp.appendChild(k);
+  if(SPALTEN.r === 'strom') rekTaetig(k.dataset.markeArt || '', k.dataset.markeText || '');
+  runter(sp);
+}
+function kachelText(e){
+  if(!e.text || !e.text.trim()) return;
+  const k = document.createElement('div');
+  k.className = 'karte erg' + (e.fehler ? ' fehler' : '');
+  k.innerHTML = `<div class="kk">${e.ablage ? '💾' : (e.fehler ? '⚠' : '✓')} ${esc(e.name)}` +
+                `<span class="zeit">${uhrStempel(e.t)}</span></div>` +
+                `<pre>${esc(e.text)}</pre>` +
+                (e.gekuerzt ? `<div class="bu">gekürzt — ${e.voll} Zeichen insgesamt</div>` : '') +
+                (e.ablage ? `<div class="bu">📄 im Projekt: ${esc(e.ablage)}</div>` : '');
+  k.dataset.markeArt = e.fehler ? 'fehler' : 'ergebnis';
+  k.dataset.markeText = (e.name || '') + ': ' + String(e.text || '').slice(0, 90);
+  karte(k);
+  // Erst im Baum steht die Breite fest.
+  const pre = k.querySelector('pre');
+  const m = pre && preAnpassen(pre);
+  // Gemeldet wird nur, wenn die AUSGERICHTETEN Zeilen nicht passen — dann ist
+  // eine Tabelle zerbrochen. Dass ein langer Prosasatz umbricht, ist kein
+  // Befund, sondern der Normalfall.
+  if(m && m.soll > m.passt){
+    // Sagen, statt es zu verstecken: der Paarvergleich ist gemessen 418 Zeichen
+    // breit, und der passt in kein Hochformat. Wer das nicht liest, haelt eine
+    // umgebrochene Tabelle fuer die ganze Antwort.
+    const bu = document.createElement('div');
+    bu.className = 'bu';
+    bu.textContent = `Tabelle ${m.soll} Zeichen breit, ${m.passt} passen — ` +
+                     `umgebrochen; ungekürzt im abgelegten Text`;
+    k.appendChild(bu);
+  }
+}
+function kachelBild(e){
+  const k = document.createElement('div');
+  k.className = 'karte erg';
+  const url = '/agent/bild/' + encodeURIComponent(e.projekt) + '/' +
+              encodeURIComponent(e.unter) + '/' + encodeURIComponent(e.datei);
+  // Feldbilder sind durchsichtig gerendert — sie bekommen das Schachbrett statt
+  // des weissen Grundes, sonst sieht man die Durchsicht nicht.
+  const durch = /^feld_/i.test(e.datei) ? ' class="durchsicht"' : '';
+  k.innerHTML = `<div class="kk">🖼 ${esc(e.datei)}<span class="zeit">${uhrStempel(e.t)}</span></div>` +
+                `<img${durch} src="${url}" alt="${esc(e.datei)}" loading="lazy">` +
+                `<div class="bu">${esc(e.projekt)}</div>`;
+  k.dataset.markeArt = 'bild';
+  k.dataset.markeText = e.datei || '';
+  const bild = k.querySelector('img'), ziel = SPALTEN.r;
+  bild.addEventListener('load',  () => runter($(ziel)));
+  bild.addEventListener('error', () => runter($(ziel)));
+  karte(k);
+}
+
+// Wo dieser Lauf liegt. Am Schreibtisch steht der Pfad dauerhaft in der Fusszeile;
+// hier ist die Fusszeile zwei Zeilen hoch und die Buehne 1080 px breit — ein Pfad
+// mit Auslassungspunkten haette die Symbole verdraengt fuer eine Angabe, die man
+// einmal braucht. Er sitzt deshalb am Sicherungsknopf (title, immer abrufbar) und
+// erscheint im Verlauf, wenn von Hand gesichert wurde: dort gehoert er
+// chronologisch hin, wie jedes andere Ereignis dieser Seite.
+function pfadAnKnopf(text){
+  const b = $('b_sichern'); if(b) b.title = text;
+}
+function ordnerZeigen(o){ pfadAnKnopf('💾 Jetzt sichern — Ordner: ' + o); }
+function gesichertZeigen(a){
+  if(a.fehler){ links('fehl', '⚠ Sichern: ' + a.fehler); return; }
+  const wo = a.pfad + (a.kacheln != null ? '  (' + a.kacheln + ' Ergebnisse)' : '');
+  pfadAnKnopf('💾 Jetzt sichern — zuletzt: ' + wo);
+  if(a.hand) links('sys', '💾 gesichert: ' + wo);
+}
+
+function zustand(s){
+  const p = $('p_zustand');
+  p.textContent = s;
+  p.className = 'pille' + (s === 'arbeitet' ? ' arbeit' : s === 'bereit' ? ' an' : '');
+  // Der Zwischenruf bleibt waehrend der Arbeit ausdruecklich bedienbar — das ist
+  // sein ganzer Zweck. Nur der Auftrag wartet auf das Zugende.
+  $('b_senden').disabled = (s === 'arbeitet' && !RUFMODUS) || !LAEUFT;
+  $('eingabe').disabled  = !LAEUFT;
+  $('b_ruf').disabled    = !LAEUFT;
+}
+
+// ── Eingabe: ein Feld, zwei Wege ─────────────────────────────────
+// Am Schreibtisch stehen Auftrag und Zwischenruf untereinander. Auf einem
+// Handydisplay waeren das zwei Felder fuer eine Handlung; hier schaltet ein
+// Knopf um, und WAS gerade passiert, steht darueber.
+function rufUm(){
+  RUFMODUS = !RUFMODUS;
+  $('b_ruf').classList.toggle('an', RUFMODUS);
+  $('rufhinweis').style.display = RUFMODUS ? '' : 'none';
+  $('eingabe').placeholder = RUFMODUS ? 'Zwischenruf …' : 'Auftrag …';
+  zustand($('p_zustand').textContent);
+}
+function tastatur(ev){
+  // Auf dem Handy ist Enter die Zeilenschaltung — dort wird mit dem Knopf
+  // gesendet. Am Schreibtisch sendet Enter, wie ueberall sonst auch.
+  if(ev.key === 'Enter' && !ev.shiftKey && matchMedia('(min-width: 721px)').matches){
+    ev.preventDefault(); senden();
+  }
+}
+async function senden(){
+  const t = $('eingabe').value.trim(); if(!t) return;
+  $('eingabe').value = '';
+  if(RUFMODUS) await hinweisSenden(t);
+  else await frageSenden(t);
+}
+
+// ── Arbeitsanzeige: wer gerade was macht ─────────────────────────
+// Dieselben Daten wie am Schreibtisch (/agent/arbeit), dieselbe Funktion
+// ``lampe`` mit derselben Signatur wie dort (ema_agent.html) — damit beide
+// Seiten gleich zu LESEN sind, auch wenn sie verschieden aussehen.
+//
+// Der eine Unterschied ist Absicht: am Schreibtisch stehen alle Lampen immer,
+// weil die Spalte Platz hat und eine dunkle Lampe selbst eine Aussage ist. Hier
+// stehen nur die TAETIGEN — die Buehne ist 1080 px breit, und eine Reihe
+// dunkler Lampen haette dieselbe Zeile gesprengt, die vorher der Ablagepfad
+// gesprengt hat. Die Agentenlampe steht immer, solange ein Kopf laeuft: sie ist
+// die Antwort auf „arbeitet er noch".
+//
+// Was es weiterhin NICHT gibt: eine Lampe „Modell denkt". Ollama meldet ueber
+// /api/ps nur, welches Modell im Speicher LIEGT, nicht ob es rechnet.
+function lampe(an, symbol, kopf, text, klasse){
+  const k = klasse || (an ? 'an' : 'aus');
+  return `<span class="lampe ${k}"><span class="pkt"></span>${symbol} ` +
+         `<b>${esc(kopf)}</b>${text ? ' ' + esc(text) : ''}</span>`;
+}
+
+function arbeitZeigen(d){
+  const z = $('arbeit');
+  if(!d){
+    z.innerHTML = lampe(false, '⚠', 'Arbeitsanzeige', 'nicht erreichbar', 'fehlt');
+    return;
+  }
+  const teile = [];
+
+  // 0) Der Agent selbst — immer, solange er laeuft.
+  const kp = d.kopf || {};
+  if(kp.laeuft){
+    const still = kp.still_sek == null ? null : Math.round(kp.still_sek);
+    if(kp.prozess_lebt === false){
+      teile.push(lampe(false, '🤖', 'Agent', 'Prozess beendet', 'fehlt'));
+      HAENGT = false;
+    }else if(kp.beschaeftigt){
+      const haengt = still != null && still >= STILL_WARNUNG;
+      HAENGT = still != null && still >= STILL_FREIGABE;
+      teile.push(lampe(!haengt, '🤖', 'Agent',
+                       (haengt ? 'still seit ' : 'arbeitet · ') + uhrKurz(still),
+                       haengt ? 'still' : 'an'));
+    }else{
+      teile.push(lampe(false, '🤖', 'Agent', 'wartet auf dich'));
+      HAENGT = false;
+    }
+  }else{ HAENGT = false; }
+
+  // 1) Was der Server gerade rechnet, mit Namen und Fortschritt.
+  const r = d.rechnung || {};
+  if(r.an) teile.push(lampe(true, '⚙', 'Rechnung', (r.was || [])
+      .map(x => x.name + (x.fortschritt != null ? ' ' + x.fortschritt + '%' : ''))
+      .join(', ')));
+
+  const re = d.recherche || {};
+  if(re.an) teile.push(lampe(true, '🌐', 'Recherche', 'greift ins Netz'));
+
+  const l = d.loeser || {};
+  if(l.an) teile.push(lampe(true, '🧮', 'Löser', (l.was || [])
+      .map(x => x.name + (x.n > 1 ? '×' + x.n : '')).join(', ')));
+
+  const g = d.gpu || {};
+  if(g.da && g.an) teile.push(lampe(true, '🖥', 'GPU', g.last_pct + ' % · ' +
+      (g.mb_belegt / 1024).toFixed(1) + '/' +
+      Math.round(g.mb_gesamt / 1024) + ' GB'));
+
+  const m = d.modell || {}, ge = (m.geladen || []);
+  if(m.da && ge.length) teile.push(lampe(true, '🧠', 'Modell',
+      ge.map(x => x.name.split(':')[0] +
+             (x.mb ? ' ' + (x.mb / 1024).toFixed(1) + ' GB' : '')).join(', ')));
+
+  const tp = d.tempo || {};
+  if(tp.da && tp.tok_s != null)
+    teile.push(lampe(tp.tok_s > 0.5, '⚡', 'Tempo', tp.tok_s.toFixed(1) + ' Tok/s'));
+  else if(ZTEMPO.rate > 1)
+    teile.push(lampe(true, '⚡', 'Tempo', ZTEMPO.rate.toFixed(0) + ' Z/s (Zeichen)'));
+
+  // 6) Das Werkzeug selbst. Steht nur da, wenn es sich geaendert hat — und dann
+  // in Bernstein: die Zahlen dieses Laufs kommen dann nicht mehr aus demselben
+  // Werkzeug wie die frueheren. Siehe ema_werkzeugstand.py.
+  const w = d.werkzeug || {};
+  if(w.abweichend) teile.push(lampe(true, '🔧', 'Werkzeug',
+      'geändert: ' + (w.geaendert || []).join(', '), 'werkzeug'));
+
+  if(HAENGT){
+    z.innerHTML = lampe(true, '🤖', 'Agent', 'still seit ' +
+                        uhrKurz(Math.round(kp.still_sek)), 'still') +
+      '<button class="klein" onclick="freigeben()">🔓 Sperre lösen</button>';
+    return;
+  }
+  z.innerHTML = teile.length ? teile.join('')
+                             : lampe(false, '·', 'nichts in Arbeit', '', 'aus');
+}
+
+// ── Handy-Zugang: Adresse und QR ─────────────────────────────────
+async function handyAuf(){
+  $('handy').classList.add('an');
+  const ziel = $('handy_inhalt');
+  ziel.innerHTML = '<div class="leer">lädt …</div>';
+  let d;
+  try{ d = await (await fetch('/studio/zugang')).json(); }
+  catch(e){ ziel.innerHTML = '<div class="leer">nicht abrufbar: ' + esc(e.message) + '</div>'; return; }
+  if(d.error){
+    ziel.innerHTML = '<div class="leer">' + esc(d.error) + ' — die Adresse gibt es ' +
+                     'nur am Rechner selbst, sonst wäre das Token frei abholbar.</div>';
+    return;
+  }
+  ziel.innerHTML =
+    '<div style="max-width:560px;margin:0 auto">' +
+    (d.qr ? '<canvas id="qr_bild"></canvas>'
+          : '<div class="achtung">Kein QR-Code: weder <code>segno</code> noch ' +
+            '<code>qrcode</code> ist im venv installiert. Die Adresse unten ' +
+            'funktioniert unverändert — ein halb richtiger QR wäre schlimmer ' +
+            'als keiner.</div>') +
+    '<div class="adr">' + esc(d.url) + '</div>' +
+    '<button class="klein" onclick="adresseKopieren(' + JSON.stringify(d.url).replace(/"/g,'&quot;') + ')">📋 Adresse kopieren</button>' +
+    '<p style="color:var(--tx2);font-size:13px">Handy ins <b>gleiche WLAN</b> — ' +
+    'nicht ins Gast-WLAN der Fritz!Box, das ist gegen das Heimnetz abgeschottet. ' +
+    'Das Token ist dasselbe wie beim Handy-Pfad <code>/m</code>: ein QR deckt ' +
+    'beide Wege. Es merkt sich der Browser, ein Startbildschirm-Eintrag braucht ' +
+    'es also nur einmal.</p>' +
+    '<p style="color:var(--tx2);font-size:12.5px">Rechner im Netz: ' + esc(d.lan) + '</p></div>';
+  if(d.qr) qrMalen(d.qr);
+}
+function qrMalen(m){
+  const c = $('qr_bild'), rand = 2, n = m.length + 2 * rand, s = 6;
+  c.width = c.height = n * s;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  g.fillStyle = '#000';
+  for(let y = 0; y < m.length; y++)
+    for(let x = 0; x < m[y].length; x++)
+      if(m[y][x]) g.fillRect((x + rand) * s, (y + rand) * s, s, s);
+}
+async function adresseKopieren(t){
+  try{ await navigator.clipboard.writeText(t); }catch(_){}
+}
+
+// ── Beitragswerkstatt ────────────────────────────────────────────
+let B_KANAL = 'instagram', B_MATERIAL = null;
+
+function kanalWahl(b){
+  B_KANAL = b.dataset.k;
+  document.querySelectorAll('#b_kanal button').forEach(x => x.classList.toggle('an', x === b));
+}
+function beitragAuf(){
+  $('beitrag').classList.add('an');
+  if(!B_MATERIAL) beitragMaterial();
+}
+async function beitragMaterial(){
+  const p = $('b_projekt').value || 'last';
+  $('b_bilder').innerHTML = '<div class="leer" style="margin-top:0">lädt …</div>';
+  try{
+    B_MATERIAL = await (await fetch(K('/studio/material?projekt=' + encodeURIComponent(p)))).json();
+  }catch(e){ $('b_bilder').innerHTML = '<div class="leer">nicht ladbar</div>'; return; }
+  if(!B_MATERIAL.ok){
+    $('b_bilder').innerHTML = '<div class="leer">' + esc(B_MATERIAL.grund || '') + '</div>';
+    return;
+  }
+  const vor = new Set(B_MATERIAL.vorwahl || []);
+  $('b_bildzahl').textContent = '(' + (B_MATERIAL.kennwerte||[]).length + ' gerechnete Kennwerte)';
+  $('b_bilder').innerHTML = (B_MATERIAL.bilder || []).map(b =>
+    `<label class="${vor.has(b.datei) ? 'an' : ''}" onclick="setTimeout(()=>this.classList.toggle('an', this.querySelector('input').checked),0)">` +
+    `<input type="checkbox" value="${esc(b.datei)}" ${vor.has(b.datei) ? 'checked' : ''}>` +
+    `<img src="${b.url}" alt="" loading="lazy">${esc(b.datei)}</label>`).join('') ||
+    '<div class="leer" style="margin-top:0">Keine Bilder in diesem Projekt.</div>';
+}
+
+async function beitragBauen(){
+  const bilder = [...document.querySelectorAll('#b_bilder input:checked')].map(x => x.value);
+  $('b_los').disabled = true;
+  $('b_lauf').textContent = 'Der Entwurf entsteht … das lokale Modell braucht dafür ' +
+                            'eine halbe bis zwei Minuten.';
+  $('b_ergebnis').innerHTML = '';
+  let a;
+  try{
+    a = await (await fetch(K('/studio/beitrag'), {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({projekt: $('b_projekt').value || 'last', kanal: B_KANAL,
+                              bilder: bilder, ton: $('b_ton').value,
+                              sprache: $('b_sprache').value})})).json();
+  }catch(e){ a = {ok:false, grund: e.message}; }
+  $('b_los').disabled = false;
+  $('b_lauf').textContent = '';
+  if(!a.ok){ $('b_ergebnis').innerHTML = '<div class="achtung">' + esc(a.grund || 'kein Entwurf') + '</div>'; return; }
+
+  const teile = a.teile || [a.beitrag];
+  let h = teile.map((t, i) =>
+    `<div style="margin-bottom:10px"><div style="color:var(--tx2);font-size:12px">` +
+    (teile.length > 1 ? `Teil ${i+1}/${teile.length} · ` : '') +
+    `${t.length}/${a.grenze} Zeichen</div><pre>${esc(t)}</pre>` +
+    `<button class="klein" onclick="adresseKopieren(${JSON.stringify(t).replace(/"/g,'&quot;')})">📋 kopieren</button></div>`).join('');
+  for(const hw of (a.hinweise || []))
+    h += `<div class="achtung">⚠ ${esc(hw)}</div>`;
+  if(a.bilder && a.bilder.length)
+    h += '<h3 style="font-size:14px;margin:16px 0 6px">Bilder und Alternativtexte</h3>' +
+         a.bilder.map(b => `<div style="display:flex;gap:10px;margin-bottom:8px;align-items:flex-start">` +
+           `<img src="${b.url}" style="width:88px;border-radius:6px;background:#fff" alt="">` +
+           `<div style="font-size:12.5px"><b>${esc(b.datei)}</b><br>${esc(b.alt)}</div></div>`).join('');
+  if(a.clips && a.clips.length)
+    h += '<h3 style="font-size:14px;margin:16px 0 6px">Schnittvorschläge aus der Aufnahme</h3>' +
+         '<div style="color:var(--tx2);font-size:12px;margin-bottom:6px">' +
+         esc(a.aufnahme || '') + '</div>' +
+         a.clips.map(c => `<div style="margin-bottom:8px"><b>${c.ab.toFixed(0)}–${c.bis.toFixed(0)} s</b> ` +
+           `(${c.dauer.toFixed(0)} s) ${esc(c.worum)}` +
+           `<div style="color:var(--tx2);font-size:12px">` +
+           (c.zuschnitt ? '↳ schneidet auf das Hochformat zu (' + esc(c.zuschnitt) + ')'
+                        : '↳ ohne Zuschnitt: die Aufnahme war der ganze Bildschirm, ' +
+                          'die Lage der Bühne darin ist nicht bekannt') +
+           `</div><pre style="font-size:11.5px">${esc(c.ffmpeg)}</pre></div>`).join('');
+  h += '<div style="color:var(--tx2);font-size:12px;margin-top:14px">Herkunft der Zahlen:<pre style="font-size:11.5px">' +
+       esc(a.herkunft || '') + '</pre></div>';
+  if(a.ablage && a.ablage.datei)
+    h += '<div style="color:var(--tx2);font-size:12px">📄 abgelegt: ' + esc(a.ablage.datei) + '</div>';
+  $('b_ergebnis').innerHTML = h;
+}
+
+folgeUeberwachen('strom');
+$('f_format').value = FORMAT;
+(async () => { if (!await anknuepfen()) auswahlLaden(); })();
+</script>
+</body>
+</html>

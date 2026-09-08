@@ -205,11 +205,23 @@ def kaefig(geom: dict, axial_mm: float, j_stab_Apmm2: float = 0.0) -> dict:
     # nie fuehren.
     j_soll = float(j_stab_Apmm2 or geom.get("barCurrentDensity") or J_STAB_APMM2)
     j_soll = min(max(j_soll, 1.0), 20.0)
-    a_soll = auslegungsstrom_stab(geom)["I_stab_eff_A"] / j_soll        # mm^2
+    aus = auslegungsstrom_stab(geom)
+    a_soll = aus["I_stab_eff_A"] / j_soll                                # mm^2
     t_strom = a_soll / max(breite * KAEFIG_FUELLUNG, 1e-9)
     t_deckel = KAEFIG_TIEFE_ZU_BREITE * breite
     nuttiefe = max(min(t_strom, nutraum, t_deckel), 2.0)
-    if nuttiefe >= nutraum - 1e-9 and t_strom > nutraum:
+    # Der Bodenwert 2,0 mm ist eine Fertigungsgrenze, KEIN Ersatz fuer einen
+    # fehlenden Auslegungsstrom. Ist der Strom null (weil die Magnetisierung die
+    # ganze Umrichtergrenze frisst, s. auslegungsstrom_stab), dann greift der
+    # Boden still -- und heraus kommt eine breite, flache Nut statt einer
+    # schmalen, tiefen. Gemessen an der Ventilator-Geometrie: der 2-D-Lauf misst
+    # daran ein Carter von 3,2 gegen die analytisch angenommenen 1,15 und ein
+    # Leerlauffeld von 0,29 T statt 0,80 T -- das Moment faellt auf ein Siebtel,
+    # und die Ursache steht nirgends. Sie steht jetzt hier.
+    nicht_auslegbar = not aus["erreichbar"]
+    if nicht_auslegbar:
+        bemessung = "nicht auslegbar"
+    elif nuttiefe >= nutraum - 1e-9 and t_strom > nutraum:
         bemessung = "Blechraum"          # der Laeufer ist zu klein fuer den Strom
     elif nuttiefe >= t_deckel - 1e-9 and t_strom > t_deckel:
         bemessung = "Tiefe/Breite"       # Stromverdraengung waere nicht mehr erfasst
@@ -234,6 +246,12 @@ def kaefig(geom: dict, axial_mm: float, j_stab_Apmm2: float = 0.0) -> dict:
         "nutraum_mm": round(nutraum, 2),          # was das Blech hergaebe
         "tief_begrenzt": bool(nutraum > KAEFIG_TIEFE_ZU_BREITE * breite),
         "bemessung": bemessung,
+        # Ist der Kaefig ueberhaupt bemessbar? Die Geometrie steht trotzdem da
+        # (der Zeichner und das Netz brauchen etwas), aber sie ist der
+        # Fertigungsboden und keine Auslegung -- wer sie benutzt, muss das
+        # wissen. ``ema_em2d_harm`` weigert sich daraufhin.
+        "erreichbar": bool(aus["erreichbar"]),
+        "grund": aus["grund"],
         "J_stab_Apmm2": round(auslegungsstrom_stab(geom)["I_stab_eff_A"]
                               / max(a_stab, 1e-9), 2),
         "tiefe_zu_breite": round(nuttiefe / max(breite, 1e-9), 2),
@@ -372,6 +390,48 @@ def stabstrom(geom: dict, i_q_haus: float, n_stab: int) -> float:
     return 2.0 * math.pi * p * f_stator / max(int(n_stab), 1)
 
 
+# ── Wann es diesen Betriebspunkt NICHT gibt ──────────────────────────────────
+#
+# Bleibt nach dem Magnetisierungsstrom kein momentbildender Strom uebrig, dann
+# hat diese Maschine an dieser Stelle keinen Betriebspunkt. Das ist ein
+# ERGEBNIS, kein Randfall: die Bauart (oder die Umrichterklasse) traegt den
+# geforderten Punkt nicht.
+#
+# Bis zum 08.09.2026 gab es dafuer keine Form. ``i_q`` wurde 0, die Zahlen
+# wurden trotzdem gebildet, und ``verluste`` teilte durch einen Boden von
+# 1e-9 -- gemessen an einem 230-V-Ventilatorantrieb (24 Nuten, p=1, Rotor
+# 88,6 mm; Magnetisierung 1686 A gegen eine Grenze von 800 A) kamen dabei
+# **2,8e20 W** heraus und daneben stand "T_ist = 0,0 Nm". Wer das liest, sucht
+# den Rechenfehler; der Befund war aber "so nicht darstellbar".
+#
+# Die Schwelle ist ein TAUSENDSTEL der Stromgrenze, nicht 1e-9: unterhalb davon
+# liegt auch das Moment unter einem Tausendstel dessen, was diese Maschine
+# koennte, und jede abgeleitete Groesse (Schlupf = P_kaefig/P_luft, Kupferfaktor
+# (I_s/i_q)^2) waechst dort um sechs Groessenordnungen. Das ist kein
+# Betriebspunkt mehr, sondern ein Rundungsrest.
+I_Q_MIN_ANTEIL = 1e-3
+
+
+def _i_q_schwelle(i_lim: float) -> float:
+    return max(I_Q_MIN_ANTEIL * float(i_lim), 1e-6)
+
+
+def _grund_kein_punkt(i_mag: float, i_lim: float, geom: dict) -> str:
+    """Warum es hier keinen Punkt gibt -- mit Zahlen und mit der Stellschraube."""
+    return (f"Nicht darstellbar: die Magnetisierung auf B_m = "
+            f"{ziel_feld(geom):.2f} T braucht i_mag = {i_mag:.0f} A, die "
+            f"Stromgrenze liegt bei {i_lim:.0f} A (geom.inverterImax, Vorgabe "
+            f"ema_analysis.INVERTER_I_MAX). Es bleibt kein momentbildender "
+            f"Strom uebrig. Das ist eine Aussage ueber die Klasse, nicht ueber "
+            f"die Rechnung: entweder ist die Maschine fuer diesen Umrichter zu "
+            f"gross, oder sie gehoert gar nicht an einen Umrichter.")
+
+
+def nicht_erreichbar_text(d: dict) -> str:
+    """Der eine Satz, den alle Verbraucher drucken -- damit es EIN Satz bleibt."""
+    return str((d or {}).get("grund") or "Betriebspunkt nicht darstellbar.")
+
+
 def auslegungsstrom_stab(geom: dict) -> dict:
     """Der Strom, fuer den der Kaefig zu bemessen ist -- aus der Geometrie allein.
 
@@ -396,9 +456,13 @@ def auslegungsstrom_stab(geom: dict) -> dict:
     i_q = math.sqrt(max(i_lim ** 2 - i_mag ** 2, 0.0))
     n_stab = stabzahl(geom)
     i_stab = stabstrom(geom, i_q, n_stab)
+    erreichbar = i_q > _i_q_schwelle(i_lim)
     return {"i_mag_A": i_mag, "i_q_max_A": i_q, "n_stab": n_stab,
             "I_stab_A": i_stab, "I_stab_eff_A": i_stab / math.sqrt(2.0),
-            "am_limit": bool(i_q <= 1e-6)}
+            "am_limit": bool(i_q <= 1e-6),
+            "i_lim_A": i_lim,
+            "erreichbar": bool(erreichbar),
+            "grund": "" if erreichbar else _grund_kein_punkt(i_mag, i_lim, geom)}
 
 
 def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
@@ -429,6 +493,34 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     # -- dieselbe Bezugsgroesse wie Kt. Ohne geom-Eintrag ist es die Vorgabe 800 A.
     i_lim = float(ema_analysis.umrichter(geom)["i_max_1t"])
     i_q_max = math.sqrt(max(i_lim ** 2 - i_mag ** 2, 0.0))
+
+    # ── Das Tor: gibt es diesen Punkt ueberhaupt? ────────────────────────────
+    # Nein zu sagen ist hier eine ANTWORT. Was frueher an dieser Stelle
+    # weitergerechnet wurde, waren Zahlen ohne Gegenstand -- s. I_Q_MIN_ANTEIL.
+    if i_q_max <= _i_q_schwelle(i_lim):
+        grund = _grund_kein_punkt(i_mag, i_lim, geom)
+        return {
+            "erreichbar": False, "grund": grund,
+            "B_m_T": round(mg["B_m_T"], 4),
+            "i_mag_A": round(i_mag, 1), "i_lim_A": round(i_lim, 1),
+            # Ausdruecklich None, nicht 0.0: eine Null liest sich wie ein
+            # gerechnetes Ergebnis ("das Moment ist null"), und genau so wurde
+            # sie gelesen. None heisst "nicht gerechnet, weil es den Punkt
+            # nicht gibt".
+            "i_q_A": None, "I_s_A": None, "T_ist_Nm": None, "I_stab_A": None,
+            "P_stab_W": None, "P_kaefig_W": None, "schlupf": None,
+            "schlupf_pct": None, "n_laeufer_1pmin": None,
+            "strom_limit": True,
+            "Kt_Nm_per_A": round(kt, 5),
+            "psi_Wb": float(perf["psi_pm_Wb"]),
+            "n_syn_1pmin": round(float(rpm), 1),
+            "kaefig": kaefig(geom, L),
+            "stabmaterial": HAIRPIN_MATS.get(
+                stabmaterial or geom.get("barMat") or KAEFIG_VORGABE,
+                HAIRPIN_MATS[KAEFIG_VORGABE])["label"],
+            "perf": perf,
+        }
+
     i_q_roh = t_soll / kt
     i_q = min(i_q_roh, i_q_max)
     i_s = math.hypot(i_mag, i_q)
@@ -454,7 +546,10 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     schlupf = min(p_kaefig / p_luft, 0.5) if p_luft > 0 else 0.0
 
     return {
+        "erreichbar":   True,
+        "grund":        "",
         "B_m_T":        round(mg["B_m_T"], 4),
+        "i_lim_A":      round(i_lim, 1),
         "i_mag_A":      round(i_mag, 1),
         "i_q_A":        round(i_q, 1),
         "I_s_A":        round(i_s, 1),
@@ -495,17 +590,29 @@ def verluste(geom: dict, axial_mm: float, rpm: float, last_nm: float,
       **Kaefigverlust** ersetzt -- der sitzt im Laeufer, also dort, wo die
       Waerme am schlechtesten wegkommt.
     """
+    # Ohne Betriebspunkt keine Verluste. Hier stand ein Faktor
+    # ``(I_s/max(i_q, 1e-9))**2``, und wenn ``i_q`` null war, lieferte er
+    # gemessen 2,8e20 W -- eine Zahl, die wie Physik aussieht und keine ist.
+    # Eine Division durch nahezu Null ist kein Ergebnis, sondern die Stelle, an
+    # der die Rechnung haette aufhoeren muessen.
+    if not bp.get("erreichbar", True):
+        return {"erreichbar": False, "grund": nicht_erreichbar_text(bp),
+                "P_Cu": None, "P_Fe_stator": None, "P_Fe_rotor": None,
+                "P_Mag_eddy": None, "P_Kaefig": None, "P_Bearing": None,
+                "P_total": None}
     mag_platzhalter = {"rho_el": 1.4e-6, "density": 7600.0, "label": "—"}
     basis = ema_thermal.design_point_losses(geom, axial_mm, rpm, last_nm,
                                             bp["perf"], rot_lam, st_lam, hp_mat,
                                             mag_platzhalter, kuehlung)
-    faktor = (bp["I_s_A"] / max(bp["i_q_A"], 1e-9)) ** 2
+    faktor = (bp["I_s_A"] / bp["i_q_A"]) ** 2
     p_cu = float(basis["P_Cu"]) * faktor
     p_kaefig = float(bp["P_kaefig_W"])
     p_total = (p_cu + float(basis["P_Fe_stator"]) + float(basis["P_Fe_rotor"])
                + p_kaefig + float(basis["P_Bearing"]))
     aus = dict(basis)
     aus.update({
+        "erreichbar":  True,
+        "grund":       "",
         "P_Cu":        round(p_cu, 1),
         "P_Cu_mag_anteil": round(p_cu - float(basis["P_Cu"]), 1),
         "P_Mag_eddy":  0.0,          # kein Magnet vorhanden
@@ -524,6 +631,9 @@ def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> dict:
     thermisch zulaessig ist ein Strangstrom ``I_s,max``; momentbildend ist davon
     nur ``sqrt(I_s,max^2 - i_mag^2)``.
     """
+    if not bp.get("erreichbar", True):
+        return {"erreichbar": False, "grund": nicht_erreichbar_text(bp),
+                "T_dauer_Nm": None}
     t_geo = ema_thermal.rated_torque(geom, axial_mm, kuehlung)
     kt    = max(float(bp["Kt_Nm_per_A"]), 1e-9)
     i_max = t_geo / kt                                  # Strangstrom bei T_geo

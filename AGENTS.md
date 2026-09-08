@@ -43,6 +43,26 @@ als Tatsache wieder. **PI hat das nicht:** PI sortiert seine Sitzungen nach
 Arbeitsverzeichnis, und das muss die Repo-Wurzel bleiben, sonst findet PI weder diese
 Datei noch die Skills.
 
+## Das Werkzeug ist der Maßstab, nicht der Gegenstand
+
+Die Rechenmodule unter `cae_orchestrator/ema_*.py` **werden nicht geändert, damit
+eine Zahl passt.** Ein Ziel wird über Geometrie, Werkstoff und Betriebspunkt
+erreicht. Ist es mit dem vorhandenen Werkzeug nicht erreichbar, dann ist „nicht
+erreichbar, weil …" die richtige und vollständige Antwort — ein begründetes Nein
+ist hier ein Ergebnis, kein Fehlschlag.
+
+Hältst du das Werkzeug selbst für falsch: schreib einen Befund nach
+`cae_orchestrator/BEFUNDE.md` (was beobachtet, wo gemessen, welche Fundstelle)
+und sag Bescheid. Repariere es nicht still mitten in einem Lauf — die Zahlen
+davor und danach wären dann aus zwei verschiedenen Werkzeugen, und man sieht
+ihnen das nicht an.
+
+Nachgehalten wird das gemessen, nicht geglaubt: `ema_werkzeugstand.py` bildet
+einen Fingerabdruck über die zwölf Module, deren Änderung eine Kennzahl bewegt.
+Er steht an jeder abgelegten Rechnung, im Steckbrief und in `project.json`s
+`evolution`; ändert sich eine dieser Dateien während ein Agent läuft, erscheint
+das sofort in der Arbeitsanzeige des Browsers und im `protokoll_*.md` des Laufs.
+
 ## Die wichtigste Regel
 
 **Bediene den Orchestrator über sein CLI, nicht über HTTP von Hand.** Dafür gibt es

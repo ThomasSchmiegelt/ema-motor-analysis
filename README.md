@@ -718,6 +718,208 @@ operating points with the 2D-FDM solver, as an installable web app (PWA). Measur
 example machine: **four points in ~9 s, 1.7 MB**. The entry URL with a QR code is printed
 at server start.
 
+## A third head, and a chat that leaves the desk (`/studio`)
+
+The two-column agent page is built for a desk: agent on the left, results on the right,
+a drag handle between them that only listens to mouse events. On a phone it is
+unusable — the same finding that produced the `/m` path, and the same answer: **don't
+share the layout, share everything underneath it.**
+
+The **📱 Studio** tab shows the same agent run in **one column** — question, thinking,
+tool call, result, image, all under one another in the order they happened. Two columns
+are two timelines, and a reader inevitably takes one as the continuation of the other;
+here a result tile sits exactly where it was produced.
+
+Behind it runs a **third agent** next to 🤖 PI and 🪽 Hermes: its own process, its own
+session, its own memory. It stands explicitly *beside* a computing PI rather than in its
+place, and so it gets a different standing order from the other two — **it writes about
+what was computed, it does not compute on its own.** The design brief the others carry
+(draft loops, drive-cycle choice, 3D counter-check) would be actively harmful here: it
+would send the agent into an hours-long run while somebody waits on a phone for one
+sentence.
+
+Two things only became visible through that side-by-side, and both are now fixed rather
+than described: `AGENTS.projekt.md` was rewritten on **every** agent start — so the
+second head fed the first a foreign project the next time it read the file; and screen
+recording exists **once per server**, not once per head, which the page now says
+honestly instead of faking a second recorder.
+
+**From a phone** it is the same conversation: "📱 Handy" shows the address and a QR code,
+the phone joins mid-conversation and keeps typing. It is the only agent page deliberately
+reachable over the LAN, so it — and only it — carries the same token as `/m`; one QR
+covers both ways. Open from the machine itself (where it is a tab), token required from
+anywhere else. PI and Hermes are untouched.
+
+### Portrait, at a fixed resolution
+
+A Reel and a Short are **1080×1920**. Record a landscape window and you get a 16:9 video
+whose portrait crop is decided *afterwards, while cutting* — which means what ends up in
+frame is decided then, too. So the Studio tab puts the conversation in a **stage of exactly
+that pixel size** (9:16 by default, plus 4:5, 1:1 and "free"), scaled as a whole to fit the
+window: the layout no longer depends on the window size, the dashed edge is the cut line,
+and the crop is settled *before* recording. The stage is scaled, not its font sizes — it
+carries its own type scale, about twice the size of a UI, because a Reel is read on a
+phone. On a phone the whole thing is skipped: the screen is already portrait.
+
+Next to it sits what is **actually** captured. The stage is 1080×1920 but sits scaled down
+on screen, and it is the screen's pixels that get recorded — a 1000 px tall window measures
+527×937, which the crop then scales up to 1920. That number is on screen with a warning
+colour, rather than leaving someone to wonder later why the Reel looks soft; the remedy is
+a taller window or a higher-density display.
+
+The crop itself is not guessed: when recording starts the page writes a mark carrying the
+stage rectangle, the window size and the capture size, and `crop=…,scale=1080:1920` follows
+from it — **only** for a tab or window capture. If the whole screen was recorded the window
+sits somewhere inside it, which cannot be known, so there is no crop line, just the sentence
+saying why.
+
+### Typeset, not raw — and the field analysis keeps its columns
+
+The model answers in Markdown. Raw, that puts asterisks, hashes and pipes on screen; the
+Studio tab typesets it instead: headings, bold, italics, code, lists, quotes — and
+**tables**. The table is the actual point: a field analysis *is* a table, and
+`| B_gap | 0.799 T |` as raw text is not one. The renderer is a short block of its own (no
+library), it only ever sees the text the model wrote, and `test_studio.py` checks it with
+`node` against fixed examples — the same method as the topology JS mirror.
+
+Two details separate "typeset" from "tidy": a soft line break from the model becomes a
+**space**, not a break — otherwise the right edge frays exactly where the model wrapped at
+eighty characters; and italics only apply at word boundaries, or `em_field_load.png` takes
+itself apart.
+
+**Tool output** goes the other way: it keeps its columns and the *font* is fitted instead.
+Wrapping destroys a table of key figures, scrolling hides it, and a height cap cut straight
+through one — the Steckbrief ended after `safety_factor_fem`. The font size now follows the
+**aligned** lines, recognised by their column gap; prose may wrap. That took three attempts,
+each driven by a measurement: a percentile over all lines fell for the 228 characters of
+prose in the `welle` output; a plain "contains a pipe" mistook the same sentence for a table
+because `(|B| p95 …)` sits inside it; and without one character of slack a 94-character
+table wrapped because 93 fitted after rounding. When a table genuinely does not fit — the
+pair comparison measures 418 characters wide — the tile says so instead of wrapping in
+silence.
+
+### The bottom bar: two rows, and you can see who is doing what
+
+On the phone it sat right; at the desk it did not. Four stacked rows, one of them just
+for the storage path — truncated with ellipses, permanently in the way for something you
+need once a day. The path now lives on the save button (hover is enough) and appears in
+the transcript on a **manual** save, where it belongs chronologically. The "show
+thinking" checkbox moved to the right end of the work row; that removes the fourth row
+and gives the input its full width back for the icons.
+
+Where the truncated line used to be there is now the same **lamp row** as on the desk
+page: the agent itself (always, while it runs — "working · 0:42", "waiting for you",
+amber "silent for 8:13" with the release button), plus computation with progress,
+research, solver, GPU, loaded model, rate, and the tool lamp. The desk page shows every
+lamp all the time; here only the active ones — the stage is 1080 pixels wide, and on the
+phone they stay one swipeable row (wrapping, they measured six).
+
+What still does not exist is a "model is thinking" lamp: Ollama only reports which model
+is *loaded*, not whether it is computing.
+
+## The tool is the yardstick, not the object
+
+Target-value optimisation raises an uncomfortable question: what stops the agent from
+editing the source until the number comes out right? The heads are coding agents with
+write access to this directory, and the browser path asks for no permission. The honest
+answer is that it **cannot be prevented.** The agent runs as the same user, without a
+sandbox; whoever owns a file may write it, and a `chmod` back costs one line. A lock you
+can open from the inside is not a lock, it is a claim.
+
+Hiding it, however, can be prevented, and that is what this comes down to. A fingerprint
+over the twelve modules whose change moves a figure travels with every stored
+calculation, every line of the project log, and the Steckbrief — and when several states
+show up there, the Steckbrief says outright that those figures are not readily
+comparable. If one of those files changes **while** an agent is running, it appears
+immediately as an amber 🔧 lamp in the work row and as a line in that run's transcript,
+which is to say exactly when somebody is already watching.
+
+Next to it, the rule in plain words — in `AGENTS.md`, in `SKILL.md`, and in every one of
+the three heads' standing orders: a goal is reached through geometry, material and
+operating point, never through a limit moved in the source. If you believe the tool
+itself is wrong, you write a **finding** into `cae_orchestrator/BEFUNDE.md` (what was
+observed, where it was measured, which line) instead of repairing it silently —
+otherwise the figures before and after the repair come from two different tools, and
+nothing about them says so.
+
+The **target-value search itself** needs none of this: there the model only proposes
+parameter vectors, they are clamped to their ranges, and every infeasible solution ranks
+below every feasible one. The source is out of its reach. What is exposed is the route an
+agent takes by hand.
+
+## A no is also a good answer
+
+The occasion was a 230 V fan drive. It could not be computed — and instead of saying so,
+the model produced numbers: 0.0 Nm of torque and, next to it, a loss of **2.8·10²⁰ W**.
+Anyone reading that goes looking for an arithmetic error. The finding was "different
+machine class" all along; there was simply no place for it to be stated.
+
+The cause is a chain of three stages, each unremarkable on its own, and it is written up
+with every measurement and line reference in `cae_orchestrator/BEFUNDE.md`. The core: to
+magnetise at all this machine needs 1686 A against an inverter limit of 800 A, so no
+torque-producing current is left — and the loss term divided by that current with a floor
+of 10⁻⁹. A division by almost nothing is not a result; it is the point at which the
+calculation should have stopped.
+
+Now the operating point first decides whether it **exists**. Below a thousandth of the
+current limit no number comes back, but `reachable: no` with a reason naming both
+currents and the adjustable knob; torque, slip and losses are then explicitly **empty and
+not 0.0** — a zero reads like a computed result, and that is exactly how it was read. The
+cage no longer falls back silently to its manufacturing floor, and the 2-D field stage
+refuses to mesh a rotor from it rather than spending half an hour on a machine that does
+not exist.
+
+### Should answers be weighted?
+
+Yes — but not with a confidence number. That would be one more invented quantity. What
+makes a figure weighable are two statements, and both were already half there: its
+**provenance** (which method produced it — that has been on every figure in the
+Steckbrief from the start) and its **domain of validity** (does this case sit in the
+class this chain is calibrated for).
+
+The domain is explicitly **not a gate**: outside does not mean wrong, it means "this
+chain is not calibrated for that, and none of the computed designs sits there". Three
+statements, each measured rather than asserted: whether an inverter was set at all or the
+traction default of 800 V / 800 A applies (in which case every current statement is a
+statement about that ceiling); whether the machine needs more magnetisation than this
+class provides — **direct mains operation without a converter is not modelled**, and that
+now stands there verbatim; and whether the power falls inside the band actually computed
+here (read out of the database: 0.2 to 419 kW from 57 runs).
+
+The Steckbrief, `sicherheit` and `beitrag` all carry it. Which makes "not representable,
+because the model has no mains operation" a complete answer — not a failure.
+
+## Instagram and X posts — out of what was actually computed
+
+The Studio tab's second job, and a verb so the agent can use the same tool:
+
+```bash
+python3 cae_orchestrator/cae_cli.py beitrag x --from-project last
+python3 cae_orchestrator/cae_cli.py beitrag instagram --from-project last --ton begeistert
+```
+
+The material comes from the project's **Steckbrief**, not from the conversation. That
+difference is the whole point: the Steckbrief knows which stage produced which figure and
+what is missing, whereas a post written from the chat log inherits every number the agent
+estimated along the way — and **publishes it**.
+
+For the same reason "no figure without cover in the material" is not left to the prompt:
+every number in the draft is **measured back** against the material afterwards and
+reported as a warning when it isn't there. Rounding is covered (0.7994 → 0.80); inventing
+is not. Asking a language model nicely is not a guarantee.
+
+What a draft carries: text in the channel's shape (X 280 characters per post, thread of up
+to three — and **too long means wrapping, not truncating**; in the first real run part 1
+ended at 274 of 280 characters with "Achtung: Sicherheitskriterien…", so the one caveat
+worth reading fell off the end), hashtags, an image selection with alt texts, a
+**provenance footer** saying which figure came from which stage — and, if a screen
+recording was running, cut suggestions from its marks with a ready `ffmpeg` line. It shows
+the line; it does not run it.
+
+**Nothing is published.** There is no path out, no credentials and no button for it. The
+draft is filed under `<project>/beitraege/` and in the project's stored calculations;
+copying and posting is done by hand.
+
 ## Shared toolchain (system-wide, not in this repo)
 
 - FreeCAD 1.1 source build + CalculiX (`ccx` 2.23); `ccx` is also called directly, without FreeCAD

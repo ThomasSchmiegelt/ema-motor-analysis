@@ -56,6 +56,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `recherche <was>` | **Internet**: `suche <begriffe>` · `hole <adresse>` |
 | `feld2d` | **Die Feldstufe des Käfigläufers** (Elmer 2-D, harmonisch). Sättigt den Läufersteg **durch Messung**, misst den Carter-Faktor der *gezeichneten* Nut (2,27 gegen die 1,15, die `ema_asm` ansetzt) und tastet die Momenten-Schlupf-Kennlinie ab. Zwei unabhängige Momentwege (Arkkio und Leistungsbilanz) stimmen auf 0,00 % überein |
 | `feld3d` | **Was der Kurzschlussring wirklich kostet** (Elmer 3-D, harmonisch). Die eine Größe, die ein Querschnitt grundsätzlich nicht hergibt. Das Modell ist an zwei Punkten gegen `feld2d` geprüft, an denen der Ring keine Rolle spielt (ohne Käfigstrom 0,3 %, bei ideal kurzgeschlossenem Käfig 0,14 %). Die Ringzahl selbst ist eine **untere Schranke** — 63–78 % des Stabverlusts je nach Netz, jede Verfeinerung schiebt sie nach oben, sie konvergiert auf dieser Maschine nicht aus. Sicher ist damit nur: die früher angesetzten pauschalen 20 % sind um mindestens das Dreifache zu klein; `ema_asm.kurzschlussring_zuschlag` rechnet den Zuschlag seitdem aus der Geometrie. `--nur-netz` sagt vorher, was der Lauf kostet — und warnt ab 150.000 Knoten (gemessen: 102.918 Knoten brauchen 12,9 GB, bei rund 200.000 bricht MUMPS mit fehlendem Arbeitsspeicher ab; Elmer meldet danach trotzdem „FINISHED“ und schreibt ein Nullfeld). Der 0,7-mm-Luftspalt ist seit dem Scheibenbau des Netzes **aufgelöst** (zwei Elementlagen bei 59.796 Knoten — vorher eine einzige bei 166.614 Tetraedern) |
+| `beitrag <kanal>` | **Beitragsentwurf für Instagram oder X** aus dem, was gerechnet wurde: Text, Hashtags, Bildauswahl, Alternativtexte — und aus den Marken einer Bildschirmaufnahme Schnittvorschläge. **Veröffentlicht wird nichts** |
 | `raw GET/POST <pfad>` | beliebige Route — Notausgang für alles Übrige |
 
 **`--frisch` gegen `--from-project`** — gilt für `run`, `rotor-check`, `screen`, `paarvergleich`, `bilddaten`, `lernen`, `struktur`, `topopt`, `feldbild`:
@@ -283,6 +284,45 @@ und wären ohne diese Spalte nicht zu unterscheiden.
 Besonders zu beachten: **`structural_basis`** sagt, ob die Festigkeitsaussage auf einer
 FEM-Rechnung beruht (`fem`) oder nur auf der Ringformel (`analytisch`), weil die FEM
 nichts geliefert hat. Ein grünes `structural_ok` allein sagt das nicht.
+
+### Geltungsbereich — die zweite Hälfte der Herkunft
+
+Die Herkunft sagt, mit **welchem Verfahren** eine Zahl entstanden ist. Der
+Geltungsbereich sagt, ob der **Fall** überhaupt in der Klasse liegt, auf die diese
+Kette geeicht ist. Beides zusammen macht eine Zahl wägbar; eine Vertrauenszahl
+gibt es bewusst nicht — die wäre selbst wieder erfunden.
+
+`steckbrief` druckt einen Abschnitt **„Geltungsbereich"**, sobald etwas außerhalb
+liegt, und `sicherheit` führt es als Hinweis. Es ist **kein Tor**: außerhalb heißt
+nicht falsch, sondern „dafür ist diese Kette nicht geeicht, und keine der
+gerechneten Auslegungen liegt dort". Worauf geeicht ist:
+
+* **Umrichtergespeist (PWM).** `INVERTER_V_DC`/`INVERTER_I_MAX` (800 V / 800 A bei
+  1 Wdg/Nut) sind die Vorgabe der Traktionsklasse, einstellbar über
+  `--set inverterVdc=…` / `--set inverterImax=…`. Steht dort nichts, ist **jede**
+  Strom- und Momentgrenze eine Aussage über diesen Deckel und nicht über die
+  Maschine — das gehört dazugesagt.
+* **Der unmittelbare Netzbetrieb ohne Stromrichter ist NICHT modelliert**
+  (z. B. 1~230 V). Dort gibt es keinen einstellbaren Strom, sondern feste Spannung
+  und Frequenz. Eine solche Maschine ist hier **nicht darstellbar** — das ist die
+  vollständige Antwort, nicht der Anfang einer Suche nach einem Weg drumherum.
+* **Leistungsband** aus den tatsächlich gerechneten Läufen (`db liste`), nicht
+  hingeschrieben.
+
+### Wenn ein Ziel nicht erreichbar ist
+
+**„Nicht erreichbar, weil …" ist die richtige und vollständige Antwort.** Ein
+begründetes Nein ist hier ein Ergebnis, kein Fehlschlag — und es ist mehr wert als
+eine Zahl, die aus einem Modell fällt, das den Fall gar nicht trägt.
+
+Die ASM sagt das jetzt selbst: bleibt nach dem Magnetisierungsstrom kein
+momentbildender Strom übrig, kommt `erreichbar: False` mit Begründung zurück, und
+Moment, Schlupf und Verluste sind **leer statt 0,0** (`paarvergleich` weist die
+Option dann ab, `feld3d` bricht mit Exit 2 ab). Wo so etwas steht: den Grund
+weitergeben, nicht umgehen. Insbesondere **nicht** eine Grenze hochsetzen, damit es
+„geht" — `--set inverterImax=…` ist eine Aussage über einen wirklichen Umrichter,
+keine Stellschraube für ein gewünschtes Ergebnis, und eine Änderung an `ema_*.py`
+ist keine Option (s. „Was NICHT zu tun ist").
 
 ### Internetrecherche
 
@@ -650,6 +690,37 @@ Fliehkraft trägt, sagt `struktur` bzw. `sicherheit`. Eine magnetisch
 unbedenkliche Bohrung kann mechanisch unzulässig sein; gib das so weiter.
 
 
+### `beitrag` — über Gerechnetes schreiben, ohne eine Zahl zu erfinden
+
+```bash
+python3 cae_cli.py beitrag x --from-project 20260903_183044          # X, bis 3 Beiträge
+python3 cae_cli.py beitrag instagram --from-project last --ton begeistert
+python3 cae_cli.py beitrag beide --from-project last --sprache en
+python3 cae_cli.py beitrag x --from-project last --bilder feld_pol.png,em_field.png
+```
+
+Das Material kommt aus dem **Steckbrief** dieses Projekts — nicht aus deinem Gedächtnis
+und nicht aus dem Gesprächsverlauf. Deshalb gilt:
+
+* **Jede Zahl im Beitrag steht im Steckbrief, oder sie steht nicht im Beitrag.** Das Werkzeug
+  misst das hinterher nach und meldet ungedeckte Zahlen als Hinweis; runden ist erlaubt
+  (0,7994 → 0,80), erfinden nicht.
+* Ist eine Stufe nicht gerechnet, wird sie **nicht erwähnt** — kein „voraussichtlich", kein
+  „dürfte bei etwa".
+* Ein verletztes Sicherheitskriterium gehört in den Entwurf. Ein Beitrag, der es weglässt,
+  ist der teuerste Fehler in diesem Verb.
+* Exit 1 heißt: der Entwurf steht, aber mit Hinweisen (ungedeckte Zahl, nichts gerechnet,
+  Faden zu lang). Lies sie, bevor du ihn weitergibst.
+
+Lief waehrenddessen eine Bildschirmaufnahme, stehen im Entwurf auch **Schnittvorschlaege**
+samt fertiger `ffmpeg`-Zeile — bei einer Reiter- oder Fensteraufnahme mit dem Zuschnitt
+aufs Hochformat (1080x1920), sonst mit dem Satz, warum er nicht bestimmbar ist.
+Ausgefuehrt wird die Zeile nicht.
+
+Der Entwurf landet unter `<projekt>/beitraege/` und in den abgelegten Rechnungen.
+**Gepostet wird nichts** — es gibt keinen Weg nach draußen, und das ist Absicht. Der Mensch
+kopiert selbst.
+
 ### `steckbrief` — was dieses Projekt ist, bevor du etwas daran änderst
 
 ```bash
@@ -1007,7 +1078,7 @@ Bei langen Läufen nicht in einer engen Schleife pollen — `wait` macht das mit
 
 ## Alles Übrige
 
-Die 167 Routen sind über `raw` erreichbar; `routes --grep` findet sie.
+Die 172 Routen sind über `raw` erreichbar; `routes --grep` findet sie.
 
 ```bash
 python3 cae_cli.py routes --grep oilspray
@@ -1028,6 +1099,18 @@ Referenz mit allen Routen nach Themen: `references/routes.md`.
 
 * **Keine Zahl erfinden.** Kommt eine Größe nicht aus `results`, dann sagen, dass
   sie nicht gerechnet wurde.
+* **Das Werkzeug nicht ändern, damit die Zahl passt.** Die Rechenmodule
+  (`cae_orchestrator/ema_*.py`) sind der Maßstab, nicht der Gegenstand. Ein Ziel
+  wird über Geometrie, Werkstoff und Betriebspunkt erreicht — nie dadurch, dass
+  eine Formel, eine Grenze oder eine Vorgabe im Quelltext verschoben wird. Ist
+  ein Ziel mit dem vorhandenen Werkzeug nicht erreichbar, dann ist **„nicht
+  erreichbar, weil …" die richtige und vollständige Antwort**; ein begründetes
+  Nein ist hier ein Ergebnis, kein Fehlschlag. Hältst du das Werkzeug selbst für
+  falsch, schreib einen Befund nach `cae_orchestrator/BEFUNDE.md` (was beobachtet,
+  wo gemessen, welche Fundstelle) — repariere es nicht still mitten im Lauf.
+  Jede abgelegte Rechnung trägt den Fingerabdruck der Physikmodule mit
+  (`ema_werkzeugstand.py`), und eine Änderung während eines Laufs erscheint
+  sofort in der Arbeitsanzeige und im Protokoll.
 * **`/opt/freecad-1.1` nie benutzen** — das ist in Wahrheit 1.2 mit einem
   Darstellungsfehler.
 * **Nie `pixi self-update`** — 0.68+ zerstört die schreibgeschützte FreeCAD-Umgebung.

@@ -4153,123 +4153,26 @@ def agent_start():
 
     # Das gebundene Projekt kommt als Systemzusatz herein, nicht als Prompt: ein
     # Prompt kann vom Modell ueberschrieben oder vergessen werden, der
-    # Systemzusatz nicht. Und es wird ausdruecklich gesagt, dass das Projekt KEINE
-    # Vorlage ist -- genau die Verwechslung war der Anlass fuer ``--frisch``.
-    zusatz = ""
+    # Systemzusatz nicht. WAS darin steht, entscheidet aber der KOPF
+    # (``ema_agent.Kopf.systemzusatz``): der Auslegungsauftrag stand hier inline
+    # und galt damit stillschweigend fuer jeden Kopf -- auch fuer einen, der
+    # ueber Gerechnetes schreibt, statt zu rechnen.
+    akte = {}
     if projekt:
-        # Ablageort ODER Vorgabe. Beides falschherum zu sagen ist gleich teuer:
-        # eine uebernommene Altgeometrie ist der Fehler, gegen den ``--frisch``
-        # gebaut wurde -- eine IGNORIERTE Vorgabe ist der umgekehrte, und er
-        # aergert mehr, weil jemand sie eigens hingelegt hat.
-        akte = {}
         try:
             with open(os.path.join(PROJECTS_ROOT, projekt, "project.json"),
                       encoding="utf-8") as f:
                 akte = json.load(f) or {}
         except (OSError, ValueError):
             akte = {}
-        entwurf = akte.get("design") or {}
-        brief = str(entwurf.get("brief") or "").strip()
-        if entwurf.get("vorgabe"):
-            zusatz = (f"Gebundenes Projekt: {projekt} (unter ~/cae_projekte). "
-                      f"Ergebnisse dieses Laufs gehoeren dorthin. In ihm liegt eine "
-                      f"VON HAND VORGEZEICHNETE GEOMETRIE, die ausdruecklich als "
-                      f"Startpunkt uebergeben wurde: 'python3 "
-                      f"cae_orchestrator/cae_cli.py steckbrief {projekt}' zeigt sie, "
-                      f"und '--from-project {projekt}' uebernimmt sie in jedes Verb. "
-                      f"Fang damit an. Aendern darfst du sie -- sag dann aber, WAS du "
-                      f"geaendert hast und warum. Benutze hier NICHT '--frisch': das "
-                      f"wuerfe genau die Vorgabe weg, um die es geht. ")
-        else:
-            zusatz = (f"Gebundenes Projekt: {projekt} (unter ~/cae_projekte). "
-                      f"Ergebnisse dieses Laufs gehoeren dorthin. Es ist AUSDRUECKLICH "
-                      f"KEINE Vorlage: uebernimm daraus keine Polzahl, Nutzahl, "
-                      f"Magnetanordnung, Kuehlung oder Werkstoffwahl. Fuer eine neue "
-                      f"Auslegung beginnst du mit "
-                      f"'python3 cae_orchestrator/cae_cli.py paarvergleich --frisch'. ")
-        # Die Beschreibung, die beim Anlegen des Projekts eingegeben wurde. Ohne
-        # sie muesste sie ein zweites Mal getippt werden -- und beim zweiten Mal
-        # steht etwas anderes da als beim ersten.
-        if brief:
-            zusatz += (f"Der Mensch hat das Projekt so beschrieben: \"{brief[:1200]}\" "
-                       f"Das ist der Auftrag; frag nach, was darin offen bleibt, "
-                       f"statt es zu erfinden. ")
-    # ── Entwurfsschleifen ───────────────────────────────────────────────────
-    #
-    # Der Mensch gibt die ZAHL vor, nicht der Agent. Ohne sie faellt er in eines
-    # von zwei Extremen: einen einzigen Detaillauf von Stunden, an dem sich
-    # nichts mehr entscheiden laesst -- oder endloses Herumprobieren. Beides
-    # wurde beobachtet.
-    #
-    # Die Guetestufen sind gemessen (ema_text2ema.GUETE): 'entwurf' liefert
-    # DIESELBEN Kennwerte wie 'detail' (B_gap und Kt kommen aus der analytischen
-    # Formel und haengen nicht an der Aufloesung), nur groebere Bilder und eine
-    # groebere Luftspaltwelle. Genau deshalb laesst sich damit entscheiden.
+    # Der Mensch gibt die ZAHL der Entwurfsrunden vor, nicht der Agent.
     try:
         schleifen = max(0, min(20, int(d.get("schleifen", 3))))
     except (TypeError, ValueError):
         schleifen = 3
-    if schleifen:
-        zusatz += (
-            f"ARBEITSWEISE: fahre die ersten {schleifen} Auslegungsrunden im "
-            f"ENTWURFSMODUS -- 'run analyse ... --guete entwurf' (Minuten statt "
-            f"Stunden; gleiche Kennwerte, nur groebere Bilder). Nach jeder Runde "
-            f"'sicherheit --from-project <pid>' und daraus die naechste Aenderung "
-            f"ableiten. Erst wenn ein Stand alle Kriterien haelt, EINEN Lauf mit "
-            f"'--guete detail' -- das ist die Zahl, die in den Bericht geht. Zaehle "
-            f"die Runden mit und sag, in welcher du bist. Brauchst du mehr als "
-            f"{schleifen} Runden, sag das und frag, statt stillschweigend "
-            f"weiterzulaufen. ")
-    else:
-        zusatz += ("ARBEITSWEISE: keine Entwurfsschleifen vorgegeben — rechne "
-                   "gleich mit '--guete detail'. ")
-    # Ueber die Welle entscheidest DU, und zwar gemessen:
-    zusatz += ("Ob die Maschine eine Vollwelle braucht, entscheidest du selbst und "
-               "MISST es: 'python3 cae_orchestrator/cae_cli.py welle --from-project "
-               "<pid>' rechnet ein Feld und sagt, ob durch die Welle Fluss laeuft "
-               "und wie gross die Bohrung hoechstens sein darf. Eine Bohrung spart "
-               "Masse und Traegheit und ist erst dann falsch, wenn sie im "
-               "magnetischen Pfad sitzt. Der Befund ist magnetisch — die "
-               "Festigkeit sagt 'struktur'/'sicherheit'. ")
-
-    # Der 3D-Lauf steht auch im Skill, aber der Systemzusatz ueberlebt einen langen
-    # Zug: das 2D-FDM-Feld ist zweidimensional, erst Elmer prueft es unabhaengig nach.
-    # Fahrzyklus und Sicherheitskriterien: beides steht im Skill, aber beides ist
-    # eine Entscheidung AM ANFANG bzw. eine Pflicht AM ENDE -- und dazwischen
-    # liegen Stunden Rechenzeit, in denen ein langer Zug den Skilltext verdraengt.
-    zusatz += ("Bei einer NEUEN Aufgabe zuerst "
-               "'python3 cae_orchestrator/cae_cli.py aufgabe \"<Aufgabe>\"': das stellt "
-               "nebeneinander, was feststehen muss, was der eigene Bestand schon hergibt "
-               "und was offen ist. Erst DANN recherchieren, und nur nach dem Offenen. "
-               "Was nur der Auftraggeber wissen kann (Bauraum, Betriebspunkt, Einsatz, "
-               "Spannungsebene) wird GEFRAGT, nicht recherchiert. Recherchiertes wird mit "
-               "woertlichem Zitat abgelegt ('recherche merke ... --wert \"x=1 mm :: Zitat\"') "
-               "und ersetzt nie eine gerechnete Zahl. ")
-    zusatz += ("Erste Entscheidung jeder Auslegung ist der LASTFALL: "
-               "'python3 cae_orchestrator/cae_cli.py zyklus liste' zeigt die "
-               "waehlbaren Fahrzyklen samt dem Fahrzeug, fuer das sie gedacht sind. "
-               "Passt keiner, lege selbst einen an ('zyklus anlegen <name> --phasen "
-               "ziel_kmh:dauer_s,... --fahrzeug mass_kg=... --fahrzeug gear_ratio=...') "
-               "-- er bleibt in der gemeinsamen Datenbank und steht beim naechsten Mal "
-               "schon da. Der Lauf bekommt ihn ueber 'run analyse --zyklus <name>', was "
-               "Zyklus UND Fahrzeug setzt. Ohne Wahl rechnet '--frisch' mit cycle=off; "
-               "NIE einen Pkw-Zyklus auf eine Maschine legen, die kein Pkw ist. "
-               "Nach jedem Lauf: "
-               "'python3 cae_orchestrator/cae_cli.py sicherheit --from-project <pid>' "
-               "(Exit 1 = Kriterium verletzt: Festigkeit, Drehzahl, Magnet- und "
-               "Wicklungstemperatur ueber ALLE Zyklen, Entmagnetisierung, Fahrprofil). "
-               "Ein verletztes Kriterium wird behoben oder ausdruecklich als "
-               "'so nicht einsetzbar' gemeldet, nicht in einem Nebensatz erwaehnt. "
-               "safety_factor_fem=null heisst 'keine FEM gerechnet', nicht 'sicher'. ")
-    zusatz += ("Zu einer Auslegung gehoert die 3D-Gegenprobe: nach jedem erfolgreichen "
-               "'run analyse --wait' folgt "
-               "'python3 cae_orchestrator/cae_cli.py run em3d --from-project <pid> --wait' "
-               "(5-30 min, Elmer) auf DEMSELBEN Projekt, und erst danach der Bericht "
-               "ueber 'raw POST /project/<pid>/report' -- nur dann enthaelt er den "
-               "3D-Abschnitt und die 2D-gegen-3D-Tabelle. Antwortet die Route mit 503, "
-               "fehlt Elmer: das melden, nicht stillschweigend ueberspringen.")
 
     k = _agent_kopf()
+    zusatz = k.systemzusatz(projekt, akte, schleifen)
     erg = k.starten(str(d.get("modell") or DEFAULT_MODEL),
                                  projekt=projekt,
                                  sitzung=str(d.get("sitzung", "")),
@@ -4376,6 +4279,14 @@ def agent_arbeit():
         stand["tempo"] = k.tempo()
     except Exception:                                        # noqa: BLE001
         stand["tempo"] = {"da": False}
+    # Womit gerechnet wird -- und ob das noch dasselbe Werkzeug ist wie beim
+    # Start dieses Laufs. Der Kopf weiss das, ``ema_arbeit`` nicht: es kennt
+    # keinen Lauf, nur den Rechner. Siehe ema_werkzeugstand.py.
+    try:
+        stand["werkzeug"] = k.werkzeug()
+    except Exception:                                        # noqa: BLE001
+        # Nicht "alles in Ordnung" melden, wenn es nicht messbar war.
+        stand["werkzeug"] = {"abweichend": False, "hash": "nicht messbar"}
     # Der Kopf selbst gehoert in die Leiste: "arbeitet noch" war bisher eine
     # Behauptung ohne Beleg, und wenn ein Zug haengt, stimmt sie nicht mehr.
     z = k.zustand()
@@ -4595,6 +4506,165 @@ def agent_bild(pid: str, unter: str, name: str):
     if not os.path.isfile(os.path.join(d, name)):
         return jsonify({"error": "nicht gefunden"}), 404
     return send_from_directory(d, name)
+
+
+# ── Studio: einspaltiger Chat, vom Handy aus bedienbar ───────────────────────
+#
+# Dritter Agentenkopf (``ema_agent.StudioKopf``) auf einer dritten Seite. Warum
+# nicht ein drittes Layout in ``ema_agent.html``: das ist ein Nebeneinander aus
+# zwei Spalten mit einem Ziehgriff auf Mausereignisse -- auf einem Handy
+# unbedienbar. Dasselbe Argument, aus dem ``ema_mobil.py`` entstanden ist.
+# Geteilt wird deshalb nicht das Layout, sondern der Ereignisstrom, die Routen
+# und ``agent_gemein.js``.
+#
+# ALS EINZIGE Agentenseite steht diese ABSICHTLICH im Heimnetz. Deshalb traegt
+# sie -- und nur sie -- die Tokenwache des Handy-Pfads. PI und Hermes bleiben
+# offen wie bisher; sie waren nie von aussen gemeint.
+
+_STUDIO_TOKENSEITE = """<!DOCTYPE html><html lang="de"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Studio — Zugang</title>
+<style>body{background:#0e1116;color:#dfe6ee;font:15px/1.6 system-ui,sans-serif;
+margin:0;display:grid;place-items:center;height:100vh;padding:20px}
+.k{max-width:420px;background:#151a21;border:1px solid #2a333f;border-radius:14px;padding:20px}
+input{width:100%;padding:12px;margin:10px 0;border-radius:9px;border:1px solid #2a333f;
+background:#0e1116;color:#dfe6ee;font:inherit}
+button{width:100%;padding:12px;border-radius:9px;border:0;background:#4ea1ff;color:#04121f;
+font:inherit;font-weight:600}
+p{color:#93a1b1;font-size:13px}</style></head><body><div class="k">
+<h2 style="margin:0 0 8px">Studio — Zugang</h2>
+<p>Diese Seite steht absichtlich im Heimnetz und verlangt deshalb dasselbe Token
+wie der Handy-Pfad. Es steht beim Serverstart im Terminal (QR-Code) und im
+Studio-Reiter unter &bdquo;\U0001F4F1 Handy&ldquo;.</p>
+<form onsubmit="location.href='/studio?t='+encodeURIComponent(document.getElementById('t').value.trim());return false">
+<input id="t" placeholder="Token" autocomplete="off" autocapitalize="off" spellcheck="false">
+<button type="submit">Weiter</button></form>
+<p>Einmal eingetragen merkt der Browser es sich.</p></div></body></html>"""
+
+
+def _studio_wache():
+    """None wenn erlaubt, sonst die fertige 401-Antwort.
+
+    Vom Rechner selbst offen: dort steht der Reiter in ``ema.html``, und ein
+    Token im Rahmen waere eine Huerde ohne Nutzen. Von aussen dasselbe Token wie
+    ``/m`` -- ein gemeinsames Geheimnis, damit ein QR am Kuehlschrank beide Wege
+    deckt und beim zweiten niemand mehr weiss, wofuer er war.
+    """
+    if request.remote_addr in ("127.0.0.1", "::1"):
+        return None
+    return _mobil_token_pruefen()
+
+
+@app.before_request
+def _studio_zugang():
+    """Die Wache an EINER Stelle statt an fuenfzehn Routen.
+
+    Der Studio-Kopf benutzt dieselben ``/agent/...``-Routen wie PI und Hermes;
+    ihn dort zu schuetzen hiesse sonst, jede einzelne anzufassen -- und die
+    naechste neue Route waere die, die jemand vergisst.
+    """
+    p = request.path
+    if p == "/studio" or p.startswith("/studio/"):
+        if p == "/studio/zugang":
+            return None                 # prueft selbst schaerfer: nur localhost
+        abgewiesen = _studio_wache()
+        # Die SEITE wird mit einer Seite abgewiesen, nicht mit einem JSON.
+        # Der Startbildschirm-Eintrag auf dem Handy startet unter ``/studio``
+        # ohne ``?t=`` -- ein Token gehoert nicht in ein Manifest, das jeder
+        # lesen kann. Wer hier landet, soll es einmal eintragen koennen statt
+        # eine Fehlermeldung anzusehen, deren Ursache er nicht kennt.
+        if abgewiesen is not None and p == "/studio":
+            return Response(_STUDIO_TOKENSEITE, status=401,
+                            mimetype="text/html; charset=utf-8")
+        return abgewiesen
+    if p == "/agent" or p.startswith("/agent/"):
+        if (request.args.get("kopf") or "").strip().lower() == "studio":
+            return _studio_wache()
+    return None
+
+
+@app.route("/studio")
+def studio_seite():
+    return send_from_directory(os.path.dirname(__file__), "ema_studio.html")
+
+
+@app.route("/agent_gemein.js")
+def studio_gemein():
+    """Was ``ema_agent.html`` und ``ema_studio.html`` gemeinsam haben.
+
+    Aufnahme, Mitlaufen, Stoppuhr, Archivwiedergabe und die Kopfklammer -- rund
+    350 Zeilen, die als zweite Abschrift beim ersten Fehlerbericht auseinander
+    liefen. Eine Datei, zwei Seiten.
+    """
+    antwort = send_from_directory(os.path.dirname(__file__), "agent_gemein.js")
+    antwort.headers["Cache-Control"] = "no-cache"
+    return antwort
+
+
+@app.route("/studio/zugang")
+def studio_zugang():
+    """Einstiegsadresse, Token und QR -- NUR von diesem Rechner aus.
+
+    Sonst holte sich jeder im WLAN das Token ab und die Sperre waere eine
+    Attrappe (derselbe Grund wie bei ``/m/zugang``).
+    """
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return jsonify({"error": "nur lokal abrufbar"}), 403
+    import ema_mobil
+    port = request.host.split(":")[-1]
+    try:
+        port = int(port)
+    except ValueError:
+        port = 5000
+    url = ema_mobil.studio_url(port)
+    return jsonify({"url": url, "token": ema_mobil.token(),
+                    "lan": ema_mobil.lan_adresse(),
+                    # ``None``, wenn weder segno noch qrcode da ist. Die Seite
+                    # zeigt dann die Adresse im Klartext -- ein halb richtiger
+                    # QR waere schlimmer als keiner.
+                    "qr": ema_mobil.qr_matrix(url)})
+
+
+@app.route("/studio/material")
+def studio_material():
+    """Woraus ein Beitrag gebaut werden kann: Bilder und Aufnahmen."""
+    import ema_beitrag
+    pid = str(request.args.get("projekt") or "last")
+    mat = ema_beitrag.material(pid)
+    if not mat.get("ok"):
+        return jsonify(mat), 404
+    return jsonify({"ok": True, "projekt": mat["projekt"],
+                    "bilder": [{"datei": b["datei"], "unter": b["unter"],
+                                "url": f"/agent/bild/{mat['projekt']}/"
+                                       f"{b['unter']}/{b['datei']}"}
+                               for b in mat["bilder_alle"]],
+                    "vorwahl": [b["datei"] for b in mat["bilder"]],
+                    "kennwerte": mat["kennwerte"],
+                    "aufnahmen": [{"datei": a["datei"], "mb": a["mb"],
+                                   "clips": a["clips"]}
+                                  for a in mat["aufnahmen"]]})
+
+
+@app.route("/studio/beitrag", methods=["POST", "OPTIONS"])
+def studio_beitrag():
+    """Den Entwurf bauen -- dasselbe Modul wie ``cae_cli.py beitrag``."""
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import ema_beitrag
+    d = request.get_json(silent=True) or {}
+    pid = str(d.get("projekt") or "last")
+    kanal = str(d.get("kanal") or "instagram")
+    erg = ema_beitrag.erzeugen(
+        pid, kanal,
+        bilder=[str(b) for b in (d.get("bilder") or [])] or None,
+        ton=str(d.get("ton") or "sachlich"),
+        sprache=str(d.get("sprache") or "de"),
+        ablage=bool(d.get("ablage", True)))
+    if not erg.get("ok"):
+        return jsonify(erg), 400
+    erg["text"] = ema_beitrag.als_text(erg)
+    erg.pop("roh", None)
+    return jsonify(erg)
+
 
 
 @app.after_request

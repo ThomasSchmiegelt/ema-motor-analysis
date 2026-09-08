@@ -799,6 +799,14 @@ def vorbereiten(payload: dict, rpm: float, last_nm: float, work_dir: str,
     axial = float(geom.get("axialLen") or payload.get("axial_len") or 80.0)
     p = max(int(geom["p"]), 1)
     bp = ema_asm.betriebspunkt(geom, axial, rpm, last_nm)
+    # Kein Betriebspunkt, kein Netz. Ohne diese Weigerung wuerde hier aus einer
+    # Kaefignut auf ihrem FERTIGUNGSBODEN (2 mm, weil der Auslegungsstrom null
+    # ist) ein Rotor gezeichnet, der das Spaltfeld nicht traegt -- und der Lauf
+    # lieferte danach ein gemessenes Carter von 3,2 gegen 1,15 und 0,29 T
+    # Leerlauffeld, ohne dass irgendwo stuende, warum. Eine halbe Stunde Elmer
+    # fuer eine Maschine, die es nicht gibt.
+    if not bp.get("erreichbar", True):
+        raise ValueError(ema_asm.nicht_erreichbar_text(bp))
     kf = dict(bp["kaefig"])
     kf["steg_mm"] = ema_asm.KAEFIG_STEG_MM
 

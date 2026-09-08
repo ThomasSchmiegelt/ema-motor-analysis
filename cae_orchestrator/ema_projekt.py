@@ -257,6 +257,15 @@ def append_evolution(project_dir: str, entry: dict) -> bool:
         return False
 
 
+def _werkzeugstand() -> str:
+    """Fingerabdruck der Physikmodule, weich fehlschlagend (s. ema_werkzeugstand)."""
+    try:
+        import ema_werkzeugstand
+        return ema_werkzeugstand.kurz(ema_werkzeugstand.stand())
+    except Exception:                                        # noqa: BLE001
+        return "unbekannt"
+
+
 def record_run(project_dir: str, pid: str, meta: dict, results: dict, *,
                action: str = "analyse", note: str = "", ref=None) -> bool:
     """End-of-run integration: append an evolution entry (diffing inputs vs the
@@ -270,6 +279,10 @@ def record_run(project_dir: str, pid: str, meta: dict, results: dict, *,
         m["evolution"].append({
             "ts": _now(), "action": action, "changed_inputs": changed,
             "key_metrics": metrics, "note": note or "", "ref": ref,
+            # Mit welchem Werkzeug diese Kennwerte entstanden sind. Ohne das ist
+            # ein Vergleich zweier Eintraege eine Behauptung -- s.
+            # ema_werkzeugstand.py.
+            "werkzeug": _werkzeugstand(),
         })
         m["label"] = (meta or {}).get("label") or m.get("label") or pid
         m["status"] = "gerechnet"

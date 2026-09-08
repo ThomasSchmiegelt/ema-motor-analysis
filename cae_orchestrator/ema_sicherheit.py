@@ -284,6 +284,26 @@ def pruefen(results: dict, meta: dict | None = None) -> dict:
                           else ", Fahrzeug: Vorgabe (1600 kg Pkw)"),
                        quelle="meta.payload.cycle"))
 
+    # ── Geltungsbereich ─────────────────────────────────────────────────────
+    # Kein Tor, sondern ein Hinweis: ausserhalb heisst nicht falsch, sondern
+    # "dafuer ist diese Kette nicht geeicht". Er steht hier, weil `sicherheit`
+    # der Ort ist, an dem nach jedem Lauf nachgesehen wird -- und weil eine
+    # Zahl aus einer fremden Klasse jedes Kriterium darueber mittraegt.
+    try:
+        import ema_referenz
+        for e in ema_referenz.geltung_pruefen(payload.get("geom") or {}, payload):
+            # Nur echte Abweichungen. Dass kein Umrichter GESETZT ist, ist der
+            # Normalfall dieses Bestandes (die Vorgabe gilt) und gehoert in den
+            # Steckbrief, nicht in eine Pruefung, die sonst bei fast jedem
+            # Projekt mit Exit 1 endete.
+            if e.get("befund") != "ausserhalb":
+                continue
+            krit.append(_k("geltungsbereich", False,
+                           f"{e['feld']}: {e['text']}", None, None,
+                           schwere="hinweis", quelle="ema_referenz.GELTUNG"))
+    except Exception:                                        # noqa: BLE001
+        pass
+
     verletzt = [x for x in krit if not x["ok"]]
     return {"ok": not verletzt, "kriterien": krit,
             "n_verletzt": len(verletzt),

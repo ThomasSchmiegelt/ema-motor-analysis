@@ -107,6 +107,20 @@ def _freie_marke(ordner: str, verb: str) -> str:
     return f"{marke}-{os.getpid()}"
 
 
+def _werkzeugstand() -> str:
+    """Der Fingerabdruck der Physikmodule als eine Zeile -- weich.
+
+    Weich, weil das Ablegen nie am Nebenbefund scheitern darf (dieselbe Regel
+    wie fuer ``ablegen`` selbst). Fehlt er, steht "unbekannt" da und nicht ein
+    stillschweigendes "war schon in Ordnung".
+    """
+    try:
+        import ema_werkzeugstand
+        return ema_werkzeugstand.kurz(ema_werkzeugstand.stand())
+    except Exception:                                        # noqa: BLE001
+        return "unbekannt"
+
+
 def ablegen(projekt_dir: str, verb: str, text: str, *, daten: dict | None = None,
             befehl: str = "", ok: bool = True) -> dict:
     """Ein Verbergebnis dauerhaft ins Projekt legen. Weich fehlschlagend.
@@ -129,6 +143,9 @@ def ablegen(projekt_dir: str, verb: str, text: str, *, daten: dict | None = None
         if befehl:
             kopf.append(f"# Aufruf : {befehl}")
         kopf.append(f"# Ausgang: {'bestanden' if ok else 'ABGELEHNT / verletzt'}")
+        # Womit gerechnet wurde. Zwei Zahlen aus zwei Werkzeugstaenden sind nicht
+        # vergleichbar, und man sieht ihnen das nicht an -- also steht es dran.
+        kopf.append(f"# Werkzeug: {_werkzeugstand()}")
         with open(pfad, "w", encoding="utf-8") as f:
             f.write("\n".join(kopf) + "\n\n" + (text or "").rstrip() + "\n")
         if daten is not None:
@@ -146,6 +163,7 @@ def ablegen(projekt_dir: str, verb: str, text: str, *, daten: dict | None = None
             "action": f"cli:{verb}",
             "note": (befehl or verb)[:200],
             "ref": os.path.join(UNTER, os.path.basename(pfad)),
+            "werkzeug": _werkzeugstand(),
         })
     except Exception:                                        # noqa: BLE001
         pass
@@ -323,8 +341,30 @@ def steckbrief(projekt_dir: str, *, mit_laeufen: bool = True) -> dict:
         "vtu": _vtu_zaehlen(projekt_dir),
     }
 
+    # Mit welchem Werkzeug ist hier gerechnet worden? Stehen in der Evolution
+    # mehrere Staende, sind die Kennwerte NICHT ohne Weiteres vergleichbar -- und
+    # das ist eine Aussage ueber die Zahlen, keine ueber die Ablage.
+    _staende = []
+    for e in (akte.get("evolution") or []):
+        w = str(e.get("werkzeug") or "").split(" ")[0]
+        if w and w != "unbekannt" and w not in _staende:
+            _staende.append(w)
+    # Und: liegt dieser Fall ueberhaupt in der Klasse, auf die diese Kette
+    # geeicht ist? Zusammen mit der Herkunft je Kennwert ist das die Gewichtung
+    # einer Zahl -- s. ema_referenz.GELTUNG.
+    try:
+        import ema_referenz
+        geltung = ema_referenz.geltung_pruefen(payload.get("geom") or {}, payload)
+    except Exception:                                        # noqa: BLE001
+        geltung = []
+
+    werkzeug = {"jetzt": _werkzeugstand(),
+                "staende": _staende,
+                "gemischt": len(_staende) > 1}
+
     aus = {
-        "ok": True, "id": pid, "ordner": projekt_dir,
+        "ok": True, "id": pid, "ordner": projekt_dir, "werkzeug": werkzeug,
+        "geltung": geltung,
         "label": akte.get("label") or pid,
         "status": akte.get("status") or ("gerechnet" if zus else "neu"),
         "angelegt": akte.get("created") or meta.get("created", ""),
@@ -423,7 +463,19 @@ def als_text(sb: dict, *, kurz: bool = False) -> str:
                  "Startpunkt gemeint")
     if sb["herkunft"]["eltern"]:
         z.append(f"  Abgeleitet aus: {sb['herkunft']['eltern']}")
+    w = sb.get("werkzeug") or {}
+    if w.get("jetzt"):
+        z.append(f"  Werkzeug : {w['jetzt']}")
+    if w.get("gemischt"):
+        z.append("  ACHTUNG  : die abgelegten Rechnungen stammen aus "
+                 f"{len(w['staende'])} verschiedenen Werkzeugstaenden "
+                 f"({', '.join(w['staende'])}) — ihre Zahlen sind nicht ohne "
+                 "Weiteres vergleichbar.")
 
+    if sb.get("geltung"):
+        z += ["", "  Geltungsbereich — was hier ausserhalb der geprueften Klasse liegt:"]
+        for e in sb["geltung"]:
+            z.append(f"    {e['feld']}: {e['text']}")
     da = [s["name"] for s in sb["gerechnet"] if s["da"]]
     z += ["", "  Gerechnet: " + (", ".join(da) if da else "— noch nichts —")]
     if sb["kennwerte"]:
@@ -497,6 +549,16 @@ def als_markdown(sb: dict) -> str:
           f"Leiter {_z(m['leiter'])}"]
     da = [s["name"] for s in sb["gerechnet"] if s["da"]]
     z.append("- Gerechnet: " + (", ".join(da) if da else "**noch nichts**"))
+    for e in (sb.get("geltung") or []):
+        z.append(f"- **Geltungsbereich / {e['feld']}**: {e['text']}")
+    w = sb.get("werkzeug") or {}
+    if w.get("jetzt"):
+        z.append(f"- Werkzeugstand: `{w['jetzt']}`")
+    if w.get("gemischt"):
+        z.append("- **Die abgelegten Rechnungen stammen aus verschiedenen "
+                 f"Werkzeugstaenden** ({', '.join(w['staende'])}). Zahlen aus "
+                 "zwei Staenden sind nicht ohne Weiteres vergleichbar; sag das "
+                 "dazu, statt sie nebeneinanderzustellen.")
     for k in sb["kennwerte"]:
         z.append(f"- {k['schluessel']}: {_z(k['wert'], k['einheit'])} "
                  f"(Herkunft: {k['methode']})")

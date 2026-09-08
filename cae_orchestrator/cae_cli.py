@@ -1396,6 +1396,13 @@ def cmd_feld3d(args) -> int:
     import ema_em3d_harm as E3
     kf = dict(ema_asm.kaefig(geom, axial))
     kf["steg_mm"] = ema_asm.KAEFIG_STEG_MM
+    # Ist der Kaefig gar nicht auslegbar, ist auch das 3-D-Netz sinnlos: es
+    # vernetzt dann die Fertigungsuntergrenze und rechnet stundenlang an einer
+    # Maschine, die es nicht gibt. Lieber ein begruendetes Nein in Sekunden.
+    if not kf.get("erreichbar", True):
+        print()
+        print("Nicht gerechnet — " + ema_asm.nicht_erreichbar_text(kf))
+        return 2
     try:
         if getattr(args, "nur_netz", False):
             nz = E3.netzkosten(geom, kf, axial, arbeit,
@@ -1769,6 +1776,52 @@ def cmd_steckbrief(args) -> int:
         else:
             print("Abgelegte Rechnungen: keine.")
     return EXIT_OK if not sb["warnungen"] else 1
+
+
+def cmd_beitrag(args) -> int:
+    """Beitragsentwuerfe fuer Instagram und X aus einem gerechneten Projekt.
+
+    Warum ein Verb und nicht nur ein Knopf im Studio-Reiter: was der Mensch
+    tut, soll der Agent mit DEMSELBEN Werkzeug tun koennen. Ein Knopf, den nur
+    die Oberflaeche hat, ist fuer den Agenten nicht vorhanden -- und ein Agent,
+    der Beitraege von Hand schreibt, erfindet Zahlen.
+
+    Veroeffentlicht wird nichts. Der Entwurf landet unter ``beitraege/`` im
+    Projekt und im Terminal; kopiert und gepostet wird von Hand.
+
+    Exit: 0 = Entwurf steht ohne Beanstandung, 1 = er steht, aber mit Hinweisen
+    (ungedeckte Zahlen, nichts gerechnet) -- dasselbe Muster wie ``steckbrief``.
+    """
+    import ema_beitrag
+    pdir = _projekt_pfad(args.projekt)
+    if not pdir:
+        return _die(f"Projekt '{args.projekt}' nicht gefunden — 'projects' zeigt "
+                    f"die vorhandenen.", EXIT_USAGE)
+    pid = os.path.basename(pdir.rstrip("/"))
+    bilder = [b.strip() for b in (args.bilder or "").split(",") if b.strip()]
+    kanaele = (["instagram", "x"] if args.kanal == "beide" else [args.kanal])
+
+    ergebnisse, schlecht = [], False
+    for kanal in kanaele:
+        erg = ema_beitrag.erzeugen(pid, kanal, bilder=bilder or None,
+                                   ton=args.ton, sprache=args.sprache,
+                                   ablage=not getattr(args, "ohne_ablage", False))
+        if not erg.get("ok"):
+            return _die(erg.get("grund", "kein Entwurf"), EXIT_USAGE)
+        ergebnisse.append(erg)
+        schlecht = schlecht or bool(erg["hinweise"])
+
+    if getattr(args, "json", False):
+        emit(ergebnisse if len(ergebnisse) > 1 else ergebnisse[0], args)
+        return 1 if schlecht else EXIT_OK
+
+    for erg in ergebnisse:
+        print(ema_beitrag.als_text(erg))
+        ab = erg.get("ablage") or {}
+        if ab.get("datei"):
+            print(f"\nAbgelegt: {ab['datei']}")
+        print("")
+    return 1 if schlecht else EXIT_OK
 
 
 def cmd_sicherheit(args) -> int:
@@ -2573,6 +2626,24 @@ def build_parser() -> argparse.ArgumentParser:
                    help="ohne den Warnblock (nur die Fakten)")
     _add_globals(s)
     s.set_defaults(fn=cmd_steckbrief)
+
+    s = sub.add_parser("beitrag",
+                       help="Beitragsentwurf fuer Instagram/X aus einem gerechneten "
+                            "Projekt — Text, Hashtags, Bildauswahl, Alternativtexte "
+                            "(veroeffentlicht wird nichts)")
+    s.add_argument("kanal", choices=["instagram", "x", "beide"],
+                   help="wohin der Entwurf soll")
+    s.add_argument("--from-project", dest="projekt", default="last",
+                   help="Projektkennung oder 'last' (Vorgabe)")
+    s.add_argument("--bilder", default="",
+                   help="Dateinamen aus charts/ bzw. cad_images/, mit Komma "
+                        "getrennt; ohne Angabe waehlt das Werkzeug bis zu vier")
+    s.add_argument("--ton", choices=["sachlich", "begeistert", "trocken"],
+                   default="sachlich", help="Tonlage des Entwurfs")
+    s.add_argument("--sprache", choices=["de", "en"], default="de")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_beitrag)
 
     s = sub.add_parser("sicherheit",
                        help="Sicherheitskriterien eines gerechneten Projekts pruefen "

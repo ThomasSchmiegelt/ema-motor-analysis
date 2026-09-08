@@ -53,6 +53,8 @@ Drei Befunde, die das Bild aendern
 
 from __future__ import annotations
 
+import math
+
 # ── Die Quellen ───────────────────────────────────────────────────────────────
 #
 # Alle am 02.09.2026 abgerufen und im Volltext gelesen -- nicht nur der Anriss
@@ -544,6 +546,151 @@ BAUBAND = {
                      "der Luftspalt skaliert NICHT mit dem Durchmesser. Genau "
                      "deshalb laesst ihn die Durchmesser-Achse stehen."},
 }
+
+
+# ── Geltungsbereich: worauf diese Kette ueberhaupt geeicht ist ────────────────
+#
+# Anlass, gemessen am 08.09.2026: ein 230-V-Ventilatorantrieb (125 W, netz-
+# gespeist, 1~) wurde durch diese Kette geschickt. Sie hat nicht gerechnet, was
+# sie nicht kann -- sie hat gerechnet, als koennte sie es, und heraus kamen
+# 0,0 Nm neben 2,8e20 W. Der Befund war die ganze Zeit "andere Klasse", und
+# niemand hat ihn ausgesprochen, weil es keinen Ort dafuer gab. Das hier ist der
+# Ort.
+#
+# Es ist -- wie ``ART_BAND`` -- **kein Tor**: ausserhalb heisst nicht falsch,
+# sondern "dafuer ist diese Kette nicht geeicht, und keine der gerechneten
+# Auslegungen liegt dort". Ein Tor waere hier auch anmassend: eine Maschine
+# ausserhalb der Klasse darf man ausrechnen -- man darf das Ergebnis nur nicht
+# lesen, als stuende es auf demselben Grund wie die anderen.
+#
+# Zusammen mit der **Herkunft** je Kennwert (welches Verfahren) ist das die
+# Gewichtung einer Antwort: nicht eine erfundene Vertrauenszahl, sondern die
+# zwei Angaben, die eine Zahl waegbar machen -- womit gerechnet wurde, und ob
+# der Fall in der gepruefenten Klasse liegt.
+
+GELTUNG = {
+    "speisung": (
+        "Umrichtergespeist (PWM-Stromrichter). INVERTER_V_DC/INVERTER_I_MAX in "
+        "ema_analysis sind die Vorgabe der Traktionsklasse (800 V / 800 A bei "
+        "1 Wdg/Nut) und ueber geom.inverterVdc/inverterImax einstellbar. "
+        "NICHT modelliert ist der unmittelbare NETZBETRIEB ohne Stromrichter "
+        "(z. B. 1~230 V): dort gibt es keinen einstellbaren Strom, sondern eine "
+        "feste Spannung und Frequenz, und der Betriebspunkt entsteht ganz "
+        "anders. Eine solche Maschine ist hier nicht darstellbar."),
+    "kt_bgap": (
+        "Kt, B_gap und die Eisenverluste kommen aus der ANALYTISCHEN "
+        "Luftspaltformel, an der das FDM-Feld geeicht ist -- nicht aus dem "
+        "Feldbild. Das Feldbild ist Anschauung."),
+}
+
+
+def leistungsband(conn=None) -> dict:
+    """Welche Leistungen in diesem Bestand tatsaechlich gerechnet wurden.
+
+    Gemessen aus ``ema_db``, nicht hingeschrieben: eine hingeschriebene Spanne
+    waere binnen eines Monats falsch, und ihre Quelle waere niemand. Weich --
+    ohne Datenbank kommt ``{"da": False}`` zurueck und keine erfundene Spanne.
+    """
+    try:
+        import ema_db
+        eigen = conn is None
+        c = conn or ema_db.oeffne()
+        try:
+            # Null heisst hier "nicht gerechnet", nicht "eine 0-kW-Maschine".
+            # Gemessen: 2 von 59 Eintraegen sind 0 -- sie haetten die untere
+            # Bandgrenze auf 0 gedrueckt, und dann faellt kein Fall der Welt
+            # jemals unten heraus.
+            werte = [float(r[0]) for r in c.execute(
+                "SELECT wert_num FROM kennwerte WHERE groesse='P_max_kW' "
+                "AND wert_num > 0")]
+            n_laeufe = c.execute("SELECT COUNT(*) FROM laeufe").fetchone()[0]
+        finally:
+            if eigen:
+                c.close()
+    except Exception:                                        # noqa: BLE001
+        return {"da": False}
+    if not werte:
+        return {"da": False, "laeufe": 0}
+    return {"da": True, "min_kW": round(min(werte), 2),
+            "max_kW": round(max(werte), 2), "n": len(werte),
+            "laeufe": int(n_laeufe)}
+
+
+def geltung_pruefen(geom: dict, payload: dict | None = None) -> list:
+    """Was an diesem Fall ausserhalb der gepruefteren Klasse liegt.
+
+    Jeder Eintrag: ``{"feld", "befund", "text"}``. Leere Liste heisst: nichts
+    Auffaelliges -- nicht "alles richtig".
+    """
+    geom = geom or {}
+    payload = payload or {}
+    aus = []
+
+    # 1) Der Umrichter. Steht keiner im Payload, rechnet die Kette mit der
+    # Traktionsvorgabe -- und JEDE Stromaussage ist dann eine Aussage ueber
+    # diesen Deckel und nicht ueber die Maschine.
+    import ema_analysis
+    v_ges = float(geom.get("inverterVdc") or 0.0)
+    i_ges = float(geom.get("inverterImax") or 0.0)
+    if not (v_ges or i_ges):
+        aus.append({
+            "feld": "Umrichter", "befund": "Vorgabe",
+            "text": (f"Kein Umrichter gesetzt — gerechnet wird mit der "
+                     f"Traktionsvorgabe {ema_analysis.INVERTER_V_DC:.0f} V / "
+                     f"{ema_analysis.INVERTER_I_MAX:.0f} A (1 Wdg/Nut). Ist das "
+                     f"nicht der Umrichter dieser Maschine, sind Strom- und "
+                     f"Momentgrenzen Aussagen ueber diesen Deckel. Setzbar mit "
+                     f"--set inverterImax=… / inverterVdc=…")})
+
+    # 2) Braucht die Maschine mehr Magnetisierungsstrom als die Grenze hergibt,
+    # ist sie fuer diese Umrichterklasse zu gross -- oder gehoert gar nicht an
+    # einen Umrichter. Nur bei der ASM messbar (nur sie magnetisiert ueber den
+    # Stator).
+    try:
+        import ema_maschinenart
+        art = ema_maschinenart.art_code(payload or {"geom": geom})
+    except Exception:                                        # noqa: BLE001
+        art = str(geom.get("machineType") or "").lower()
+    if art == "asm":
+        try:
+            import ema_asm
+            mg = ema_asm.magnetisierungsstrom(geom)
+            i_lim = float(ema_analysis.umrichter(geom)["i_max_1t"])
+            if mg["i_mag_A"] >= i_lim:
+                aus.append({
+                    "feld": "Speisung", "befund": "ausserhalb",
+                    "text": (f"Die Magnetisierung allein braucht "
+                             f"{mg['i_mag_A']:.0f} A gegen eine Grenze von "
+                             f"{i_lim:.0f} A. {GELTUNG['speisung']}")})
+        except Exception:                                    # noqa: BLE001
+            pass
+
+    # 3) Liegt die Leistung in dem Bereich, in dem hier ueberhaupt schon
+    # gerechnet wurde? Gemessen aus dem eigenen Bestand.
+    try:
+        rpm = float(payload.get("rpm_from") or payload.get("rpm_to") or 0.0)
+        nm = float(payload.get("load_nm") or 0.0)
+        p_kw = nm * 2.0 * math.pi * rpm / 60.0 / 1000.0
+    except (TypeError, ValueError):
+        p_kw = 0.0
+    band = leistungsband()
+    if p_kw > 0 and band.get("da") and not (band["min_kW"] <= p_kw <= band["max_kW"]):
+        aus.append({
+            "feld": "Leistung", "befund": "ausserhalb",
+            "text": (f"{p_kw:.2f} kW liegt ausserhalb dessen, was in diesem "
+                     f"Bestand gerechnet wurde ({band['min_kW']:.1f}–"
+                     f"{band['max_kW']:.1f} kW aus {band['n']} Laeufen). Das "
+                     f"heisst nicht falsch — es heisst, dass hier noch nichts "
+                     f"dort gebaut wurde.")})
+    return aus
+
+
+def geltung_text(geom: dict, payload: dict | None = None) -> str:
+    """Die Abweichungen als Absatz -- leer, wenn es keine gibt."""
+    e = geltung_pruefen(geom, payload)
+    if not e:
+        return ""
+    return "\n".join(f"  {x['feld']}: {x['text']}" for x in e)
 
 
 # ── Zugriff ───────────────────────────────────────────────────────────────────

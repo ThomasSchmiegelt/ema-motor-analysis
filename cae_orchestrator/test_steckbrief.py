@@ -370,7 +370,13 @@ pruefe("laeufe_liste" in srv and "lauf_lesen" in srv,
 # ── 8) Die Seite: EIN Satz Zeichenfunktionen ───────────────────────────────
 print("\n[8] Agentenseite")
 
-html = open(os.path.join(HIER, "ema_agent.html"), encoding="utf-8").read()
+# Seit dem dritten Kopf (Studio) steht das VERHALTEN der Agentenseiten in
+# ``agent_gemein.js`` -- Ereignisstrom, Uhr, Mitlaufen, Archiv, Aufnahme --, und
+# beide Seiten binden dieselbe Datei ein. In der Seite blieb, was sie AUSSEHEN
+# laesst. Geprueft wird deshalb beides zusammen: die Aussage „es gibt genau EINEN
+# Satz Zeichenfunktionen" gilt jetzt fuer zwei Seiten und eine geteilte Datei.
+html = (open(os.path.join(HIER, "ema_agent.html"), encoding="utf-8").read() +
+        open(os.path.join(HIER, "agent_gemein.js"), encoding="utf-8").read())
 pruefe('id="archiv"' in html and 'id="a_liste"' in html,
        "es gibt eine Archivansicht")
 pruefe("let SPALTEN" in html and "$(SPALTEN.l)" in html and "$(SPALTEN.r)" in html,
@@ -447,7 +453,11 @@ with tempfile.TemporaryDirectory() as tmp:
     pruefe(SB.steckbrief(ohne, mit_laeufen=False)["vorgabe"] is False,
            "ein gewoehnliches Projekt bleibt ausdruecklich KEINE Vorlage")
 
-quelle_srv = open(os.path.join(HIER, "server.py"), encoding="utf-8").read()
+# Der stehende Auftrag ist von der Route an den KOPF gewandert
+# (``ema_agent.Kopf.systemzusatz``): PI und Hermes tragen ihn unveraendert, der
+# Studio-Kopf einen eigenen -- er schreibt ueber Gerechnetes, statt zu rechnen.
+quelle_srv = (open(os.path.join(HIER, "server.py"), encoding="utf-8").read() +
+              open(os.path.join(HIER, "ema_agent.py"), encoding="utf-8").read())
 pruefe('@app.route("/agent/vorgabe"' in quelle_srv,
        "es gibt eine Route, die gezeichnete Geometrie uebergibt — ohne Lauf")
 pruefe("body.get(\"brief\")" in quelle_srv,

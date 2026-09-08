@@ -224,6 +224,40 @@ def qr_terminal(text: str) -> str | None:
         return None
 
 
+def qr_matrix(text: str) -> list | None:
+    """Der QR-Code als Modulmatrix (Zeilen aus 0/1) -- oder ``None``.
+
+    Fuer den Browser: die Studio-Seite malt ihn auf ein Canvas. Ein Bild
+    daraus zu rendern haette eine Bildbibliothek verlangt; die Matrix ist die
+    kleinste ehrliche Form. Faellt sie aus, zeigt die Seite die URL im Klartext
+    -- aus demselben Grund wie oben: ein halb richtiger QR waere schlimmer als
+    keiner.
+    """
+    try:
+        import segno                                    # type: ignore
+        m = segno.make(text, error="l").matrix
+        return [[int(bool(x)) for x in zeile] for zeile in m]
+    except Exception:
+        pass
+    try:
+        import qrcode                                   # type: ignore
+        q = qrcode.QRCode(border=0, error_correction=0)
+        q.add_data(text)
+        q.make(fit=True)
+        return [[int(bool(x)) for x in zeile] for zeile in q.get_matrix()]
+    except Exception:
+        return None
+
+
+def studio_url(port: int = 5000) -> str:
+    """Einstieg in den Studio-Reiter vom Handy aus -- dasselbe Token wie ``/m``.
+
+    Ein gemeinsames Geheimnis fuer beide Wege ist Absicht: sonst haengen zwei
+    QR-Codes am Kuehlschrank, und beim zweiten weiss niemand mehr, wofuer er war.
+    """
+    return f"http://{lan_adresse()}:{port}/studio?t={token()}"
+
+
 def zugang_text(port: int = 5000) -> str:
     """Der Block, den ``start.sh`` beim Start ausgibt."""
     url = einstieg_url(port)
@@ -233,6 +267,7 @@ def zugang_text(port: int = 5000) -> str:
         zeilen += ["    " + z for z in qr.rstrip("\n").split("\n")]
         zeilen.append("")
     zeilen += [f"    {url}", ""]
+    zeilen += [f"    Studio-Chat (auch fuer den Agenten): {studio_url(port)}", ""]
     if not qr:
         zeilen += ["    (Kein QR im Terminal — 'pip install segno' im venv nachrüsten;",
                    "     die Adresse oben funktioniert unverändert.)", ""]
