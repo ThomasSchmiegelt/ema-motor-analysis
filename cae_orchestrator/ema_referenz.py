@@ -548,6 +548,82 @@ BAUBAND = {
 }
 
 
+# ── Getriebewerkstoffe: ANNAHME, nicht Zitat ─────────────────────────────────
+#
+# ``sigma_Flim`` (Zahnfuss-Dauerfestigkeit) und ``sigma_Hlim`` (Gruebchen-
+# Dauerfestigkeit) sind FREMDWERTE. Sie stehen hier und nicht in
+# ``ema_getriebe``, weil dieses Modul der Ort fuer Fremdwerte ist -- aber sie
+# stehen NICHT in ``MESSPUNKTE``, denn dort gehoert nur hinein, was mit Quelle
+# und woertlicher Fundstelle abgerufen wurde.
+#
+# Was sie sind: Groessenordnungen der Werkstoffklassen, wie sie in der
+# Normliteratur (ISO 6336-5, DIN 3990-5) als Dauerfestigkeitsschaubilder
+# stehen -- mittlere Qualitaet (MQ). Sie sind hier **nicht belegt**, und jede
+# damit gerechnete Sicherheit traegt deshalb ``werkstoff_beleg: "annahme"``.
+# Eine erfundene Festigkeitszahl ist die gefaehrlichste Zahl in einem
+# Getriebewerkzeug: sie entscheidet ueber das Modul und damit ueber alles.
+#
+# Wer sie belegen will, holt sie ueber ``cae_cli.py recherche`` mit Fundstelle
+# und setzt ``beleg`` auf ``"zitat"`` -- dann steht es auch in jedem Befund.
+# Die SPANNE ist Teil der Angabe: wer den Mittelwert nimmt und die Spanne
+# verschweigt, tut so, als waere die Zahl scharf.
+
+GETRIEBE_WERKSTOFF = {
+    "einsatzgehaertet": {
+        "label": "Einsatzstahl, einsatzgehaertet (16MnCr5 / 20MnCr5)",
+        "sigma_Flim_Nmm2": 460.0, "spanne_F": (310.0, 525.0),
+        "sigma_Hlim_Nmm2": 1500.0, "spanne_H": (1300.0, 1650.0),
+        "E_Nmm2": 206000.0, "nu": 0.3, "dichte_kgm3": 7850.0,
+        "beleg": "annahme",
+        "bemerkung": ("Der uebliche Getriebewerkstoff im Fahrzeugbau: harte "
+                      "Randschicht, zaeher Kern. Traegt die hoechste Flanken- "
+                      "und Fusslast der vier hier."),
+    },
+    "nitriert": {
+        "label": "Nitrierstahl, nitriert (31CrMoV9)",
+        "sigma_Flim_Nmm2": 425.0, "spanne_F": (270.0, 470.0),
+        "sigma_Hlim_Nmm2": 1250.0, "spanne_H": (1000.0, 1450.0),
+        "E_Nmm2": 206000.0, "nu": 0.3, "dichte_kgm3": 7850.0,
+        "beleg": "annahme",
+        "bemerkung": ("Verzugsarm, weil nach dem Haerten nicht mehr geschliffen "
+                      "werden muss — dafuer duenne Randschicht, empfindlich "
+                      "gegen Ueberlast."),
+    },
+    "verguetet": {
+        "label": "Verguetungsstahl, verguetet (42CrMo4)",
+        "sigma_Flim_Nmm2": 320.0, "spanne_F": (250.0, 370.0),
+        "sigma_Hlim_Nmm2": 800.0, "spanne_H": (650.0, 920.0),
+        "E_Nmm2": 206000.0, "nu": 0.3, "dichte_kgm3": 7850.0,
+        "beleg": "annahme",
+        "bemerkung": "Ohne Randschichthaertung — billiger, deutlich schwaecher.",
+    },
+    "baustahl": {
+        "label": "Baustahl verguetet (C45)",
+        "sigma_Flim_Nmm2": 250.0, "spanne_F": (190.0, 300.0),
+        "sigma_Hlim_Nmm2": 600.0, "spanne_H": (470.0, 700.0),
+        "E_Nmm2": 206000.0, "nu": 0.3, "dichte_kgm3": 7850.0,
+        "beleg": "annahme",
+        "bemerkung": "Fuer langsam laufende, gering belastete Stufen.",
+    },
+}
+
+
+def getriebe_werkstoff_text() -> str:
+    """Die Werkstofftabelle mit ihrem Vorbehalt — der gehoert an jede Ausgabe."""
+    z = ["GETRIEBEWERKSTOFFE (ANNAHME, nicht belegt — s. ema_referenz)"]
+    for k, w in GETRIEBE_WERKSTOFF.items():
+        z.append(f"  {k:18s} {w['label']}")
+        z.append(f"  {'':18s} sigma_Flim {w['sigma_Flim_Nmm2']:.0f} "
+                 f"(Spanne {w['spanne_F'][0]:.0f}…{w['spanne_F'][1]:.0f}) N/mm^2, "
+                 f"sigma_Hlim {w['sigma_Hlim_Nmm2']:.0f} "
+                 f"(Spanne {w['spanne_H'][0]:.0f}…{w['spanne_H'][1]:.0f}) N/mm^2")
+    z.append("")
+    z.append("  Diese Werte sind Groessenordnungen der Werkstoffklassen, keine")
+    z.append("  zitierten Messwerte. Jede damit gerechnete Sicherheit traegt")
+    z.append("  'werkstoff_beleg: annahme'. Belegen: cae_cli.py recherche.")
+    return "\n".join(z)
+
+
 # ── Geltungsbereich: worauf diese Kette ueberhaupt geeicht ist ────────────────
 #
 # Anlass, gemessen am 08.09.2026: ein 230-V-Ventilatorantrieb (125 W, netz-

@@ -318,6 +318,45 @@ Schnellbewerter. Er kennt Magnetbreite, -dicke und -neigung, aber er ist eine
 Kreisersatzschaltung und kein Feldlauf. Was er als bestes findet, gehört danach
 durch `run analyse` und `feld2d`, bevor es als Ergebnis gilt.
 
+### `getriebe` — die Übersetzung ist kein freier Parameter mehr
+
+```bash
+# zweistufiges Stirnradgetriebe
+python3 cae_cli.py getriebe --from-project last --art stirnrad --stufen 2 --i 9.5
+
+# Planetensatz IN der Hohlwelle (prüft die Bohrung magnetisch mit — ein Feldlauf)
+python3 cae_cli.py getriebe --from-project last --art planeten --einbau in_welle \
+        --i 5 --bauraum-axial 70
+```
+
+Bis dahin war das Getriebe zwei Konstanten im Fahrzeugmodell (`gear_ratio` 9,5
+und `eta_drive` 0,95) — dieselben für einen Fahrrad-Nabenmotor wie für einen
+Traktionsantrieb. Das Verb rechnet statt dessen Stufenteilung, Zähnezahlen,
+Modul, Tragfähigkeit, einen **lastabhängigen** Wirkungsgrad, Masse und die auf
+die Motorwelle bezogene Trägheit.
+
+* **`i_ist` steht immer neben `i_soll`.** Eine Übersetzung aus ganzen
+  Zähnezahlen trifft den Sollwert fast nie genau; die Abweichung ist eine
+  Aussage und keine Nachkommastelle.
+* **Was bindet, steht dabei**: meistens nicht der Zahnfuß, sondern die Flanke.
+  Wer nach der Fußformel aufhört, legt eine Verzahnung aus, die Grübchen bekommt.
+* **`--einbau in_welle`** (nur Planetensatz) legt den Satz in die Hohlwelle und
+  prüft drei Zahlen gegeneinander: was er braucht, was gezeichnet ist, und was
+  **magnetisch zulässig** ist — letzteres aus `welle`, also gerechnet und nicht
+  geschätzt. Ohne den Feldlauf (`--ohne-feld`) steht ausdrücklich da, dass die
+  magnetische Grenze ungeprüft blieb. Ein Stirnradsatz in der Welle wird
+  abgewiesen, nicht genähert.
+* **Exit 1** heißt: die Verzahnung trägt nicht ODER der Satz passt nicht. Beides
+  wird getrennt genannt — eine Verzahnung, die trägt und nur nicht in die
+  Bohrung geht, braucht mehr Platz, nicht mehr Modul.
+
+**Zwei Grenzen, die dazugehören.** Die Festigkeitskennwerte
+(`ema_referenz.GETRIEBE_WERKSTOFF`) sind eine **Annahme** — Größenordnung der
+Werkstoffklasse, nicht zitiert; jede Sicherheit trägt `werkstoff_beleg:
+annahme`. Und die Beiwerte `K_A`, `K_V`, `K_Hβ` sind Betriebswissen, keine
+Geometrie: sie stehen als Eingang mit begründeter Vorgabe da. Wer eine
+belastbare Zahl braucht, belegt sie (`recherche`) und sagt es dazu.
+
 ### Geltungsbereich — die zweite Hälfte der Herkunft
 
 Die Herkunft sagt, mit **welchem Verfahren** eine Zahl entstanden ist. Der

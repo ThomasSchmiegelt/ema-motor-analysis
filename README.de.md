@@ -1016,6 +1016,84 @@ wie eine Modelländerung). Die Seite merkt sich den Stand beim Öffnen und sagt
 **einmal** Bescheid, wenn er sich ändert. Neu geladen wird nicht von selbst:
 mitten in einem Lauf ist das eine Entscheidung des Menschen, nicht der Seite.
 
+## Das Getriebe wird gerechnet — und darf in der Welle sitzen
+
+Das Getriebe war in dieser Kette **zwei Konstanten**: eine Übersetzung von 9,5
+und ein Wirkungsgrad von 0,95, beide fest im Fahrzeugmodell. Ein
+Fahrrad-Nabenmotor und ein Traktionsantrieb bekamen dieselben Zahlen, sofern
+niemand sie von Hand setzte. Es gab keine Stufenteilung, keine Zähnezahlen, kein
+Modul, keine Tragfähigkeit, keine Masse, keine Trägheit — und einen
+Wirkungsgrad, der bei Volllast dasselbe sagte wie im Schub.
+
+```bash
+python3 cae_orchestrator/cae_cli.py getriebe --from-project last \
+        --art stirnrad --stufen 2 --i 9.5
+```
+
+Gerechnet wird jetzt die ganze Kette: Stufenteilung, Zähnezahlen, Modul,
+Achsabstand, Zahnfuß- und Flankentragfähigkeit, ein **lastabhängiger**
+Wirkungsgrad, Masse und die auf die Motorwelle bezogene Trägheit.
+
+**Aus der Geometrie, nicht aus Tabellen.** Der Zahnformfaktor und der Kerbfaktor
+werden über das Verfahren der 30-Grad-Tangente aus Zähnezahl, Profilverschiebung
+und Werkzeugform bestimmt — der Wälzwinkel iterativ. Eine Tabelle wäre das
+Naheliegende und das Falsche gewesen: sie gilt nur für unverschobene Zähne, und
+die Auslegung wählt eine Profilverschiebung, sobald die Zähnezahl unter 17
+fällt. Gemessen fällt der Formfaktor bei 14 Zähnen von 3,20 auf 2,26, sobald man
+sie zulässt — ein Tabellenwert läge dort um 42 % daneben, ohne dass es
+auffiele.
+
+**Der Zahnfuß gibt den ersten Wurf, die Flanke entscheidet meistens.** Die
+Fußformel liefert das Modul aus der dritten Wurzel des Moments, die Flanke trägt
+mit der anderthalbten Potenz. An einer 191-Nm-Stufe hält der Fuß bei Modul 2,0
+mit einer Sicherheit von 1,41 — die Flanke steht dort bei 0,91. Wer nach der
+Fußformel aufhört, legt eine Verzahnung aus, die im Betrieb Grübchen bekommt.
+Deshalb geht die Auslegung die Normreihe hoch, bis beide Sicherheiten stehen,
+und sagt, **welche gebunden hat**.
+
+### Und der Einbauort ist ein Tor, keine Beschriftung
+
+Ein Planetensatz kann **in der Hohlwelle des Läufers** sitzen — der integrierte
+Antrieb. Ein Stirnradsatz kann das nicht: er sitzt neben der Achse, nicht auf
+ihr. Das wird abgewiesen und nicht genähert.
+
+Für den Planetensatz stehen drei Zahlen nebeneinander, und es steht dabei,
+welche bindet:
+
+| | |
+|---|---:|
+| was der Satz braucht (Hohlrad-Fußkreis + Wand) | 100,6 mm |
+| was gezeichnet ist (`shaftBoreD`) | 70,0 mm |
+| was **magnetisch zulässig** ist | 66,0 mm |
+
+Die letzte Zahl ist nicht geschätzt: sie kommt aus dem `welle`-Befund, also aus
+einem gerechneten Feld — dem größten Radius, unter dem nirgends Fluss steht.
+Im gemessenen Fall passt der Satz nicht, es fehlen 34,6 mm, und die gezeichnete
+Bohrung ist überdies schon größer als magnetisch zulässig. Beides steht da.
+Ohne den Feldlauf sagt der Befund ausdrücklich, dass die magnetische Grenze
+**ungeprüft** blieb — „passt in die gezeichnete Bohrung" ist nicht „zulässig".
+
+### Was der Fahrzyklus davon hat
+
+Liegt eine Auslegung vor, treten drei gerechnete Größen an die Stelle der
+Vorgaben: die Übersetzung, ein lastabhängiger Wirkungsgrad und die reduzierte
+Trägheit (die drehenden Massen wirken beim Beschleunigen wie zusätzliche Masse).
+Gemessen am WLTP-Zyklus steht der Wirkungsgrad bei großer Last auf 0,955 und bei
+kleiner auf 0,62 — die Konstante 0,95 konnte das nicht abbilden, weil die
+Lager- und Planschverluste an der **Drehzahl** hängen und nicht an der Last.
+Ohne Auslegung ändert sich nichts: jede bestehende Rechnung bleibt Ziffer für
+Ziffer dieselbe.
+
+### Zwei Grenzen, die dazugehören
+
+Die Festigkeitskennwerte sind eine **Annahme** — Größenordnungen der
+Werkstoffklassen mit Spanne, nicht zitierte Messungen. Jede damit gerechnete
+Sicherheit trägt diesen Vermerk, und **ohne Kennwert gibt es kein Modul** statt
+eines Ersatzwerts. Bei **Kegelrad** und **Schnecke** steht das Verfahren an
+jeder Zahl: das Kegelrad rechnet über das Ersatz-Stirnrad, die Schnecke rechnet
+gar keine Zahnfußtragfähigkeit und gibt beim Wirkungsgrad eine Spanne über den
+Reibwert aus statt einer Zahl.
+
 ## Der Schnellbewerter sah die Zeichnung nicht
 
 Vor dem Bau einer freien Magnetsuche wurde erst die Grundlage nachgemessen — und

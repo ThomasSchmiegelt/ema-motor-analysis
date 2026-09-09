@@ -2154,6 +2154,86 @@ def _chart_ablegen(b64: str, name: str, args) -> str:
     return pfad
 
 
+def cmd_getriebe(args) -> int:
+    """Getriebe auslegen -- und, je nach Bauart, in die Welle legen.
+
+    Das Getriebe war in dieser Kette zwei Konstanten (``gear_ratio``,
+    ``eta_drive``). Dieses Verb rechnet statt dessen: Stufenteilung,
+    Zaehnezahlen, Modul, Tragfaehigkeit, lastabhaengiger Wirkungsgrad, Masse und
+    die auf die Motorwelle bezogene Traegheit.
+
+    Bei ``--einbau in_welle`` wird ZUSAETZLICH gemessen, ob das Hohlrad in die
+    Wellenbohrung passt -- und zwar nicht nur in die gezeichnete, sondern in die
+    magnetisch zulaessige: ``ema_welle.pruefen`` rechnet dafuer ein Feld. Das
+    kostet ein paar Sekunden und ist der einzige Weg, die Frage zu beantworten,
+    statt sie zu vermuten.
+
+    Exit: 0 = haelt und passt, 1 = haelt nicht / passt nicht, 2 = Bedienfehler.
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    echo_sets(applied)
+    geom = payload.get("geom") or {}
+
+    import ema_getriebe as GT
+
+    T_mot = float(args.moment if args.moment is not None
+                  else (payload.get("load_nm") or 0.0))
+    n_mot = float(args.drehzahl if args.drehzahl is not None
+                  else (payload.get("rpm_to") or payload.get("rpm_from") or 0.0))
+    if T_mot <= 0:
+        return _die("Kein Moment: weder --moment noch load_nm im Payload.", EXIT_USAGE)
+    if n_mot <= 0:
+        return _die("Keine Drehzahl: weder --drehzahl noch rpm_to im Payload.",
+                    EXIT_USAGE)
+
+    spec = {
+        "art": args.art, "einbau": args.einbau, "stufen": args.stufen,
+        "T_motor_Nm": T_mot, "n_motor_1pmin": n_mot,
+        "werkstoff": args.werkstoff, "geom": geom,
+        "n_planeten": args.planeten, "beta_grad": args.schraegung,
+        "laenge_verfuegbar_mm": args.bauraum_axial,
+    }
+    if args.i:
+        spec["i"] = args.i
+    elif args.n_ab:
+        spec["n_ab_1pmin"] = args.n_ab
+    else:
+        return _die("Weder --i noch --n-ab gegeben — die Uebersetzung muss "
+                    "irgendwoher kommen.", EXIT_USAGE)
+
+    # Die magnetische Grenze der Bohrung: nur wenn sie gebraucht wird, denn sie
+    # kostet einen Feldlauf.
+    if args.einbau == "in_welle" and not args.ohne_feld:
+        try:
+            import ema_welle
+            print("  Wellenbohrung magnetisch pruefen (ein Feldlauf) …")
+            spec["welle_befund"] = ema_welle.pruefen(geom)
+        except Exception as e:                               # noqa: BLE001
+            print(f"  (Feldlauf nicht moeglich: {type(e).__name__}: {e} — "
+                  f"die magnetische Grenze bleibt ungeprueft)")
+
+    erg = GT.auslegen(spec)
+    text = GT.als_text(erg)
+    if args.json:
+        print(json.dumps(erg, ensure_ascii=False, indent=1, default=str))
+    else:
+        print()
+        print(text)
+
+    ok = bool(erg.get("ok")) and erg.get("haelt") is not False \
+        and erg.get("passt", True)
+    _ablegen(args, "getriebe", text, daten=erg, ok=ok)
+    if not erg.get("ok"):
+        return EXIT_USAGE if "gibt es nicht" in str(erg.get("grund", "")) else 1
+    return 0 if ok else 1
+
+
 def cmd_studie(args) -> int:
     """EINEN Parameter von x nach y durchfahren und ALLE Kennwerte mitschreiben.
 
@@ -3076,6 +3156,41 @@ def build_parser() -> argparse.ArgumentParser:
                         help="einzelnen Parameter der Basis aendern, mehrfach angebbar")
         sp.add_argument("--force", action="store_true",
                         help="Grenzen und Typen aus dem Schema nicht pruefen")
+
+    s = sub.add_parser("getriebe",
+                       help="Getriebe auslegen (Stirnrad/Planeten/Kegelrad/Schnecke) — "
+                            "mit Tragfaehigkeit, Wirkungsgrad, Masse; Planetensatz auch IN der Welle")
+    _basis(s)
+    s.add_argument("--art", default="stirnrad",
+                   choices=["stirnrad", "planeten", "kegelrad", "schnecke"],
+                   help="Bauart (Vorgabe stirnrad)")
+    s.add_argument("--einbau", default="",
+                   choices=["", "achsparallel", "koaxial", "in_welle"],
+                   help="Einbauort. 'in_welle' geht nur beim Planetensatz und "
+                        "prueft die Bohrung magnetisch mit (ein Feldlauf)")
+    s.add_argument("--stufen", type=int, default=1, choices=[1, 2],
+                   help="Zahl der Stirnradstufen (Vorgabe 1)")
+    s.add_argument("--i", type=float, default=None, help="Gesamtuebersetzung")
+    s.add_argument("--n-ab", dest="n_ab", type=float, default=None,
+                   help="Abtriebsdrehzahl 1/min — daraus folgt i")
+    s.add_argument("--moment", type=float, default=None,
+                   help="Eingangsmoment Nm (Vorgabe: load_nm aus dem Payload)")
+    s.add_argument("--drehzahl", type=float, default=None,
+                   help="Eingangsdrehzahl 1/min (Vorgabe: rpm_to)")
+    s.add_argument("--werkstoff", default="einsatzgehaertet",
+                   help="Schluessel aus ema_referenz.GETRIEBE_WERKSTOFF")
+    s.add_argument("--planeten", type=int, default=3,
+                   help="Zahl der Planeten (Vorgabe 3)")
+    s.add_argument("--schraegung", type=float, default=0.0,
+                   help="Schraegungswinkel Grad (0 = geradverzahnt)")
+    s.add_argument("--bauraum-axial", dest="bauraum_axial", type=float, default=0.0,
+                   help="verfuegbare Baulaenge mm (nur fuer --einbau in_welle)")
+    s.add_argument("--ohne-feld", dest="ohne_feld", action="store_true",
+                   help="bei 'in_welle' den Feldlauf ueberspringen — dann bleibt "
+                        "die magnetische Grenze der Bohrung UNGEPRUEFT")
+    _add_ablage(s)
+    _add_globals(s, json_hilfe="vollstaendig als JSON")
+    s.set_defaults(fn=cmd_getriebe)
 
     s = sub.add_parser("studie",
                        help="EINEN Parameter von x nach y durchfahren und alle Kennwerte mitschreiben")

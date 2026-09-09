@@ -889,6 +889,72 @@ a model change). The page remembers the state it saw when it opened and says so
 **once** when it changes. It does not reload by itself: in the middle of a run
 that is a person's decision, not the page's.
 
+## The gearbox is computed — and may sit inside the shaft
+
+The gearbox used to be **two constants**: a ratio of 9.5 and an efficiency of
+0.95, both fixed in the vehicle model. A bicycle hub motor and a traction drive
+got the same ones unless somebody set them by hand. There was no stage split, no
+tooth counts, no module, no load capacity, no mass, no inertia — and an
+efficiency that said the same thing at full load as on the overrun.
+
+Now the whole chain is computed: stage split, tooth counts, module, centre
+distance, root and flank capacity, a **load-dependent** efficiency, mass, and the
+inertia referred to the motor shaft.
+
+**From the geometry, not from tables.** The tooth-form and notch factors come out
+of the 30° tangent construction — tooth count, profile shift and tool form, with
+the roll angle solved iteratively. A table would have been the obvious and the
+wrong choice: it holds only for unshifted teeth, and the sizing picks a profile
+shift as soon as the tooth count drops below 17. Measured, the form factor at 14
+teeth falls from 3.20 to 2.26 once that is allowed — a table value would be 42 %
+off, with nothing to show for it.
+
+**The root gives the first cut, the flank usually decides.** The root formula
+yields the module from the cube root of the torque; the flank carries with the
+1.5th power. On a 191 Nm stage the root holds at module 2.0 with a safety of
+1.41 — the flank stands at 0.91 there. Stopping after the root formula produces a
+gear set that pits in service. So the sizing walks up the standard series until
+both safeties hold, and states **which one bound**.
+
+### And the mounting position is a gate, not a label
+
+A planetary set can sit **inside the rotor's hollow shaft** — the integrated
+drive. A spur set cannot: it sits beside the axis, not on it. That is refused,
+not approximated.
+
+For the planetary set three numbers stand side by side, and it says which binds:
+
+| | |
+|---|---:|
+| what the set needs (ring root circle + wall) | 100.6 mm |
+| what is drawn (`shaftBoreD`) | 70.0 mm |
+| what is **magnetically permissible** | 66.0 mm |
+
+The last number is not an estimate: it comes from the `welle` finding, i.e. from
+a solved field — the largest radius with no flux anywhere. In the measured case
+the set does not fit, 34.6 mm are missing, and the drawn bore is already larger
+than magnetically permissible. Both are stated. Without the field run the finding
+says explicitly that the magnetic limit went **unchecked** — "fits the drawn
+bore" is not "permissible".
+
+### What the drive cycle gains
+
+When a design exists, three computed quantities replace the defaults: the ratio,
+a load-dependent efficiency, and the reduced inertia (rotating masses act like
+extra mass under acceleration). Measured over the WLTP cycle the efficiency sits
+at 0.955 at high load and 0.62 at low — the constant 0.95 could not express that,
+because bearing and churning losses hang on **speed**, not on load. Without a
+design nothing changes: every existing calculation stays identical to the digit.
+
+### Two limits that come with it
+
+The strength values are an **assumption** — magnitudes of the material classes
+with a range, not quoted measurements. Every safety computed with them carries
+that note, and **without a value there is no module** rather than a substitute.
+For **bevel** and **worm** gears the method is stated on every figure: the bevel
+computes through the equivalent spur gear, the worm computes no root capacity at
+all and gives a range over the friction coefficient instead of a number.
+
 ## The fast evaluator could not read a drawing
 
 Before building a free magnet search, the ground it would stand on was measured —

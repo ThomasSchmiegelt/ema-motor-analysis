@@ -548,6 +548,39 @@ DEFAULT_VEHICLE = {
 }
 
 
+def _eta_getriebe(getr: dict, P_ab_W, rpm_ein) -> "np.ndarray":
+    """Wirkungsgrad je Zeitschritt aus dem gerechneten Getriebe.
+
+    ``eta = P_ab / (P_ab + P_zahn + P_leer)`` mit
+    ``P_zahn = P_ab * H_V * mu`` (waechst mit der Last) und
+    ``P_leer ~ n`` (haengt an der Drehzahl, nicht an der Last).
+
+    Im Stillstand ist der Wirkungsgrad nicht definiert -- dort wird kein Moment
+    uebertragen. Statt 0/0 steht dann der Nennwert; er geht ohnehin mit einem
+    Moment von null in die Rechnung.
+    """
+    w = getr.get("wirkungsgrad") or {}
+    eta_nenn = float(w.get("eta_nenn", 0.95) or 0.95)
+    H_V = float(w.get("H_V_summe", 0.0) or 0.0)
+    mu = float(w.get("mu_m", 0.05) or 0.05)
+    anteil = float(w.get("leerlauf_anteil", 0.005) or 0.005)
+    n_stufen = max(int(getr.get("n_stufen", 1) or 1), 1)
+    P_nenn = float(getr.get("P_nenn_W", 0.0) or 0.0)
+    n_nenn = float(getr.get("n_motor_1pmin", 0.0) or 0.0)
+    if P_nenn <= 0 or n_nenn <= 0:
+        return np.full(np.shape(P_ab_W), eta_nenn)
+    P_ab = np.abs(np.asarray(P_ab_W, dtype=float))
+    n = np.abs(np.asarray(rpm_ein, dtype=float))
+    P_zahn = P_ab * H_V * mu
+    P_leer = anteil * P_nenn * n_stufen * (n / n_nenn)
+    nenner = P_ab + P_zahn + P_leer
+    eta = np.divide(P_ab, nenner, out=np.full_like(P_ab, eta_nenn),
+                    where=nenner > 1e-6)
+    # Ein Getriebe im Schub ist nicht besser als im Zug; und unter 0,3 wird es
+    # unphysikalisch (dann steht das Fahrzeug ohnehin).
+    return np.clip(eta, 0.30, eta_nenn)
+
+
 def compute_drivetrain(cycle: dict, vehicle: dict) -> dict:
     """From v(t) compute rpm_motor(t), T_motor(t), P_wheel(t).
 
@@ -580,14 +613,35 @@ def compute_drivetrain(cycle: dict, vehicle: dict) -> dict:
     a = np.gradient(v, t)
     a = np.clip(a, -8.0, 8.0)
 
-    m     = vehicle["mass_kg"]
+    # ── Ein GERECHNETES Getriebe, falls eines vorliegt ──────────────────────
+    #
+    # ``vehicle["getriebe"]`` ist das Ergebnis von ``ema_getriebe.auslegen``.
+    # Liegt es vor, treten drei gerechnete Groessen an die Stelle von Vorgaben:
+    # die Uebersetzung, ein LASTABHAENGIGER Wirkungsgrad und die reduzierte
+    # Traegheit. Liegt es nicht vor, aendert sich hier NICHTS -- jede bestehende
+    # Rechnung bleibt Ziffer fuer Ziffer gleich.
+    getr = vehicle.get("getriebe") or {}
+    getr_da = bool(getr.get("ok"))
+
+    m     = vehicle["mass_kg"] + (float(getr.get("masse_kg", 0.0)) if getr_da else 0.0)
     cwA   = vehicle["cwA_m2"]
     cr    = vehicle["cr"]
     rho   = vehicle["rho_air"]
     g     = vehicle["g"]
 
     moving    = np.where(v > 0.1, 1.0, 0.0)
-    F_inertia = m * a
+    # Die drehenden Massen wirken beim Beschleunigen wie zusaetzliche Masse:
+    # m_eff = m + J_red * i^2 / r^2 -- ``J_red`` ist auf die MOTORwelle bezogen,
+    # das Rad dreht um i langsamer, also kommt i^2 wieder herein. Bei einem
+    # kleinen Fahrzeug ist das kein Randeffekt: 0,01 kg m^2 bei i = 9,5 und
+    # r = 0,3 m sind ueber 10 kg.
+    m_dreh = 0.0
+    if getr_da:
+        _i = float(getr.get("i_ist", 0.0) or 0.0)
+        _r = float(vehicle["r_wheel_m"])
+        if _i > 0 and _r > 0:
+            m_dreh = float(getr.get("J_red_kgm2", 0.0)) * _i ** 2 / (_r ** 2)
+    F_inertia = (m + m_dreh) * a
     F_drag    = 0.5 * rho * cwA * v**2
     F_roll    = m * g * cr * moving
     # Constant bearing/seal friction of the trailer's extra axles (0 for the
@@ -615,16 +669,26 @@ def compute_drivetrain(cycle: dict, vehicle: dict) -> dict:
     rW        = vehicle["r_wheel_m"]
     omega_w   = v / rW                                 # rad/s
     rpm_wheel = omega_w * 60 / (2 * math.pi)
-    rpm_motor = rpm_wheel * vehicle["gear_ratio"]
+    i_getriebe = (float(getr["i_ist"]) if getr_da and getr.get("i_ist")
+                  else vehicle["gear_ratio"])
+    rpm_motor = rpm_wheel * i_getriebe
 
     T_wheel   = F_wheel * rW                           # Nm at wheel
     # Motor torque: dividing by gear ratio; drivetrain losses penalise traction
     # mode but help braking mode (less energy needs to be absorbed)
-    eta = vehicle["eta_drive"]
+    if getr_da:
+        # Lastabhaengig statt konstant. Der Verzahnungsverlust waechst mit der
+        # Last, die Lager- und Planschverluste haengen dagegen an der DREHZAHL --
+        # bei kleiner Last fressen die den ganzen Wirkungsgrad. Genau diese Form
+        # fehlte, solange ``eta_drive`` eine Zahl war: im Schub und bei Volllast
+        # stand dieselbe 0,95.
+        eta = _eta_getriebe(getr, np.abs(F_wheel * v), rpm_motor)
+    else:
+        eta = vehicle["eta_drive"]
     T_motor = np.where(
         T_wheel >= 0,
-        T_wheel / (vehicle["gear_ratio"] * eta),
-        T_wheel / vehicle["gear_ratio"] * eta,
+        T_wheel / (i_getriebe * eta),
+        T_wheel / i_getriebe * eta,
     )
 
     return {
