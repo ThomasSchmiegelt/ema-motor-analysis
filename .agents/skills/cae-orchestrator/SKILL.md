@@ -328,6 +328,10 @@ python3 cae_cli.py getriebe --from-project last --art stirnrad --stufen 2 --i 9.
 # Planetensatz IN der Hohlwelle (prüft die Bohrung magnetisch mit — ein Feldlauf)
 python3 cae_cli.py getriebe --from-project last --art planeten --einbau in_welle \
         --i 5 --bauraum-axial 70
+
+# ZWEI Planetenstufen koaxial hintereinander in der Welle (i = 9…100)
+python3 cae_cli.py getriebe --from-project last --art planeten --einbau in_welle \
+        --stufen 2 --i 25 --bauraum-axial 160
 ```
 
 Bis dahin war das Getriebe zwei Konstanten im Fahrzeugmodell (`gear_ratio` 9,5
@@ -350,6 +354,13 @@ die Motorwelle bezogene Trägheit.
 * **Exit 1** heißt: die Verzahnung trägt nicht ODER der Satz passt nicht. Beides
   wird getrennt genannt — eine Verzahnung, die trägt und nur nicht in die
   Bohrung geht, braucht mehr Platz, nicht mehr Modul.
+* **Zwei Planetenstufen liegen koaxial hintereinander — auch in der Hohlwelle.**
+  Eine Stufe trägt i = 3…10, zwei tragen 9…100 (`--stufen 2 --art planeten`).
+  Radial bindet dann die **dickste** Stufe, nicht die Summe: sie teilen sich
+  dieselbe Bohrung. Axial zählen alle zusammen, und der Befund sagt, wie viel
+  Luft mittig an jeder Seite bleibt. Bei `--einbau in_welle` wird die Aufteilung
+  auf die **kleinste nötige Bohrung** gesucht statt nach der Volumenregel
+  genommen — gemessen an i = 25 sind das 174,4 statt 199,5 mm.
 * **`--uebernehmen` ist der Schritt, der sie wirksam macht.** Ohne ihn ist das Verb
   ein Werkzeug, das nichts berührt: der Fahrzyklus liest `vehicle.getriebe`, und
   geschrieben wird der Schlüssel nur hier. Danach rechnet der nächste

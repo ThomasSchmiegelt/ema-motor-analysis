@@ -747,10 +747,24 @@ def planetensatz(T_sonne_Nm: float, i_soll: float, werkstoff: dict, *,
 # wird hier ABGEWIESEN und nicht genaehert: er sitzt neben der Achse, nicht auf
 # ihr, und laesst sich nicht in eine Bohrung legen.
 
-def in_welle_pruefen(satz: dict, geom: dict, *, welle_befund: dict | None = None,
+# Luft zwischen zwei hintereinanderliegenden Stufen: Steg der ersten Stufe,
+# Sonnenwelle der zweiten und die Fuge dazwischen. Eine ANNAHME der
+# Groessenordnung, kein gerechneter Wert -- sie steht deshalb als Konstante da
+# und wird in der Ausgabe genannt, statt in einer Formel zu verschwinden.
+STUFENABSTAND_MM = 8.0
+
+
+def in_welle_pruefen(satz, geom: dict, *, welle_befund: dict | None = None,
                      laenge_verfuegbar_mm: float = 0.0,
                      lager_je_seite_mm: float = 12.0) -> dict:
-    """Passt ein Planetensatz in die Wellenbohrung? Radial UND axial.
+    """Passt der Planetensatz in die Wellenbohrung? Radial UND axial.
+
+    ``satz`` ist EINE Stufe oder die ganze **Kette** (Liste). Mehrere Stufen
+    liegen koaxial hintereinander in derselben Bohrung, mittig auf der Achse --
+    radial zaehlt deshalb das MAXIMUM der Aussendurchmesser und nicht ihre
+    Summe, axial dagegen die Summe der Zahnbreiten plus je eine Fuge dazwischen.
+    Wer radial summierte, verboete jede zweistufige Anordnung ohne Grund; wer
+    axial das Maximum naehme, uebersaehe die halbe Baulaenge.
 
     ``welle_befund`` ist das Ergebnis von ``ema_welle.pruefen``. Fehlt es, wird
     nur gegen die im Payload stehende Bohrung geprueft — und ausdruecklich
@@ -758,14 +772,20 @@ def in_welle_pruefen(satz: dict, geom: dict, *, welle_befund: dict | None = None
     Unterschied zwischen „passt in die gezeichnete Bohrung" und „diese Bohrung
     ist ueberhaupt zulaessig".
     """
-    if satz.get("art") != "planeten":
+    kette = list(satz) if isinstance(satz, (list, tuple)) else [satz]
+    if not kette:
+        return {"ok": False, "passt": False, "grund": "keine Stufe uebergeben"}
+    fremd = next((st for st in kette if st.get("art") != "planeten"), None)
+    if fremd is not None:
         return {"ok": False, "passt": False,
                 "grund": (f"Nur ein Planetensatz kann in der Welle sitzen — "
-                          f"'{satz.get('art', '?')}' arbeitet achsparallel und "
-                          f"braucht einen eigenen Achsabstand ({satz.get('a_mm', '?')} mm). "
+                          f"'{fremd.get('art', '?')}' arbeitet achsparallel und "
+                          f"braucht einen eigenen Achsabstand ({fremd.get('a_mm', '?')} mm). "
                           f"Einbau 'in_welle' ist dafuer nicht darstellbar.")}
 
-    d_noetig = float(satz["d_aussen_mm"])
+    # Radial bindet die DICKSTE Stufe, nicht ihre Summe.
+    dickste = max(kette, key=lambda st: float(st["d_aussen_mm"]))
+    d_noetig = float(dickste["d_aussen_mm"])
     d_gezeichnet = float(geom.get("shaftBoreD", 0) or 0)
     d_welle = float(geom.get("shaftD", 0) or 0)
 
@@ -785,20 +805,31 @@ def in_welle_pruefen(satz: dict, geom: dict, *, welle_befund: dict | None = None
                                 key=lambda nv: nv[1], default=("keine Angabe", 0.0))
     passt_radial = d_verfuegbar > 0 and d_noetig <= d_verfuegbar
 
-    # Axial: der Satz braucht seine Zahnbreite plus die Lager auf beiden Seiten.
-    l_noetig = float(satz["b_mm"]) + 2.0 * lager_je_seite_mm
+    # Axial: alle Zahnbreiten, je eine Fuge ZWISCHEN zwei Stufen, dazu die
+    # Lager an den beiden Enden.
+    b_summe = sum(float(st["b_mm"]) for st in kette)
+    l_fugen = STUFENABSTAND_MM * (len(kette) - 1)
+    l_noetig = b_summe + l_fugen + 2.0 * lager_je_seite_mm
     passt_axial = (laenge_verfuegbar_mm <= 0) or (l_noetig <= laenge_verfuegbar_mm)
+    # Wo der Satz sitzt: mittig in der Bohrung, wenn Platz uebrig ist. Das ist
+    # keine Kosmetik -- ein an einem Ende sitzender Satz belastet die Welle
+    # einseitig, und die Zahl sagt, wie viel Luft an jeder Seite bleibt.
+    luft_je_seite = (max(0.0, laenge_verfuegbar_mm - l_noetig) / 2.0
+                     if laenge_verfuegbar_mm > 0 and passt_axial else None)
 
     saetze = []
+    wer = (f"{dickste.get('name', 'die Stufe')} ist die dickste von "
+           f"{len(kette)}; " if len(kette) > 1 else "")
     if passt_radial:
-        saetze.append(f"Radial passt es: der Satz braucht {d_noetig:.1f} mm "
+        saetze.append(f"Radial passt es: {wer}der Satz braucht {d_noetig:.1f} mm "
                       f"Bohrung, verfuegbar sind {d_verfuegbar:.1f} mm "
                       f"({bindend}).")
     else:
         fehlt = d_noetig - d_verfuegbar
-        saetze.append(f"Radial passt es NICHT: der Satz braucht {d_noetig:.1f} mm "
-                      f"Bohrung, verfuegbar sind {d_verfuegbar:.1f} mm "
-                      f"({bindend}) — es fehlen {fehlt:.1f} mm.")
+        saetze.append(f"Radial passt es NICHT: {wer}der Satz braucht "
+                      f"{d_noetig:.1f} mm Bohrung, verfuegbar sind "
+                      f"{d_verfuegbar:.1f} mm ({bindend}) — es fehlen "
+                      f"{fehlt:.1f} mm.")
     if d_magnetisch is None:
         saetze.append("Die MAGNETISCHE Grenze wurde nicht geprueft: ohne Befund "
                       "aus 'welle' steht hier nur, was gezeichnet ist, nicht was "
@@ -809,10 +840,17 @@ def in_welle_pruefen(satz: dict, geom: dict, *, welle_befund: dict | None = None
                       f"({d_magnetisch:.1f} mm) — das ist unabhaengig vom Getriebe "
                       f"ein Befund fuer sich.")
     if laenge_verfuegbar_mm > 0:
+        teile = (f"Zahnbreiten {b_summe:.1f}"
+                 + (f" + {len(kette)-1} x {STUFENABSTAND_MM:.0f} mm Fuge"
+                    if len(kette) > 1 else "")
+                 + f" + 2 x {lager_je_seite_mm:.0f} mm Lager")
         saetze.append(f"Axial {'passt' if passt_axial else 'passt NICHT'}: "
-                      f"{l_noetig:.1f} mm noetig (Zahnbreite {satz['b_mm']:.1f} + "
-                      f"2 x {lager_je_seite_mm:.0f} mm Lager), "
+                      f"{l_noetig:.1f} mm noetig ({teile}), "
                       f"{laenge_verfuegbar_mm:.1f} mm vorhanden.")
+        if luft_je_seite is not None:
+            saetze.append(f"Die Stufen liegen koaxial hintereinander, mittig in "
+                          f"der Bohrung — {luft_je_seite:.1f} mm Luft an jeder "
+                          f"Seite.")
 
     return {
         "ok": True, "passt": bool(passt_radial and passt_axial),
@@ -825,6 +863,15 @@ def in_welle_pruefen(satz: dict, geom: dict, *, welle_befund: dict | None = None
         "magnetisch_geprueft": d_magnetisch is not None,
         "l_noetig_mm": round(l_noetig, 1),
         "l_verfuegbar_mm": round(laenge_verfuegbar_mm, 1),
+        "n_stufen": len(kette),
+        "dickste_stufe": dickste.get("name", ""),
+        "luft_je_seite_mm": (None if luft_je_seite is None
+                             else round(luft_je_seite, 1)),
+        "stufenabstand_mm": STUFENABSTAND_MM if len(kette) > 1 else 0.0,
+        "stufen_platz": [{"name": st.get("name", f"Stufe {k+1}"),
+                          "d_aussen_mm": st["d_aussen_mm"],
+                          "b_mm": st["b_mm"]}
+                         for k, st in enumerate(kette)],
         "satz": " ".join(saetze),
         "vorbehalt": ("Geprueft ist PLATZ. Ob die verbleibende Wellenwand das "
                       "Moment und die Fliehkraft traegt, sagt die Festigkeit "
@@ -949,9 +996,16 @@ def uebersetzung_aufteilen(i_ges: float, stufen: int, art: str = "stirnrad") -> 
     und wer ihm die kleinere Uebersetzung gibt, macht es unnoetig gross. Beide
     werden auf die Stufengrenze der Bauart geklemmt; passt die Gesamtuebersetzung
     dann nicht mehr, ist das eine Antwort und keine Panne.
+
+    Der Planetensatz hat neben der oberen auch eine **untere** Grenze
+    (``I_MIN_PLANET``): unter i = 3 wird das Hohlrad kleiner als die Sonne. Fuer
+    zwei Stufen heisst das ein Band von 9 bis 100 -- und dass eine Aufteilung,
+    die eine Stufe unter die Grenze druecken wuerde, abgewiesen wird, statt einen
+    Satz zu bauen, den es nicht gibt.
     """
     i_ges = abs(float(i_ges))
     i_max = I_MAX_STUFE.get(art, 6.3)
+    i_min = I_MIN_PLANET if art == "planeten" else 1.0
     stufen = max(1, int(stufen))
     if stufen == 1:
         if i_ges > i_max:
@@ -962,17 +1016,105 @@ def uebersetzung_aufteilen(i_ges: float, stufen: int, art: str = "stirnrad") -> 
         return {"ok": True, "i_stufen": [i_ges], "i_ges": i_ges}
     if stufen > 2:
         return {"ok": False, "grund": "mehr als zwei Stufen sind hier nicht vorgesehen"}
-    i1 = math.sqrt(1.2 * i_ges)
-    i1 = min(max(i1, 1.0), i_max)
-    i2 = i_ges / i1
-    if i2 > i_max:
-        i2 = i_max
-        i1 = i_ges / i2
-    if i1 > i_max:
+    if i_ges > i_max * i_max:
         return {"ok": False,
                 "grund": (f"i = {i_ges:.2f} passt nicht in zwei {art}-Stufen zu "
                           f"je hoechstens {i_max:g} (das waeren {i_max*i_max:.1f}).")}
+    if i_ges < i_min * i_min:
+        return {"ok": False,
+                "grund": (f"i = {i_ges:.2f} ist fuer ZWEI {art}-Stufen zu klein: "
+                          f"jede traegt mindestens {i_min:g}, zusammen also "
+                          f"{i_min*i_min:.1f}. Eine Stufe genuegt hier.")}
+    i1 = math.sqrt(1.2 * i_ges)
+    i1 = min(max(i1, i_min), i_max)
+    i2 = i_ges / i1
+    # Beide Stufen ins Band ziehen -- erst die zweite, dann die erste nachfuehren.
+    if i2 > i_max:
+        i2, i1 = i_max, i_ges / i_max
+    elif i2 < i_min:
+        i2, i1 = i_min, i_ges / i_min
+    if not (i_min <= i1 <= i_max):
+        return {"ok": False,
+                "grund": (f"i = {i_ges:.2f} laesst sich nicht auf zwei "
+                          f"{art}-Stufen zu je {i_min:g}…{i_max:g} aufteilen.")}
     return {"ok": True, "i_stufen": [i1, i2], "i_ges": i_ges}
+
+
+def aufteilung_fuer_bohrung(i_ges: float, T_ein_Nm: float, werkstoff: dict, *,
+                            n_planeten: int = 3, psi_m: float = 18.0,
+                            n_ein_1pmin: float = 0.0, beiwerte: dict | None = None,
+                            k_gamma: float = 1.15, schritte: int = 25) -> dict:
+    """Die Aufteilung suchen, bei der die DICKSTE Stufe am duennsten wird.
+
+    Zwei Planetenstufen hintereinander in EINER Hohlwelle muessen sich dieselbe
+    Bohrung teilen -- es zaehlt also nicht die Summe der Durchmesser, sondern
+    das Maximum. Die uebliche Regel ``i1 = sqrt(1,2*i)`` ist auf das Bauvolumen
+    gemuenzt und beantwortet diese Frage nicht: sie kennt die Bohrung nicht.
+
+    Der Zusammenhang ist gegenlaeufig und deshalb nicht im Kopf zu entscheiden.
+    Ein groesseres ``i1`` laesst die zweite Stufe ein groesseres Moment tragen
+    (``T2 = T1*i1``), sie wird dicker; ein kleineres ``i1`` schiebt dafuer
+    Uebersetzung in die zweite Stufe, deren Hohlrad damit waechst. Dazwischen
+    liegt ein Minimum, und es liegt bei jedem Moment woanders. Also wird es
+    **gesucht** und nicht hergeleitet: das Band zwischen den Stufengrenzen wird
+    abgetastet, jede Aufteilung wirklich ausgelegt, und die mit dem kleinsten
+    groessten Aussendurchmesser gewinnt.
+    """
+    i_ges = abs(float(i_ges))
+    i_min, i_max = I_MIN_PLANET, I_MAX_STUFE["planeten"]
+    # Der zulaessige Bereich fuer i1: beide Stufen muessen im Band liegen.
+    lo = max(i_min, i_ges / i_max)
+    hi = min(i_max, i_ges / i_min)
+    if lo > hi:
+        return {"ok": False,
+                "grund": (f"i = {i_ges:.2f} laesst sich nicht auf zwei "
+                          f"Planetenstufen zu je {i_min:g}…{i_max:g} aufteilen.")}
+
+    beste, versuche = None, []
+    for k in range(max(2, schritte)):
+        i1 = lo + (hi - lo) * k / (max(2, schritte) - 1)
+        i2 = i_ges / i1
+        s1 = planetensatz(T_ein_Nm, i1, werkstoff, n_planeten=n_planeten,
+                          psi_m=psi_m, n_sonne_1pmin=n_ein_1pmin,
+                          beiwerte=beiwerte, k_gamma=k_gamma, name="Stufe 1")
+        if not s1.get("ok"):
+            continue
+        T2 = T_ein_Nm * s1["i_ist"]
+        n2 = n_ein_1pmin / s1["i_ist"] if s1["i_ist"] else n_ein_1pmin
+        s2 = planetensatz(T2, i2, werkstoff, n_planeten=n_planeten,
+                          psi_m=psi_m, n_sonne_1pmin=n2, beiwerte=beiwerte,
+                          k_gamma=k_gamma, name="Stufe 2")
+        if not s2.get("ok"):
+            continue
+        d_max = max(s1["d_aussen_mm"], s2["d_aussen_mm"])
+        versuche.append({"i1": round(i1, 3), "i2": round(i2, 3),
+                         "d_max_mm": round(d_max, 1),
+                         "d1_mm": s1["d_aussen_mm"], "d2_mm": s2["d_aussen_mm"],
+                         "l_mm": round(s1["b_mm"] + s2["b_mm"], 1)})
+        if beste is None or d_max < beste["d_max"] - 1e-9:
+            beste = {"d_max": d_max, "i_stufen": [i1, i2]}
+    if beste is None:
+        return {"ok": False,
+                "grund": (f"keine der {schritte} gepruefen Aufteilungen von "
+                          f"i = {i_ges:.2f} ergab zwei baubare Planetenstufen")}
+    # Was die uebliche Regel geliefert haette -- damit in der Ausgabe steht, was
+    # die Suche eingebracht hat, statt dass sie nur behauptet wird.
+    regel = uebersetzung_aufteilen(i_ges, 2, "planeten")
+    vergleich = None
+    if regel.get("ok"):
+        nah = min(versuche, key=lambda v: abs(v["i1"] - regel["i_stufen"][0]),
+                  default=None)
+        if nah:
+            vergleich = {"i1_regel": round(regel["i_stufen"][0], 3),
+                         "d_max_regel_mm": nah["d_max_mm"]}
+    return {"ok": True, "i_stufen": beste["i_stufen"], "i_ges": i_ges,
+            "d_max_mm": round(beste["d_max"], 1), "versuche": versuche,
+            "regel": vergleich,
+            "verfahren": ("Aufteilung gesucht, nicht hergeleitet: das Band "
+                          "zwischen den Stufengrenzen abgetastet und die "
+                          "Aufteilung mit dem kleinsten GROESSTEN "
+                          "Aussendurchmesser genommen — zwei Stufen in einer "
+                          "Bohrung teilen sich dieselbe Bohrung.")}
 
 
 # ── Die ganze Kette ─────────────────────────────────────────────────────────
@@ -983,7 +1125,10 @@ def auslegen(spec: dict) -> dict:
     ``spec``:
       ``art``            stirnrad | planeten | kegelrad | schnecke
       ``einbau``         achsparallel | koaxial | in_welle
-      ``stufen``         1 oder 2 (nur stirnrad)
+      ``stufen``         1 oder 2 (stirnrad und planeten). Zwei Planetenstufen
+                         liegen koaxial hintereinander und passen damit auch in
+                         die Hohlwelle; bei ``einbau='in_welle'`` wird die
+                         Aufteilung auf die kleinste noetige BOHRUNG gesucht.
       ``i`` ODER ``n_motor_1pmin`` + ``n_ab_1pmin``
       ``T_motor_Nm``     Moment an der Getriebe-EINGANGswelle
       ``n_motor_1pmin``  Drehzahl dort
@@ -1030,15 +1175,25 @@ def auslegen(spec: dict) -> dict:
         return _sonderbauart(art, i_ges, T_mot, n_mot, werkstoff, spec)
 
     stufen_n = int(spec.get("stufen", 1) or 1)
-    if art == "planeten":
-        stufen_n = 1
-    teil = uebersetzung_aufteilen(i_ges, stufen_n, art)
-    if not teil.get("ok"):
-        return {"ok": False, "grund": teil["grund"]}
-
     beiwerte = spec.get("beiwerte") or {}
     psi_m = float(spec.get("psi_m", 20.0 if art == "stirnrad" else 18.0))
     beta = float(spec.get("beta_grad", 0.0))
+
+    # Zwei Planetenstufen IN der Welle teilen sich dieselbe Bohrung. Dann ist
+    # nicht das Bauvolumen die Frage, sondern der groesste Durchmesser -- und
+    # die uebliche Aufteilungsregel kennt die Bohrung nicht. Also wird sie hier
+    # gesucht (s. ``aufteilung_fuer_bohrung``); ueberall sonst bleibt die Regel.
+    aufteilung = None
+    if art == "planeten" and stufen_n == 2 and einbau == "in_welle":
+        aufteilung = aufteilung_fuer_bohrung(
+            i_ges, T_mot, werkstoff, n_planeten=int(spec.get("n_planeten", 3)),
+            psi_m=psi_m, n_ein_1pmin=n_mot, beiwerte=beiwerte,
+            k_gamma=float(spec.get("k_gamma", 1.15)))
+        teil = aufteilung
+    else:
+        teil = uebersetzung_aufteilen(i_ges, stufen_n, art)
+    if not teil.get("ok"):
+        return {"ok": False, "grund": teil["grund"]}
 
     stufen, T_i, n_i, i_kum = [], T_mot, n_mot, 1.0
     for k, i_st in enumerate(teil["i_stufen"], start=1):
@@ -1047,7 +1202,8 @@ def auslegen(spec: dict) -> dict:
                               n_planeten=int(spec.get("n_planeten", 3)),
                               n_sonne_1pmin=n_i, beiwerte=beiwerte,
                               k_gamma=float(spec.get("k_gamma", 1.15)),
-                              name="Planetensatz")
+                              name=("Planetensatz" if len(teil["i_stufen"]) == 1
+                                    else f"Planetenstufe {k}"))
         else:
             st = stufe_auslegen(T_i, i_st, werkstoff, psi_m=psi_m,
                                 beta_grad=beta, n1_1pmin=n_i,
@@ -1096,9 +1252,14 @@ def auslegen(spec: dict) -> dict:
         "haelt": all(st.get("haelt") for st in stufen),
     }
 
+    if aufteilung and aufteilung.get("versuche"):
+        erg["aufteilung"] = {k: aufteilung[k] for k in
+                             ("d_max_mm", "regel", "verfahren") if k in aufteilung}
     if einbau == "in_welle":
+        # Die GANZE Kette, nicht nur die erste Stufe: radial bindet die dickste,
+        # axial zaehlen alle zusammen.
         erg["in_welle"] = in_welle_pruefen(
-            stufen[0], spec.get("geom") or {},
+            stufen, spec.get("geom") or {},
             welle_befund=spec.get("welle_befund"),
             laenge_verfuegbar_mm=float(spec.get("laenge_verfuegbar_mm", 0) or 0))
         erg["passt"] = bool(erg["in_welle"].get("passt"))
@@ -1344,6 +1505,19 @@ def als_text(e: dict) -> str:
                      f"{st['S_H']} (Ziel {st['S_H_ziel']})")
             if st.get("hinweis_zaehne"):
                 z.append(f"    Hinweis: {st['hinweis_zaehne']}")
+        z.append("")
+
+    a = e.get("aufteilung")
+    if a:
+        z.append(f"  AUFTEILUNG auf die Stufen: gesucht, nicht nach Regel — "
+                 f"groesster Aussendurchmesser {a['d_max_mm']} mm.")
+        r = a.get("regel") or {}
+        if r.get("d_max_regel_mm"):
+            gespart = r["d_max_regel_mm"] - a["d_max_mm"]
+            z.append(f"    Die uebliche Regel (i1 = {r['i1_regel']}) haette "
+                     f"{r['d_max_regel_mm']} mm gebraucht — "
+                     + (f"{gespart:.1f} mm mehr Bohrung."
+                        if gespart > 0.05 else "praktisch dasselbe."))
         z.append("")
 
     if art == "kegelrad":

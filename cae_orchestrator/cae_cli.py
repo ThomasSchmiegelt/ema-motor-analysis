@@ -3236,7 +3236,9 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Einbauort. 'in_welle' geht nur beim Planetensatz und "
                         "prueft die Bohrung magnetisch mit (ein Feldlauf)")
     s.add_argument("--stufen", type=int, default=1, choices=[1, 2],
-                   help="Zahl der Stirnradstufen (Vorgabe 1)")
+                   help="Zahl der Stufen (Vorgabe 1). Stirnrad und "
+                        "Planetensatz; zwei Planetenstufen liegen koaxial "
+                        "hintereinander und passen damit auch in die Hohlwelle")
     s.add_argument("--i", type=float, default=None, help="Gesamtuebersetzung")
     s.add_argument("--n-ab", dest="n_ab", type=float, default=None,
                    help="Abtriebsdrehzahl 1/min — daraus folgt i")

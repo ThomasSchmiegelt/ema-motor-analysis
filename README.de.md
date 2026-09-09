@@ -1092,6 +1092,35 @@ nichts an.
 Ohne Auslegung ändert sich nichts: jede bestehende Rechnung bleibt Ziffer für
 Ziffer dieselbe.
 
+### Zwei Stufen, koaxial hintereinander — mittig in der Welle
+
+Eine Planetenstufe trägt i = 3…10. Darüber war Schluss, denn der Planetensatz
+war auf **eine** Stufe festgenagelt. Zwei Stufen tragen 9…100 und liegen auf
+derselben Achse hintereinander, mittig in der Bohrung — und damit gilt eine
+andere Rechnung als bei achsparallelen Stufen: **radial bindet die dickste
+Stufe**, nicht ihre Summe, weil sich beide dieselbe Bohrung teilen; **axial
+zählen alle zusammen**, plus eine Fuge dazwischen und die Lager an den Enden.
+Wie viel Luft mittig an jeder Seite bleibt, steht im Befund.
+
+Daraus folgt eine Entscheidung, die man nicht aus der Regel nehmen kann. Die
+übliche Aufteilung `i₁ = √(1,2·i)` ist aufs **Bauvolumen** gemünzt und kennt die
+Bohrung nicht. Der Zusammenhang ist gegenläufig: ein größeres `i₁` lässt die
+zweite Stufe mehr Moment tragen, ein kleineres schiebt Übersetzung in ihr
+Hohlrad — und das Optimum liegt bei jedem Moment woanders. Also wird es
+**gesucht**: das Band zwischen den Stufengrenzen wird abgetastet, jede
+Aufteilung wirklich ausgelegt, und die mit dem kleinsten größten Durchmesser
+gewinnt.
+
+Gemessen an i = 25 bei 60 Nm: **174,4 mm nötige Bohrung statt 199,5 mm** nach
+der Regel — 25 mm weniger. Über alle Aufteilungen spannt der nötige Durchmesser
+174 bis 347 mm; das ist keine Feinheit. Gesucht wird durch Abtasten und nicht
+über einen Gradienten, weil die Zielgröße eine **Treppe** ist: Zähnezahlen sind
+ganz und die Modulreihe springt.
+
+Das Bild wird bei mehreren Stufen zum **Längsschnitt**. Von vorn lägen zwei
+koaxiale Stufen genau übereinander — man sähe zwei Sätze konzentrischer Kreise
+und gerade nicht das, worum es geht.
+
 ### Die Zeichnung — und was ein zu schön gezeichnetes Rad anrichtet
 
 Ein Querschnittsbild fällt bei jeder Auslegung ab (`charts/getriebe.png`), aus

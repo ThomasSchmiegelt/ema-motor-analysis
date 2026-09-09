@@ -202,22 +202,34 @@ def bauen(erg: dict, projekt_dir: str, *, name: str = "getriebe",
         _ersatz_rad(var, z, m, b, innen, x, lage))
 
     if art == "planeten":
-        st = erg["stufen"][0]
-        m, b = st["m_mm"], st["b_mm"]
-        a_sp = st["a_sonne_planet_mm"]
-        code.append(rad("Sonne", st["z_sonne"], m, b, False))
-        for k in range(st["n_planeten"]):
-            w = 2.0 * math.pi * k / st["n_planeten"]
-            code.append(rad(f"Planet{k}", st["z_planet"], m, b, False,
-                            lage=(a_sp * math.cos(w), a_sp * math.sin(w), 0.0)))
-        code.append(rad("Hohlrad", st["z_hohlrad"], m, b, True))
-        if mit_welle and erg.get("einbau") == "in_welle":
+        # Mehrere Stufen liegen KOAXIAL hintereinander -- dieselbe Achse, um die
+        # Zahnbreite plus eine Fuge versetzt. Genau so sitzen sie in der Welle.
+        import ema_getriebe as _G
+        stufen_p = erg.get("stufen") or []
+        z_off, laenge = 0.0, 0.0
+        for si, st in enumerate(stufen_p):
+            m, b = st["m_mm"], st["b_mm"]
+            a_sp = st["a_sonne_planet_mm"]
+            vs = "" if len(stufen_p) == 1 else f"_S{si + 1}"
+            code.append(rad(f"Sonne{vs}", st["z_sonne"], m, b, False,
+                            lage=(0.0, 0.0, z_off)))
+            for k in range(st["n_planeten"]):
+                w = 2.0 * math.pi * k / st["n_planeten"]
+                code.append(rad(f"Planet{si}_{k}", st["z_planet"], m, b, False,
+                                lage=(a_sp * math.cos(w), a_sp * math.sin(w),
+                                      z_off)))
+            code.append(rad(f"Hohlrad{vs}", st["z_hohlrad"], m, b, True,
+                            lage=(0.0, 0.0, z_off)))
+            laenge = z_off + b
+            z_off += b + _G.STUFENABSTAND_MM
+        if mit_welle and erg.get("einbau") == "in_welle" and stufen_p:
             iw = erg.get("in_welle") or {}
-            d_i = float(iw.get("d_noetig_mm", st["d_aussen_mm"]))
+            d_i = float(iw.get("d_noetig_mm")
+                        or max(st["d_aussen_mm"] for st in stufen_p))
             d_a = d_i + 2.0 * 8.0
             code.append(f'''
-_w = Part.makeCylinder({d_a / 2.0}, {b + 24.0}, Vector(0, 0, {-12.0}))
-_w = _w.cut(Part.makeCylinder({d_i / 2.0}, {b + 26.0}, Vector(0, 0, {-13.0})))
+_w = Part.makeCylinder({d_a / 2.0}, {laenge + 24.0}, Vector(0, 0, {-12.0}))
+_w = _w.cut(Part.makeCylinder({d_i / 2.0}, {laenge + 26.0}, Vector(0, 0, {-13.0})))
 _wo = doc.addObject("Part::Feature", "Hohlwelle")
 _wo.Shape = _w
 doc.recompute()
@@ -316,6 +328,94 @@ def bild(erg: dict, pfad: str) -> str:
         ax.add_patch(Circle((x, y), d / 2.0, fill=fuellung is not None,
                             facecolor=fuellung or "none", edgecolor=farbe,
                             lw=breite, ls=strich, zorder=z))
+
+    stufen_p = erg.get("stufen") or []
+    if art == "planeten" and len(stufen_p) > 1:
+        # LAENGSSCHNITT. Von vorn gesehen liegen zwei koaxiale Stufen genau
+        # uebereinander -- das Bild zeigte dann zwei Saetze konzentrischer Kreise
+        # und gerade nicht das, worum es beim Einbau in der Welle geht: dass sie
+        # HINTEREINANDER und mittig in der Bohrung sitzen. Also r ueber z.
+        import ema_getriebe as _G
+        iw = erg.get("in_welle") or {}
+        d_v = float(iw.get("d_verfuegbar_mm") or 0)
+        lager = 12.0
+        l_ges = float(iw.get("l_noetig_mm") or 0)
+        l_frei = float(iw.get("l_verfuegbar_mm") or 0)
+        luft = float(iw.get("luft_je_seite_mm") or 0)
+        # z = 0 ist der Anfang des verfuegbaren Bauraums; der Satz sitzt mittig.
+        z0 = luft + lager
+        if d_v > 0:
+            for vz in (+1, -1):
+                ax.plot([0, max(l_frei, l_ges)], [vz * d_v / 2.0] * 2,
+                        color="#ffb454", lw=2.2, ls="--", zorder=1)
+            ax.text(max(l_frei, l_ges) / 2.0, d_v / 2.0 + 4,
+                    f"verfuegbare Bohrung {d_v:.1f} mm "
+                    f"({iw.get('bindend', '')})", color="#ffb454",
+                    ha="center", fontsize=9)
+        if l_frei > 0:
+            ax.plot([0, 0], [-d_v / 2.0, d_v / 2.0], color="#5a6570", lw=1.0)
+            ax.plot([l_frei, l_frei], [-d_v / 2.0, d_v / 2.0],
+                    color="#5a6570", lw=1.0)
+            ax.text(l_frei / 2.0, -d_v / 2.0 - 12,
+                    f"Bauraum {l_frei:.0f} mm  ·  Satz {l_ges:.1f} mm  ·  "
+                    f"{luft:.1f} mm Luft je Seite (mittig)",
+                    color="#93a1b1", ha="center", fontsize=9)
+        farben = ("#4ea1ff", "#4ec98f")
+        z = z0
+        for si, st in enumerate(stufen_p):
+            f = farben[si % 2]
+            b = st["b_mm"]
+            for vz in (+1, -1):
+                # Hohlradkoerper (Rechteck vom Fusskreis nach aussen), Planet und
+                # Sonne -- je Haelfte gespiegelt, wie im Maschinenbau ueblich.
+                ax.add_patch(plt.Rectangle(
+                    (z, vz * st["d_hohlrad_mm"] / 2.0), b,
+                    vz * (st["d_aussen_mm"] - st["d_hohlrad_mm"]) / 2.0,
+                    facecolor=f, alpha=0.22, edgecolor=f, lw=1.6, zorder=2))
+                ax.add_patch(plt.Rectangle(
+                    (z, vz * (st["a_sonne_planet_mm"] - st["d_planet_mm"] / 2.0)),
+                    b, vz * st["d_planet_mm"], facecolor="#ff6b6b", alpha=0.22,
+                    edgecolor="#ff6b6b", lw=1.4, zorder=2))
+            ax.add_patch(plt.Rectangle(
+                (z, -st["d_sonne_mm"] / 2.0), b, st["d_sonne_mm"],
+                facecolor="#4ec98f", alpha=0.18, edgecolor="#4ec98f",
+                lw=1.4, zorder=2))
+            ax.text(z + b / 2.0, 0, f"{si + 1}", color="#dfe6ee",
+                    ha="center", va="center", fontsize=11, zorder=4)
+            # Die Beschriftungen zweier dicht benachbarter Stufen liegen sonst
+            # uebereinander (gemessen: sie ueberlappten bei 8 mm Fuge) -- also
+            # abwechselnd hoeher setzen.
+            ax.text(z + b / 2.0,
+                    st["d_aussen_mm"] / 2.0 + (4 if si % 2 == 0 else 15),
+                    f"Stufe {si + 1}: i {st['i_ist']:g} · ⌀{st['d_aussen_mm']:.0f} "
+                    f"· b {b:.0f} mm", color=f, ha="center", fontsize=8.5)
+            z += b + _G.STUFENABSTAND_MM
+        ax.axhline(0, color="#5a6570", lw=0.8, ls="-.", zorder=1)
+        ax.set_aspect("equal")
+        r_max = max(d_v, max(st["d_aussen_mm"] for st in stufen_p)) / 2.0 * 1.30
+        ax.set_xlim(-0.06 * max(l_frei, l_ges, 1.0), max(l_frei, l_ges) * 1.06)
+        ax.set_ylim(-r_max, r_max)
+        ax.set_title(f"Planetensatz, {len(stufen_p)} Stufen koaxial in der "
+                     f"Hohlwelle  ·  i = {erg['i_ist']}  (Laengsschnitt)",
+                     color="#dfe6ee", fontsize=11)
+        ax.tick_params(colors="#4a5560", labelsize=8)
+        for sp in ax.spines.values():
+            sp.set_color("#2a333f")
+        fuss = (f"Werkstoff {erg.get('werkstoff', '?')} "
+                f"[{erg.get('werkstoff_beleg', '?')}]"
+                f"   ·   Wirkungsgrad "
+                f"{(erg.get('wirkungsgrad') or {}).get('eta_nenn', '?')}"
+                f"   ·   Masse {erg.get('masse_kg', '?')} kg")
+        fig.text(0.5, 0.025, fuss, color="#93a1b1", ha="center", fontsize=8.5)
+        try:
+            os.makedirs(os.path.dirname(pfad) or ".", exist_ok=True)
+            fig.savefig(pfad, dpi=130, facecolor=fig.get_facecolor(),
+                        bbox_inches="tight")
+        except OSError:
+            return ""
+        finally:
+            plt.close(fig)
+        return pfad
 
     if art == "planeten":
         st = erg["stufen"][0]

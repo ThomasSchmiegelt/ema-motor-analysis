@@ -177,6 +177,68 @@ pruefe("PASST NICHT an den gewaehlten Einbauort" in t_eng
        "und der Text schickt einen zu mehr PLATZ, nicht zu mehr Modul")
 
 
+print("\n6b. ZWEI Planetenstufen — koaxial hintereinander in der Welle")
+# Eine Stufe traegt i = 3…10. Was darueber liegt, ging bisher gar nicht: der
+# Planetensatz war auf EINE Stufe festgenagelt.
+e1 = G.auslegen({"art": "planeten", "einbau": "in_welle", "stufen": 1, "i": 25.0,
+                 "T_motor_Nm": 60.0, "n_motor_1pmin": 6000,
+                 "geom": {"shaftD": 260.0, "shaftBoreD": 210.0}})
+pruefe(not e1["ok"] and "Grenze einer planeten-Stufe" in e1["grund"],
+       "i = 25 sprengt EINE Planetenstufe — und das wird gesagt, nicht genaehert")
+e2 = G.auslegen({"art": "planeten", "einbau": "in_welle", "stufen": 2, "i": 25.0,
+                 "T_motor_Nm": 60.0, "n_motor_1pmin": 6000,
+                 "geom": {"shaftD": 260.0, "shaftBoreD": 210.0},
+                 "laenge_verfuegbar_mm": 160.0})
+pruefe(e2["ok"] and e2["n_stufen"] == 2 and abs(e2["i_ist"] - 25.0) / 25.0 < 0.03,
+       f"mit zwei Stufen geht es: i = {e2.get('i_ist')} aus "
+       f"{[st['i_ist'] for st in e2.get('stufen', [])]}")
+iw2 = e2["in_welle"]
+d_max = max(st["d_aussen_mm"] for st in e2["stufen"])
+b_summe = sum(st["b_mm"] for st in e2["stufen"])
+pruefe(abs(iw2["d_noetig_mm"] - d_max) < 0.05,
+       f"radial bindet die DICKSTE Stufe ({d_max} mm), nicht die Summe — zwei "
+       f"koaxiale Stufen teilen sich dieselbe Bohrung")
+pruefe(abs(iw2["l_noetig_mm"] - (b_summe + G.STUFENABSTAND_MM + 24.0)) < 0.05,
+       f"axial zaehlen dagegen ALLE: {b_summe} Zahnbreite + "
+       f"{G.STUFENABSTAND_MM:g} Fuge + 2 x 12 Lager = {iw2['l_noetig_mm']} mm")
+pruefe(iw2["luft_je_seite_mm"] is not None and iw2["luft_je_seite_mm"] > 0
+       and "mittig" in iw2["satz"],
+       f"und der Satz sitzt MITTIG in der Bohrung — {iw2['luft_je_seite_mm']} mm "
+       f"Luft an jeder Seite")
+pruefe(iw2["n_stufen"] == 2 and len(iw2["stufen_platz"]) == 2,
+       "der Befund fuehrt beide Stufen einzeln mit")
+
+# Die Aufteilung wird fuer die Bohrung GESUCHT, nicht nach der Volumenregel
+# genommen. Das ist keine Feinheit: gemessen sind es 25 mm Bohrung.
+a = G.aufteilung_fuer_bohrung(25.0, 60.0, W, n_ein_1pmin=6000)
+regel = G.uebersetzung_aufteilen(25.0, 2, "planeten")
+pruefe(a["ok"] and regel["ok"], "beide Wege liefern eine Aufteilung")
+pruefe(a["regel"] and a["d_max_mm"] < a["regel"]["d_max_regel_mm"],
+       f"die gesuchte braucht {a['d_max_mm']} mm Bohrung, die uebliche Regel "
+       f"(i1 = {a['regel']['i1_regel']}) {a['regel']['d_max_regel_mm']} mm — "
+       f"{a['regel']['d_max_regel_mm'] - a['d_max_mm']:.1f} mm weniger")
+_d = [v["d_max_mm"] for v in a["versuche"]]
+pruefe(max(_d) > 1.5 * min(_d),
+       f"und es ist keine Spitzfindigkeit: ueber die Aufteilungen spannt der "
+       f"noetige Durchmesser {min(_d)}…{max(_d)} mm")
+pruefe(any(_d[k] > _d[k+1] and _d[k+1] < _d[k+2]
+           for k in range(len(_d) - 2)),
+       "die Kurve ist nicht monoton — Zaehnezahlen sind ganz und die Normreihe "
+       "springt, ein Gradientenverfahren liefe hier in ein Nebenminimum")
+pruefe(e2.get("aufteilung", {}).get("d_max_mm") == a["d_max_mm"],
+       "die Auslegung nimmt diese Suche und traegt ihr Ergebnis mit")
+# Ausserhalb der Welle bleibt es bei der Regel -- dort ist das Bauvolumen die
+# Frage und nicht die Bohrung.
+e2k = G.auslegen({"art": "planeten", "einbau": "koaxial", "stufen": 2, "i": 25.0,
+                  "T_motor_Nm": 60.0, "n_motor_1pmin": 6000})
+pruefe(e2k["ok"] and "aufteilung" not in e2k,
+       "koaxial ausserhalb der Welle bleibt es bei der Volumenregel — dort "
+       "teilt sich nichts eine Bohrung")
+pruefe(not G.uebersetzung_aufteilen(8.0, 2, "planeten")["ok"],
+       "i = 8 auf zwei Planetenstufen wird abgewiesen: jede traegt mindestens "
+       "3, zusammen also 9 — eine Stufe genuegt")
+
+
 print("\n7. Bauart und Einbauort passen zusammen")
 e = G.auslegen({"art": "stirnrad", "einbau": "in_welle", "i": 4.0,
                 "T_motor_Nm": 60.0, "n_motor_1pmin": 6000})

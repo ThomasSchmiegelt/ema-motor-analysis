@@ -1282,8 +1282,15 @@
           <input type="number" id="gt_stufen" value="1" min="1" max="2" step="1"><span class="unit"></span></div>
         <details class="e3-help"><summary>Erklärung</summary>
           <p>Die schnelle Stufe trägt weniger: aufgeteilt wird nach
-          <code>i₁ = √(1,2·i)</code>. Mehr als zwei Stirnradstufen sind hier nicht
-          vorgesehen.</p></details>
+          <code>i₁ = √(1,2·i)</code> — eine Regel aufs Bauvolumen. Mehr als zwei
+          Stufen sind hier nicht vorgesehen.</p>
+          <p><b>Zwei Planetenstufen</b> liegen <b>koaxial hintereinander</b> und
+          passen damit auch in die Hohlwelle. Dort gilt die Regel <b>nicht</b>:
+          beide Stufen teilen sich dieselbe Bohrung, also zählt der größte
+          Durchmesser und nicht das Volumen. Die Aufteilung wird deshalb
+          <b>gesucht</b> — gemessen an einem Beispiel 174,4 statt 199,5 mm
+          Bohrung, also 25 mm weniger.</p>
+          <p>Ein Planetensatz trägt je Stufe i = 3…10, zwei Stufen also 9…100.</p></details>
       </div>
       <div class="e3-field" id="gt_planeten_wrap" style="display:none">
         <div class="row"><label>Planeten</label>
@@ -6276,7 +6283,9 @@ function _gtSync() {
   const einbau = document.getElementById('gt_einbau').value;
   const zeig = (id, an) => { const e = document.getElementById(id);
                              if (e) e.style.display = an ? '' : 'none'; };
-  zeig('gt_stufen_wrap',   art === 'stirnrad');
+  // Stufen gibt es bei Stirnrad UND Planetensatz. Zwei Planetenstufen liegen
+  // koaxial hintereinander — auch in der Hohlwelle.
+  zeig('gt_stufen_wrap',   art === 'stirnrad' || art === 'planeten');
   zeig('gt_planeten_wrap', art === 'planeten');
   zeig('gt_axial_wrap',    einbau === 'in_welle');
   zeig('gt_feld_wrap',     einbau === 'in_welle');

@@ -952,6 +952,34 @@ and every run kept taking 9.5 and 0.95 while the computed design lay beside it. 
 is applied only when the gearing **holds** — where the set sits is none of the
 drive cycle's business.
 
+### Two stages, coaxial one behind the other — centred in the shaft
+
+One planetary stage carries i = 3…10. Above that it stopped, because the
+planetary set was pinned to **one** stage. Two stages carry 9…100 and sit on the
+same axis one behind the other, centred in the bore — and that calls for a
+different sum than axis-parallel stages: **radially the thickest stage binds**,
+not their sum, because both share the same bore; **axially they all count**, plus
+a gap between them and the bearings at the ends. How much room is left on each
+side is stated in the finding.
+
+From that follows a decision the usual rule cannot make. The customary split
+`i₁ = √(1.2·i)` is aimed at **build volume** and knows nothing about a bore. The
+relation runs both ways: a larger `i₁` makes the second stage carry more torque,
+a smaller one pushes ratio into its ring gear — and the optimum sits elsewhere at
+every torque. So it is **searched**: the band between the stage limits is
+sampled, every split actually designed, and the one with the smallest largest
+diameter wins.
+
+Measured at i = 25 and 60 Nm: **174.4 mm of bore instead of 199.5 mm** by the
+rule — 25 mm less. Across all splits the required diameter spans 174 to 347 mm;
+this is no nicety. It is searched by sampling rather than by a gradient, because
+the objective is a **staircase**: tooth counts are integers and the module series
+jumps.
+
+For more than one stage the image becomes a **longitudinal section**. Face-on,
+two coaxial stages would lie exactly on top of one another — you would see two
+sets of concentric circles and precisely not the thing at issue.
+
 ### The drawing — and what a too-nicely-drawn gear does
 
 A cross-section image falls out of every design (`charts/getriebe.png`), computed
