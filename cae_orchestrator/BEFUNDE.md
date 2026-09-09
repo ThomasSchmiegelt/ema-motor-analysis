@@ -17,6 +17,41 @@ kann.
 
 ---
 
+## 2026-09-08 (17:13 Uhr) — Die Pipeline stürzt ab, wenn der Luftspalt nicht aufgelöst ist
+
+**Beobachtung.** Lauf des Stadtfahr-Zykklus `stadt_pkw_1400` (PSM, 1200 V,
+rpm 500–4000, Güte `entwurf`): alle Gates bestehen (Rotor-Festigkeit 4000 U/min
+SF 21,8), CAD fertig (112 Flächen, STEP exportiert), dann stirbt der Lauf in
+der EM-Stufe mit
+`TypeError: unsupported format string passed to NoneType.__format__` bei
+`_log(state, f"… Maxwell-Moment ≈ {perf['T_maxwell_Nm']:.1f} Nm", 38)`
+(`ema_pipeline.py:2158`).
+
+**Messung.** `ema_analysis.py:1764` liefert seit dem Befund vom 08.09.2026
+bewusst `T_maxwell_Nm = None` plus Begründung in `T_maxwell_grund`, wenn das
+Luftband im FDM-Raster weniger als 2,5 Bildpunkte breit ist — korrekt, denn
+dann wäre eine 0,0 Nm-Figur aus Sichtbarkeit eine Messung gewesen und es
+gibt keine. Die Logzeile in `ema_pipeline.py:2158` wurde dabei nicht mit
+angepasst und formatiert das `None` hart. Zusätzlich erzwinge `ema_pipeline.py:2869`
+das `None` bei der Ablage auf 0 — dieselbe Falle, die im 08.09.-Befund
+gegen genau dieses Verhalten argumentiert.
+
+**Fundstelle.** `ema_pipeline.py:2158` (Log, Crashtreiber) und `:2869`
+(Defaults bei der Ablage); Quelle des `None`: `ema_analysis.py:1761–1767`.
+
+**Status: behoben** (08.09.2026, 17:20 Uhr). `ema_pipeline.py:2158` meldet
+jetzt die Begründung aus `T_maxwell_grund`, falls das Moment nicht berechnet
+wurde; `:2869` erzwingt keinen Default mehr. Kleiner Einzelfehler — der Befund
+bleibt stehen und dokumentiert, wie diese Falle entstand.
+**Offen bleibt die Ursache selbst:** bei einer 0,7-mm-Luftspalt-Maschine dieser
+Größe ist das Band im FDM-Raster selbst bei hoher Güte nicht breiter als ca.
+0,6 Bildpunkte (Befund oben) — `T_maxwell_Nm` bleibt dort `None`, und genau
+das ist die richtige Antwort. Was diese Grundauslage dem Nutzer liefert, ist
+`B_gap` und `Kt` aus der Analyseformel; die Feldstufen liefern Anschauung
+und Maxwell-moment, wenn der Spalt aufgelöst ist, sonst nicht.
+
+---
+
 ## 2026-09-08 — Der Schnellbewerter sah die gezeichnete Geometrie nicht
 
 **Beobachtung.** Vor dem Bau einer freien („wilden") Magnetsuche wurde die

@@ -2152,10 +2152,16 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 "Bt_T":      em0["Bt_gap"].tolist()[::4],
             },
         })
+        # ``T_maxwell_Nm`` sein darf None -- dann ist der Luftspalt im Raster
+        # nicht aufgeloest (ema_analysis.setzt `T_maxwell_grund`), und genau das
+        # muss anstelle einer Zahl hier stehen (Befund 08.09.2026, 17:13 Uhr).
+        _tmax   = perf.get("T_maxwell_Nm")
+        _tmax_s = (f"Maxwell-Moment ≈ {_tmax:.1f} Nm" if _tmax is not None
+                   else f"Maxwell-Moment: {perf.get('T_maxwell_grund') or 'nicht berechnet'}")
         _log(state,
              f"✓ EM: B_gap = {perf['B_gap_T']:.3f} T | "
              f"Kt = {perf['Kt_Nm_per_A']:.3f} Nm/A | "
-             f"Maxwell-Moment ≈ {perf['T_maxwell_Nm']:.1f} Nm", 38)
+             f"{_tmax_s}", 38)
 
         # ── 3. Field animation(s) — one or more visualisation modes ──────────
         # rotate       : rotor turns (rotor_angle sweep), iq/id per RPM (existing)
@@ -2866,7 +2872,9 @@ def run_pipeline(data: dict, state: dict, frames: list,
         results["summary"] = {
             "B_gap_T":         perf["B_gap_T"],
             "Kt_Nm_per_A":     perf["Kt_Nm_per_A"],
-            "T_maxwell_Nm":    perf.get("T_maxwell_Nm", 0),
+            # None (nicht aufgeloester Luftspalt) muss None bleiben: eine 0
+            # liest sich wie eine Messung (Befund 08.09.2026, 17:13 Uhr).
+            "T_maxwell_Nm":    perf.get("T_maxwell_Nm"),
             "lcm_slots_poles": perf["lcm_slots_poles"],
             "max_safe_rpm":    max_safe_rpm,
             "P_max_kW":        (results.get("power") or {}).get("P_max_kW"),
