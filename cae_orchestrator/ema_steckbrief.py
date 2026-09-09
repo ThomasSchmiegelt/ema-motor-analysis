@@ -170,6 +170,23 @@ def ablegen(projekt_dir: str, verb: str, text: str, *, daten: dict | None = None
     return {"ok": True, "datei": pfad, "marke": marke, "verb": verb}
 
 
+def _marke_key(marke: str) -> tuple:
+    """Sortierschluessel einer Marke -- die Nummer als ZAHL, nicht als Text.
+
+    ``_freie_marke`` haengt bei zwei Rechnungen in derselben Sekunde ein ``-2``
+    an. Als Zeichenkette sortiert liegt ``20260101_000000`` dann HINTER
+    ``20260101_000000-2`` (Unterstrich 0x5F vor Bindestrich 0x2D im
+    Dateinamen) -- die aeltere Rechnung galt als die juengere. Zwei Verben in
+    einem Agentenzug sind beide in Millisekunden fertig, das ist also der
+    Normalfall und nicht der Sonderfall.
+    """
+    kopf, _, nr = marke.partition("-")
+    try:
+        return (kopf, int(nr) if nr else 1)
+    except ValueError:
+        return (kopf, 1)
+
+
 def rechnungen(projekt_dir: str) -> list[dict]:
     """Was in diesem Projekt abgelegt wurde, neueste zuerst."""
     ordner = os.path.join(projekt_dir, UNTER)
@@ -196,7 +213,76 @@ def rechnungen(projekt_dir: str) -> list[dict]:
         aus.append({"marke": m.group(1), "verb": m.group(2), "datei": pfad,
                     "erste_zeile": kopf, "ausgang": ausgang,
                     "daten": os.path.isfile(pfad[:-4] + ".json")})
-    aus.sort(key=lambda r: r["marke"], reverse=True)
+    aus.sort(key=lambda r: _marke_key(r["marke"]), reverse=True)
+    return aus
+
+
+def getriebe(projekt_dir: str) -> dict | None:
+    """Die JUENGSTE abgelegte Getriebeauslegung, auf ihre Aussagen eingedampft.
+
+    Sie steht schon in ``rechnungen`` -- aber dort als eine Zeile „getriebe
+    (16:42)", und damit ist die Uebersetzung, mit der der Fahrzyklus gerechnet
+    hat, im Steckbrief nicht zu sehen. Sie gehoert dorthin, denn sie ist eine
+    Eigenschaft des Antriebs und nicht bloss eine gelaufene Rechnung.
+
+    Wie ueberall hier wird **nichts nachgerechnet**: gelesen wird die abgelegte
+    JSON. Und jede Zahl traegt, woher sie kommt -- die Uebersetzung folgt exakt
+    aus ganzen Zaehnezahlen, die Sicherheiten aus ISO 6336 mit einem
+    ANGENOMMENEN Werkstoffkennwert, und ob der Satz in die Welle passt, haengt
+    daran, ob die magnetische Grenze wirklich gemessen wurde.
+    """
+    ordner = os.path.join(projekt_dir, UNTER)
+    if not os.path.isdir(ordner):
+        return None
+    treffer = sorted((n for n in os.listdir(ordner)
+                      if _MARKE.match(n) and _MARKE.match(n).group(2) == "getriebe"
+                      and n.endswith(".json")),
+                     key=lambda n: _marke_key(_MARKE.match(n).group(1)), reverse=True)
+    if not treffer:
+        return None
+    g = _json(os.path.join(ordner, treffer[0]))
+    if not g.get("ok"):
+        return None
+    stufen = g.get("stufen") or []
+    iw = g.get("in_welle") or {}
+    aus = {
+        "marke": _MARKE.match(treffer[0]).group(1),
+        "art": g.get("art"), "einbau": g.get("einbau"),
+        "einbau_text": g.get("einbau_text", ""),
+        "i_soll": g.get("i_soll"), "i_ist": g.get("i_ist"),
+        "i_fehler_pct": g.get("i_fehler_pct"),
+        "n_stufen": g.get("n_stufen"),
+        "moduln_mm": [st.get("m_mm") for st in stufen if st.get("m_mm")]
+                     or ([g["m_mm"]] if g.get("m_mm") else []),
+        # Die SCHWAECHSTE Stufe zaehlt, nicht der Mittelwert: eine Kette ist so
+        # tragfaehig wie ihr schwaechstes Glied. Beim Kegelrad steht die
+        # Sicherheit auf der obersten Ebene, bei der Schnecke gar nicht.
+        "S_F": None, "S_H": None,
+        "bindend": [st.get("bindend") for st in stufen if st.get("bindend")],
+        "haelt": g.get("haelt"),
+        "eta_nenn": (g.get("wirkungsgrad") or {}).get("eta_nenn"),
+        "masse_kg": g.get("masse_kg"), "J_red_kgm2": g.get("J_red_kgm2"),
+        "werkstoff": g.get("werkstoff"), "werkstoff_beleg": g.get("werkstoff_beleg"),
+        "verfahren": g.get("verfahren", ""),
+        "zeichner": (g.get("cad") or {}).get("zeichner"),
+        "bild": bool(g.get("bild")),
+    }
+    for schl in ("S_F", "S_H"):
+        werte = [st[schl] for st in stufen if st.get(schl) is not None]
+        if g.get(schl) is not None:
+            werte.append(g[schl])
+        if werte:
+            aus[schl] = min(werte)
+    if iw:
+        aus["in_welle"] = {
+            "passt": iw.get("passt"), "bindend": iw.get("bindend"),
+            "d_noetig_mm": iw.get("d_noetig_mm"),
+            "d_verfuegbar_mm": iw.get("d_verfuegbar_mm"),
+            # Der eigentliche Punkt: „passt in die gezeichnete Bohrung" ist
+            # nicht „zulaessig". Ohne Feldlauf steht die magnetische Grenze
+            # ungeprueft da, und das ist eine Aussage ueber die Antwort.
+            "magnetisch_geprueft": bool(iw.get("magnetisch_geprueft")),
+        }
     return aus
 
 
@@ -384,6 +470,7 @@ def steckbrief(projekt_dir: str, *, mit_laeufen: bool = True) -> dict:
         "sicherheit": sicher,
         "bestand": bestand,
         "rechnungen": rechnungen(projekt_dir),
+        "getriebe": getriebe(projekt_dir),
         "notizen": akte.get("notes") or "",
     }
     if mit_laeufen:
@@ -418,6 +505,23 @@ def _warnungen(sb: dict, zus: dict) -> list[str]:
     if sb["sicherheit"] and not sb["sicherheit"]["ok"]:
         w.append("Sicherheitskriterien VERLETZT: "
                  + ", ".join(sb["sicherheit"]["verletzt"] or ["—"]))
+    g = sb.get("getriebe")
+    if g:
+        # Der Werkstoffkennwert ist eine ANNAHME, und jede Sicherheit haengt
+        # daran. Das ist nicht dasselbe wie eine gerechnete Zahl und sieht
+        # genauso aus -- also steht es hier.
+        if g.get("werkstoff_beleg") == "annahme" and (g.get("S_F") is not None
+                                                      or g.get("S_H") is not None):
+            w.append("Die Getriebesicherheiten ruhen auf einem ANGENOMMENEN "
+                     f"Werkstoffkennwert ({g.get('werkstoff') or '?'}) — "
+                     "Groessenordnung der Werkstoffklasse, nicht zitiert.")
+        if g.get("haelt") is False:
+            w.append("Die Verzahnung TRAEGT NICHT: mindestens eine Sicherheit "
+                     "liegt unter ihrem Zielwert.")
+        iw = g.get("in_welle") or {}
+        if iw and not iw.get("magnetisch_geprueft"):
+            w.append("Beim Einbau in der Welle wurde die magnetisch zulaessige "
+                     "Bohrung NICHT geprueft (kein Feldlauf).")
     return w
 
 
@@ -488,6 +592,41 @@ def als_text(sb: dict, *, kurz: bool = False) -> str:
                                      if sb["sicherheit"]["ok"] else
                                      "VERLETZT — " + ", ".join(
                                          sb["sicherheit"]["verletzt"] or ["?"])))
+
+    g = sb.get("getriebe")
+    if g:
+        z += ["", f"  Getriebe : {g['art']}, {g.get('einbau_text') or g['einbau']}"
+                  f" — i {_z(g['i_ist'])} (gefordert {_z(g['i_soll'])}, "
+                  f"{_z(g['i_fehler_pct'], '%')} daneben)  [zaehnezahlen]"]
+        if g["moduln_mm"]:
+            z.append("    Modul     : "
+                     + ", ".join(f"{m:g} mm" for m in g["moduln_mm"])
+                     + (f"  (gebunden hat: {', '.join(g['bindend'])})"
+                        if g["bindend"] else ""))
+        if g["S_F"] is not None or g["S_H"] is not None:
+            z.append(f"    Sicherheit: Zahnfuss {_z(g['S_F'])}, "
+                     f"Flanke {_z(g['S_H'])}  [iso6336, Werkstoff "
+                     f"{g.get('werkstoff') or '?'} — {g.get('werkstoff_beleg') or '?'}]")
+        if g["eta_nenn"] is not None:
+            z.append(f"    Wirkungsgrad {_z(g['eta_nenn'])} am Nennpunkt "
+                     f"(lastabhaengig), Masse {_z(g['masse_kg'], 'kg')}, "
+                     f"J_red {_z(g['J_red_kgm2'], 'kgm2')}")
+        iw = g.get("in_welle")
+        if iw:
+            z.append(f"    In der Welle: "
+                     + ("PASST" if iw["passt"] else "PASST NICHT")
+                     + f" — gebraucht {_z(iw['d_noetig_mm'], 'mm')}, "
+                     f"verfuegbar {_z(iw['d_verfuegbar_mm'], 'mm')}"
+                     + (f" (bindend: {iw['bindend']})" if iw.get("bindend") else ""))
+            if not iw["magnetisch_geprueft"]:
+                z.append("      ACHTUNG: die magnetisch zulaessige Bohrung wurde "
+                         "NICHT geprueft (kein Feldlauf) — „passt in die "
+                         "gezeichnete Bohrung\" ist nicht „zulaessig\".")
+        if g.get("verfahren"):
+            z.append(f"    Verfahren : {g['verfahren'][:160]}")
+        if g.get("zeichner") == "ersatz":
+            z.append("    Zeichnung : ERSATZKOERPER ohne Zaehne (FCGear fehlte) — "
+                     "sie zeigt Lage und Platzbedarf, keine Verzahnung.")
 
     b = sb["bestand"]
     z += ["", f"  Bestand  : {b['diagramme']} Diagramme "
@@ -562,6 +701,22 @@ def als_markdown(sb: dict) -> str:
     for k in sb["kennwerte"]:
         z.append(f"- {k['schluessel']}: {_z(k['wert'], k['einheit'])} "
                  f"(Herkunft: {k['methode']})")
+    g = sb.get("getriebe")
+    if g:
+        z.append(f"- Getriebe: {g['art']}, {g.get('einbau_text') or g['einbau']}, "
+                 f"i = {_z(g['i_ist'])} (gefordert {_z(g['i_soll'])})"
+                 + (f", Modul {', '.join(f'{m:g}' for m in g['moduln_mm'])} mm"
+                    if g["moduln_mm"] else "")
+                 + (f", S_F {_z(g['S_F'])} / S_H {_z(g['S_H'])}"
+                    if g["S_F"] is not None or g["S_H"] is not None else "")
+                 + (f", eta {_z(g['eta_nenn'])}" if g["eta_nenn"] is not None else ""))
+        iw = g.get("in_welle")
+        if iw:
+            z.append("- Getriebe in der Welle: "
+                     + ("passt" if iw["passt"] else "**passt NICHT**")
+                     + f" — gebraucht {_z(iw['d_noetig_mm'], 'mm')}, verfuegbar "
+                     f"{_z(iw['d_verfuegbar_mm'], 'mm')}"
+                     + (f", bindend: {iw['bindend']}" if iw.get("bindend") else ""))
     if sb["rechnungen"]:
         z.append(f"- Abgelegte Rechnungen in `{UNTER}/`: "
                  + ", ".join(f"{r['marke']}_{r['verb']}"

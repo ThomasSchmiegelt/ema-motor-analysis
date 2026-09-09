@@ -17,6 +17,53 @@ kann.
 
 ---
 
+## 2026-09-09 — Zweierlei zusammengeworfen: „traegt nicht" und „passt nicht"
+
+**Beobachtung.** Ein Planetensatz i = 5 in einer 90-mm-Welle wurde als
+`haelt: false` abgelegt, obwohl beide Sicherheiten seiner einzigen Stufe standen
+(S_F 2,49 gegen Ziel 1,4 · S_H 1,06 gegen Ziel 1,0) und die Stufe selbst
+`haelt: true` meldete. Der Satz passte lediglich nicht in die Bohrung: gebraucht
+100,6 mm, verfügbar 58,0 mm.
+
+**Messung.** `ema_getriebe.auslegen` verrechnete beim Einbau in der Welle
+`haelt` mit `passt` zu einem einzigen Wert. Der ausgegebene Text hatte den
+Unterschied schon berücksichtigt — er rechnete `verzahnung_haelt` eigens aus den
+Stufen zurück und trug den Grund dafür als Kommentar —, der **abgelegte
+Schlüssel** aber nicht. Jeder spätere Leser (Steckbrief, Bericht) erbte damit
+die Verwechslung, und die schickt die Suche in die falsche Richtung: eine
+Verzahnung, die trägt und nur nicht in die Bohrung geht, braucht mehr Platz,
+nicht mehr Modul.
+
+**Fundstelle.** `ema_getriebe.py`, Ende von `auslegen` (`erg["haelt"] =
+bool(erg["haelt"] and erg["passt"])`) und `als_text` (die Rückrechnung).
+
+**Status: behoben** (09.09.2026). `haelt` ist wieder ausschließlich die Aussage
+über die Verzahnung; wer beides zugleich braucht, fragt `haelt and passt` — so
+macht es das Verb für seinen Exit-Code. `als_text` liest den Schlüssel jetzt
+direkt statt ihn zurückzurechnen. `test_getriebe.py` [6] nagelt den Unterschied
+an genau diesem Fall fest.
+
+## 2026-09-09 — Zwei Rechnungen in derselben Sekunde standen in der falschen Reihenfolge
+
+**Beobachtung.** Zwei nacheinander abgelegte `getriebe`-Auslegungen in einem
+Projekt: die **ältere** wurde als die jüngere ausgelesen.
+
+**Messung.** `ema_steckbrief._freie_marke` hängt bei einer Kollision ein `-2` an
+(`20260101_000000` → `20260101_000000-2`), und `rechnungen()` sortierte die
+Marken als **Zeichenketten** absteigend. Im Dateinamen folgt auf die Marke ein
+Unterstrich (0x5F), auf die Nummer ein Bindestrich (0x2D) — `..._getriebe.json`
+sortiert damit über `...-2_getriebe.json`, und der erste Eintrag war der ältere.
+Zwei Verben in einem Agentenzug sind beide in Millisekunden fertig; das ist der
+Normalfall und nicht der Sonderfall.
+
+**Fundstelle.** `ema_steckbrief.py`, `rechnungen()` (`sort(key=lambda r:
+r["marke"])`). Dass sich die Dateien nicht überschreiben, war geprüft — die
+Reihenfolge nicht.
+
+**Status: behoben** (09.09.2026). `_marke_key` liest die Nummer als **Zahl**;
+`rechnungen()` und `getriebe()` sortieren darüber. `test_getriebe.py` [13] legt
+zwei Auslegungen in derselben Sekunde ab und verlangt die jüngere.
+
 ## 2026-09-08 (17:13 Uhr) — Die Pipeline stürzt ab, wenn der Luftspalt nicht aufgelöst ist
 
 **Beobachtung.** Lauf des Stadtfahr-Zykklus `stadt_pkw_1400` (PSM, 1200 V,

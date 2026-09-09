@@ -1111,6 +1111,26 @@ Rückfall zeichnet stattdessen Zylinder auf dem Teilkreis — unverkennbar ohne
 Zähne, und genau das, was die Einbaufrage braucht: passt es hinein und wo sitzt
 es. Das Ergebnis sagt in jedem Fall, wer gezeichnet hat.
 
+### Und es überlebt das Fenster
+
+Die Auslegung wird wie jedes entscheidende Verb im Projekt abgelegt, und
+**Steckbrief und Bericht lesen genau diese Ablage** — sie rechnen nichts nach,
+denn eine zweite Rechnung wäre eine zweite Quelle. Im Steckbrief stehen
+Übersetzung, Modul, beide Sicherheiten, Wirkungsgrad, Masse, Trägheit und der
+Einbaubefund, jedes mit seiner Herkunft; im PDF steht ein eigener Abschnitt, und
+die Zahlen stehen dort in der Tabelle, während die Prosa wertfrei bleibt. Dass
+der Festigkeitskennwert eine Annahme ist und dass die magnetische Grenze
+ungeprüft blieb, sind dabei **Warnungen** und keine Fußnoten — eine Sicherheit
+sieht aus wie jede andere Zahl.
+
+Zwei Verwechslungen fielen dabei auf und sind behoben. „Trägt nicht" und „passt
+nicht" waren zu einem Wert verrechnet: ein Satz mit den Sicherheiten 2,49 und
+1,06 wurde als *trägt nicht* abgelegt, obwohl ihm nur Platz fehlte — und das
+schickt die Suche zu mehr Modul statt zu mehr Platz. Und zwei Rechnungen
+derselben Sekunde standen in der falschen Reihenfolge, weil die Zeitmarken als
+Zeichenketten sortiert wurden; zwei Verben in einem Agentenzug sind beide in
+Millisekunden fertig, das ist der Normalfall.
+
 ### Zwei Grenzen, die dazugehören
 
 Die Festigkeitskennwerte sind eine **Annahme** — Größenordnungen der

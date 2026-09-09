@@ -971,6 +971,25 @@ drawing from it finds out too late. The fallback draws cylinders on the pitch
 circle instead — unmistakably toothless, and exactly what the mounting question
 needs: does it fit and where does it sit. The result always says who drew it.
 
+### And it outlives the window
+
+The design is filed in the project like every deciding verb, and **the Steckbrief
+and the report read exactly that file** — they recompute nothing, because a
+second computation would be a second source. The Steckbrief carries the ratio,
+the module, both safeties, the efficiency, mass, inertia and the mounting
+verdict, each with its provenance; the PDF gets its own section, with the numbers
+in the table and the prose value-free. That the strength value is an assumption
+and that the magnetic limit went unchecked are **warnings**, not footnotes — a
+safety factor looks like any other number.
+
+Two conflations surfaced doing this and are fixed. "Does not hold" and "does not
+fit" had been folded into one value: a set with safeties of 2.49 and 1.06 was
+filed as *does not hold* although all it lacked was room — and that sends the
+search towards more module instead of more room. And two calculations in the same
+second came out in the wrong order, because the timestamps were sorted as
+strings; two verbs in one agent turn both finish in milliseconds, so that is the
+normal case.
+
 ### Two limits that come with it
 
 The strength values are an **assumption** — magnitudes of the material classes

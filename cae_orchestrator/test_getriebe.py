@@ -156,6 +156,24 @@ abw = G.in_welle_pruefen(stirn, geom)
 pruefe(not abw["ok"] and "Nur ein Planetensatz" in abw["grund"],
        "ein Stirnradsatz in der Welle wird ABGEWIESEN und nicht genaehert")
 
+# „Traegt nicht" und „passt nicht" sind ZWEIERLEI, und der Unterschied entscheidet
+# ueber die naechste Massnahme: mehr Modul gegen mehr Platz. Gemessen an einem
+# echten Fall (Planetensatz i = 5, 90-mm-Welle) hielt die Verzahnung mit
+# S_F 2,49 / S_H 1,06 und passte trotzdem nicht — ``haelt`` sagte trotzdem False,
+# weil es mit ``passt`` verrechnet wurde.
+e_eng = G.auslegen({"art": "planeten", "einbau": "in_welle", "i": 5.0,
+                    "T_motor_Nm": 60.0, "n_motor_1pmin": 6000,
+                    "geom": {"shaftD": 90.0, "shaftBoreD": 70.0}})
+pruefe(e_eng["passt"] is False and e_eng["haelt"] is True,
+       "die VERZAHNUNG traegt, der Satz PASST NICHT — und beides steht getrennt "
+       "da (haelt True, passt False)")
+pruefe(all(st["haelt"] for st in e_eng["stufen"]) == e_eng["haelt"],
+       "'haelt' ist genau die Aussage der Stufen und nichts anderes")
+t_eng = G.als_text(e_eng)
+pruefe("PASST NICHT an den gewaehlten Einbauort" in t_eng
+       and "VERZAHNUNG traegt nicht" not in t_eng,
+       "und der Text schickt einen zu mehr PLATZ, nicht zu mehr Modul")
+
 
 print("\n7. Bauart und Einbauort passen zusammen")
 e = G.auslegen({"art": "stirnrad", "einbau": "in_welle", "i": 4.0,
@@ -288,6 +306,51 @@ with tempfile.TemporaryDirectory() as tmp:
                        "geom": {"shaftD": 180.0, "shaftBoreD": 140.0}})
     pruefe(bool(GC.bild(e_iw, os.path.join(tmp, "iw.png"))),
            "auch mit Wellenbefund — dort ist die verfuegbare Bohrung im Bild")
+
+
+print("\n13. Steckbrief und Bericht lesen dieselbe abgelegte Rechnung")
+import ema_steckbrief as SB
+import ema_report as RP
+with tempfile.TemporaryDirectory() as tmp:
+    pdir = os.path.join(tmp, "20260101_000000_probe")
+    os.makedirs(os.path.join(pdir, "rechnungen"))
+    os.makedirs(os.path.join(pdir, "charts"))
+    e_iw2 = G.auslegen({"art": "planeten", "einbau": "in_welle", "i": 5.0,
+                        "T_motor_Nm": 60.0, "n_motor_1pmin": 6000,
+                        "geom": {"shaftD": 90.0, "shaftBoreD": 70.0}})
+    SB.ablegen(pdir, "getriebe", G.als_text(e_iw2), daten=e_iw2,
+               ok=bool(e_iw2["haelt"] and e_iw2["passt"]))
+    g = SB.getriebe(pdir)
+    pruefe(g and g["i_ist"] == e_iw2["i_ist"] and g["art"] == "planeten",
+           "der Steckbrief liest die abgelegte Auslegung — er rechnet sie NICHT "
+           "nach, das waere eine zweite Quelle")
+    pruefe(g["werkstoff_beleg"] == "annahme",
+           "und traegt mit, dass der Festigkeitskennwert eine ANNAHME ist")
+    pruefe(g["in_welle"]["magnetisch_geprueft"] is False,
+           "und dass die magnetische Grenze ungeprueft blieb")
+    # Zwei Auslegungen im selben Projekt: die JUENGSTE gilt.
+    e_alt = G.auslegen({"art": "stirnrad", "i": 3.0, "T_motor_Nm": 60.0,
+                        "n_motor_1pmin": 6000})
+    SB.ablegen(pdir, "getriebe", G.als_text(e_alt), daten=e_alt)
+    pruefe(SB.getriebe(pdir)["art"] == "stirnrad",
+           "liegen mehrere Auslegungen im Projekt, gilt die juengste")
+
+    sb = SB.steckbrief(pdir, mit_laeufen=False)
+    pruefe("Getriebe :" in SB.als_text(sb) and "Getriebe:" in SB.als_markdown(sb),
+           "sie steht in beiden Steckbrief-Formen — Text und Projektakte")
+    pruefe(any("ANGENOMMENEN Werkstoffkennwert" in w for w in sb["warnungen"]),
+           "und die Annahme wird als WARNUNG gefuehrt, nicht als Fussnote: eine "
+           "Sicherheit sieht aus wie jede andere Zahl im Steckbrief")
+
+    ctx = {"getriebe": SB.getriebe(pdir), "_img_map": {}}
+    md = RP._ensure_getriebe_section("# B\n\nText.\n", ctx)
+    pruefe("## Getriebeauslegung" in md,
+           "der Bericht bekommt einen eigenen Abschnitt")
+    pruefe(md == RP._ensure_getriebe_section(md, ctx),
+           "und zweimal aufgerufen haengt er ihn nicht zweimal an")
+    pruefe("Getriebeauslegung" in RP._single_md_tables(ctx),
+           "die ZAHLEN stehen in der Tabelle — die Prosa des Berichts bleibt "
+           "wertfrei, so wie ueberall hier")
 
 
 print("\n" + "=" * 62)

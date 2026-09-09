@@ -79,6 +79,9 @@ def build_context(project_dir: str) -> dict:
         ("oil_droplets",  "charts/oil_droplets.png",  "Tröpfchenbildung / Fragmentierung über die Zeit"),
         # Quantitative OpenFOAM-VOF-Kühlung (interFoam) — nur bei durchgeführtem 🌊-Lauf.
         ("cfd_wetting",   "charts/cfd_wetting.png",   "VOF-Benetzung über die Zeit (OpenFOAM interFoam)"),
+        # Getriebe (Verb ``getriebe``) — das Bild kommt aus ``ema_getriebe_cad.bild``
+        # und wird aus den ZAHLEN gezeichnet, ohne FreeCAD.
+        ("getriebe",      "charts/getriebe.png",      "Getriebe im Querschnitt (Auslegung)"),
     ]
     for key, rel, title in pairs:
         full = os.path.join(project_dir, rel)
@@ -194,6 +197,17 @@ def build_context(project_dir: str) -> dict:
         "images": list(imgs.keys()),
         "_img_map": imgs,
     }
+
+    # Das Getriebe steht NICHT in ``results.json`` -- es ist ein Verbergebnis und
+    # wuerde beim naechsten ``run analyse`` ueberschrieben. Gelesen wird deshalb
+    # dieselbe abgelegte Rechnung, die auch der Steckbrief liest: EINE Quelle.
+    try:
+        import ema_steckbrief
+        _getr = ema_steckbrief.getriebe(project_dir)
+    except Exception:                                        # noqa: BLE001
+        _getr = None
+    if _getr:
+        ctx["getriebe"] = _getr
 
     seg = results.get("segmentation") or {}
     if seg:
@@ -614,6 +628,76 @@ def _ensure_kuehlung_section(md: str, ctx: dict) -> str:
     return md.rstrip() + "\n" + "\n".join(block) + "\n"
 
 
+def _ensure_getriebe_section(md: str, ctx: dict) -> str:
+    """Garantiert einen eigenen Getriebe-Abschnitt, wenn eine Auslegung vorliegt.
+
+    Spiegelt ``_ensure_em3d_section``/``_ensure_kuehlung_section``. Die ZAHLEN
+    stehen in der Kennwerttabelle (`_single_md_tables`) -- hier steht, wie sie
+    zustande kommen und was an ihnen NICHT gerechnet ist. Das ist bei diesem
+    Abschnitt keine Formsache: die Festigkeitskennwerte sind eine Annahme, und
+    eine Sicherheit sieht so aus wie jede andere Zahl im Bericht.
+    """
+    g = ctx.get("getriebe")
+    if not g:
+        return md
+    if re.search(r"(?im)^#{1,3}\s.*getriebe", md) or \
+            re.search(r"\[BILD\s*:\s*getriebe\s*\]", md, re.I):
+        return md
+    paras = [
+        "Die Übersetzung ist kein gesetzter Wert, sondern eine Auslegung: "
+        "Stufenteilung, Zähnezahlen, Modul, Achsabstand, Zahnfuß- und "
+        "Flankentragfähigkeit, ein lastabhängiger Wirkungsgrad, Masse und die auf "
+        "die Motorwelle bezogene Trägheit. Zahnform- und Kerbfaktor werden über "
+        "das Verfahren der 30-Grad-Tangente aus Zähnezahl, Profilverschiebung und "
+        "Werkzeugform bestimmt, nicht aus einer Tabelle — die gilt nur für "
+        "unverschobene Zähne, und die Auslegung wählt eine Profilverschiebung, "
+        "sobald die Zähnezahl unter die Unterschnittgrenze fällt. Die aus ganzen "
+        "Zähnezahlen erreichte Übersetzung weicht vom Sollwert ab; diese "
+        "Abweichung ist eine Aussage und steht in der Tabelle neben dem Sollwert.",
+        "Das Modul folgt aus dem Zahnfußmoment und wird auf die Normreihe "
+        "**aufgerundet**; danach entscheidet in aller Regel nicht der Zahnfuß, "
+        "sondern die **Flanke**, weil sie mit einer höheren Potenz des Moduls "
+        "trägt. Die Auslegung geht die Normreihe deshalb hoch, bis beide "
+        "Sicherheiten stehen, und weist aus, welche gebunden hat.",
+    ]
+    if g.get("werkstoff_beleg") == "annahme":
+        paras.append(
+            "**Grenze dieser Aussage:** die zugrunde liegenden Festigkeitskennwerte "
+            "sind eine **Annahme** — die Größenordnung der Werkstoffklasse mit "
+            "Spanne, keine zitierte Messung. Jede daraus gerechnete Sicherheit "
+            "trägt diesen Vorbehalt. Ebenso sind die Betriebsbeiwerte "
+            "(Anwendungs-, Dynamik- und Breitenfaktor) Betriebswissen und keine "
+            "Geometrie; sie gehen als begründete Vorgabe ein.")
+    if g.get("art") == "kegelrad":
+        paras.append("Beim **Kegelrad** wird die Tragfähigkeit über das "
+                     "Ersatz-Stirnrad nach Tredgold gerechnet — eine Näherung, "
+                     "und sie ist als solche ausgewiesen.")
+    if g.get("art") == "schnecke":
+        paras.append("Bei der **Schnecke** wird **keine** Zahnfußtragfähigkeit "
+                     "gerechnet; dort entscheiden Wirkungsgrad, Selbsthemmung und "
+                     "Erwärmung. Weil der Wirkungsgrad stark am Reibwert hängt, "
+                     "steht dort eine Spanne und keine einzelne Zahl.")
+    iw = g.get("in_welle")
+    if iw:
+        paras.append(
+            "Der Satz sitzt **in der Hohlwelle des Läufers**. Dafür stehen drei "
+            "Durchmesser nebeneinander — was der Satz braucht, was gezeichnet ist "
+            "und was magnetisch zulässig ist —, und es ist ausgewiesen, welcher "
+            "bindet."
+            + ("" if iw.get("magnetisch_geprueft") else
+               " **Die magnetisch zulässige Bohrung wurde hier NICHT geprüft** "
+               "(kein Feldlauf): „passt in die gezeichnete Bohrung“ ist nicht "
+               "„zulässig“."))
+    if g.get("zeichner") == "ersatz":
+        paras.append("Die beigefügte Zeichnung zeigt **Ersatzkörper ohne Zähne** "
+                     "(das Verzahnungs-Addon lag nicht vor). Sie belegt Lage und "
+                     "Platzbedarf, nicht die Zahnform.")
+    block = ["\n\n## Getriebeauslegung\n", "\n\n".join(paras)]
+    if "getriebe" in (ctx.get("_img_map") or {}):
+        block.append("[BILD:getriebe]")
+    return md.rstrip() + "\n" + "\n".join(block) + "\n"
+
+
 def insert_images(md: str, img_map: dict) -> str:
     """Replace [BILD:key] with ![title](path) for each known key.
     Also strips backticks the LLM tends to add around the placeholder, and
@@ -754,6 +838,7 @@ def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
     md_raw   = _ensure_em_images(md_raw, ctx["_img_map"])  # EM field maps into §3
     md_raw   = _ensure_em3d_section(md_raw, ctx)           # eigener 3D-Abschnitt + Bilder
     md_raw   = _ensure_kuehlung_section(md_raw, ctx)       # Spritzöl-Kühlung + Bilder
+    md_raw   = _ensure_getriebe_section(md_raw, ctx)       # Getriebe + Bild
     md_final = insert_images(md_raw, ctx["_img_map"])
     md_final = insert_tables(md_final, {"kennwerte": _single_md_tables(ctx),
                                         "herkunft":  _herkunft_tabelle(project_dir),
@@ -826,6 +911,7 @@ def generate_report_agentic(
     md_main = _ensure_em_images(md_main, ctx["_img_map"])  # EM field maps into §3
     md_main = _ensure_em3d_section(md_main, ctx)           # eigener 3D-Abschnitt + Bilder
     md_main = _ensure_kuehlung_section(md_main, ctx)       # Spritzöl-Kühlung + Bilder
+    md_main = _ensure_getriebe_section(md_main, ctx)      # Getriebe + Bild
     md_main = insert_images(md_main, ctx["_img_map"])
     md_main = insert_tables(md_main, {"kennwerte": _single_md_tables(ctx),
                                       "herkunft":  _herkunft_tabelle(project_dir),
@@ -1298,6 +1384,35 @@ def _single_md_tables(ctx: dict) -> str:
         ("FEM-Drehzahl",               st.get("rpm_fem"),         "U/min", 0),
         ("Max. sichere Drehzahl",      st.get("max_safe_rpm"),    "U/min", 0),
     ]))
+    gt = ctx.get("getriebe") or {}
+    if gt:
+        _iw = gt.get("in_welle") or {}
+        blocks.append(_tbl("Getriebeauslegung", [
+            ("Bauart",              gt.get("art"),           "", None),
+            ("Einbauort",           gt.get("einbau_text") or gt.get("einbau"),
+                                                             "", None),
+            ("Stufen",              gt.get("n_stufen"),      "", None),
+            ("Übersetzung i (Soll)", gt.get("i_soll"),       "", 3),
+            ("Übersetzung i (aus Zähnezahlen)", gt.get("i_ist"), "", 3),
+            ("Abweichung",          gt.get("i_fehler_pct"),  "%", 2),
+            ("Modul",               ", ".join(f"{m:g}" for m in (gt.get("moduln_mm") or []))
+                                    or None,                 "mm", None),
+            ("Bindend",             ", ".join(gt.get("bindend") or []) or None,
+                                                             "", None),
+            ("Sicherheit Zahnfuß S_F", gt.get("S_F"),        "", 2),
+            ("Sicherheit Flanke S_H",  gt.get("S_H"),        "", 2),
+            ("Werkstoff",           gt.get("werkstoff"),     "", None),
+            ("Werkstoffkennwert",   gt.get("werkstoff_beleg"), "", None),
+            ("Wirkungsgrad am Nennpunkt", gt.get("eta_nenn"), "", 3),
+            ("Masse",               gt.get("masse_kg"),      "kg", 2),
+            ("Trägheit auf die Motorwelle bezogen", gt.get("J_red_kgm2"), "kgm²", 5),
+            ("Bohrung: gebraucht",  _iw.get("d_noetig_mm"),  "mm", 1),
+            ("Bohrung: verfügbar",  _iw.get("d_verfuegbar_mm"), "mm", 1),
+            ("Bohrung: bindend",    _iw.get("bindend"),      "", None),
+            ("Magnetische Grenze geprüft",
+             (("ja" if _iw.get("magnetisch_geprueft") else "NEIN") if _iw else None),
+                                                             "", None),
+        ]))
     blocks.append(_tbl("Thermisches Verhalten", [
         ("Kühlung",        th.get("cooling"),    "", None),
         ("T_Wicklung",     th.get("T_winding"),  "°C", 1),

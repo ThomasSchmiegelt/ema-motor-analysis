@@ -1102,7 +1102,11 @@ def auslegen(spec: dict) -> dict:
             welle_befund=spec.get("welle_befund"),
             laenge_verfuegbar_mm=float(spec.get("laenge_verfuegbar_mm", 0) or 0))
         erg["passt"] = bool(erg["in_welle"].get("passt"))
-        erg["haelt"] = bool(erg["haelt"] and erg["passt"])
+        # ``haelt`` bleibt die Aussage ueber die VERZAHNUNG und wird hier NICHT
+        # mit ``passt`` verrechnet. Zusammengeworfen las sich ein Satz, der
+        # traegt und nur nicht in die Bohrung geht, als „traegt nicht" — und
+        # schickte die Suche zu mehr Modul statt zu mehr Platz. Wer beides
+        # zugleich braucht, fragt ``haelt and passt`` (so macht es das Verb).
     return erg
 
 
@@ -1324,8 +1328,7 @@ def als_text(e: dict) -> str:
     # „Haelt nicht" und „passt nicht" sind zweierlei, und sie zusammenzuwerfen
     # schickt die Suche in die falsche Richtung: eine Verzahnung, die traegt und
     # nur nicht in die Bohrung geht, braucht mehr Platz — nicht mehr Modul.
-    verzahnung_haelt = all(st.get("haelt") for st in e.get("stufen", [])) \
-        if e.get("stufen") else e.get("haelt")
+    verzahnung_haelt = e.get("haelt")
     if verzahnung_haelt is False:
         z.append("  ⚠ Die VERZAHNUNG traegt nicht — s. die Sicherheiten oben. "
                  "Mehr Modul, mehr Breite oder ein besserer Werkstoff.")

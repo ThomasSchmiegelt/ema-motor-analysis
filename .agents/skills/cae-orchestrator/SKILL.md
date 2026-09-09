@@ -349,6 +349,13 @@ die Motorwelle bezogene Trägheit.
 * **Exit 1** heißt: die Verzahnung trägt nicht ODER der Satz passt nicht. Beides
   wird getrennt genannt — eine Verzahnung, die trägt und nur nicht in die
   Bohrung geht, braucht mehr Platz, nicht mehr Modul.
+* **Die Auslegung überlebt das Fenster.** Sie wird wie jedes entscheidende Verb
+  unter `<projekt>/rechnungen/` abgelegt — und der **Steckbrief** liest sie von
+  dort: Übersetzung, Modul, beide Sicherheiten, Wirkungsgrad, Masse, Trägheit und
+  der Einbaubefund stehen dort mit ihrer Herkunft, und der PDF-Bericht bekommt
+  einen eigenen Abschnitt. Nachgerechnet wird dabei nichts; gelesen wird die
+  abgelegte Zahl. Wer also wissen will, mit welcher Übersetzung gerechnet wurde,
+  fragt `steckbrief` und nicht das Gedächtnis.
 * **Ein Bild kommt immer** (`charts/getriebe.png`, aus den Zahlen gerechnet, ohne
   FreeCAD) und steht damit von selbst in der rechten Spalte. **`--cad`** zeichnet
   zusätzlich die Räder (FreeCAD + FCGear) nach `getriebe.FCStd`/`getriebe.step`;
