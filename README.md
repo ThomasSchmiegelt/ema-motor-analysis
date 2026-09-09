@@ -971,6 +971,15 @@ drawing from it finds out too late. The fallback draws cylinders on the pitch
 circle instead — unmistakably toothless, and exactly what the mounting question
 needs: does it fit and where does it sit. The result always says who drew it.
 
+### Usable as a verb and as a tab — over one chain
+
+The browser has a **⚙ Getriebe** tab, the terminal has the `getriebe` verb. What
+computes underneath is the same function: field run, sizing, image and drawing
+live in **one** place. Two transcriptions would be two paths that drift apart at
+the first bug report — the same reason all three agent heads read a single skill
+file. Torque and speed come from the active project when the fields are left
+empty; when they are missing everywhere, that is an error, not an assumption.
+
 ### And it outlives the window
 
 The design is filed in the project like every deciding verb, and **the Steckbrief

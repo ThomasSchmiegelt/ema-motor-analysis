@@ -1111,6 +1111,16 @@ Rückfall zeichnet stattdessen Zylinder auf dem Teilkreis — unverkennbar ohne
 Zähne, und genau das, was die Einbaufrage braucht: passt es hinein und wo sitzt
 es. Das Ergebnis sagt in jedem Fall, wer gezeichnet hat.
 
+### Zu bedienen als Verb und als Reiter — mit einer Kette darunter
+
+Im Browser gibt es den Reiter **⚙ Getriebe**, im Terminal das Verb `getriebe`.
+Was darunter rechnet, ist dieselbe Funktion: Feldlauf, Auslegung, Bild,
+Zeichnung stehen an **einer** Stelle. Zwei Abschriften wären zwei Wege, die beim
+ersten Fehlerbericht auseinanderlaufen — derselbe Grund, aus dem alle drei
+Agentenköpfe eine einzige Anleitung lesen. Moment und Drehzahl kommen aus dem
+aktiven Projekt, wenn die Felder leer bleiben; fehlen sie überall, ist das ein
+Fehler und keine Annahme.
+
 ### Und es überlebt das Fenster
 
 Die Auslegung wird wie jedes entscheidende Verb im Projekt abgelegt, und

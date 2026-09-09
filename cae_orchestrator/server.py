@@ -52,6 +52,13 @@ _design_state     = {"status": "idle", "progress": 0, "log": [], "result": None,
 # Per-Magnet-Fein-Optimierung eines gezeichneten Custom-Designs
 _design_opt_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
 
+# Getriebeauslegung (Verb ``getriebe``, Reiter ⚙ Getriebe). Eigener Zustand wie
+# jede andere Stufe -- die Auslegung selbst kostet Millisekunden, der Feldlauf
+# fuer die magnetisch zulaessige Wellenbohrung aber Sekunden und die Zeichnung
+# einen FreeCAD-Start. ``_rechnet`` findet ihn automatisch (Muster ``_*_state``).
+_getriebe_state = {"status": "idle", "progress": 0, "log": [], "result": None,
+                   "error": None}
+
 # Parameter-study state (one parameter swept at a fixed speed, fast evaluator)
 _study_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
 # Field-line frames/video of the most recent parameter study (overwritten each run)
@@ -1440,6 +1447,119 @@ def optimize_meta():
               "int": v["type"] is int}
           for k, v in ema_optimize.FREE_PARAMS.items()}
     return jsonify({"free_params": fp, "metrics": ema_optimize.METRICS})
+
+
+@app.route("/getriebe", methods=["POST", "OPTIONS"])
+def getriebe_start():
+    """Getriebe auslegen — dieselbe Kette, die auch ``cae_cli.py getriebe`` fuehrt.
+
+    Gerechnet wird in ``ema_getriebe.lauf``; hier steht nur der Faden, der
+    Projektbezug und die Ablage. Zwei Abschriften derselben Kette waeren zwei
+    Wege, die beim ersten Fehlerbericht auseinanderlaufen.
+
+    Body: ``{art, einbau, stufen, i | n_ab, moment, drehzahl, werkstoff,
+    planeten, schraegung, bauraum_axial, ohne_feld, cad, geom?, project_id?}``.
+    Fehlen Moment/Drehzahl, werden sie aus dem Payload des Projekts genommen —
+    genau wie beim Verb.
+    """
+    if request.method == "OPTIONS":
+        return "", 200
+    if _getriebe_state["status"] == "running":
+        return jsonify({"error": "Eine Getriebeauslegung läuft bereits"}), 409
+    data = request.get_json(force=True) or {}
+    proj_dir, proj_id = _em3d_project_dir(data)
+
+    # Geometrie und Betriebspunkt kommen aus dem Projekt, wenn sie nicht im
+    # Rumpf stehen. Ohne beides ist keine Auslegung moeglich — das ist ein
+    # Bedienfehler und wird als solcher gemeldet, nicht mit einer Annahme
+    # ueberspielt.
+    payload = {}
+    try:
+        with open(os.path.join(proj_dir, "meta.json"), encoding="utf-8") as f:
+            payload = (json.load(f) or {}).get("payload") or {}
+    except (OSError, ValueError):
+        pass
+    geom = data.get("geom") or payload.get("geom") or {}
+    try:
+        T_mot = float(data.get("moment") or payload.get("load_nm") or 0)
+        n_mot = float(data.get("drehzahl") or payload.get("rpm_to")
+                      or payload.get("rpm_from") or 0)
+    except (TypeError, ValueError):
+        T_mot = n_mot = 0.0
+    if T_mot <= 0 or n_mot <= 0:
+        return jsonify({"error": "Moment und Drehzahl fehlen — weder im Aufruf "
+                                 "noch im Payload des Projekts."}), 400
+
+    spec = {"art": data.get("art") or "stirnrad",
+            "einbau": data.get("einbau") or "achsparallel",
+            "stufen": int(data.get("stufen") or 1),
+            "T_motor_Nm": T_mot, "n_motor_1pmin": n_mot,
+            "werkstoff": data.get("werkstoff") or "einsatzgehaertet",
+            "geom": geom,
+            "n_planeten": int(data.get("planeten") or 3),
+            "beta_grad": float(data.get("schraegung") or 0.0),
+            "laenge_verfuegbar_mm": float(data.get("bauraum_axial") or 0.0)}
+    if data.get("i"):
+        spec["i"] = float(data["i"])
+    elif data.get("n_ab"):
+        spec["n_ab_1pmin"] = float(data["n_ab"])
+    else:
+        return jsonify({"error": "Weder 'i' noch 'n_ab' gegeben — die "
+                                 "Uebersetzung muss irgendwoher kommen."}), 400
+
+    mit_feld = not data.get("ohne_feld")
+    mit_cad  = bool(data.get("cad"))
+    _getriebe_state.update({"status": "running", "progress": 0, "log": [],
+                            "result": None, "error": None,
+                            "project_id": proj_id})
+
+    def _worker():
+        import ema_getriebe as GT
+        def _sag(text, pct=None):
+            _getriebe_state["log"].append(str(text))
+            if pct is not None:
+                _getriebe_state["progress"] = int(pct)
+        try:
+            _sag("Auslegung …", 10)
+            erg = GT.lauf(spec, proj_dir, mit_feld=mit_feld, mit_cad=mit_cad,
+                          melde=_sag)
+            _getriebe_state["progress"] = 90
+            text = GT.als_text(erg)
+            # Wie beim Verb: das Ergebnis ueberlebt das Fenster. Steckbrief und
+            # Bericht lesen genau diese Ablage.
+            try:
+                import ema_steckbrief
+                ema_steckbrief.ablegen(proj_dir, "getriebe", text, daten=erg,
+                                       befehl="POST /getriebe",
+                                       ok=GT.bestanden(erg))
+            except Exception as e:                           # noqa: BLE001
+                _sag(f"(nicht abgelegt: {type(e).__name__}: {e})")
+            erg["text"] = text
+            erg["bestanden"] = GT.bestanden(erg)
+            _getriebe_state["result"] = erg
+            _getriebe_state["status"] = "done"
+            _getriebe_state["progress"] = 100
+        except Exception as e:                               # noqa: BLE001
+            import traceback
+            _getriebe_state["error"] = str(e)
+            _getriebe_state["log"].append("⚠ " + str(e))
+            _getriebe_state["status"] = "error"
+            print(traceback.format_exc())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+@app.route("/getriebe/status")
+def getriebe_status():
+    return jsonify({
+        "status":   _getriebe_state["status"],
+        "progress": _getriebe_state["progress"],
+        "log":      _getriebe_state["log"][-40:],
+        "result":   _getriebe_state["result"],
+        "error":    _getriebe_state["error"],
+        "project_id": _getriebe_state.get("project_id"),
+    })
 
 
 @app.route("/design_ai", methods=["POST", "OPTIONS"])

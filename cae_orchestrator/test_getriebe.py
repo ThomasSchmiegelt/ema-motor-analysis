@@ -353,6 +353,36 @@ with tempfile.TemporaryDirectory() as tmp:
            "wertfrei, so wie ueberall hier")
 
 
+print("\n14. Reiter und Route — EINE Kette, nicht zwei")
+_hier = os.path.dirname(os.path.abspath(__file__))
+_html = open(os.path.join(_hier, "ema.html"), encoding="utf-8").read()
+_srv = open(os.path.join(_hier, "server.py"), encoding="utf-8").read()
+_cli = open(os.path.join(_hier, "cae_cli.py"), encoding="utf-8").read()
+pruefe("'getriebe'" in _html.split("const TABS = ")[1].split("]")[0]
+       and "getriebe:'panel-getriebe'" in _html
+       and 'id="panel-getriebe"' in _html
+       and "id=\"tbtn-getriebe\"" in _html,
+       "der Reiter ist in TABS, PANEL_OF, der Leiste UND als Panel registriert — "
+       "fehlt eines davon, ist der Knopf da und tut nichts")
+pruefe('@app.route("/getriebe"' in _srv and '@app.route("/getriebe/status"' in _srv
+       and "_getriebe_state" in _srv,
+       "Server: Start- und Statusroute plus eigener Zustand — den findet "
+       "'_rechnet' automatisch (Muster _*_state) und die Arbeitsleiste zeigt ihn")
+pruefe(_srv.count("GT.lauf(") == 1 and _cli.count("GT.lauf(") == 1
+       and "def lauf(" in open(os.path.join(_hier, "ema_getriebe.py"),
+                               encoding="utf-8").read(),
+       "Verb und Route rufen DIESELBE Kette (ema_getriebe.lauf) — zwei "
+       "Abschriften laufen beim ersten Fehlerbericht auseinander")
+pruefe("GT.bestanden(erg)" in _srv and "GT.bestanden(erg)" in _cli,
+       "und dasselbe Urteil: 'haelt UND passt' steht an EINER Stelle")
+# Der Rechenkern bleibt ohne FreeCAD ladbar -- ``lauf`` importiert erst beim
+# Aufruf, sonst waere die ganze Auslegung an FreeCAD gebunden.
+_quelle_g = open(os.path.join(_hier, "ema_getriebe.py"), encoding="utf-8").read()
+pruefe("import ema_getriebe_cad" not in _quelle_g.split("def lauf(")[0],
+       "ema_getriebe laedt den Zeichner NICHT beim Import — die Auslegung "
+       "bleibt ohne FreeCAD pruefbar")
+
+
 print("\n" + "=" * 62)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

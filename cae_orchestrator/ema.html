@@ -215,6 +215,7 @@
     <button class="tab-btn"        id="tbtn-live"    onclick="switchTab('live')">▶ Live-Simulation</button>
     <button class="tab-btn"        id="tbtn-designer" onclick="switchTab('designer')">🎨 Designer</button>
     <button class="tab-btn"        id="tbtn-import"  onclick="switchTab('import')">📥 STEP-Import</button>
+    <button class="tab-btn"        id="tbtn-getriebe" onclick="switchTab('getriebe')">⚙ Getriebe</button>
     <button class="tab-btn"        id="tbtn-em3d"    onclick="switchTab('em3d')">🧲 3D-Feld</button>
     <button class="tab-btn"        id="tbtn-oil"     onclick="switchTab('oil')">💧 Spritzöl-Kühlung</button>
     <button class="tab-btn"        id="tbtn-cfd"     onclick="switchTab('cfd')">🌊 OpenFOAM (quant.)</button>
@@ -1218,6 +1219,110 @@
     </div>
   </div>
 </div><!-- /panel-import -->
+
+<!-- ════════ TAB: Getriebe ════════ -->
+<div class="tab-panel" id="panel-getriebe">
+  <div class="section" style="max-width:900px">
+    <div class="section-title">⚙ Getriebeauslegung</div>
+    <p style="font-size:.82rem;color:#9aa;line-height:1.5">
+      Das Getriebe war in dieser Kette <b>zwei Konstanten</b> (Übersetzung 9,5,
+      Wirkungsgrad 0,95) — dieselben für einen Fahrrad-Nabenmotor wie für einen
+      Traktionsantrieb. Hier wird statt dessen gerechnet: Stufenteilung,
+      Zähnezahlen, Modul, Achsabstand, Zahnfuß- und Flankentragfähigkeit, ein
+      <b>lastabhängiger</b> Wirkungsgrad, Masse und die auf die Motorwelle
+      bezogene Trägheit. Moment und Drehzahl kommen aus dem <b>aktiven
+      Projekt</b>, wenn die Felder leer bleiben.
+    </p>
+  </div>
+
+  <div class="section" style="max-width:900px">
+    <div class="section-title">Auslegung</div>
+    <div class="input-group">
+      <label>Bauart</label>
+      <select id="gt_art" onchange="_gtSync()">
+        <option value="stirnrad">Stirnrad (1–2 Stufen)</option>
+        <option value="planeten">Planetensatz</option>
+        <option value="kegelrad">Kegelrad (Näherung über Ersatz-Stirnrad)</option>
+        <option value="schnecke">Schnecke (keine Zahnfußrechnung)</option>
+      </select>
+    </div>
+    <div class="input-group">
+      <label>Einbauort</label>
+      <select id="gt_einbau" onchange="_gtSync()">
+        <option value="achsparallel">achsparallel (neben der Motorachse)</option>
+        <option value="koaxial">koaxial (auf der Motorachse, hinter dem Läufer)</option>
+        <option value="in_welle">in der Hohlwelle des Läufers (nur Planetensatz)</option>
+      </select>
+    </div>
+    <div class="input-group" id="gt_stufen_wrap">
+      <label>Stufen</label>
+      <input type="number" id="gt_stufen" value="1" min="1" max="2" step="1"/>
+    </div>
+    <div class="input-group" id="gt_planeten_wrap" style="display:none">
+      <label>Planeten</label>
+      <input type="number" id="gt_planeten" value="3" min="3" max="6" step="1"/>
+    </div>
+    <div class="input-group">
+      <label>Übersetzung i</label>
+      <input type="number" id="gt_i" value="9.5" min="1" step="0.1"/>
+      <span style="font-size:.74rem;color:#889">oder Abtriebsdrehzahl setzen ↓</span>
+    </div>
+    <div class="input-group">
+      <label>Abtrieb 1/min</label>
+      <input type="number" id="gt_nab" placeholder="leer = über i" min="1" step="1"/>
+    </div>
+    <div class="input-group">
+      <label>Moment Nm</label>
+      <input type="number" id="gt_moment" placeholder="leer = load_nm des Projekts" min="0" step="1"/>
+    </div>
+    <div class="input-group">
+      <label>Drehzahl 1/min</label>
+      <input type="number" id="gt_drehzahl" placeholder="leer = rpm_to des Projekts" min="0" step="1"/>
+    </div>
+    <div class="input-group">
+      <label>Werkstoff</label>
+      <select id="gt_werkstoff">
+        <option value="einsatzgehaertet">Einsatzstahl, einsatzgehärtet</option>
+        <option value="nitriert">Nitrierstahl, nitriert (31CrMoV9)</option>
+        <option value="verguetet">Vergütungsstahl, vergütet (42CrMo4)</option>
+        <option value="baustahl">Baustahl vergütet (C45)</option>
+      </select>
+    </div>
+    <div class="input-group">
+      <label>Schrägung °</label>
+      <input type="number" id="gt_schraegung" value="0" min="0" max="30" step="1"/>
+    </div>
+    <div class="input-group" id="gt_axial_wrap" style="display:none">
+      <label>Bauraum axial mm</label>
+      <input type="number" id="gt_axial" value="0" min="0" step="1"/>
+      <span style="font-size:.74rem;color:#889">0 = nicht prüfen</span>
+    </div>
+    <div class="input-group" id="gt_feld_wrap" style="display:none">
+      <label>Feldlauf</label>
+      <label style="font-weight:400;font-size:.8rem;color:#bbb">
+        <input type="checkbox" id="gt_feld" checked/>
+        magnetisch zulässige Bohrung <b>messen</b> (ein FDM-Lauf, Sekunden)
+      </label>
+    </div>
+    <div class="input-group">
+      <label>Zeichnung</label>
+      <label style="font-weight:400;font-size:.8rem;color:#bbb">
+        <input type="checkbox" id="gt_cad"/>
+        Räder zeichnen (FreeCAD + FCGear → <code>getriebe.FCStd</code>/<code>.step</code>)
+      </label>
+    </div>
+    <button id="gt_btn" onclick="startGetriebe()" style="margin-top:8px">⚙ Auslegen</button>
+    <div id="gt_msg" style="margin-top:10px;font-size:.82rem"></div>
+    <pre id="gt_log" style="margin-top:8px;max-height:200px;overflow:auto;background:#0d0d14;border:1px solid #2a2a30;border-radius:4px;padding:8px;font-size:.72rem;color:#9c9;white-space:pre-wrap;display:none"></pre>
+  </div>
+
+  <div class="section" style="max-width:900px" id="gt_ergebnis_wrap" hidden>
+    <div class="section-title">Ergebnis</div>
+    <div id="gt_urteil" style="margin-bottom:8px;font-size:.86rem"></div>
+    <pre id="gt_text" style="overflow:auto;background:#0d0d14;border:1px solid #2a2a30;border-radius:4px;padding:10px;font-size:.74rem;color:#cdd;white-space:pre"></pre>
+    <img id="gt_bild" style="max-width:100%;margin-top:10px;border:1px solid #2a2a30;border-radius:4px;display:none"/>
+  </div>
+</div><!-- /panel-getriebe -->
 
 <!-- ════════ TAB: 3D-Feld (Elmer) ════════ -->
 <div class="tab-panel" id="panel-em3d">
@@ -3440,13 +3545,14 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['projekt','geo','betrieb','calc','live','designer','import','em3d','oil','cfd','spraytest','ki','jobs','results','compare','agent','agenth','studio'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','getriebe','em3d','oil','cfd','spraytest','ki','jobs','results','compare','agent','agenth','studio'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
   projekt:'panel-projekt',
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
-  designer:'panel-designer', import:'panel-import', em3d:'panel-em3d', oil:'panel-oil',
+  designer:'panel-designer', import:'panel-import', getriebe:'panel-getriebe',
+  em3d:'panel-em3d', oil:'panel-oil',
   cfd:'panel-cfd', spraytest:'panel-spraytest', ki:'panel-ki', jobs:'panel-jobs',
   results:'tab-results', compare:'tab-compare', agent:'panel-agent',
   agenth:'panel-agent-hermes', studio:'panel-agent-studio'
@@ -3493,6 +3599,7 @@ function switchTab(name) {
   if (PREVIEW_TABS.has(name)) requestAnimationFrame(() => requestAnimationFrame(() => {
     if (typeof resize === 'function') resize();
   }));
+  if (name === 'getriebe' && typeof _gtSync === 'function') _gtSync();
   if (name === 'ki' && typeof kiActivate === 'function') kiActivate();
   if (name === 'projekt' && typeof pjActivate === 'function') pjActivate();
   if (name === 'calc' && typeof initParamStudy === 'function') initParamStudy();
@@ -6057,6 +6164,144 @@ function applyDesignToCanvas(design) {
 // ── STEP-Import: erkennt Magnetlage, lädt sie in den Designer ───────────────────
 let _importedActive = false;       // true ⇒ _dsnBuildPayload markiert imported (Geometrie nicht neu bauen)
 let _importedProjectId = null;     // Projekt mit der importierten motor.FCStd (Rotor)
+
+// ──────────────── Getriebe-Reiter (⚙) ────────────────
+// Die Kette selbst liegt im Server (``ema_getriebe.lauf``) und ist dieselbe, die
+// ``cae_cli.py getriebe`` fuehrt. Hier steht nur die Maske.
+function _gtSync() {
+  const art = document.getElementById('gt_art').value;
+  const einbau = document.getElementById('gt_einbau').value;
+  const zeig = (id, an) => { const e = document.getElementById(id);
+                             if (e) e.style.display = an ? '' : 'none'; };
+  zeig('gt_stufen_wrap',   art === 'stirnrad');
+  zeig('gt_planeten_wrap', art === 'planeten');
+  zeig('gt_axial_wrap',    einbau === 'in_welle');
+  zeig('gt_feld_wrap',     einbau === 'in_welle');
+  // Der Einbauort ist ein TOR, keine Beschriftung: nur der Planetensatz passt
+  // in die Hohlwelle. Das steht hier, statt es der Server abweisen zu lassen —
+  // abgewiesen wird es dort trotzdem.
+  const opt = document.querySelector('#gt_einbau option[value="in_welle"]');
+  if (opt) {
+    opt.disabled = (art !== 'planeten');
+    if (opt.disabled && einbau === 'in_welle') {
+      document.getElementById('gt_einbau').value = 'achsparallel';
+      _gtSync();
+    }
+  }
+}
+
+async function startGetriebe() {
+  const msg = document.getElementById('gt_msg');
+  const logEl = document.getElementById('gt_log');
+  const btn = document.getElementById('gt_btn');
+  const num = id => { const v = (document.getElementById(id).value || '').trim();
+                      return v === '' ? null : parseFloat(v); };
+  const body = {
+    art:  document.getElementById('gt_art').value,
+    einbau: document.getElementById('gt_einbau').value,
+    stufen: num('gt_stufen') || 1,
+    planeten: num('gt_planeten') || 3,
+    i: num('gt_i'), n_ab: num('gt_nab'),
+    moment: num('gt_moment'), drehzahl: num('gt_drehzahl'),
+    werkstoff: document.getElementById('gt_werkstoff').value,
+    schraegung: num('gt_schraegung') || 0,
+    bauraum_axial: num('gt_axial') || 0,
+    ohne_feld: !document.getElementById('gt_feld').checked,
+    cad: document.getElementById('gt_cad').checked,
+  };
+  if (body.n_ab) body.i = null;          // Abtriebsdrehzahl schlaegt i
+  if (window._activeProject && window._activeProject.id)
+    body.project_id = window._activeProject.id;
+  btn.disabled = true; msg.style.color = '#9c9'; msg.textContent = '⏳ Rechne…';
+  logEl.style.display = 'block'; logEl.textContent = '';
+  try {
+    const r = await fetch('/getriebe', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)}).then(x => x.json());
+    if (r.error) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + r.error;
+                   btn.disabled = false; return; }
+    _pollGetriebe();
+  } catch (e) {
+    msg.style.color = '#e57'; msg.textContent = 'Fehler: ' + e.message;
+    btn.disabled = false;
+  }
+}
+
+async function _pollGetriebe() {
+  const msg = document.getElementById('gt_msg');
+  const logEl = document.getElementById('gt_log');
+  const btn = document.getElementById('gt_btn');
+  try {
+    const s = await fetch('/getriebe/status').then(x => x.json());
+    if (Array.isArray(s.log)) { logEl.textContent = s.log.join('\n');
+                                logEl.scrollTop = logEl.scrollHeight; }
+    if (s.status === 'done') { _renderGetriebe(s.result); btn.disabled = false; return; }
+    if (s.status === 'error') { msg.style.color = '#e57';
+                                msg.textContent = '⚠ ' + (s.error || 'fehlgeschlagen');
+                                btn.disabled = false; return; }
+  } catch (e) { /* weiter fragen */ }
+  setTimeout(_pollGetriebe, 800);
+}
+
+function _renderGetriebe(res) {
+  const msg = document.getElementById('gt_msg');
+  const wrap = document.getElementById('gt_ergebnis_wrap');
+  const urteil = document.getElementById('gt_urteil');
+  const bild = document.getElementById('gt_bild');
+  if (!res) { msg.style.color = '#e57'; msg.textContent = '⚠ kein Ergebnis'; return; }
+  wrap.hidden = false;
+  document.getElementById('gt_text').textContent = res.text || '';
+  if (!res.ok) {
+    msg.style.color = '#e57'; msg.textContent = '⚠ ' + (res.grund || 'nicht auslegbar');
+    urteil.innerHTML = '';
+    bild.style.display = 'none';
+    return;
+  }
+  msg.style.color = '#6c6'; msg.textContent = '✓ gerechnet und im Projekt abgelegt.';
+  // „Traegt nicht" und „passt nicht" sind ZWEIERLEI und stehen deshalb getrennt:
+  // eine Verzahnung, die traegt und nur nicht in die Bohrung geht, braucht mehr
+  // PLATZ, nicht mehr Modul.
+  const zeilen = [];
+  if (res.haelt === false)
+    zeilen.push('<span style="color:#e57">⚠ Die VERZAHNUNG trägt nicht</span> — ' +
+                'mehr Modul, mehr Breite oder ein besserer Werkstoff.');
+  else if (res.haelt === null || res.haelt === undefined)
+    zeilen.push('<span style="color:#ca8">Für diese Bauart wird keine ' +
+                'Zahnfußtragfähigkeit gerechnet.</span>');
+  else
+    zeilen.push('<span style="color:#6c6">✓ Die Verzahnung trägt.</span>');
+  if (res.in_welle) {
+    const iw = res.in_welle;
+    zeilen.push(iw.passt
+      ? '<span style="color:#6c6">✓ Der Satz passt in die Welle.</span>'
+      : '<span style="color:#e57">⚠ Der Satz PASST NICHT an den Einbauort</span> — ' +
+        'was fehlt, ist Platz: größere Bohrung, kleinere Übersetzung oder ein ' +
+        'anderer Einbau.');
+    if (!iw.magnetisch_geprueft)
+      zeilen.push('<span style="color:#ca8">Die magnetisch zulässige Bohrung ' +
+                  'wurde NICHT geprüft</span> — „passt in die gezeichnete ' +
+                  'Bohrung" ist nicht „zulässig".');
+  }
+  if (res.werkstoff_beleg === 'annahme')
+    zeilen.push('<span style="color:#ca8">Die Festigkeitskennwerte sind eine ' +
+                'ANNAHME</span> (Größenordnung der Werkstoffklasse), keine ' +
+                'zitierte Messung — jede Sicherheit oben ist eine Größenordnung.');
+  const cad = res.cad || {};
+  if (cad.zeichner === 'ersatz')
+    zeilen.push('<span style="color:#ca8">Die Zeichnung zeigt ERSATZKÖRPER ohne ' +
+                'Zähne</span> (FCGear fehlte) — sie belegt Lage und Platzbedarf, ' +
+                'nicht die Zahnform.');
+  urteil.innerHTML = zeilen.map(z => '<div>' + z + '</div>').join('');
+  // Das Bild liegt im Projekt und wird ueber den vorhandenen Diagrammweg geholt
+  // (``/chart/<name>`` loest gegen das aktive Projekt auf) -- mit Zeitstempel,
+  // sonst zeigt der Browser das Bild der vorigen Auslegung.
+  if (res.bild) {
+    bild.src = '/chart/getriebe.png?t=' + Date.now();
+    bild.style.display = '';
+  } else {
+    bild.style.display = 'none';
+  }
+}
 
 async function startStepImport() {
   const fileEl = document.getElementById('import-file');

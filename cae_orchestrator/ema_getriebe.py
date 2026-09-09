@@ -1226,6 +1226,72 @@ def _sonderbauart(art: str, i_ges: float, T_mot: float, n_mot: float,
 
 # ── Ausgabe ─────────────────────────────────────────────────────────────────
 
+def lauf(spec: dict, projekt_dir: str = "", *, mit_feld: bool = True,
+         mit_bild: bool = True, mit_cad: bool = False, melde=None) -> dict:
+    """Die ganze Kette an EINER Stelle: Feldlauf, Auslegung, Bild, Zeichnung.
+
+    Warum das hier steht und nicht zweimal daneben: das Verb ``getriebe`` und
+    die Route ``/getriebe`` machen dasselbe, und zwei Abschriften laufen beim
+    ersten Fehlerbericht auseinander -- derselbe Grund, aus dem alle drei
+    Agentenkoepfe EINE ``SKILL.md`` lesen. Der Rechenkern (``auslegen``) bleibt
+    davon unberuehrt und weiterhin ohne FreeCAD pruefbar; ``ema_welle`` und
+    ``ema_getriebe_cad`` werden **erst beim Aufruf** importiert.
+
+    ``mit_feld`` entscheidet ueber den einen teuren Schritt: die magnetisch
+    zulaessige Bohrung kostet einen FDM-Lauf. Ohne ihn bleibt sie UNGEPRUEFT,
+    und das steht dann auch im Befund -- „passt in die gezeichnete Bohrung" ist
+    nicht „zulaessig".
+    """
+    def _sag(text):
+        if melde:
+            melde(text)
+
+    if spec.get("einbau") == "in_welle" and mit_feld and "welle_befund" not in spec:
+        try:
+            import ema_welle
+            _sag("Wellenbohrung magnetisch pruefen (ein Feldlauf) …")
+            spec = dict(spec)
+            spec["welle_befund"] = ema_welle.pruefen(spec.get("geom") or {})
+        except Exception as e:                               # noqa: BLE001
+            _sag(f"(Feldlauf nicht moeglich: {type(e).__name__}: {e} — die "
+                 f"magnetische Grenze bleibt ungeprueft)")
+
+    erg = auslegen(spec)
+    if not erg.get("ok") or not projekt_dir or not (mit_bild or mit_cad):
+        return erg
+
+    import os
+    import ema_getriebe_cad as GC
+    if mit_bild:
+        bild = GC.bild(erg, os.path.join(projekt_dir, "charts", "getriebe.png"))
+        if bild:
+            erg["bild"] = bild
+            _sag(f"Bild: charts/{os.path.basename(bild)}")
+    if mit_cad:
+        _sag(f"Zeichnen ({'FCGear' if GC.fcgear_da() else 'Ersatzkoerper'}) …")
+        cad = GC.bauen(erg, projekt_dir)
+        erg["cad"] = cad
+        if cad.get("ok"):
+            _sag(f"CAD: {os.path.basename(cad['fcstd'])} + "
+                 f"{os.path.basename(cad['step'])} ({cad['koerper']} Koerper, "
+                 f"Zeichner: {cad['zeichner']})")
+            if cad.get("vorbehalt"):
+                _sag(cad["vorbehalt"])
+        else:
+            _sag(f"CAD nicht erzeugt: {cad.get('grund', '?')}")
+    return erg
+
+
+def bestanden(erg: dict) -> bool:
+    """Traegt die Verzahnung UND passt der Satz? Beides, und in dieser Reihenfolge.
+
+    Die beiden getrennt zu halten ist der ganze Punkt (s. ``BEFUNDE.md``); wer
+    ein Urteil braucht, holt es hier -- nicht durch ein zweites Und irgendwo.
+    """
+    return bool(erg.get("ok")) and erg.get("haelt") is not False \
+        and erg.get("passt", True)
+
+
 def als_text(e: dict) -> str:
     """Der Befund als Text. Fuer einen Agenten ist das die eigentliche Ausgabe:
     ein Bild kann er nicht lesen, und Base64 wird ohnehin herausgefiltert."""

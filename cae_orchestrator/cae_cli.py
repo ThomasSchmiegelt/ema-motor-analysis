@@ -2207,47 +2207,19 @@ def cmd_getriebe(args) -> int:
         return _die("Weder --i noch --n-ab gegeben — die Uebersetzung muss "
                     "irgendwoher kommen.", EXIT_USAGE)
 
-    # Die magnetische Grenze der Bohrung: nur wenn sie gebraucht wird, denn sie
-    # kostet einen Feldlauf.
-    if args.einbau == "in_welle" and not args.ohne_feld:
-        try:
-            import ema_welle
-            print("  Wellenbohrung magnetisch pruefen (ein Feldlauf) …")
-            spec["welle_befund"] = ema_welle.pruefen(geom)
-        except Exception as e:                               # noqa: BLE001
-            print(f"  (Feldlauf nicht moeglich: {type(e).__name__}: {e} — "
-                  f"die magnetische Grenze bleibt ungeprueft)")
-
-    erg = GT.auslegen(spec)
-
-    # Zeichnen und ein Bild ablegen -- beides nur bei einer gueltigen Auslegung
-    # und nur, wenn ein Projekt da ist. Das Bild landet in ``charts/`` und
-    # erscheint damit ueber den vorhandenen Bilderpfad von selbst in der rechten
-    # Spalte der Agentenseiten.
-    if erg.get("ok") and not args.ohne_cad:
-        pdir = _projekt_pfad(getattr(args, "projekt", "")
-                             or getattr(args, "_pid", "") or "")
-        if pdir:
-            import ema_getriebe_cad as GC
-            bild = GC.bild(erg, os.path.join(pdir, "charts", "getriebe.png"))
-            if bild:
-                erg["bild"] = bild
-                print(f"  Bild: charts/{os.path.basename(bild)}")
-            if args.cad:
-                print(f"  Zeichnen ({'FCGear' if GC.fcgear_da() else 'Ersatzkoerper'}) …")
-                cad = GC.bauen(erg, pdir)
-                erg["cad"] = cad
-                if cad.get("ok"):
-                    print(f"  CAD: {os.path.basename(cad['fcstd'])} + "
-                          f"{os.path.basename(cad['step'])} "
-                          f"({cad['koerper']} Koerper, Zeichner: {cad['zeichner']})")
-                    if cad.get("vorbehalt"):
-                        print(f"  {cad['vorbehalt']}")
-                else:
-                    print(f"  CAD nicht erzeugt: {cad.get('grund', '?')}")
-        elif args.cad:
-            print("  (kein Projekt gebunden — ohne Projektordner wird nichts "
-                  "gezeichnet)")
+    # Ab hier rechnet ``GT.lauf`` -- dieselbe Kette, die auch ``POST /getriebe``
+    # fuehrt. Zwei Abschriften waeren zwei Wege, die beim ersten Fehlerbericht
+    # auseinanderlaufen.
+    pdir = _projekt_pfad(getattr(args, "projekt", "")
+                         or getattr(args, "_pid", "") or "")
+    if args.cad and not pdir:
+        print("  (kein Projekt gebunden — ohne Projektordner wird nichts "
+              "gezeichnet)")
+    erg = GT.lauf(spec, pdir,
+                  mit_feld=not args.ohne_feld,
+                  mit_bild=not args.ohne_cad,
+                  mit_cad=bool(args.cad) and not args.ohne_cad,
+                  melde=lambda t: print(f"  {t}"))
 
     text = GT.als_text(erg)
     if args.json:
@@ -2256,8 +2228,7 @@ def cmd_getriebe(args) -> int:
         print()
         print(text)
 
-    ok = bool(erg.get("ok")) and erg.get("haelt") is not False \
-        and erg.get("passt", True)
+    ok = GT.bestanden(erg)
     _ablegen(args, "getriebe", text, daten=erg, ok=ok)
     if not erg.get("ok"):
         return EXIT_USAGE if "gibt es nicht" in str(erg.get("grund", "")) else 1
