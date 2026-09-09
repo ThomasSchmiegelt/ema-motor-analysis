@@ -1084,6 +1084,33 @@ Lager- und Planschverluste an der **Drehzahl** hängen und nicht an der Last.
 Ohne Auslegung ändert sich nichts: jede bestehende Rechnung bleibt Ziffer für
 Ziffer dieselbe.
 
+### Die Zeichnung — und was ein zu schön gezeichnetes Rad anrichtet
+
+Ein Querschnittsbild fällt bei jeder Auslegung ab (`charts/getriebe.png`), aus
+den Zahlen gerechnet und ohne FreeCAD; bei `in_welle` steht die verfügbare
+Bohrung mit der bindenden Grenze darin. Mit `--cad` kommen die Räder dazu, als
+`getriebe.FCStd` und `getriebe.step` im Projekt. Gezeichnet wird mit **FCGear**,
+und dass das kopflos läuft, ist gemessen und nicht angenommen: ein Stirnrad mit
+20 Zähnen in 0,12 s.
+
+Zwei Fallen haben dabei am meisten Zeit gekostet, beide still: das Addon gehört
+in den Zweig **`v1-1/Mod`**, den dieser FreeCAD-Bau als Nutzerverzeichnis
+meldet — daneben abgelegt wird es einfach nicht gefunden; und die Eigenschaft
+heißt **`num_teeth`**, nicht `teeth`. Die dritte war die Baugruppe selbst: ein
+`fuse` über zwei Räder, deren Kopfkreise sich berühren, gab ein Volumen von
+**0,00 mm³** zurück, während die Einzelkörper 16.677 und 209.396 mm³ hatten. Die
+Räder bleiben deshalb ein Verbund — ein Getriebe ist ohnehin eine Baugruppe und
+kein verschweißter Klumpen.
+
+**Ohne FCGear wird keine Verzahnung erfunden.** Hier stand zuerst ein eigener
+Evolventen-Erzeuger. An derselben Stufe lieferte er 12.092.260 statt 226.073 mm³
+— um den **Faktor 60** daneben, und dem Bild sieht man das nicht an. Ein Rad,
+das wie ein Zahnrad aussieht und die falsche Größe hat, ist schlimmer als
+keines: wer eine Fertigungszeichnung daraus zieht, merkt es zu spät. Der
+Rückfall zeichnet stattdessen Zylinder auf dem Teilkreis — unverkennbar ohne
+Zähne, und genau das, was die Einbaufrage braucht: passt es hinein und wo sitzt
+es. Das Ergebnis sagt in jedem Fall, wer gezeichnet hat.
+
 ### Zwei Grenzen, die dazugehören
 
 Die Festigkeitskennwerte sind eine **Annahme** — Größenordnungen der

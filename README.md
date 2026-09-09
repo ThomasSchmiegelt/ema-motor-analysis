@@ -946,6 +946,31 @@ at 0.955 at high load and 0.62 at low — the constant 0.95 could not express th
 because bearing and churning losses hang on **speed**, not on load. Without a
 design nothing changes: every existing calculation stays identical to the digit.
 
+### The drawing — and what a too-nicely-drawn gear does
+
+A cross-section image falls out of every design (`charts/getriebe.png`), computed
+from the numbers and without FreeCAD; for `in_welle` it carries the available
+bore and the limit that binds it. `--cad` adds the gears themselves, as
+`getriebe.FCStd` and `getriebe.step` in the project. Drawing is done with
+**FCGear**, and that it runs headless is measured, not assumed: a 20-tooth spur
+gear in 0.12 s.
+
+Two traps cost the most time, both silent: the add-on belongs in the **`v1-1/Mod`**
+branch this FreeCAD build reports as its user directory — put beside it, it is
+simply not found; and the property is called **`num_teeth`**, not `teeth`. The
+third was the assembly itself: a `fuse` over two gears whose tip circles touch
+returned a volume of **0.00 mm³**, while the individual bodies had 16,677 and
+209,396 mm³. The gears therefore stay a compound — a gearbox is an assembly
+anyway, not a welded lump.
+
+**Without FCGear no gearing is invented.** There was an own involute generator
+here first. On the same stage it produced 12,092,260 instead of 226,073 mm³ — off
+by a **factor of 60**, and the picture does not show it. A wheel that looks like a
+gear and has the wrong size is worse than none: whoever draws a manufacturing
+drawing from it finds out too late. The fallback draws cylinders on the pitch
+circle instead — unmistakably toothless, and exactly what the mounting question
+needs: does it fit and where does it sit. The result always says who drew it.
+
 ### Two limits that come with it
 
 The strength values are an **assumption** — magnitudes of the material classes

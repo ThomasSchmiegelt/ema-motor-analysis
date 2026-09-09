@@ -349,6 +349,14 @@ die Motorwelle bezogene Trägheit.
 * **Exit 1** heißt: die Verzahnung trägt nicht ODER der Satz passt nicht. Beides
   wird getrennt genannt — eine Verzahnung, die trägt und nur nicht in die
   Bohrung geht, braucht mehr Platz, nicht mehr Modul.
+* **Ein Bild kommt immer** (`charts/getriebe.png`, aus den Zahlen gerechnet, ohne
+  FreeCAD) und steht damit von selbst in der rechten Spalte. **`--cad`** zeichnet
+  zusätzlich die Räder (FreeCAD + FCGear) nach `getriebe.FCStd`/`getriebe.step`;
+  das dauert Sekunden statt Millisekunden. Fehlt das FCGear-Addon, werden
+  **Ersatzkörper** gezeichnet — Zylinder auf dem Teilkreis, unverkennbar ohne
+  Zähne; das Ergebnis trägt dann `zeichner: "ersatz"` samt Vorbehalt, statt etwas
+  Zahnradähnliches in falscher Größe zu zeichnen. Für Kegelrad und Schnecke gibt
+  es keinen Rückfall, dann wird gar nichts gezeichnet und das steht dabei.
 
 **Zwei Grenzen, die dazugehören.** Die Festigkeitskennwerte
 (`ema_referenz.GETRIEBE_WERKSTOFF`) sind eine **Annahme** — Größenordnung der

@@ -242,6 +242,54 @@ pruefe(eta.max() <= e["wirkungsgrad"]["eta_nenn"] + 1e-9,
        "und uebersteigt nie den Nennwirkungsgrad")
 
 
+print("\n12. Die Zeichnung: FCGear, sonst ehrliche Ersatzkoerper")
+import ema_getriebe_cad as GC
+e_pl = G.auslegen({"art": "planeten", "einbau": "koaxial", "i": 5.0,
+                   "T_motor_Nm": 60.0, "n_motor_1pmin": 6000})
+# Das Skript wird als TEXT fuer einen fremden Prozess gebaut -- pruefbar, ohne
+# FreeCAD zu starten.
+alt_mod, GC.FCGEAR_MOD = GC.FCGEAR_MOD, "/gibt/es/nicht"
+try:
+    pruefe(not GC.fcgear_da(), "ohne Addon meldet fcgear_da() False")
+    for art in ("kegelrad", "schnecke"):
+        e_x = G.auslegen({"art": art, "i": 3.0, "T_motor_Nm": 60.0,
+                          "n_motor_1pmin": 4000})
+        r = GC.bauen(e_x, "/tmp", name="x")
+        pruefe(not r["ok"] and "keinen Ersatzkoerper" in r["grund"],
+               f"{art} ohne FCGear wird NICHT gezeichnet — ein aehnlicher "
+               f"Koerper waere schlimmer als keiner")
+finally:
+    GC.FCGEAR_MOD = alt_mod
+pruefe("_ERSATZ_HILFE" in open(os.path.join(os.path.dirname(
+    os.path.abspath(__file__)), "ema_getriebe_cad.py"), encoding="utf-8").read(),
+    "der Rueckfall zeichnet Ersatzkoerper und keine erfundene Verzahnung")
+quelle = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                           "ema_getriebe_cad.py"), encoding="utf-8").read()
+pruefe("num_teeth" in quelle and "\n{var}.teeth" not in quelle,
+       "die FCGear-Eigenschaft heisst 'num_teeth' — 'teeth' scheitert mit "
+       "AttributeError an einem Objekt, das gerade erzeugt wurde")
+pruefe("v1-1/Mod" in GC.FCGEAR_MOD,
+       f"das Addon wird unter {GC.FCGEAR_MOD} gesucht — dieser FreeCAD-Bau "
+       f"meldet 'v1-1/' als Nutzerzweig, im Elternverzeichnis wird es NICHT "
+       f"gefunden")
+pruefe("makeCompound" in quelle and "fuse(" not in quelle.split("makeCompound")[1],
+       "die Raeder bleiben ein VERBUND: 'fuse' ueber zwei Raeder, deren "
+       "Kopfkreise sich beruehren, gab gemessen 0,00 mm^3 zurueck")
+
+# Und das Bild -- es braucht kein FreeCAD.
+import tempfile
+with tempfile.TemporaryDirectory() as tmp:
+    pfad = os.path.join(tmp, "g.png")
+    aus = GC.bild(e_pl, pfad)
+    pruefe(aus == pfad and os.path.getsize(pfad) > 5000,
+           "der Querschnitt wird aus den ZAHLEN gezeichnet, ohne FreeCAD")
+    e_iw = G.auslegen({"art": "planeten", "einbau": "in_welle", "i": 5.0,
+                       "T_motor_Nm": 60.0, "n_motor_1pmin": 6000,
+                       "geom": {"shaftD": 180.0, "shaftBoreD": 140.0}})
+    pruefe(bool(GC.bild(e_iw, os.path.join(tmp, "iw.png"))),
+           "auch mit Wellenbefund — dort ist die verfuegbare Bohrung im Bild")
+
+
 print("\n" + "=" * 62)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

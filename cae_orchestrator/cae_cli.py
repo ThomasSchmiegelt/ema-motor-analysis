@@ -2219,6 +2219,36 @@ def cmd_getriebe(args) -> int:
                   f"die magnetische Grenze bleibt ungeprueft)")
 
     erg = GT.auslegen(spec)
+
+    # Zeichnen und ein Bild ablegen -- beides nur bei einer gueltigen Auslegung
+    # und nur, wenn ein Projekt da ist. Das Bild landet in ``charts/`` und
+    # erscheint damit ueber den vorhandenen Bilderpfad von selbst in der rechten
+    # Spalte der Agentenseiten.
+    if erg.get("ok") and not args.ohne_cad:
+        pdir = _projekt_pfad(getattr(args, "projekt", "")
+                             or getattr(args, "_pid", "") or "")
+        if pdir:
+            import ema_getriebe_cad as GC
+            bild = GC.bild(erg, os.path.join(pdir, "charts", "getriebe.png"))
+            if bild:
+                erg["bild"] = bild
+                print(f"  Bild: charts/{os.path.basename(bild)}")
+            if args.cad:
+                print(f"  Zeichnen ({'FCGear' if GC.fcgear_da() else 'Ersatzkoerper'}) …")
+                cad = GC.bauen(erg, pdir)
+                erg["cad"] = cad
+                if cad.get("ok"):
+                    print(f"  CAD: {os.path.basename(cad['fcstd'])} + "
+                          f"{os.path.basename(cad['step'])} "
+                          f"({cad['koerper']} Koerper, Zeichner: {cad['zeichner']})")
+                    if cad.get("vorbehalt"):
+                        print(f"  {cad['vorbehalt']}")
+                else:
+                    print(f"  CAD nicht erzeugt: {cad.get('grund', '?')}")
+        elif args.cad:
+            print("  (kein Projekt gebunden — ohne Projektordner wird nichts "
+                  "gezeichnet)")
+
     text = GT.als_text(erg)
     if args.json:
         print(json.dumps(erg, ensure_ascii=False, indent=1, default=str))
@@ -3188,6 +3218,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--ohne-feld", dest="ohne_feld", action="store_true",
                    help="bei 'in_welle' den Feldlauf ueberspringen — dann bleibt "
                         "die magnetische Grenze der Bohrung UNGEPRUEFT")
+    s.add_argument("--cad", action="store_true",
+                   help="zusaetzlich die Raeder zeichnen (FreeCAD + FCGear) und "
+                        "als FCStd/STEP ins Projekt legen")
+    s.add_argument("--ohne-cad", dest="ohne_cad", action="store_true",
+                   help="auch das Querschnittsbild weglassen")
     _add_ablage(s)
     _add_globals(s, json_hilfe="vollstaendig als JSON")
     s.set_defaults(fn=cmd_getriebe)
