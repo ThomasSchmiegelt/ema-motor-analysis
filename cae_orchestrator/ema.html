@@ -1222,115 +1222,209 @@
 
 <!-- ════════ TAB: Getriebe ════════ -->
 <div class="tab-panel" id="panel-getriebe">
-  <div class="section" style="max-width:900px">
+ <div class="e3-wrap">
+
+  <div class="e3-card">
     <div class="section-title">⚙ Getriebeauslegung</div>
-    <p style="font-size:.82rem;color:#9aa;line-height:1.5">
-      Das Getriebe war in dieser Kette <b>zwei Konstanten</b> (Übersetzung 9,5,
-      Wirkungsgrad 0,95) — dieselben für einen Fahrrad-Nabenmotor wie für einen
-      Traktionsantrieb. Hier wird statt dessen gerechnet: Stufenteilung,
-      Zähnezahlen, Modul, Achsabstand, Zahnfuß- und Flankentragfähigkeit, ein
-      <b>lastabhängiger</b> Wirkungsgrad, Masse und die auf die Motorwelle
-      bezogene Trägheit. Moment und Drehzahl kommen aus dem <b>aktiven
-      Projekt</b>, wenn die Felder leer bleiben.
+    <p style="font-size:.82rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      Das Getriebe war in dieser Kette <b>zwei Konstanten</b> — Übersetzung 9,5 und
+      Wirkungsgrad 0,95, dieselben für einen Fahrrad-Nabenmotor wie für einen
+      Traktionsantrieb. Gerechnet werden statt dessen Stufenteilung, Zähnezahlen,
+      Modul, Achsabstand, Zahnfuß- und Flankentragfähigkeit, ein <b>lastabhängiger</b>
+      Wirkungsgrad, Masse und die auf die Motorwelle bezogene Trägheit.
     </p>
+    <div style="background:#2a2620;border:1px solid #6a5a2e;border-radius:5px;padding:8px 11px;font-size:.76rem;color:#d8c89a;line-height:1.45">
+      ⚠ <b>Grenze:</b> die Festigkeitskennwerte sind eine <b>Annahme</b> — die
+      Größenordnung der Werkstoffklasse mit Spanne, keine zitierte Messung. Jede
+      Sicherheit unten trägt diesen Vorbehalt. Die Betriebsbeiwerte (Anwendungs-,
+      Dynamik-, Breitenfaktor) sind Betriebswissen, keine Geometrie.
+    </div>
   </div>
 
-  <div class="section" style="max-width:900px">
-    <div class="section-title">Auslegung</div>
-    <div class="input-group">
-      <label>Bauart</label>
-      <select id="gt_art" onchange="_gtSync()">
-        <option value="stirnrad">Stirnrad (1–2 Stufen)</option>
-        <option value="planeten">Planetensatz</option>
-        <option value="kegelrad">Kegelrad (Näherung über Ersatz-Stirnrad)</option>
-        <option value="schnecke">Schnecke (keine Zahnfußrechnung)</option>
-      </select>
+  <div class="e3-card">
+    <div class="section-title">① Bauart und Einbauort</div>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Bauart</label>
+          <select id="gt_art" onchange="_gtSync()" style="width:auto;padding:4px">
+            <option value="stirnrad">Stirnrad (1–2 Stufen)</option>
+            <option value="planeten">Planetensatz</option>
+            <option value="kegelrad">Kegelrad</option>
+            <option value="schnecke">Schnecke</option>
+          </select></div>
+        <details class="e3-help"><summary>Wie weit trägt welche Bauart?</summary>
+          <p><b>Stirnrad</b> und <b>Planetensatz</b>: voll gerechnet, Tragfähigkeit
+          nach ISO 6336 in vereinfachter Form.</p>
+          <p><b>Kegelrad</b>: Tragfähigkeit über das <b>Ersatz-Stirnrad</b> (Tredgold)
+          — eine Näherung, und sie steht als solche an jeder Zahl.</p>
+          <p><b>Schnecke</b>: <b>keine</b> Zahnfußrechnung. Dort entscheiden
+          Wirkungsgrad, Selbsthemmung und Erwärmung; weil der Wirkungsgrad stark am
+          Reibwert hängt, kommt eine <b>Spanne</b> heraus und keine Zahl.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Einbauort</label>
+          <select id="gt_einbau" onchange="_gtSync()" style="width:auto;padding:4px">
+            <option value="achsparallel">achsparallel</option>
+            <option value="koaxial">koaxial</option>
+            <option value="in_welle">in der Hohlwelle</option>
+          </select></div>
+        <details class="e3-help"><summary>Warum das ein Tor ist</summary>
+          <p>Nur ein <b>Planetensatz</b> sitzt koaxial und kann damit in der Hohlwelle
+          des Läufers liegen — der integrierte Antrieb. Ein Stirnradsatz sitzt neben
+          der Achse, nicht auf ihr; das wird <b>abgewiesen</b> und nicht genähert.
+          Deshalb ist der Eintrag gesperrt, solange die Bauart etwas anderes sagt.</p>
+          <p>Bei <code>in der Hohlwelle</code> stehen drei Durchmesser nebeneinander —
+          was der Satz braucht, was gezeichnet ist und was <b>magnetisch zulässig</b>
+          ist — und es steht dabei, welcher bindet.</p></details>
+      </div>
+      <div class="e3-field" id="gt_stufen_wrap">
+        <div class="row"><label>Stufen</label>
+          <input type="number" id="gt_stufen" value="1" min="1" max="2" step="1"><span class="unit"></span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>Die schnelle Stufe trägt weniger: aufgeteilt wird nach
+          <code>i₁ = √(1,2·i)</code>. Mehr als zwei Stirnradstufen sind hier nicht
+          vorgesehen.</p></details>
+      </div>
+      <div class="e3-field" id="gt_planeten_wrap" style="display:none">
+        <div class="row"><label>Planeten</label>
+          <input type="number" id="gt_planeten" value="3" min="3" max="6" step="1"><span class="unit"></span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>Die Zahl der Planeten muss die <b>Montagebedingung</b> erfüllen
+          (<code>(z_Sonne + z_Hohlrad) mod n = 0</code>) — sonst passt der letzte
+          Planet nicht in seine Lücke — und die <b>Nachbarbedingung</b>: die Planeten
+          dürfen sich nicht berühren. Beides wird geprüft.</p></details>
+      </div>
     </div>
-    <div class="input-group">
-      <label>Einbauort</label>
-      <select id="gt_einbau" onchange="_gtSync()">
-        <option value="achsparallel">achsparallel (neben der Motorachse)</option>
-        <option value="koaxial">koaxial (auf der Motorachse, hinter dem Läufer)</option>
-        <option value="in_welle">in der Hohlwelle des Läufers (nur Planetensatz)</option>
-      </select>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">② Betriebspunkt und Übersetzung</div>
+    <p style="font-size:.8rem;color:#9aa;line-height:1.5;margin:0 0 6px">
+      <b>Übersetzung ODER Abtriebsdrehzahl</b> — eines von beidem genügt; ist die
+      Abtriebsdrehzahl gesetzt, gilt sie. Moment und Drehzahl kommen aus dem
+      <b>aktiven Projekt</b> (<code>load_nm</code>, <code>rpm_to</code>), wenn die
+      Felder leer bleiben.
+    </p>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Übersetzung i</label>
+          <input type="number" id="gt_i" value="9.5" min="1" step="0.1"><span class="unit"></span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>Aus ganzen Zähnezahlen ist der Sollwert fast nie genau zu treffen. Die
+          Abweichung steht deshalb im Ergebnis <b>neben</b> dem Sollwert — sie ist
+          eine Aussage und keine Nachkommastelle.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Abtrieb</label>
+          <input type="number" id="gt_nab" placeholder="über i" min="1" step="1"><span class="unit">1/min</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>Alternative zur Übersetzung: aus Eingangs- und Abtriebsdrehzahl folgt
+          <code>i</code>. Gesetzt schlägt sie das Feld darüber.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Moment</label>
+          <input type="number" id="gt_moment" placeholder="aus Projekt" min="0" step="1"><span class="unit">Nm</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>Das Moment am <b>Eingang</b> des Getriebes, also an der Motorwelle. Ohne
+          Moment gibt es kein Modul — fehlt es hier und im Projekt, wird das gesagt
+          statt etwas angenommen.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Drehzahl</label>
+          <input type="number" id="gt_drehzahl" placeholder="aus Projekt" min="0" step="1"><span class="unit">1/min</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>Eingangsdrehzahl. Sie trägt den <b>drehzahlabhängigen</b> Teil der
+          Verluste (Lager, Planschen) — der Grund, warum der Wirkungsgrad mit der
+          Last steigt und mit der Drehzahl fällt.</p></details>
+      </div>
     </div>
-    <div class="input-group" id="gt_stufen_wrap">
-      <label>Stufen</label>
-      <input type="number" id="gt_stufen" value="1" min="1" max="2" step="1"/>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">③ Verzahnung und Werkstoff</div>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Werkstoff</label>
+          <select id="gt_werkstoff" style="width:auto;padding:4px">
+            <option value="einsatzgehaertet">Einsatzstahl, einsatzgehärtet</option>
+            <option value="nitriert">Nitrierstahl, nitriert</option>
+            <option value="verguetet">Vergütungsstahl (42CrMo4)</option>
+            <option value="baustahl">Baustahl vergütet (C45)</option>
+          </select></div>
+        <details class="e3-help"><summary>Woher die Kennwerte kommen</summary>
+          <p><b>Angenommen</b>, nicht zitiert: Größenordnung der Werkstoffklasse mit
+          Spanne (<code>ema_referenz.GETRIEBE_WERKSTOFF</code>). Jede damit gerechnete
+          Sicherheit trägt <code>werkstoff_beleg: annahme</code>. Ohne Kennwert gibt
+          es <b>kein Modul</b> statt eines Ersatzwerts.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Schrägung</label>
+          <input type="number" id="gt_schraegung" value="0" min="0" max="30" step="1"><span class="unit">°</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>0 = geradverzahnt. Die Schrägung bringt Sprungüberdeckung — mehrere Zähne
+          im Eingriff, ruhigerer Lauf — und erkauft sie mit einer <b>Axialkraft</b>,
+          die die Lager tragen müssen (hier nicht ausgelegt).</p></details>
+      </div>
+      <div class="e3-field" id="gt_axial_wrap" style="display:none">
+        <div class="row"><label>Bauraum axial</label>
+          <input type="number" id="gt_axial" value="0" min="0" step="1"><span class="unit">mm</span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>Verfügbare Baulänge in der Hohlwelle. Geprüft wird gegen Zahnbreite plus
+          Lager (12 mm je Seite). <b>0 = nicht prüfen.</b></p></details>
+      </div>
+      <div class="e3-field" id="gt_feld_wrap" style="display:none">
+        <div class="row"><label>Bohrung messen</label>
+          <input type="checkbox" id="gt_feld" checked style="width:auto"><span class="unit"></span></div>
+        <details class="e3-help"><summary>Was das kostet und was es bringt</summary>
+          <p>Ein <b>FDM-Feldlauf</b> (Sekunden) misst, wie groß die Wellenbohrung
+          magnetisch überhaupt sein darf — der größte Radius, unter dem nirgends Fluss
+          steht. Ohne ihn bleibt diese Grenze <b>ungeprüft</b>, und das steht dann
+          auch im Befund: „passt in die gezeichnete Bohrung" ist nicht „zulässig".</p></details>
+      </div>
     </div>
-    <div class="input-group" id="gt_planeten_wrap" style="display:none">
-      <label>Planeten</label>
-      <input type="number" id="gt_planeten" value="3" min="3" max="6" step="1"/>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">④ Was daraus entstehen soll</div>
+    <div class="e3-set">
+      <div class="e3-field">
+        <div class="row"><label>Räder zeichnen</label>
+          <input type="checkbox" id="gt_cad" style="width:auto"><span class="unit"></span></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>FreeCAD + FCGear → <code>getriebe.FCStd</code> und <code>getriebe.step</code>
+          im Projekt (Sekunden). Das <b>Querschnittsbild</b> kommt ohnehin immer — es
+          wird aus den Zahlen gezeichnet und braucht kein FreeCAD.</p>
+          <p>Fehlt das Verzahnungs-Addon, werden <b>Ersatzkörper ohne Zähne</b>
+          gezeichnet und das steht am Ergebnis. Für Kegelrad und Schnecke gibt es
+          keinen Rückfall — dann wird nichts gezeichnet.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Übernehmen</label>
+          <input type="checkbox" id="gt_uebernehmen" style="width:auto"><span class="unit"></span></div>
+        <details class="e3-help"><summary>Der Schritt, der es wirksam macht</summary>
+          <p>Schreibt die Auslegung in den Payload (<code>vehicle.getriebe</code> +
+          <code>gear_ratio</code>). <b>Erst dann</b> rechnet der Fahrzyklus mit dieser
+          Übersetzung, mit η(T,&nbsp;n) je Zeitschritt, mit der Getriebemasse und mit
+          <code>J_red</code> als Zusatzmasse beim Beschleunigen — statt mit 9,5 und
+          0,95.</p>
+          <p>Übernommen wird nur, wenn die <b>Verzahnung trägt</b>. Ob der Satz an
+          seinen Einbauort passt, geht den Fahrzyklus nichts an: er kennt Übersetzung,
+          Wirkungsgrad, Masse und Trägheit, nicht den Ort.</p></details>
+      </div>
     </div>
-    <div class="input-group">
-      <label>Übersetzung i</label>
-      <input type="number" id="gt_i" value="9.5" min="1" step="0.1"/>
-      <span style="font-size:.74rem;color:#889">oder Abtriebsdrehzahl setzen ↓</span>
-    </div>
-    <div class="input-group">
-      <label>Abtrieb 1/min</label>
-      <input type="number" id="gt_nab" placeholder="leer = über i" min="1" step="1"/>
-    </div>
-    <div class="input-group">
-      <label>Moment Nm</label>
-      <input type="number" id="gt_moment" placeholder="leer = load_nm des Projekts" min="0" step="1"/>
-    </div>
-    <div class="input-group">
-      <label>Drehzahl 1/min</label>
-      <input type="number" id="gt_drehzahl" placeholder="leer = rpm_to des Projekts" min="0" step="1"/>
-    </div>
-    <div class="input-group">
-      <label>Werkstoff</label>
-      <select id="gt_werkstoff">
-        <option value="einsatzgehaertet">Einsatzstahl, einsatzgehärtet</option>
-        <option value="nitriert">Nitrierstahl, nitriert (31CrMoV9)</option>
-        <option value="verguetet">Vergütungsstahl, vergütet (42CrMo4)</option>
-        <option value="baustahl">Baustahl vergütet (C45)</option>
-      </select>
-    </div>
-    <div class="input-group">
-      <label>Schrägung °</label>
-      <input type="number" id="gt_schraegung" value="0" min="0" max="30" step="1"/>
-    </div>
-    <div class="input-group" id="gt_axial_wrap" style="display:none">
-      <label>Bauraum axial mm</label>
-      <input type="number" id="gt_axial" value="0" min="0" step="1"/>
-      <span style="font-size:.74rem;color:#889">0 = nicht prüfen</span>
-    </div>
-    <div class="input-group" id="gt_feld_wrap" style="display:none">
-      <label>Feldlauf</label>
-      <label style="font-weight:400;font-size:.8rem;color:#bbb">
-        <input type="checkbox" id="gt_feld" checked/>
-        magnetisch zulässige Bohrung <b>messen</b> (ein FDM-Lauf, Sekunden)
-      </label>
-    </div>
-    <div class="input-group">
-      <label>Zeichnung</label>
-      <label style="font-weight:400;font-size:.8rem;color:#bbb">
-        <input type="checkbox" id="gt_cad"/>
-        Räder zeichnen (FreeCAD + FCGear → <code>getriebe.FCStd</code>/<code>.step</code>)
-      </label>
-    </div>
-    <div class="input-group">
-      <label>Übernehmen</label>
-      <label style="font-weight:400;font-size:.8rem;color:#bbb">
-        <input type="checkbox" id="gt_uebernehmen"/>
-        in den Payload schreiben (<code>vehicle.getriebe</code> +
-        <code>gear_ratio</code>) — erst dann rechnet der <b>Fahrzyklus</b> mit
-        dieser Übersetzung und mit η(T,&nbsp;n) statt mit den Konstanten
-      </label>
-    </div>
-    <button id="gt_btn" onclick="startGetriebe()" style="margin-top:8px">⚙ Auslegen</button>
+    <button id="gt_btn" onclick="startGetriebe()" style="margin-top:12px">⚙ Auslegen</button>
     <div id="gt_msg" style="margin-top:10px;font-size:.82rem"></div>
     <pre id="gt_log" style="margin-top:8px;max-height:200px;overflow:auto;background:#0d0d14;border:1px solid #2a2a30;border-radius:4px;padding:8px;font-size:.72rem;color:#9c9;white-space:pre-wrap;display:none"></pre>
   </div>
 
-  <div class="section" style="max-width:900px" id="gt_ergebnis_wrap" hidden>
+  <div class="e3-card" id="gt_ergebnis_wrap" hidden>
     <div class="section-title">Ergebnis</div>
-    <div id="gt_urteil" style="margin-bottom:8px;font-size:.86rem"></div>
+    <div id="gt_urteil" style="margin-bottom:10px;font-size:.84rem;line-height:1.6"></div>
     <pre id="gt_text" style="overflow:auto;background:#0d0d14;border:1px solid #2a2a30;border-radius:4px;padding:10px;font-size:.74rem;color:#cdd;white-space:pre"></pre>
     <img id="gt_bild" style="max-width:100%;margin-top:10px;border:1px solid #2a2a30;border-radius:4px;display:none"/>
   </div>
+
+ </div>
 </div><!-- /panel-getriebe -->
 
 <!-- ════════ TAB: 3D-Feld (Elmer) ════════ -->
@@ -6225,16 +6319,38 @@ async function startGetriebe() {
   btn.disabled = true; msg.style.color = '#9c9'; msg.textContent = '⏳ Rechne…';
   logEl.style.display = 'block'; logEl.textContent = '';
   try {
-    const r = await fetch('/getriebe', {method: 'POST',
+    const antw = await fetch('/getriebe', {method: 'POST',
       headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify(body)}).then(x => x.json());
-    if (r.error) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + r.error;
+      body: JSON.stringify(body)});
+    const r = await _gtJson(antw);
+    if (r.error) { msg.style.color = '#e57'; msg.innerHTML = '⚠ ' + escHtml(r.error);
                    btn.disabled = false; return; }
     _pollGetriebe();
   } catch (e) {
-    msg.style.color = '#e57'; msg.textContent = 'Fehler: ' + e.message;
+    msg.style.color = '#e57'; msg.innerHTML = escHtml('Fehler: ' + e.message);
     btn.disabled = false;
   }
+}
+
+// Eine Antwort lesen, die vielleicht gar kein JSON ist.
+//
+// Der Grund ist gemessen und keine Vorsicht: `ema.html` wird bei JEDEM Aufruf
+// frisch von der Platte gelesen, die Routen dagegen stehen fest, sobald der
+// Server gestartet ist. Nach einer Änderung zeigt der Browser also den neuen
+// Reiter, während der laufende Server die neue Route noch gar nicht kennt — er
+// antwortet mit seiner HTML-404-Seite, und `.json()` scheitert daran mit
+// „JSON.parse: unexpected character at line 1 column 1". Diese Meldung sagt
+// über die Ursache nichts und schickt einen in den Code statt an den Server.
+async function _gtJson(antw) {
+  const typ = antw.headers.get('content-type') || '';
+  if (typ.includes('application/json')) return await antw.json();
+  if (antw.status === 404)
+    throw new Error('Diese Route kennt der laufende Server nicht (404). Er ' +
+      'läuft vermutlich noch mit dem Code von vor der Änderung — die Seite ' +
+      'wird bei jedem Aufruf neu von der Platte gelesen, die Routen nicht. ' +
+      'Server neu starten: ./start.sh');
+  throw new Error('Der Server hat kein JSON geschickt (HTTP ' + antw.status +
+                  ', ' + (typ || 'ohne Typangabe') + ').');
 }
 
 async function _pollGetriebe() {
@@ -6242,14 +6358,21 @@ async function _pollGetriebe() {
   const logEl = document.getElementById('gt_log');
   const btn = document.getElementById('gt_btn');
   try {
-    const s = await fetch('/getriebe/status').then(x => x.json());
+    const s = await _gtJson(await fetch('/getriebe/status'));
     if (Array.isArray(s.log)) { logEl.textContent = s.log.join('\n');
                                 logEl.scrollTop = logEl.scrollHeight; }
     if (s.status === 'done') { _renderGetriebe(s.result); btn.disabled = false; return; }
     if (s.status === 'error') { msg.style.color = '#e57';
                                 msg.textContent = '⚠ ' + (s.error || 'fehlgeschlagen');
                                 btn.disabled = false; return; }
-  } catch (e) { /* weiter fragen */ }
+  } catch (e) {
+    // Ein 404 geht nicht weg, indem man ihn wiederholt — der Server kennt die
+    // Route schlicht nicht. Alles andere (ein Aussetzer im Netz) darf weiter.
+    if (String(e.message).includes('404')) {
+      msg.style.color = '#e57'; msg.innerHTML = escHtml('⚠ ' + e.message);
+      btn.disabled = false; return;
+    }
+  }
   setTimeout(_pollGetriebe, 800);
 }
 
