@@ -17,6 +17,43 @@ kann.
 
 ---
 
+## 2026-09-09 — Der Fahrzyklus konnte das Getriebe lesen, aber niemand schrieb es hin
+
+**Beobachtung.** `ema_drivecycle.compute_drivetrain` liest seit dem Getriebe-Umbau
+`vehicle["getriebe"]` und rechnet daraus Übersetzung, η(T, n), Masse und die
+reduzierte Trägheit. Gesucht nach der Gegenstelle: **kein einziger Schreiber** im
+ganzen Repo — nicht das Verb, nicht die Route, nicht die Oberfläche.
+
+**Messung.** `grep -rn 'vehicle\["getriebe"\]' --include=*.py` findet außer der
+Lesestelle selbst nur Tests. Jeder Lauf rechnete also weiter mit `gear_ratio` 9,5
+und `eta_drive` 0,95, während daneben eine gerechnete Auslegung im Projekt lag —
+genau der Zustand, gegen den der Umbau gebaut war („solange das Ergebnis die zwei
+Konstanten nicht ersetzt, ist es ein Werkzeug, das nichts berührt").
+
+**Fundstelle.** `ema_drivecycle.py:623` (die Lesestelle); die fehlende
+Schreibstelle in `cae_cli.cmd_getriebe` und `server.getriebe_start`.
+
+**Status: behoben** (09.09.2026). `cae_cli._getriebe_uebernehmen` schreibt die
+Auslegung nach `meta.json` unter `vehicle.getriebe` und setzt `gear_ratio`
+mit — eine skalare Angabe, die etwas anderes behauptet als das Getriebe daneben,
+wäre schlimmer als keine. Ausgelöst wird es ausdrücklich: `--uebernehmen` am Verb,
+Häkchen im Reiter, `uebernehmen: true` an der Route; die Route ruft dieselbe
+Funktion. Übernommen wird nur, wenn die Verzahnung **trägt** — ob der Satz an
+seinen Einbauort passt, geht den Fahrzyklus nichts an. Gemessen am
+Stadt-Land-Zyklus: n_max 7475,5 → 7488,7 1/min und ein anderes Spitzenmoment,
+weil η jetzt an der Last hängt und `J_red` beim Beschleunigen wie Masse wirkt.
+`test_getriebe.py` [14] prüft die ganze Strecke; ohne den Schlüssel bleibt jede
+bestehende Rechnung Ziffer für Ziffer dieselbe.
+
+**Und der Agent fand das Verb gar nicht erst.** `getriebe` stand nicht in der
+Verbtabelle der `SKILL.md` — nur in einem eigenen Abschnitt weiter unten —,
+während der Fahrzyklus-Abschnitt daneben zum Handeintrag von `gear_ratio` riet.
+Beides ergänzt: die Tabelle führt das Verb, und an der `gear_ratio`-Stelle steht,
+dass eine von Hand gesetzte Zahl eine Annahme ohne Zähnezahlen, ohne
+Tragfähigkeit und mit lastunabhängigem Wirkungsgrad ist.
+
+---
+
 ## 2026-09-09 — `child_env` warf `/usr/bin` aus dem PATH, sobald der Aufrufer im System-Python lief
 
 **Beobachtung.** `python3 cae_cli.py getriebe … --cad` meldete „CAD nicht

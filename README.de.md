@@ -1081,6 +1081,14 @@ Trägheit (die drehenden Massen wirken beim Beschleunigen wie zusätzliche Masse
 Gemessen am WLTP-Zyklus steht der Wirkungsgrad bei großer Last auf 0,955 und bei
 kleiner auf 0,62 — die Konstante 0,95 konnte das nicht abbilden, weil die
 Lager- und Planschverluste an der **Drehzahl** hängen und nicht an der Last.
+Wirksam wird das durch **einen ausdrücklichen Schritt** — `--uebernehmen` am
+Verb, ein Häkchen im Reiter: die Auslegung wird in den Payload geschrieben, und
+erst der nächste Lauf rechnet mit ihr. Das war zunächst nicht so: der Fahrzyklus
+konnte den Schlüssel lesen, geschrieben hat ihn niemand, und jeder Lauf nahm
+weiter 9,5 und 0,95, während die gerechnete Auslegung danebenlag. Übernommen
+wird nur, wenn die Verzahnung **trägt** — wo der Satz sitzt, geht den Fahrzyklus
+nichts an.
+
 Ohne Auslegung ändert sich nichts: jede bestehende Rechnung bleibt Ziffer für
 Ziffer dieselbe.
 

@@ -43,6 +43,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `wait` | auf Abschluss warten |
 | `routes [--grep x]` | alle Serverrouten auflisten |
 | `steckbrief [id]` | **Was dieses Projekt IST und was daran gerechnet wurde** — Maschinenart, Pole/Nuten, Bauraum, Werkstoffe, Betriebspunkt, welche Stufen gelaufen sind, die Kennwerte **samt Herkunft**, und was offen ist. Rechnet nichts; was fehlt, steht als fehlend da. `--laeufe` listet zusätzlich die früheren Agentenläufe und die abgelegten Rechnungen |
+| `getriebe` | **Die Übersetzung wird gerechnet, nicht gesetzt.** Stufenteilung, Zähnezahlen, Modul, Tragfähigkeit, lastabhängiger Wirkungsgrad, Masse und die auf die Motorwelle bezogene Trägheit — für Stirnrad, Planetensatz, Kegelrad und Schnecke. `--einbau in_welle` legt den Planetensatz in die Hohlwelle und prüft die Bohrung **magnetisch** mit (ein Feldlauf). **`--uebernehmen` ist der Schritt, der es wirksam macht**: erst dann rechnet der Fahrzyklus mit dieser Übersetzung und mit η(T, n) statt mit `gear_ratio` 9,5 und `eta_drive` 0,95. Exit 0 = trägt und passt |
 | `welle` | **Vollwelle oder Hohlwelle — gemessen.** Rechnet EIN Feld und sagt, ob durch die Welle Fluss läuft und wie groß die Bohrung höchstens sein darf. Exit 0 = Hohlwelle möglich, 1 = Vollwelle nötig |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
 | `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Sechzehn Achsen (**Maschinenart** PSM/ASM/SynRM/EESM, **Bauform** Innen-/Außenläufer, **Wicklungsart** Hairpin/Runddraht, Magnetanordnung, **V-Öffnungswinkel**, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge, **Wellendurchmesser**), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht** — beim Kt ist das inzwischen die Maschinenart. 0,7 s, rein analytisch. `--referenz` zeigt statt eines Vergleichs die **recherchierten Vergleichswerte** mit Quellen; die Achse `maschinenart` trägt zusätzlich einen Block **BAUART GEGEN BAUART**, der gerechnete Verhältnisse gegen recherchierte stellt |
@@ -349,6 +350,14 @@ die Motorwelle bezogene Trägheit.
 * **Exit 1** heißt: die Verzahnung trägt nicht ODER der Satz passt nicht. Beides
   wird getrennt genannt — eine Verzahnung, die trägt und nur nicht in die
   Bohrung geht, braucht mehr Platz, nicht mehr Modul.
+* **`--uebernehmen` ist der Schritt, der sie wirksam macht.** Ohne ihn ist das Verb
+  ein Werkzeug, das nichts berührt: der Fahrzyklus liest `vehicle.getriebe`, und
+  geschrieben wird der Schlüssel nur hier. Danach rechnet der nächste
+  `run analyse --from-project <id>` mit der gerechneten Übersetzung, mit η(T, n) je
+  Zeitschritt, mit der Getriebemasse und mit `J_red` als Zusatzmasse beim
+  Beschleunigen. Übernommen wird nur, wenn die **Verzahnung trägt**; ob der Satz an
+  seinen Einbauort passt, geht den Fahrzyklus nichts an — er kennt Übersetzung,
+  Wirkungsgrad, Masse und Trägheit, nicht den Ort.
 * **Die Auslegung überlebt das Fenster.** Sie wird wie jedes entscheidende Verb
   unter `<projekt>/rechnungen/` abgelegt — und der **Steckbrief** liest sie von
   dort: Übersetzung, Modul, beide Sicherheiten, Wirkungsgrad, Masse, Trägheit und
@@ -603,6 +612,11 @@ python3 cae_cli.py run analyse --frisch --zyklus pedelec_stadt --wait
   Geschwindigkeit linear auf das Ziel. Konstantfahrt = denselben Wert wiederholen.
 * **Direktantrieb heißt `gear_ratio=1.0`.** Die Vorgabe 9,5 ist ein Pkw-Getriebe; mit ihr
   rechnet ein Nabenmotor das Neunfache an Raddrehzahl.
+* **Gibt es ein Getriebe, dann rechne es, statt eine Zahl zu setzen** — `getriebe`
+  (s. o.) liefert Übersetzung, **lastabhängigen** Wirkungsgrad, Masse und die auf die
+  Motorwelle bezogene Trägheit, und `--uebernehmen` schreibt sie in den Payload. Ein von
+  Hand gesetztes `gear_ratio` ist eine Annahme ohne Zähnezahlen, ohne Tragfähigkeit und
+  mit einem Wirkungsgrad, der bei Volllast dasselbe sagt wie im Schub.
 * `--zyklus` setzt **Zyklus UND Fahrzeug** — nie nur eins davon. Ein eigener Zyklus mit
   dem Fahrzeugmodell eines 1600-kg-Autos ergibt wieder die Momente eines Autos.
 * `run analyse` schreibt den Lastfall **vor** dem Start in einer Zeile hin. Steht dort

@@ -15,9 +15,11 @@ Was hier still falsch sein koennte und deshalb geprueft wird:
 Aufruf: ``venv/bin/python test_getriebe.py``
 """
 
+import json
 import math
 import os
 import sys
+import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -372,7 +374,51 @@ with tempfile.TemporaryDirectory() as tmp:
            "wertfrei, so wie ueberall hier")
 
 
-print("\n14. Reiter und Route — EINE Kette, nicht zwei")
+print("\n14. Die Auslegung erreicht den Fahrzyklus WIRKLICH")
+# ``compute_drivetrain`` LIEST ``vehicle["getriebe"]`` seit Stufe 2 -- geschrieben
+# hat den Schluessel aber niemand. Ein Werkzeug, dessen Ergebnis nirgends
+# ankommt, ersetzt die zwei Konstanten nicht; genau daran haengt der ganze Plan.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import importlib.util as _ilu
+_spec = _ilu.spec_from_file_location("_cli_probe",
+                                     os.path.join(os.path.dirname(
+                                         os.path.abspath(__file__)), "cae_cli.py"))
+_cli = _ilu.module_from_spec(_spec)
+_spec.loader.exec_module(_cli)
+with tempfile.TemporaryDirectory() as tmp:
+    pdir = os.path.join(tmp, "20260101_000000_zyklus")
+    os.makedirs(pdir)
+    grund = {"payload": {"vehicle": dict(D.DEFAULT_VEHICLE)}}
+    with open(os.path.join(pdir, "meta.json"), "w", encoding="utf-8") as f:
+        json.dump(grund, f)
+    e_zyk = G.auslegen({"art": "stirnrad", "stufen": 2, "i": 9.5,
+                        "T_motor_Nm": 191.0, "n_motor_1pmin": 8000})
+    pruefe(_cli._getriebe_uebernehmen(pdir, e_zyk) == "",
+           "die Auslegung laesst sich in den Payload uebernehmen")
+    with open(os.path.join(pdir, "meta.json"), encoding="utf-8") as f:
+        fz = json.load(f)["payload"]["vehicle"]
+    pruefe(fz.get("getriebe", {}).get("i_ist") == e_zyk["i_ist"]
+           and abs(fz["gear_ratio"] - e_zyk["i_ist"]) < 1e-6,
+           f"sie steht unter vehicle.getriebe UND als gear_ratio ({fz['gear_ratio']}) "
+           f"— eine skalare Angabe, die etwas anderes behauptet als das Getriebe "
+           f"daneben, waere schlimmer als keine")
+    zyk = D.stadtland_cycle()
+    ohne = dict(D.DEFAULT_VEHICLE)
+    a = D.compute_drivetrain(zyk, ohne)
+    b = D.compute_drivetrain(zyk, fz)
+    pruefe(max(a["rpm_motor"]) != max(b["rpm_motor"]),
+           f"und der Fahrzyklus rechnet damit: n_max {max(a['rpm_motor']):.1f} -> "
+           f"{max(b['rpm_motor']):.1f} 1/min")
+    pruefe(max(abs(x) for x in a["T_motor"]) != max(abs(x) for x in b["T_motor"]),
+           "auch das Moment bewegt sich — eta haengt jetzt an der Last, und "
+           "J_red wirkt beim Beschleunigen wie zusaetzliche Masse")
+# Und ohne den Schluessel bleibt alles, wie es war.
+pruefe("getriebe" not in D.DEFAULT_VEHICLE,
+       "der Vorgabe-Fahrzeug traegt KEIN Getriebe — jede bestehende Rechnung "
+       "bleibt damit Ziffer fuer Ziffer dieselbe")
+
+
+print("\n15. Reiter und Route — EINE Kette, nicht zwei")
 _hier = os.path.dirname(os.path.abspath(__file__))
 _html = open(os.path.join(_hier, "ema.html"), encoding="utf-8").read()
 _srv = open(os.path.join(_hier, "server.py"), encoding="utf-8").read()

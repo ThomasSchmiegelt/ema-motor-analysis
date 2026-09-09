@@ -1509,6 +1509,7 @@ def getriebe_start():
 
     mit_feld = not data.get("ohne_feld")
     mit_cad  = bool(data.get("cad"))
+    uebernehmen = bool(data.get("uebernehmen"))
     _getriebe_state.update({"status": "running", "progress": 0, "log": [],
                             "result": None, "error": None,
                             "project_id": proj_id})
@@ -1534,6 +1535,22 @@ def getriebe_start():
                                        ok=GT.bestanden(erg))
             except Exception as e:                           # noqa: BLE001
                 _sag(f"(nicht abgelegt: {type(e).__name__}: {e})")
+            # Uebernehmen ist der Schritt, der die Auslegung wirksam macht:
+            # ``ema_drivecycle.compute_drivetrain`` liest ``vehicle["getriebe"]``,
+            # und ohne diesen Schritt schreibt den Schluessel niemand. Die
+            # VERZAHNUNG muss dafuer tragen; wo der Satz sitzt, geht den
+            # Fahrzyklus nichts an.
+            if uebernehmen:
+                if erg.get("haelt") is False:
+                    erg["uebernommen"] = ("nein: die Verzahnung traegt nicht — "
+                                          "ein Getriebe, das nicht haelt, hat "
+                                          "auch keinen Wirkungsgrad, mit dem "
+                                          "sich rechnen liesse")
+                else:
+                    import cae_cli
+                    fehler = cae_cli._getriebe_uebernehmen(proj_dir, erg)
+                    erg["uebernommen"] = fehler and f"nein: {fehler}" or "ja"
+                _sag("Uebernahme: " + erg["uebernommen"])
             erg["text"] = text
             erg["bestanden"] = GT.bestanden(erg)
             _getriebe_state["result"] = erg

@@ -1311,6 +1311,15 @@
         Räder zeichnen (FreeCAD + FCGear → <code>getriebe.FCStd</code>/<code>.step</code>)
       </label>
     </div>
+    <div class="input-group">
+      <label>Übernehmen</label>
+      <label style="font-weight:400;font-size:.8rem;color:#bbb">
+        <input type="checkbox" id="gt_uebernehmen"/>
+        in den Payload schreiben (<code>vehicle.getriebe</code> +
+        <code>gear_ratio</code>) — erst dann rechnet der <b>Fahrzyklus</b> mit
+        dieser Übersetzung und mit η(T,&nbsp;n) statt mit den Konstanten
+      </label>
+    </div>
     <button id="gt_btn" onclick="startGetriebe()" style="margin-top:8px">⚙ Auslegen</button>
     <div id="gt_msg" style="margin-top:10px;font-size:.82rem"></div>
     <pre id="gt_log" style="margin-top:8px;max-height:200px;overflow:auto;background:#0d0d14;border:1px solid #2a2a30;border-radius:4px;padding:8px;font-size:.72rem;color:#9c9;white-space:pre-wrap;display:none"></pre>
@@ -6208,6 +6217,7 @@ async function startGetriebe() {
     bauraum_axial: num('gt_axial') || 0,
     ohne_feld: !document.getElementById('gt_feld').checked,
     cad: document.getElementById('gt_cad').checked,
+    uebernehmen: document.getElementById('gt_uebernehmen').checked,
   };
   if (body.n_ab) body.i = null;          // Abtriebsdrehzahl schlaegt i
   if (window._activeProject && window._activeProject.id)
@@ -6286,6 +6296,12 @@ function _renderGetriebe(res) {
     zeilen.push('<span style="color:#ca8">Die Festigkeitskennwerte sind eine ' +
                 'ANNAHME</span> (Größenordnung der Werkstoffklasse), keine ' +
                 'zitierte Messung — jede Sicherheit oben ist eine Größenordnung.');
+  if (res.uebernommen)
+    zeilen.push(res.uebernommen === 'ja'
+      ? '<span style="color:#6c6">✓ Übernommen</span> — der nächste Analyselauf ' +
+        'dieses Projekts rechnet mit dieser Übersetzung und mit η(T,&nbsp;n).'
+      : '<span style="color:#ca8">Nicht übernommen</span> — ' +
+        escHtml(res.uebernommen.replace(/^nein:\s*/, '')));
   const cad = res.cad || {};
   if (cad.zeichner === 'ersatz')
     zeilen.push('<span style="color:#ca8">Die Zeichnung zeigt ERSATZKÖRPER ohne ' +

@@ -2154,6 +2154,42 @@ def _chart_ablegen(b64: str, name: str, args) -> str:
     return pfad
 
 
+def _getriebe_uebernehmen(pdir: str, erg: dict) -> str:
+    """Die Auslegung in den Payload des Projekts schreiben — und zwar dorthin,
+    wo der Fahrzyklus sie liest.
+
+    Ohne diesen Schritt bleibt die Auslegung ein Werkzeug, das nichts beruehrt:
+    ``ema_drivecycle.compute_drivetrain`` liest ``vehicle["getriebe"]``, und
+    geschrieben hat den Schluessel bis dahin **niemand** — weder Verb noch Route
+    noch Oberflaeche. Gerechnet wurde also weiter mit ``gear_ratio`` 9,5 und
+    ``eta_drive`` 0,95, waehrend daneben eine gerechnete Uebersetzung lag.
+
+    ``gear_ratio`` wird mitgesetzt, damit die skalare Angabe nicht etwas anderes
+    behauptet als das Getriebe daneben.
+    """
+    import ema_steckbrief
+    pfad = os.path.join(pdir, "meta.json")
+    try:
+        with open(pfad, encoding="utf-8") as f:
+            meta = json.load(f) or {}
+    except (OSError, ValueError) as e:
+        return f"meta.json nicht lesbar ({type(e).__name__}) — nichts uebernommen"
+    payload = meta.get("payload")
+    if not isinstance(payload, dict):
+        return ("dieses Projekt hat keinen gespeicherten Payload — es gibt "
+                "nichts, worin das Getriebe stehen koennte")
+    fz = payload.setdefault("vehicle", {})
+    fz["getriebe"] = erg
+    if erg.get("i_ist"):
+        fz["gear_ratio"] = round(float(erg["i_ist"]), 4)
+    try:
+        with open(pfad, "w", encoding="utf-8") as f:
+            json.dump(meta, f, ensure_ascii=False, indent=1, default=str)
+    except OSError as e:
+        return f"meta.json nicht schreibbar ({type(e).__name__}) — nichts uebernommen"
+    return ""
+
+
 def cmd_getriebe(args) -> int:
     """Getriebe auslegen -- und, je nach Bauart, in die Welle legen.
 
@@ -2229,6 +2265,36 @@ def cmd_getriebe(args) -> int:
         print(text)
 
     ok = GT.bestanden(erg)
+
+    # In den Payload uebernehmen -- der einzige Schritt, der die Auslegung
+    # wirksam macht. Die VERZAHNUNG muss dafuer tragen; ob der Satz an den
+    # gewaehlten Ort passt, ist eine Einbaufrage und geht den Fahrzyklus nichts
+    # an (er kennt nur Uebersetzung, Wirkungsgrad, Masse und Traegheit).
+    if getattr(args, "uebernehmen", False):
+        if not erg.get("ok"):
+            print("  NICHT uebernommen: es gibt keine gueltige Auslegung.")
+        elif erg.get("haelt") is False:
+            print("  NICHT uebernommen: die Verzahnung traegt nicht. Ein "
+                  "Getriebe, das nicht haelt, hat auch keinen Wirkungsgrad, "
+                  "mit dem sich rechnen liesse.")
+        elif not pdir:
+            print("  NICHT uebernommen: kein Projekt gebunden "
+                  "(--from-project/--projekt).")
+        else:
+            fehler = _getriebe_uebernehmen(pdir, erg)
+            if fehler:
+                print(f"  NICHT uebernommen: {fehler}")
+            else:
+                print(f"  Uebernommen: vehicle.getriebe + gear_ratio = "
+                      f"{erg['i_ist']} in meta.json. Der naechste "
+                      f"'run analyse --from-project {os.path.basename(pdir)}' "
+                      f"rechnet mit dieser Uebersetzung und mit eta(T, n) "
+                      f"statt mit den Konstanten.")
+                if erg.get("passt") is False:
+                    print("  (Der EINBAU ist damit nicht geloest — der "
+                          "Fahrzyklus kennt nur Uebersetzung, Wirkungsgrad, "
+                          "Masse und Traegheit, nicht den Ort.)")
+
     _ablegen(args, "getriebe", text, daten=erg, ok=ok)
     if not erg.get("ok"):
         return EXIT_USAGE if "gibt es nicht" in str(erg.get("grund", "")) else 1
@@ -3194,6 +3260,10 @@ def build_parser() -> argparse.ArgumentParser:
                         "als FCStd/STEP ins Projekt legen")
     s.add_argument("--ohne-cad", dest="ohne_cad", action="store_true",
                    help="auch das Querschnittsbild weglassen")
+    s.add_argument("--uebernehmen", action="store_true",
+                   help="die Auslegung in meta.json schreiben (vehicle.getriebe "
+                        "+ gear_ratio) — erst dann rechnet der Fahrzyklus mit "
+                        "ihr statt mit den Konstanten")
     _add_ablage(s)
     _add_globals(s, json_hilfe="vollstaendig als JSON")
     s.set_defaults(fn=cmd_getriebe)

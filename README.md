@@ -945,6 +945,12 @@ extra mass under acceleration). Measured over the WLTP cycle the efficiency sits
 at 0.955 at high load and 0.62 at low — the constant 0.95 could not express that,
 because bearing and churning losses hang on **speed**, not on load. Without a
 design nothing changes: every existing calculation stays identical to the digit.
+It takes an explicit step to apply — `--uebernehmen` on the verb, a checkbox in the
+tab: the design is written into the payload, and only the next run computes with
+it. That was not so at first: the drive cycle could read the key, nobody wrote it,
+and every run kept taking 9.5 and 0.95 while the computed design lay beside it. It
+is applied only when the gearing **holds** — where the set sits is none of the
+drive cycle's business.
 
 ### The drawing — and what a too-nicely-drawn gear does
 
