@@ -2049,6 +2049,13 @@ dict passed to the FEM script.
   `$VIRTUAL_ENV/bin` and prepends `CCX_DIR`. The 0-node symptom is now also named in
   the Verformung tab (`#deform-source-note`, shown whenever `deformation.source ==
   "analytical"`, incl. the `attempts` list).
+  **Und die Umkehrung, gemessen 09.09.2026:** herausgenommen wird nur eine
+  **echte** virtuelle Umgebung (`sys.prefix != sys.base_prefix`). Die frühere
+  Fassung warf `sys.prefix/bin` bedingungslos heraus — im System-Python ist das
+  `/usr/bin`, und dann scheitert schon pixi (`failed to activate environment`),
+  also **jeder** FreeCAD-Aufruf aus `cae_cli.py`, das ausdrücklich im
+  System-Python läuft. Latent blieb das, solange nur der Server zeichnete; das
+  erste CLI-Verb, das FreeCAD selbst ruft, ist `getriebe --cad`. S. `BEFUNDE.md`.
 - FreeCAD scripts run in a separate process with **no shared Python state** — pass
   everything via the generated script string and read results back through stdout markers.
 - Opening a headlessly-saved `.FCStd` in GUI FreeCAD leaves ViewProviders detached;

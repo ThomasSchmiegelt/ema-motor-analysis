@@ -116,6 +116,13 @@ try:
     print("CAD_VOLUME:%.2f" % sum(k.Volume for k in _koerper))
     print("CAD_KOERPER:%d" % len(_koerper))
     fcstd = os.path.join(ZIEL, NAME + ".FCStd")
+    # KEINE .FCBak-Sicherung. FreeCAD legt beim Ueberschreiben eine an, und weil
+    # die Auslegung mehrmals hintereinander laeuft, sammeln sich im Projekt
+    # ``getriebe.<zeit>.FCBak``-Dateien, die niemand liest -- die vorige Fassung
+    # steht ohnehin in ``rechnungen/`` als Zahlen. Der Schalter ist eine
+    # Nutzereinstellung dieses FreeCAD-Laufs und wirkt nur in diesem Prozess.
+    App.ParamGet("User parameter:BaseApp/Preferences/Document").SetBool(
+        "CreateBackupFiles", False)
     doc.saveAs(fcstd)
     print("SAVED:" + fcstd)
     try:

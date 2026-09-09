@@ -293,6 +293,25 @@ pruefe("v1-1/Mod" in GC.FCGEAR_MOD,
 pruefe("makeCompound" in quelle and "fuse(" not in quelle.split("makeCompound")[1],
        "die Raeder bleiben ein VERBUND: 'fuse' ueber zwei Raeder, deren "
        "Kopfkreise sich beruehren, gab gemessen 0,00 mm^3 zurueck")
+pruefe("CreateBackupFiles" in quelle,
+       "und es wird KEINE .FCBak-Sicherung geschrieben — die Auslegung laeuft "
+       "mehrmals, die vorige Fassung steht ohnehin als Zahlen in 'rechnungen/'")
+
+# Der Weg zu FreeCAD selbst. Die CLI laeuft im SYSTEM-Python, der Server im venv
+# -- und ``child_env`` warf frueher ``sys.prefix/bin`` heraus, was im System-
+# Python ``/usr/bin`` ist. Gemessen scheiterte dann schon pixi, also JEDER
+# FreeCAD-Aufruf aus der CLI. Das faellt nirgends auf, solange nur der Server
+# zeichnet.
+import freecad_runner as FR
+_pfad = FR.child_env()["PATH"].split(os.pathsep)
+_echt = [os.path.realpath(x) for x in _pfad]
+pruefe(sys.prefix != sys.base_prefix or "/usr/bin" in _pfad or "/bin" in _pfad,
+       "im System-Python bleibt /usr/bin im PATH des FreeCAD-Prozesses — ohne "
+       "es kann pixi die Umgebung nicht aktivieren")
+if sys.prefix != sys.base_prefix:
+    pruefe(os.path.realpath(os.path.join(sys.prefix, "bin")) not in _echt,
+           "im venv wird dessen bin/ weiterhin herausgenommen — der gmsh-Wrapper "
+           "dort ergaebe sonst ein Netz mit 0 Knoten, ohne Warnung")
 
 # Und das Bild -- es braucht kein FreeCAD.
 import tempfile

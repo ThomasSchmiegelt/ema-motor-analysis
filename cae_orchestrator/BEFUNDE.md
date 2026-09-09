@@ -17,6 +17,36 @@ kann.
 
 ---
 
+## 2026-09-09 — `child_env` warf `/usr/bin` aus dem PATH, sobald der Aufrufer im System-Python lief
+
+**Beobachtung.** `python3 cae_cli.py getriebe … --cad` meldete „CAD nicht
+erzeugt: FreeCAD meldete keinen Erfolg". Derselbe Aufruf mit
+`venv/bin/python cae_cli.py …` zeichnete anstandslos.
+
+**Messung.** `freecad_runner.child_env` nimmt `sys.prefix/bin` aus dem PATH des
+FreeCAD-Unterprozesses — richtig, solange der Aufrufer im venv läuft (dort liegt
+der `gmsh`-Wrapper, der sonst ein Netz mit 0 Knoten erzeugt, ohne zu warnen). Im
+**System-Python** ist `sys.prefix` aber `/usr`, und damit fiel `/usr/bin`
+heraus. Gemessen scheitert dann schon pixi:
+`failed to activate environment · An activation error occurred:
+IoError(Os { code: 2, kind: NotFound })` — also **jeder** FreeCAD-Aufruf aus
+`cae_cli.py`, das ausdrücklich im System-Python läuft.
+
+Latent war das, solange nur der Server zeichnete (der läuft im venv) und die CLI
+ihre CAD-Arbeit über HTTP an ihn gab. Das erste CLI-Verb, das FreeCAD **selbst**
+aufruft, ist `getriebe --cad` — daran fiel es auf.
+
+**Fundstelle.** `freecad_runner.py`, `child_env()`
+(`drop = {os.path.realpath(os.path.join(sys.prefix, "bin"))}`).
+
+**Status: behoben** (09.09.2026). Herausgenommen wird nur noch eine **echte**
+virtuelle Umgebung — `sys.prefix != sys.base_prefix`, das ist die Bedingung, die
+venv definiert; `VIRTUAL_ENV` wird wie bisher zusätzlich beachtet. Nachgemessen
+in beiden Interpretern: System-Python behält `/usr/bin` und FreeCAD läuft, venv
+verliert weiterhin sein `bin/`. `test_getriebe.py` [12] prüft beide Fälle.
+
+---
+
 ## 2026-09-09 — Zweierlei zusammengeworfen: „traegt nicht" und „passt nicht"
 
 **Beobachtung.** Ein Planetensatz i = 5 in einer 90-mm-Welle wurde als

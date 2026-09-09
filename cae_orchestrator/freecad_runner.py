@@ -45,7 +45,15 @@ def child_env() -> dict:
     (verified: same script, 0 nodes with venv on PATH vs 747 nodes without).
     """
     env = os.environ.copy()
-    drop = {os.path.realpath(os.path.join(sys.prefix, "bin"))}
+    drop = set()
+    # NUR eine echte virtuelle Umgebung wird herausgenommen. Laeuft der Aufrufer
+    # im System-Python -- und ``cae_cli.py`` tut das ausdruecklich --, dann ist
+    # ``sys.prefix`` schlicht ``/usr``, und die alte Fassung warf ``/usr/bin``
+    # aus dem PATH. Gemessen scheitert dann schon pixi ("failed to activate
+    # environment", IoError NotFound), also JEDER FreeCAD-Aufruf aus der CLI.
+    # ``sys.prefix != sys.base_prefix`` ist die Bedingung, die venv definiert.
+    if sys.prefix != sys.base_prefix:
+        drop.add(os.path.realpath(os.path.join(sys.prefix, "bin")))
     if os.environ.get("VIRTUAL_ENV"):
         drop.add(os.path.realpath(os.path.join(os.environ["VIRTUAL_ENV"], "bin")))
     parts = [p for p in env.get("PATH", "").split(os.pathsep)
