@@ -2994,6 +2994,78 @@ def agent_vorgabe():
                     "ordner": proj_dir, "brief": brief})
 
 
+@app.route("/project/<pid>/stand")
+def project_stand(pid: str):
+    """Was sich an diesem Projekt zuletzt getan hat — die Bruecke fragt das oft.
+
+    Traegt zusaetzlich, ob gerade ein AGENTENKOPF an diesem Projekt arbeitet.
+    Ohne das koennte der Geometrie-Reiter eine Aenderung zwar bemerken, aber
+    nicht sagen, wer sie gemacht hat — und „der Agent hat gerade gerechnet" ist
+    fuer den, der davorsitzt, die halbe Auskunft.
+    """
+    if not _safe_name(pid):
+        return jsonify({"ok": False, "grund": "ungueltiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"ok": False, "grund": "Projekt nicht gefunden"}), 404
+    import ema_projekt
+    aus = ema_projekt.stand(proj)
+    koepfe = []
+    try:
+        import ema_agent
+        for name, kopf in (ema_agent.KOEPFE or {}).items():
+            z = kopf.zustand() if hasattr(kopf, "zustand") else {}
+            if z.get("laeuft") and str(z.get("projekt") or "") == pid:
+                koepfe.append({"kopf": name, "beschaeftigt": bool(z.get("beschaeftigt")),
+                               "zug_sek": z.get("zug_sek")})
+    except Exception:                                        # noqa: BLE001
+        pass
+    aus["koepfe"] = koepfe
+    aus["rechnet"] = _rechnet()
+    return jsonify(aus)
+
+
+@app.route("/project/<pid>/knoten", methods=["GET", "POST"])
+def project_knoten(pid: str):
+    """Rueckkehrpunkte: auflisten (GET) oder einen setzen (POST {label, note}).
+
+    Ein Abzweig, den man verfolgt, braucht eine Stelle, zu der man zurueckkann —
+    und die Evolution allein war eine Einbahnstrasse (s. ``ema_projekt``).
+    """
+    if not _safe_name(pid):
+        return jsonify({"ok": False, "grund": "ungueltiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"ok": False, "grund": "Projekt nicht gefunden"}), 404
+    import ema_projekt
+    if request.method == "GET":
+        return jsonify({"ok": True, "knoten": ema_projekt.knoten_liste(proj)})
+    body = request.get_json(silent=True) or {}
+    aus = ema_projekt.knoten_setzen(proj, label=str(body.get("label") or "")[:120],
+                                    note=str(body.get("note") or "")[:400],
+                                    action="knoten", automatisch=False)
+    return jsonify(aus), (200 if aus.get("ok") else 400)
+
+
+@app.route("/project/<pid>/zurueck", methods=["POST"])
+def project_zurueck(pid: str):
+    """Zum Knotenpunkt zurueck. Body ``{marke}``.
+
+    Die Stufen dazwischen bleiben stehen — dass ein Zweig probiert wurde und
+    sich nicht bewaehrt hat, ist selbst eine Auskunft.
+    """
+    if not _safe_name(pid):
+        return jsonify({"ok": False, "grund": "ungueltiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"ok": False, "grund": "Projekt nicht gefunden"}), 404
+    import ema_projekt
+    body = request.get_json(silent=True) or {}
+    aus = ema_projekt.zurueck(proj, str(body.get("marke") or ""),
+                              note=str(body.get("note") or "")[:400])
+    return jsonify(aus), (200 if aus.get("ok") else 404)
+
+
 @app.route("/project/<pid>/manifest")
 def project_manifest(pid: str):
     """Volle Projektakte (für das Ergebnis-Tab-Panel: Evolution/Links/Status/Tags)."""

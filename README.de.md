@@ -1016,6 +1016,43 @@ wie eine Modelländerung). Die Seite merkt sich den Stand beim Öffnen und sagt
 **einmal** Bescheid, wenn er sich ändert. Neu geladen wird nicht von selbst:
 mitten in einem Lauf ist das eine Entscheidung des Menschen, nicht der Seite.
 
+## Agent und Formular sehen einander zu — und man kann zurückgehen
+
+Agent und Geometrie-Reiter arbeiten längst am selben Projekt: der Agent über
+`cae_cli.py --from-project`, das Formular über dieselbe `meta.json`. Was fehlte,
+war dass die eine Seite **merkt**, wenn die andere etwas geändert hat. Der Agent
+schrieb, und der Reiter erfuhr davon erst, wenn jemand von Hand „Als Vorlage
+verwenden" drückte — zwei Leute an einem Werkstück, von denen einer nicht
+hinsieht.
+
+Der Geometrie-Reiter trägt jetzt eine Leiste, die sagt, welcher Kopf am Projekt
+hängt und wann sich die Auslegung geändert hat. Erkannt wird das an einer
+**Marke über den Payload**, nicht an der Dateizeit: `meta.json` wird auch neu
+geschrieben, wenn nur eine Notiz dazukam, und dann überschriebe die Brücke ein
+Formular, in dem sich nichts geändert hat.
+
+**Automatisch übernommen wird nur, solange das Formular unberührt ist.** Wer
+gerade selbst tippt, bekommt keinen fremden Wert unter der Hand — dann wird
+gefragt. Das ist der einzige Punkt, an dem „automatisch" gefährlich wäre. Die
+Gegenrichtung ist ein Knopf: was im Formular steht, geht als **Vorgabe** an den
+Agenten.
+
+### Abzweige, und der Weg zurück
+
+Die Projektakte war eine Einbahnstraße. Jede Stufe hält nur die **geänderten**
+Werte, gedeckelt auf sechzig, und den vollen Payload gibt es genau einmal — den
+letzten. Der Stand von Stufe 7 ließ sich daraus nicht wiederherstellen. Eine
+Kette gedeckelter Diffs rückwärts zu rechnen wäre das Naheliegende und das
+Falsche: sie liefe still daneben, sobald ein Lauf mehr als sechzig Schlüssel
+bewegt.
+
+Jetzt legt jeder gerechnete Lauf einen **Rückkehrpunkt** an, und vor einem
+Versuch setzt man einen ausdrücklichen („⑂ Abzweig"). Erweist sich der Zweig als
+Sackgasse, geht es zurück — und **die Stufen dazwischen bleiben stehen**: dass
+dieser Weg probiert wurde und nicht getragen hat, ist selbst eine Auskunft. Der
+verlassene Stand wird vorher automatisch gesichert, sonst wäre der Rückweg der
+einzige Schritt, den man nicht rückgängig machen kann.
+
 ## Das Getriebe wird gerechnet — und darf in der Welle sitzen
 
 Das Getriebe war in dieser Kette **zwei Konstanten**: eine Übersetzung von 9,5

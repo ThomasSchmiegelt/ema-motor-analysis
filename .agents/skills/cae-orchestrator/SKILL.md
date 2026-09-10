@@ -863,6 +863,25 @@ gebunden ist — du musst ihn also nicht erst abrufen, um zu wissen, woran du
 arbeitest.
 
 
+### Der Geometrie-Reiter sieht mit — und du kannst Abzweige setzen
+
+Was du am gebundenen Projekt änderst (`run --set`, `getriebe --uebernehmen`,
+jeder gerechnete Lauf), erscheint im **Geometrie-Reiter** des Browsers, sobald
+sich die Auslegung wirklich geändert hat — der Mensch am Schreibtisch sieht dein
+Ergebnis im Formular, ohne es zu holen. Umgekehrt kann er dir mit einem Knopf
+seine Maße als **Vorgabe** hinlegen; die steht dann im Steckbrief.
+
+Zwei Dinge folgen daraus für dich:
+
+* **Notizen und Zwischenstände sind harmlos** — die Brücke schlägt nur an, wenn
+  sich der Payload ändert, nicht bei jedem Schreibvorgang.
+* **Vor einem Versuch, von dem du nicht weißt, ob er trägt, setz einen
+  Rückkehrpunkt.** Jeder gerechnete Lauf legt von selbst einen an; einen
+  ausdrücklichen setzt der Mensch über „⑂ Abzweig". Erweist sich ein Zweig als
+  Sackgasse, geht es zu diesem Stand zurück — **die Stufen dazwischen bleiben in
+  der Projektakte stehen.** Sag also ruhig, dass ein Weg nicht getragen hat: das
+  ist eine Auskunft und wird nicht gelöscht.
+
 ### Was du rechnest, bleibt im Projekt liegen
 
 `paarvergleich`, `screen`, `rotor-check`, `sicherheit` und `feldbild` schreiben

@@ -63,6 +63,21 @@
     .btn-group{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px}
     .sep{margin:4px 0;border:none;border-top:1px solid #333}
 
+    /* ── Bruecke Agentenkoepfe <-> Geometrie-Reiter ─────────────────────── */
+    .brk{display:flex;align-items:center;justify-content:space-between;gap:12px;
+         flex-wrap:wrap;margin:6px 4px 2px;padding:7px 11px;border-radius:6px;
+         background:#16161c;border:1px solid #2e2e36;font-size:.8rem;color:#bcc}
+    .brk.neu{border-color:#6a5a2e;background:#231f16}
+    .brk-l{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+    .brk-r{display:flex;align-items:center;gap:9px;flex-wrap:wrap}
+    .brk-punkt{width:9px;height:9px;border-radius:50%;background:#3a3a44;flex:none}
+    .brk-punkt.an{background:#4ec98f;box-shadow:0 0 6px #4ec98f}
+    .brk-punkt.neu{background:#e6a23c;box-shadow:0 0 6px #e6a23c}
+    .brk-folgt{display:flex;align-items:center;gap:5px;font-size:.76rem;color:#9aa;
+               cursor:pointer;white-space:nowrap}
+    .brk-btn{width:auto;padding:5px 10px;font-size:.74rem;text-transform:none;
+             letter-spacing:0;background:#2f5d8a}
+
     /* ── 3D-Feld tab: uniformly-sized stacked cards (like FEM-Ergebnisse) ──── */
     .e3-wrap{max-width:1080px;margin:0 auto;padding:14px 16px 70px}
     .e3-card{background:#16161c;border:1px solid #2e2e36;border-radius:7px;
@@ -451,6 +466,25 @@
 
 <!-- ════════ TAB: Geometrie ════════ -->
 <div class="tab-panel" id="panel-geo">
+  <!-- Bruecke: was die Agentenkoepfe am aktiven Projekt tun, und beide Wege -->
+  <div id="brk-bar" class="brk" hidden>
+    <div class="brk-l">
+      <span id="brk-lampe" class="brk-punkt"></span>
+      <span id="brk-text">—</span>
+    </div>
+    <div class="brk-r">
+      <label class="brk-folgt" title="Solange du das Formular nicht anfasst, wird eine Änderung des Agenten sofort übernommen. Sobald du etwas änderst, wird nur noch gefragt.">
+        <input type="checkbox" id="brk-auto" checked onchange="_brkAutoUm()"/> automatisch folgen
+      </label>
+      <button id="brk-hol" class="brk-btn" onclick="brueckeHolen()" hidden>⤓ Übernehmen</button>
+      <button id="brk-geb" class="brk-btn" onclick="brueckeGeben()">⤒ An den Agenten</button>
+      <button class="brk-btn" style="background:#5a4a86" onclick="knotenSetzen()"
+              title="Einen Punkt setzen, zu dem du zurückkehren kannst — bevor du einem Abzweig folgst.">⑂ Abzweig</button>
+      <button class="brk-btn" style="background:#455" onclick="knotenListe()"
+              title="Alle Rückkehrpunkte dieses Projekts">↩ Zurück zu …</button>
+    </div>
+  </div>
+  <div id="brk-knoten" class="brk" hidden style="display:block"></div>
   <div class="panel-grid">
 
   <!-- 1. Hauptabmessungen -->
@@ -3709,6 +3743,11 @@ function switchTab(name) {
   if (PREVIEW_TABS.has(name)) requestAnimationFrame(() => requestAnimationFrame(() => {
     if (typeof resize === 'function') resize();
   }));
+  // Die Bruecke laeuft nur, solange der Geometrie-Reiter offen ist: sie fragt im
+  // Sekundentakt, und im Hintergrund gaebe es dafuer keinen Grund.
+  if (typeof brueckeStart === 'function') {
+    if (name === 'geo') brueckeStart(); else brueckeStopp();
+  }
   if (name === 'getriebe' && typeof _gtSync === 'function') _gtSync();
   if (name === 'ki' && typeof kiActivate === 'function') kiActivate();
   if (name === 'projekt' && typeof pjActivate === 'function') pjActivate();
@@ -5109,6 +5148,10 @@ function pjSetActive(pid, name) {
   // projektgebundene Panels (auf Tab 1) auffrischen
   if (typeof _e3RefreshSavedList === 'function') _e3RefreshSavedList();
   if (typeof refreshTrainingStats === 'function') refreshTrainingStats();
+  // Die Bruecke merkt sich die Marke des Projekts, an dem sie haengt — nach
+  // einem Wechsel haette die alte am neuen keine Bedeutung und meldete sofort
+  // eine „Aenderung", die keine ist.
+  if (typeof brueckeNeuesProjekt === 'function') brueckeNeuesProjekt();
 }
 
 // Bericht-Karte (Tab ① Projekt): nur aktiv, wenn das aktive Projekt Ergebnisse hat.
@@ -9697,6 +9740,257 @@ async function setupAutosave() {
   document.addEventListener('change', _scheduleSave, true);
   window.addEventListener('beforeunload', saveFormState);   // best effort beim Schließen
   if ((await restoreFormState()) && typeof _toast === 'function') _toast('Eingaben wiederhergestellt');
+}
+
+// ══════════ Abzweige und der Weg zurueck ══════════
+//
+// Die Evolution der Projektakte war eine Einbahnstrasse: jede Stufe haelt nur
+// die GEAENDERTEN Werte (gedeckelt), den vollen Payload gibt es einmal — den
+// letzten. Wer einem Abzweig folgte und feststellte, dass er nicht traegt,
+// hatte keinen Weg zurueck ausser von Hand. ``ema_projekt`` legt deshalb je
+// Knoten einen Schnappschuss ab; hier sind die zwei Knoepfe dazu.
+//
+// Zurueckgehen LOESCHT die Stufen dazwischen NICHT: dass ein Zweig probiert
+// wurde und sich nicht bewaehrt hat, ist selbst eine Auskunft.
+async function knotenSetzen() {
+  const pid = window._activeProject && window._activeProject.id;
+  const txt = document.getElementById('brk-text');
+  if (!pid) { if (txt) txt.textContent = '⚠ Erst ein Projekt wählen (Tab ① Projekt).'; return; }
+  const label = prompt('Wofür steht dieser Abzweig?\n' +
+                       '(z. B. „vor dem Versuch mit 8 Polen")', '');
+  if (label === null) return;
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/knoten',
+      {method: 'POST', headers: {'Content-Type': 'application/json'},
+       body: JSON.stringify({label})}).then(x => x.json());
+    if (txt) txt.innerHTML = r && r.ok
+      ? '⑂ <b>Abzweig gesetzt</b> — von hier kommst du mit „↩ Zurück zu …" ' +
+        'wieder her.'
+      : '⚠ ' + escHtml((r && r.grund) || 'nicht gesetzt');
+    if (r && r.ok) knotenListe();
+  } catch (e) { if (txt) txt.textContent = 'Fehler: ' + e.message; }
+}
+
+async function knotenListe() {
+  const pid = window._activeProject && window._activeProject.id;
+  const box = document.getElementById('brk-knoten');
+  if (!box) return;
+  if (!box.hidden) { box.hidden = true; return; }        // zweiter Klick schliesst
+  if (!pid) return;
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/knoten')
+                      .then(x => x.json());
+    const kn = (r && r.knoten) || [];
+    if (!kn.length) {
+      box.innerHTML = '<span style="color:#9aa">Noch keine Rückkehrpunkte. ' +
+        'Jeder gerechnete Lauf legt einen an; „⑂ Abzweig" setzt einen von Hand.</span>';
+    } else {
+      box.innerHTML = '<div style="font-size:.78rem;color:#9aa;margin-bottom:6px">' +
+        'Zurück zu einem Stand — die Stufen dazwischen bleiben stehen:</div>' +
+        kn.map(k => {
+          const wann = (k.ts || '').slice(0, 16).replace('T', ' ');
+          const wie = k.automatisch ? '' :
+            ' <span style="color:#b18aff">⑂ von Hand</span>';
+          return '<div style="display:flex;gap:9px;align-items:center;' +
+            'padding:3px 0;border-top:1px solid #26262e">' +
+            '<button class="brk-btn" style="background:#455" onclick="knotenZurueck(\'' +
+            escHtml(k.marke) + '\')">↩</button>' +
+            '<span style="flex:1;min-width:0"><b>' +
+            escHtml(k.label || k.action || 'Stand') + '</b>' + wie +
+            ' <span style="color:#889">· ' + escHtml(wann) + '</span>' +
+            (k.note ? '<br><span style="color:#889;font-size:.75rem">' +
+                      escHtml(k.note) + '</span>' : '') + '</span></div>';
+        }).join('');
+    }
+    box.hidden = false;
+  } catch (e) { /* stumm */ }
+}
+
+async function knotenZurueck(marke) {
+  const pid = window._activeProject && window._activeProject.id;
+  const txt = document.getElementById('brk-text');
+  if (!pid || !marke) return;
+  if (!confirm('Zu diesem Stand zurückgehen?\n\n' +
+               'Der aktuelle Stand wird vorher automatisch als Rückkehrpunkt ' +
+               'gesichert, und die Stufen dazwischen bleiben in der Projektakte ' +
+               'stehen — gelöscht wird nichts.')) return;
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/zurueck',
+      {method: 'POST', headers: {'Content-Type': 'application/json'},
+       body: JSON.stringify({marke})}).then(x => x.json());
+    if (!r || !r.ok) {
+      if (txt) txt.innerHTML = '⚠ ' + escHtml((r && r.grund) || 'nicht möglich');
+      return;
+    }
+    // Der Payload des Projekts ist ein anderer — das Formular zieht nach.
+    _brkBeruehrt = false;
+    await brueckeHolen(true);
+    if (txt) txt.innerHTML = '↩ <b>Zurück auf „' +
+      escHtml(r.label || r.marke) + '"</b> — ' + escHtml(r.hinweis || '');
+    const box = document.getElementById('brk-knoten');
+    if (box) box.hidden = true;
+  } catch (e) { if (txt) txt.textContent = 'Fehler: ' + e.message; }
+}
+
+// ══════════ Bruecke: Agentenkoepfe <-> Geometrie-Reiter ══════════
+//
+// Beide Seiten arbeiten laengst am selben Projekt -- der Agent ueber
+// ``cae_cli.py --from-project``, das Formular ueber ``/project/<id>/template``.
+// Was fehlte, ist dass die eine Seite merkt, wenn die andere etwas geaendert
+// hat: der Agent schreibt ``meta.json``, und der Reiter erfuhr davon erst, wenn
+// jemand von Hand „Als Vorlage verwenden" drueckte. Zwei Leute an einem Werkstueck,
+// von denen einer nicht hinsieht.
+//
+// Erkannt wird die Aenderung an der PAYLOAD-MARKE und nicht an der Dateizeit:
+// ``meta.json`` wird auch neu geschrieben, wenn nur eine Notiz dazukam, und dann
+// wuerde die Bruecke ein Formular ueberschreiben, in dem sich nichts geaendert hat.
+//
+// ``automatisch folgen`` gilt nur, solange das Formular UNBERUEHRT ist. Wer
+// gerade selbst tippt, bekommt keinen fremden Wert unter der Hand -- dann wird
+// gefragt. Das ist der einzige Punkt, an dem „automatisch" gefaehrlich waere.
+let _brkMarke = null;        // zuletzt gesehene Marke des aktiven Projekts
+let _brkBeruehrt = false;    // hat der Mensch seit dem letzten Abgleich getippt?
+let _brkTimer = null;
+let _brkOffen = null;        // Marke, die zur Uebernahme ansteht
+
+function _brkAutoUm() { _brkZeichnen(_brkLetzterStand); }
+
+function brueckeBeruehrt() {
+  // Nur EINE Meldung je Abgleich -- der Zaehler haengt an jedem Tastendruck.
+  if (!_brkBeruehrt) { _brkBeruehrt = true; _brkZeichnen(_brkLetzterStand); }
+}
+
+let _brkLetzterStand = null;
+
+async function _brkAbfragen() {
+  const pid = window._activeProject && window._activeProject.id;
+  const bar = document.getElementById('brk-bar');
+  if (!bar) return;
+  if (!pid) { bar.hidden = true; return; }
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/stand');
+    if (!r.ok) { bar.hidden = true; return; }
+    const st = await r.json();
+    if (!st.ok) { bar.hidden = true; return; }
+    bar.hidden = false;
+    _brkLetzterStand = st;
+    if (_brkMarke === null) { _brkMarke = st.payload_marke; }   // erster Blick
+    else if (st.payload_marke !== _brkMarke) {
+      _brkOffen = st.payload_marke;
+      const auto = document.getElementById('brk-auto');
+      if (auto && auto.checked && !_brkBeruehrt) { await brueckeHolen(true); return; }
+    }
+    _brkZeichnen(st);
+  } catch (e) { /* Netzaussetzer: beim naechsten Mal wieder */ }
+}
+
+function _brkZeichnen(st) {
+  if (!st) return;
+  const lampe = document.getElementById('brk-lampe');
+  const txt = document.getElementById('brk-text');
+  const hol = document.getElementById('brk-hol');
+  const bar = document.getElementById('brk-bar');
+  const koepfe = st.koepfe || [];
+  const neu = !!_brkOffen;
+  bar.classList.toggle('neu', neu);
+  lampe.className = 'brk-punkt' + (neu ? ' neu' : (koepfe.length ? ' an' : ''));
+  hol.hidden = !neu;
+  const wer = koepfe.length
+    ? koepfe.map(k => k.kopf.toUpperCase() + (k.beschaeftigt ? ' (arbeitet)' : ''))
+            .join(', ')
+    : null;
+  let m;
+  if (neu) {
+    const l = st.letzte || {};
+    const feld = (l.geaendert || []).slice(0, 4).join(', ');
+    m = '<b>Die Auslegung dieses Projekts hat sich geändert</b>'
+      + (l.action ? ' — ' + escHtml(l.action) : '')
+      + (feld ? ' (' + escHtml(feld) + (l.n_geaendert > 4 ? ' …' : '') + ')' : '')
+      + (_brkBeruehrt
+          ? ' · <span style="color:#e6a23c">dein Formular ist geändert, es wird '
+            + 'nichts überschrieben</span>'
+          : '');
+  } else if (wer) {
+    m = 'Verbunden mit ' + escHtml(wer) + ' auf <code>' + escHtml(st.id) + '</code>'
+      + ' · Änderungen des Agenten kommen hier an.';
+  } else {
+    m = 'Projekt <code>' + escHtml(st.id) + '</code> · kein Agentenkopf daran. '
+      + 'Änderungen aus dem Terminal (<code>cae_cli.py</code>) kommen trotzdem an.';
+  }
+  txt.innerHTML = m;
+}
+
+async function brueckeHolen(still) {
+  const pid = window._activeProject && window._activeProject.id;
+  if (!pid) return;
+  try {
+    const tpl = await fetch('/project/' + encodeURIComponent(pid) + '/template')
+                        .then(x => x.json());
+    if (tpl && tpl.payload) {
+      applyPayload(tpl.payload);
+      _brkMarke = _brkOffen || _brkMarke;
+      _brkOffen = null;
+      _brkBeruehrt = false;
+      const txt = document.getElementById('brk-text');
+      if (txt) txt.innerHTML = (still ? '⤓ <b>Automatisch übernommen</b>'
+                                      : '⤓ <b>Übernommen</b>')
+        + ' — das Formular zeigt jetzt den Stand des Projekts.';
+      const bar = document.getElementById('brk-bar');
+      if (bar) bar.classList.remove('neu');
+      const hol = document.getElementById('brk-hol');
+      if (hol) hol.hidden = true;
+      const lampe = document.getElementById('brk-lampe');
+      if (lampe) lampe.className = 'brk-punkt an';
+    }
+  } catch (e) { /* stumm: beim naechsten Abgleich wieder */ }
+}
+
+async function brueckeGeben() {
+  // Die andere Richtung. ``/agent/vorgabe`` gab es schon — aber nur als Knopf
+  // im Designer. Was im Geometrie-Reiter steht, kam beim Agenten nur an, wenn
+  // jemand vorher rechnete; eine Uebergabe darf Sekunden dauern und keine
+  // Stunden.
+  const pid = window._activeProject && window._activeProject.id;
+  const txt = document.getElementById('brk-text');
+  if (!pid) { if (txt) txt.textContent = '⚠ Erst ein Projekt wählen (Tab ① Projekt).'; return; }
+  try {
+    const payload = await buildPayload();
+    const r = await fetch('/agent/vorgabe', {method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({payload, projekt: pid})}).then(x => x.json());
+    if (txt) txt.innerHTML = r && r.ok
+      ? '⤒ <b>An den Agenten gegeben</b> — steht als Vorgabe in <code>'
+        + escHtml(pid) + '</code>. Ein laufender Kopf sieht sie beim nächsten '
+        + 'Steckbrief; ein neuer bekommt sie im stehenden Auftrag.'
+      : '⚠ ' + escHtml((r && r.grund) || 'Übergabe fehlgeschlagen');
+    // Der eigene Stand ist damit der Stand des Projekts.
+    const st = await fetch('/project/' + encodeURIComponent(pid) + '/stand')
+                       .then(x => x.json()).catch(() => null);
+    if (st && st.ok) { _brkMarke = st.payload_marke; _brkOffen = null; _brkBeruehrt = false; }
+  } catch (e) {
+    if (txt) txt.textContent = 'Fehler: ' + e.message;
+  }
+}
+
+function brueckeStart() {
+  if (_brkTimer) return;
+  const panel = document.getElementById('panel-geo');
+  if (panel && !panel.dataset.brkGebunden) {
+    panel.addEventListener('input', brueckeBeruehrt);
+    panel.addEventListener('change', brueckeBeruehrt);
+    panel.dataset.brkGebunden = '1';
+  }
+  _brkAbfragen();
+  _brkTimer = setInterval(_brkAbfragen, 4000);
+}
+function brueckeStopp() {
+  if (_brkTimer) { clearInterval(_brkTimer); _brkTimer = null; }
+}
+// Ein Projektwechsel setzt die Bruecke zurueck -- die Marke des alten Projekts
+// haette am neuen keine Bedeutung und meldete sofort eine „Aenderung".
+function brueckeNeuesProjekt() {
+  _brkMarke = null; _brkOffen = null; _brkBeruehrt = false; _brkLetzterStand = null;
+  if (_brkTimer) _brkAbfragen();
 }
 
 async function buildPayload() {
