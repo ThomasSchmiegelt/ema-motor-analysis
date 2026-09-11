@@ -92,9 +92,9 @@ ist.
 benannten Konstante, gegen `cae_cli.py:42`); `requirements.txt:12`;
 `.agents/skills/cae-orchestrator/SKILL.md` (jedes Beispiel).
 
-**Status.** Offen — nur aufgeschrieben, nichts geändert. Es ist kein Defekt der
-Physik, sondern einer der Bedienung, und er hat drei mögliche Antworten, die sich
-nicht ausschließen:
+**Status.** Punkt 1 und 2 **behoben am 2026-09-11**, Punkt 3 offen. Es ist kein
+Defekt der Physik, sondern einer der Bedienung, und er hatte drei mögliche
+Antworten, die sich nicht ausschließen:
 
 1. **Beim Fehlschlag die Wahrheit sagen.** Ein `ModuleNotFoundError` im Netzbau
    ist kein Geometriebefund: eigener Zweig, Exit 2 (Bedienfehler), und der Text
@@ -102,8 +102,36 @@ nicht ausschließen:
    Änderung und behebt den eigentlichen Schaden — die falsche Fährte.
    **Die beiden Literale `4` sind davon unabhängig zu berichtigen**, denn sie
    verfälschen jeden Fehlschlag der Feldstufen, nicht nur diesen.
+
+   *Umgesetzt.* `_oertlicher_fehlschlag(e, was)` (`cae_cli.py:106`) ordnet den
+   Fehler ein und ist die EINE Stelle für alle vier Fundstellen — vier
+   Abschriften wären die, die beim nächsten Mal auseinanderlaufen. Ein
+   `ImportError` gibt `EXIT_USAGE` und einen Text, der das Modul, den
+   `sys.executable` und den Aufruf nennt, der geht, und ausdrücklich dazusagt,
+   dass an der Auslegung **nichts geprüft** wurde; alles andere bleibt
+   `EXIT_REMOTE` samt Fehlertyp. Die beiden `4`-Literale sind damit weg.
+   Nachgemessen nach der Änderung, alle vier im System-Python:
+
+   ```
+   struktur --frisch --mesh 12                        Exit 2
+   topopt   --frisch --iterationen 1                  Exit 2
+   feld2d   --frisch --set machineType=asm            Exit 2
+   feld3d   --frisch --set machineType=asm --nur-netz Exit 2
+   FEHLER: Modul 'gmsh' fehlt in diesem Python (/usr/bin/python3) — Vernetzung
+   hat deshalb NICHT begonnen. Die Auslegung ist damit NICHT beanstandet: an
+   ihr wurde nichts geprueft. Aufruf mit …/venv/bin/python cae_cli.py …
+   ```
+
+   Festgenagelt in `test_cae_cli.py::test_fehlendes_modul_ist_kein_geometriebefund`
+   — samt der Gegenrichtung (ein `RuntimeError` bleibt Exit 1 mit
+   „Feldlauf fehlgeschlagen") und einer Prüfung am Quelltext, dass **kein**
+   Exit-Code mehr als nackte Zahl dasteht.
 2. **Beim Start prüfen.** Die Verben, die Gmsh brauchen, sagen es, bevor sie
-   rechnen, statt mittendrin.
+   rechnen, statt mittendrin. — *Nicht umgesetzt und bewusst nicht:* nach der
+   Berichtigung aus Punkt 1 ist der Unterschied nur noch, ob die Meldung vor
+   oder nach dem Payload-Aufbau steht (Bruchteile einer Sekunde), und eine
+   zweite Liste „welches Verb braucht welches Modul" wäre genau die Art von
+   Abschrift, die still veraltet.
 3. **Den Interpreter in den Unterlagen richtigstellen.** Das ist die Frage
    dahinter und keine reine Textänderung: `cae_cli.py` ist ausdrücklich für den
    System-Python gebaut (Kern stdlib-only, kein `requests`), und `feldbild`,

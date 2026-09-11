@@ -103,6 +103,48 @@ def _die(msg: str, code: int) -> int:
     return code
 
 
+def _oertlicher_fehlschlag(e: BaseException, was: str) -> int:
+    """Einen Fehlschlag einer OERTLICHEN Rechnung einordnen und melden.
+
+    Zwei Faelle, die verschieden zu behandeln sind und es bis zum 11.09.2026
+    nicht waren (s. ``BEFUNDE.md``):
+
+    * **Ein fehlendes Python-Modul ist kein Befund ueber die Auslegung.**
+      ``gmsh`` wird erst IM Aufruf importiert, damit die CLI schlank startet --
+      der ``ModuleNotFoundError`` faellt deshalb mitten im Netzbau an, genau
+      dort, wo der Fang fuer „gmsh kommt mit dieser Geometrie nicht zurecht"
+      steht. Gemeldet wurde „Vernetzung fehlgeschlagen" mit ``EXIT_REMOTE``, und
+      das heisst in dieser CLI „Gegenstelle": das Werkzeug hat gerechnet und
+      sagt Nein zu deiner Geometrie. Wer das liest, aendert ``magDist`` oder
+      ``mesh_mm`` und bekommt denselben Satz. Richtig ist ``EXIT_USAGE`` und ein
+      Text, der den **Interpreter** nennt -- ``gmsh`` steht in
+      ``requirements.txt`` und liegt damit nur in der venv.
+    * **Alles andere** ist ein echter Fehlschlag der Rechnung: ``EXIT_REMOTE``.
+
+    Und an den beiden Feldstufen stand statt einer benannten Konstante die
+    nackte ``4`` -- in dieser CLI die **Zeitueberschreitung**. Jeder Fehlschlag
+    wurde also als „zu lang" gemeldet, was zum Vergroebern des Netzes oder zum
+    Heraufsetzen der Zeitgrenze einlaedt und beides nichts hilft.
+
+    ``was`` benennt den Schritt (``"Vernetzung"``, ``"Feldlauf"`` …) und steht
+    nur im Text der ECHTEN Fehlschlaege; ein fehlendes Modul bekommt seinen
+    eigenen Satz, weil der Schritt gar nicht angefangen hat.
+    """
+    modul = getattr(e, "name", None) if isinstance(e, ImportError) else None
+    if not modul:
+        return _die(f"{was} fehlgeschlagen: {type(e).__name__}: {e}", EXIT_REMOTE)
+
+    venv = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "venv", "bin", "python")
+    wie = (f"{venv} {os.path.basename(__file__)} …" if os.path.isfile(venv)
+           else "dem Python der venv (s. requirements.txt)")
+    return _die(
+        f"Modul '{modul}' fehlt in diesem Python ({sys.executable}) — "
+        f"{was} hat deshalb NICHT begonnen. Die Auslegung ist damit "
+        f"NICHT beanstandet: an ihr wurde nichts geprueft. Aufruf mit {wie}",
+        EXIT_USAGE)
+
+
 def emit(obj, args) -> int:
     obj = strip_blobs(obj)
     text = json.dumps(obj, indent=2, ensure_ascii=False, default=str)
@@ -988,7 +1030,7 @@ def cmd_struktur(args) -> int:
         netz = D.baue(geom, mesh_mm=args.mesh, ordnung=args.ordnung,
                       sektoren=1 if sektor else 0)
     except Exception as e:                                  # gmsh meldet vielerlei
-        return _die(f"Vernetzung fehlgeschlagen: {e}", EXIT_REMOTE)
+        return _oertlicher_fehlschlag(e, "Vernetzung")
 
     print(f"  Netz: {netz.n_knoten:,} Knoten, {netz.n_elemente:,} Tet"
           f"{4 if args.ordnung == 1 else 10}, "
@@ -1085,7 +1127,7 @@ def cmd_topopt(args) -> int:
         netz = D.baue(geom, mesh_mm=args.mesh, ordnung=1,
                       sektoren=0 if args.solver == "z88" else 1)
     except Exception as e:
-        return _die(f"Vernetzung fehlgeschlagen: {e}", EXIT_REMOTE)
+        return _oertlicher_fehlschlag(e, "Vernetzung")
 
     fest = T.sperrbereiche(netz, geom, bohrung_mm=args.fest_bohrung,
                            rand_mm=args.fest_rand, tasche_mm=args.fest_tasche)
@@ -1338,7 +1380,7 @@ def cmd_feld2d(args) -> int:
                        schlupf_suche=not getattr(args, "ohne_kennlinie", False),
                        log=lambda t: print(f"  {t}"))
     except Exception as e:
-        return _die(f"Feldlauf fehlgeschlagen: {type(e).__name__}: {e}", 4)
+        return _oertlicher_fehlschlag(e, "Feldlauf")
 
     text = EH.bericht(kz)
     print()
@@ -1472,7 +1514,7 @@ def cmd_feld3d(args) -> int:
                              log=lambda t: print(f"  {t}"))
     except Exception as e:
         was = "Netzbau" if getattr(args, "nur_netz", False) else "Feldlauf"
-        return _die(f"3-D-{was} fehlgeschlagen: {type(e).__name__}: {e}", 4)
+        return _oertlicher_fehlschlag(e, f"3-D-{was}")
 
     text = E3.bericht(kz)
     print()

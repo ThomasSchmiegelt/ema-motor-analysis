@@ -12,6 +12,8 @@ und wird sonst übersprungen."""
 
 import json
 import os
+import re
+import sys
 
 import cae_cli
 
@@ -441,6 +443,73 @@ def test_schema_vs_payload():
         print(f"✓ schema_vs_payload: alle {len(schema)} Schemaschluessel im Payload gefunden")
 
 
+def test_fehlendes_modul_ist_kein_geometriebefund():
+    """Ein ModuleNotFoundError im Netzbau darf nicht wie eine Absage an die
+    Auslegung aussehen.
+
+    Gemessen am 11.09.2026 (s. BEFUNDE.md): ``python3 cae_cli.py struktur``
+    meldete ``Vernetzung fehlgeschlagen: No module named 'gmsh'`` mit Exit 1.
+    Exit 1 heisst in dieser CLI **Gegenstelle** -- also „das Werkzeug hat
+    gerechnet und sagt Nein zu deiner Geometrie"; wer das liest, aendert
+    ``magDist`` und bekommt denselben Satz. ``gmsh`` wird erst IM Aufruf
+    importiert, der Fehler faellt deshalb genau in den Fang, der fuer „gmsh
+    kommt mit dieser Geometrie nicht zurecht" gebaut ist.
+
+    Und ``feld2d``/``feld3d`` gaben dafuer die nackte ``4`` zurueck -- in dieser
+    CLI die **Zeitueberschreitung**, was zum Vergroebern des Netzes einlaedt und
+    nichts hilft.
+    """
+    import io as _io
+    import contextlib
+
+    def melde(e, was):
+        fehler = _io.StringIO()
+        with contextlib.redirect_stderr(fehler):
+            code = cae_cli._oertlicher_fehlschlag(e, was)
+        return code, fehler.getvalue()
+
+    # (1) Fehlendes Modul -> Bedienfehler, und der Text nennt den Interpreter.
+    code, txt = melde(ModuleNotFoundError("No module named 'gmsh'", name="gmsh"),
+                      "Vernetzung")
+    assert code == cae_cli.EXIT_USAGE, f"fehlendes Modul -> Exit {code}, erwartet 2"
+    assert code != cae_cli.EXIT_REMOTE, "darf NICHT als Gegenstelle gelten"
+    assert code != cae_cli.EXIT_TIMEOUT, "und schon gar nicht als Zeitueberschreitung"
+    assert "gmsh" in txt, "das fehlende Modul wird benannt"
+    assert sys.executable in txt, "der Interpreter wird benannt — er ist die Ursache"
+    assert "NICHT beanstandet" in txt, ("es muss dastehen, dass an der Auslegung "
+                                        "nichts geprueft wurde")
+    assert "fehlgeschlagen" not in txt, ("'fehlgeschlagen' waere die falsche "
+                                          "Faehrte: der Schritt hat nie begonnen")
+
+    # (2) Die Grossschreibung des Schrittes bleibt stehen — ein '.lower()' machte
+    #     aus '3-D-Netzbau' ein '3-d-netzbau'.
+    _, txt3 = melde(ModuleNotFoundError("x", name="gmsh"), "3-D-Netzbau")
+    assert "3-D-Netzbau" in txt3, txt3
+
+    # (3) Jeder ANDERE Fehler bleibt ein echter Fehlschlag der Rechnung.
+    for fehler in (RuntimeError("Netz entartet"),
+                   ValueError("Tasche ausserhalb des Rotors")):
+        code, txt = melde(fehler, "Feldlauf")
+        assert code == cae_cli.EXIT_REMOTE, f"{fehler!r} -> Exit {code}, erwartet 1"
+        assert "Feldlauf fehlgeschlagen" in txt, txt
+        assert type(fehler).__name__ in txt, "der Fehlertyp steht dabei"
+
+    # (4) Kein Exit-Code als nackte Zahl mehr — genau diese zwei Literale waren
+    #     die Ursache des Zeitueberschreitungs-Befunds.
+    quelle = open(os.path.join(os.path.dirname(os.path.abspath(cae_cli.__file__)),
+                               "cae_cli.py"), encoding="utf-8").read()
+    nackt = re.findall(r"_die\(f?\"[^\"]*\",\s*\d\)", quelle)
+    assert not nackt, f"Exit-Code als Literal statt als Konstante: {nackt}"
+
+    # (5) Und alle vier Fundstellen gehen durch DENSELBEN Helfer — vier
+    #     Abschriften waeren die, die beim naechsten Mal auseinanderlaufen.
+    rufe = quelle.count("return _oertlicher_fehlschlag(e")
+    assert rufe == 4, (f"{rufe} Aufrufe statt 4 — erwartet: struktur, topopt, "
+                       f"feld2d, feld3d")
+    print("✓ fehlendes Modul: Bedienfehler statt Geometriebefund, Interpreter "
+          "genannt, echte Fehlschlaege bleiben Exit 1, keine nackten Exit-Codes")
+
+
 if __name__ == "__main__":
     test_placement()
     test_types_and_bounds()
@@ -460,4 +529,5 @@ if __name__ == "__main__":
     test_frischer_payload_baut_aus_waenden()
     test_schema_has_no_second_geom_table()
     test_schema_vs_payload()
+    test_fehlendes_modul_ist_kein_geometriebefund()
     print("\nALLE CAE-CLI-TESTS BESTANDEN ✅")

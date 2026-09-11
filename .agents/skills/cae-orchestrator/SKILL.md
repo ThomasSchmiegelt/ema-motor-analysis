@@ -30,6 +30,13 @@ cd ~/ai-workspace/cae_orchestrator && ./start.sh
 Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehler ·
 `3` Server aus · `4` Zeitüberschreitung. Am Code entscheiden, nicht am Text.
 
+**Exit 2 mit „Modul … fehlt in diesem Python" ist kein Befund über die
+Auslegung.** `struktur`, `topopt`, `feld2d` und `feld3d` brauchen das
+Python-Modul `gmsh`, und das liegt nur in der venv — mit
+`cae_orchestrator/venv/bin/python cae_cli.py …` aufrufen statt mit `python3`.
+An der Geometrie ist dann nichts geprüft worden; sie zu ändern hilft nicht.
+Alle übrigen Verben laufen unter `python3`.
+
 ## Verben
 
 | Verb | Zweck |
