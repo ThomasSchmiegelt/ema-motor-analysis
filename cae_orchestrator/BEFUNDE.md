@@ -17,6 +17,143 @@ kann.
 
 ---
 
+## 2026-09-11 — Vier Verben laufen im System-Python nicht, und melden dabei das Falsche
+
+**Beobachtung.** `python3 cae_cli.py struktur --frisch` bricht ab mit
+`FEHLER: Vernetzung fehlgeschlagen: No module named 'gmsh'`, Exit 1. Der Satz ist
+zweimal irreführend, und zwar in der Richtung, die einen Agenten in die falsche
+Arbeit schickt: **die Vernetzung ist nicht fehlgeschlagen** — sie hat gar nicht
+angefangen, weil dem Interpreter das Modul fehlt; und **Exit 1 heißt in dieser CLI
+„Gegenstelle"**, also „das Werkzeug hat gearbeitet und sagt Nein zu deiner
+Geometrie". Wer das liest, ändert `magDist`, `mesh_mm` oder die Taschenlage — und
+bekommt beim nächsten Versuch denselben Satz. Richtig wäre „Bedienfehler" (Exit 2)
+und ein Text, der den Interpreter nennt.
+
+Der Grund, dass es überhaupt so weit kommt: `gmsh` wird **erst im Aufruf**
+importiert (damit der Rest der CLI schlank bleibt und stdlib-nah startet). Der
+`ModuleNotFoundError` fällt deshalb mitten in `ema_deck.baue` an, wo
+`cmd_struktur` ihn mit `except Exception` als Vernetzungsfehler einsammelt —
+genau der Stelle, die für „gmsh kommt mit dieser Geometrie nicht zurecht" gebaut
+ist.
+
+**Messung.**
+
+- Module im System-Python (`/usr/bin/python3`, 3.12.3) gegen die venv:
+
+  | | numpy | scipy | matplotlib | vtk | **gmsh** | flask |
+  |---|---|---|---|---|---|---|
+  | `/usr/bin/python3` | ✓ | ✓ | ✓ | ✓ | **fehlt** | fehlt |
+  | `venv/bin/python` | ✓ | ✓ | ✓ | ✓ | **✓** | ✓ |
+
+  `gmsh` steht in `requirements.txt:12` und liegt damit **nur** in der venv.
+  `/usr/bin/gmsh` (4.12.1) ist das Programm, nicht das Python-Modul, und hilft
+  hier nicht.
+
+- Betroffen sind vier Verben, alle mit demselben Muster:
+
+  | Aufruf (System-Python) | Meldung | Exit |
+  |---|---|---|
+  | `struktur --frisch --mesh 12` | `Vernetzung fehlgeschlagen: No module named 'gmsh'` | 1 |
+  | `topopt --frisch --iterationen 1` | `Vernetzung fehlgeschlagen: No module named 'gmsh'` | 1 |
+  | `feld2d --frisch --set machineType=asm` | `Feldlauf fehlgeschlagen: ModuleNotFoundError: No module named 'gmsh'` | **4** |
+  | `feld3d --frisch --set machineType=asm --nur-netz` | `3-D-Netzbau fehlgeschlagen: ModuleNotFoundError: No module named 'gmsh'` | **4** |
+
+  **Bei `feld2d`/`feld3d` ist der Exit-Code eine eigene, größere Sache: 4 heißt in
+  dieser CLI „Zeitüberschreitung".** Gemeldet wird also „der Lauf war zu lang" für
+  ein fehlendes Modul — und das schickt einen Agenten zum Vergröbern des Netzes
+  oder zum Heraufsetzen der Zeitgrenze, beides wirkungslos. Die Ursache steht
+  in zwei Zeilen: `cae_cli.py:1341` und `:1475` geben die **nackte Zahl `4`**
+  zurück, wo sonst überall die benannten Konstanten stehen
+  (`EXIT_OK, EXIT_REMOTE, EXIT_USAGE, EXIT_DOWN, EXIT_TIMEOUT = 0, 1, 2, 3, 4`,
+  `cae_cli.py:42`). Es sind die **einzigen** zwei Stellen im ganzen Verb-Satz, an
+  denen ein Exit-Code als Literal steht; an einer benannten Konstante wäre
+  niemandem entgangen, dass dort `EXIT_TIMEOUT` gemeint gewesen wäre. Das gilt
+  unabhängig von Gmsh — **jeder** Fehlschlag dieser beiden Feldstufen wird heute
+  als Zeitüberschreitung gemeldet.
+
+- Die Module selbst laden alle sauber (`import ema_deck`, `ema_topopt`,
+  `ema_z88`, `ema_aster`, `ema_em2d_harm`, `ema_em3d_harm`, `ema_em3d`,
+  `ema_bilddaten`, `ema_getriebe`, `ema_feldbild`, `ema_welle` — 11 von 11 ohne
+  Fehler). Es gibt also keinen Import-Zeitpunkt, an dem das auffiele.
+
+- Gegenprobe: `venv/bin/python cae_cli.py struktur --frisch --mesh 12` läuft
+  durch (`Netz: 566 Knoten, 1.734 Tet4, ein Polsektor, 15000 min-1`).
+
+- **Und die Unterlagen zeigen genau den Aufruf, der nicht geht:** `python3
+  cae_cli.py …` steht **70 mal** in `.agents/skills/cae-orchestrator/SKILL.md`
+  und **10 mal** in `AGENTS.md`; `venv/bin/python cae_cli` steht **null mal** in
+  beiden. Die venv wird in der `SKILL.md` überhaupt nicht erwähnt. Ein Modell
+  folgt den Beispielen — das ist derselbe Mechanismus, aus dem `--frisch`
+  entstanden ist (alle Beispiele zeigten `--from-project last`, also erbte jede
+  neue Auslegung die vorige).
+
+**Fundstelle.** `cae_cli.py:991` und `:1088` (`_die(f"Vernetzung fehlgeschlagen:
+{e}", EXIT_REMOTE)`); `cae_cli.py:1341` und `:1475` (Literal `4` statt einer
+benannten Konstante, gegen `cae_cli.py:42`); `requirements.txt:12`;
+`.agents/skills/cae-orchestrator/SKILL.md` (jedes Beispiel).
+
+**Status.** Offen — nur aufgeschrieben, nichts geändert. Es ist kein Defekt der
+Physik, sondern einer der Bedienung, und er hat drei mögliche Antworten, die sich
+nicht ausschließen:
+
+1. **Beim Fehlschlag die Wahrheit sagen.** Ein `ModuleNotFoundError` im Netzbau
+   ist kein Geometriebefund: eigener Zweig, Exit 2 (Bedienfehler), und der Text
+   nennt `sys.executable` samt dem Aufruf, der geht. Das ist die kleinste
+   Änderung und behebt den eigentlichen Schaden — die falsche Fährte.
+   **Die beiden Literale `4` sind davon unabhängig zu berichtigen**, denn sie
+   verfälschen jeden Fehlschlag der Feldstufen, nicht nur diesen.
+2. **Beim Start prüfen.** Die Verben, die Gmsh brauchen, sagen es, bevor sie
+   rechnen, statt mittendrin.
+3. **Den Interpreter in den Unterlagen richtigstellen.** Das ist die Frage
+   dahinter und keine reine Textänderung: `cae_cli.py` ist ausdrücklich für den
+   System-Python gebaut (Kern stdlib-only, kein `requests`), und `feldbild`,
+   `welle`, `getriebe`, `steckbrief`, `paarvergleich` laufen dort auch wirklich —
+   nur die vier gmsh-Verben nicht. Ob alle Beispiele auf die venv umgestellt
+   werden oder nur diese vier, ist eine Entscheidung über den Charakter der CLI
+   und gehört nicht in einen Befund.
+
+Gefunden beim Einbau von Code Aster als drittem Löser (`--solver alle`), also
+beim ersten Aufruf von `struktur` aus dem System-Python seit längerem. Der
+FreeCAD-Weg und der Browser sind **nicht** betroffen: der Server läuft in der
+venv.
+
+---
+
+## 2026-09-10 — Code_Aster ist nicht verfügbar — und bleibt es, solange AppArmor unprivilegierte userns sperrt
+
+**Beobachtung.** `ster`/`salome` gibt es systemweit nicht. Spack 1.3.0 user-space
+ist installiert, kennt das Paket `code-aster` aber nicht (`spack code-aster` →
+`does not exist` — der PR ist nicht merged). `codeaster/src` @ 18.1.5 ist unter
+`~/aster-build/src/src` geklont (32 852 Dateien, WAF-Build, keine CMake).
+
+**Messung.**
+- `which aster`, `which salome` → nicht gefunden.
+- `spack spec code-aster` → `cannot concretize 'code-aster', since 'code-aster' does not exist`.
+- Code_Aster 18 braucht Doflux und SALOME (SMESH, MED, BRep) als externe Libs.
+  Die öffentlichen Repos (`gitlab.com/doflux/doflux`,
+  `gitlab.com/salome-platform/SALOME-Platform`) sind **nicht öffentlich**
+  (HTTP 302 → `gitlab.com/users/sign_in`). Ohne die Libs start
+  der WAF-Build nicht.
+- Als: SIF-Bundle `salome_meca-lgpl-2025.1.0-1-20251026-scibian-12.sif`
+  (5,4 GB) in `~/Downloads`. Apptainer 1.5.3 aus DEB entpackt unter
+  `~/apptainer-pkg`. Start bricht an:
+  `apparmor_restrict_unprivileged_userns = 1` und
+  `unshare -Urmp` → `/proc/self/uid_map: Operation not permitted`.
+  Kein sudo → setuid-Binär nicht setzbar. Beide Modi (userns, setuid) sind in
+  dieser Umgebung nicht nutzbar.
+
+**Fundstelle.** `~/aster-build/src/src/` (Code_Aster 18.1.5),
+`~/apptainer-pkg/` (Apptainer 1.5.3), SIF in `~/Downloads/`.
+
+**Status.** Behoben am 2026-09-10. Der SIF-RootFS wurde mit `unsquashfs`
+direkt aus dem SIF extrahiert (`tail -c +65537 SIF | unsquashfs -d salome-img`);
+userns / AppArmor / setuid sind nicht mehr nötig. Code_Aster 17.4.0
+(`lib64/aster/code_aster/`) läuft als reines Python-Paket mit eingebauten
+Libraries (HDF5 1.10.9, MUMPS 5.6.2, MED 4.1, MFront 4.2, SCOTCH 7.0.4) unter
+`~/aster-build/salome-img/`. Start-Wrap
+
+---
+
 ## 2026-09-09 — Der Fahrzyklus konnte das Getriebe lesen, aber niemand schrieb es hin
 
 **Beobachtung.** `ema_drivecycle.compute_drivetrain` liest seit dem Getriebe-Umbau
