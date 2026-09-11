@@ -737,9 +737,15 @@ function modellFuellen(d){
       ? 'Nur das Vorgabemodell: ' + d.modelle_grund : '';
     return;
   }
+  // `da:false` heisst: steht im Katalog, ist aber nicht installiert. Gemessen
+  // gab es genau so einen Eintrag (`qwen3.5:9b`) -- die Maske bot ihn an, und
+  // der Start waere daran gescheitert. Also zeigen UND sperren, statt ihn
+  // verschwinden zu lassen: verschwunden erklaert nichts.
   sel.innerHTML = MODELLE.map(m =>
-    `<option value="${esc(m.modell)}"${m.modell === d.modell ? ' selected' : ''}>` +
-    `${m.lokal ? '🏠' : '🌐'} ${esc(m.name)} · ${esc(m.anbieter)}</option>`).join('');
+    `<option value="${esc(m.modell)}"${m.modell === d.modell ? ' selected' : ''}` +
+    `${m.da === false ? ' disabled' : ''}>` +
+    `${m.da === false ? '⚠ ' : (m.lokal ? '🏠' : '🌐')} ${esc(m.name)} · ` +
+    `${esc(m.anbieter)}${m.da === false ? ' — nicht installiert' : ''}</option>`).join('');
   modellHinweis();
 }
 

@@ -206,6 +206,59 @@
         <select id="f_modell" onchange="modellHinweis()"></select>
         <div class="hint" id="f_modell_hinweis"
              style="margin:5px 0 0;font-size:11.5px;color:var(--tx2)"></div>
+        <!-- Erst beim Aufklappen geladen: der Abschnitt fragt Ollama UND liest
+             den Katalog, und das gehoert nicht in jeden Seitenstart. -->
+        <details id="f_kat" style="margin:8px 0 0;font-size:11.5px"
+                 ontoggle="if(this.open && !KAT) katLaden()">
+          <summary style="cursor:pointer;color:#7db9e8">⚙ Modelle &amp; API-Zugang</summary>
+          <div style="padding:8px 0 0;display:flex;flex-direction:column;gap:8px">
+
+            <div id="kat_stand" style="color:var(--tx2)"></div>
+
+            <div>
+              <button type="button" onclick="katSync()"
+                      style="font-size:11.5px">⟳ Ollama-Modelle übernehmen</button>
+              <span class="hint" style="color:var(--tx2)">
+                trägt ein, was wirklich installiert ist — <code>pi</code> entdeckt
+                nichts von selbst</span>
+            </div>
+
+            <hr style="border:0;border-top:1px solid var(--brd);margin:2px 0">
+
+            <div>
+              <label for="kat_anb" style="font-size:11.5px">API-Anbieter</label>
+              <select id="kat_anb" onchange="katAnbieterUm()"
+                      style="font-size:11.5px"></select>
+            </div>
+            <div>
+              <label for="kat_key" style="font-size:11.5px">Schlüssel</label>
+              <input type="password" id="kat_key" autocomplete="off"
+                     placeholder="sk-or-v1-…" style="font-size:11.5px">
+              <div class="hint" style="color:var(--tx2)">
+                Wird in <code>~/.pi/agent/models.json</code> (0600) abgelegt und
+                <b>nie zurückgegeben</b>. Diese Felder wirken <b>nur von diesem
+                Rechner</b> — im Heimnetz wäre ein Schlüsselfeld keine Sperre.
+                <span id="kat_woher"></span>
+              </div>
+            </div>
+            <div>
+              <label for="kat_suche" style="font-size:11.5px">Modell suchen</label>
+              <input type="text" id="kat_suche" placeholder="z. B. claude, qwen, llama"
+                     onkeydown="if(event.key==='Enter'){event.preventDefault();katSuchen();}"
+                     style="font-size:11.5px">
+              <button type="button" onclick="katSuchen()"
+                      style="font-size:11.5px;margin-top:5px">Suchen</button>
+              <span class="hint" style="color:var(--tx2)">
+                ohne Schlüssel möglich — die Liste ist öffentlich</span>
+            </div>
+            <div id="kat_treffer" style="max-height:190px;overflow:auto"></div>
+            <div>
+              <button type="button" onclick="katEintragen()"
+                      style="font-size:11.5px">✓ Angehakte eintragen</button>
+              <span id="kat_meldung" style="margin-left:8px"></span>
+            </div>
+          </div>
+        </details>
       </div>
       <div>
         <label for="f_schleifen">Entwurfsschleifen</label>
@@ -370,13 +423,128 @@ function modellFuellen(d){
       ? 'Nur das Vorgabemodell: ' + d.modelle_grund : '';
     return;
   }
+  // `da:false` heisst: steht im Katalog, ist aber nicht installiert. Gemessen
+  // gab es genau so einen Eintrag (`qwen3.5:9b`) -- die Maske bot ihn an, und
+  // der Start waere daran gescheitert. Also zeigen UND sperren, statt ihn
+  // verschwinden zu lassen: verschwunden erklaert nichts.
   sel.innerHTML = MODELLE.map(m =>
-    `<option value="${esc(m.modell)}"${m.modell === d.modell ? ' selected' : ''}>` +
-    `${m.lokal ? '🏠' : '🌐'} ${esc(m.name)} · ${esc(m.anbieter)}</option>`).join('');
+    `<option value="${esc(m.modell)}"${m.modell === d.modell ? ' selected' : ''}` +
+    `${m.da === false ? ' disabled' : ''}>` +
+    `${m.da === false ? '⚠ ' : (m.lokal ? '🏠' : '🌐')} ${esc(m.name)} · ` +
+    `${esc(m.anbieter)}${m.da === false ? ' — nicht installiert' : ''}</option>`).join('');
   if(!MODELLE.some(m => m.modell === d.modell) && d.modell)
     sel.insertAdjacentHTML('afterbegin',
       `<option value="${esc(d.modell)}" selected>${esc(d.modell)} (Vorgabe)</option>`);
   modellHinweis();
+}
+
+// ── Modellkatalog: abgleichen und einen API-Anbieter eintragen ──────────────
+//
+// Der Katalog ist PIs eigene `~/.pi/agent/models.json` -- dieselbe Datei, aus
+// der `pi --list-models` liest. Es gibt keine zweite Liste daneben; eine solche
+// liefe binnen einer Woche auseinander, und dann boete die Maske ein Modell an,
+// das `pi` nicht kennt (oder umgekehrt). Gemessen war genau das der Zustand:
+// zwei Eintraege gegen zwanzig installierte Modelle, und einer der zwei war
+// gar nicht da.
+let KAT = null;
+
+async function katLaden(){
+  try{
+    const r = await fetch(K('/agent/anbieter'));
+    KAT = await r.json();
+  }catch(e){ $('kat_stand').textContent = 'Katalog nicht lesbar: ' + e.message; return; }
+
+  const ol = KAT.ollama || {};
+  const verw = (ol.verwaist || []);
+  $('kat_stand').innerHTML =
+    (ol.grund ? `<b style="color:#e6a23c">Ollama: ${esc(ol.grund)}</b>`
+              : `Ollama: <b>${ol.n}</b> Modelle installiert`) +
+    ' · Katalog: ' + (KAT.anbieter || []).map(a =>
+      `${a.lokal ? '🏠' : '🌐'} ${esc(a.name)} (${a.n_modelle})`).join(', ') +
+    (verw.length ? `<br><span style="color:#e6a23c">⚠ im Katalog, aber nicht ` +
+      `installiert: ${verw.map(esc).join(', ')}</span>` : '');
+
+  const sel = $('kat_anb');
+  sel.innerHTML = (KAT.bekannt || []).map(b =>
+    `<option value="${esc(b.name)}">${esc(b.label)} — ${esc(b.baseUrl)}</option>`).join('');
+  // Die Sperre sitzt im Server; die Maske sagt nur, warum die Felder nichts tun.
+  const aus = !KAT.lokal;
+  ['kat_key','kat_suche','kat_anb'].forEach(id => { const e=$(id); if(e) e.disabled = aus; });
+  $('kat_woher').innerHTML = aus
+    ? ' <b style="color:#e6a23c">Diese Seite ist nicht von 127.0.0.1 geöffnet — ' +
+      'Eintragen ist hier gesperrt.</b>' : '';
+  katAnbieterUm();
+}
+
+function katAnbieterUm(){
+  const b = (KAT?.bekannt || []).find(x => x.name === $('kat_anb').value);
+  const m = $('kat_meldung');
+  m.innerHTML = b?.schluessel_ab
+    ? `<span class="hint" style="color:var(--tx2)">Schlüssel: ` +
+      `<a href="${esc(b.schluessel_ab)}" target="_blank" rel="noopener" ` +
+      `style="color:#7db9e8">${esc(b.schluessel_ab)}</a></span>` : '';
+  $('kat_treffer').innerHTML = '';
+}
+
+async function katSync(){
+  const m = $('kat_meldung'); m.textContent = 'gleiche ab …';
+  try{
+    const r = await fetch(K('/agent/anbieter/sync'), {method:'POST'});
+    const d = await r.json();
+    m.innerHTML = d.ok
+      ? `<b style="color:#67c23a">✓ ${d.neu.length} neu, ${d.gesamt} im Katalog</b>`
+      : `<b style="color:#e6a23c">${esc(d.grund || d.error || 'fehlgeschlagen')}</b>`;
+    if(d.ok){ await katLaden(); await auswahlLaden(); }
+  }catch(e){ m.textContent = 'Abgleich fehlgeschlagen: ' + e.message; }
+}
+
+async function katSuchen(){
+  const m = $('kat_meldung'); m.textContent = 'frage an …';
+  try{
+    const r = await fetch(K('/agent/anbieter/liste'), {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({anbieter: $('kat_anb').value,
+                            schluessel: $('kat_key').value,
+                            suche: $('kat_suche').value})});
+    const d = await r.json();
+    if(!d.ok){ m.innerHTML = `<b style="color:#e6a23c">${esc(d.grund || d.error)}</b>`; return; }
+    m.innerHTML = `<span class="hint" style="color:var(--tx2)">` +
+      `${d.modelle.length} von ${d.n_gesamt} gezeigt</span>`;
+    $('kat_treffer').innerHTML = d.modelle.map((x, i) =>
+      `<label style="display:flex;gap:6px;align-items:baseline;padding:2px 0">` +
+      `<input type="checkbox" data-i="${i}">` +
+      `<span><code>${esc(x.id)}</code> · ${(x.contextWindow/1000).toFixed(0)}k` +
+      `${(x.cost.input || x.cost.output)
+          ? ` · $${x.cost.input}/$${x.cost.output} je Mio` : ' · kostenlos'}</span></label>`
+    ).join('') || '<span class="hint">nichts gefunden</span>';
+    $('kat_treffer').dataset.modelle = JSON.stringify(d.modelle);
+  }catch(e){ m.textContent = 'Suche fehlgeschlagen: ' + e.message; }
+}
+
+async function katEintragen(){
+  const m = $('kat_meldung');
+  const alle = JSON.parse($('kat_treffer').dataset.modelle || '[]');
+  const gewaehlt = [...$('kat_treffer').querySelectorAll('input:checked')]
+                     .map(c => alle[+c.dataset.i]).filter(Boolean);
+  if(!gewaehlt.length){ m.innerHTML =
+    '<b style="color:#e6a23c">Nichts angehakt — ein Anbieter ohne Modell steht ' +
+    'in keiner Auswahl.</b>'; return; }
+  m.textContent = 'trage ein …';
+  try{
+    const r = await fetch(K('/agent/anbieter'), {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({anbieter: $('kat_anb').value,
+                            schluessel: $('kat_key').value,
+                            modelle: gewaehlt})});
+    const d = await r.json();
+    if(!d.ok){ m.innerHTML = `<b style="color:#e6a23c">${esc(d.grund || d.error)}</b>`; return; }
+    // Der Schlüssel wird sofort aus dem Feld genommen: er steht jetzt in der
+    // Datei, und im DOM hat er nichts mehr verloren.
+    $('kat_key').value = '';
+    m.innerHTML = `<b style="color:#67c23a">✓ ${esc(d.anbieter)}: ` +
+                  `${d.modelle.length} Modelle</b>`;
+    await katLaden(); await auswahlLaden();
+  }catch(e){ m.textContent = 'Eintragen fehlgeschlagen: ' + e.message; }
 }
 
 function modellHinweis(){

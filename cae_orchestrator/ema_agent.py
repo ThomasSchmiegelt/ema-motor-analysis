@@ -117,79 +117,46 @@ def hermes_gefunden() -> str | None:
 # liefe auseinander, und dann boete die Maske ein Modell an, das ``pi`` nicht
 # kennt (oder umgekehrt). Dasselbe Argument wie bei der einen ``SKILL.md`` fuer
 # alle Koepfe.
-PI_MODELLE = os.path.expanduser("~/.pi/agent/models.json")
+import ema_modelle as _kat
+
+PI_MODELLE = _kat.PI_MODELLE
 
 
 def _ist_lokal(base_url: str) -> bool:
-    """Bleibt dieser Anbieter auf der Maschine?
+    """Bleibt dieser Anbieter auf der Maschine? An der ADRESSE gemessen.
 
-    An der ADRESSE gemessen und nicht am Namen: ein Anbieter darf heissen, wie er
-    will -- ob Daten das Haus verlassen, entscheidet der Host. Das ist die eine
-    Angabe, die in der Maske stehen muss, denn bis hierher galt fuer dieses Repo
-    ausdruecklich „nichts spricht ueber localhost hinaus".
+    Ein Anbieter darf heissen, wie er will; ob Eingaben die Maschine verlassen,
+    entscheidet der Host. Das ist die eine Angabe, die in der Maske stehen muss,
+    denn bis hierher galt fuer dieses Repo ausdruecklich „nichts spricht ueber
+    localhost hinaus".
     """
-    try:
-        wirt = (urllib.parse.urlsplit(str(base_url or "")).hostname or "").lower()
-    except ValueError:
-        return False
-    return wirt in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+    return _kat.ist_lokal(base_url)
 
 
-def modelle(pfad: str = "") -> dict:
-    """Anbieter und Modelle, wie ``pi`` sie kennt. Weich fehlschlagend.
+def modelle(pfad: str = "", pruefe: bool = True) -> dict:
+    """Anbieter und Modelle fuer die Startmaske. Weich fehlschlagend.
 
-    Rueckgabe: ``{"ok", "modelle": [...], "grund"}``. Jeder Eintrag traegt
-    ``anbieter``, ``modell``, ``name``, ``lokal`` und ``schluessel`` -- letzteres
-    NUR als ja/nein: ein Schluessel gehoert nirgends in eine Antwort, die durch
-    den Browser geht.
+    Gerechnet wird in ``ema_modelle.katalog`` -- **eine** Quelle fuer Maske,
+    Startskript und ``pi`` selbst. Der Grund steht dort im Modulkopf und ist
+    gemessen: ``pi --list-models`` zeigte zwei Modelle, waehrend zwanzig in
+    Ollama lagen, und eines der zwei war gar nicht installiert.
+
+    Jeder Eintrag traegt ``schluessel`` NUR als ja/nein -- ein Schluessel
+    gehoert nirgends in eine Antwort, die durch den Browser geht -- und ``da``:
+    ob es das Modell wirklich gibt.
     """
-    pfad = pfad or PI_MODELLE
-    try:
-        with open(pfad, encoding="utf-8") as f:
-            d = json.load(f) or {}
-    except (OSError, ValueError) as e:
-        return {"ok": False, "modelle": [],
-                "grund": f"{os.path.basename(pfad)} nicht lesbar: "
-                         f"{type(e).__name__}"}
-    aus = []
-    for anbieter, p in (d.get("providers") or {}).items():
-        lokal = _ist_lokal(p.get("baseUrl"))
-        for m in (p.get("models") or []):
-            kosten = m.get("cost") or {}
-            aus.append({
-                "anbieter": anbieter,
-                "modell": m.get("id", ""),
-                "name": m.get("name") or m.get("id", ""),
-                "lokal": lokal,
-                "basis": p.get("baseUrl", ""),
-                "schluessel": bool(p.get("apiKey")),
-                # Kostet der Lauf Geld? Die Zahl steht in PIs Datei; ob sie
-                # stimmt, weiss nur der Anbieter -- sie wird darum gezeigt und
-                # nicht verrechnet.
-                "kostet": bool(kosten.get("input") or kosten.get("output")),
-                "kontext": m.get("contextWindow"),
-            })
-    if not aus:
-        return {"ok": False, "modelle": [],
-                "grund": f"in {os.path.basename(pfad)} steht kein Modell"}
-    # Lokale zuerst: das ist die Vorgabe dieses Hauses, und wer ein API-Modell
-    # will, soll es ausdruecklich waehlen statt es versehentlich zu treffen.
-    aus.sort(key=lambda m: (not m["lokal"], m["anbieter"], m["modell"]))
-    return {"ok": True, "modelle": aus, "grund": ""}
+    k = _kat.katalog(pfad, pruefe_ollama=pruefe)
+    return {"ok": k["ok"], "modelle": k["modelle"], "grund": k["grund"],
+            "anbieter": k.get("anbieter") or []}
 
 
 def anbieter_fuer(modell: str, pfad: str = "") -> str:
     """Zu welchem Anbieter gehoert dieses Modell? Vorgabe ``ollama``.
 
-    Der Aufrufer schickt einen Modellnamen; welcher Anbieter ihn fuehrt, steht
-    in PIs Datei. Ist er dort unbekannt, bleibt es bei ``ollama`` -- dann
-    verhaelt sich alles wie vorher, statt mit einem erratenen Anbieter zu
-    starten.
+    Ist er im Katalog unbekannt, bleibt es bei ``ollama`` -- dann verhaelt sich
+    alles wie vorher, statt mit einem erratenen Anbieter zu starten.
     """
-    for m in modelle(pfad).get("modelle") or []:
-        if m["modell"] == modell:
-            return m["anbieter"]
-    return "ollama"
+    return _kat.anbieter_fuer(modell, pfad)
 
 
 # ── Frueheren Laeufen nachgehen ──────────────────────────────────────────────

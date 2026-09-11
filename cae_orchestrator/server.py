@@ -4320,6 +4320,98 @@ def _agent_kopf():
     return ema_agent.kopf(name)
 
 
+# ── Der Modellkatalog: Ollama abgleichen, einen API-Anbieter eintragen ───────
+#
+# Geschrieben wird ``~/.pi/agent/models.json`` -- PIs eigene Datei und damit die
+# EINE Quelle fuer Maske, Startskript und ``pi`` selbst. Gemessen am 11.09.2026
+# stand darin zweierlei Unfug: neunzehn installierte Ollama-Modelle fehlten, und
+# eines der beiden eingetragenen (``qwen3.5:9b``) war gar nicht installiert --
+# die Maske bot also ein Modell an, das beim Start nicht existiert.
+#
+# **Jeder Schreibzugriff und jede Schluesseleingabe nur von diesem Rechner.**
+# Die Studio-Seite steht absichtlich im Heimnetz (``ema_mobil.token``); ein
+# Schluesselfeld, das von dort erreichbar waere, ist keines. Dasselbe Muster wie
+# ``/m/zugang`` und ``/studio/zugang``, und aus demselben Grund.
+
+def _nur_von_hier():
+    """``None`` wenn der Aufruf von dieser Maschine kommt, sonst die Absage."""
+    if request.remote_addr not in ("127.0.0.1", "::1"):
+        return jsonify({"error": "Der Modellkatalog wird nur von diesem Rechner "
+                                 "aus geaendert — ein Schluesselfeld im Heimnetz "
+                                 "waere keine Sperre."}), 403
+    return None
+
+
+@app.route("/agent/anbieter", methods=["GET"])
+def agent_anbieter():
+    """Was im Katalog steht und was sich eintragen liesse. OHNE Schluessel."""
+    import ema_modelle
+    k = ema_modelle.katalog()
+    da, ollama_grund = ema_modelle.installiert()
+    return jsonify({
+        "anbieter": k.get("anbieter") or [],
+        "bekannt": [{"name": n, **{x: v for x, v in p.items()
+                                   if x != "modelle_url"}}
+                    for n, p in ema_modelle.BEKANNT.items()],
+        "ollama": {"n": len(da), "grund": ollama_grund,
+                   "verwaist": [m["modell"] for m in (k.get("modelle") or [])
+                                if not m["da"]]},
+        "lokal": request.remote_addr in ("127.0.0.1", "::1"),
+        "datei": ema_modelle.PI_MODELLE,
+    })
+
+
+@app.route("/agent/anbieter/sync", methods=["POST"])
+def agent_anbieter_sync():
+    """Die installierten Ollama-Modelle in den Katalog uebernehmen."""
+    if (nein := _nur_von_hier()):
+        return nein
+    import ema_modelle
+    r = ema_modelle.sync_ollama()
+    return jsonify(r), (200 if r["ok"] else 400)
+
+
+@app.route("/agent/anbieter/liste", methods=["POST"])
+def agent_anbieter_liste():
+    """Die Modelle eines API-Anbieters holen — zum Auswaehlen, nicht zum Eintragen.
+
+    OpenRouter fuehrt ueber vierhundert; alle einzutragen machte Katalog und
+    Maske unbrauchbar. Der Schluessel darf hier fehlen: OpenRouters Liste ist
+    oeffentlich (gemessen), und wer ohne Schluessel schon sehen kann, was es
+    gibt, muss ihn nicht zum Stoebern eintippen.
+    """
+    if (nein := _nur_von_hier()):
+        return nein
+    import ema_modelle
+    d = request.get_json(silent=True) or {}
+    r = ema_modelle.fremde_modelle(str(d.get("anbieter", "")),
+                                   str(d.get("schluessel", "")),
+                                   str(d.get("suche", "")),
+                                   grenze=int(d.get("grenze") or 60))
+    return jsonify(r), (200 if r["ok"] else 400)
+
+
+@app.route("/agent/anbieter", methods=["POST"])
+def agent_anbieter_setzen():
+    """Einen API-Anbieter eintragen oder entfernen. Der Schluessel kommt NUR hier herein.
+
+    Er wird in ``models.json`` (0600) abgelegt und **nie zurueckgegeben** — die
+    Antwort sagt nur, dass einer da ist.
+    """
+    if (nein := _nur_von_hier()):
+        return nein
+    import ema_modelle
+    d = request.get_json(silent=True) or {}
+    name = str(d.get("anbieter", ""))
+    if d.get("entfernen"):
+        r = ema_modelle.anbieter_entfernen(name)
+        return jsonify(r), (200 if r["ok"] else 400)
+    r = ema_modelle.anbieter_setzen(
+        name, str(d.get("schluessel", "")), d.get("modelle") or [],
+        base_url=str(d.get("basis", "")), api=str(d.get("api", "")))
+    return jsonify(r), (200 if r["ok"] else 400)
+
+
 @app.route("/agent/auswahl")
 def agent_auswahl():
     """Was die Startmaske anzubieten hat: Projekte, Sitzungen, Vorgabemodell."""
