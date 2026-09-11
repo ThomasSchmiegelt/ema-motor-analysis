@@ -50,7 +50,7 @@ Exit-Codes durchgängig: `0` ok · `1` Fehler der Gegenstelle · `2` Bedienfehle
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
 | `bilddaten <was>` | **Bilddatensatz zum optischen Bewerten**: `erzeugen` · `seite` · `einlesen` · `regel` · `stand`. Zieht zufaellige Rotorquerschnitte, behaelt nur die, die das Layouttor bestehen, und zeichnet sie. **Die Bewertung macht ein Mensch** — du kannst sie nur vorbereiten und hinterher auswerten |
 | `feldbild` | **Magnetfeldlinien zum Ansehen** in den Projektordner legen: `linien` (Durchsicht) · `schnitt` (Stator ueber einen Sektor weggenommen) · `pol` (ein Polsektor gross) · `laengs` (Achsschnitt, gerechnetes Feld nur mit 3-D-Lauf). Durchsichtige PNG, ein FDM-Lauf, Sekunden bis Minuten — **kein** Pipelinelauf |
-| `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver beide` (Vollrotor, ~7 s, mit Gegenüberstellung) |
+| `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver aster` (Code Aster) · `--solver beide` (ccx+z88) · `--solver alle` (alle drei, Vollrotor, mit Gegenüberstellung). Nur `ccx` kann den Polsektor; alles andere braucht `--voll` |
 | `topopt` | Topologieoptimierung des Rotorblechs. `--verfahren sko` (Vorgabe) oder `simp`. 20–60 s. Ergebnis ist ein **Dichtefeld, kein Bauteil** |
 | `db <was>` | **Rechnungsdatenbank**: `import` · `liste` · `zeige --lauf X` · `guete --lauf X` · `vergleich`. Kennwerte **mit Herkunft je Größe** |
 | `lernen <was>` | **was aus dem eigenen Bestand folgt**: `zeige` · `merke --regel … --beleg …` · `pruefe` · **`probieren`** = geplanter Versuch: jede Bauform ueber jede Polzahl, mit `--merken` landen die Befunde als belegte Regeln im Speicher |
@@ -202,6 +202,7 @@ Beide rechnen **lokal**, ohne den Server und ohne FreeCAD; sie bauen das Netz se
 ```bash
 python3 cae_cli.py struktur --from-project last --solver ccx            # ~2 s
 python3 cae_cli.py struktur --from-project last --solver beide --voll   # ~7 s
+python3 cae_cli.py struktur --from-project last --solver alle  --voll   # + Code Aster
 python3 cae_cli.py topopt   --from-project last --iterationen 25        # ~20 s
 ```
 

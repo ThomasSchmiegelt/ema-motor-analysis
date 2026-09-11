@@ -58,7 +58,7 @@ davor und danach wären dann aus zwei verschiedenen Werkzeugen, und man sieht
 ihnen das nicht an.
 
 Nachgehalten wird das gemessen, nicht geglaubt: `ema_werkzeugstand.py` bildet
-einen Fingerabdruck über die zwölf Module, deren Änderung eine Kennzahl bewegt.
+einen Fingerabdruck über die dreizehn Module, deren Änderung eine Kennzahl bewegt.
 Er steht an jeder abgelegten Rechnung, im Steckbrief und in `project.json`s
 `evolution`; ändert sich eine dieser Dateien während ein Agent läuft, erscheint
 das sofort in der Arbeitsanzeige des Browsers und im `protokoll_*.md` des Laufs.

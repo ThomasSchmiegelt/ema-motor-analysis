@@ -72,6 +72,7 @@ PHYSIK: tuple[str, ...] = (
     "ema_grenzen.py",       # die Tore, die immer gelten
     "ema_deck.py",          # eigener Strukturweg (Gmsh + CalculiX)
     "ema_z88.py",           # zweite Meinung zur Struktur
+    "ema_aster.py",         # dritte Meinung zur Struktur (Code Aster)
     "ema_pipeline.py",      # die Reihenfolge, in der all das laeuft
 )
 

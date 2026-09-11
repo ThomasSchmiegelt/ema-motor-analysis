@@ -780,8 +780,9 @@ Gemessen an derselben Maschine (Delta-IPM, 3 Polpaare):
 | eigener Satz, Polsektor | 13.669 | 0,4 s vernetzt, 0,35 s gelöst |
 | eigener Satz, Vollrotor | 37.066 | 1,2 s vernetzt, 1,5 s (ccx) / 2,1 s (Z88) |
 
-**Z88Aurora V5** (`/opt/z88aurora`) rechnet als zweiter, unabhängiger Löser dasselbe
-Netz. Auf gleicher Last und gleichem Netz:
+**Z88Aurora V5** (`/opt/z88aurora`) rechnet als zweiter und **Code Aster 17.4.0**
+(`~/aster-build`, aus einem ausgepackten Salome-Meca-Abbild) als dritter unabhängiger
+Löser dasselbe Netz. Auf gleicher Last und gleichem Netz:
 
 | Größe | CalculiX | Z88 | Abw. |
 |---|---:|---:|---:|
@@ -790,11 +791,27 @@ Netz. Auf gleicher Last und gleichem Netz:
 | Ringspannung Bohrung | 161,57 MPa | 161,62 MPa | 0,03 % |
 | größte Verschiebung | 40,59 µm | 40,60 µm | — |
 
+Mit `--solver alle` kommt Code Aster dazu. An einem 5.745-Knoten-Vollrotor
+(21.822 Tet4, 12.000 min⁻¹) gemessen:
+
+| Größe | CalculiX | Z88 | Code Aster | Abw. |
+|---|---:|---:|---:|---:|
+| σ_v Spitze | 153,62 MPa | 153,64 MPa | 153,62 MPa | 0,013 % |
+| σ_v P99 (Torwert) | 105,87 MPa | 105,88 MPa | 105,87 MPa | 0,009 % |
+| Ringspannung Bohrung | 117,08 MPa | 117,09 MPa | 117,08 MPa | 0,009 % |
+
+Element für Element nachgemessen liegen CalculiX und Aster sogar auf
+**3,8·10⁻⁵ %** — und das ist die richtige Erwartung, keine Überraschung: der Tet4
+ist ein Element konstanter Dehnung, zwei korrekte Direktlöser auf EINEM Netz müssen
+auf Rundungsniveau übereinstimmen. Eine **bitgleiche** Zahl wäre der Verdachtsfall
+gewesen; sie ist es nicht (größte Abweichung 6,0·10⁻⁵ MPa bei 157,6 MPa Spitze).
+
 Das prüft **Löser und Rechensatz**, nicht das Netz und nicht das Modell.
 
 ```bash
 cd cae_orchestrator
 python3 cae_cli.py struktur --from-project last --solver beide --voll
+python3 cae_cli.py struktur --from-project last --solver alle  --voll   # + Code Aster
 python3 cae_cli.py topopt   --from-project last --iterationen 25
 ```
 

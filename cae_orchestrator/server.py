@@ -4101,10 +4101,11 @@ def _eigener_satz_payload():
 
 @app.route("/struktur_eigen", methods=["POST", "OPTIONS"])
 def struktur_eigen():
-    """Rotor-Festigkeit auf dem eigenen Rechensatz — ccx, z88 oder beide.
+    """Rotor-Festigkeit auf dem eigenen Rechensatz — ccx, z88, aster, beide, alle.
 
-    ``solver="beide"`` rechnet dasselbe Netz zweimal und gibt die Gegenueberstellung
-    zurueck. Das prueft Loeser und Rechensatz, nicht das Netz und nicht das Modell.
+    ``solver="beide"`` (ccx+z88) und ``"alle"`` (mit Code Aster) rechnen dasselbe
+    Netz mehrfach und geben die Gegenueberstellung zurueck. Das prueft Loeser und
+    Rechensatz, nicht das Netz und nicht das Modell.
     """
     if request.method == "OPTIONS":
         return "", 200
@@ -4116,8 +4117,8 @@ def struktur_eigen():
     geom, mat, rpm, d = geladen
 
     solver = str(d.get("solver", "ccx")).lower()
-    if solver not in ("ccx", "z88", "beide"):
-        return jsonify({"error": "solver muss ccx, z88 oder beide sein"}), 400
+    if solver not in ("ccx", "z88", "aster", "beide", "alle"):
+        return jsonify({"error": "solver muss ccx, z88, aster, beide oder alle sein"}), 400
     mesh = max(1.0, min(20.0, float(d.get("mesh_mm", 6.0))))
 
     import ema_pipeline as P

@@ -165,9 +165,16 @@ CalculiX input file is written here rather than by FreeCAD. It exists because
 topology optimisation needs a **per-element Young's modulus**, which FreeCAD's writer
 cannot emit, and because 13.669 elements meshed in 0,4 s beat 797.275 elements plus a
 40 s FreeCAD start. **Z88Aurora V5** (`/opt/z88aurora`, batch solvers only) runs the
-same mesh as an independent second opinion — measured agreement 0,00–0,05 %.
-Selected via `struct_solver` (`freecad` | `ccx` | `z88` | `beide`); `freecad` remains
-the default and is the only one that feeds the deformation images and ramp video.
+same mesh as an independent second opinion — measured agreement 0,00–0,05 % — and
+**Code Aster 17.4.0** (`ema_aster.py`, from an unpacked Salome-Meca image under
+`~/aster-build`) as a third. Measured on one 5.745-node / 21.822-Tet4 full rotor at
+12.000 min⁻¹, ccx against Aster: **3,8·10⁻⁵ %** on the per-element von-Mises stress
+and the same `u_max` of 23,084 µm. That is the right expectation, not a surprise — a
+Tet4 is a constant-strain element, so two correct direct solvers on one mesh must
+agree to round-off; a **bit-identical** figure would have been the suspicious one.
+Selected via `struct_solver` (`freecad` | `ccx` | `z88` | `aster` | `beide` = ccx+z88
+| `alle` = all three); `freecad` remains the default and is the only one that feeds
+the deformation images and ramp video.
 Three things that are easy to get wrong there are documented in the module headers:
 Z88 has **no centrifugal load** (its `OMEGA` is the SOR relaxation factor), its
 material file is **space-separated** (a comma silently yields nu=0), and

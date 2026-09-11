@@ -1845,7 +1845,7 @@ SF_TARGET = 1.3
 
 def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
                            solver: str, mesh_mm: float, state: dict) -> dict:
-    """Rotor-Festigkeit ueber ``ema_deck`` statt ueber FreeCAD — und wahlweise mit Z88.
+    """Rotor-Festigkeit ueber ``ema_deck`` statt ueber FreeCAD — mit bis zu DREI Loesern.
 
     Gibt einen Ergebnisblock in DERSELBEN Form zurueck wie der FreeCAD-Pfad, damit das
     Tier-2-Tor darunter unveraendert weiterlaeuft:
@@ -1853,12 +1853,19 @@ def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
     Wert, auf den das Tor stellt).
 
     Der Polsektor bleibt CalculiX vorbehalten — Z88 kennt weder zyklische Symmetrie
-    noch schiefe Symmetrieebenen. Bei ``z88`` und ``beide`` wird deshalb der volle
-    Rotor vernetzt, und dann rechnen beide Loeser bitgleich dasselbe Netz.
+    noch schiefe Symmetrieebenen, und Code Aster bekommt die ``*EQUATION``-Paarung
+    hier nicht geschrieben. Sobald ein zweiter Loeser mitlaeuft, wird deshalb der
+    volle Rotor vernetzt, und dann rechnen alle bitgleich dasselbe Netz.
+
+    ``solver``: ``ccx`` · ``z88`` · ``aster`` · ``beide`` (ccx+z88) · ``alle``.
     """
     import ema_deck as _deck
 
-    sektor = (solver == "ccx")
+    gewuenscht = {"ccx": ("ccx",), "z88": ("z88",), "aster": ("aster",),
+                  "beide": ("ccx", "z88"),
+                  "alle": ("ccx", "z88", "aster")}.get(solver, ("ccx",))
+
+    sektor = (gewuenscht == ("ccx",))
     netz = _deck.baue(geom, mesh_mm=mesh_mm, ordnung=1, sektoren=1 if sektor else 0)
     _log(state, f"   Netz: {netz.n_knoten:,} Knoten / {netz.n_elemente:,} Tet4, "
                 f"{'ein Polsektor' if sektor else 'voller Rotor'}", 79)
@@ -1869,60 +1876,87 @@ def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
                  "netz_knoten": netz.n_knoten, "netz_elemente": netz.n_elemente,
                  "netz_sektor": bool(sektor), "struct_mesh_mm": mesh_mm}
 
-    k_ccx = k_z88 = None
-    if solver in ("ccx", "beide"):
+    # Reihenfolge ist die Rangfolge: der erste, der Zahlen liefert, fuehrt.
+    k: dict = {}
+
+    if "ccx" in gewuenscht:
         pfad = _deck.schreibe_inp(netz, mat, rpm, os.path.join(arbeit, "rotor.inp"))
         r = _deck.loese_ccx(pfad)
         if r["solver_status"] != "OK":
             return {"solver_status": "FAILED", "rechensatz": "eigen", "rpm": rpm,
                     "log": str(r.get("meldung", ""))[:1500]}
-        k_ccx = _deck.kennzahlen(netz, _deck.lies_dat_spannungen(r["dat"]),
-                                 mat["yield_mpa"])
+        k["calculix"] = _deck.kennzahlen(netz, _deck.lies_dat_spannungen(r["dat"]),
+                                         mat["yield_mpa"])
 
-    if solver in ("z88", "beide"):
+    if "z88" in gewuenscht:
         import ema_z88 as _z88
         ok, warum = _z88.verfuegbar()
         if not ok:
-            _log(state, f"⚠ Z88 nicht einsatzbereit ({warum}) — nur CalculiX", 79)
+            _log(state, f"⚠ Z88 nicht einsatzbereit ({warum}) — uebersprungen", 79)
         else:
             zp = os.path.join(arbeit, "z88")
             _z88.schreibe_satz(netz, mat, rpm, zp)
             rz = _z88.loese(zp, netz=netz)
             if rz["solver_status"] == "OK":
-                k_z88 = _z88.kennzahlen_aus_lauf(netz, zp, mat["yield_mpa"])
-                k_z88["solver"] = rz["solver"]
+                kz = _z88.kennzahlen_aus_lauf(netz, zp, mat["yield_mpa"])
+                kz["solver"] = rz["solver"]
+                k["z88"] = kz
             else:
                 _log(state, f"⚠ Z88 ohne Ergebnis: {rz.get('meldung', '')}", 79)
 
-    fuehrend = k_ccx or k_z88
-    if not fuehrend:
+    if "aster" in gewuenscht:
+        import ema_aster as _aster
+        ok, warum = _aster.verfuegbar()
+        if not ok:
+            _log(state, f"⚠ Code Aster nicht einsatzbereit ({warum}) — uebersprungen", 79)
+        else:
+            ra = _aster.loese(netz, mat, rpm,
+                              ordner=os.path.join(arbeit, "aster"))
+            if ra["solver_status"] == "OK":
+                k["code_aster"] = _aster.kennzahlen_aus_lauf(netz, ra,
+                                                             mat["yield_mpa"])
+            else:
+                _log(state, f"⚠ Code Aster ohne Ergebnis: "
+                            f"{str(ra.get('meldung', ''))[:200]}", 79)
+
+    if not k:
         return {"solver_status": "FAILED", "rechensatz": "eigen", "rpm": rpm,
                 "log": "kein Loeser hat Spannungen geliefert"}
 
+    name, fuehrend = next(iter(k.items()))
     aus.update({"max_von_mises_MPa": fuehrend["stress_peak_MPa"],
                 "notch_peak_MPa": fuehrend["stress_p99_MPa"],
                 "mean_von_mises_MPa": fuehrend["stress_mean_MPa"],
                 "bore_hoop_median_MPa": fuehrend.get("bore_hoop_median_MPa"),
                 "node_count": netz.n_knoten,
-                "solver_verwendet": "CalculiX" if k_ccx else "Z88"})
+                "solver_verwendet": {"calculix": "CalculiX", "z88": "Z88",
+                                     "code_aster": "Code Aster"}[name]})
     if fuehrend.get("max_displacement_um") is not None:
         aus["max_displacement_um"] = fuehrend["max_displacement_um"]
         aus["max_displacement_mm"] = fuehrend.get("max_displacement_mm")
 
-    if k_ccx and k_z88:
-        vergleich = {"calculix": k_ccx, "z88": k_z88}
+    if len(k) > 1:
+        vergleich = dict(k)
+        schlimmste = 0.0
         for schl in ("stress_peak_MPa", "stress_p99_MPa", "bore_hoop_median_MPa"):
-            a, b = k_ccx.get(schl), k_z88.get(schl)
-            if a and b:
-                vergleich[f"abweichung_{schl}_pct"] = round(100 * abs(a - b) / abs(a), 3)
-        vergleich["hinweis"] = ("Gleiches Netz, gleiche Last, zwei unabhaengige Loeser. "
+            a = fuehrend.get(schl)
+            if not a:
+                continue
+            for andere, kk in k.items():
+                if andere == name:
+                    continue
+                b = kk.get(schl)
+                if not b:
+                    continue
+                abw = round(100 * abs(a - b) / abs(a), 3)
+                vergleich[f"abweichung_{andere}_{schl}_pct"] = abw
+                schlimmste = max(schlimmste, abw)
+        vergleich["hinweis"] = ("Gleiches Netz, gleiche Last, unabhaengige Loeser. "
                                 "Das prueft Loeser und Rechensatz — NICHT das Netz und "
                                 "nicht das Modell.")
         aus["loeservergleich"] = vergleich
-        schlimmste = max((v for k, v in vergleich.items()
-                          if k.startswith("abweichung_")), default=0.0)
-        _log(state, f"✓ CalculiX gegen Z88 auf demselben Netz: hoechste Abweichung "
-                    f"{schlimmste:.2f} %", 87)
+        _log(state, f"✓ {len(k)} Loeser auf demselben Netz ({', '.join(k)}): "
+                    f"hoechste Abweichung {schlimmste:.3f} %", 87)
     return aus
 
 
@@ -2007,7 +2041,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
     #   "beide"   – eigener Rechensatz, voller Rotor, BEIDE Loeser und die
     #               Gegenueberstellung in results["structural_fem"]["loeservergleich"].
     struct_solver  = str(data.get("struct_solver", "freecad")).lower()
-    if struct_solver not in ("freecad", "ccx", "z88", "beide"):
+    if struct_solver not in ("freecad", "ccx", "z88", "aster", "beide", "alle"):
         struct_solver = "freecad"
     struct_video   = bool(data.get("struct_video",   True))    # render deformation ramp video
     struct_frames  = int(data.get("struct_frames",   30))      # video frame count

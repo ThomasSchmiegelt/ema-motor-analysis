@@ -13,7 +13,7 @@ different stages of maturity that are *not* wired to each other today — see th
 "Wiring" column.
 
 **Topics:** electric motor · IPM · PMSM · traction motor · motor design · CAE · FEA ·
-finite element analysis · CalculiX · Z88Aurora · FreeCAD · Gmsh · Elmer · OpenFOAM ·
+finite element analysis · CalculiX · Z88Aurora · Code Aster · FreeCAD · Gmsh · Elmer · OpenFOAM ·
 electromagnetics · 2D FDM field solver · topology optimisation (SKO/SIMP) · centrifugal
 rotor stress · lumped-parameter thermal network · drive cycle (WLTP) · design space
 exploration · pole/slot combination · magnet arrangement · local LLM ·
@@ -23,7 +23,7 @@ Ollama · agent skill · PI · Hermes Agent · provenance tracking · SQLite
 
 | Folder | What | Stack | Start |
 |---|---|---|---|
-| `cae_orchestrator/` | Browser CAE for IPM motors (geometry → EM field → FEM → thermal → drive cycle, PDF report) | Python/Flask + FreeCAD/CalculiX/Z88/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
+| `cae_orchestrator/` | Browser CAE for IPM motors (geometry → EM field → FEM → thermal → drive cycle, PDF report) | Python/Flask + FreeCAD/CalculiX/Z88/Code Aster/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
 | `connection_detection/` | FreeCAD workbench: geometric connection detection in STEP assemblies | Python FreeCAD add-on (`rtree`) | `FreeCADCmd cli.py -- input.step -o out.json` |
 | `pikogk/` | PicoGK geometry kernel with an HTTP API (voxel/implicit geometry, LLM-generated "skills") | .NET 9 + native `picogk.so` | `cd pikogk && ./start.sh` → http://localhost:5266 |
 | `physics_surrogate/` | ML surrogate for the 2D-FDM field stage (PhysicsNeMo/Torch) | Python + Torch/CUDA | `cd physics_surrogate && ./start.sh` → http://localhost:5300 |
@@ -49,7 +49,7 @@ value**, not guessed afterwards:
 |---|---|---|---|
 | Air-gap field, torque | analytic formula (ms) | 2D FDM (seconds) | 3D Elmer FEM (minutes) |
 | Rotor strength | rotating-ring formula × Kt (ms) | own deck, pole sector (~1 s) | FreeCAD + CalculiX, full rotor (minutes) |
-| Solver check | — | — | CalculiX **and** Z88Aurora on one mesh |
+| Solver check | — | — | CalculiX, Z88Aurora **and** Code Aster on one mesh |
 | Sheet cross-section | parameter study | topology optimisation (~20 s) | — |
 
 Two values that sit side by side in the same result set and are **not** equivalent:
@@ -491,7 +491,7 @@ not typed twice; a designer hand-over appends to it rather than replacing it.
 Besides the FreeCAD route there is an own deck: Gmsh meshes one pole sector — or the
 full rotor — from the same magnet geometry the 2D field uses, and the CalculiX input
 file is written directly. **Z88Aurora V5** solves the same mesh as an independent second
-opinion.
+opinion, and **Code Aster 17.4.0** as a third.
 
 | Quantity | CalculiX | Z88 | Δ |
 |---|---:|---:|---:|
@@ -499,6 +499,14 @@ opinion.
 | von Mises, P99 (the gated value) | 128.89 MPa | 128.90 MPa | 0.01 % |
 | Bore hoop stress | 161.57 MPa | 161.62 MPa | 0.03 % |
 | max displacement | 40.59 µm | 40.60 µm | — |
+
+With `--solver alle`, Code Aster joins in. On a 5,745-node full rotor (21,822 Tet4,
+12,000 rpm): peak von Mises 153.620 / 153.640 / 153.620 MPa, largest spread 0.013 %.
+Element by element, CalculiX and Aster agree to **3.8·10⁻⁵ %** — which is the correct
+expectation, not a surprise: a Tet4 is a constant-strain element, so two correct
+direct solvers on one mesh must agree to round-off. A **bit-identical** figure would
+have been the suspicious one, and it is not (largest spread 6.0·10⁻⁵ MPa at a 157.6 MPa
+peak).
 
 This checks **solver and deck** — not the mesh and not the model. A mesh both see wrongly,
 both see wrongly. Speed: 797,275 elements plus a 40 s FreeCAD start become **13,669
@@ -1208,6 +1216,7 @@ copying and posting is done by hand.
 
 - FreeCAD 1.1 source build + CalculiX (`ccx` 2.23); `ccx` is also called directly, without FreeCAD
 - **Z88Aurora®** V5 — freeware of the Chair for Engineering Design and CAD (LCAD), University of Bayreuth, by Prof. Dr.-Ing. Frank Rieg; batch solvers only. `z88r` needs `LD_LIBRARY_PATH` set to its own MKL and **two** runs — `-t` writes `Z88R.DYN`, which `-c` then reads. **Z88Arion has no Linux build**
+- **Code Aster 17.4.0** — from an unpacked Salome-Meca SIF image under `~/aster-build` (24 GB), sourced through its own `env_aster.sh`. Aster 17 runs as a **library** (`import code_aster`), **not** via `as_run` and not via an `.export` file — this image ships no `as_run`
 - Gmsh (the Python module in the orchestrator venv), OpenFOAM v2406, Elmer, CUDA, pandoc/pdflatex
 - Ollama at `localhost:11434`
 

@@ -969,16 +969,21 @@ def _geom_und_material(args):
 def cmd_struktur(args) -> int:
     """Rotor-Festigkeit auf dem EIGENEN Rechensatz — ohne FreeCAD, in Sekunden.
 
-    Wahlweise mit CalculiX, mit Z88 oder mit beiden. 'beide' rechnet dasselbe Netz
-    zweimal und stellt die Zahlen gegenueber; das prueft Loeser und Rechensatz,
-    NICHT das Netz und nicht das Modell.
-    Exit: 0 = gerechnet, 1 = ein Loeser hat nicht geliefert."""
+    Wahlweise mit CalculiX, Z88 oder Code Aster; 'beide' (ccx+z88) und 'alle'
+    rechnen DASSELBE Netz mehrfach und stellen die Zahlen gegenueber. Das prueft
+    Loeser und Rechensatz, NICHT das Netz und nicht das Modell — wo drei Loeser
+    auf einem Netz dieselbe Zahl liefern, liegt ein Fehler mit Sicherheit
+    woanders. Exit: 0 = gerechnet, 1 = ein Loeser hat nicht geliefert."""
     import tempfile
 
     geom, mat, rpm = _geom_und_material(args)
     import ema_deck as D
 
-    sektor = args.solver == "ccx" and not args.voll
+    LOESER = {"ccx": ("ccx",), "z88": ("z88",), "aster": ("aster",),
+              "beide": ("ccx", "z88"), "alle": ("ccx", "z88", "aster")}
+    gewuenscht = LOESER[args.solver]
+
+    sektor = gewuenscht == ("ccx",) and not args.voll
     try:
         netz = D.baue(geom, mesh_mm=args.mesh, ordnung=args.ordnung,
                       sektoren=1 if sektor else 0)
@@ -996,7 +1001,7 @@ def cmd_struktur(args) -> int:
                          "ordnung": args.ordnung},
                 "rpm": rpm, "werkstoff": mat["label"], "ordner": ordner}
 
-    if args.solver in ("ccx", "beide"):
+    if "ccx" in gewuenscht:
         pfad = D.schreibe_inp(netz, mat, rpm, os.path.join(ordner, "rotor.inp"))
         r = D.loese_ccx(pfad, kerne=args.kerne)
         if r["solver_status"] != "OK":
@@ -1004,7 +1009,7 @@ def cmd_struktur(args) -> int:
         ergebnis["calculix"] = D.kennzahlen(
             netz, D.lies_dat_spannungen(r["dat"]), mat["yield_mpa"])
 
-    if args.solver in ("z88", "beide"):
+    if "z88" in gewuenscht:
         import ema_z88 as Z
         ok, warum = Z.verfuegbar()
         if not ok:
@@ -1020,7 +1025,22 @@ def cmd_struktur(args) -> int:
         ergebnis["z88"] = Z.kennzahlen_aus_lauf(netz, zp, mat["yield_mpa"])
         ergebnis["z88"]["solver"] = r["solver"]
 
-    # Die analytische Formel als dritte, unabhaengige Zahl.
+    if "aster" in gewuenscht:
+        import ema_aster as A
+        ok, warum = A.verfuegbar()
+        if not ok:
+            return _die(f"Code Aster nicht einsatzbereit: {warum}", EXIT_REMOTE)
+        if sektor:
+            return _die("Code Aster rechnet hier nur den vollen Rotor — die zyklische "
+                        "Symmetrie steht als CalculiX-*EQUATION im .inp und hat in der "
+                        ".mail keine Entsprechung. --voll angeben.", EXIT_USAGE)
+        ra = A.loese(netz, mat, rpm, ordner=os.path.join(ordner, "aster"))
+        if ra["solver_status"] != "OK":
+            return _die(f"Code Aster: {str(ra.get('meldung', ra['solver_status']))[:400]}",
+                        EXIT_REMOTE)
+        ergebnis["code_aster"] = A.kennzahlen_aus_lauf(netz, ra, mat["yield_mpa"])
+
+    # Die analytische Formel als weitere, unabhaengige Zahl.
     from ema_rotorcheck import _bore_hoop_mpa
     w = 2 * math.pi * rpm / 60.0
     a_m, b_m = netz.r_shaft / 1e3, netz.r_rot / 1e3
@@ -1033,14 +1053,20 @@ def cmd_struktur(args) -> int:
         "hinweis": "frei rotierender Ring OHNE Magnettaschen"}
 
     emit(ergebnis, args)
-    if args.solver == "beide":
-        c, z = ergebnis["calculix"], ergebnis["z88"]
-        print("\n  Groesse                        CalculiX          Z88      Abw.")
+
+    namen = [n for n in ("calculix", "z88", "code_aster") if n in ergebnis]
+    if len(namen) > 1:
+        kopf = "".join(f"{n:>14s}" for n in namen)
+        print(f"\n  {'Groesse':28s}{kopf}   max. Abw.")
         for schl in ("stress_peak_MPa", "stress_p99_MPa",
-                     "bore_hoop_median_MPa", "safety_factor_p99"):
-            if schl in c and schl in z:
-                d = 100 * abs(c[schl] - z[schl]) / max(abs(c[schl]), 1e-9)
-                print(f"  {schl:28s} {c[schl]:10.2f} {z[schl]:12.2f} {d:7.2f} %")
+                     "bore_hoop_median_MPa", "max_displacement_um",
+                     "safety_factor_p99"):
+            werte = [ergebnis[n].get(schl) for n in namen]
+            if any(v is None for v in werte):
+                continue
+            d = 100 * (max(werte) - min(werte)) / max(abs(werte[0]), 1e-9)
+            zeile = "".join(f"{v:14.3f}" for v in werte)
+            print(f"  {schl:28s}{zeile} {d:9.3f} %")
         print("  Gleiches Netz, gleiche Last: das prueft die Loeser, nicht das Modell.")
     return EXIT_OK
 
@@ -3437,7 +3463,7 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_db)
 
     s = sub.add_parser("struktur",
-                       help="Rotor-Festigkeit auf dem eigenen Rechensatz (ccx | z88 | beide) — ohne FreeCAD")
+                       help="Rotor-Festigkeit auf dem eigenen Rechensatz (ccx | z88 | aster | beide | alle) — ohne FreeCAD")
     g = s.add_mutually_exclusive_group()
     g.add_argument("--payload", help="JSON direkt")
     g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
@@ -3450,10 +3476,12 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--set", action="append", metavar="KEY=WERT",
                    help="einzelnen Parameter aendern, mehrfach angebbar")
     s.add_argument("--force", action="store_true", help="Schemagrenzen nicht pruefen")
-    s.add_argument("--solver", choices=["ccx", "z88", "beide"], default="ccx",
-                   help="Loeser. 'beide' rechnet dasselbe Netz zweimal und vergleicht")
+    s.add_argument("--solver",
+                   choices=["ccx", "z88", "aster", "beide", "alle"], default="ccx",
+                   help="Loeser. 'beide' = ccx+z88, 'alle' = ccx+z88+Code Aster: "
+                        "dasselbe Netz mehrfach gerechnet und gegenuebergestellt")
     s.add_argument("--voll", action="store_true",
-                   help="voller Rotor statt Polsektor (bei z88/beide zwingend)")
+                   help="voller Rotor statt Polsektor (ausser bei reinem ccx zwingend)")
     s.add_argument("--mesh", type=float, default=6.0, help="Netzweite in mm (Vorgabe 6)")
     s.add_argument("--ordnung", type=int, choices=[1, 2], default=1,
                    help="1 = Tet4 (schnell), 2 = Tet10 (genauer, nur ccx)")
