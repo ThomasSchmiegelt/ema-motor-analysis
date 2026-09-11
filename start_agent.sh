@@ -14,7 +14,12 @@
 set -euo pipefail
 
 MODEL="qwen-gross:latest"
-MODEL_ID="ca8ec377441f"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
+MODEL_ID="1bb3a46c5021"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
+# Der Anbieter stand bis hierher als Literal in der letzten Zeile. `pi` kann
+# laengst andere (die Anbieter stehen in ~/.pi/agent/models.json mit baseUrl,
+# api und apiKey) — nur angeben liess es sich nicht. Vorgabe bleibt ollama:
+# wer ein API-Modell will, sagt es ausdruecklich.
+PROVIDER="ollama"
 # 02.09.2026 nachgezogen: qwen-gross wurde auf qwen3.8:27b-mtp-q4_K_M neu gebaut
 # (identische Blobs, nur num_ctx 65536 ergaenzt). Der Wechsel ist geprueft und
 # gewollt: MTP-Spekulativdekodierung, warm gemessen 93,1 statt 86,7 tok/s bei
@@ -29,9 +34,11 @@ LOG="${TMPDIR:-/tmp}/cae_server_$USER.log"
 export PATH="$HOME/.npm-global/bin:$PATH"   # pi liegt hier, weil ohne sudo installiert
 
 BROWSER=1; NUR_SERVER=0; WEITER=0; LISTE=0; SITZUNG=""; ARGS=()
-erwarte_id=""
+erwarte_id=""; erwarte_modell=""; erwarte_anbieter=""
 for a in "$@"; do
     if [ -n "$erwarte_id" ]; then SITZUNG="$a"; erwarte_id=""; continue; fi
+    if [ -n "$erwarte_modell" ]; then MODEL="$a"; erwarte_modell=""; continue; fi
+    if [ -n "$erwarte_anbieter" ]; then PROVIDER="$a"; erwarte_anbieter=""; continue; fi
     case "$a" in
         --kein-browser) BROWSER=0 ;;
         --nur-server)   NUR_SERVER=1 ;;
@@ -39,6 +46,10 @@ for a in "$@"; do
         --sitzungen)    LISTE=1 ;;
         --sitzung)      erwarte_id=1 ;;
         --sitzung=*)    SITZUNG="${a#--sitzung=}" ;;
+        --modell)       erwarte_modell=1 ;;
+        --modell=*)     MODEL="${a#--modell=}" ;;
+        --anbieter)     erwarte_anbieter=1 ;;
+        --anbieter=*)   PROVIDER="${a#--anbieter=}" ;;
         --)             ;;   # ueblicher Trenner "ab hier keine eigenen Optionen mehr".
                              # NICHT weiterreichen: `pi` kennt ihn nicht und bricht mit
                              # "Unknown option: --" ab, nachdem alles andere schon lief.
@@ -46,6 +57,25 @@ for a in "$@"; do
     esac
 done
 [ -n "$erwarte_id" ] && { echo "FEHLER: --sitzung braucht eine Kennung (--sitzungen zeigt sie)" >&2; exit 1; }
+[ -n "$erwarte_modell" ]   && { echo "FEHLER: --modell braucht einen Namen" >&2; exit 1; }
+[ -n "$erwarte_anbieter" ] && { echo "FEHLER: --anbieter braucht einen Namen" >&2; exit 1; }
+# Wird ein Modell genannt, ohne den Anbieter zu nennen, wird der Anbieter aus
+# PIs models.json GESUCHT statt geraten -- dieselbe Quelle, aus der auch die
+# Startmaske im Browser liest.
+if [ "$PROVIDER" = "ollama" ] && [ "$MODEL" != "qwen-gross:latest" ]; then
+    gefunden="$(python3 - "$MODEL" <<'PYP' 2>/dev/null || true
+import json, os, sys
+try:
+    d = json.load(open(os.path.expanduser("~/.pi/agent/models.json")))
+except Exception:
+    sys.exit(0)
+for name, p in (d.get("providers") or {}).items():
+    if any(m.get("id") == sys.argv[1] for m in (p.get("models") or [])):
+        print(name); break
+PYP
+)"
+    [ -n "$gefunden" ] && PROVIDER="$gefunden"
+fi
 
 # ── Sitzungen dieses Verzeichnisses ─────────────────────────────────────────
 # PI legt sie unter ~/.pi/agent/sessions/<kodiertes cwd>/ ab. Wie das cwd kodiert
@@ -103,14 +133,45 @@ warn() { echo "[--] $*"; }
 die()  { echo "FEHLER: $*" >&2; exit 1; }
 
 # ── 1. Ollama ───────────────────────────────────────────────────────────────
-curl -sf --max-time 3 "$OLLAMA_URL" >/dev/null \
-    || die "Ollama nicht erreichbar ($OLLAMA_URL). Starten: sudo systemctl start ollama"
-ok "Ollama: $OLLAMA_URL"
+# NUR wenn der Agent auch dort rechnet. Bei einem API-Modell liefe hier eine
+# Pruefung, die mit dem Lauf nichts zu tun hat -- und scheiterte auf einer
+# Maschine ohne Ollama an etwas, das gar nicht gebraucht wird. Der Orchestrator
+# braucht Ollama weiterhin fuer Bericht, Chat und Einbettungen; das steht
+# darunter und ist ein anderer Punkt.
+if [ "$PROVIDER" = "ollama" ]; then
+    curl -sf --max-time 3 "$OLLAMA_URL" >/dev/null \
+        || die "Ollama nicht erreichbar ($OLLAMA_URL). Starten: sudo systemctl start ollama"
+    ok "Ollama: $OLLAMA_URL"
+else
+    warn "Anbieter '$PROVIDER' — der Agent rechnet NICHT lokal."
+    warn "Alles, was er liest und schreibt, verlaesst damit diese Maschine."
+    curl -sf --max-time 3 "$OLLAMA_URL" >/dev/null \
+        && ok "Ollama laeuft trotzdem (Bericht, Chat, Einbettungen brauchen es)" \
+        || warn "Ollama antwortet nicht — Bericht, Chat und Wissensbasis fallen aus."
+fi
 
 # ── 2. Modell — auf die ID festgenagelt ─────────────────────────────────────
 # Der Name allein genuegt nicht: ein `ollama pull` unter gleichem Namen tauscht die
 # Gewichte still aus, und dann rechnet ein anderes Modell als das gepruefte.
-if [ "$NUR_SERVER" -eq 0 ]; then
+if [ "$NUR_SERVER" -eq 0 ] && [ "$PROVIDER" != "ollama" ]; then
+    # Ein API-Modell hat keine Ollama-ID, die man festnageln koennte. Was hier
+    # bleibt, ist die eine Frage, die wirklich zaehlt: kennt `pi` das Modell?
+    command -v pi >/dev/null || die "pi nicht gefunden. Einrichtung: .agents/README.md"
+    [ -f "$HOME/.pi/agent/models.json" ] || die "~/.pi/agent/models.json fehlt"
+    python3 - "$PROVIDER" "$MODEL" <<'PYCHK' || die "Anbieter/Modell nicht in ~/.pi/agent/models.json — dort eintragen (baseUrl, api, apiKey)."
+import json, os, sys
+anb, mod = sys.argv[1], sys.argv[2]
+d = json.load(open(os.path.expanduser("~/.pi/agent/models.json")))
+p = (d.get("providers") or {}).get(anb)
+if not p:
+    print(f"Anbieter '{anb}' steht nicht in models.json.", file=sys.stderr); sys.exit(1)
+if not any(m.get("id") == mod for m in (p.get("models") or [])):
+    print(f"Modell '{mod}' steht nicht unter '{anb}'.", file=sys.stderr); sys.exit(1)
+if not p.get("apiKey"):
+    print(f"Fuer '{anb}' steht kein apiKey in models.json.", file=sys.stderr); sys.exit(1)
+PYCHK
+    ok "Modell: $MODEL ueber '$PROVIDER' (nicht lokal)"
+elif [ "$NUR_SERVER" -eq 0 ]; then
     line="$(ollama list 2>/dev/null | awk -v m="$MODEL" '$1 == m {print; exit}')" || true
     [ -n "$line" ] || die "Modell '$MODEL' nicht in Ollama. Vorhandene: $(ollama list | awk 'NR>1{print $1}' | paste -sd' ')"
     have="$(awk '{print $2}' <<<"$line")"
@@ -339,6 +400,6 @@ else
 fi
 
 echo ""
-echo "=== PI mit $MODEL — Skill 'cae-orchestrator' geladen ==="
+echo "=== PI mit $MODEL ueber '$PROVIDER' — Skill 'cae-orchestrator' geladen ==="
 echo ""
-exec pi --provider ollama --model "$MODEL" ${ARGS[@]+"${ARGS[@]}"}
+exec pi --provider "$PROVIDER" --model "$MODEL" ${ARGS[@]+"${ARGS[@]}"}

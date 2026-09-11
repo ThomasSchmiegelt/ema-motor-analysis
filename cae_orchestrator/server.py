@@ -4325,9 +4325,16 @@ def agent_auswahl():
     import ema_agent
     from ema_report import DEFAULT_MODEL
     k = _agent_kopf()
+    # Die Modelle kommen aus PIs eigener ``models.json`` -- eine zweite, hier
+    # gepflegte Liste liefe auseinander, und dann boete die Maske ein Modell an,
+    # das ``pi`` nicht kennt. Faellt die Datei aus, bleibt es beim Vorgabemodell
+    # und die Maske sagt warum, statt eine leere Auswahl zu zeigen.
+    mm = ema_agent.modelle()
     return jsonify({"projekte": ema_agent.projekte(),
                     "sitzungen": k.sitzungen(),
                     "modell": DEFAULT_MODEL,
+                    "modelle": mm.get("modelle") or [],
+                    "modelle_grund": mm.get("grund", ""),
                     "kopf": k.NAME, "kopf_label": k.LABEL,
                     # ``projektpflicht``: bei Hermes haengt das GEDAECHTNIS am
                     # Projekt (HERMES_HOME). Im falschen Projekt zu landen heisst

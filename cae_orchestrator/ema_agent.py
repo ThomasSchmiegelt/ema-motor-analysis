@@ -45,6 +45,7 @@ diese Datei sieht nur zu und reicht durch.
 from __future__ import annotations
 
 import json
+import urllib.parse
 import os
 import queue
 import re
@@ -101,6 +102,94 @@ def pi_gefunden() -> str | None:
 def hermes_gefunden() -> str | None:
     """Pfad zu ``hermes`` -- oder ``None``."""
     return _suchen("hermes", HERMES_PFADE)
+
+
+# ── Welche Modelle es gibt -- und welche davon das Haus verlassen ────────────
+#
+# Bis hierher bot die Startmaske genau EIN Modell an: ``ema_report.DEFAULT_MODEL``,
+# also den lokalen Ollama-Namen. Ein Modell ueber eine API anzugeben ging gar
+# nicht -- obwohl ``pi`` es laengst kann: der Aufruf lautet
+# ``pi --provider <name> --model <id>``, und die Anbieter stehen in PIs eigener
+# ``~/.pi/agent/models.json`` (``baseUrl``, ``api``, ``apiKey``). Fest verdrahtet
+# war allein die Zeichenkette ``"ollama"`` an zwei Stellen.
+#
+# Gelesen wird deshalb **PIs Datei** und keine zweite, hier gepflegte Liste: die
+# liefe auseinander, und dann boete die Maske ein Modell an, das ``pi`` nicht
+# kennt (oder umgekehrt). Dasselbe Argument wie bei der einen ``SKILL.md`` fuer
+# alle Koepfe.
+PI_MODELLE = os.path.expanduser("~/.pi/agent/models.json")
+
+
+def _ist_lokal(base_url: str) -> bool:
+    """Bleibt dieser Anbieter auf der Maschine?
+
+    An der ADRESSE gemessen und nicht am Namen: ein Anbieter darf heissen, wie er
+    will -- ob Daten das Haus verlassen, entscheidet der Host. Das ist die eine
+    Angabe, die in der Maske stehen muss, denn bis hierher galt fuer dieses Repo
+    ausdruecklich „nichts spricht ueber localhost hinaus".
+    """
+    try:
+        wirt = (urllib.parse.urlsplit(str(base_url or "")).hostname or "").lower()
+    except ValueError:
+        return False
+    return wirt in ("localhost", "127.0.0.1", "::1", "0.0.0.0")
+
+
+def modelle(pfad: str = "") -> dict:
+    """Anbieter und Modelle, wie ``pi`` sie kennt. Weich fehlschlagend.
+
+    Rueckgabe: ``{"ok", "modelle": [...], "grund"}``. Jeder Eintrag traegt
+    ``anbieter``, ``modell``, ``name``, ``lokal`` und ``schluessel`` -- letzteres
+    NUR als ja/nein: ein Schluessel gehoert nirgends in eine Antwort, die durch
+    den Browser geht.
+    """
+    pfad = pfad or PI_MODELLE
+    try:
+        with open(pfad, encoding="utf-8") as f:
+            d = json.load(f) or {}
+    except (OSError, ValueError) as e:
+        return {"ok": False, "modelle": [],
+                "grund": f"{os.path.basename(pfad)} nicht lesbar: "
+                         f"{type(e).__name__}"}
+    aus = []
+    for anbieter, p in (d.get("providers") or {}).items():
+        lokal = _ist_lokal(p.get("baseUrl"))
+        for m in (p.get("models") or []):
+            kosten = m.get("cost") or {}
+            aus.append({
+                "anbieter": anbieter,
+                "modell": m.get("id", ""),
+                "name": m.get("name") or m.get("id", ""),
+                "lokal": lokal,
+                "basis": p.get("baseUrl", ""),
+                "schluessel": bool(p.get("apiKey")),
+                # Kostet der Lauf Geld? Die Zahl steht in PIs Datei; ob sie
+                # stimmt, weiss nur der Anbieter -- sie wird darum gezeigt und
+                # nicht verrechnet.
+                "kostet": bool(kosten.get("input") or kosten.get("output")),
+                "kontext": m.get("contextWindow"),
+            })
+    if not aus:
+        return {"ok": False, "modelle": [],
+                "grund": f"in {os.path.basename(pfad)} steht kein Modell"}
+    # Lokale zuerst: das ist die Vorgabe dieses Hauses, und wer ein API-Modell
+    # will, soll es ausdruecklich waehlen statt es versehentlich zu treffen.
+    aus.sort(key=lambda m: (not m["lokal"], m["anbieter"], m["modell"]))
+    return {"ok": True, "modelle": aus, "grund": ""}
+
+
+def anbieter_fuer(modell: str, pfad: str = "") -> str:
+    """Zu welchem Anbieter gehoert dieses Modell? Vorgabe ``ollama``.
+
+    Der Aufrufer schickt einen Modellnamen; welcher Anbieter ihn fuehrt, steht
+    in PIs Datei. Ist er dort unbekannt, bleibt es bei ``ollama`` -- dann
+    verhaelt sich alles wie vorher, statt mit einem erratenen Anbieter zu
+    starten.
+    """
+    for m in modelle(pfad).get("modelle") or []:
+        if m["modell"] == modell:
+            return m["anbieter"]
+    return "ollama"
 
 
 # ── Frueheren Laeufen nachgehen ──────────────────────────────────────────────
@@ -492,6 +581,8 @@ class Kopf:
         self.beschaeftigt = False         # zwischen Prompt und agent_settled
         self.projekt = ""
         self.modell = ""
+        self.anbieter = "ollama"
+        self.lokal = True
         self.sitzung = ""
         self.start_ts = 0.0
         self._bild_marke = 0.0
@@ -738,6 +829,13 @@ class Kopf:
         self.fehler = ""
         self.projekt = projekt
         self.modell = modell
+        # Womit gerechnet wurde, gehoert zum Ergebnis. Ein Lauf gegen ein
+        # API-Modell ist nicht derselbe Lauf wie einer gegen das lokale -- und
+        # ein blosser Modellname sagt nicht, ob dabei Daten das Haus verlassen
+        # haben. Beides steht deshalb im Zustand, im Protokoll und im Strom.
+        self.anbieter = anbieter_fuer(modell)
+        self.lokal = next((m["lokal"] for m in modelle().get("modelle") or []
+                           if m["modell"] == modell), True)
         self.sitzung = "" if sitzung in ("", "weiter") else sitzung
         self.start_ts = time.time()
         # Der Ordner steht mit dem Start fest, und die Projektakte wird VOR dem
@@ -764,7 +862,8 @@ class Kopf:
             return {"ok": False, "grund": self.fehler}
         self.laeuft = True
         threading.Thread(target=self._lesen, daemon=True).start()
-        self._sende("start", modell=modell, projekt=projekt, kopf=self.NAME,
+        self._sende("start", modell=modell, anbieter=self.anbieter,
+                    lokal=self.lokal, projekt=projekt, kopf=self.NAME,
                     befehl=" ".join(befehl), ordner=ordner, akte=akte,
                     werkzeug=ema_werkzeugstand.kurz(self._werkzeug0))
         bereit = self._nach_start(modell, sitzung, system_zusatz)
@@ -773,7 +872,8 @@ class Kopf:
             self._sende("fehler", text=self.fehler[:400])
             self.stoppen()
             return bereit
-        return {"ok": True, "modell": modell, "projekt": projekt,
+        return {"ok": True, "modell": modell, "anbieter": self.anbieter,
+                "lokal": self.lokal, "projekt": projekt,
                 "kopf": self.NAME, "ordner": ordner}
 
     def fragen(self, text: str) -> dict:
@@ -1289,7 +1389,9 @@ class Kopf:
         z = [f"# Agentenlauf {time.strftime('%d.%m.%Y %H:%M', time.localtime(t0))}",
              "",
              f"* Kopf: {self.LABEL} (`{self.NAME}`)",
-             f"* Modell: `{self.modell}`",
+             f"* Modell: `{self.modell}` (Anbieter `{self.anbieter}`"
+             + (", lokal)" if self.lokal else ", **ueber eine API — die Eingaben "
+                                              "haben die Maschine verlassen**)"),
              f"* Projekt: {self.projekt or '— keine Bindung —'}",
              f"* Sitzung: `{self.sitzung or '—'}`",
              f"* Dauer: {uhr(ring[-1].get('t', t0))}",
@@ -1384,6 +1486,7 @@ class Kopf:
                 "prozess_lebt": bool(self.proc and self.proc.poll() is None),
                 "start_ts": round(self.start_ts, 3), "ordner": self.ordner,
                 "projekt": self.projekt, "modell": self.modell,
+                "anbieter": self.anbieter, "lokal": self.lokal,
                 "sitzung": self.sitzung, "fehler": self.fehler,
                 "ereignisse": len(self.ring),
                 "sekunden": round(time.time() - self.start_ts, 1)
@@ -1419,7 +1522,12 @@ class PiKopf(Kopf):
                 "Einrichtung steht in .agents/README.md")
 
     def _befehl(self, prog, modell, sitzung, system_zusatz) -> list:
-        befehl = [prog, "--provider", "ollama", "--model", modell,
+        # Der Anbieter stand hier als Zeichenkette "ollama" -- und war damit die
+        # eine Stelle, an der ein API-Modell scheiterte, obwohl ``pi`` es kann.
+        # Er folgt jetzt aus dem gewaehlten Modell (PIs ``models.json``); ist es
+        # dort unbekannt, bleibt es bei ollama und alles verhaelt sich wie
+        # vorher.
+        befehl = [prog, "--provider", anbieter_fuer(modell), "--model", modell,
                   "--mode", "rpc"]
         if sitzung == "weiter":
             befehl.append("--continue")

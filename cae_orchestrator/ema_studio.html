@@ -382,7 +382,8 @@
     <label for="f_sitzung">Sitzung</label>
     <select id="f_sitzung"></select>
     <label for="f_modell">Modell</label>
-    <input type="text" id="f_modell" value="">
+    <select id="f_modell" onchange="modellHinweis()"></select>
+    <div id="f_modell_hinweis" style="margin:5px 0 0;font-size:11.5px;color:#9aa"></div>
     <label for="f_prompt">Erster Auftrag (optional)</label>
     <textarea id="f_prompt" rows="3"
       placeholder="z. B.: Was ist beim letzten Lauf herausgekommen? Danach ein Beitrag für X."></textarea>
@@ -691,7 +692,7 @@ async function auswahlLaden(){
   try{
     const d = await (await fetch(K('/agent/auswahl'))).json();
     LABEL = d.kopf_label || 'Studio';
-    $('f_modell').value = d.modell || '';
+    modellFuellen(d);
     const opt = (d.projekte||[]).map(x =>
       `<option value="${esc(x.id)}">${esc(x.id)}${x.gerechnet?' · gerechnet':' · offen'}</option>`).join('');
     $('f_projekt').innerHTML = '<option value="">— kein Projekt binden —</option>' + opt;
@@ -720,6 +721,42 @@ async function anknuepfen(){
     LAEUFT = true; lauschen();
     return true;
   }catch(e){ return false; }
+}
+
+// ── Modellwahl: lokal oder ueber eine API ────────────────────────
+// Die Liste kommt aus PIs eigener ``models.json``; ``lokal`` ist an der ADRESSE
+// gemessen und nicht am Namen. Der Studio-Kopf steht oft im Heimnetz — hier
+// zaehlt der Hinweis doppelt.
+let MODELLE = [];
+function modellFuellen(d){
+  MODELLE = d.modelle || [];
+  const sel = $('f_modell');
+  if(!MODELLE.length){
+    sel.innerHTML = `<option value="${esc(d.modell||'')}">${esc(d.modell||'—')}</option>`;
+    $('f_modell_hinweis').textContent = d.modelle_grund
+      ? 'Nur das Vorgabemodell: ' + d.modelle_grund : '';
+    return;
+  }
+  sel.innerHTML = MODELLE.map(m =>
+    `<option value="${esc(m.modell)}"${m.modell === d.modell ? ' selected' : ''}>` +
+    `${m.lokal ? '🏠' : '🌐'} ${esc(m.name)} · ${esc(m.anbieter)}</option>`).join('');
+  modellHinweis();
+}
+
+function modellHinweis(){
+  const el = $('f_modell_hinweis');
+  const m = MODELLE.find(x => x.modell === $('f_modell').value);
+  if(!m){ el.textContent = ''; return; }
+  if(m.lokal){
+    el.innerHTML = '🏠 <b>Lokal</b> — nichts verlässt die Maschine.';
+    el.style.color = '#9aa';
+    return;
+  }
+  el.innerHTML = '🌐 <b>Über eine API</b> (<code>' + esc(m.basis) + '</code>) — ' +
+    'alles, was der Agent liest und schreibt, <b>verlässt diese Maschine</b>.' +
+    (m.kostet ? ' Der Lauf <b>kostet</b> beim Anbieter.' : '') +
+    (m.schluessel ? '' : ' <b>Kein Schlüssel hinterlegt — der Start scheitert.</b>');
+  el.style.color = '#e6a23c';
 }
 
 function buehneAn(modell, projekt){

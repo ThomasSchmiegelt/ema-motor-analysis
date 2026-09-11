@@ -203,7 +203,9 @@
     <div class="zeile">
       <div>
         <label for="f_modell">Modell</label>
-        <input type="text" id="f_modell" value="">
+        <select id="f_modell" onchange="modellHinweis()"></select>
+        <div class="hint" id="f_modell_hinweis"
+             style="margin:5px 0 0;font-size:11.5px;color:var(--tx2)"></div>
       </div>
       <div>
         <label for="f_schleifen">Entwurfsschleifen</label>
@@ -301,7 +303,7 @@ async function auswahlLaden(){
   try{
     const d = await (await fetch(K('/agent/auswahl'))).json();
     kopfBeschriften(d);
-    $('f_modell').value = d.modell || '';
+    modellFuellen(d);
     const p = $('f_projekt');
     p.innerHTML = (PROJEKTPFLICHT ? '<option value="">— Projekt wählen —</option>'
                                   : '<option value="">— kein Projekt binden —</option>') +
@@ -344,8 +346,58 @@ function kopfBeschriften(d){
   if(KOPF === 'hermes'){
     // ``hermes acp`` kennt keinen Modellschalter — das Feld waere eine Behauptung.
     $('f_modell').disabled = true;
-    $('f_modell').placeholder = 'aus der config.yaml von Hermes';
+    $('f_modell_hinweis').innerHTML =
+      'Hermes nimmt das Modell <b>nicht</b> über die Kommandozeile an (gemessen ' +
+      'an <code>--help</code>) — es steht in seiner <code>config.yaml</code>. ' +
+      'Ein Feld hier wäre eine Behauptung.';
   }
+}
+
+// ── Modellwahl: lokal oder über eine API ─────────────────────────
+//
+// Die Liste kommt aus PIs eigener ``models.json`` — kein zweiter, hier
+// gepflegter Satz, der auseinanderlaufen würde. ``lokal`` ist an der ADRESSE
+// des Anbieters gemessen und nicht an seinem Namen: ob Eingaben die Maschine
+// verlassen, entscheidet der Host, nicht die Beschriftung.
+let MODELLE = [];
+function modellFuellen(d){
+  MODELLE = d.modelle || [];
+  const sel = $('f_modell');
+  if(!MODELLE.length){
+    // Ehrlich leer: lieber das Vorgabemodell und der Grund, als eine leere Liste.
+    sel.innerHTML = `<option value="${esc(d.modell||'')}">${esc(d.modell||'—')}</option>`;
+    $('f_modell_hinweis').textContent = d.modelle_grund
+      ? 'Nur das Vorgabemodell: ' + d.modelle_grund : '';
+    return;
+  }
+  sel.innerHTML = MODELLE.map(m =>
+    `<option value="${esc(m.modell)}"${m.modell === d.modell ? ' selected' : ''}>` +
+    `${m.lokal ? '🏠' : '🌐'} ${esc(m.name)} · ${esc(m.anbieter)}</option>`).join('');
+  if(!MODELLE.some(m => m.modell === d.modell) && d.modell)
+    sel.insertAdjacentHTML('afterbegin',
+      `<option value="${esc(d.modell)}" selected>${esc(d.modell)} (Vorgabe)</option>`);
+  modellHinweis();
+}
+
+function modellHinweis(){
+  const el = $('f_modell_hinweis');
+  const m = MODELLE.find(x => x.modell === $('f_modell').value);
+  if(!m){ el.textContent = ''; return; }
+  if(m.lokal){
+    el.innerHTML = '🏠 <b>Lokal</b> (<code>' + esc(m.basis) + '</code>) — nichts ' +
+      'verlässt die Maschine.';
+    el.style.color = 'var(--tx2)';
+    return;
+  }
+  // Das ist die eine Angabe, die nicht in einer Fußnote stehen darf: bis hierher
+  // galt für dieses Repo ausdrücklich „nichts spricht über localhost hinaus".
+  el.innerHTML = '🌐 <b>Über eine API</b> (<code>' + esc(m.basis) + '</code>) — ' +
+    'alles, was der Agent liest und schreibt, <b>verlässt damit diese Maschine</b>: ' +
+    'Geometrie, Kennwerte, Quelltext der Werkzeuge, Projektnamen.' +
+    (m.kostet ? ' Der Lauf <b>kostet</b> beim Anbieter.' : '') +
+    (m.schluessel ? '' : ' <b style="color:#e6a23c">Für diesen Anbieter steht kein ' +
+      'Schlüssel in der <code>models.json</code> — der Start wird scheitern.</b>');
+  el.style.color = '#e6a23c';
 }
 
 // ── An einen schon laufenden Agenten wieder anknüpfen ────────────

@@ -34,7 +34,7 @@ cd ~/ai-workspace
 ```
 
 Es prüft Ollama, **nagelt das Modell auf seine ID fest** (`qwen-gross:latest` /
-`ca8ec377441f` — ein `ollama pull` unter gleichem Namen tauscht sonst still die
+`1bb3a46c5021` — ein `ollama pull` unter gleichem Namen tauscht sonst still die
 Gewichte), startet den Orchestrator nur, wenn `:5000` nicht antwortet, räumt einen
 belegten Port über `fuser` frei und wartet auf die Erreichbarkeit, bevor PI
 losläuft. Alle weiteren Argumente gehen unverändert an `pi`.
@@ -382,3 +382,57 @@ Skill und zum CLI gegriffen:
 * „Nimm das neueste Projekt und nenne B_gap und Kt."
   → richtiges Projekt, 0,766 T / 0,05 Nm/A, **samt Herkunftshinweis** auf die
   analytische Formel — die Ehrlichkeitsregel aus dem Skill greift.
+
+## Ein Modell über eine API angeben
+
+Die Anbieter stehen in **PIs eigener** `~/.pi/agent/models.json` — nicht in
+diesem Repo. Das ist Absicht: eine zweite, hier gepflegte Liste liefe
+auseinander, und dann böte die Startmaske ein Modell an, das `pi` nicht kennt.
+Ein Eintrag sieht so aus:
+
+```jsonc
+"providers": {
+  "anthropic": {
+    "baseUrl": "https://api.anthropic.com/v1",
+    "api":     "anthropic",
+    "apiKey":  "sk-ant-…",          // NICHT ins Repo, NICHT in ein Projekt
+    "models": [{ "id": "claude-opus-5", "name": "Opus 5",
+                 "contextWindow": 200000,
+                 "cost": { "input": 15, "output": 75 } }]
+  }
+}
+```
+
+Danach:
+
+```bash
+./start_agent.sh --anbieter anthropic --modell claude-opus-5
+./start_agent.sh --modell qwen3.5:9b        # Anbieter wird in models.json gesucht
+```
+
+Im Browser steht die Auswahl in der Startmaske von 🤖 PI und 📱 Studio.
+
+**Was dabei gesagt wird, und warum es dort steht und nicht in einer Fußnote:**
+für dieses Repo galt bis dahin ausdrücklich *nichts spricht über `localhost`
+hinaus*. Ein API-Modell hebt das auf — **alles, was der Agent liest und
+schreibt, verlässt damit die Maschine**: Geometrie, Kennwerte, Quelltext der
+Werkzeuge, Projektnamen. Die Maske sagt es, das Terminal sagt es, und das
+`protokoll_*.md` des Laufs hält fest, mit welchem Anbieter gerechnet wurde —
+ein Lauf gegen ein API-Modell ist nicht derselbe Lauf wie einer gegen das
+lokale.
+
+**Was `lokal` heißt, wird an der Adresse gemessen**, nicht am Namen: ein
+Anbieter darf heißen, wie er will; ob Daten das Haus verlassen, entscheidet der
+Host in `baseUrl`.
+
+**Hermes bleibt außen vor:** `hermes acp` nimmt weder Modell noch Sitzung über
+die Kommandozeile an (gemessen an `--help`) — beides steht in seiner
+`config.yaml`. Ein Auswahlfeld dort wäre eine Behauptung, und die Maske sagt
+das statt es anzubieten.
+
+**Bericht, Chat, KI-Entwurf und die Wissensbasis bleiben lokal.** Sie sprechen
+über **sechs voneinander unabhängige** `urllib`-Wege mit Ollama
+(`ema_report.call_ollama`, `ema_chat`, `ema_text2ema`, `ema_optimize`,
+`ema_design_ai`, `ema_experts`) plus die Einbettungen in `ema_rag` — es gibt
+dort keinen gemeinsamen Flaschenhals, an dem sich ein Anbieter umstellen ließe.
+Das wäre ein eigener Umbau und ist hier **nicht** gemacht.
