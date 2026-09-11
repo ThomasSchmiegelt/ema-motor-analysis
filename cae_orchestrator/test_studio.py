@@ -766,6 +766,54 @@ def test_bilder_und_video_im_verlauf():
           "abspielbar — und aufgenommen wird die Bühne, nicht der Reiter")
 
 
+def test_alle_drei_koepfe_stehen_in_JEDER_layoutregel():
+    """Der Rahmen fuellt die Flaeche — bei allen drei Koepfen, nicht bei zweien.
+
+    Gemeldet als „in diesem tab wird das studio nur im oberen drittel
+    eingeblendet" (`#studio`). Gemessene Ursache: als der dritte Kopf dazukam,
+    wurde `#panel-agent-studio` nur in die **iframe**-Regel aufgenommen, nicht in
+    die beiden Container-Regeln. Damit galt fuer den Studio-Reiter weiter die
+    Vorgabe `.tab-panel.active{display:block}`; das `flex:1` am Rahmen ist ohne
+    Flex-Container wirkungslos, und ein `<iframe>` ohne Hoehenangabe faellt auf
+    seine HTML-Vorgabe von **150 px** zurueck — auf einem halbhohen Fenster
+    genau „das obere Drittel".
+
+    Der Kommentar ueber der Regelmenge sagte schon, dass es EINE Regelmenge sein
+    soll, damit nichts auseinanderlaeuft. Genau das ist trotzdem passiert, weil
+    die Menge aus DREI Regeln besteht und nur eine nachgezogen wurde. Dieser
+    Test prueft deshalb jede einzeln.
+    """
+    h = open(os.path.join(HIER, "ema.html"), encoding="utf-8").read()
+    koepfe = ("#panel-agent", "#panel-agent-hermes", "#panel-agent-studio")
+
+    # Die drei Regeln am Merkmal ihrer rechten Seite finden — nicht an einer
+    # Zeilennummer, die sich beim naechsten Umbruch verschiebt.
+    regeln = {
+        "Container (Hoehe)":  r"\{height:100%;flex-direction:column\}",
+        "Container (aktiv)":  r"\{display:flex\}",
+        "Rahmen (iframe)":    r"\{flex:1;width:100%;border:0",
+    }
+    for name, muster in regeln.items():
+        treffer = [m for m in re.finditer(muster, h)]
+        assert treffer, f"Regel '{name}' nicht gefunden — Muster veraltet?"
+        # Der Selektor steht vor der geschweiften Klammer; 400 Zeichen davor
+        # reichen fuer die laengste der drei Selektorlisten.
+        sel = h[max(0, treffer[0].start() - 400):treffer[0].start()]
+        fehlend = [k for k in koepfe if k not in sel]
+        assert not fehlend, (
+            f"Regel '{name}' nennt {', '.join(fehlend)} nicht — dieser Kopf "
+            f"bekommt dann nicht die volle Hoehe (gemeldet: 'nur im oberen "
+            f"Drittel'). Selektor: {sel.strip()[-160:]!r}")
+
+    # Und die Vorgabe, gegen die das laeuft, steht wirklich so da — ohne sie
+    # waere die Begruendung oben eine Behauptung.
+    assert ".tab-panel.active{display:block}" in h, (
+        "Die Vorgabe hat sich geaendert; dann ist die Begruendung dieses Tests "
+        "nachzupruefen statt ihn anzupassen.")
+    print("✓ layout: alle drei Koepfe stehen in JEDER der drei Regeln — der "
+          "Rahmen fuellt die Flaeche statt 150 px hoch zu bleiben")
+
+
 if __name__ == "__main__":
     test_dritter_kopf()
     test_systemzusatz_je_kopf()
@@ -789,6 +837,7 @@ if __name__ == "__main__":
     test_html_ist_ausgeglichen()
     test_studio_seite_gehoert_dem_studio_kopf()
     test_studio_reiter_in_der_oberflaeche()
+    test_alle_drei_koepfe_stehen_in_JEDER_layoutregel()
     test_fussleiste_zeigt_wer_was_macht()
     test_bilder_und_video_im_verlauf()
     print("\nALLE STUDIO-TESTS BESTANDEN ✅")

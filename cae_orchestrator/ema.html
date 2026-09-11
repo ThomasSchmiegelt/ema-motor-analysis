@@ -109,12 +109,21 @@
     .tab-btn:disabled{opacity:.4;cursor:default}
 
     /* Agent-Tabs: der Rahmen fuellt die Flaeche, die Seite darin scrollt selbst.
-       PI und Hermes teilen EINE Regelmenge — zwei Kopien liefen beim ersten
-       Layoutfehler auseinander (wie die eine SKILL.md, die beide lesen). */
-    #panel-agent,#panel-agent-hermes{height:100%;flex-direction:column}
-    #panel-agent.active,#panel-agent-hermes.active{display:flex}
+       ALLE DREI Koepfe teilen EINE Regelmenge — zwei Kopien liefen beim ersten
+       Layoutfehler auseinander (wie die eine SKILL.md, die alle drei lesen).
+       Genau das ist hier passiert: als das Studio dazukam, wurde es nur in die
+       iframe-Regel aufgenommen, nicht in die beiden Container-Regeln. Die
+       Vorgabe `.tab-panel.active{display:block}` blieb damit stehen, das
+       `flex:1` am Rahmen war ohne Flex-Container wirkungslos, und das iframe
+       fiel auf seine HTML-Vorgabehoehe von 150 px zurueck — gemeldet als
+       „das Studio wird nur im oberen Drittel eingeblendet". Wer hier einen
+       vierten Kopf anhaengt: in JEDE der drei Regeln. */
+    #panel-agent,#panel-agent-hermes,#panel-agent-studio{height:100%;flex-direction:column}
+    #panel-agent.active,#panel-agent-hermes.active,
+    #panel-agent-studio.active{display:flex}
     #panel-agent .agent-leiste,
-    #panel-agent-hermes .agent-leiste{display:flex;align-items:center;gap:10px;flex:0 0 auto;
+    #panel-agent-hermes .agent-leiste,
+    #panel-agent-studio .agent-leiste{display:flex;align-items:center;gap:10px;flex:0 0 auto;
                                padding:6px 12px;background:#22272e;border-bottom:1px solid var(--brd);
                                font-size:.78rem;color:#8aa}
     #panel-agent iframe,
