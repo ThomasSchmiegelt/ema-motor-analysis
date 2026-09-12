@@ -2124,7 +2124,7 @@ def _classified_grid(tags):
         if name in _CLS:
             p2c[pid] = _CLS[name]                      # shaft/rotor/stator; air → fehlt ⇒ -1
     for m in tags["magnets"]:
-        p2c[m["phys"]] = 3.0 if m["sign"] > 0 else 4.0
+        p2c[m["phys"]] = _magnet_klasse(m)
     cls = np.array([p2c.get(int(e), -1.0) for e in ent], dtype=float)
     arr = ns.numpy_to_vtk(cls); arr.SetName("cls")
     g.GetCellData().AddArray(arr); g.GetCellData().SetActiveScalars("cls")
@@ -2185,6 +2185,46 @@ def _grab(rw, save_fn, name):
     return save_fn(data, name)
 
 
+def _magnet_klasse(m: dict) -> float:
+    """Rot (3) oder Blau (4) für EINEN Magneten — nach seiner WIRKUNG, nicht nach ``sign``.
+
+    Gemeldet am 12.09.2026 als „die Magnete sind falsch orientiert" an einer
+    U-Form: im 3-D-Bild trugen die drei Magnete EINES Pols verschiedene Farben.
+    Nachgerechnet war die Physik in Ordnung — die radiale Komponente der
+    Magnetisierung ist innerhalb jedes Pols gleichsinnig und wechselt von Pol zu
+    Pol, bei U genauso wie bei V, Delta und Doppel-V::
+
+        u     Pol 0: -0,664 -0,664 -1,000  |  Pol 1: +0,664 +0,664 +1,000
+        v     Pol 0: -0,664 -0,664         |  Pol 1: +0,664 +0,664
+
+    Falsch war das BILD. Eingefärbt wurde nach ``m["sign"]`` allein, und das ist
+    nur EIN Faktor der Magnetisierung ``Hc·sign·mag_sign·(mdx,mdy)``. Innerhalb
+    eines Pols wechselt ``sign`` zwischen den Schenkeln mit — bei der U-Form
+    +1/−1/+1 —, während ``mag_sign`` gegengleich mitläuft und das Produkt gleich
+    bleibt. Die Farbe kippte also genau dort, wo die Physik nicht kippt.
+
+    Das ist nicht kosmetisch: dieses Bild ist die einzige Stelle, an der jemand
+    die Polfolge NACHSIEHT. Ein Bild, das eine falsche Orientierung zeigt, wo
+    keine ist, kostet genau die Zeit, die hier gerade gekostet wurde — und im
+    umgekehrten Fall verdeckt es eine echte.
+
+    Entschieden wird an der **radialen Komponente** der fertigen Magnetisierung:
+    nach aussen = N am Luftspalt = rot. Wo sie bedeutungslos ist (Speiche
+    magnetisiert TANGENTIAL, gemessen M·r̂ = 0,000), bleibt es bei ``sign`` —
+    dort bildet erst das Paar benachbarter Magnete den Pol.
+    """
+    sign = float(m.get("sign", 1.0) or 1.0)
+    cx, cy = float(m.get("cx", 0.0)), float(m.get("cy", 0.0))
+    mdx, mdy = float(m.get("mdx", 0.0)), float(m.get("mdy", 0.0))
+    r = math.hypot(cx, cy)
+    n = math.hypot(mdx, mdy)
+    if r > 1e-9 and n > 1e-9:
+        radial = sign * (mdx * cx + mdy * cy) / (r * n)
+        if abs(radial) > 0.1:                    # tangentiale Magnete: s. Speiche
+            return 3.0 if radial > 0 else 4.0
+    return 3.0 if sign > 0 else 4.0
+
+
 def _classify_grid_gids(grid, tags):
     """Wie ``_classified_grid``, aber aus den **GeometryIds** einer Elmer-VTU (Body-Physical-IDs)
     statt der gmsh-.vtk-CellEntityIds — für den zum vollen Motor gespiegelten Sektor (der die
@@ -2200,7 +2240,7 @@ def _classify_grid_gids(grid, tags):
         if name in _CLS:
             p2c[pid] = _CLS[name]
     for m in tags["magnets"]:
-        p2c[m["phys"]] = 3.0 if m["sign"] > 0 else 4.0
+        p2c[m["phys"]] = _magnet_klasse(m)
     cls = np.array([p2c.get(int(e), -1.0) for e in ent], dtype=float)
     arr = ns.numpy_to_vtk(cls); arr.SetName("cls")
     grid.GetCellData().AddArray(arr); grid.GetCellData().SetActiveScalars("cls")

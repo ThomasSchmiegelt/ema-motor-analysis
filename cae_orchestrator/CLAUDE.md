@@ -728,6 +728,29 @@ stimmen überein, beide sind richtig. Ebenfalls nachgemessen und dokumentiert: d
 umdrehen senkt die Luftspalt-Grundwelle von 1,216 auf 0,723 (0,59×), das Deck arbeitet also nicht
 gegen die Arme. Test: `test_em3d.test_orientation_check_2d_vs_3d` (rein numerisch, ohne Netz/Elmer).
 
+**Die Magnetfarbe im 3-D-Bild folgt der MAGNETISIERUNG, nicht `sign` (12.09.2026).**
+Gemeldet als „die Magnete sind falsch orientiert" an einer U-Form: im
+3-D-Modellbild trugen die drei Magnete EINES Pols verschiedene Farben.
+Nachgerechnet war die Physik in Ordnung — die radiale Komponente der
+Magnetisierung ist innerhalb jedes Pols gleichsinnig und wechselt von Pol zu
+Pol, bei U genauso wie bei V, Delta und Doppel-V (`u` Pol 0: −0,664 −0,664
+−1,000 · Pol 1: +0,664 +0,664 +1,000). Falsch war das **Bild**: eingefärbt wurde
+nach `m["sign"]` allein, und das ist nur EIN Faktor der Magnetisierung
+`Hc·sign·mag_sign·(mdx,mdy)`. Innerhalb eines Pols wechselt `sign` zwischen den
+Schenkeln (U: +1/−1/+1), während `mag_sign` gegengleich mitläuft und das Produkt
+gleich bleibt — die Farbe kippte also genau dort, wo die Physik nicht kippt.
+**Das ist nicht kosmetisch:** dieses Bild ist die einzige Stelle, an der jemand
+die Polfolge nachsieht; eine Farbe, die dort kippt, schickt die Fehlersuche ans
+falsche Ende, und im umgekehrten Fall verdeckt sie eine echte Verdrehung.
+`_magnet_klasse(m)` entscheidet jetzt an der radialen Komponente (nach außen =
+N = rot) und fällt nur dort auf `sign` zurück, wo sie bedeutungslos ist — die
+**Speiche** magnetisiert tangential (gemessen M·r̂ = 0,000), dort bildet erst
+das Paar benachbarter Magnete den Pol. EINE Regel für beide Einfärbungsstellen
+(`_classified_grid` und `_classify_grid_gids`). Test:
+`test_em3d.test_magnetfarbe_folgt_der_magnetisierung` — acht Bauformen, je Pol
+eine Farbe, Polfolge wechselt, Farbe gegen M·r̂ geprüft, samt Gegenprobe, dass
+die ALTE Regel den Pol gemischt eingefärbt hätte.
+
 **Plausibilitätswächter `_b_gap_plausibility` (2026-08-12).** `_gap_field_metrics` liefert jetzt
 `b_gap_max_abs`; überschreitet es 3 T (Eisen sättigt bei ~2 T), warnen beide Auswertepfade. Anlass:
 im Lastfall überstrahlen die vereinfachten **Stirnring-Leiter** (`COIL_J_SCALE`, an EINER Maschine

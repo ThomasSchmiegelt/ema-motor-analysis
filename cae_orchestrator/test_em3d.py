@@ -382,6 +382,65 @@ def test_layouttor_vor_dem_netzbau():
           "laeuft dafuer gar nicht erst an")
 
 
+def test_magnetfarbe_folgt_der_magnetisierung():
+    """Im 3-D-Bild traegt ein Pol EINE Farbe — sonst liest man eine Stoerung hinein.
+
+    Gemeldet am 12.09.2026 als „die Magnete sind falsch orientiert" an einer
+    U-Form; das Bild zeigte innerhalb eines Pols rote UND blaue Magnete.
+    Nachgerechnet war die Physik in Ordnung: die radiale Komponente der
+    Magnetisierung ist je Pol gleichsinnig und wechselt von Pol zu Pol.
+
+    Falsch war die EINFAERBUNG. Sie ging nach ``m["sign"]``, und das ist nur
+    einer der Faktoren von ``Hc·sign·mag_sign·(mdx,mdy)``: innerhalb eines Pols
+    wechselt ``sign`` zwischen den Schenkeln (U: +1/-1/+1), waehrend
+    ``mag_sign`` gegengleich mitlaeuft und das Produkt gleich bleibt.
+
+    Dieses Bild ist die einzige Stelle, an der jemand die Polfolge NACHSIEHT.
+    Eine Farbe, die dort kippt, wo die Physik nicht kippt, kostet eine
+    Fehlersuche am falschen Ende — und im umgekehrten Fall verdeckt sie eine
+    echte Verdrehung.
+    """
+    import cae_cli
+    basis = dict(cae_cli.frischer_payload()["geom"])
+    basis.update({"statorOD": 305.0, "rotorOD": 188.6, "statorID": 190.0,
+                  "shaftD": 60.0, "poles": 6, "slots": 36, "axialLen": 150.0})
+
+    for form in ("v", "vasym", "u", "delta", "vv", "pmasynrm", "spm", "spoke"):
+        g = dict(basis); g["magShape"] = form
+        mr = E3.magnet_rects(g)
+        n = max(1, len(mr) // 6)
+        farbe = lambda ms: {E3._magnet_klasse(m) for m in ms}
+        p0, p1 = farbe(mr[:n]), farbe(mr[n:2 * n])
+        assert len(p0) == 1, f"{form}: Pol 0 ist gemischt eingefaerbt ({p0})"
+        assert len(p1) == 1, f"{form}: Pol 1 ist gemischt eingefaerbt ({p1})"
+        assert p0 != p1, f"{form}: die Polfolge wechselt die Farbe NICHT"
+
+        # Und die Farbe stimmt mit der Physik ueberein: rot = Magnetisierung
+        # zeigt nach AUSSEN. Bei tangentialen Magneten (Speiche, gemessen
+        # M·r̂ = 0,000) gibt es keine radiale Aussage — dort wird nichts
+        # behauptet, sondern auf `sign` zurueckgefallen.
+        for m in mr[:n]:
+            r = math.hypot(m["cx"], m["cy"])
+            nn = math.hypot(m.get("mdx", 0.0), m.get("mdy", 0.0))
+            if not (r > 1e-9 and nn > 1e-9):
+                continue
+            radial = (float(m.get("sign", 1.0))
+                      * (m["mdx"] * m["cx"] + m["mdy"] * m["cy"]) / (r * nn))
+            if abs(radial) <= 0.1:
+                continue
+            soll = 3.0 if radial > 0 else 4.0
+            assert E3._magnet_klasse(m) == soll, (
+                f"{form}: Farbe {E3._magnet_klasse(m)} gegen M·r̂ = {radial:+.3f}")
+
+    # Die alte Regel haette genau das nicht gehalten — sonst prueft der Test nichts.
+    g = dict(basis); g["magShape"] = "u"
+    alt = {3.0 if m["sign"] > 0 else 4.0 for m in E3.magnet_rects(g)[:3]}
+    assert len(alt) > 1, ("Vorbedingung: nach der ALTEN Regel war Pol 0 gemischt "
+                          "— ist das nicht mehr so, prueft dieser Test nichts")
+    print("✓ magnetfarbe: je Pol EINE Farbe, Polfolge wechselt, Farbe = radiale "
+          "Richtung der Magnetisierung (8 Bauformen)")
+
+
 def main():
     test_magnet_rects_count()
     test_orientation_check_2d_vs_3d()
@@ -396,6 +455,7 @@ def main():
     test_sweep_per_point_sif()
     test_streamlines_export()
     test_layouttor_vor_dem_netzbau()
+    test_magnetfarbe_folgt_der_magnetisierung()
     print("\nALLE EM3D-MESH-TESTS BESTANDEN ✅  (Elmer-Solve separat, sobald installiert)")
 
 
