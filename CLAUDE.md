@@ -14,7 +14,7 @@ not restate subproject detail.
 
 | Folder | What | Stack | Start |
 |---|---|---|---|
-| `cae_orchestrator/` | Browser CAE for IPM motors: geometry → EM field → structural FEM → thermal → drive-cycle, PDF report | Python/Flask + FreeCAD/CalculiX/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
+| `cae_orchestrator/` | Browser CAE for IPM motors: geometry → EM field → structural FEM → thermal → drive-cycle, PDF report | Python/Flask + FreeCAD/CalculiX/Elmer/OpenFOAM/Blender/FluidX3D | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
 | `connection_detection/` | FreeCAD workbench: geometric connection detection in STEP assemblies (basis for multi-body CalculiX) | Python FreeCAD addon (`rtree`) | `FreeCADCmd cli.py -- input.step -o out.json` |
 | `pikogk/` | PicoGK geometry kernel + HTTP API (voxel/implicit geometry, LLM-driven "skill" generation; domain = combustion cylinder heads) | .NET 9 + native `picogk.so` | `cd pikogk && ./start.sh` → http://localhost:5266 |
 | `physics_surrogate/` | ML surrogate for the 2D-FDM field stage (PhysicsNeMo/Torch). **Stalled mid-stage-1**: 17 GB dataset + 4 trained checkpoints, best `rmse_Br_rel_peak` 0.054 against a 0.03 gate; `/predict/*` returns a hardcoded 503 and there is no inference client | Python + Torch/CUDA | `cd physics_surrogate && ./start.sh` → http://localhost:5300 |
@@ -127,6 +127,14 @@ not assumed:
 - Gmsh — the one actually used is the **Python module in the orchestrator venv** (4.15.2, from `requirements.txt`). `/usr/bin/gmsh` (4.12.1) sits alongside and is not needed.
 - Portable Blender under `~/blender_portable`.
 - OpenFOAM v2406 (`/usr/lib/openfoam`), Elmer, CUDA, pandoc/pdflatex — installed system-wide.
+- **FluidX3D** (ProjectPhysX, OpenCL-Lattice-Boltzmann mit freier Oberfläche) unter
+  `~/ai-workspace/FluidX3D` — **nicht versioniert** (`.gitignore`), weil die Lizenz
+  keine kommerzielle und keine militärische Nutzung erlaubt, **kein KI-Training auf
+  dem Quelltext**, und geänderte Fassungen bei einer Veröffentlichung von Ergebnissen
+  offenzulegen sind. `cae_orchestrator/ema_fluidx3d.py` arbeitet deshalb in einer
+  **Kopie** unter `~/fluidx3d_cae` (`$CAE_FLUIDX3D_HEIM`) und rührt den Quellbaum nicht
+  an — dort stehen die eigenen Fälle des Menschen. FluidX3D hat keine Eingabedatei:
+  jeder Fall ist eine C++-Funktion und wird neu übersetzt (gemessen 40 s).
 - Ollama at `localhost:11434`.
 
 ## Runtime data (never versioned)

@@ -606,6 +606,189 @@ def oilspray_presets():
     return jsonify(ema_oilspray.save_preset(data.get("name"), payload))
 
 
+# ── 🌀 FluidX3D: Spritzoel als Lattice-Boltzmann auf der GPU ─────────────────
+#
+# Dritter Loeser auf DEMSELBEN Spritzoel-Fall: `ema_oilspray` (Mantaflow, CPU,
+# qualitativ), `ema_cfd` (interFoam, VOF, liefert den HTC) und dieser hier
+# (FluidX3D, freie Oberflaeche, GPU, aufgeloeste Duese). Die Einstellungen
+# kommen aus DEMSELBEN `oil`-Satz — wie beim 🌊-Tab, damit ein Druck in allen
+# drei Pfaden denselben Strahl bedeutet.
+_fx3d_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+_fx3d_abort = {"v": False}
+
+
+@app.route("/fluidx3d", methods=["POST", "OPTIONS"])
+def fluidx3d_start():
+    """Startet den FluidX3D-Spritzoellauf (LBM, freie Oberflaeche, GPU). Body =
+    normaler Analyse-Payload + ``oil``-Satz (geerbt) + ``fx3d``-Optionen
+    (fenster_mm, n, bilder, dauer_ms, stoss_ms, fps). 503 ohne FluidX3D.
+    ISOTHERM — kein Temperaturfeld, kein Waermeuebergang."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import fluidx3d_runner
+    if not fluidx3d_runner.FLUIDX3D_OK:
+        return jsonify({"error": fluidx3d_runner.INSTALL_HINT, "need_install": True}), 503
+    if _fx3d_state["status"] == "running":
+        return jsonify({"error": "FluidX3D-Lauf laeuft bereits"}), 409
+    data = request.get_json(force=True) or {}
+    proj_dir, proj_id = _fx3d_setup(data)
+    threading.Thread(target=_fx3d_body, args=(data, proj_dir, proj_id),
+                     daemon=True).start()
+    return jsonify({"status": "started", "project_id": proj_id}), 202
+
+
+def _fx3d_setup(data):
+    """Gemeinsames Setup (Route + Job-Warteschlange)."""
+    import fluidx3d_runner
+    proj_dir, proj_id = _em3d_project_dir(data)
+    _fx3d_abort["v"] = False
+    fluidx3d_runner.clear_abort()
+    _fx3d_state.update({"status": "running", "progress": 0, "log": [],
+                        "result": None, "error": None})
+    return proj_dir, proj_id
+
+
+def _fx3d_body(data, proj_dir, proj_id):
+    """Synchroner Lauf-Koerper von /fluidx3d — auch von der Job-Warteschlange
+    direkt aufgerufen."""
+    import ema_fluidx3d, traceback
+    def cb(msg, pct=None):
+        _fx3d_state["log"].append(msg)
+        if pct is not None:
+            _fx3d_state["progress"] = int(pct)
+    try:
+        res = ema_fluidx3d.run_fluidx3d(data, proj_dir, progress_cb=cb,
+                                        cancel_cb=lambda: _fx3d_abort["v"])
+        res["project_id"] = proj_id
+        _fx3d_state["result"] = res
+        _fx3d_state["status"] = "done"
+        _fx3d_state["progress"] = 100
+    except Exception as e:
+        if _fx3d_abort["v"] or "abgebrochen" in str(e).lower():
+            _fx3d_state["log"].append("⛔ Abgebrochen.")
+            _fx3d_state["status"] = "aborted"
+            _fx3d_state["error"] = None
+        else:
+            _fx3d_state["error"] = str(e)
+            _fx3d_state["log"].append("⚠ " + str(e))
+            _fx3d_state["log"].append(traceback.format_exc()[:600])
+            _fx3d_state["status"] = "error"
+
+
+@app.route("/fluidx3d/abort", methods=["POST", "OPTIONS"])
+def fluidx3d_abort():
+    if request.method == "OPTIONS":
+        return "", 200
+    import fluidx3d_runner
+    if _fx3d_state.get("status") != "running":
+        return jsonify({"status": "idle"})
+    _fx3d_abort["v"] = True
+    killed = fluidx3d_runner.abort_current()
+    _fx3d_state["log"].append("⛔ Abbruch angefordert…"
+                              + (" (FluidX3D gestoppt)" if killed else ""))
+    return jsonify({"status": "aborting", "killed": bool(killed)})
+
+
+@app.route("/fluidx3d/status")
+def fluidx3d_status():
+    return jsonify({k: _fx3d_state[k]
+                    for k in ("status", "progress", "log", "result", "error")})
+
+
+@app.route("/fluidx3d/kosten", methods=["POST", "OPTIONS"])
+def fluidx3d_kosten():
+    """Was kostet dieser Fall, BEVOR er laeuft: Zellgroesse, Zellen je Bohrung,
+    Speicher — und was die ganze Maschine kosten wuerde. Die Maske fragt das
+    beim Tippen ab, wie `_oilRecommendRes` im 💧-Tab; hier gerechnet statt im
+    Browser nachgebaut, weil die Zahl aus derselben Quelle kommen muss wie der
+    Lauf."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_fluidx3d
+    d = request.get_json(force=True) or {}
+    oil, fx = d.get("oil") or {}, d.get("fx3d") or {}
+    geom = d.get("geom") or {}
+    duese = float(oil.get("nozzle_d_mm", 1.0) or 1.0)
+    fenster = float(fx.get("fenster_mm", ema_fluidx3d.DEFAULT_FENSTER) or 48.0)
+    aufl = ema_fluidx3d.aufloesung(fenster, duese, n_fest=fx.get("n"))
+    voll = ema_fluidx3d.vollmaschine_kosten(geom.get("statorOD", 260.0), duese)
+    return jsonify({"aufloesung": aufl, "vollmaschine": voll,
+                    "strahl_mps": round(ema_fluidx3d.strahlgeschwindigkeit(
+                        float(oil.get("pressure_bar", 3.0) or 3.0)), 2)})
+
+
+def _fx3d_project_base(pid):
+    """Projektverzeichnis fuer die FluidX3D-Varianten-Routen."""
+    if pid == "current":
+        return _state.get("project_dir")
+    if not _safe_name(pid):
+        return None
+    base = os.path.join(PROJECTS_ROOT, pid)
+    return base if os.path.isdir(base) else None
+
+
+@app.route("/project/<pid>/fluidx3d")
+def project_fluidx3d(pid: str):
+    """Gespeicherten FluidX3D-Lauf eines Projekts laden (ohne Neurechnen)."""
+    base = _fx3d_project_base(pid)
+    if not base:
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_fluidx3d
+    saved = ema_fluidx3d.load_saved(base)
+    if not saved:
+        return jsonify({"error": "Kein gespeicherter FluidX3D-Lauf in diesem Projekt"}), 404
+    saved["project_id"] = pid if pid != "current" else _state.get("project_id")
+    return jsonify(saved)
+
+
+@app.route("/project/<pid>/fluidx3d/saved")
+def project_fluidx3d_saved_list(pid: str):
+    base = _fx3d_project_base(pid)
+    if not base:
+        return jsonify([])
+    import ema_fluidx3d
+    return jsonify(ema_fluidx3d.list_saved_runs(base))
+
+
+@app.route("/project/<pid>/fluidx3d/saved/<rid>")
+def project_fluidx3d_saved_load(pid: str, rid: str):
+    base = _fx3d_project_base(pid)
+    if not base or not _safe_name(rid):
+        return jsonify({"error": "ungueltig"}), 403
+    import ema_fluidx3d
+    run = ema_fluidx3d.load_saved_run(base, rid)
+    if not run:
+        return jsonify({"error": "Variante nicht gefunden"}), 404
+    run["project_id"] = pid if pid != "current" else _state.get("project_id")
+    run["video_src"] = f"/project/{pid}/fluidx3d/saved/{rid}/video"
+    return jsonify(run)
+
+
+@app.route("/project/<pid>/fluidx3d/saved/<rid>/video")
+def project_fluidx3d_saved_video(pid: str, rid: str):
+    base = _fx3d_project_base(pid)
+    if not base or not _safe_name(rid):
+        return jsonify({"error": "ungueltig"}), 403
+    import ema_fluidx3d
+    mp4 = ema_fluidx3d.saved_run_video(base, rid)
+    if not mp4:
+        return jsonify({"error": "Kein Video fuer diese Variante"}), 404
+    return send_file(mp4, mimetype="video/mp4", as_attachment=True,
+                     download_name=f"{pid}_fx3d_{rid}.mp4")
+
+
+@app.route("/project/<pid>/fluidx3d/saved/<rid>/delete", methods=["POST", "OPTIONS"])
+def project_fluidx3d_saved_delete(pid: str, rid: str):
+    if request.method == "OPTIONS":
+        return "", 200
+    base = _fx3d_project_base(pid)
+    if not base or not _safe_name(rid):
+        return jsonify({"error": "ungueltig"}), 403
+    import ema_fluidx3d
+    ok = ema_fluidx3d.delete_saved_run(base, rid)
+    return jsonify({"status": "deleted" if ok else "missing"})
+
+
 @app.route("/oilspray/presets/<pid>/delete", methods=["POST", "OPTIONS"])
 def oilspray_preset_delete(pid: str):
     if request.method == "OPTIONS":
@@ -3101,7 +3284,8 @@ def delete_project(pid: str):
 def project_video(pid: str, mode: str):
     # field-animation modes + structural deformation ramp + 3D-Lastprofil (frames_em3d)
     video_subdirs = {**FIELD_SUBDIRS, "struct": "frames_struct", "em3d": "frames_em3d",
-                     "oil": "frames_oil", "cfd": "frames_cfd"}
+                     "oil": "frames_oil", "cfd": "frames_cfd",
+                     "fx3d": "frames_fx3d"}
     if not _safe_name(pid) or mode not in video_subdirs:
         return jsonify({"error": "ungültig"}), 403
     base = os.path.join(PROJECTS_ROOT, pid) if pid and pid != "current" else _state.get("project_dir")
@@ -3894,6 +4078,23 @@ def _jobs_abort_cfd():
     openfoam_runner.abort_current()
 
 
+def _exec_fluidx3d(payload):
+    import fluidx3d_runner
+    if not fluidx3d_runner.FLUIDX3D_OK:
+        return {"status": "fehler", "error": fluidx3d_runner.INSTALL_HINT}
+    proj_dir, proj_id = _fx3d_setup(payload)
+    _fx3d_body(payload, proj_dir, proj_id)
+    st = _fx3d_state["status"]
+    status = {"done": "fertig", "aborted": "abgebrochen"}.get(st, "fehler")
+    return {"status": status, "project_id": proj_id, "error": _fx3d_state.get("error")}
+
+
+def _jobs_abort_fx3d():
+    import fluidx3d_runner
+    _fx3d_abort["v"] = True
+    fluidx3d_runner.abort_current()
+
+
 def _jobs_abort_oil():
     import blender_runner
     _oil_abort["v"] = True
@@ -3903,6 +4104,7 @@ def _jobs_abort_oil():
 # type → State-Dict des laufenden Jobs (für die Live-Anreicherung in GET /jobs)
 _JOB_STATES = {"analyse": _state, "em3d": _em3d_state,
                "em3d_sweep": _em3d_state, "oilspray": _oil_state,
+               "fluidx3d": _fx3d_state,
                "param_study": _study_state, "optimize": _opt_state,
                "cfd": _cfd_state}
 
@@ -4014,6 +4216,9 @@ ema_jobs.init({
     "optimize":   {"run": _exec_optimize,
                    "busy": lambda: _opt_state["status"] == "running",
                    "abort": None},
+    "fluidx3d":   {"run": _exec_fluidx3d,
+                   "busy": lambda: _fx3d_state["status"] == "running",
+                   "abort": _jobs_abort_fx3d},
     "cfd":        {"run": _exec_cfd,
                    "busy": lambda: _cfd_state["status"] == "running",
                    "abort": _jobs_abort_cfd},

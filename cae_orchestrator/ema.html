@@ -243,6 +243,7 @@
     <button class="tab-btn"        id="tbtn-em3d"    onclick="switchTab('em3d')">🧲 3D-Feld</button>
     <button class="tab-btn"        id="tbtn-oil"     onclick="switchTab('oil')">💧 Spritzöl-Kühlung</button>
     <button class="tab-btn"        id="tbtn-cfd"     onclick="switchTab('cfd')">🌊 OpenFOAM (quant.)</button>
+    <button class="tab-btn"        id="tbtn-fx3d"    onclick="switchTab('fx3d')">🌀 FluidX3D (LBM)</button>
     <button class="tab-btn"        id="tbtn-spraytest" onclick="switchTab('spraytest')">🧪 Spray-Test</button>
     <button class="tab-btn"        id="tbtn-ki"      onclick="switchTab('ki')">🧠 KI-Training</button>
     <button class="tab-btn"        id="tbtn-jobs"    onclick="switchTab('jobs')">⏳ Jobs<span id="jobs-badge" style="display:none;margin-left:5px;background:#e67e22;color:#fff;border-radius:9px;padding:0 6px;font-size:.68rem"></span></button>
@@ -2482,6 +2483,95 @@
  </div>
 </div><!-- /panel-cfd -->
 
+<div class="tab-panel" id="panel-fx3d">
+ <div class="e3-wrap">
+
+  <div class="e3-card">
+    <div class="section-title">🌀 Spritzöl als Lattice-Boltzmann (FluidX3D, GPU)</div>
+    <p style="font-size:.82rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      Dritter Löser auf DEMSELBEN Spritzöl-Fall. Er rechnet ein <b>Fenster</b> um
+      <b>eine</b> Düse mit <b>aufgelöster Bohrung</b> und freier Oberfläche
+      (PLIC + Oberflächenspannung) auf der GPU — dort, wo 💧 bei 1-mm-Düsen an der
+      Auflösung scheitert. Gemessen: 9,0 Mio. Zellen, 10,4 ms Realzeit in 11,3 s
+      (≈9500 MLUPS), Massenerhaltung −1,1 %.
+    </p>
+    <div style="background:#2a2620;border:1px solid #6a5a2e;border-radius:5px;padding:8px 11px;font-size:.76rem;color:#d8c89a;line-height:1.45">
+      ⚠ <b>Scope — drei Grenzen, gemessen:</b>
+      <b>(1)</b> Die ganze Maschine passt nicht: mit aufgelöster 1-mm-Bohrung bräuchte
+      sie zig GB. Gerechnet wird deshalb immer ein <b>Fenster</b> am Wickelkopf.
+      <b>(2)</b> Kein Dauerstrahl — der Freiflächenlöser kann von außen keine Masse
+      nachgespeist bekommen; gerechnet wird ein endlicher <b>Ölstoß</b>, der
+      Anlaufvorgang fällt heraus, der Aufprall nicht.
+      <b>(3)</b> <b>Isotherm</b> — kein Temperaturfeld, kein Wärmeübergang. Der HTC
+      kommt weiter aus 🌊 OpenFOAM; dieser Pfad ersetzt den qualitativen 💧-Pfad.
+    </div>
+    <div style="margin-top:8px;font-size:.74rem;color:#789;line-height:1.4">
+      Lizenz FluidX3D (ProjectPhysX): nicht kommerziell, nicht militärisch, kein
+      KI-Training auf dem Quelltext; geänderte Fassungen sind bei einer
+      Veröffentlichung von Ergebnissen offenzulegen. Gearbeitet wird in einer Kopie,
+      der eigene Quellbaum bleibt unangetastet.
+    </div>
+    <div id="fx3d_need_install" style="display:none;margin-top:8px;font-size:.78rem;color:#e88;white-space:pre-wrap"></div>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">💧 Aus dem Spritzöl-Tab übernommen</div>
+    <p style="font-size:.8rem;color:#9aa;line-height:1.5;margin:0 0 6px">
+      Geometrie, Öldruck, Düsen-Ø, Ringabstand und Ausschnitt kommen aus dem
+      <b>💧 Spritzöl-Kühlung</b>-Tab — dort einstellen. Hier nur die LBM-eigenen Größen.
+    </p>
+    <div id="fx3d_inherited" style="font-size:.8rem;color:#bcd;background:#0d1014;border-radius:4px;padding:7px 10px">—</div>
+    <button onclick="switchTab('oil')" style="margin-top:7px;background:#456;width:auto;padding:7px 12px;font-size:.78rem">💧 Spritzöl-Einstellungen öffnen</button>
+  </div>
+
+  <div class="e3-card">
+    <div class="section-title">⚙ Fenster &amp; Rechenparameter</div>
+    <div class="input-group"><label>Fenstergröße</label>
+      <input type="number" id="fx3d_fenster" value="48" min="16" max="160" step="2" oninput="_fx3dKosten()"/><span>mm</span>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Kantenlänge des Rechenwürfels am Wickelkopf. Kleiner = feiner bei gleicher Zellzahl; zu klein, und der Ölstoß hat keinen Anlauf mehr.</small></div>
+    <div class="input-group"><label>Zellen je Kante</label>
+      <input type="number" id="fx3d_n" value="208" min="64" max="512" step="8" oninput="_fx3dKosten()"/><span>Zellen</span>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Kosten ~kubisch. Leer lassen ist nicht vorgesehen — die Empfehlung unten rechnet mit.</small></div>
+    <div class="input-group"><label>Simulierte Zeit</label>
+      <input type="number" id="fx3d_dauer" value="10" min="0.5" max="60" step="0.5"/><span>ms</span></div>
+    <div class="input-group"><label>Ölstoß-Dauer</label>
+      <input type="number" id="fx3d_stoss" value="0.7" min="0.05" max="20" step="0.05"/><span>ms</span>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">Wie lange die Düse „feuert". Die Säule steht zum Zeitpunkt 0 außerhalb des Rings und fliegt los; braucht sie mehr Platz als das Fenster hergibt, wird sie gekürzt und das gesagt.</small></div>
+    <div class="input-group"><label>Bilder</label>
+      <input type="number" id="fx3d_bilder" value="24" min="4" max="120" step="2"/><span>Schnitte</span></div>
+    <div class="input-group"><label>Video-Tempo</label>
+      <input type="number" id="fx3d_fps" value="12" min="2" max="60" step="1"/><span>fps</span></div>
+    <div id="fx3d_kosten" style="margin-top:8px;font-size:.78rem;color:#bcd;background:#0d1014;border-radius:4px;padding:8px 10px;line-height:1.5">—</div>
+  </div>
+
+  <div class="e3-card">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button id="fx3d_btn" onclick="startFluidx3d()" style="background:#5a3a8a;width:auto;padding:10px 16px;font-size:.85rem">🌀 LBM-Spritzöl rechnen</button>
+      <button id="fx3d_abort_btn" onclick="abortFluidx3d()" style="display:none;background:#833;width:auto;padding:10px 14px">⛔ Abbrechen</button>
+      <button onclick="queueFluidx3d()" style="background:#456;width:auto;padding:10px 14px;font-size:.8rem"
+        title="In die Server-Warteschlange einreihen (läuft auch bei geschlossenem Browser) → Tab ⏳ Jobs">➕ Warteschlange</button>
+      <span id="fx3d_queue_msg" style="font-size:.72rem;color:#6c8"></span>
+    </div>
+    <div id="fx3d_progress_wrap" style="display:none;margin-top:10px">
+      <div style="background:#21262d;border-radius:4px;height:8px;overflow:hidden">
+        <div id="fx3d_bar" style="background:#5a3a8a;height:100%;width:0%;transition:width .3s"></div>
+      </div>
+      <pre id="fx3d_log" style="margin-top:6px;max-height:220px;overflow:auto;background:#0d1014;border-radius:4px;padding:8px;font-size:.72rem;color:#9cc;white-space:pre-wrap"></pre>
+    </div>
+    <div id="fx3d_msg" style="margin-top:8px;font-size:.82rem;color:#9aa"></div>
+  </div>
+
+  <div id="fx3d_results" style="display:none"></div>
+
+  <div class="e3-card">
+    <div class="section-title">🎞 Gespeicherte LBM-Läufe</div>
+    <p style="font-size:.78rem;color:#9aa;margin:0 0 7px">Jeder fertige Lauf wird automatisch als eigene Variante abgelegt — ein neuer überschreibt die vorherigen nicht.</p>
+    <div id="fx3d_saved_cards" style="display:flex;flex-wrap:wrap;gap:10px">—</div>
+  </div>
+
+ </div>
+</div><!-- /panel-fx3d -->
+
 <!-- ════════ TAB: Spray-Test-Prüfstand (iteratives Spray-Tuning) ════════ -->
 <div class="tab-panel" id="panel-spraytest">
  <div class="e3-wrap">
@@ -3700,7 +3790,7 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['projekt','geo','betrieb','calc','live','designer','import','getriebe','em3d','oil','cfd','spraytest','ki','jobs','results','compare','agent','agenth','studio'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','getriebe','em3d','oil','cfd','fx3d','spraytest','ki','jobs','results','compare','agent','agenth','studio'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
@@ -3708,7 +3798,7 @@ const PANEL_OF = {
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
   designer:'panel-designer', import:'panel-import', getriebe:'panel-getriebe',
   em3d:'panel-em3d', oil:'panel-oil',
-  cfd:'panel-cfd', spraytest:'panel-spraytest', ki:'panel-ki', jobs:'panel-jobs',
+  cfd:'panel-cfd', fx3d:'panel-fx3d', spraytest:'panel-spraytest', ki:'panel-ki', jobs:'panel-jobs',
   results:'tab-results', compare:'tab-compare', agent:'panel-agent',
   agenth:'panel-agent-hermes', studio:'panel-agent-studio'
 };
@@ -3779,6 +3869,7 @@ function switchTab(name) {
     if (typeof oilRefreshPresets === 'function') oilRefreshPresets();  // gespeicherte Darstellungen
   }
   if (name === 'cfd' && typeof _cfdSyncInherited === 'function') _cfdSyncInherited();
+  if (name === 'fx3d' && typeof _fx3dSyncInherited === 'function') { _fx3dSyncInherited(); _fx3dKosten(); fx3dRefreshSaved(); }
   if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
   if (name === 'jobs' && typeof jobsActivate === 'function') jobsActivate();
   if (name === 'agent' && typeof agActivate === 'function') agActivate('pi');
@@ -7857,6 +7948,203 @@ function _cfdOilOpacity() {
   if (!_cfdOilActor || !_cfdrw) return;
   _cfdOilActor.getProperty().setOpacity((+document.getElementById('cfd_oil_op').value || 72) / 100);
   _cfdrw.getRenderWindow().render();
+}
+
+// ── 🌀 FluidX3D (LBM, GPU) ───────────────────────────────────────────────────
+// Erbt den GANZEN 💧-Satz (Geometrie, Druck, Düsen-Ø, Ringabstand, Ausschnitt) und
+// ergänzt nur die LBM-eigenen Größen — dasselbe Verhältnis, das 🌊 zu 💧 hat. Ein
+// zweiter Satz Spritzöl-Felder wäre die Stelle, an der die drei Löser auseinander-
+// laufen, ohne dass es jemand merkt.
+async function _fx3dBuildPayload() {
+  const g = id => document.getElementById(id);
+  const payload = await _oilBuildPayload();
+  payload.fx3d = {
+    fenster_mm: +g('fx3d_fenster').value || 48,
+    n:          +g('fx3d_n').value || 208,
+    dauer_ms:   +g('fx3d_dauer').value || 10,
+    stoss_ms:   +g('fx3d_stoss').value || 0.7,
+    bilder:     +g('fx3d_bilder').value || 24,
+    fps:        +g('fx3d_fps').value || 12,
+  };
+  return payload;
+}
+
+function _fx3dSyncInherited() {
+  const el = document.getElementById('fx3d_inherited');
+  if (!el) return;
+  const g = id => document.getElementById(id);
+  const val = (id, d) => (g(id) ? (g(id).value || d) : d);
+  el.innerHTML =
+    'Öldruck <b>' + val('oil_pressure', 3) + ' bar</b> · Düsen-Ø <b>' + val('oil_nozzle_d', 1) +
+    ' mm</b> · Ring-Spalt <b>' + val('oil_ring_gap', 3) + ' mm</b> · Ausschnitt <b>' +
+    val('oil_section', 3) + ' Nuten</b>';
+}
+
+// Was der Fall kostet, BEVOR er läuft — gerechnet auf dem Server, nicht im Browser
+// nachgebaut: die Zahl muss aus derselben Quelle kommen wie der Lauf.
+let _fx3dKostenTimer = null;
+function _fx3dKosten() {
+  clearTimeout(_fx3dKostenTimer);
+  _fx3dKostenTimer = setTimeout(async () => {
+    const box = document.getElementById('fx3d_kosten');
+    if (!box) return;
+    const g = id => document.getElementById(id);
+    try {
+      const body = { geom: (typeof GEOM !== 'undefined' ? GEOM : {}),
+                     oil: { nozzle_d_mm: +g('oil_nozzle_d')?.value || 1,
+                            pressure_bar: +g('oil_pressure')?.value || 3 },
+                     fx3d: { fenster_mm: +g('fx3d_fenster').value || 48,
+                             n: +g('fx3d_n').value || 208 } };
+      const r = await fetch('/fluidx3d/kosten', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const j = await r.json();
+      const a = j.aufloesung || {}, v = j.vollmaschine || {};
+      const warn = a.unteraufgeloest
+        ? '<div style="color:#e9a;margin-top:5px">⚠ Strahl unter-aufgelöst (&lt; 2 Zellen je Bohrung) — Fenster verkleinern oder Zellzahl erhöhen.</div>' : '';
+      box.innerHTML =
+        '<b>' + a.n + '³</b> = ' + (a.zellen/1e6).toFixed(1) + ' Mio. Zellen · <b>' +
+        (a.zelle_mm||0).toFixed(3) + ' mm</b> je Zelle · <b>' + a.zellen_je_bohrung +
+        '</b> Zellen je Bohrung · ' + (a.speicher_mb||0).toFixed(0) + ' MB GPU · Strahl <b>' +
+        j.strahl_mps + ' m/s</b>' + warn +
+        '<div style="color:#789;margin-top:5px">Die ganze Maschine mit derselben Auflösung wären ' +
+        v.n + '³ = ' + (v.zellen/1e6).toFixed(0) + ' Mio. Zellen ≈ <b>' + v.speicher_gb +
+        ' GB</b> — ' + (v.passt ? 'ginge' : 'geht auf dieser Karte nicht') + '.</div>';
+    } catch (e) { box.textContent = '—'; }
+  }, 250);
+}
+
+async function startFluidx3d() {
+  const btn = document.getElementById('fx3d_btn');
+  const msg = document.getElementById('fx3d_msg');
+  document.getElementById('fx3d_results').style.display = 'none';
+  btn.disabled = true;
+  document.getElementById('fx3d_progress_wrap').style.display = 'block';
+  document.getElementById('fx3d_bar').style.width = '0%';
+  document.getElementById('fx3d_log').textContent = '';
+  msg.style.color = '#9aa'; msg.textContent = '⏳ Starte FluidX3D…';
+  try {
+    const payload = await _fx3dBuildPayload();
+    const r = await fetch('/fluidx3d', { method: 'POST',
+      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const j = await r.json();
+    if (r.status === 503) {
+      const ni = document.getElementById('fx3d_need_install');
+      if (ni) { ni.style.display = 'block'; ni.textContent = j.error || 'FluidX3D nicht verfügbar.'; }
+      msg.style.color = '#e88'; msg.textContent = '⚠ FluidX3D nicht verfügbar.';
+      btn.disabled = false; return;
+    }
+    if (!r.ok) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + (j.error || 'Start fehlgeschlagen'); btn.disabled = false; return; }
+    document.getElementById('fx3d_abort_btn').style.display = '';
+    _pollFx3d();
+  } catch (e) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + e.message; btn.disabled = false; }
+}
+
+async function abortFluidx3d() {
+  try { await fetch('/fluidx3d/abort', { method: 'POST' }); } catch (e) {}
+}
+
+async function _pollFx3d() {
+  let s;
+  try { s = await fetch('/fluidx3d/status').then(x => x.json()); } catch (e) { setTimeout(_pollFx3d, 2000); return; }
+  document.getElementById('fx3d_bar').style.width = (s.progress || 0) + '%';
+  const logEl = document.getElementById('fx3d_log');
+  if (Array.isArray(s.log)) { logEl.textContent = s.log.join('\n'); logEl.scrollTop = logEl.scrollHeight; }
+  if (s.status === 'running') { setTimeout(_pollFx3d, 1500); return; }
+  document.getElementById('fx3d_btn').disabled = false;
+  document.getElementById('fx3d_abort_btn').style.display = 'none';
+  const msg = document.getElementById('fx3d_msg');
+  if (s.status === 'error') { msg.style.color = '#e57'; msg.textContent = '⚠ ' + (s.error || 'Fehler'); return; }
+  if (s.status === 'aborted') { msg.style.color = '#c85'; msg.textContent = '⛔ Abgebrochen.'; return; }
+  if (s.result) { _renderFx3d(s.result); fx3dRefreshSaved();
+                  msg.style.color = '#6c6'; msg.textContent = '✓ Fertig.'; }
+}
+
+function _renderFx3d(res, videoSrc) {
+  const box = document.getElementById('fx3d_results');
+  if (!res) return;
+  const cfg = res.config || {}, met = res.metrics || {}, bil = res.bilanz || {},
+        auf = res.aufloesung || {}, fen = res.fenster || {}, voll = res.vollmaschine || {};
+  const pid = res.project_id || (window._activeProject && window._activeProject.id) || 'current';
+  const vsrc = videoSrc || ('/project/' + pid + '/video/fx3d');
+  const bild = k => (res.images && res.images[k])
+    ? `<img src="data:image/png;base64,${res.images[k]}" style="width:100%;max-width:560px;border-radius:5px;cursor:zoom-in" onclick="window.open(this.src)"/>` : '';
+  const treffer = bil.getroffen
+    ? `<span style="color:#7fe0b0">✓ der Strahl trifft</span>`
+    : `<span style="color:#e9a">✗ KEIN Treffer — Düsenlage/Ölstoß prüfen</span>`;
+  box.style.display = '';
+  box.innerHTML = `
+    <div class="e3-card">
+      <div class="section-title">🌀 Ergebnis des LBM-Laufs</div>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px">
+        <div style="flex:1;min-width:170px;background:#231a30;border:1px solid #5a3a8a;border-radius:8px;padding:12px 14px">
+          <div style="font-size:.74rem;color:#b9a">Benetzung am Kupfer</div>
+          <div style="font-size:1.6rem;color:#c9a8ff;font-weight:600">${escHtml(String(bil.am_kupfer_max ?? '—'))} <span style="font-size:.9rem;color:#b9a">Zellen</span></div>
+          <div style="font-size:.72rem;color:#b9a;margin-top:3px">${treffer}</div>
+        </div>
+        <div style="flex:1;min-width:170px;background:#1a2430;border:1px solid #2e4a6a;border-radius:8px;padding:12px 14px">
+          <div style="font-size:.74rem;color:#9bd">Rechenleistung</div>
+          <div style="font-size:1.6rem;color:#8cd0ff;font-weight:600">${escHtml(String(Math.round(met.mlups||0)))} <span style="font-size:.9rem;color:#9bd">MLUPS</span></div>
+          <div style="font-size:.72rem;color:#9bd;margin-top:3px">${(met.sekunden||0).toFixed(1)} s für ${escHtml(String(met.t_ende_ms ? met.t_ende_ms.toFixed(2) : '—'))} ms Realzeit</div>
+        </div>
+        <div style="flex:1;min-width:170px;background:#16302a;border:1px solid #2e6a4a;border-radius:8px;padding:12px 14px">
+          <div style="font-size:.74rem;color:#8ca">Massenerhaltung</div>
+          <div style="font-size:1.6rem;color:#7fe0b0;font-weight:600">${escHtml(String(bil.masse_abweichung_pct ?? '—'))} <span style="font-size:.9rem;color:#8ca">%</span></div>
+          <div style="font-size:.72rem;color:#8ca;margin-top:3px">${escHtml(String(bil.oel_start_mm3))} → ${escHtml(String(bil.oel_ende_mm3))} mm³ im Fenster</div>
+        </div>
+      </div>
+      <table style="width:100%;font-size:.78rem;border-collapse:collapse;margin-bottom:10px">
+        <tr><td style="padding:3px 6px;color:#89a">Gitter</td><td style="padding:3px 6px"><b>${auf.n}³</b> = ${((auf.zellen||0)/1e6).toFixed(1)} Mio. Zellen, ${(cfg.zelle_mm||0).toFixed(4)} mm je Zelle</td></tr>
+        <tr><td style="padding:3px 6px;color:#89a">Düse</td><td style="padding:3px 6px">${cfg.nozzle_d_mm} mm Bohrung = <b>${auf.zellen_je_bohrung}</b> Zellen · ${cfg.pressure_bar} bar → ${cfg.jet_speed_mps} m/s</td></tr>
+        <tr><td style="padding:3px 6px;color:#89a">Fenster</td><td style="padding:3px 6px">${cfg.fenster_mm} mm um die Krone bei r=${fen.r_krone_mm} mm, z=${fen.z_krone_mm} mm (${fen.quelle||''}) · ${fen.anlauf_mm} mm Anlauf, ${fen.kupfertiefe_mm} mm Kupfer im Bild</td></tr>
+        <tr><td style="padding:3px 6px;color:#89a">Ölstoß</td><td style="padding:3px 6px">${cfg.stoss_ms} ms${cfg.stoss_gekuerzt ? ' <span style="color:#e9a">(gekürzt, sonst hätte der Wickelkopf nicht mehr ins Fenster gepasst)</span>' : ''} · simuliert ${cfg.dauer_ms} ms</td></tr>
+        <tr><td style="padding:3px 6px;color:#89a">Ganze Maschine</td><td style="padding:3px 6px;color:#89a">bräuchte ${voll.n}³ ≈ ${voll.speicher_gb} GB — ${voll.passt ? 'ginge' : 'geht auf dieser Karte nicht'}</td></tr>
+      </table>
+      ${res.warnung ? `<div style="background:#2a2620;border:1px solid #6a5a2e;border-radius:5px;padding:8px 11px;font-size:.78rem;color:#d8c89a;margin-bottom:10px">⚠ ${escHtml(res.warnung)}</div>` : ''}
+      ${res.video ? `<video src="${vsrc}" controls autoplay loop muted style="width:100%;max-width:640px;border-radius:6px"></video>` : '<div style="font-size:.78rem;color:#9aa">Kein Video erzeugt.</div>'}
+      <div style="display:flex;gap:12px;flex-wrap:wrap;margin-top:10px">${bild('fx3d_benetzung')}${bild('fx3d_masse')}</div>
+      <div style="margin-top:10px;font-size:.75rem;color:#9aa;line-height:1.5">${escHtml(res.note || '')}</div>
+      <div style="margin-top:5px;font-size:.72rem;color:#789">${escHtml(res.lizenz || '')}</div>
+    </div>`;
+}
+
+async function queueFluidx3d() {
+  const payload = await _fx3dBuildPayload();
+  await enqueueJobs([{ type: 'fluidx3d', title: '🌀 FluidX3D-Spritzöl (LBM)', payload }],
+                    document.getElementById('fx3d_queue_msg'));
+}
+
+// ── gespeicherte Varianten (Muster: 🎞 Öl-Varianten) ─────────────────────────
+async function fx3dRefreshSaved() {
+  const box = document.getElementById('fx3d_saved_cards');
+  if (!box) return;
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  let list = [];
+  try { list = await fetch('/project/' + pid + '/fluidx3d/saved').then(r => r.json()); } catch (e) {}
+  if (!Array.isArray(list) || !list.length) { box.innerHTML = '<span style="font-size:.78rem;color:#789">Noch kein Lauf gespeichert.</span>'; return; }
+  box.innerHTML = list.map(v => `
+    <div style="background:#141821;border:1px solid #2a3340;border-radius:6px;padding:9px 11px;min-width:220px">
+      <div style="font-size:.8rem;color:#cde">${escHtml(v.timestamp || v.id)}</div>
+      <div style="font-size:.72rem;color:#89a;margin:3px 0 6px">
+        ${v.n}³ · ${v.zelle_mm} mm · ${v.fenster_mm} mm Fenster · ${v.pressure_bar} bar<br>
+        ${Math.round(v.mlups||0)} MLUPS · ${v.getroffen ? '✓ Treffer' : '✗ kein Treffer'} (${v.am_kupfer_max||0} Zellen)
+      </div>
+      <button onclick="fx3dLoadSaved('${escHtml(v.id)}')" style="background:#456;width:auto;padding:5px 10px;font-size:.74rem">📂 Laden</button>
+      <button onclick="fx3dDeleteSaved('${escHtml(v.id)}')" style="background:#633;width:auto;padding:5px 10px;font-size:.74rem">🗑</button>
+    </div>`).join('');
+}
+
+async function fx3dLoadSaved(rid) {
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  try {
+    const run = await fetch('/project/' + pid + '/fluidx3d/saved/' + rid).then(r => r.json());
+    if (run && !run.error) _renderFx3d(run, run.video_src);
+  } catch (e) {}
+}
+
+async function fx3dDeleteSaved(rid) {
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  try { await fetch('/project/' + pid + '/fluidx3d/saved/' + rid + '/delete', { method: 'POST' }); } catch (e) {}
+  fx3dRefreshSaved();
 }
 
 async function queueCfd() {
