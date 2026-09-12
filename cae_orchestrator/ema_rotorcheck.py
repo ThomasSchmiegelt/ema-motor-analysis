@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import math
 
-from ema_topology import (BRIDGE_MM, balance_bolt_holes, flux_barrier_slots,
+from ema_topology import (WAND_WELLE_MM, BRIDGE_MM, balance_bolt_holes, flux_barrier_slots,
                           leg_center, magnet_legs)
 
 
@@ -346,6 +346,34 @@ def rotor_layout_check(geom: dict, min_web_mm: float | None = None) -> dict:
             f"{_ueber_i:.2f} mm ueber der Bohrung. Der Wellensitz ist damit "
             f"unterbrochen — die Wellenverbindung (Querpressverband) traegt so nicht.")
 
+    # 1b) Steg zur WELLE — Warnung, kein Tor ------------------------------------
+    #
+    # Geprueft wurde bisher der Steg zum RAND (`BRIDGE_MM`) und der zwischen
+    # zwei Taschen; zum Wellensitz gab es nur das Durchbruch-Kriterium oben, also
+    # erst ab NEGATIV. Dazwischen liegt der Bereich, der in der Fertigung nicht
+    # mehr geht und im Netz zum Splitter wird: gemessen am 12.09.2026 (Stator
+    # 305 / Rotor 188,6 / Welle 100) hat V 8,56 mm Luft zur Welle, U nur
+    # 0,06 mm, Delta -0,58 mm. Bei 0,06 mm steht ueber die ganze Paketlaenge ein
+    # haarduenner Eisensplitter — gmsh nannte ihn als 0,22 mm breite Flaeche.
+    #
+    # Bewusst WARNUNG und kein Tor: ein Tor wuerde bestehende Auslegungen von
+    # einem Tag auf den anderen verweigern, und ob 2,0 mm die richtige Schranke
+    # fuer jede Bauform sind, ist an genug echten Auslegungen noch nicht
+    # gemessen. Der gemessene Wert steht in `layout` und laesst sich als Tor
+    # lesen, wer will.
+    _stege_welle = [pk.radius_bounds()[0] - r_shaft for _b, pk in pockets]
+    min_welle = min(_stege_welle) if _stege_welle else None
+    if min_welle is not None and not _offen_i and 0.0 <= min_welle < WAND_WELLE_MM:
+        warnings.append(
+            f"Steg Magnettasche → Wellensitz nur {min_welle:.2f} mm "
+            f"(Richtwert {WAND_WELLE_MM:.1f} mm, wie bei der Speiche). Das ist "
+            f"fertigungstechnisch knapp, und im 3-D-Netz steht dort ein "
+            f"Eisensplitter ueber die ganze Paketlaenge — bei zusaetzlichen "
+            f"kleinen Merkmalen (Wuchtbolzen, Barrieren) scheitert der Netzbau "
+            f"daran. Typisch fuer U und Delta mit dicker Welle: deren innerer "
+            f"Magnet reicht weit nach innen, V hat den nicht. Abhilfe: duennere "
+            f"Welle, kuerzerer innerer Magnet — oder V.")
+
     # 2) min web over ALL pockets/tiles ----------------------------------------
     allpk = [(b, pk, "Tasche") for b, pk in pockets]
     allpk += [(b, pk, "Oberflaechenmagnet") for b, pk in surface]
@@ -400,6 +428,10 @@ def rotor_layout_check(geom: dict, min_web_mm: float | None = None) -> dict:
         "min_web_req_mm": min_web_mm,
         "min_web_found_mm": None if min_dist == math.inf
                               else round(min_dist, 3),
+        # Steg zur WELLE: gemessen und ausgewiesen, aber nur als Warnung
+        # bewertet (s. Abschnitt 1b). Wer ihn als Tor will, liest ihn hier.
+        "min_web_welle_mm": None if min_welle is None else round(min_welle, 3),
+        "min_web_welle_req_mm": WAND_WELLE_MM,
         "worst_pair": None if worst is None else {
             "a": {"pole": worst[0]["pole"], "leg": worst[0]["leg"],
                   "layer": worst[0]["layer"],

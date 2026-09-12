@@ -285,10 +285,68 @@ def test_purge_riegel():
         check("Datei unveraendert", open(a).read() == vorher)
 
 
+def test_steg_zur_welle():
+    """Der Steg zur WELLE: Warnung im Band zwischen Tor und Richtwert.
+
+    Geprueft wurde bisher der Steg zum RAND (``BRIDGE_MM``) und der zwischen
+    zwei Taschen; zum Wellensitz gab es nur das Durchbruch-Kriterium, also erst
+    ab NEGATIV. Dazwischen liegt der Bereich, der in der Fertigung nicht mehr
+    geht und im 3-D-Netz zum Eisensplitter ueber die ganze Paketlaenge wird --
+    gemessen am 12.09.2026 an einer U-Form mit 0,06 mm Steg, die gmsh als
+    0,22 mm breite Flaeche meldete und deren Netzbau kippte, sobald
+    Wuchtbolzen dazukamen.
+
+    BEWUSST Warnung und kein Tor: ein Tor wuerde bestehende Auslegungen von
+    einem Tag auf den anderen verweigern, und ob 2,0 mm fuer jede Bauform die
+    richtige Schranke sind, ist an genug echten Auslegungen noch nicht
+    gemessen. Der Test haelt deshalb ausdruecklich fest, dass ``ok`` im
+    Warnband TRUE bleibt -- wird daraus spaeter ein Tor, faellt er auf und
+    zwingt zur Entscheidung statt sie stillschweigend zu treffen.
+    """
+    import cae_cli
+    from ema_topology import WAND_WELLE_MM as WW
+
+    g = dict(cae_cli.frischer_payload()["geom"])
+    g.update({"statorOD": 305.0, "rotorOD": 188.6, "statorID": 190.0,
+              "magShape": "u", "poles": 6, "slots": 36, "axialLen": 150.0})
+
+    def welle(shaft, form="u"):
+        lay = rotor_layout_check(dict(g, shaftD=shaft, magShape=form))
+        return (lay["layout"].get("min_web_welle_mm"), lay["ok"],
+                any("Wellensitz" in w for w in lay["warnings"]))
+
+    w88, ok88, warn88 = welle(88.0)     # ~3,3 mm  reichlich
+    w94, ok94, warn94 = welle(94.0)     # ~0,3 mm  knapp
+    w96, ok96, _      = welle(96.0)     # ~-0,7 mm Durchbruch
+
+    check("welle_reichlich", w88 > WW and not warn88 and ok88,
+          f"{w88:.2f} mm > {WW} mm, keine Warnung")
+    check("welle_knapp_warnt", 0.0 <= w94 < WW and warn94,
+          f"{w94:.2f} mm im Band [0, {WW}) -> Warnung")
+    check("welle_knapp_kein_tor", ok94,
+          "das Tor bleibt OFFEN — ausdruecklich Warnung, kein Ausschluss")
+    check("welle_durchbruch_fatal", w96 < 0 and not ok96,
+          f"{w96:.2f} mm < 0 -> weiterhin fatal wie bisher")
+    check("welle_gesund_still", not welle(60.0)[2],
+          "eine gesunde Auslegung wird nicht beanstandet")
+
+    lay = rotor_layout_check(dict(g, shaftD=94.0))["layout"]
+    check("welle_richtwert_ausgewiesen", lay.get("min_web_welle_req_mm") == WW,
+          "der Richtwert steht im Ergebnis, nicht nur im Warntext")
+
+    # V hat den inneren Magneten nicht — das ist der aus dem Betrieb gemeldete
+    # Unterschied („die einfache V-Form geht stabiler durch"), in Zahlen.
+    v = welle(100.0, "v")[0]
+    u = welle(100.0, "u")[0]
+    check("v_hat_mehr_luft_als_u", v > 5.0 > u,
+          f"V behaelt {v:.2f} mm, U nur {u:.2f} mm")
+
+
 if __name__ == "__main__":
     for t in (test_bore_hoop, test_struct_sweep, test_layout_gate,
               test_stress_gate, test_purge_paritaet,
-              test_purge_volcut_ohne_nachwirkung, test_purge_riegel):
+              test_purge_volcut_ohne_nachwirkung, test_purge_riegel,
+              test_steg_zur_welle):
         t()
     print()
     if _fails:

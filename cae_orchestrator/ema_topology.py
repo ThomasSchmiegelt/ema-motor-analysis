@@ -78,6 +78,17 @@ WAND_ACHSE_MM     = 1.5         # Tasche → Polsymmetrieachse (d-Achse)
 WAND_QACHSE_MM    = 2.0         # Tasche → Tasche des Nachbarpols (q-Achse)
 WAND_SPEICHE_A_MM = 1.5         # Speiche: Tasche → Rotoraussenrand
 WAND_SPEICHE_I_MM = 2.0         # Speiche: Tasche → Wellenaussenrand
+# Derselbe Steg, aber fuer ALLE Bauformen — und ausdruecklich nur als MASSSTAB
+# fuer eine Warnung, nicht als Tor (s. `ema_rotorcheck.rotor_layout_check`).
+# Anlass (12.09.2026): bei U und Delta reicht der innere Magnet weit nach innen,
+# und mit einer dicken Welle bleibt dazwischen fast nichts. Gemessen an
+# Stator 305 / Rotor 188,6 / Welle 100: V hat 8,56 mm Luft zur Welle, U nur
+# 0,06 mm, Delta -0,58 mm (Durchbruch). Bei 0,06 mm steht ueber die ganze
+# Paketlaenge ein haarduenner Eisensplitter — gmsh nannte ihn als 0,22 mm breite
+# Flaeche —, und das Netz kippte, sobald weitere kleine Merkmale dazukamen.
+# Das Tor sah davon nichts: es prueft den Steg zum RAND und den zwischen
+# Taschen, aber keinen zur WELLE.
+WAND_WELLE_MM     = WAND_SPEICHE_I_MM
 
 
 def _spalt(geom: dict) -> float:
