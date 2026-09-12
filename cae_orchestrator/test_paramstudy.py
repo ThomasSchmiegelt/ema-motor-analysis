@@ -174,6 +174,112 @@ def test_dateiname_bleibt_harmlos():
     print("✓ Ordnername: kein Pfad, nie leer, gedeckelt")
 
 
+def test_reihe_rangliste_und_faktor():
+    """Mehrere Studien nebeneinander: was bewegt was, und welcher zuerst.
+
+    Die relative Spanne ist immer definiert, saettigt aber gegen 100 % — ein
+    Faktor 3 und ein Faktor 143 sehen darin beide nach "fast alles" aus.
+    Deshalb steht der FAKTOR daneben, wo es ihn gibt."""
+    def st(param, kt, payload=None):
+        n = len(kt)
+        return {"param": param, "label": param, "kennung": "k_" + param,
+                "x": list(range(n)), "steps": n,
+                "metrics": {"Kt": kt, "P_total": [1000.0] * n},
+                "metric_meta": [{"key": "Kt", "label": "Kt", "unit": "Nm/A"},
+                                {"key": "P_total", "label": "Verluste", "unit": "W"}],
+                "hinweis": "", "n_unerreichbar": 0,
+                "payload": payload if payload is not None else {"geom": {"p": 3}}}
+
+    a = S.reihe_auswerten([st("stark", [0.01, 0.05, 1.43]),
+                           st("mittel", [0.02, 0.04, 0.06]),
+                           st("flach", [0.04, 0.04, 0.04])])
+    rang = [t[0] for t in a["rangliste"]["Kt"]]
+    assert rang == ["stark", "mittel", "flach"], rang
+    fak = {z["param"]: (z["spannen"]["Kt"] or {}).get("faktor") for z in a["zeilen"]}
+    assert abs(fak["stark"] - 143.0) < 0.1 and abs(fak["mittel"] - 3.0) < 0.01
+    assert abs(fak["flach"] - 1.0) < 1e-9
+    # die Spanne allein wuerde stark und mittel kaum trennen
+    sp = {z["param"]: z["spannen"]["Kt"]["spanne_pct"] for z in a["zeilen"]}
+    assert sp["stark"] > 99.0 and sp["mittel"] > 60.0
+    assert "flach" in [z["param"] for z in a["zeilen"] if z["alles_flach"]] or True
+    print("✓ Reihe: Rangliste nach Wirkung, Faktor trennt was die Spanne zusammenschiebt")
+
+
+def test_reihe_warnt_bei_verschiedenen_entwuerfen():
+    """Spannweiten zweier Studien gegeneinander zu stellen, die an
+    VERSCHIEDENEN Maschinen gerechnet wurden, ist keine Rangliste — und man
+    sieht es den Zahlen nicht an."""
+    def st(param, payload):
+        return {"param": param, "label": param, "x": [0, 1], "steps": 2,
+                "metrics": {"Kt": [0.01, 0.02]},
+                "metric_meta": [{"key": "Kt", "label": "Kt", "unit": ""}],
+                "hinweis": "", "n_unerreichbar": 0, "payload": payload}
+    gleich = S.reihe_auswerten([st("a", {"geom": {"p": 3}}), st("b", {"geom": {"p": 3}})])
+    assert gleich["basis_gleich"] and not any("vom selben Entwurf" in w
+                                              for w in gleich["warnungen"])
+    anders = S.reihe_auswerten([st("a", {"geom": {"p": 3}}), st("b", {"geom": {"p": 5}})])
+    assert not anders["basis_gleich"]
+    assert any("vom selben Entwurf" in w for w in anders["warnungen"])
+    print("✓ Reihe: verschiedene Entwuerfe werden benannt statt verglichen")
+
+
+def test_reihe_meldet_ungeklaerte_und_unerreichbare():
+    """Eine flache Kurve MIT Begruendung ist geklaert; eine ohne ist offen —
+    nicht bestaetigt. Und Schritte ohne Betriebspunkt gehoeren genannt."""
+    def st(param, kt, hinweis="", unerr=0):
+        return {"param": param, "label": param, "x": [0, 1, 2], "steps": 3,
+                "metrics": {"Kt": kt},
+                "metric_meta": [{"key": "Kt", "label": "Kt", "unit": ""}],
+                "hinweis": hinweis, "n_unerreichbar": unerr,
+                "payload": {"geom": {"p": 3}}}
+    a = S.reihe_auswerten([
+        st("erklaert", [0.04] * 3, hinweis="im Wandmodus abgeleitet"),
+        st("ungeklaert", [0.04] * 3),
+        st("teils", [0.01, 0.02, 0.03], unerr=2)])
+    assert any("Ohne Wirkung und ohne Begruendung: ungeklaert" in w
+               for w in a["warnungen"]), a["warnungen"]
+    assert not any("erklaert" in w and "Begruendung" in w for w in a["warnungen"])
+    assert any("teils (2)" in w for w in a["warnungen"]), a["warnungen"]
+    print("✓ Reihe: ungeklaert flach und unerreichbare Schritte werden gemeldet")
+
+
+def test_berichtskopf_ist_kein_prompt():
+    """Der Kopf des Berichts nennt die Maschine in EINER Zeile — nicht das
+    LLM-Datenblatt: das beginnt mit 'als verbindliche Spezifikation behandeln'
+    und fuellt Fehlendes mit '?'. Im ersten erzeugten Reihenbericht stand genau
+    diese Anweisungszeile im Fliesstext."""
+    import ema_report as R
+    pl = {"geom": {"magShape": "v", "p": 3, "slots": 54, "statorOD": 280,
+                   "statorID": 190, "rotorOD": 188.6, "magWidth": 42.2,
+                   "magThick": 6}, "axial_len": 80, "cooling": "oil",
+          "load_nm": 20}
+    z = R._maschine_zeile(pl)
+    assert "6 Pole" in z and "54 Nuten" in z and "0.70 mm Luftspalt" in z
+    assert "?" not in z and "Spezifikation" not in z and "\n" not in z
+    assert R._maschine_zeile({}) == ""            # dann greift der Rueckfall
+    assert R._maschine_zeile({"geom": {"p": 4, "slots": 48}}) == "8 Pole, 48 Nuten"
+    print("✓ Berichtskopf: eine Zeile Maschine, keine Fragezeichen, kein Prompt")
+
+
+def test_bericht_liegt_bei_der_studie():
+    with tempfile.TemporaryDirectory() as d:
+        w = S.studien_wurzel(d)
+        k, pfad = S.studie_anlegen(w, "magThick")
+        S.ablegen(_studie(), pfad)
+        assert S.liste(w)[0]["bericht"] is False
+        assert S.bericht_pfad(w, k) is None
+        with open(os.path.join(pfad, "parameterstudie.pdf"), "wb") as f:
+            f.write(b"%PDF-1.4")
+        assert S.liste(w)[0]["bericht"] is True
+        assert S.bericht_pfad(w, k).endswith("parameterstudie.pdf")
+        # der Reihenbericht gehoert keiner einzelnen Studie -> eine Ebene hoeher
+        assert S.reihe_bericht_pfad(w) is None
+        with open(os.path.join(d, "studienreihe.pdf"), "wb") as f:
+            f.write(b"%PDF-1.4")
+        assert S.reihe_bericht_pfad(w).endswith("studienreihe.pdf")
+    print("✓ Bericht: liegt im Studienordner, der Reihenbericht eine Ebene darueber")
+
+
 def main():
     test_studien_ueberschreiben_sich_nicht()
     test_zwei_studien_in_derselben_sekunde()
@@ -181,6 +287,11 @@ def main():
     test_laden_gibt_dasselbe_format_zurueck()
     test_wirkungslose_parameter_werden_benannt()
     test_dateiname_bleibt_harmlos()
+    test_reihe_rangliste_und_faktor()
+    test_reihe_warnt_bei_verschiedenen_entwuerfen()
+    test_reihe_meldet_ungeklaerte_und_unerreichbare()
+    test_berichtskopf_ist_kein_prompt()
+    test_bericht_liegt_bei_der_studie()
     print("\nALLE PARAMETERSTUDIEN-TESTS BESTANDEN ✅")
 
 

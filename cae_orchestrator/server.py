@@ -2069,6 +2069,119 @@ def param_study_saved_delete(kennung: str):
     return jsonify({"status": "missing"})
 
 
+def _study_bericht_start(worker):
+    """Gemeinsamer Start fuer Einzel- und Reihenbericht — beide teilen sich
+    ``_study_report_state`` (und damit Status und Download), wie Vorschau und
+    Voll-Lauf sich ``_oil_state`` teilen."""
+    if _study_report_state["status"] == "running":
+        return jsonify({"error": "Studienbericht laeuft bereits"}), 409
+    _study_report_state.update({"status": "running", "progress": 0, "log": [],
+                                "pdf_path": None, "error": None})
+    threading.Thread(target=worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+def _study_bericht_lauf(bauen):
+    """Der Koerper: ``bauen(cb)`` liefert ``{"pdf": pfad}``."""
+    def cb(msg, pct=None):
+        _study_report_state["log"].append(msg)
+        if pct is not None:
+            _study_report_state["progress"] = int(pct)
+    try:
+        r = bauen(cb)
+        _study_report_state["pdf_path"] = r["pdf"]
+        _study_report_state["status"] = "done"
+        _study_report_state["progress"] = 100
+    except Exception as e:
+        import traceback
+        _study_report_state["error"] = str(e)
+        _study_report_state["log"].append("⚠ " + str(e))
+        _study_report_state["status"] = "error"
+        print(traceback.format_exc())
+
+
+@app.route("/param_study/gespeichert/<kennung>/bericht", methods=["POST", "OPTIONS"])
+def param_study_saved_report(kennung: str):
+    """Bericht ueber eine ABGELEGTE Studie — ohne sie neu zu rechnen. Er wird in
+    ihren eigenen Ordner geschrieben (`parameterstudie.pdf`) und ueberdauert
+    damit den Serverneustart, anders als der Bericht ueber die zuletzt
+    gerechnete Studie."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_paramstudy, ema_report
+    if not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    d = request.get_json(silent=True) or {}
+    model = d.get("model") or LLM_MODEL
+    w = _study_wurzel_von(d.get("projekt", "current"))
+    st = ema_paramstudy.laden(w, kennung) if w else None
+    if st is None and w != ema_paramstudy.GLOBALE_WURZEL:
+        w = ema_paramstudy.GLOBALE_WURZEL
+        st = ema_paramstudy.laden(w, kennung)
+    if st is None:
+        return jsonify({"error": "Studie nicht gefunden"}), 404
+    ordner = os.path.join(w, kennung)
+    return _study_bericht_start(lambda: _study_bericht_lauf(
+        lambda cb: ema_report.generate_paramstudy_report(
+            st, st.get("payload") or {}, ordner, model=model, progress_cb=cb)))
+
+
+@app.route("/param_study/reihe/bericht", methods=["POST", "OPTIONS"])
+def param_study_reihe_report():
+    """Bericht ueber MEHRERE abgelegte Studien derselben Maschine. Eine einzelne
+    Studie sagt, WIE ein Parameter wirkt; die Reihe sagt, welcher zuerst
+    anzufassen ist. Body: ``{kennungen: [...], projekt, titel, model}``; ohne
+    ``kennungen`` werden alle Studien des Projekts genommen."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_paramstudy, ema_report
+    d = request.get_json(silent=True) or {}
+    w = _study_wurzel_von(d.get("projekt", "current"))
+    if not w:
+        return jsonify({"error": "kein Projekt"}), 404
+    gewuenscht = d.get("kennungen") or [e["kennung"] for e in ema_paramstudy.liste(w)]
+    studien = []
+    for k in gewuenscht:
+        if not _safe_name(k):
+            continue
+        st = ema_paramstudy.laden(w, k)
+        if st:
+            studien.append(st)
+    if not studien:
+        return jsonify({"error": "keine abgelegte Studie gefunden"}), 404
+    ziel = os.path.dirname(w.rstrip("/"))
+    model = d.get("model") or LLM_MODEL
+    titel = str(d.get("titel") or "")
+    return _study_bericht_start(lambda: _study_bericht_lauf(
+        lambda cb: ema_report.generate_studienreihe_report(
+            studien, ziel, model=model, progress_cb=cb, titel=titel)))
+
+
+@app.route("/param_study/gespeichert/<kennung>/bericht/download")
+def param_study_saved_report_download(kennung: str):
+    import ema_paramstudy
+    if not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    for w in (_study_wurzel_von(request.args.get("projekt", "current")),
+              ema_paramstudy.GLOBALE_WURZEL):
+        p = ema_paramstudy.bericht_pfad(w, kennung) if w else None
+        if p:
+            return send_file(p, mimetype="application/pdf", as_attachment=True,
+                             download_name="%s.pdf" % kennung)
+    return jsonify({"error": "kein Bericht"}), 404
+
+
+@app.route("/param_study/reihe/bericht/download")
+def param_study_reihe_report_download():
+    import ema_paramstudy
+    w = _study_wurzel_von(request.args.get("projekt", "current"))
+    p = ema_paramstudy.reihe_bericht_pfad(w) if w else None
+    if not p:
+        return jsonify({"error": "kein Reihenbericht"}), 404
+    return send_file(p, mimetype="application/pdf", as_attachment=True,
+                     download_name="studienreihe.pdf")
+
+
 @app.route("/param_study/status")
 def param_study_status():
     return jsonify({

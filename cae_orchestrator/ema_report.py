@@ -2350,6 +2350,232 @@ def _study_prompt(study, stats, machine):
     )
 
 
+def _reihe_prompt(ausw, machine, plabels):
+    """Aufforderung fuer den Reihenbericht. Wie ueberall hier: die ZAHLEN stehen
+    in den deterministisch gebauten Tabellen, das Modell schreibt nur die
+    qualitative Einordnung — und bekommt die Befunde ausdruecklich mit, damit es
+    eine flache Kurve nicht als Ergebnis verkauft."""
+    rang = ausw.get("rangliste", {})
+    def _liste(k, n=6):
+        return "\n".join("  - %s: Spannweite %.1f %%%s" %
+                          (lab, pct, (" (Faktor %.1f)" % f) if f else "")
+                          for (par, lab, pct), f in
+                          [(t, next((( z["spannen"].get(k) or {}).get("faktor"))
+                                    for z in ausw["zeilen"] if z["param"] == t[0]))
+                           for t in (rang.get(k) or [])[:n]])
+    befunde = "\n".join("  - %s: %s" % (z["label"], z["hinweis"])
+                         for z in ausw["zeilen"] if z["hinweis"]) or "  (keine)"
+    warn = "\n".join("  - " + w for w in ausw.get("warnungen") or []) or "  (keine)"
+    return f"""Du bist Auslegungsingenieur fuer elektrische Maschinen und schreibst die
+Einordnung zu einer REIHE von Parameterstudien an EINER Maschine.
+
+Maschine: {machine}
+
+Untersuchte Parameter: {", ".join(plabels)}
+
+Wirkung auf das Drehmomentverhaeltnis Kt (nach Staerke):
+{_liste("Kt")}
+
+Wirkung auf die Gesamtverluste P_total:
+{_liste("P_total")}
+
+Befunde zu einzelnen Parametern (vom Werkzeug gemessen):
+{befunde}
+
+Vorbehalte:
+{warn}
+
+Schreibe auf Deutsch, in Markdown, mit den Ueberschriften
+"## Was zuerst anzufassen ist", "## Was nichts bewegt — und warum" und
+"## Vorbehalte". Regeln, die ohne Ausnahme gelten:
+- KEINE Zahlenwerte im Fliesstext. Die Zahlen stehen in den Tabellen darunter;
+  beschreibe qualitativ (staerker, schwaecher, saettigend, gegenlaeufig).
+- Ein Parameter ohne Wirkung ist KEIN Ergebnis ueber die Maschine, sondern
+  meistens eines ueber das Modell oder die Betriebsart. Sag das so.
+- Erfinde nichts, was oben nicht steht. Wo die Daten nichts hergeben, schreibe,
+  dass sie nichts hergeben.
+- Keine Empfehlung fuer eine Auslegung, die als nicht erreichbar gemeldet ist.
+Hoechstens 350 Woerter."""
+
+
+def generate_studienreihe_report(studien: list, out_dir: str,
+                                 model: str = DEFAULT_MODEL, progress_cb=None,
+                                 titel: str = "") -> dict:
+    """Bericht ueber MEHRERE Parameterstudien derselben Maschine.
+
+    Eine einzelne Studie sagt, WIE ein Parameter wirkt; eine Reihe sagt, welcher
+    ueberhaupt zuerst anzufassen ist. Aufgebaut wie die uebrigen Berichte hier:
+    das Geruest und alle Tabellen deterministisch, das Modell schreibt nur die
+    Prosa — und die wird auf Zahlen hin gefiltert (`_strip_value_numbers`), weil
+    ein oertliches Modell sie zuverlaessig falsch zuordnet.
+
+    ``studien`` = Liste von ``ema_paramstudy.laden``-Ergebnissen (mit
+    ``chart_b64``/``field_images``). Returns ``{"pdf", "md", "model"}``.
+    """
+    import base64
+    import ema_paramstudy as PS
+
+    def _log(msg, pct=None):
+        if progress_cb:
+            progress_cb(msg, pct)
+
+    if not studien:
+        raise ValueError("keine Studien uebergeben")
+    os.makedirs(out_dir, exist_ok=True)
+    cdir = os.path.join(out_dir, "charts")
+    os.makedirs(cdir, exist_ok=True)
+
+    _log("Werte %d Studien nebeneinander aus…" % len(studien), 10)
+    ausw = PS.reihe_auswerten(studien)
+    plabels = [z["label"] for z in ausw["zeilen"]]
+
+    basis = next((st.get("payload") for st in studien
+                  if isinstance(st.get("payload"), dict) and st.get("payload")), {}) or {}
+    try:
+        import ema_chat
+        machine = ema_chat._machine_datasheet({"payload": basis, **basis})
+    except Exception:                                        # noqa: BLE001
+        g = basis.get("geom", {}) or {}
+        machine = ("Topologie %s, %s Pole, %s Nuten, Stator-D %s mm."
+                   % (TOPOLOGY_LABELS.get(g.get("magShape", "v"), g.get("magShape")),
+                      int(g.get("p", 0)) * 2, g.get("slots"), g.get("statorOD")))
+
+    _log("Rangliste zeichnen…", 25)
+    rang_b64 = PS.reihe_chart(ausw)
+    if rang_b64:
+        with open(os.path.join(cdir, "reihe_rangliste.png"), "wb") as f:
+            f.write(base64.b64decode(rang_b64))
+
+    _log("Frage %s (qualitative Einordnung)…" % model, 40)
+    try:
+        prose = _clean_prose_keep_headings(
+            call_ollama(_reihe_prompt(ausw, machine, plabels), model=model))
+    except Exception as e:                                   # noqa: BLE001
+        _log("⚠ LLM nicht erreichbar (%s) — Bericht ohne Fliesstext" % e, 50)
+        prose = ("## Was zuerst anzufassen ist\n\n_Die qualitative Einordnung konnte "
+                 "nicht erzeugt werden (LLM nicht erreichbar). Rangliste, Tabellen "
+                 "und Diagramme unten sind vollstaendig._")
+
+    rpms = sorted({round(float(st.get("rpm") or 0)) for st in studien})
+    teile = [
+        "# " + (titel or "Parameterstudien — Reihenauswertung"),
+        "",
+        "**Studien:** %d  ·  **Stuetzstellen je Studie:** %s  ·  "
+        "**Drehzahl (fest):** %s U/min"
+        % (len(studien),
+           ", ".join(str(x) for x in sorted({st.get("steps") for st in studien})),
+           ", ".join(str(r) for r in rpms)),
+        "",
+        "**Maschine:** " + (_maschine_zeile(basis) or machine),
+        "",
+    ]
+    if not ausw["basis_gleich"]:
+        teile += ["> ⚠ **Die Studien gehen nicht vom selben Entwurf aus.** Eine "
+                  "Rangliste ueber ihre Spannweiten vergleicht dann verschiedene "
+                  "Maschinen und steht unter Vorbehalt.", ""]
+    teile += ["## Rangliste: was bewegt was", "",
+              _reihe_md_rangliste(ausw), ""]
+    if rang_b64:
+        teile += ["![Spannweite je Parameter](charts/reihe_rangliste.png)", ""]
+    teile += [prose, ""]
+
+    _log("Studien einzeln anhaengen…", 65)
+    teile += ["## Die Studien im Einzelnen", ""]
+    for i, st in enumerate(studien):
+        lab = st.get("label", st.get("param", "?"))
+        xs = st.get("x") or []
+        teile += ["### %s" % lab, "",
+                  "**Bereich:** %s  ·  **Stuetzstellen:** %s  ·  **Ablage:** `%s`"
+                  % ("%g … %g" % (xs[0], xs[-1]) if xs else "?",
+                     st.get("steps", "?"), st.get("kennung", "—")), ""]
+        hw = (st.get("hinweis") or "").strip()
+        if hw:
+            teile += ["> **Befund:** " + hw, ""]
+        teile += [_study_md_table(_study_metric_stats(st), lab), ""]
+        if st.get("chart_b64"):
+            rel = "charts/reihe_%02d_%s.png" % (i, _safe_key(st.get("param", "x")))
+            with open(os.path.join(out_dir, rel), "wb") as f:
+                f.write(base64.b64decode(st["chart_b64"]))
+            teile += ["![Kennwerte ueber %s](%s)" % (lab, rel), ""]
+        fimgs = st.get("field_images") or []
+        if len(fimgs) >= 2:
+            for k, im in ((0, fimgs[0]), (1, fimgs[-1])):
+                rel = "charts/reihe_%02d_%s_feld%d.png" % (i, _safe_key(st.get("param", "x")), k)
+                with open(os.path.join(out_dir, rel), "wb") as f:
+                    f.write(base64.b64decode(im["b64"]))
+                teile += ["![Feld bei %s = %g](%s)" % (lab, im["value"], rel), ""]
+
+    md = "\n".join(teile)
+    _log("Rendere PDF (pandoc + xelatex)…", 85)
+    pdf = render_pdf(md, out_dir, out_filename="studienreihe.pdf",
+                     md_filename="studienreihe.md")
+    _log("✓ Reihenbericht fertig.", 100)
+    return {"pdf": pdf, "md": os.path.join(out_dir, "studienreihe.md"),
+            "model": model, "auswertung": ausw}
+
+
+def _safe_key(s):
+    return "".join(c if (c.isalnum() or c in "._-") else "_" for c in str(s))[:24] or "x"
+
+
+def _maschine_zeile(payload):
+    """Eine Zeile Maschine fuer den BERICHTSKOPF — deterministisch aus dem
+    Payload, ohne Fragezeichen.
+
+    Nicht `ema_chat._machine_datasheet`: das ist ein Datenblatt fuer die
+    AUFFORDERUNG an das Modell, es beginnt mit "als verbindliche Spezifikation
+    behandeln" und fuellt fehlende Felder mit "?" auf. Beides gehoert in den
+    Prompt und nicht in ein Dokument, das jemand liest (im ersten Reihenbericht
+    stand genau diese Anweisungszeile im Fliesstext)."""
+    g = (payload or {}).get("geom") or {}
+    def _z(v, e=""):
+        return ("%g%s" % (float(v), e)) if isinstance(v, (int, float)) else None
+    spalt = None
+    try:
+        spalt = (float(g["statorID"]) - float(g["rotorOD"])) / 2.0
+    except (KeyError, TypeError, ValueError):
+        pass
+    stuecke = [
+        (TOPOLOGY_LABELS.get(g["magShape"], g["magShape"]) if g.get("magShape") else None),
+        ("%d Pole" % (int(g["p"]) * 2)) if g.get("p") else None,
+        ("%s Nuten" % g["slots"]) if g.get("slots") else None,
+        _z(g.get("statorOD"), " mm Stator-D"),
+        _z(payload.get("axial_len", g.get("axialLen")), " mm Paket"),
+        ("%.2f mm Luftspalt" % spalt) if spalt is not None else None,
+        ("Magnet %s x %s mm" % (_z(g.get("magWidth")), _z(g.get("magThick"))))
+        if g.get("magWidth") else None,
+        ("Kuehlung %s" % payload.get("cooling")) if payload.get("cooling") else None,
+        ("Lastmoment %g Nm" % float(payload["load_nm"])) if payload.get("load_nm") else None,
+    ]
+    return ", ".join(x for x in stuecke if x)
+
+
+def _reihe_md_rangliste(ausw):
+    """Eine Zeile je Studie, Spalten = Kennzahlen, Zellen = Spannweite (Faktor).
+    Deterministisch gebaut; das Modell fasst sie nicht an."""
+    keys = [k for k in ausw["kennzahlen"]
+            if any((z["spannen"].get(k) or {}).get("spanne_pct") for z in ausw["zeilen"])]
+    kopf = ["Parameter", "Bereich"] + keys
+    zeilen = ["| " + " | ".join(_mdesc(h) for h in kopf) + " |",
+              "|" + "---|" * len(kopf)]
+    def _sort(z):
+        s = z["spannen"].get(ausw.get("leit") or "Kt") or {}
+        return -abs(s.get("spanne_pct") or 0.0)
+    for z in sorted(ausw["zeilen"], key=_sort):
+        zellen = [_mdesc(z["label"]),
+                  ("%g…%g" % (z["von"], z["bis"])) if z["von"] is not None else "—"]
+        for k in keys:
+            sp = z["spannen"].get(k)
+            if not sp or abs(sp["spanne_pct"]) < 0.05:
+                zellen.append("—")
+            elif sp.get("faktor") and sp["faktor"] >= 1.05:
+                zellen.append("%.0f %% (x%.1f)" % (sp["spanne_pct"], sp["faktor"]))
+            else:
+                zellen.append("%.0f %%" % sp["spanne_pct"])
+        zeilen.append("| " + " | ".join(zellen) + " |")
+    return "\n".join(zeilen)
+
+
 def generate_paramstudy_report(study: dict, payload: dict, out_dir: str,
                                model: str = DEFAULT_MODEL, progress_cb=None) -> dict:
     """LLM report for a parameter study. The study data (per-metric trends) is the

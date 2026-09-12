@@ -1091,8 +1091,12 @@
     <div style="margin-top:12px;border-top:1px solid #222a33;padding-top:9px">
       <div style="display:flex;align-items:center;gap:8px">
         <span class="section-h" style="margin:0">🗂 Gespeicherte Studien</span>
-        <button onclick="studyRefreshSaved()" style="margin-left:auto;background:#456;width:auto;padding:4px 9px;font-size:.7rem">↻</button>
+        <button onclick="studyBerichtReihe()" id="btn_study_reihe"
+          style="margin-left:auto;background:#7a5a3a;width:auto;padding:4px 9px;font-size:.7rem"
+          title="Ein PDF über die angehakten Studien: welcher Parameter bewegt was, und welcher zuerst anzufassen ist. Ohne Haken werden alle genommen.">📄 Reihenbericht</button>
+        <button onclick="studyRefreshSaved()" style="background:#456;width:auto;padding:4px 9px;font-size:.7rem">↻</button>
       </div>
+      <div id="study_reihe_msg" style="font-size:.72rem;color:#9aa;margin:4px 0"></div>
       <div style="font-size:.7rem;color:#789;margin:3px 0 6px">
         Jede Studie liegt in ihrem eigenen Ordner (Zahlen, Diagramm, CSV, Feldbilder, Video
         und der Payload, aus dem sie gerechnet wurde) — beim aktiven Projekt, sonst global.
@@ -6076,12 +6080,16 @@ async function studyRefreshSaved() {
       ? ` <span style="color:#e9a" title="Schritte ohne erreichbaren Betriebspunkt">⚠${e.n_unerreichbar}</span>` : '';
     const q = '?projekt=' + encodeURIComponent(e.wurzel || 'current');
     return `<div style="display:flex;align-items:center;gap:7px;background:#141821;border:1px solid #222a33;border-radius:5px;padding:6px 9px">
+      <input type="checkbox" class="study-pick" value="${escHtml(e.kennung)}" data-wurzel="${escHtml(e.wurzel||'current')}"
+             style="width:auto;margin:0" title="für den Reihenbericht auswählen"/>
       <div style="flex:1;min-width:0">
         <div style="font-size:.76rem;color:#cde;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
           ${escHtml(e.label || e.param || '?')} · ${escHtml(sp)} · ${e.steps} Schritte${warn}</div>
         <div style="font-size:.68rem;color:#789">${escHtml(e.zeitpunkt || e.kennung)} · ${e.rpm ? Math.round(e.rpm)+' U/min' : ''}${e.video ? ' · 🎬' : ''}${e.wurzel === 'global' ? ' · global' : ''}</div>
       </div>
-      <button onclick="studyLoadSaved('${escHtml(e.kennung)}','${escHtml(e.wurzel||'current')}')" style="background:#456;width:auto;padding:4px 9px;font-size:.7rem">📂</button>
+      <button onclick="studyLoadSaved('${escHtml(e.kennung)}','${escHtml(e.wurzel||'current')}')" style="background:#456;width:auto;padding:4px 9px;font-size:.7rem" title="Studie ansehen">📂</button>
+      <button onclick="studyBerichtEinzeln('${escHtml(e.kennung)}','${escHtml(e.wurzel||'current')}')" style="background:#7a5a3a;width:auto;padding:4px 9px;font-size:.7rem" title="PDF-Bericht über diese Studie erzeugen (wird in ihrem Ordner abgelegt)">📄</button>
+      ${e.bericht ? `<a href="/param_study/gespeichert/${encodeURIComponent(e.kennung)}/bericht/download${q}" target="_blank" style="background:#3a5a6a;color:#fff;text-decoration:none;border-radius:4px;padding:4px 9px;font-size:.7rem" title="abgelegten Bericht öffnen">📕</a>` : ''}
       <a href="/param_study/gespeichert/${encodeURIComponent(e.kennung)}/csv${q}" style="background:#3a5a6a;color:#fff;text-decoration:none;border-radius:4px;padding:4px 9px;font-size:.7rem">⬇</a>
       <button onclick="studyDeleteSaved('${escHtml(e.kennung)}','${escHtml(e.wurzel||'current')}')" style="background:#633;width:auto;padding:4px 9px;font-size:.7rem">🗑</button>
     </div>`;
@@ -6094,6 +6102,66 @@ async function studyLoadSaved(kennung, wurzel) {
                            + '?projekt=' + encodeURIComponent(wurzel || 'current')).then(r => r.json());
     if (st && !st.error) _studyRenderDone({ status: 'done', result: st });
   } catch (e) {}
+}
+
+// ── 📄 Berichte ueber ABGELEGTE Studien ─────────────────────────────────────
+// Der vorhandene Knopf am Ergebnis berichtet nur ueber die ZULETZT gerechnete
+// Studie (sie liegt im Serverspeicher und ist nach einem Neustart weg). Diese
+// beiden gehen ueber den Store: einzeln, oder als Reihe ueber mehrere — letzteres
+// beantwortet die Frage, die vor der Auslegung steht, naemlich welcher Parameter
+// ueberhaupt zuerst anzufassen ist.
+function _studyPicks() {
+  return Array.from(document.querySelectorAll('.study-pick:checked'))
+              .map(el => ({ kennung: el.value, wurzel: el.dataset.wurzel }));
+}
+
+async function _studyBerichtPoll(msgEl, fertigHtml) {
+  let s;
+  try { s = await fetch('/param_study/report/status').then(x => x.json()); }
+  catch (e) { setTimeout(() => _studyBerichtPoll(msgEl, fertigHtml), 1500); return; }
+  if (msgEl) msgEl.textContent = (s.log || []).slice(-1)[0] || '…';
+  if (s.status === 'running') { setTimeout(() => _studyBerichtPoll(msgEl, fertigHtml), 900); return; }
+  document.querySelectorAll('#btn_study_reihe').forEach(b => b.disabled = false);
+  if (!msgEl) return;
+  if (s.status === 'error') { msgEl.style.color = '#e57'; msgEl.textContent = '⚠ ' + (s.error || 'Fehler'); return; }
+  msgEl.style.color = '#9c9';
+  msgEl.innerHTML = fertigHtml;
+  studyRefreshSaved();
+}
+
+async function studyBerichtEinzeln(kennung, wurzel) {
+  const msg = document.getElementById('study_reihe_msg');
+  if (msg) { msg.style.color = '#9aa'; msg.textContent = '⏳ Bericht über ' + kennung + ' …'; }
+  const r = await fetch('/param_study/gespeichert/' + encodeURIComponent(kennung) + '/bericht',
+    { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ projekt: wurzel || 'current' }) }).then(x => x.json());
+  if (r.error) { if (msg) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + r.error; } return; }
+  _studyBerichtPoll(msg, '✓ Bericht fertig — <a href="/param_study/gespeichert/'
+    + encodeURIComponent(kennung) + '/bericht/download?projekt=' + encodeURIComponent(wurzel || 'current')
+    + '" target="_blank" style="color:#6cf">PDF öffnen</a>');
+}
+
+async function studyBerichtReihe() {
+  const msg = document.getElementById('study_reihe_msg');
+  const picks = _studyPicks();
+  const btn = document.getElementById('btn_study_reihe');
+  if (btn) btn.disabled = true;
+  const wurzel = picks.length ? picks[0].wurzel : 'current';
+  if (msg) {
+    msg.style.color = '#9aa';
+    msg.textContent = '⏳ Reihenbericht über ' + (picks.length || 'alle') + ' Studien …';
+  }
+  const r = await fetch('/param_study/reihe/bericht', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ kennungen: picks.map(p => p.kennung), projekt: wurzel })
+  }).then(x => x.json());
+  if (r.error) {
+    if (btn) btn.disabled = false;
+    if (msg) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + r.error; }
+    return;
+  }
+  _studyBerichtPoll(msg, '✓ Reihenbericht fertig — <a href="/param_study/reihe/bericht/download?projekt='
+    + encodeURIComponent(wurzel) + '" target="_blank" style="color:#6cf">studienreihe.pdf öffnen</a>');
 }
 
 async function studyDeleteSaved(kennung, wurzel) {

@@ -476,6 +476,7 @@ def _kurz(studie, pfad):
         "n_ok": studie.get("n_ok"), "n_fail": studie.get("n_fail"),
         "n_unerreichbar": studie.get("n_unerreichbar"),
         "video": os.path.exists(os.path.join(pfad, "anim.mp4")),
+        "bericht": os.path.exists(os.path.join(pfad, "parameterstudie.pdf")),
         "n_feldbilder": len(studie.get("field_images") or []),
         "Kt_spanne": spanne("Kt"), "notiz": studie.get("notiz", ""),
     }
@@ -536,6 +537,21 @@ def video_pfad(wurzel, kennung):
     return p if os.path.exists(p) else None
 
 
+def bericht_pfad(wurzel, kennung, name="parameterstudie.pdf"):
+    """Pfad des abgelegten Studienberichts (oder None). Der Bericht liegt IM
+    Studienordner, neben den Zahlen, aus denen er entstanden ist — ein Bericht
+    an einem anderen Ort ist beim naechsten Lauf nicht mehr zuzuordnen."""
+    p = os.path.join(wurzel, kennung, name)
+    return p if os.path.exists(p) else None
+
+
+def reihe_bericht_pfad(wurzel, name="studienreihe.pdf"):
+    """Der Reihenbericht liegt eine Ebene ueber den Studien — er gehoert keiner
+    einzelnen."""
+    p = os.path.join(os.path.dirname(wurzel.rstrip("/")), name)
+    return p if os.path.exists(p) else None
+
+
 def csv_pfad(wurzel, kennung):
     p = os.path.join(wurzel, kennung, "studie.csv")
     return p if os.path.exists(p) else None
@@ -548,3 +564,144 @@ def loeschen(wurzel, kennung):
         shutil.rmtree(p, ignore_errors=True)
         return True
     return False
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Reihenauswertung — mehrere Studien nebeneinander
+# ─────────────────────────────────────────────────────────────────────────────
+# Eine einzelne Studie sagt, WIE ein Parameter wirkt. Eine Reihe sagt, WELCHER
+# ueberhaupt zuerst anzufassen ist — und das ist die Frage, die vor der
+# Auslegung steht (dasselbe Argument, aus dem `ema_paarvergleich` neben den
+# Paaren die Spannweite je Achse ausgibt).
+#
+# **Der Vergleich gilt nur, wenn alle Studien vom SELBEN Entwurf ausgehen.**
+# Spannweiten zweier Studien gegeneinander zu stellen, die an verschiedenen
+# Maschinen gerechnet wurden, ist keine Rangliste, sondern eine Verwechslung —
+# und man sieht es den Zahlen nicht an. `reihe_auswerten` prueft das ueber die
+# Payload-Marke (`ema_projekt.payload_marke`, dieselbe Quelle, an der auch die
+# Bruecke zwischen Agent und Formular haengt) und sagt es, statt zu rechnen.
+
+def _spanne(werte):
+    w = [v for v in werte if v is not None]
+    if len(w) < 2:
+        return None
+    lo, hi = min(w), max(w)
+    bezug = max(abs(lo), abs(hi), 1e-12)
+    # Die relative Spanne ist IMMER definiert, saettigt aber gegen 100 %: ein
+    # Faktor 3 und ein Faktor 143 sehen darin beide nach "fast alles" aus. Der
+    # FAKTOR trennt sie und ist bei einer multiplikativ wirkenden Groesse das
+    # richtige Mass — er gibt es nur dort, wo nichts null oder negativ wird.
+    faktor = (hi / lo) if lo > 1e-12 else None
+    return {"min": lo, "max": hi, "spanne": hi - lo,
+            "spanne_pct": 100.0 * (hi - lo) / bezug, "faktor": faktor}
+
+
+def reihe_auswerten(studien, schluessel="Kt"):
+    """Mehrere Studien nebeneinander: was bewegt welcher Parameter, und welcher
+    zuerst. ``studien`` = Liste von ``run_study``/``laden``-Ergebnissen.
+
+    Returns ``{basis_gleich, marken, zeilen, rangliste, kennzahlen, warnungen}``.
+    Rein — keine Datei, kein Netz, kein Loeser.
+    """
+    try:
+        import ema_projekt as _PJ
+        marke = _PJ.payload_marke
+    except Exception:                                        # noqa: BLE001
+        marke = lambda p: ""                                 # noqa: E731
+    marken, zeilen, warnungen = {}, [], []
+    kennzahlen = []
+    for st in studien:
+        for m in st.get("metric_meta") or []:
+            if m["key"] not in kennzahlen:
+                kennzahlen.append(m["key"])
+    for st in studien:
+        p = st.get("payload")
+        mk = marke(p) if isinstance(p, dict) and p else None
+        if mk:
+            marken.setdefault(mk, []).append(st.get("param"))
+        xs = st.get("x") or []
+        spannen = {k: _spanne((st.get("metrics") or {}).get(k) or []) for k in kennzahlen}
+        flach = [k for k, s in spannen.items()
+                 if s is not None and abs(s["spanne_pct"]) < 0.05]
+        zeilen.append({
+            "param": st.get("param"), "label": st.get("label", st.get("param")),
+            "kennung": st.get("kennung"),
+            "von": xs[0] if xs else None, "bis": xs[-1] if xs else None,
+            "steps": st.get("steps"), "rpm": st.get("rpm"),
+            "spannen": spannen, "flach": flach,
+            "alles_flach": len(flach) == len([k for k in kennzahlen if spannen.get(k)]),
+            "hinweis": (st.get("hinweis") or "").strip(),
+            "n_unerreichbar": st.get("n_unerreichbar") or 0,
+            "n_feldbilder": len(st.get("field_images") or []),
+        })
+    basis_gleich = len(marken) <= 1
+    if not basis_gleich:
+        warnungen.append(
+            "Die Studien gehen NICHT vom selben Entwurf aus (%d verschiedene "
+            "Payloads: %s). Eine Rangliste ueber ihre Spannweiten waere ein "
+            "Vergleich verschiedener Maschinen — sie steht deshalb unter "
+            "Vorbehalt." % (len(marken),
+                            "; ".join(", ".join(v) for v in marken.values())))
+    ohne = [z["param"] for z in zeilen if not z["hinweis"] and z["alles_flach"]]
+    if ohne:
+        warnungen.append(
+            "Ohne Wirkung und ohne Begruendung: %s. Eine flache Kurve, zu der "
+            "nichts dasteht, ist ungeklaert — nicht bestaetigt."
+            % ", ".join(ohne))
+    unerr = [(z["param"], z["n_unerreichbar"]) for z in zeilen if z["n_unerreichbar"]]
+    if unerr:
+        warnungen.append(
+            "Schritte ohne erreichbaren Betriebspunkt: %s. Dort sind Verluste "
+            "und Temperaturen leer und NICHT null."
+            % ", ".join("%s (%d)" % t for t in unerr))
+    rangliste = {}
+    for k in kennzahlen:
+        mit = [(z["param"], z["label"], z["spannen"][k]["spanne_pct"])
+               for z in zeilen if z["spannen"].get(k)]
+        rangliste[k] = sorted(mit, key=lambda t: -abs(t[2]))
+    return {"basis_gleich": basis_gleich, "marken": sorted(marken),
+            "zeilen": zeilen, "rangliste": rangliste,
+            "kennzahlen": kennzahlen, "warnungen": warnungen,
+            "leit": schluessel}
+
+
+def reihe_chart(auswertung, schluessel=("Kt", "P_total", "B_gap", "mass_g")):
+    """Balken je Parameter: wie weit bewegt er die Kennzahl (in %). Waagerecht
+    und nach Wirkung sortiert — eine Rangliste liest man an der Laenge ab, nicht
+    an einer Zahlenkolonne."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    rang = auswertung.get("rangliste") or {}
+    hat = [k for k in schluessel if rang.get(k)]
+    if not hat:
+        return ""
+    fig, axes = plt.subplots(1, len(hat), figsize=(4.2 * len(hat), 4.4), squeeze=False)
+    farben = {"Kt": "#2d7d5a", "P_total": "#b5563a", "B_gap": "#2471a3",
+              "mass_g": "#7a5a3a"}
+    for ax, k in zip(axes[0], hat):
+        eintraege = rang[k][::-1]
+        namen = [e[1] for e in eintraege]
+        werte = [abs(e[2]) for e in eintraege]
+        ax.barh(range(len(werte)), werte, color=farben.get(k, "#555"))
+        ax.set_yticks(range(len(namen)))
+        ax.set_yticklabels(namen, fontsize=7)
+        ax.set_xlabel("Spannweite [%]", fontsize=8)
+        ax.set_title(k, fontsize=9)
+        ax.grid(axis="x", alpha=0.3)
+        # Am Balken steht der FAKTOR, nicht noch einmal der Prozentwert: die
+        # Balkenlaenge sagt schon, wie viel des Wertebereichs der Parameter
+        # ueberstreicht — was sie NICHT sagt, ist ob das ein Drittel mehr oder
+        # das Hundertfache ist.
+        fak = {z["param"]: (z["spannen"].get(k) or {}).get("faktor")
+               for z in auswertung.get("zeilen") or []}
+        for i, (e, v) in enumerate(zip(eintraege, werte)):
+            if v <= 0:
+                continue
+            f = fak.get(e[0])
+            ax.text(v, i, ("  ×%.1f" % f) if f and f >= 1.05 else "  %.0f %%" % v,
+                    va="center", fontsize=6.5)
+    fig.suptitle("Was bewegt welcher Parameter (Spannweite ueber den Studienbereich)",
+                 fontsize=10)
+    fig.tight_layout()
+    return _fig_b64(fig, dpi=120)
