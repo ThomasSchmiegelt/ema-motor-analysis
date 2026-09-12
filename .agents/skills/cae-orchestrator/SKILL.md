@@ -67,6 +67,7 @@ python3 cae_cli.py auftrag --projekt <id> --ergaenzen entscheidungen \
 | `routes [--grep x]` | alle Serverrouten auflisten |
 | `steckbrief [id]` | **Was dieses Projekt IST und was daran gerechnet wurde** — Maschinenart, Pole/Nuten, Bauraum, Werkstoffe, Betriebspunkt, welche Stufen gelaufen sind, die Kennwerte **samt Herkunft**, und was offen ist. Rechnet nichts; was fehlt, steht als fehlend da. `--laeufe` listet zusätzlich die früheren Agentenläufe und die abgelegten Rechnungen |
 | `auftrag` | **Die ABSICHT dieses Projekts — Ziel, Randbedingungen, Entscheidungen samt Begründung, offene Punkte.** Steht als `AUFTRAG.md` im Projektordner, entsteht bei der Projektanlage und wird **ergänzt, nie überschrieben**. Ohne Argumente zeigt es ihn; `--ergaenzen entscheidungen --text "…"` hängt einen datierten Eintrag an. **Lies ihn, bevor du etwas entscheidest, und schreib hinein, was du entschieden hast und warum** — sonst fängt der nächste Lauf die Begründungen von vorn an und geht einen schon verworfenen Weg ein zweites Mal. Es gibt bewusst kein Ersetzen: eine überholte Entscheidung wird als überholt vermerkt, nicht getilgt |
+| `aehnlich` | **Welche anderen Projekte dieser Auslegung gleichen — und WORIN.** Verglichen wird über **dimensionslose** Merkmale (Polbedeckung, Nabenanteil, Zahn/Nut, Schlankheit, Länge/Bohrung): eine 75-mm- und eine 300-mm-Maschine können dieselbe Auslegung sein, und wer über Absolutmaße vergleicht, findet nur, was zufällig gleich groß ist. Zu jedem Treffer steht, welche Felder übereinstimmen und welche nicht — eine Rangliste ohne das ist eine Behauptung. Eine **Dublette** (gleicher Payload) wird als solche benannt: das ist die Auskunft „das hast du schon gerechnet", nicht „das ist ähnlich". **Bevor du eine Entscheidung neu ausrechnest, sieh hier nach** — die abgelegten Läufe sind dein eigener Bestand |
 | `papierkorb` | **Was entsorgt wurde — auflisten, zurückholen, endgültig leeren.** In diesem Werkzeug wird nirgends mehr sofort gelöscht: alles geht über `ema_ablage` nach `<projekt>/.papierkorb/`. `papierkorb zurueck --marke <M>` holt es zurück; `leeren --ja` ist die einzige Stelle, nach der etwas wirklich weg ist |
 | `getriebe` | **Die Übersetzung wird gerechnet, nicht gesetzt.** Stufenteilung, Zähnezahlen, Modul, Tragfähigkeit, lastabhängiger Wirkungsgrad, Masse und die auf die Motorwelle bezogene Trägheit — für Stirnrad, Planetensatz, Kegelrad und Schnecke. `--einbau in_welle` legt den Planetensatz in die Hohlwelle und prüft die Bohrung **magnetisch** mit (ein Feldlauf). **`--uebernehmen` ist der Schritt, der es wirksam macht**: erst dann rechnet der Fahrzyklus mit dieser Übersetzung und mit η(T, n) statt mit `gear_ratio` 9,5 und `eta_drive` 0,95. Exit 0 = trägt und passt |
 | `welle` | **Vollwelle oder Hohlwelle — gemessen.** Rechnet EIN Feld und sagt, ob durch die Welle Fluss läuft und wie groß die Bohrung höchstens sein darf. Exit 0 = Hohlwelle möglich, 1 = Vollwelle nötig |
@@ -952,7 +953,10 @@ deine Arbeitsweise:
   bleibt nirgends.
 * Bevor du eine Entscheidung neu ausrechnest, sieh mit
   `steckbrief <id> --laeufe` nach, ob sie schon einmal ausgerechnet wurde. Die
-  abgelegten Dateien sind dein eigener Bestand, nicht der eines Fremden.
+  abgelegten Dateien sind dein eigener Bestand, nicht der eines Fremden. Und
+  mit `aehnlich --projekt <id>`, ob eine VERGLEICHBARE Auslegung schon
+  dasteht — bei 75 abgelegten Projekten erinnert man sich sonst an das
+  falsche.
 
 `--ohne-ablage` schaltet das ab — nur für ein Ausprobieren, das nirgends
 hingehört.

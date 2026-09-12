@@ -2707,8 +2707,20 @@ def results():
 
 @app.route("/chat", methods=["POST", "OPTIONS"])
 def chat():
-    """LLM Q&A over the loaded project's results, or over a variant comparison.
-    Body: {message, history:[{role,content}], scope:"project"|"compare", ids:[...]}.
+    """LLM-Gespraech ueber EIN Projekt oder ueber einen Variantenvergleich.
+
+    Body: ``{message, history?, scope:"project"|"compare", ids?, project_id?,
+    kennung?, werkzeuge?}``.
+
+    **Projektgebunden statt am global aktiven `_state`.** Der Chat haengte an
+    dem Projekt, das der Server zuletzt aktiviert hatte — wer in einem zweiten
+    Reiter umschaltete, verschob den Gegenstand des Gespraechs unter der Hand,
+    und die Antworten bezogen sich stillschweigend auf eine andere Maschine.
+    ``project_id`` ist jetzt massgeblich; ``_state`` ist nur noch der Rueckfall.
+
+    **Der Verlauf liegt im Projekt** (``<projekt>/gespraeche/<kennung>.jsonl``,
+    anhaengend) und ueberlebt das Neuladen. Schickt der Browser keinen, wird der
+    abgelegte genommen — vorher war das Gespraech mit dem Fenster weg.
     """
     if request.method == "OPTIONS":
         return "", 200
@@ -2726,41 +2738,157 @@ def chat():
             variants = ema_compare.load_projects(PROJECTS_ROOT, ids)
             if len(variants) < 2:
                 return jsonify({"error": "Mindestens 2 Projekte für den Vergleichs-Chat wählen"}), 400
-            reply = ema_chat.chat_compare(msg, history, variants)
+            return jsonify({"reply": ema_chat.chat_compare(msg, history, variants)})
+
+        # ── Projektbezug: ausdrueckliche Kennung vor dem aktiven Zustand ──
+        pid = str(data.get("project_id") or "").strip()
+        if pid and _safe_name(pid) and os.path.isdir(os.path.join(PROJECTS_ROOT, pid)):
+            pd = os.path.join(PROJECTS_ROOT, pid)
+            results = _load_results_of(pd)
         else:
-            results = _state.get("results")
-            if not results:
-                return jsonify({"error": "Kein Projekt geladen — erst eine Analyse ausführen oder ein Projekt laden"}), 400
-            # Load the project's meta.json so the chat is grounded on its parameter
-            # datasheet (results.json holds outputs only, not the input parameters).
-            meta = {}
             pd = _state.get("project_dir")
-            if pd and os.path.exists(os.path.join(pd, "meta.json")):
-                try:
-                    with open(os.path.join(pd, "meta.json")) as f:
-                        meta = json.load(f)
-                except Exception:
-                    meta = {}
-            # Projektakte als gemeinsame Quelle: Notizen erden den Assistenten; bei
-            # Altprojekten ohne meta.json liefert die synthetisierte Akte das Payload.
-            if pd:
-                try:
-                    import ema_projekt
-                    man = ema_projekt.load_or_synthesize(pd, write_back=False)
-                    if not meta:
-                        meta = {"label": man.get("label", ""),
-                                "payload": (man.get("inputs") or {}).get("payload", {})}
-                    if man.get("notes"):
-                        meta["notes"] = man["notes"]
-                except Exception:
-                    pass
-            reply = ema_chat.chat_results(msg, history, results, meta=meta,
-                                          project_dir=pd)
-        return jsonify({"reply": reply})
+            results = _state.get("results")
+        if not results:
+            return jsonify({"error": "Kein Projekt geladen — erst eine Analyse "
+                                     "ausführen oder ein Projekt wählen"}), 400
+
+        kennung = str(data.get("kennung") or "chat")
+        # Kein Verlauf vom Browser? Dann den abgelegten nehmen. Genau dafuer
+        # liegt er im Projekt.
+        if pd and not history:
+            history = [{"role": h.get("role"), "content": h.get("content")}
+                       for h in ema_chat.verlauf_lesen(pd, kennung, n=16)]
+
+        meta = {}
+        if pd and os.path.exists(os.path.join(pd, "meta.json")):
+            try:
+                with open(os.path.join(pd, "meta.json")) as f:
+                    meta = json.load(f)
+            except Exception:
+                meta = {}
+        # Projektakte als gemeinsame Quelle: Notizen erden den Assistenten; bei
+        # Altprojekten ohne meta.json liefert die synthetisierte Akte das Payload.
+        if pd:
+            try:
+                import ema_projekt
+                man = ema_projekt.load_or_synthesize(pd, write_back=False)
+                if not meta:
+                    meta = {"label": man.get("label", ""),
+                            "payload": (man.get("inputs") or {}).get("payload", {})}
+                if man.get("notes"):
+                    meta["notes"] = man["notes"]
+            except Exception:
+                pass
+
+        erg = ema_chat.chat_results(msg, history, results, meta=meta,
+                                    project_dir=pd, kennung=kennung,
+                                    werkzeuge=data.get("werkzeuge", True) is not False)
+        if pd:
+            ema_chat.verlauf_anhaengen(pd, kennung, "user", msg)
+            ema_chat.verlauf_anhaengen(pd, kennung, "assistant", erg["reply"],
+                                       werkzeuge=erg["werkzeuge"],
+                                       ungedeckt=erg["ungedeckt"])
+        return jsonify(erg)
     except urllib.error.URLError:
         return jsonify({"error": "Ollama nicht erreichbar (localhost:11434). Läuft der Dienst?"}), 503
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+def _load_results_of(project_dir: str) -> dict | None:
+    """``results.json`` eines Projekts lesen, ohne es zu AKTIVIEREN.
+
+    Der Chat soll ein Projekt lesen koennen, ohne den Serverzustand zu
+    verschieben — sonst zoege eine Frage im Chat den Bericht und den 3-D-Reiter
+    mit sich.
+    """
+    p = os.path.join(project_dir, "results.json")
+    if not os.path.isfile(p):
+        return None
+    try:
+        with open(p) as f:
+            return json.load(f)
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
+@app.route("/project/<pid>/aehnlich")
+def project_aehnlich(pid: str):
+    """Welche anderen Projekte dieser Auslegung gleichen — **mit Begruendung**.
+
+    Verknuepfen liess sich schon immer (``/links``), aber die Kennung musste man
+    wissen; bei 75 abgelegten Projekten verknuepft man dann, woran man sich
+    erinnert, und das ist selten das Aehnlichste.
+    """
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_projekt
+    n = max(1, min(25, int(request.args.get("n", 5))))
+    return jsonify({"projekt": pid,
+                    "treffer": ema_projekt.aehnlich(proj, n=n,
+                                                    wurzel=PROJECTS_ROOT)})
+
+
+@app.route("/project/<pid>/gespraeche")
+def project_gespraeche(pid: str):
+    """Welche Gespraeche dieses Projekt hat — und eines davon lesen (``?kennung=``)."""
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_chat
+    k = request.args.get("kennung", "")
+    if k:
+        return jsonify({"projekt": pid, "kennung": k,
+                        "zuege": ema_chat.verlauf_lesen(proj, k, n=200)})
+    return jsonify({"projekt": pid, "gespraeche": ema_chat.gespraeche(proj)})
+
+
+@app.route("/recherche", methods=["POST"])
+def recherche():
+    """Im Web nachschlagen — ``{was:"suche"|"hole", frage|adresse, projekt?}``.
+
+    `ema_recherche` gab es laengst, aber **ohne Route**: erreichbar war es nur
+    ueber einen Agentenkopf. Der Chat konnte damit nichts nachschlagen, und die
+    Oberflaeche auch nicht.
+
+    Was hier herauskommt, ist **Fremdtext und keine Zahl** (AGENTS.md) — es
+    ersetzt niemals einen gerechneten Wert. `merke` legt die Quelle
+    anhaengend unter `<projekt>/recherche/quellen.jsonl` ab.
+    """
+    import ema_recherche
+    body = request.get_json(silent=True) or {}
+    was = str(body.get("was", "suche"))
+    try:
+        if was == "suche":
+            frage = str(body.get("frage", "")).strip()
+            if not frage:
+                return jsonify({"error": "keine Frage"}), 400
+            return jsonify({"treffer": ema_recherche.suche(
+                frage, treffer=int(body.get("treffer", 5)))})
+        if was == "hole":
+            adresse = str(body.get("adresse", "")).strip()
+            if not adresse.startswith(("http://", "https://")):
+                return jsonify({"error": "Adresse muss mit http(s):// beginnen"}), 400
+            return jsonify(ema_recherche.hole(adresse))
+        if was == "merke":
+            pid = str(body.get("projekt", ""))
+            if not _safe_name(pid) or not os.path.isdir(
+                    os.path.join(PROJECTS_ROOT, pid)):
+                return jsonify({"error": "Projekt nicht gefunden"}), 404
+            return jsonify(ema_recherche.speichere(
+                os.path.join(PROJECTS_ROOT, pid),
+                str(body.get("adresse", "")), str(body.get("notiz", ""))))
+    except ImportError as e:
+        return jsonify({"error": f"Recherche nicht verfuegbar: {e} "
+                                 f"(ddgs/trafilatura fehlen)"}), 503
+    except Exception as e:                                   # noqa: BLE001
+        return jsonify({"error": f"{type(e).__name__}: {e}"}), 502
+    return jsonify({"error": f"unbekannt: {was} (suche | hole | merke)"}), 400
 
 
 @app.route("/field/<int:n>")

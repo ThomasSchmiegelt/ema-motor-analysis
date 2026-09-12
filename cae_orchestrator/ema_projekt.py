@@ -761,3 +761,174 @@ def load_or_synthesize(project_dir: str, write_back: bool = True) -> dict:
     if write_back:
         _write(project_dir, m)
     return m
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Aehnliche Projekte — „worauf habe ich das schon einmal gerechnet?"
+# ═══════════════════════════════════════════════════════════════════════════
+# Verknuepfen liess sich schon immer (``add_link``), aber die Kennung musste man
+# WISSEN. Bei 74 abgelegten Projekten heisst das: man verknuepft, woran man sich
+# erinnert, und das ist selten das Aehnlichste.
+#
+# Verglichen wird ueber **dimensionslose** Merkmale. Eine 75-mm-Maschine und eine
+# 300-mm-Maschine koennen dieselbe Auslegung sein — wer ueber Absolutmasse
+# vergleicht, findet nur, was zufaellig gleich gross ist. Genau diese Merkmale
+# fuehrt ``ema_bilddaten.merkmale`` bereits (Stegbreite relativ, Polbedeckung,
+# Nabenanteil, Zahn/Nut); sie wird best-effort benutzt und faellt auf einen
+# kleinen, aus dem Payload gerechneten Satz zurueck — das Modul braucht das
+# Layouttor und kann an einer Altgeometrie scheitern, und dann waere ein
+# Projekt unsichtbar statt ungenau.
+
+# Was gleich sein MUSS, damit zwei Auslegungen ueberhaupt vergleichbar sind.
+_GLEICHHEIT = [
+    ("geom.machineType", "Maschinenart"),
+    ("geom.magShape",    "Magnetanordnung"),
+    ("cooling",          "Kuehlung"),
+    ("magnet",           "Magnetwerkstoff"),
+    ("rotor_lam",        "Rotorblech"),
+]
+
+# Dimensionslose Zahlen. Die Spanne dahinter ist der Massstab, ueber den ein
+# Unterschied als „ganz anders" zaehlt — ohne sie waere ein Polzahlunterschied
+# von 2 auf 12 dasselbe wie ein Nabenanteil von 0,30 auf 0,40.
+_MASSSTAB = {
+    "polzahl":           8.0,
+    "nuten_je_pol":      4.0,
+    "nabenanteil":       0.35,
+    "polbedeckung":      0.6,
+    "schlankheit":       8.0,
+    "zahn_zu_nut":       2.0,
+    "magnetflaeche_rel": 0.25,
+    "magnettiefe":       0.5,
+    "laenge_zu_bohrung": 1.5,
+    "spalt_rel":         0.02,
+}
+
+
+def _merkmale(payload: dict) -> dict:
+    """Dimensionslose Merkmale einer Auslegung — best effort."""
+    geom = (payload or {}).get("geom") or {}
+    if not geom:
+        return {}
+    m = {}
+    try:
+        import ema_bilddaten
+        m = {k: float(v) for k, v in ema_bilddaten.merkmale(dict(geom)).items()
+             if isinstance(v, (int, float))}
+    except Exception:                                        # noqa: BLE001
+        m = {}
+    # Rueckfall UND Ergaenzung: die beiden Verhaeltnisse, die ``merkmale`` nicht
+    # kennt (es sieht nur den Querschnitt, nicht die Baulaenge).
+    def _f(*schluessel):
+        for k in schluessel:
+            v = geom.get(k, payload.get(k))
+            try:
+                if v is not None:
+                    return float(v)
+            except (TypeError, ValueError):
+                pass
+        return None
+    r_rot, r_si = _f("rotorOD"), _f("statorID")
+    schaft, axial = _f("shaftD"), _f("axialLen", "axial_len")
+    if not m:
+        p = _f("p")
+        if r_rot and schaft:
+            m["nabenanteil"] = schaft / r_rot
+        if p:
+            m["polzahl"] = 2 * p
+            n = _f("slots")
+            if n:
+                m["nuten_je_pol"] = n / max(1.0, 2 * p)
+        w, t = _f("magWidth"), _f("magThick")
+        if w and t:
+            m["schlankheit"] = w / t
+    if axial and r_si:
+        m["laenge_zu_bohrung"] = axial / r_si
+    if r_si and r_rot:
+        m["spalt_rel"] = (r_si - r_rot) / 2.0 / max(1e-6, r_rot / 2.0)
+    return m
+
+
+def _kategorien(payload: dict) -> dict:
+    flach = _flatten_payload(payload)
+    aus = {}
+    for k, label in _GLEICHHEIT:
+        v = flach.get(k)
+        if v not in (None, ""):
+            aus[label] = str(v)
+    return aus
+
+
+def aehnlich(project_dir: str, n: int = 5, wurzel: str | None = None) -> list:
+    """Die ``n`` aehnlichsten Projekte — **mit Begruendung**.
+
+    Jeder Treffer traegt, welche Felder uebereinstimmen und welche nicht. Eine
+    Rangliste ohne das ist eine Behauptung: „87 % aehnlich" sagt nichts darueber,
+    ob es dieselbe Maschinenart mit anderer Kuehlung ist oder umgekehrt — und
+    genau daran haengt, ob der Vergleich etwas taugt.
+    """
+    wurzel = wurzel or os.path.dirname(os.path.abspath(project_dir.rstrip("/")))
+    mich = _read(project_dir) or load_or_synthesize(project_dir, write_back=False)
+    mein_payload = (mich.get("inputs") or {}).get("payload") or {}
+    if not mein_payload:
+        return []
+    meine_marke = payload_marke(mein_payload)
+    m0, k0 = _merkmale(mein_payload), _kategorien(mein_payload)
+    ich = os.path.basename(project_dir.rstrip("/"))
+
+    aus = []
+    for name in sorted(os.listdir(wurzel)):
+        # Fuehrender Unterstrich = Ablage, kein Projekt (``_db``, ``_papierkorb``…).
+        if name.startswith("_") or name == ich:
+            continue
+        d = os.path.join(wurzel, name)
+        if not os.path.isfile(os.path.join(d, "project.json")):
+            continue
+        try:
+            with open(os.path.join(d, "project.json"), encoding="utf-8") as f:
+                akte = json.load(f)
+        except (OSError, ValueError):
+            continue
+        pl = (akte.get("inputs") or {}).get("payload") or {}
+        if not pl:
+            continue
+
+        k1 = _kategorien(pl)
+        gleich = [f"{lab}={k0[lab]}" for lab in k0 if k1.get(lab) == k0[lab]]
+        anders = [f"{lab} {k0[lab]}≠{k1[lab]}" for lab in k0
+                  if lab in k1 and k1[lab] != k0[lab]]
+        # Kategorien und Zahlen zaehlen je zur Haelfte: zwei Maschinen mit
+        # gleicher Anordnung und anderen Verhaeltnissen sind einander so nah
+        # wie umgekehrt, und keines der beiden allein entscheidet.
+        n_kat = len(gleich) + len(anders)
+        s_kat = (len(gleich) / n_kat) if n_kat else 0.5
+
+        m1 = _merkmale(pl)
+        gemeinsam = [k for k in m0 if k in m1 and k in _MASSSTAB]
+        if gemeinsam:
+            d2 = sum(min(1.0, abs(m0[k] - m1[k]) / _MASSSTAB[k]) ** 2
+                     for k in gemeinsam) / len(gemeinsam)
+            s_num = 1.0 - d2 ** 0.5
+            weit = sorted(gemeinsam,
+                          key=lambda k: abs(m0[k] - m1[k]) / _MASSSTAB[k],
+                          reverse=True)
+            anders += [f"{k} {m0[k]:.3g}≠{m1[k]:.3g}" for k in weit[:3]
+                       if abs(m0[k] - m1[k]) / _MASSSTAB[k] > 0.25]
+        else:
+            s_num = 0.5
+
+        aus.append({
+            "id": name,
+            "label": akte.get("label") or name,
+            "status": akte.get("status", ""),
+            # Eine Dublette ist keine Aehnlichkeit, sondern Identitaet -- und
+            # das ist eine andere Auskunft („das hast du schon gerechnet").
+            "dublette": payload_marke(pl) == meine_marke,
+            "aehnlichkeit": round(0.5 * s_kat + 0.5 * s_num, 3),
+            "gleich": gleich, "anders": anders,
+            "kennwerte": {k: v for k, v in (akte.get("metrics") or {}).items()
+                          if k in ("B_gap_T", "Kt_Nm_per_A", "max_safe_rpm",
+                                   "mass_g", "T_magnet_C")},
+        })
+    aus.sort(key=lambda e: (e["dublette"], e["aehnlichkeit"]), reverse=True)
+    return aus[:max(1, int(n))]

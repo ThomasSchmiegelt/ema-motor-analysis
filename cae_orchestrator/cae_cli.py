@@ -1790,6 +1790,51 @@ def _ablegen(args, verb: str, text: str, *, daten=None, ok: bool = True,
         print(f"  (nicht abgelegt: {a.get('grund')})", file=sys.stderr)
 
 
+def cmd_aehnlich(args) -> int:
+    """Welche anderen Projekte dieser Auslegung gleichen — und WORIN.
+
+    Verknuepfen liess sich schon immer (``project.json``s ``links``), aber die
+    Kennung musste man WISSEN. Bei 75 abgelegten Projekten heisst das: man
+    verknuepft, woran man sich erinnert, und das ist selten das Aehnlichste.
+
+    Verglichen wird ueber **dimensionslose** Merkmale — eine 75-mm-Maschine und
+    eine 300-mm-Maschine koennen dieselbe Auslegung sein; wer ueber Absolutmasse
+    vergleicht, findet nur, was zufaellig gleich gross ist. **Die Begruendung
+    gehoert zum Treffer**: eine Rangliste ohne „worin gleich, worin anders" ist
+    eine Behauptung.
+
+    Exit: 0 = Treffer, 1 = keine.
+    """
+    import ema_projekt as PJ
+    pdir = _projekt_pfad(args.projekt)
+    if not pdir:
+        return _die(f"Projekt '{args.projekt}' nicht gefunden.", EXIT_USAGE)
+    treffer = PJ.aehnlich(pdir, n=getattr(args, "n", 5))
+    if getattr(args, "json", False):
+        emit({"ok": bool(treffer), "projekt": os.path.basename(pdir),
+              "treffer": treffer}, args)
+        return EXIT_OK if treffer else 1
+    if not treffer:
+        print(f"Keine vergleichbaren Projekte zu {os.path.basename(pdir)} "
+              f"(hat es einen Payload?).")
+        return 1
+    print(f"Aehnlich zu {os.path.basename(pdir)}:\n")
+    for e in treffer:
+        marke = "  DUBLETTE — derselbe Payload" if e["dublette"] else ""
+        print(f"  {e['id']}  {e['aehnlichkeit']:.0%}{marke}")
+        if e["label"] != e["id"]:
+            print(f"      {e['label']}  [{e['status']}]")
+        print(f"      gleich: {', '.join(e['gleich']) or '—'}")
+        print(f"      anders: {', '.join(e['anders'][:5]) or '—'}")
+        kw = e.get("kennwerte") or {}
+        if kw:
+            print("      " + "  ".join(f"{k}={v}" for k, v in kw.items()))
+        print("")
+    print("  Einen Verweis festhalten: cae_cli.py raw POST /project/"
+          f"{os.path.basename(pdir)}/links '{{\"id\": \"<Kennung>\"}}'")
+    return EXIT_OK
+
+
 def cmd_papierkorb(args) -> int:
     """Was entsorgt wurde, zurueckholen — oder endgueltig leeren.
 
@@ -3404,6 +3449,16 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_feld3d)
+
+    s = sub.add_parser("aehnlich",
+                       help="welche anderen Projekte dieser Auslegung gleichen — "
+                            "ueber dimensionslose Merkmale, samt Begruendung "
+                            "(worin gleich, worin anders)")
+    s.add_argument("--projekt", "--from-project", dest="projekt", default="last",
+                   help="Projektkennung oder 'last' (Vorgabe)")
+    s.add_argument("--n", type=int, default=5, help="wie viele Treffer (Vorgabe 5)")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_aehnlich)
 
     s = sub.add_parser("papierkorb",
                        help="was entsorgt wurde: auflisten, zurueckholen, "
