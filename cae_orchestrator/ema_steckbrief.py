@@ -459,6 +459,10 @@ def steckbrief(projekt_dir: str, *, mit_laeufen: bool = True) -> dict:
                      "ursprung": (akte.get("lineage") or {}).get("origin"),
                      "quelle": (akte.get("design") or {}).get("source")},
         "auftrag": (akte.get("design") or {}).get("brief") or "",
+        # ``auftrag`` ist EIN Satz aus der Maske; ``auftragsdatei`` ist das
+        # fortgeschriebene Dokument daneben -- Ziel, Randbedingungen,
+        # Entscheidungen samt Begruendung, offene Punkte (s. ema_auftrag).
+        "auftragsdatei": _auftragsdatei(projekt_dir),
         # Der Unterschied, auf den beim Agentenstart alles ankommt: ein
         # gebundenes Projekt ist sonst ausdruecklich KEINE Vorlage (dagegen
         # wurde ``--frisch`` gebaut). Eine im Designer vorgezeichnete Geometrie
@@ -481,6 +485,26 @@ def steckbrief(projekt_dir: str, *, mit_laeufen: bool = True) -> dict:
         except Exception:                                    # noqa: BLE001
             aus["laeufe"] = []
     aus["warnungen"] = _warnungen(aus, zus)
+    return aus
+
+
+def _auftragsdatei(projekt_dir: str) -> dict:
+    """``AUFTRAG.md`` als Abschnitte -- ohne Platzhalter.
+
+    Ein Abschnitt, in dem noch „_noch keine_" steht, ist LEER; ihn als Inhalt
+    zurueckzugeben hiesse, die Vorlage fuer eine Aussage zu halten.
+    """
+    try:
+        import ema_auftrag
+        roh = ema_auftrag.abschnitte(projekt_dir)
+    except Exception:                                        # noqa: BLE001
+        return {}
+    aus = {}
+    for titel, rumpf in roh.items():
+        t = (rumpf or "").strip()
+        if not t or t.startswith("_noch "):
+            continue
+        aus[titel] = t
     return aus
 
 
@@ -562,6 +586,13 @@ def als_text(sb: dict, *, kurz: bool = False) -> str:
          f"Leiter {_z(m['leiter'])}"]
     if sb["auftrag"]:
         z.append(f"  Auftrag  : {sb['auftrag'][:180]}")
+    if sb.get("auftragsdatei"):
+        z.append("  AUFTRAG.md:")
+        for titel, rumpf in sb["auftragsdatei"].items():
+            z.append(f"    {titel}:")
+            for zeile in str(rumpf)[:900].splitlines():
+                if zeile.strip():
+                    z.append(f"      {zeile.strip()}")
     if sb.get("vorgabe"):
         z.append("  VORGABE  : die Geometrie ist von Hand vorgezeichnet und als "
                  "Startpunkt gemeint")
@@ -669,6 +700,13 @@ def als_markdown(sb: dict) -> str:
         auftrag = "\n  ".join(zeile for zeile in
                               str(sb["auftrag"])[:1500].splitlines() if zeile.strip())
         z.append(f"- **Auftrag des Menschen**: {auftrag}")
+    # Das fortgeschriebene Dokument daneben. Hier NUR als Stichpunkte -- den
+    # vollen Text bekommt der Agentenkopf ueber ``ema_auftrag.als_markdown``;
+    # zweimal derselbe Wortlaut in einer Aufforderung ist verschwendeter Platz.
+    for titel, rumpf in (sb.get("auftragsdatei") or {}).items():
+        eingerueckt = "\n  ".join(zeile for zeile in
+                                  str(rumpf)[:900].splitlines() if zeile.strip())
+        z.append(f"- **Auftrag / {titel}**: {eingerueckt}")
     if sb.get("vorgabe"):
         z += ["- **Diese Geometrie ist eine VORGABE, kein Altbestand.** Sie wurde",
               "  von Hand im Designer vorgezeichnet und ausdruecklich als Startpunkt",

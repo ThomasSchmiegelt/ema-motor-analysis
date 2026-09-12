@@ -239,13 +239,21 @@ def liste(project_dir):
     return out
 
 
-def loeschen(project_dir, kennung):
-    import shutil
+def loeschen(project_dir, kennung, *, bestaetigt=True):
+    """Einen Bericht entsorgen — ueber den Papierkorb.
+
+    Hier steckt die Arbeit eines Menschen: Text, den er geschrieben, und
+    Bilder, die er ausgewaehlt hat, dazu alle Fassungen. Ein
+    ``rmtree(ignore_errors=True)`` warf das weg, ohne auch nur zu melden, ob es
+    geklappt hat.
+    """
     d = os.path.join(wurzel(project_dir), _sicher(kennung))
-    if os.path.isdir(d) and os.path.exists(os.path.join(d, "bericht.json")):
-        shutil.rmtree(d, ignore_errors=True)
-        return True
-    return False
+    if not (os.path.isdir(d) and os.path.exists(os.path.join(d, "bericht.json"))):
+        return False
+    import ema_ablage
+    r = ema_ablage.entsorgen(d, "Bericht verworfen", bestaetigt=bestaetigt,
+                             project_dir=project_dir)
+    return bool(r.get("ok"))
 
 
 # ── Bausteine: gerechnete Abschnitte, beim Rendern frisch geholt ────────────
@@ -612,12 +620,22 @@ def fassung_ablegen(project_dir, kennung, doc, anlass="gespeichert"):
                  "zeit": time.strftime("%Y-%m-%d %H:%M:%S")})
     with open(os.path.join(d, marke + ".json"), "w", encoding="utf-8") as f:
         json.dump(satz, f, ensure_ascii=False)
+    # Ueberzaehlige Fassungen kappen. Eine Fassung ist ein Stand, den jemand
+    # geschrieben hat — sie wandert deshalb in den Papierkorb und wird nicht
+    # weggeworfen. (Der Deckel selbst bleibt: sonst waechst der Ordner mit
+    # jedem Speichern, und die Fassungsliste wird unlesbar.)
     alt = sorted((f for f in os.listdir(d) if f.endswith(".json")),
                  key=lambda f: _marke_key(f[:-5]))
-    for f in alt[:-MAX_FASSUNGEN]:
+    ueberzaehlig = alt[:-MAX_FASSUNGEN] if MAX_FASSUNGEN > 0 else []
+    if ueberzaehlig:
         try:
-            os.remove(os.path.join(d, f))
-        except OSError:
+            import ema_ablage
+            for f in ueberzaehlig:
+                ema_ablage.entsorgen(
+                    os.path.join(d, f),
+                    f"aelteste Fassung, ueber {MAX_FASSUNGEN} hinaus",
+                    bestaetigt=True, project_dir=project_dir)
+        except Exception:                                    # noqa: BLE001
             pass
     return marke
 

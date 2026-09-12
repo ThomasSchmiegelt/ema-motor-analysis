@@ -2924,6 +2924,15 @@ def _prep_mesh(geom, axial, opts, work, log):
     elif tags.get("hex_fallback"):
         log(f"   ⚠ Hexaeder-Modus nicht möglich ({tags['hex_fallback']}) → Tetraeder-Netz", 32)
     log("🔁 ElmerGrid: MSH → Elmer-Mesh…", 38)
+    # ``run_elmergrid`` setzt das Mesh-Verzeichnis bei jedem Lauf frisch auf
+    # (sonst rechnete Elmer auf dem ALTEN Netz weiter). Auch ein Zwischenstand,
+    # auch nicht in den Papierkorb -- aber protokolliert. Das Projekt steckt im
+    # Arbeitspfad: alle drei Aufrufer setzen ``work = <projekt>/em3d``.
+    try:
+        import ema_ablage
+        ema_ablage.geraeumt(os.path.dirname(work), "Elmer-Netzverzeichnis")
+    except Exception:                                        # noqa: BLE001
+        pass
     rg = ER.run_elmergrid(msh, os.path.join(work, "mesh"))
     if not rg["ok"]:
         raise RuntimeError("ElmerGrid fehlgeschlagen: " + (rg.get("stderr") or rg.get("error", ""))[:300])
@@ -3106,12 +3115,22 @@ def run_em3d_sweep(payload: dict, project_dir: str, progress_cb=None, cancel_cb=
     prof = None
     if make_video:
         import ema_analysis
+        _weg = 0
         if os.path.isdir(frames_dir):
             for f in os.listdir(frames_dir):
                 if f.endswith((".png", ".mp4")):
-                    try: os.remove(os.path.join(frames_dir, f))
+                    try:
+                        os.remove(os.path.join(frames_dir, f))
+                        _weg += 1
                     except Exception: pass
         os.makedirs(frames_dir, exist_ok=True)
+        # Zwischenstand, nicht in den Papierkorb (er entsteht bei jedem Lauf
+        # neu) -- aber auch nicht still: eine Zeile in die Zeitleiste.
+        try:
+            import ema_ablage
+            ema_ablage.geraeumt(project_dir, "3-D-Lastprofil-Frames", _weg)
+        except Exception:                                    # noqa: BLE001
+            pass
         p_rpm, p_load, p_iq, p_id = [], [], [], []
         for pt in points:
             pt = pt or {}
@@ -3971,6 +3990,14 @@ def run_em3d_sector(payload: dict, project_dir: str, progress_cb=None) -> dict:
          f"{tags['n_slots']} Nuten, {tags['n_barriers']} Barrieren (1 von {tags['poles']} Polen); "
          f"Zonen Luftspalt {mz['gap_cl']:.2f} / Magnet+Barriere+Nut {mz['mag_cl']:.2f} / grob "
          f"{mz['mesh_cl']:.2f} mm", 32)
+    # ``run_elmergrid`` setzt das Mesh-Verzeichnis bei jedem Lauf frisch auf
+    # (sonst rechnete Elmer auf dem ALTEN Netz weiter). Auch ein Zwischenstand,
+    # auch nicht in den Papierkorb -- aber protokolliert.
+    try:
+        import ema_ablage
+        ema_ablage.geraeumt(project_dir, "Elmer-Netzverzeichnis")
+    except Exception:                                        # noqa: BLE001
+        pass
     rg = ER.run_elmergrid(msh, os.path.join(work, "mesh"))
     if not rg["ok"]:
         raise RuntimeError("ElmerGrid (Sektor): " + (rg.get("stderr") or rg.get("error", ""))[:300])

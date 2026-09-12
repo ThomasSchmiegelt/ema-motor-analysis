@@ -1790,6 +1790,117 @@ def _ablegen(args, verb: str, text: str, *, daten=None, ok: bool = True,
         print(f"  (nicht abgelegt: {a.get('grund')})", file=sys.stderr)
 
 
+def cmd_papierkorb(args) -> int:
+    """Was entsorgt wurde, zurueckholen — oder endgueltig leeren.
+
+    Geloescht wird in diesem Werkzeug nirgends mehr sofort: alles geht ueber
+    ``ema_ablage`` in ``<projekt>/.papierkorb/``. Das hier ist der Gegenweg.
+    Ohne ihn waere der Korb dasselbe wie die frueheren Agentenlaeufe vor
+    ``/agent/laeufe`` -- aufgehoben und unerreichbar, und das ist von weg
+    nicht zu unterscheiden.
+
+    Exit: 0 = ok, 1 = leer bzw. nichts zurueckgeholt, 2 = Bedienfehler.
+    """
+    import ema_ablage as AB
+    pdir = _projekt_pfad(args.projekt)
+    if not pdir:
+        return _die(f"Projekt '{args.projekt}' nicht gefunden.", EXIT_USAGE)
+
+    if args.was == "zurueck":
+        if not args.marke:
+            return _die("'zurueck' braucht --marke (siehe 'papierkorb liste').",
+                        EXIT_USAGE)
+        r = AB.wiederherstellen(pdir, args.marke)
+        if not r.get("ok"):
+            return _die(r.get("grund", "nicht zurueckgeholt"), 1)
+        emit(r, args)
+        print(f"  zurueckgeholt: {r['pfad']}")
+        if r.get("hinweis"):
+            print(f"  {r['hinweis']}")
+        return EXIT_OK
+
+    if args.was == "leeren":
+        # Die einzige Stelle im ganzen Werkzeug, nach der etwas wirklich weg
+        # ist -- deshalb hier ein zweites ausdrueckliches Ja.
+        r = AB.endgueltig(pdir, args.marke or "", bestaetigt=args.ja)
+        if r.get("bestaetigung_noetig"):
+            print(r["text"])
+            print("  Zum Ausfuehren: --ja")
+            return 1
+        emit(r, args)
+        print(f"  endgueltig geloescht: {r['geloescht']} Eintrag/Eintraege")
+        return EXIT_OK
+
+    eintraege = AB.inhalt(pdir)
+    if getattr(args, "json", False):
+        emit({"ok": True, "projekt": os.path.basename(pdir),
+              "eintraege": eintraege}, args)
+        return EXIT_OK if eintraege else 1
+    if not eintraege:
+        print(f"Papierkorb von {os.path.basename(pdir)} ist leer.")
+        return 1
+    print(f"Papierkorb von {os.path.basename(pdir)} — {len(eintraege)} Eintrag/Eintraege:")
+    for e in eintraege:
+        zustand = "" if e.get("da") else "  (nicht mehr da)"
+        print(f"  {e['marke']}  {e['groesse']:>9s}  {e.get('herkunft') or e['name']}"
+              + (f"  — {e['grund']}" if e.get("grund") else "") + zustand)
+    print("\n  Zurueckholen: papierkorb zurueck --marke <Marke>")
+    return EXIT_OK
+
+
+def cmd_auftrag(args) -> int:
+    """``AUFTRAG.md`` eines Projekts zeigen oder ERGAENZEN.
+
+    Die Absicht hinter einer Auslegung stand nirgends. ``design.brief`` ist EIN
+    Satz aus der Maske; warum eine Entscheidung so und nicht anders fiel, welche
+    Randbedingung der Auftraggeber genannt hat und was noch offen ist, stand
+    allein im Gespraech -- also nirgends, sobald das Fenster zu war. Ein
+    Agentenlauf faengt die Begruendungen dann von vorn an und geht einen schon
+    verworfenen Weg ein zweites Mal.
+
+    **Ergaenzt wird, nicht ueberschrieben**: es gibt hier kein ``--ersetzen``.
+    Eine ueberholte Entscheidung wird als ueberholt vermerkt, nicht getilgt --
+    warum etwas verworfen wurde, ist selbst eine Auskunft.
+
+    Exit: 0 = ok, 1 = es gibt (noch) keinen Auftrag, 2 = Bedienfehler.
+    """
+    import ema_auftrag as AU
+    pdir = _projekt_pfad(args.projekt)
+    if not pdir:
+        return _die(f"Projekt '{args.projekt}' nicht gefunden — 'projects' zeigt "
+                    f"die vorhandenen.", EXIT_USAGE)
+
+    if getattr(args, "ergaenzen", None):
+        text = (getattr(args, "text", "") or "").strip()
+        if not text:
+            return _die("--ergaenzen braucht --text \"…\" — was soll festgehalten "
+                        "werden?", EXIT_USAGE)
+        erg = AU.ergaenzen(pdir, args.ergaenzen, text,
+                           quelle=getattr(args, "quelle", "") or "cae_cli")
+        if not erg.get("ok"):
+            return _die(erg.get("grund", "nicht ergaenzt"), EXIT_USAGE)
+        emit(erg, args)
+        print(f"  ergaenzt: {erg['abschnitt']} in {AU.pfad(pdir)}")
+        return EXIT_OK
+
+    txt = AU.lesen(pdir)
+    if not txt.strip():
+        # Ein fehlender Auftrag ist kein Fehler des Werkzeugs, sondern eine
+        # Auskunft ueber das Projekt -- und der naechste Schritt steht dabei.
+        print(f"Kein AUFTRAG.md in {pdir}.")
+        print("  Anlegen geschieht bei der Projektanlage; nachtragen mit")
+        print(f"  cae_cli.py auftrag --projekt {os.path.basename(pdir)} "
+              f"--ergaenzen ziel --text \"…\"")
+        return 1
+    if getattr(args, "json", False):
+        emit({"ok": True, "projekt": os.path.basename(pdir),
+              "pfad": AU.pfad(pdir), "abschnitte": AU.abschnitte(pdir),
+              "text": txt}, args)
+        return EXIT_OK
+    print(txt)
+    return EXIT_OK
+
+
 def cmd_steckbrief(args) -> int:
     """Was dieses Projekt IST und was daran gerechnet wurde -- in einem Absatz.
 
@@ -3293,6 +3404,46 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_feld3d)
+
+    s = sub.add_parser("papierkorb",
+                       help="was entsorgt wurde: auflisten, zurueckholen, "
+                            "endgueltig leeren (geloescht wird hier nie sofort)")
+    s.add_argument("was", nargs="?", default="liste",
+                   choices=["liste", "zurueck", "leeren"],
+                   help="liste (Vorgabe) | zurueck --marke … | leeren [--ja]")
+    s.add_argument("--projekt", "--from-project", dest="projekt", default="last",
+                   help="Projektkennung oder 'last' (Vorgabe)")
+    s.add_argument("--marke", default="",
+                   help="welcher Eintrag (aus 'papierkorb liste')")
+    s.add_argument("--ja", action="store_true",
+                   help="bei 'leeren': ausdrueckliche Bestaetigung — danach ist "
+                        "es wirklich weg")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_papierkorb)
+
+    # Die Abschnittsnamen kommen aus dem Modul und nicht aus einer zweiten
+    # Liste hier: eine Abschrift waere beim ersten neuen Abschnitt veraltet.
+    # ``ema_auftrag`` ist reines stdlib und laeuft deshalb auch im System-Python.
+    import ema_auftrag as _AU
+    s = sub.add_parser("auftrag",
+                       help="AUFTRAG.md eines Projekts zeigen oder ergaenzen — "
+                            "Ziel, Randbedingungen, Entscheidungen samt "
+                            "Begruendung, offene Punkte (ergaenzen, nie ersetzen)")
+    s.add_argument("--projekt", "--from-project", dest="projekt", default="last",
+                   help="Projektkennung oder 'last' (Vorgabe)")
+    s.add_argument("--zeigen", action="store_true",
+                   help="den Auftrag ausgeben (Vorgabe, wenn nichts anderes steht)")
+    s.add_argument("--ergaenzen", metavar="ABSCHNITT",
+                   choices=[k for k, _ in _AU.ABSCHNITTE]
+                           + [t for _, t in _AU.ABSCHNITTE],
+                   help="Abschnitt, unter den der Eintrag gehaengt wird: "
+                        "ziel | randbedingungen | entscheidungen | offen | verweise")
+    s.add_argument("--text", default="",
+                   help="was festgehalten werden soll (bei --ergaenzen Pflicht)")
+    s.add_argument("--quelle", default="",
+                   help="wer das festhaelt (z. B. 'pi', 'Mensch') — steht im Eintrag")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_auftrag)
 
     s = sub.add_parser("steckbrief",
                        help="was ein Projekt IST und was daran gerechnet wurde — "

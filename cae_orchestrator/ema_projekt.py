@@ -527,15 +527,147 @@ def record_run(project_dir: str, pid: str, meta: dict, results: dict, *,
         # Knoten nur dort, wo jemand von Hand einen gesetzt hat — und
         # ausgerechnet der Stand, dessen Kennwerte man vergleicht, waere nicht
         # wiederherstellbar.
-        knoten_setzen(project_dir, label=action,
-                      note=(note or "")[:200] or f"Stand nach {action}",
-                      payload=new_payload, action=action, automatisch=True)
+        marke = knoten_setzen(project_dir, label=action,
+                              note=(note or "")[:200] or f"Stand nach {action}",
+                              payload=new_payload, action=action,
+                              automatisch=True).get("marke", "")
+        # Und der ANTWORT-Teil desselben Standes. Der Knoten haelt den Payload,
+        # also die Frage; Ergebnisse, Kennwerte und Diagramme wurden bis hierher
+        # bei jedem Lauf ueberschrieben. UNTER DERSELBEN MARKE, damit Frage und
+        # Antwort eines Standes zusammenfindbar bleiben.
+        lauf_archivieren(project_dir, marke, action=action)
         return ok
     except Exception:
         return False
 
 
 # ── comparison links (persistent) ─────────────────────────────────────────────
+
+# ── Lauf-Archiv: ergaenzen statt ueberschreiben ───────────────────────────────
+#
+# ``knoten/`` haelt den PAYLOAD jedes Laufs -- also die Frage. Die ANTWORT wurde
+# bei jedem Lauf ueberschrieben: ``results.json``, ``meta.json`` und die
+# ``charts/*.png`` tragen immer nur den letzten Stand. Wer zwei Laeufe
+# vergleichen wollte, hatte die Kennwerte (aus ``evolution``) und die Eingaben
+# (aus ``knoten/``) -- aber kein einziges Bild und keine Zwischengroesse des
+# aelteren. Und das faellt erst auf, wenn man es braucht.
+#
+# Kopiert wird NACH dem fertigen Lauf und nur, was ein Stand wirklich ist:
+# Ergebnisse, Eingaben, Diagramme. Nicht die Animations-Frames (hunderte PNG je
+# Lauf, aus denen das Video ohnehin schon gebaut ist), nicht die VTU (hunderte
+# MB), nicht das CAD (liegt als FCStd/STEP ohnehin nur einmal vor).
+LAUF_ORDNER = "laeufe"
+
+
+def lauf_archivieren(project_dir: str, marke: str = "",
+                     *, action: str = "analyse") -> dict:
+    """Den FERTIGEN Stand nach ``<projekt>/laeufe/<marke>/`` legen.
+
+    Soft-fail wie jeder Schreibvorgang hier: ein misslungenes Archiv darf
+    keinen Lauf abbrechen, der gerade erfolgreich zu Ende ging.
+    """
+    import shutil
+    try:
+        basis = marke or _marke_jetzt()
+        wurzel = os.path.join(project_dir, LAUF_ORDNER)
+        os.makedirs(wurzel, exist_ok=True)
+        # Dieselbe Kollisionsabsicherung wie bei den Knoten: zwei Laeufe koennen
+        # in dieselbe Millisekunde fallen, und ein ueberschriebenes Archiv waere
+        # genau der Verlust, gegen den es gebaut ist.
+        ziel, n = os.path.join(wurzel, basis), 1
+        while os.path.exists(ziel):
+            n += 1
+            ziel = os.path.join(wurzel, "%s-%d" % (basis, n))
+        os.makedirs(ziel)
+
+        kopiert = []
+        for name in ("results.json", "meta.json"):
+            q = os.path.join(project_dir, name)
+            if os.path.isfile(q):
+                shutil.copy2(q, os.path.join(ziel, name))
+                kopiert.append(name)
+        charts = os.path.join(project_dir, "charts")
+        if os.path.isdir(charts):
+            zc = os.path.join(ziel, "charts")
+            os.makedirs(zc, exist_ok=True)
+            for n2 in sorted(os.listdir(charts)):
+                if n2.lower().endswith(".png"):
+                    shutil.copy2(os.path.join(charts, n2), os.path.join(zc, n2))
+                    kopiert.append("charts/" + n2)
+        with open(os.path.join(ziel, "lauf.json"), "w", encoding="utf-8") as f:
+            json.dump({"marke": os.path.basename(ziel), "ts": _now(),
+                       "action": action, "werkzeug": _werkzeugstand(),
+                       "dateien": kopiert}, f, ensure_ascii=False, indent=1)
+        return {"ok": True, "marke": os.path.basename(ziel),
+                "ordner": ziel, "dateien": len(kopiert)}
+    except OSError as e:
+        return {"ok": False, "grund": f"{type(e).__name__}: {e}"}
+
+
+def laeufe_liste(project_dir: str) -> list[dict]:
+    """Die archivierten Staende, neueste zuerst — ohne die Ergebnisse zu laden."""
+    wurzel = os.path.join(project_dir, LAUF_ORDNER)
+    if not os.path.isdir(wurzel):
+        return []
+    aus = []
+    for name in os.listdir(wurzel):
+        p = os.path.join(wurzel, name, "lauf.json")
+        if not os.path.isfile(p):
+            continue
+        try:
+            with open(p, encoding="utf-8") as f:
+                e = json.load(f)
+        except (OSError, ValueError):
+            continue
+        e["ordner"] = os.path.join(wurzel, name)
+        e["n_dateien"] = len(e.get("dateien") or [])
+        e.pop("dateien", None)
+        aus.append(e)
+    # Nach (Zeit, Nummer) und NICHT als Zeichenkette: `…038-2` sortiert sonst
+    # unter `…038`, weil der Bindestrich unter dem Punkt liegt -- derselbe
+    # Fehler wie in `ema_getriebe.rechnungen` und `ema_bericht`.
+    return sorted(aus, key=lambda e: _marke_key(e.get("marke", "")), reverse=True)
+
+
+def _marke_key(marke: str):
+    """(Zeitstempel, laufende Nummer) — die einzig richtige Sortierung."""
+    basis, _, rest = str(marke).partition("-")
+    try:
+        n = int(rest) if rest else 1
+    except ValueError:
+        n = 1
+    return (basis, n)
+
+
+# ── Der Verlauf als Text ──────────────────────────────────────────────────────
+
+def verlauf_markdown(project_dir: str, max_stufen: int = 40) -> str:
+    """Die EINE Zeitleiste fuer Menschen (und fuer den Bericht).
+
+    Kein zweites Journal: gelesen wird ``project.json``s ``evolution``, dieselbe
+    additive Liste, in die Laeufe, Bewertungen, Berichte, Auftragsergaenzungen
+    und Entsorgungen schreiben.
+    """
+    m = _read(project_dir) or {}
+    ev = m.get("evolution") or []
+    if not ev:
+        return ""
+    z = ["| Zeit | Was | Anmerkung |", "|---|---|---|"]
+    for e in ev[-max_stufen:]:
+        ts = str(e.get("ts", ""))[:16].replace("T", " ")
+        was = str(e.get("action", "") or "—")
+        note = str(e.get("note", "") or "").replace("|", "\\|")[:160]
+        ref = e.get("ref")
+        if ref:
+            note = (note + f" (→ {ref})").strip()
+        ch = e.get("changed_inputs") or {}
+        if ch and not note:
+            note = ", ".join(list(ch)[:6]) + ("…" if len(ch) > 6 else "")
+        z.append(f"| {ts} | {was} | {note} |")
+    if len(ev) > max_stufen:
+        z.append(f"| … | | {len(ev) - max_stufen} aeltere Stufen nicht gezeigt |")
+    return "\n".join(z)
+
 
 def add_link(project_dir: str, other_id: str, *, label: str = "",
              relation: str = "vergleich", note: str = "") -> bool:

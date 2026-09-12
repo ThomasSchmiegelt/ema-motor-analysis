@@ -570,13 +570,24 @@ def csv_pfad(wurzel, kennung):
     return p if os.path.exists(p) else None
 
 
-def loeschen(wurzel, kennung):
-    import shutil
+def loeschen(wurzel, kennung, *, bestaetigt=True):
+    """Eine abgelegte Studie entsorgen — ueber den Papierkorb.
+
+    Eine Studie sind 15 bis 100 gerechnete Punkte samt Feldbildern und Video;
+    ``rmtree(ignore_errors=True)`` warf das weg und meldete nicht einmal, ob es
+    geklappt hat. Der Ordner traegt weiterhin die Pruefung auf ``studie.json``,
+    damit ueber die Kennung nichts anderes erwischt wird.
+    """
     p = os.path.join(wurzel, kennung)
-    if os.path.isdir(p) and os.path.exists(os.path.join(p, "studie.json")):
-        shutil.rmtree(p, ignore_errors=True)
-        return True
-    return False
+    if not (os.path.isdir(p) and os.path.exists(os.path.join(p, "studie.json"))):
+        return False
+    import ema_ablage
+    # Die Studien eines Projekts liegen unter ``<projekt>/parameterstudien/``;
+    # ohne gebundenes Projekt unter ``~/cae_projekte/_paramstudy/``. Dann ist
+    # die Studienwurzel selbst die Sicherheitsgrenze.
+    r = ema_ablage.entsorgen(p, "Parameterstudie verworfen",
+                             bestaetigt=bestaetigt, wurzel=wurzel)
+    return bool(r.get("ok"))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

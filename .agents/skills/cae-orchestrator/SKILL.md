@@ -37,6 +37,22 @@ Python-Modul `gmsh`, und das liegt nur in der venv — mit
 An der Geometrie ist dann nichts geprüft worden; sie zu ändern hilft nicht.
 Alle übrigen Verben laufen unter `python3`.
 
+**Bevor du an einer Auslegung etwas entscheidest: lies den Auftrag.**
+
+```bash
+python3 cae_cli.py auftrag --projekt <id>
+```
+
+`AUFTRAG.md` steht im Projektordner und trägt die **Absicht** — Ziel,
+Randbedingungen, frühere Entscheidungen samt Begründung, offene Punkte. Der
+Steckbrief sagt, was gerechnet *ist*; der Auftrag sagt, wozu. Was du selbst
+entscheidest, gehört hinein:
+
+```bash
+python3 cae_cli.py auftrag --projekt <id> --ergaenzen entscheidungen \
+    --text "Ferrit statt NdFeB — Kt reicht bei 90 mm Paket, Preis bindet." --quelle pi
+```
+
 ## Verben
 
 | Verb | Zweck |
@@ -50,6 +66,8 @@ Alle übrigen Verben laufen unter `python3`.
 | `wait` | auf Abschluss warten |
 | `routes [--grep x]` | alle Serverrouten auflisten |
 | `steckbrief [id]` | **Was dieses Projekt IST und was daran gerechnet wurde** — Maschinenart, Pole/Nuten, Bauraum, Werkstoffe, Betriebspunkt, welche Stufen gelaufen sind, die Kennwerte **samt Herkunft**, und was offen ist. Rechnet nichts; was fehlt, steht als fehlend da. `--laeufe` listet zusätzlich die früheren Agentenläufe und die abgelegten Rechnungen |
+| `auftrag` | **Die ABSICHT dieses Projekts — Ziel, Randbedingungen, Entscheidungen samt Begründung, offene Punkte.** Steht als `AUFTRAG.md` im Projektordner, entsteht bei der Projektanlage und wird **ergänzt, nie überschrieben**. Ohne Argumente zeigt es ihn; `--ergaenzen entscheidungen --text "…"` hängt einen datierten Eintrag an. **Lies ihn, bevor du etwas entscheidest, und schreib hinein, was du entschieden hast und warum** — sonst fängt der nächste Lauf die Begründungen von vorn an und geht einen schon verworfenen Weg ein zweites Mal. Es gibt bewusst kein Ersetzen: eine überholte Entscheidung wird als überholt vermerkt, nicht getilgt |
+| `papierkorb` | **Was entsorgt wurde — auflisten, zurückholen, endgültig leeren.** In diesem Werkzeug wird nirgends mehr sofort gelöscht: alles geht über `ema_ablage` nach `<projekt>/.papierkorb/`. `papierkorb zurueck --marke <M>` holt es zurück; `leeren --ja` ist die einzige Stelle, nach der etwas wirklich weg ist |
 | `getriebe` | **Die Übersetzung wird gerechnet, nicht gesetzt.** Stufenteilung, Zähnezahlen, Modul, Tragfähigkeit, lastabhängiger Wirkungsgrad, Masse und die auf die Motorwelle bezogene Trägheit — für Stirnrad, Planetensatz, Kegelrad und Schnecke. `--einbau in_welle` legt den Planetensatz in die Hohlwelle und prüft die Bohrung **magnetisch** mit (ein Feldlauf). **`--uebernehmen` ist der Schritt, der es wirksam macht**: erst dann rechnet der Fahrzyklus mit dieser Übersetzung und mit η(T, n) statt mit `gear_ratio` 9,5 und `eta_drive` 0,95. Exit 0 = trägt und passt |
 | `welle` | **Vollwelle oder Hohlwelle — gemessen.** Rechnet EIN Feld und sagt, ob durch die Welle Fluss läuft und wie groß die Bohrung höchstens sein darf. Exit 0 = Hohlwelle möglich, 1 = Vollwelle nötig |
 | `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
@@ -938,6 +956,24 @@ deine Arbeitsweise:
 
 `--ohne-ablage` schaltet das ab — nur für ein Ausprobieren, das nirgends
 hingehört.
+
+**Ergänzen, nicht überschreiben — und löschen nur nach Absprache.**
+Das ist keine Empfehlung, sondern wie die Ablage gebaut ist:
+
+* **Jeder gerechnete Stand bleibt vollständig erhalten.** `knoten/<marke>.json`
+  hält den Payload (die Frage), `laeufe/<marke>/` hält `results.json`,
+  `meta.json` und alle Diagramme (die Antwort) — unter **derselben** Marke, und
+  jeweils mit dem Werkzeugstand, mit dem gerechnet wurde. Ein zweiter Lauf
+  überschreibt den ersten nicht mehr. `steckbrief <id> --laeufe` und
+  `GET /project/<id>/laeufe` zeigen sie.
+* **`AUFTRAG.md` wird ergänzt, nie ersetzt** (`auftrag --ergaenzen …`). Halte
+  dort fest, was du entschieden hast und **warum**, und was offen blieb.
+* **Du löschst nichts.** Es gibt in diesem Werkzeug keinen Aufruf mehr, der
+  etwas sofort vernichtet: alles geht über `ema_ablage` in den Papierkorb des
+  Projekts, und ohne ausdrückliche Bestätigung passiert dort **gar nichts** —
+  der Aufruf gibt dann zurück, was geschehen *würde*. Wenn dir etwas im Weg
+  ist, **frag den Menschen**, statt es wegzuräumen; das Zurückholen geht über
+  `papierkorb zurueck --marke <M>`.
 
 
 ### `feldbild` — das Feld zeigen, ohne einen Lauf zu starten

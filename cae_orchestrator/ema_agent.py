@@ -1021,6 +1021,24 @@ class Kopf:
             # „Projekt" aussah, stand in ``CLAUDE.md``. Jetzt steht die Maschine
             # selbst hier -- Art, Pole, Nuten, Bauraum, Werkstoffe, Betriebspunkt
             # -- und dazu, was daran schon gerechnet ist und was nicht.
+            # Die ABSICHT vor den FAKTEN. Der Steckbrief sagt, was gerechnet
+            # ist; ``AUFTRAG.md`` sagt, wozu — Ziel, Randbedingungen, warum
+            # eine Entscheidung so und nicht anders fiel, was offen ist. Ohne
+            # das faengt jeder Lauf die Begruendungen von vorn an, und ein
+            # verworfener Weg wird zum zweiten Mal gegangen.
+            try:
+                sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+                import ema_auftrag
+                auftrag = ema_auftrag.als_markdown(ordner)
+            except Exception:                              # noqa: BLE001
+                auftrag = ""
+            if auftrag:
+                kopf += [auftrag, "",
+                         "Dieser Auftrag wird **ergaenzt, nicht ueberschrieben**:",
+                         "`python3 cae_orchestrator/cae_cli.py auftrag "
+                         f"--projekt {self.projekt} --ergaenzen entscheidungen "
+                         "--text \"…\"`. Halte dort fest, was du entschieden hast",
+                         "und warum — und was offen blieb.", ""]
             kopf.append("## Steckbrief dieses Projekts")
             kopf.append("")
             try:

@@ -22,6 +22,13 @@ gebunden ist**. Sie trägt die Fakten des Laufs, der gerade beginnt: Kennung,
 Verzeichnis, welche Kennwerte schon da sind und **welche Stufen noch nicht gerechnet
 sind**. Lies sie zuerst.
 
+Darin steht auch der **Auftrag** des Projekts (`AUFTRAG.md`) — Ziel,
+Randbedingungen, frühere Entscheidungen samt Begründung, offene Punkte. Die
+`AGENTS.projekt.md` sagt, was gerechnet *ist*; der Auftrag sagt, wozu. Was du
+selbst entscheidest, gehört hinein (`cae_cli.py auftrag --ergaenzen …`) — sonst
+fängt der nächste Lauf die Begründungen von vorn an und geht einen schon
+verworfenen Weg ein zweites Mal.
+
 Steht dort „keines gebunden", dann gibt es **kein** aktuelles Projekt, und nichts aus
 früheren Läufen ist eine Vorgabe. Das ist kein Randfall, sondern der Normalfall einer
 neuen Aufgabe. (Vorher schrieb nur der Terminalkopf diese Datei, und nur bei
@@ -188,6 +195,13 @@ verdrängt und diese Datei am Anfang jeder Sitzung neu gelesen wird.
   sind hier einmal 17 GB Datensatz beinahe in die Historie gerutscht.
 * Laufzeitdaten (`~/cae_projekte`, `datasets/`, `checkpoints/`) werden **nie**
   versioniert.
+* **Ergänzen, nicht überschreiben — und löschen nur nach Absprache.** Jeder
+  gerechnete Stand bleibt vollständig: `knoten/<marke>.json` hält den Payload,
+  `laeufe/<marke>/` die Ergebnisse samt Diagrammen, `AUFTRAG.md` die Absicht (die
+  wird angehängt, nie ersetzt). Gelöscht wird nirgends mehr sofort: alles geht
+  über `ema_ablage` in `<projekt>/.papierkorb/`, und **ohne ausdrückliche
+  Bestätigung passiert dort gar nichts** — der Aufruf gibt zurück, was geschehen
+  *würde*. Wenn dir etwas im Weg ist, **frag**, statt es wegzuräumen.
 
 ## Rechenzeiten realistisch einschätzen
 

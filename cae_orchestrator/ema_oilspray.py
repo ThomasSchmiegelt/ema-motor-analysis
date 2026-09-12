@@ -1663,14 +1663,25 @@ def run_oilspray(payload, project_dir, progress_cb=None, cancel_cb=None):
     os.makedirs(work, exist_ok=True)
     os.makedirs(frames_dir, exist_ok=True)
     # alte Frames aufräumen, damit ffmpeg keine Reste einer früheren Länge mischt
+    _weg = 0
     for fn in os.listdir(frames_dir):
         if fn.startswith("frame_") or fn == "anim.mp4":
-            try: os.remove(os.path.join(frames_dir, fn))
+            try:
+                os.remove(os.path.join(frames_dir, fn))
+                _weg += 1
             except OSError: pass
     # alten Mantaflow-Cache verwerfen — sonst kann ein neuer Lauf mit geänderten Einstellungen
     # (z. B. Zeitlupe) stale Bake-Daten des vorigen Laufs wiederverwenden
     import shutil
     shutil.rmtree(os.path.join(project_dir, "blendcache_oil"), ignore_errors=True)
+    # Frames und Bake-Cache sind ZWISCHENstaende: sie entstehen bei jedem Lauf
+    # neu und gehoeren nicht in den Papierkorb (der Platz liefe davon). Still
+    # bleiben sie trotzdem nicht — eine Zeile in die Zeitleiste.
+    try:
+        import ema_ablage
+        ema_ablage.geraeumt(project_dir, "Oel-Frames und Mantaflow-Cache", _weg)
+    except Exception:                                        # noqa: BLE001
+        pass
 
     # Debug-Log (Nutzerwunsch): alle aufgelösten Einstellungen + Verlauf, damit ein auffälliger
     # oder fehlgeschlagener Lauf 1:1 zurückgemeldet werden kann statt nur der Fehlermeldung.
@@ -2166,13 +2177,20 @@ def saved_run_video(project_dir, rid):
     return p if os.path.exists(p) else None
 
 
-def delete_saved_run(project_dir, rid):
-    import shutil as _sh
+def delete_saved_run(project_dir, rid, *, bestaetigt=True):
+    """Einen gespeicherten Lauf entsorgen — ueber den Papierkorb.
+
+    Ein gespeicherter Lauf ist Stunden bis Tage Rechenzeit samt Video und
+    Feld; ``rmtree(ignore_errors=True)`` warf ihn weg und meldete nicht
+    einmal, ob es geklappt hat.
+    """
     d = os.path.join(_runs_root(project_dir), rid)
-    if os.path.isdir(d):
-        _sh.rmtree(d, ignore_errors=True)
-        return True
-    return False
+    if not os.path.isdir(d):
+        return False
+    import ema_ablage
+    r = ema_ablage.entsorgen(d, "gespeicherter Lauf verworfen",
+                             bestaetigt=bestaetigt, project_dir=project_dir)
+    return bool(r.get("ok"))
 
 
 # ── Benannte 💧-Darstellungs-Presets (gut befundene Rechen-/Anzeige-Einstellungen) ──────────

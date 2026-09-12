@@ -316,8 +316,30 @@
     <!-- Aktives Projekt (erst sichtbar, wenn ein Projekt aktiv ist) -->
     <div id="pj-active-wrap" style="display:none;margin-top:20px">
 
+      <!-- Gruppe 0: die ABSICHT -- vor allen Fakten -->
+      <div class="pj-group-h">🎯 Auftrag — worum es hier geht</div>
+      <div style="font-size:.76rem;color:#889;margin:2px 0 10px;line-height:1.5">
+        <code>AUFTRAG.md</code> im Projektordner: Ziel, Randbedingungen, Entscheidungen <b>samt Begründung</b>,
+        offene Punkte. Wird <b>ergänzt, nie überschrieben</b> — auch von den Agentenköpfen, die ihn beim Start lesen.
+        Die Projektakte sagt, was gerechnet <i>ist</i>; der Auftrag sagt, wozu.
+      </div>
+      <div style="background:#22262e;border:1px solid #3a4250;border-radius:8px;padding:14px 16px">
+        <div id="pj_auftrag" style="font-size:.8rem;color:#bcd;line-height:1.55;max-height:320px;overflow:auto"></div>
+        <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
+          <select id="pj_auftrag_abschnitt"
+                  style="background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px;border-radius:4px;font-size:.78rem"></select>
+          <input id="pj_auftrag_text" placeholder="Was festgehalten werden soll — und warum"
+                 style="flex:1;min-width:220px;background:#0f0f1a;border:1px solid #444;color:#eee;padding:6px 8px;border-radius:4px;font-size:.78rem"/>
+          <button onclick="pjAuftragErgaenzen()" style="background:#2c5d8a;padding:6px 12px;font-size:.78rem">➕ Ergänzen</button>
+          <span id="pj_auftrag_msg" style="font-size:.74rem;color:#888"></span>
+        </div>
+        <div style="font-size:.72rem;color:#778;margin-top:8px">
+          Es gibt bewusst kein Ersetzen: eine überholte Entscheidung wird als überholt vermerkt, nicht getilgt.
+        </div>
+      </div>
+
       <!-- Gruppe 1: Projektdaten pflegen -->
-      <div class="pj-group-h">📋 Projektdaten &amp; Notizen</div>
+      <div class="pj-group-h" style="margin-top:22px">📋 Projektdaten &amp; Notizen</div>
       <div style="font-size:.76rem;color:#889;margin:2px 0 10px;line-height:1.5">
         Organisatorische Angaben und Quellen, die das aktive Projekt beschreiben und in Chat &amp; Bericht einfließen.
       </div>
@@ -364,6 +386,19 @@
               <input type="file" onchange="pjUploadAttachment(this)" style="display:none"/></label>
             <span id="pj_docs_msg" style="font-size:.74rem;color:#888;align-self:center"></span>
           </div>
+        </div>
+
+        <!-- Papierkorb -->
+        <div style="background:#22262e;border:1px solid #3a4250;border-radius:8px;padding:14px 16px">
+          <div class="section-h">🗑 Papierkorb</div>
+          <div style="font-size:.74rem;color:#889;margin-bottom:10px;line-height:1.5">
+            Gelöscht wird hier nichts sofort: Berichte, Ansichten, Studien und gespeicherte Läufe
+            wandern nach <code>.papierkorb/</code> und lassen sich zurückholen. Endgültig geleert
+            wird nur auf der Kommandozeile (<code>papierkorb leeren --ja</code>) — das ist die
+            einzige Stelle, nach der etwas wirklich weg ist.
+          </div>
+          <div id="pj_korb" style="font-size:.78rem;color:#bcd"></div>
+          <div id="pj_korb_msg" style="font-size:.74rem;color:#888;margin-top:8px"></div>
         </div>
 
       </div>
@@ -5373,6 +5408,8 @@ function pjSetActive(pid, name) {
     .catch(() => {});
   pjRenderOrg(pid);
   pjRenderDocs(pid);
+  pjRenderAuftrag(pid);
+  pjRenderKorb(pid);
   pjRefreshList();
   // projektgebundene Panels (auf Tab 1) auffrischen
   if (typeof _e3RefreshSavedList === 'function') _e3RefreshSavedList();
@@ -5381,6 +5418,101 @@ function pjSetActive(pid, name) {
   // einem Wechsel haette die alte am neuen keine Bedeutung und meldete sofort
   // eine „Aenderung", die keine ist.
   if (typeof brueckeNeuesProjekt === 'function') brueckeNeuesProjekt();
+}
+
+// ── AUFTRAG.md: die Absicht des Projekts, fortschreibbar ────────────────────
+// Gerendert wird der Text des SERVERS (ema_auftrag), nicht eine zweite Fassung
+// hier — sonst zeigt die Maske etwas anderes als die Datei, die der Agent liest.
+async function pjRenderAuftrag(pid) {
+  const box = document.getElementById('pj_auftrag');
+  const sel = document.getElementById('pj_auftrag_abschnitt');
+  if (!box) return;
+  box.innerHTML = '<span style="color:#778">…</span>';
+  try {
+    const j = await (await fetch('/project/' + encodeURIComponent(pid) + '/auftrag')).json();
+    if (sel && !sel.options.length) {
+      sel.innerHTML = (j.moeglich || []).map(a =>
+        '<option value="' + escHtml(a.schluessel) + '">' + escHtml(a.titel) + '</option>').join('');
+    }
+    // Eine LISTE in Dateireihenfolge (das Dict hätte Flask alphabetisch sortiert).
+    const ab = j.abschnitte || [];
+    if (!ab.length || ab.every(a => a.leer)) {
+      box.innerHTML = '<span style="color:#889">Noch nichts festgehalten. Halte hier fest, '
+                    + '<b>wozu</b> dieses Projekt da ist und warum du entschieden hast, wie du '
+                    + 'entschieden hast — die Agentenköpfe lesen es beim Start.</span>';
+      return;
+    }
+    box.innerHTML = ab.map(a => {
+      // Ein Platzhalter der Vorlage ist KEIN Inhalt — sonst liest man
+      // „_noch keine_" als Aussage. Der Abschnitt bleibt sichtbar (dass er
+      // offen ist, ist selbst eine Auskunft), aber gedämpft.
+      const rumpf = a.leer
+        ? '<span style="color:#667;font-style:italic">— offen —</span>'
+        : escHtml(a.text)
+            .replace(/^- \*\*(.+?)\*\*/gm, '<b style="color:#8ab">$1</b>')
+            .replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+      return '<div style="margin-bottom:10px"><div style="color:#9cf;font-weight:600">'
+           + escHtml(a.titel) + '</div><div style="white-space:pre-wrap">'
+           + rumpf + '</div></div>';
+    }).join('');
+  } catch (e) { box.innerHTML = '<span style="color:#c88">nicht lesbar: ' + escHtml(e.message) + '</span>'; }
+}
+
+async function pjAuftragErgaenzen() {
+  const pid = _activeProject && _activeProject.id;
+  const msg = document.getElementById('pj_auftrag_msg');
+  const inp = document.getElementById('pj_auftrag_text');
+  const sel = document.getElementById('pj_auftrag_abschnitt');
+  if (!pid || !inp || !sel) return;
+  const text = (inp.value || '').trim();
+  if (!text) { if (msg) msg.textContent = 'Kein Text.'; return; }
+  if (msg) msg.textContent = '…';
+  try {
+    const r = await fetch('/project/' + encodeURIComponent(pid) + '/auftrag', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ abschnitt: sel.value, text: text, quelle: 'Mensch' })
+    });
+    const j = await r.json();
+    if (!r.ok) { if (msg) msg.textContent = '❌ ' + (j.error || r.status); return; }
+    inp.value = '';
+    if (msg) msg.textContent = '✓ ergänzt unter „' + j.abschnitt + '"';
+    pjRenderAuftrag(pid);
+    pjRenderOrg(pid);          // die Ergänzung steht auch in der Zeitleiste
+  } catch (e) { if (msg) msg.textContent = '❌ ' + e.message; }
+}
+
+// ── Papierkorb: hier landet alles, was entsorgt wird ────────────────────────
+// Ohne diese Ansicht wäre der Korb aufgehoben und unerreichbar — und das ist
+// von weg nicht zu unterscheiden.
+async function pjRenderKorb(pid) {
+  const box = document.getElementById('pj_korb');
+  if (!box) return;
+  try {
+    const j = await (await fetch('/project/' + encodeURIComponent(pid) + '/papierkorb')).json();
+    const e = (j.eintraege || []).filter(x => x.da);
+    if (!e.length) { box.innerHTML = '<span style="color:#889">leer</span>'; return; }
+    box.innerHTML = e.map(x =>
+      '<div style="display:flex;gap:8px;align-items:center;padding:3px 0;border-bottom:1px solid #2c313a">'
+      + '<span style="flex:1">' + escHtml(x.herkunft || x.name)
+      + (x.grund ? ' <span style="color:#889">— ' + escHtml(x.grund) + '</span>' : '') + '</span>'
+      + '<span style="color:#889;font-size:.72rem">' + escHtml(x.groesse) + '</span>'
+      + '<button onclick="pjKorbZurueck(\'' + escHtml(x.marke) + '\')" '
+      + 'style="background:#3a5d3a;padding:3px 9px;font-size:.72rem">↩ zurück</button></div>').join('');
+  } catch (e) { box.innerHTML = '<span style="color:#c88">' + escHtml(e.message) + '</span>'; }
+}
+
+async function pjKorbZurueck(marke) {
+  const pid = _activeProject && _activeProject.id;
+  if (!pid) return;
+  const r = await fetch('/project/' + encodeURIComponent(pid) + '/papierkorb', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ was: 'zurueck', marke: marke })
+  });
+  const j = await r.json();
+  const msg = document.getElementById('pj_korb_msg');
+  if (msg) msg.textContent = r.ok ? ('✓ zurückgeholt' + (j.hinweis ? ' — ' + j.hinweis : ''))
+                                  : ('❌ ' + (j.error || r.status));
+  pjRenderKorb(pid);
 }
 
 // Bericht-Karte (Tab ① Projekt): nur aktiv, wenn das aktive Projekt Ergebnisse hat.
@@ -5503,9 +5635,27 @@ async function pjUploadAttachment(input) {
   finally { input.value = ''; }
 }
 
+// EIN Aufrufer fuer beide Loeschknoepfe (Projektliste und Galerie). Zwei
+// Abschriften waeren die Stelle, an der die eine die Bestaetigung mitschickt
+// und die andere nicht. Die Route entsorgt in den Papierkorb des Bestandes und
+// weist ohne { bestaetigt: true } mit 409 ab -- die Rueckfrage sitzt im Server,
+// nicht hier; dieser confirm ist die Hoeflichkeit davor, nicht die Sicherung.
+async function _projektEntsorgen(pid, name) {
+  const frage = 'Projekt „' + (name || pid) + '" in den Papierkorb legen?\n\n'
+              + 'Es wird nach _papierkorb/ verschoben und ist von dort '
+              + 'wiederherstellbar — nicht sofort vernichtet.';
+  if (!confirm(frage)) return null;
+  const r = await fetch('/project/' + encodeURIComponent(pid) + '/delete', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bestaetigt: true, grund: 'ueber die Oberflaeche' })
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) { alert('Nicht entsorgt: ' + (j.error || r.status)); return null; }
+  return j;
+}
+
 async function pjDelete(pid, name) {
-  if (!confirm('Projekt „' + (name || pid) + '" wirklich löschen?')) return;
-  await fetch('/project/' + encodeURIComponent(pid) + '/delete', { method: 'POST' });
+  if (!await _projektEntsorgen(pid, name)) return;
   if (_activeProject && _activeProject.id === pid) {
     window._activeProject = null;
     const badge = document.getElementById('pj-active-badge');
@@ -10671,9 +10821,8 @@ async function sendChat() {
 
 function galleryOpen(pid) { closeProjectGallery(); loadProjectById(pid); }
 async function galleryDelete(pid) {
-  if (!confirm('Projekt „' + pid + '" wirklich unwiderruflich löschen?')) return;
   try {
-    await fetch('/project/' + encodeURIComponent(pid) + '/delete', { method: 'POST' });
+    if (!await _projektEntsorgen(pid, pid)) return;
     _galleryProjects = _galleryProjects.filter(p => p.id !== pid);
     renderGallery(); refreshProjectList();
   } catch (e) { alert('Löschen fehlgeschlagen: ' + e.message); }

@@ -224,12 +224,16 @@ import ema_drivecycle
 # ── Project directory ─────────────────────────────────────────────────────────
 
 def create_project_dir(root: str, name: str = "", *,
-                       origin: str = "analyse", parent=None) -> tuple[str, str]:
+                       origin: str = "analyse", parent=None,
+                       brief: str = "", tags=None) -> tuple[str, str]:
     """Create a fresh ~/cae_projekte/<timestamp>[_<name>]/ directory.
     Returns (full_path, project_id).
 
     Also lays down the Projektakte stub (``project.json``) *first*, so the manifest
-    exists before any computation (``origin``/``parent`` record provenance/lineage)."""
+    exists before any computation (``origin``/``parent`` record provenance/lineage) —
+    and ``AUFTRAG.md``, das fortschreibbare Dokument der ABSICHT (s. ema_auftrag).
+    Beides hier und nur hier, damit `/project/new`, `clone`, `import`, die
+    CAD-Vorschau und der Pipelinelauf dieselbe Ablage bekommen."""
     ts   = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     safe = re.sub(r'[^\w\-]+', '_', (name or "").strip())[:48].strip("_")
     pid  = f"{ts}_{safe}" if safe else ts
@@ -242,7 +246,25 @@ def create_project_dir(root: str, name: str = "", *,
         ema_projekt.init(full, pid, origin=origin, parent=parent, label=name or pid)
     except Exception:
         pass
+    try:
+        import ema_auftrag
+        ema_auftrag.anlegen(full, titel=name or pid, brief=brief, tags=tags)
+    except Exception:
+        pass
     return full, pid
+
+
+def _json_atomar(pfad: str, daten) -> None:
+    """JSON atomar schreiben — erst vollstaendig daneben, dann umbenennen.
+
+    ``os.replace`` ist innerhalb eines Dateisystems atomar: entweder steht die
+    alte Datei da oder die neue, nie eine halbe. Dasselbe Muster wie
+    ``ema_projekt._write``; hier fehlte es an den beiden groessten Dateien.
+    """
+    tmp = pfad + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(daten, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, pfad)
 
 
 def _save_png_b64(b64: str, path: str) -> None:
@@ -259,6 +281,29 @@ def _save_png_b64(b64: str, path: str) -> None:
 # Field-visualisation modes → (frames bucket key, on-disk subdir). Must stay in
 # sync with server.py FIELD_SUBDIRS and the ema.html mode selector.
 FIELD_SUBDIRS = {"rotate": "frames", "react": "frames_react", "load": "frames_load"}
+
+
+def _frames_raeumen(frames_dir: str) -> int:
+    """Einen Frame-Ordner leeren, BEVOR neu hineingerendert wird.
+
+    Der einzige Frame-Ordner hier, der das nicht tat -- ``ema_oilspray``,
+    ``ema_paramstudy``, ``ema_em3d`` und ``ema_fluidx3d`` raeumen alle vor ihrem
+    Lauf. Die Folge war stumm und falsch: ein Lauf mit weniger Frames als der
+    vorige erbte dessen Reste (``frame_0031.png`` …), und ``_make_video`` nimmt
+    ``frame_%04d.png`` ohne Obergrenze -- das Video zeigte hinten die alte
+    Geometrie. Geraeumt wird NUR der Ordner der Modi, die auch wirklich neu
+    gerechnet werden (im Teil-Nachrechnen bleibt er deshalb unberuehrt).
+    """
+    os.makedirs(frames_dir, exist_ok=True)
+    n = 0
+    for fn in os.listdir(frames_dir):
+        if fn.startswith("frame_") and fn.endswith(".png") or fn == "anim.mp4":
+            try:
+                os.remove(os.path.join(frames_dir, fn))
+                n += 1
+            except OSError:
+                pass
+    return n
 
 
 def _make_video(frames_dir: str, fps: int = 15) -> str | None:
@@ -2298,7 +2343,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
 
         for mode in field_modes:
             if mode == "rotate":
-                sub = FIELD_SUBDIRS["rotate"]; os.makedirs(os.path.join(proj, sub), exist_ok=True)
+                sub = FIELD_SUBDIRS["rotate"]; _frames_raeumen(os.path.join(proj, sub))
                 frames["rotate"] = []
                 total = n_rpms * n_frames; solved = 0
                 rpm_list, rpm_stats = [], {}
@@ -2328,7 +2373,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
                                    "frames_per_rpm": n_frames, "rpm_list": rpm_list,
                                    "sweep_label": "Winkel [°]", "sweep_values": angle_deg})
             elif mode == "current_angle":
-                sub = FIELD_SUBDIRS["react"]; os.makedirs(os.path.join(proj, sub), exist_ok=True)
+                sub = FIELD_SUBDIRS["react"]; _frames_raeumen(os.path.join(proj, sub))
                 frames["react"] = []
                 betas = np.linspace(0, math.pi / 2, n_frames)
                 _log(state, f"🧲 Ankerrückwirkung (Stromwinkel β): {n_frames} Frames @ {rpm_ref:.0f} U/min...", 60)
@@ -2343,7 +2388,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
                                    "sweep_values": [round(math.degrees(b), 1) for b in betas]})
                 _log(state, f"✓ Ankerrückwirkung: {n_frames} Frames", 66)
             elif mode == "load_ramp":
-                sub = FIELD_SUBDIRS["load"]; os.makedirs(os.path.join(proj, sub), exist_ok=True)
+                sub = FIELD_SUBDIRS["load"]; _frames_raeumen(os.path.join(proj, sub))
                 frames["load"] = []
                 fracs = np.linspace(0, 1, n_frames)
                 _log(state, f"🧲 Last-Rampe 0→Volllast: {n_frames} Frames @ {rpm_ref:.0f} U/min...", 66)
@@ -3060,10 +3105,15 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 # form be repopulated exactly (minus the one-shot CSV upload).
                 "payload":    {k: v for k, v in data.items() if k != "cycle_csv"},
             }
-            with open(os.path.join(proj, "meta.json"), "w") as f:
-                json.dump(meta, f, indent=2, ensure_ascii=False)
-            with open(os.path.join(proj, "results.json"), "w") as f:
-                json.dump(results, f, indent=2, ensure_ascii=False)
+            # ATOMAR, wie ``project.json`` es seit jeher wird (tmp + os.replace).
+            # Vorher ein blankes open(...,"w"): ``results.json`` ist bei einem
+            # gerechneten Lauf gemessen bis 1,7 MB gross, und ein Abbruch
+            # mittendrin (Neustart, voller Datentraeger) liess eine
+            # ABGESCHNITTENE Datei liegen. Die ist schlimmer als gar keine --
+            # jeder Leser hier faengt `json.load` weich ab und meldet dann
+            # „nichts gerechnet" ueber einen Lauf, der gerechnet hat.
+            _json_atomar(os.path.join(proj, "meta.json"), meta)
+            _json_atomar(os.path.join(proj, "results.json"), results)
             _log(state, f"💾 Projekt gespeichert: {proj}", 99)
             # Rechnungsdatenbank nachfuehren. Weich: sie ist ein INDEX ueber
             # results.json und laesst sich jederzeit neu aufbauen ('cae_cli.py db

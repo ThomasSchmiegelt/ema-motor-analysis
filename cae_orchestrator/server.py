@@ -1501,9 +1501,18 @@ def em3d_saved_delete(rid):
     d = os.path.join(runs_root, rid)
     if not os.path.isdir(d):
         return jsonify({"error": "Lauf nicht gefunden"}), 404
-    import shutil
-    shutil.rmtree(d, ignore_errors=True)
-    return jsonify({"status": "deleted", "id": rid})
+    # Ueber den Papierkorb wie jede Loeschung -- ein gespeicherter 3-D-Lauf ist
+    # Netz, Loesung, Bilder und Video, also Stunden Rechenzeit.
+    import ema_ablage
+    # Das Projekt kommt aus dem Store-Pfad (``<projekt>/em3d_runs``) und NICHT
+    # aus ``_em3d_project_dir``: das legt ohne aktives Projekt eines an, und
+    # eine Loeschung darf kein Projekt erzeugen.
+    r = ema_ablage.entsorgen(d, "gespeicherter 3-D-Lauf verworfen",
+                             bestaetigt=True,
+                             project_dir=os.path.dirname(runs_root))
+    if not r.get("ok"):
+        return jsonify({"error": r.get("grund", "nicht entsorgt")}), 400
+    return jsonify({"status": "deleted", "id": rid, "papierkorb": r["korb"]})
 
 
 @app.route("/smoke_test", methods=["POST", "OPTIONS"])
@@ -3355,6 +3364,19 @@ def project_clone(pid: str):
     ema_projekt.update(new_dir, **patch)
     ema_projekt.append_evolution(new_dir, {"action": "clone", "ref": pid,
                                            "note": f"geklont aus {pid}"})
+    # Die ABSICHT erbt der Klon -- er entsteht ja, weil dieselbe Aufgabe
+    # weiterverfolgt wird. Die frische Vorlage aus `create_project_dir` wird
+    # dabei ersetzt (sie ist leer), und der Klon vermerkt, woher sie kommt.
+    try:
+        import shutil, ema_auftrag
+        q = ema_auftrag.pfad(src)
+        if os.path.isfile(q):
+            shutil.copy2(q, ema_auftrag.pfad(new_dir))
+            ema_auftrag.ergaenzen(new_dir, "verweise",
+                                  f"Aus {pid} geklont; der Auftrag ist uebernommen.",
+                                  "clone")
+    except Exception:
+        pass
     # Projekt-RAG mitnehmen (best effort)
     try:
         import shutil
@@ -3473,11 +3495,20 @@ def make_report(pid: str):
             _report_state["rag_md_path"] = r.get("rag_md")
             # "Immer nur der letzte Bericht": drop the other-mode PDF so exactly one
             # report stays in the project (and thus a single entry in the gallery).
+            # ... und zwar in den Papierkorb: es ist ein fertiger Bericht,
+            # und wer gerade den agentischen erzeugt hat, wollte damit nicht
+            # zwingend den Standardbericht vernichten.
             _keep = os.path.basename(r["pdf"])
             for _other in ("bericht.pdf", "bericht_agentisch.pdf"):
-                if _other != _keep:
-                    try: os.remove(os.path.join(proj, _other))
-                    except OSError: pass
+                _op = os.path.join(proj, _other)
+                if _other != _keep and os.path.exists(_op):
+                    try:
+                        import ema_ablage
+                        ema_ablage.entsorgen(
+                            _op, f"durch {_keep} ersetzt", bestaetigt=True,
+                            project_dir=proj)
+                    except Exception:                        # noqa: BLE001
+                        pass
             _report_state["status"]   = "done"
             _report_state["progress"] = 100
             # Projektakte: Bericht erzeugt → Asset + Status 'berichtet'. Soft.
@@ -3641,6 +3672,97 @@ def project_links_remove(pid: str):
                     "links": ema_projekt.resolved_links(proj, PROJECTS_ROOT)})
 
 
+@app.route("/project/<pid>/auftrag", methods=["GET", "POST"])
+def project_auftrag(pid: str):
+    """``AUFTRAG.md`` lesen (GET) oder ERGAENZEN (POST).
+
+    Es gibt hier bewusst kein Ersetzen: eine ueberholte Entscheidung wird als
+    ueberholt vermerkt, nicht getilgt (s. ``ema_auftrag``). Der Weg muss es
+    ueber eine Route geben, damit ihn Oberflaeche UND Agentenkopf haben — ein
+    Knopf, den nur die Maske hat, ist fuer den Agenten nicht vorhanden.
+    """
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_auftrag
+    if request.method == "GET":
+        # Als LISTE und nicht als Dict: Flask sortiert die Schluessel eines
+        # Dicts alphabetisch, und dann stand „Ziel" in der Maske ganz unten,
+        # obwohl es in der Datei oben steht. Die Reihenfolge ist hier die
+        # Lesereihenfolge — erst wohin, dann was im Weg steht, dann was
+        # entschieden wurde.
+        ab = ema_auftrag.abschnitte(proj)
+        abschnitte = [{"titel": t, "text": r,
+                       "leer": (not r.strip()) or r.strip().startswith("_noch ")}
+                      for t, r in ab.items()]
+        return jsonify({"projekt": pid, "text": ema_auftrag.lesen(proj),
+                        "abschnitte": abschnitte,
+                        "moeglich": [{"schluessel": k, "titel": t}
+                                     for k, t in ema_auftrag.ABSCHNITTE]})
+    body = request.get_json(silent=True) or {}
+    r = ema_auftrag.ergaenzen(proj, str(body.get("abschnitt", "")),
+                              str(body.get("text", "")),
+                              quelle=str(body.get("quelle", "")) or "Oberflaeche")
+    if not r.get("ok"):
+        return jsonify({"error": r.get("grund", "nicht ergaenzt")}), 400
+    return jsonify({"status": "ok", "abschnitt": r["abschnitt"],
+                    "text": ema_auftrag.lesen(proj)})
+
+
+@app.route("/project/<pid>/papierkorb", methods=["GET", "POST"])
+def project_papierkorb(pid: str):
+    """Was entsorgt wurde: auflisten (GET), zurueckholen oder leeren (POST).
+
+    Geloescht wird nirgends mehr sofort — das hier ist der Gegenweg. Ohne ihn
+    waere der Korb aufgehoben und unerreichbar, und das ist von weg nicht zu
+    unterscheiden. ``leeren`` braucht ein ausdrueckliches ``bestaetigt``.
+    """
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_ablage
+    if request.method == "GET":
+        return jsonify({"projekt": pid, "eintraege": ema_ablage.inhalt(proj)})
+    body = request.get_json(silent=True) or {}
+    was = str(body.get("was", "zurueck"))
+    marke = str(body.get("marke", ""))
+    if was == "zurueck":
+        r = ema_ablage.wiederherstellen(proj, marke)
+        if not r.get("ok"):
+            return jsonify({"error": r.get("grund", "nicht zurueckgeholt")}), 400
+        return jsonify({"status": "ok", "pfad": r["pfad"],
+                        "hinweis": r.get("hinweis", "")})
+    if was == "leeren":
+        r = ema_ablage.endgueltig(proj, marke,
+                                  bestaetigt=bool(body.get("bestaetigt")))
+        if r.get("bestaetigung_noetig"):
+            return jsonify({"error": r["text"], "bestaetigung_noetig": True,
+                            "eintraege": r["eintraege"]}), 409
+        return jsonify({"status": "ok", "geloescht": r["geloescht"]})
+    return jsonify({"error": f"unbekannt: {was} (zurueck | leeren)"}), 400
+
+
+@app.route("/project/<pid>/laeufe")
+def project_laeufe(pid: str):
+    """Die archivierten Staende dieses Projekts (s. ``ema_projekt.lauf_archivieren``).
+
+    Bis dahin trug ``knoten/`` allein den PAYLOAD eines Laufs — also die Frage;
+    Ergebnisse, Kennwerte und Diagramme wurden bei jedem Lauf ueberschrieben.
+    """
+    if not _safe_name(pid):
+        return jsonify({"error": "ungültiger Projektname"}), 403
+    proj = os.path.join(PROJECTS_ROOT, pid)
+    if not os.path.isdir(proj):
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    import ema_projekt
+    return jsonify({"projekt": pid, "laeufe": ema_projekt.laeufe_liste(proj),
+                    "verlauf": ema_projekt.verlauf_markdown(proj)})
+
+
 @app.route("/project/<pid>/meta", methods=["POST"])
 def project_meta_update(pid: str):
     """Status / Tags / Notizen der Projektakte setzen (Ergebnis-Tab-Panel)."""
@@ -3678,17 +3800,22 @@ def project_new():
     import ema_projekt
     body = request.get_json(silent=True) or {}
     name = str(body.get("name", "")).strip()
-    proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, name, origin="manual")
-    patch = {}
-    if isinstance(body.get("tags"), list):
-        patch["tags"] = [str(t)[:40] for t in body["tags"]][:20]
-    if "notes" in body:
-        patch["notes"] = str(body["notes"])
+    tags = ([str(t)[:40] for t in body["tags"]][:20]
+            if isinstance(body.get("tags"), list) else [])
     # Die Beschreibung geht in ``design.brief`` und damit in den Steckbrief --
     # also in das, was der Agent beim Start liest. Sie war vorher nur ``notes``
     # und stand dem Agenten nirgends zur Verfuegung; wer ihn anschliessend
     # beauftragte, musste dieselbe Aufgabe ein zweites Mal tippen.
     brief = str(body.get("brief") or body.get("beschreibung") or "").strip()
+    # ... und zugleich in ``AUFTRAG.md`` unter „Ziel" -- deshalb reist sie
+    # schon in die Verzeichnisanlage, statt die Vorlage hinterher zu flicken.
+    proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, name, origin="manual",
+                                           brief=brief, tags=tags)
+    patch = {}
+    if tags:
+        patch["tags"] = tags
+    if "notes" in body:
+        patch["notes"] = str(body["notes"])
     if brief:
         patch["design"] = {"brief": brief[:4000], "rationale": "",
                            "source": "mensch"}
@@ -3874,17 +4001,37 @@ def project_manifest(pid: str):
 
 @app.route("/project/<pid>/delete", methods=["POST"])
 def delete_project(pid: str):
+    """Ein Projekt entsorgen — in den Papierkorb, und NUR nach Bestaetigung.
+
+    Vorher ein nacktes ``shutil.rmtree(path)``: gefragt hat allein der Browser,
+    die Route fuehrte aus, was ihr gesagt wurde. Wer sie mit ``curl`` traf,
+    einen Agentenkopf danebenlaufen liess oder eine Kennung vertippte, war
+    Wochen an Rechenzeit los — ohne Rueckfrage und ohne Rueckweg. Jetzt liegt
+    beides in ``ema_ablage``, also an der Stelle, an der jeder Weg vorbeikommt.
+
+    Ohne ``{"bestaetigt": true}`` wird NICHTS angefasst; die Antwort (409) sagt,
+    was entsorgt wuerde und wie gross es ist.
+    """
     if not _safe_name(pid):
         return jsonify({"error": "ungültiger Projektname"}), 403
-    import shutil
+    import ema_ablage
     path = os.path.join(PROJECTS_ROOT, pid)
     if not os.path.isdir(path):
         return jsonify({"error": "Projekt nicht gefunden"}), 404
-    shutil.rmtree(path)
+    body = request.get_json(silent=True) or {}
+    r = ema_ablage.projekt_entsorgen(
+        path, PROJECTS_ROOT, str(body.get("grund", "")),
+        bestaetigt=bool(body.get("bestaetigt")))
+    if not r.get("ok"):
+        if r.get("bestaetigung_noetig"):
+            return jsonify({"error": r["text"], "bestaetigung_noetig": True,
+                            "was": r["was"]}), 409
+        return jsonify({"error": r.get("grund", "nicht entsorgt")}), 400
     if _state.get("project_id") == pid:
         _state["project_id"] = None
         _state["project_dir"] = None
-    return jsonify({"status": "deleted"})
+    return jsonify({"status": "deleted", "papierkorb": r["korb"],
+                    "marke": r["marke"], "was": r["was"]})
 
 
 # ── Field-animation video download ───────────────────────────────────────────

@@ -122,18 +122,31 @@ def pfad(project_dir, datei):
     return p if os.path.exists(p) else None
 
 
-def loeschen(project_dir, datei):
+def loeschen(project_dir, datei, *, bestaetigt=True):
+    """Eine festgehaltene Ansicht entsorgen — ueber den Papierkorb.
+
+    Sie ist die ENTSCHEIDUNG eines Menschen (jemand hat genau diese Blickrichtung,
+    Schnittebene und Farbskala eingestellt und festgehalten) und, anders als ein
+    Diagramm aus ``charts/``, durch keinen Lauf wiederherstellbar. Ein
+    ``os.remove`` war dafuer die falsche Endgueltigkeit.
+    """
     p = pfad(project_dir, datei)
     if not p:
         return False
-    try:
-        os.remove(p)
-    except OSError:
+    import ema_ablage
+    r = ema_ablage.entsorgen(p, "Ansicht verworfen", bestaetigt=bestaetigt,
+                             project_dir=project_dir)
+    if not r.get("ok"):
         return False
-    try:
-        os.remove(p[:-4] + ".json")
-    except OSError:
-        pass
+    # Die Einstellungen reisen mit — ein Bild ohne seine Skala ist kein Messwert,
+    # und das gilt im Papierkorb genauso wie im Bericht.
+    daten = p[:-4] + ".json"
+    if os.path.exists(daten):
+        try:
+            import shutil
+            shutil.move(daten, os.path.join(r["korb"], os.path.basename(daten)))
+        except OSError:
+            pass
     return True
 
 

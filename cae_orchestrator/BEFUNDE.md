@@ -17,6 +17,98 @@ kann.
 
 ---
 
+## 2026-09-12 — `results.json` und `meta.json` wurden nicht atomar geschrieben
+
+**Beobachtung.** `ema_projekt._write` schreibt die Projektakte seit jeher über
+`tmp` + `os.replace` — atomar, also entweder die alte Datei oder die neue, nie
+eine halbe. Die beiden **größten** Dateien desselben Projekts gingen dagegen
+durch ein blankes `open(..., "w")`.
+
+**Messung.** Ein gerechnetes `results.json` ist an der Beispielmaschine
+**1,7 MB** groß. Bricht der Schreibvorgang ab (Neustart, voller Datenträger),
+bleibt eine abgeschnittene Datei liegen — und die ist schlimmer als gar keine:
+jeder Leser hier fängt `json.load` weich ab und meldet anschließend „nichts
+gerechnet" über einen Lauf, der stundenlang gerechnet hat.
+
+**Fundstelle.** `ema_pipeline.py:3072-3075` (vorher), Muster in
+`ema_projekt.py:115`.
+
+**Status: BEHOBEN** (12.09.2026). Neuer Helfer `ema_pipeline._json_atomar`,
+beide Schreibvorgänge gehen hindurch.
+
+---
+
+## 2026-09-12 — `frames/` war der einzige Frame-Ordner, der nicht geräumt wurde
+
+**Beobachtung.** `ema_oilspray`, `ema_paramstudy`, `ema_em3d` und `ema_fluidx3d`
+leeren ihren Frame-Ordner, bevor sie hineinrendern. `run_pipeline` tat es als
+einziges nicht.
+
+**Messung.** `_make_video` nimmt `frame_%04d.png` **ohne Obergrenze**. Ein Lauf
+mit weniger Frames als der vorige erbt dessen Reste, und das Video zeigt hinten
+die Geometrie des alten Laufs — stumm, ohne Warnung, und in einem Video fällt
+das erst auf, wenn jemand bis zum Ende schaut.
+
+**Fundstelle.** `ema_pipeline.py:2323/2353/2368` (die drei
+`FIELD_SUBDIRS`-Zweige), Vorbild `ema_paramstudy.py:270`.
+
+**Status: BEHOBEN** (12.09.2026). Neuer Helfer `ema_pipeline._frames_raeumen`,
+gerufen je Modus — im Teil-Nachrechnen bleibt der Ordner der nicht gerechneten
+Modi damit unberührt.
+
+---
+
+## 2026-09-12 — Gelöscht wurde ohne Rückfrage, und nichts war rückholbar
+
+**Beobachtung.** `/project/<id>/delete` war ein nacktes `shutil.rmtree(path)`.
+Gefragt hat **allein der Browser**; die Route führte aus, was ihr gesagt wurde.
+Dasselbe Muster an rund einem Dutzend weiterer Stellen (Berichte, Ansichten,
+Studien, gespeicherte Öl-/em3d-/FluidX3D-Läufe), mehrere davon als
+`rmtree(ignore_errors=True)` — das meldet nicht einmal, ob es geklappt hat.
+
+**Messung.** Ein gerechnetes Projekt ist an der Beispielmaschine **5,7 MB** mit
+Diagrammen, mit 3-D-Feld und Öl-Video ein Vielfaches davon, und es steckt eine
+Pipeline-Laufzeit von 30 min bis 4 h darin. Wer die Route mit `curl` traf, einen
+Agentenkopf danebenlaufen ließ oder eine Kennung vertippte, war das ohne
+Rückfrage und ohne Rückweg los. Eine Zusicherung in einer Maske ist keine,
+sobald es einen zweiten Weg zur Funktion gibt — und hier gibt es immer einen
+zweiten Weg (CLI, Route, Agentenkopf).
+
+**Fundstelle.** `server.py:3901` (vorher), dazu `server.py:1505`/`:3492`,
+`ema_bericht.py:246`/`:619`, `ema_paramstudy.py:577`, `ema_ansichten.py:130`,
+`ema_oilspray.py:2169`, `ema_fluidx3d.py:950`.
+
+**Status: BEHOBEN** (12.09.2026). Neues Modul `ema_ablage` als die EINE
+Löschstelle: ohne `bestaetigt=True` passiert nichts (der Aufruf gibt dann
+zurück, was geschehen *würde*), sonst wandert es nach `<projekt>/.papierkorb/`
+und ist über `papierkorb zurueck --marke <M>` rückholbar. Zwischenstände
+(Frame-Ordner, Blender-Cache, Elmer-Netz) bleiben bewusst draußen — sie
+entstehen bei jedem Lauf neu und ließen den Platz davonlaufen —, bekommen aber
+eine Zeile in die Zeitleiste.
+
+---
+
+## 2026-09-12 — Die Marke im Papierkorb war nicht eindeutig (beim Bauen gefunden)
+
+**Beobachtung.** Beim Schreiben von `test_ablage.py` fiel auf, dass drei
+unmittelbar nacheinander entsorgte Dateien **zwei** verschiedene Marken hatten.
+
+**Messung.** Drei Entsorgungen in einer Schleife, gemessen:
+`…735_000 w1.json`, `…735_000 w2.json`, `…734_999 w0.json` — zwei Einträge
+teilen sich eine Millisekunde. Die Ordner kollidieren dabei nicht (verschiedene
+Dateinamen), aber die **Marke ist der Griff**, mit dem `wiederherstellen`
+zurückholt: bei zwei gleichen erwischt es immer denselben, und das zweite liegt
+unerreichbar im Korb. Das ist kein Sonderfall — schon das Kappen der
+Berichtsfassungen entsorgt mehrere in EINER Schleife.
+
+**Fundstelle.** `ema_ablage.py` (`_jetzt` als Marke, vor dem Fix).
+
+**Status: BEHOBEN** vor der ersten Benutzung. `_freie_marke` zählt hoch wie
+`ema_projekt.knoten_setzen`, und `inhalt()` sortiert über `_marke_key` nach
+(Zeit, Nummer) — als Zeichenkette sortierte `…000-2` sonst unter `…000`.
+
+---
+
 ## 2026-09-12 — Die Baulänge erreicht das analytische EM-Modell nicht (Kt hängt nicht an L)
 
 **Beobachtung.** In einer Testreihe von elf Parameterstudien à 15 Schritten blieb

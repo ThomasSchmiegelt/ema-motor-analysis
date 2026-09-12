@@ -947,10 +947,17 @@ def saved_run_video(project_dir, rid):
     return p if os.path.exists(p) else None
 
 
-def delete_saved_run(project_dir, rid):
-    import shutil as _sh
+def delete_saved_run(project_dir, rid, *, bestaetigt=True):
+    """Einen gespeicherten Lauf entsorgen — ueber den Papierkorb.
+
+    Ein gespeicherter Lauf ist Stunden bis Tage Rechenzeit samt Video und
+    Feld; ``rmtree(ignore_errors=True)`` warf ihn weg und meldete nicht
+    einmal, ob es geklappt hat.
+    """
     d = os.path.join(_runs_root(project_dir), rid)
-    if os.path.isdir(d):
-        _sh.rmtree(d, ignore_errors=True)
-        return True
-    return False
+    if not os.path.isdir(d):
+        return False
+    import ema_ablage
+    r = ema_ablage.entsorgen(d, "gespeicherter Lauf verworfen",
+                             bestaetigt=bestaetigt, project_dir=project_dir)
+    return bool(r.get("ok"))
