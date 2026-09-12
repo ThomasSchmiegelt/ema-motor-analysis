@@ -2182,6 +2182,269 @@ def param_study_reihe_report_download():
                      download_name="studienreihe.pdf")
 
 
+# ── 📷 Festgehaltene Ansichten aus den Browser-Betrachtern ───────────────────
+@app.route("/project/<pid>/ansicht", methods=["POST", "OPTIONS"])
+def project_ansicht_speichern(pid: str):
+    """Ein Bild aus dem 3-D-Betrachter ablegen. Body: ``{png, name,
+    beschriftung, einstellungen}`` — ``png`` ist die data-URL aus vtk.js'
+    ``captureNextImage()``. Was man im Betrachter einstellt (Blick, Schnitt,
+    Farbskala, Lastfall) ist oft genau die Ansicht, die in den Bericht gehoert,
+    und sie existierte bisher nur auf dem Schirm."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_ansichten
+    base = _fx3d_project_base(pid)
+    if not base:
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    d = request.get_json(force=True) or {}
+    r = ema_ansichten.sichern(base, d.get("png"), name=d.get("name", ""),
+                              beschriftung=d.get("beschriftung", ""),
+                              einstellungen=d.get("einstellungen"))
+    if not r.get("ok"):
+        return jsonify({"error": r.get("grund")}), 400
+    return jsonify(r)
+
+
+@app.route("/project/<pid>/ansichten")
+def project_ansichten(pid: str):
+    import ema_ansichten
+    base = _fx3d_project_base(pid)
+    return jsonify(ema_ansichten.liste(base) if base else [])
+
+
+@app.route("/project/<pid>/ansicht/<datei>")
+def project_ansicht_datei(pid: str, datei: str):
+    import ema_ansichten
+    base = _fx3d_project_base(pid)
+    p = ema_ansichten.pfad(base, datei) if base else None
+    if not p:
+        return jsonify({"error": "nicht gefunden"}), 404
+    return send_file(p, mimetype="image/png")
+
+
+@app.route("/project/<pid>/ansicht/<datei>/delete", methods=["POST", "OPTIONS"])
+def project_ansicht_loeschen(pid: str, datei: str):
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_ansichten
+    base = _fx3d_project_base(pid)
+    ok = ema_ansichten.loeschen(base, datei) if base else False
+    return jsonify({"status": "deleted" if ok else "missing"})
+
+
+# ── 🧲 Elmer-Auswertung (3-D-Lauf) ───────────────────────────────────────────
+_em3d_report_state = {"status": "idle", "progress": 0, "log": [],
+                      "pdf_path": None, "error": None}
+
+
+@app.route("/em3d/bericht", methods=["POST", "OPTIONS"])
+def em3d_bericht():
+    """Auswertung EINES 3-D-Elmer-Laufs als PDF, Schwerpunkt Loeser und Netz.
+    Nimmt das Ergebnis aus ``_em3d_state`` (frisch oder geladen) und die im
+    Betrachter festgehaltenen Ansichten mit."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_report, ema_ansichten
+    if _em3d_report_state["status"] == "running":
+        return jsonify({"error": "Elmer-Bericht laeuft bereits"}), 409
+    d = request.get_json(silent=True) or {}
+    res = _em3d_state.get("result")
+    if not res:
+        return jsonify({"error": "Kein 3-D-Ergebnis — erst einen Lauf rechnen "
+                                 "oder einen gespeicherten laden"}), 400
+    base = _fx3d_project_base(d.get("projekt") or "current") or _state.get("project_dir")
+    if not base:
+        return jsonify({"error": "kein Projekt gebunden"}), 400
+    payload = {}
+    mp = os.path.join(base, "meta.json")
+    if os.path.exists(mp):
+        try:
+            with open(mp, encoding="utf-8") as f:
+                payload = (json.load(f) or {}).get("payload") or {}
+        except (OSError, ValueError):
+            payload = {}
+    auswahl = d.get("ansichten")
+    ans = ema_ansichten.als_bildpaare(base, auswahl if auswahl else None)
+    model = d.get("model") or LLM_MODEL
+    _em3d_report_state.update({"status": "running", "progress": 0, "log": [],
+                               "pdf_path": None, "error": None})
+
+    def _worker():
+        def cb(msg, pct=None):
+            _em3d_report_state["log"].append(msg)
+            if pct is not None:
+                _em3d_report_state["progress"] = int(pct)
+        try:
+            r = ema_report.generate_em3d_report(res, payload, base, projekt_dir=base,
+                                                ansichten=ans, model=model, progress_cb=cb)
+            _em3d_report_state["pdf_path"] = r["pdf"]
+            _em3d_report_state["status"] = "done"
+            _em3d_report_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _em3d_report_state["error"] = str(e)
+            _em3d_report_state["log"].append("⚠ " + str(e))
+            _em3d_report_state["status"] = "error"
+            print(traceback.format_exc())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/em3d/bericht/status")
+def em3d_bericht_status():
+    return jsonify({k: _em3d_report_state[k]
+                    for k in ("status", "progress", "log", "error")}
+                   | {"has_pdf": bool(_em3d_report_state.get("pdf_path")
+                                      and os.path.exists(_em3d_report_state["pdf_path"]))})
+
+
+@app.route("/em3d/bericht/download")
+def em3d_bericht_download():
+    p = _em3d_report_state.get("pdf_path")
+    if not p or not os.path.exists(p):
+        return jsonify({"error": "kein Bericht"}), 404
+    return send_file(p, mimetype="application/pdf", as_attachment=True,
+                     download_name="bericht_elmer.pdf")
+
+
+# ── 📝 Berichtsreiter: selbst geschrieben, mit Bildern und Videos ────────────
+_bericht_state = {"status": "idle", "progress": 0, "log": [], "error": None,
+                  "kennung": None}
+
+
+@app.route("/project/<pid>/berichte")
+def project_berichte(pid: str):
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    return jsonify(ema_bericht.liste(base) if base else [])
+
+
+@app.route("/project/<pid>/berichte/bestand")
+def project_berichte_bestand(pid: str):
+    """Was sich einfuegen laesst: alle Bilder und Videos DIESES Projekts."""
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    return jsonify(ema_bericht.bestand(base) if base
+                   else {"bilder": [], "videos": []})
+
+
+@app.route("/project/<pid>/berichte/neu", methods=["POST", "OPTIONS"])
+def project_bericht_neu(pid: str):
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    if not base:
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    d = request.get_json(silent=True) or {}
+    k = ema_bericht.anlegen(base, d.get("titel", ""))
+    return jsonify({"kennung": k})
+
+
+@app.route("/project/<pid>/berichte/<kennung>", methods=["GET", "POST", "OPTIONS"])
+def project_bericht(pid: str, kennung: str):
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    if not base or not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    if request.method == "GET":
+        doc = ema_bericht.laden(base, kennung)
+        return jsonify(doc) if doc else (jsonify({"error": "nicht gefunden"}), 404)
+    return jsonify(ema_bericht.speichern(base, kennung,
+                                         request.get_json(force=True) or {}))
+
+
+@app.route("/project/<pid>/berichte/<kennung>/delete", methods=["POST", "OPTIONS"])
+def project_bericht_loeschen(pid: str, kennung: str):
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    ok = ema_bericht.loeschen(base, kennung) if base and _safe_name(kennung) else False
+    return jsonify({"status": "deleted" if ok else "missing"})
+
+
+@app.route("/project/<pid>/berichte/<kennung>/rendern", methods=["POST", "OPTIONS"])
+def project_bericht_rendern(pid: str, kennung: str):
+    """PDF UND HTML erzeugen. Zwei Fassungen, weil ein PDF kein Video
+    abspielen kann: dort steht ein Standbild samt Dateiname, in der
+    HTML-Fassung laeuft es."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    if not base or not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    if _bericht_state["status"] == "running":
+        return jsonify({"error": "es wird schon ein Bericht gerendert"}), 409
+    _bericht_state.update({"status": "running", "progress": 0, "log": [],
+                           "error": None, "kennung": kennung})
+
+    def _worker():
+        def cb(msg, pct=None):
+            _bericht_state["log"].append(msg)
+            if pct is not None:
+                _bericht_state["progress"] = int(pct)
+        try:
+            ema_bericht.rendern(base, kennung, progress_cb=cb)
+            _bericht_state["status"] = "done"
+            _bericht_state["progress"] = 100
+        except Exception as e:
+            import traceback
+            _bericht_state["error"] = str(e)
+            _bericht_state["log"].append("⚠ " + str(e))
+            _bericht_state["status"] = "error"
+            print(traceback.format_exc())
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/berichte/status")
+def bericht_status():
+    return jsonify(dict(_bericht_state))
+
+
+@app.route("/project/<pid>/berichte/<kennung>/<was>")
+def project_bericht_datei(pid: str, kennung: str, was: str):
+    """``pdf`` | ``html`` | ``md`` der gerenderten Fassung."""
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    if not base or not _safe_name(kennung) or was not in ("pdf", "html", "md"):
+        return jsonify({"error": "ungueltig"}), 403
+    p = os.path.join(ema_bericht.wurzel(base), kennung, "bericht." + was)
+    if not os.path.exists(p):
+        return jsonify({"error": "noch nicht gerendert"}), 404
+    typ = {"pdf": "application/pdf", "html": "text/html",
+           "md": "text/markdown"}[was]
+    # HTML wird ANGEZEIGT statt heruntergeladen — es ist die Fassung, in der das
+    # Video laeuft, und `base href` zeigt von hier aus richtig ins Projekt.
+    return send_file(p, mimetype=typ, as_attachment=(was != "html"),
+                     download_name="bericht." + was)
+
+
+@app.route("/project/<pid>/datei/<path:rel>")
+def project_datei(pid: str, rel: str):
+    """EINE Datei aus dem Projekt ausliefern (Bild oder Video eines Berichts).
+    Der Pfad wird aufgeloest geprueft — `..` laesst sich in der Zeichenkette
+    verstecken, im aufgeloesten Pfad nicht."""
+    base = _fx3d_project_base(pid)
+    if not base:
+        return jsonify({"error": "Projekt nicht gefunden"}), 404
+    p = os.path.realpath(os.path.join(base, rel))
+    if not p.startswith(os.path.realpath(base) + os.sep) or not os.path.isfile(p):
+        return jsonify({"error": "ungueltig"}), 403
+    typ = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+           ".mp4": "video/mp4", ".pdf": "application/pdf"}.get(
+               os.path.splitext(p)[1].lower())
+    if not typ:
+        return jsonify({"error": "Dateityp nicht ausgeliefert"}), 403
+    return send_file(p, mimetype=typ, conditional=True)
+
+
 @app.route("/param_study/status")
 def param_study_status():
     return jsonify({

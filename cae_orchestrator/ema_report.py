@@ -2576,6 +2576,298 @@ def _reihe_md_rangliste(ausw):
     return "\n".join(zeilen)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Elmer-Bericht (3-D-Feld) — Schwerpunkt auf dem Loeser, nicht auf der Maschine
+# ─────────────────────────────────────────────────────────────────────────────
+_SIF_INTERESSANT = (
+    "Equation", "Procedure", "Linear System Solver", "Linear System Direct Method",
+    "Linear System Iterative Method", "Linear System Preconditioning",
+    "Linear System Convergence Tolerance", "Use Piola Transform", "Use Tree Gauge",
+    "Fix Input Current Density", "Nonlinear System Max Iterations")
+
+
+def sif_loeser(sif_text):
+    """Die Loeserbloecke aus einer Elmer-``.sif`` — GELESEN, nicht behauptet.
+
+    Der Bericht soll sagen, womit wirklich gerechnet wurde. Die Einstellungen in
+    `ema_em3d.write_sif` haengen an Netzart und Anregung (Piola nur bei Hex, kein
+    Tree-Gauge dazu, MUMPS nur auf Simplizes …) — sie aus dem Modul abzuschreiben
+    hiesse, die Moeglichkeiten zu beschreiben statt den Lauf. Die Datei liegt im
+    Projekt, also wird sie gelesen.
+    Returns ``[{"nr": 1, "Equation": "MgDyn", …}]``."""
+    bloecke, akt = [], None
+    for roh in (sif_text or "").splitlines():
+        z = roh.strip()
+        if z.lower().startswith("solver ") and z[7:].strip().isdigit():
+            akt = {"nr": int(z[7:].strip())}
+            bloecke.append(akt)
+            continue
+        # Der Block endet bei `End` — ohne das sammelt er weiter, und die
+        # `Equation = 1` eines Body-Blocks landet im letzten Solver (gemessen:
+        # Solver 4 trug "Equation = 1" statt "SaveScalars").
+        if z.lower() == "end":
+            akt = None
+            continue
+        if akt is None or "=" not in z:
+            continue
+        k, _, v = z.partition("=")
+        k, v = k.strip(), v.strip().strip('"')
+        for name in _SIF_INTERESSANT:
+            if k.lower().startswith(name.lower()):
+                akt[name] = v.replace('" "', ".").strip('"')
+                break
+    return bloecke
+
+
+def _em3d_md_loeser(bloecke):
+    if not bloecke:
+        return "_Keine `case.sif` im Projekt gefunden — der Loeserstand ist damit nicht belegt._"
+    zeilen = ["| Solver | Gleichung | Verfahren | Lineares System | Besonderheiten |",
+              "|" + "---|" * 5]
+    for b in bloecke:
+        lin = b.get("Linear System Solver", "")
+        if lin.lower().startswith("direct"):
+            lin += " / " + b.get("Linear System Direct Method", "?")
+        elif lin.lower().startswith("iterative"):
+            lin += " / " + b.get("Linear System Iterative Method", "?")
+            if b.get("Linear System Preconditioning"):
+                lin += " + " + b["Linear System Preconditioning"]
+        bes = [f"{k}={b[k]}" for k in ("Use Piola Transform", "Use Tree Gauge",
+                                       "Fix Input Current Density") if k in b]
+        zeilen.append("| %d | %s | %s | %s | %s |" % (
+            b.get("nr", 0), _mdesc(b.get("Equation", "—")),
+            _mdesc(b.get("Procedure", "—")), _mdesc(lin or "—"),
+            _mdesc(", ".join(bes) or "—")))
+    return "\n".join(zeilen)
+
+
+def _em3d_md_netz(e3):
+    m = e3.get("mesh") or {}
+    z = e3.get("mesh_zones") or {}
+    b = m.get("bodies") or {}
+    def _r(name, wert, einheit="", stellen=3):
+        # Anzahlen sind Anzahlen: "164 912.000 Knoten" liest sich wie eine
+        # Messgroesse mit drei Nachkommastellen.
+        return None if wert in (None, "") else "| %s | %s |" % (
+            _mdesc(name), _fmt_val(wert, stellen, einheit))
+    zeilen = ["| Groesse | Wert |", "|---|---|"]
+    taschen = ("%s von %s zugeordnet" % (m.get("n_pockets"), m.get("n_pockets_want"))
+               if m.get("n_pockets_want") is not None else m.get("n_pockets"))
+    for name, wert, eh, st in (
+            ("Knoten", m.get("n_nodes"), "", 0),
+            ("Ziel-Knotenzahl", m.get("target_nodes"), "", 0),
+            ("Magnete", m.get("n_magnets"), "", 0),
+            ("Magnettaschen (Luft)", taschen, "", 0),
+            ("Flussbarrieren", m.get("n_barriers"), "", 0),
+            ("Statornuten vernetzt", m.get("n_slots_meshed"), "", 0),
+            ("Wuchtbolzen", m.get("n_bolts"), "", 0),
+            ("Koerper (Welle/Rotor/Stator/Luft/Ring)",
+             "/".join(str(b.get(k, "—")) for k in ("shaft", "rotor", "stator", "air", "ring")), "", 0),
+            ("Netzart", m.get("mesh_kind") or ("Hex" if e3.get("hex") else "Tet"), "", 0),
+            ("Zellgroesse Luftspalt", z.get("gap_cl"), "mm", 3),
+            ("Zellgroesse Magnet/Barriere", z.get("mag_cl"), "mm", 3),
+            ("Zellgroesse Fernfeld", z.get("mesh_cl"), "mm", 3),
+            ("Saumzone", z.get("mag_grow"), "mm", 2),
+            ("Klebespalt der Tasche", m.get("pocket_clear_mm"), "mm", 2),
+            ("Baulaenge", e3.get("axial_mm"), "mm", 1),
+            ("Schraegung", e3.get("skew_deg"), "Grad", 2),
+            ("Staffelung (Segmente)", e3.get("skew_segments"), "", 0)):
+        r = _r(name, wert, eh, st)
+        if r:
+            zeilen.append(r)
+    return "\n".join(zeilen)
+
+
+def _em3d_md_ergebnis(e3):
+    c = e3.get("compare_2d") or {}
+    op = e3.get("operating_point") or {}
+    ax = e3.get("b_gap_axial") or []
+    zeilen = ["| Groesse | 3-D (Elmer) | 2-D (FDM) | Bemerkung |", "|" + "---|" * 4]
+    def z(name, a, b_, bem=""):
+        zeilen.append("| %s | %s | %s | %s |" % (_mdesc(name), _fmt_val(a, 4),
+                                                 _fmt_val(b_, 4) if b_ is not None else "—",
+                                                 _mdesc(bem)))
+    z("Luftspaltinduktion Mitte [T]", e3.get("b_gap_mid_peak"), c.get("B_gap_2D"),
+      "z = L/2; nur die Mittelebene ist im Lastfall belastbar")
+    z("Grundwelle B_r [T]", c.get("fundamental_3D"), c.get("fundamental_2D"), "")
+    if ax:
+        z("B(z) Rand / Mitte [T]", "%.3f / %.3f" % (ax[0], ax[len(ax) // 2]), None,
+          "Endeffekt — genau das, was 2-D nicht kann")
+    z("Moment [Nm]", e3.get("torque_Nm"), c.get("Kt_2D"),
+      e3.get("torque_note") or "")
+    if e3.get("torque_arkkio_Nm") is not None:
+        z("Arkkio-Moment [Nm]", e3.get("torque_arkkio_Nm"), None, "")
+    z("Polfolge-Versatz [Grad mech.]", c.get("phase_shift_mech_deg"), None,
+      "Toleranz %s; %s" % (_fmt_val(c.get("phase_tol_mech_deg"), 2),
+                           "stimmt ueberein" if c.get("orientation_ok") else "ABWEICHUNG"))
+    zeilen.append("| Anregung | %s | %s | rpm %s, Last %s Nm, i_q %s A |" % (
+        _mdesc(op.get("excitation", "?")), _mdesc(c.get("excitation", "?")),
+        _fmt_val(op.get("rpm"), 0), _fmt_val(op.get("load_nm"), 1),
+        _fmt_val(op.get("iq_A"), 1)))
+    return "\n".join(zeilen)
+
+
+def _em3d_prompt(e3, loeser, machine):
+    m = e3.get("mesh") or {}
+    c = e3.get("compare_2d") or {}
+    warn = "\n".join("  - " + str(w) for w in (e3.get("warnings") or [])[:8]) or "  (keine)"
+    solv = "\n".join("  - Solver %s: %s (%s), %s" % (
+        b.get("nr"), b.get("Equation", "?"), b.get("Procedure", "?"),
+        b.get("Linear System Solver", "?")) for b in loeser) or "  (nicht belegt)"
+    return f"""Du bist FEM-Spezialist fuer Elmer und schreibst die Einordnung zu EINEM
+3-D-Magnetostatiklauf. Schwerpunkt: der LOESER und das NETZ, nicht die Maschine.
+
+Maschine (nur Kontext): {machine}
+
+Elmer-Loeser laut case.sif:
+{solv}
+
+Netz: {m.get("n_nodes")} Knoten, {m.get("n_magnets")} Magnete,
+{m.get("n_pockets")} Magnettaschen als Luft, Zielknotenzahl {m.get("target_nodes")}.
+
+2-D-Vergleich: Orientierungspruefung {"bestanden" if c.get("orientation_ok") else "ABWEICHUNG"},
+Anregung 3-D {e3.get("operating_point", {}).get("excitation")} gegen 2-D {c.get("excitation")}.
+
+Warnungen des Laufs:
+{warn}
+
+Schreibe auf Deutsch, in Markdown, mit den Ueberschriften
+"## Was der 3-D-Lauf leistet", "## Netz und Loeser" und "## Was er NICHT zeigt".
+Regeln ohne Ausnahme:
+- KEINE Zahlenwerte im Fliesstext; sie stehen in den Tabellen darunter.
+- Nenne ausdruecklich, was 3-D hier BRINGT, was 2-D nicht kann (endliche Laenge,
+  Endeffekt, Schraegung) — und wo der Lauf an seine Grenze kommt.
+- Die Warnungen oben sind Befunde des Werkzeugs, keine Nebensaechlichkeiten.
+  Wenn eine dabei ist, die eine Groesse unbrauchbar macht, sag das deutlich.
+- Erfinde nichts, was oben nicht steht.
+Hoechstens 320 Woerter."""
+
+
+def generate_em3d_report(res: dict, payload: dict, out_dir: str,
+                         projekt_dir: str = "", ansichten=None,
+                         model: str = DEFAULT_MODEL, progress_cb=None) -> dict:
+    """Auswertung EINES 3-D-Elmer-Laufs als PDF — mit Schwerpunkt auf dem Loeser.
+
+    Der Projektbericht hat laengst einen 3-D-Abschnitt (`_ensure_em3d_section`),
+    aber der ordnet den Lauf in eine Maschinenauslegung ein. Hier geht es um den
+    LAUF selbst: womit gerechnet wurde (`case.sif`, GELESEN), wie fein das Netz
+    wo ist, was der 2-D-Vergleich sagt — und was der Lauf ausdruecklich nicht
+    zeigt. Die Warnungen des Laufs stehen woertlich drin; sie tragen die
+    Geltungsgrenzen (etwa dass im Lastfall nur die Mittelebene belastbar ist).
+
+    ``ansichten`` = Liste ``[(relativer_pfad, Beschriftung)]`` aus
+    `ema_ansichten.als_bildpaare` — die im Browser-Betrachter festgehaltenen
+    Ansichten. Sie sind der Grund, warum dieser Bericht anders aussieht als ein
+    automatisch gerenderter: eine gedrehte, aufgeschnittene Ansicht mit
+    eingestellter Farbskala kommt aus keinem Erzeuger.
+    Returns ``{"pdf", "md", "model"}``.
+    """
+    import base64
+    def _log(msg, pct=None):
+        if progress_cb:
+            progress_cb(msg, pct)
+    if not res:
+        raise ValueError("kein 3-D-Ergebnis")
+    os.makedirs(out_dir, exist_ok=True)
+    cdir = os.path.join(out_dir, "charts")
+    os.makedirs(cdir, exist_ok=True)
+    projekt_dir = projekt_dir or out_dir
+
+    e3 = res.get("em3d") if "em3d" in res else res
+    _log("Lese case.sif …", 10)
+    sif_txt = ""
+    for kand in (os.path.join(projekt_dir, "em3d", "case.sif"),
+                 os.path.join(out_dir, "case.sif")):
+        if os.path.exists(kand):
+            try:
+                with open(kand, encoding="utf-8", errors="replace") as f:
+                    sif_txt = f.read()
+                break
+            except OSError:
+                pass
+    loeser = sif_loeser(sif_txt)
+
+    # Ohne `meta.json` (ein Projekt, in dem nur em3d lief) traegt die Projektakte
+    # den Payload — sonst stuende ueber dem ganzen Bericht "Maschine: —".
+    if not payload:
+        try:
+            import ema_projekt as _PJ
+            payload = ((_PJ.load_or_synthesize(projekt_dir, write_back=False) or {})
+                       .get("inputs") or {}).get("payload") or {}
+        except Exception:                                    # noqa: BLE001
+            payload = {}
+    machine = _maschine_zeile(payload) or "—"
+    _log("Frage %s (Einordnung des Loeserlaufs)…" % model, 35)
+    try:
+        prose = _clean_prose_keep_headings(
+            call_ollama(_em3d_prompt(e3, loeser, machine), model=model))
+    except Exception as e:                                   # noqa: BLE001
+        _log("⚠ LLM nicht erreichbar (%s) — Bericht ohne Fliesstext" % e, 45)
+        prose = ("## Was der 3-D-Lauf leistet\n\n_Die qualitative Einordnung konnte "
+                 "nicht erzeugt werden (LLM nicht erreichbar). Tabellen und Bilder "
+                 "unten sind vollstaendig._")
+
+    op = e3.get("operating_point") or {}
+    teile = [
+        "# 3-D-Magnetfeld (Elmer) — Auswertung",
+        "",
+        "**Maschine:** %s" % machine,
+        "",
+        "**Lauf:** %s  ·  **Anregung:** %s  ·  **Drehzahl:** %s min^-1  ·  "
+        "**Last:** %s Nm"
+        % (res.get("source", "Einzellauf"), op.get("excitation", "?"),
+           _fmt_val(op.get("rpm"), 0), _fmt_val(op.get("load_nm"), 1)),
+        "",
+        "## Netz", "", _em3d_md_netz(e3), "",
+        "## Elmer-Loeser (aus `case.sif`)", "", _em3d_md_loeser(loeser), "",
+        prose, "",
+        "## Ergebnisse und 2-D-Vergleich", "", _em3d_md_ergebnis(e3), "",
+    ]
+    warn = [str(w) for w in (e3.get("warnings") or [])]
+    if warn:
+        teile += ["## Warnungen des Laufs", "",
+                  "_Woertlich uebernommen — sie tragen die Geltungsgrenzen._", ""]
+        teile += ["- " + _mdesc(w) for w in warn] + [""]
+
+    _log("Bilder einsetzen…", 60)
+    teile += ["## Bilder aus dem Lauf", ""]
+    n_bild = 0
+    for key, rel, titel in _IMAGE_PAIRS_EM3D:
+        q = os.path.join(projekt_dir, rel)
+        if os.path.exists(q):
+            teile += ["![%s](%s)" % (titel, rel), ""]
+            n_bild += 1
+    if not n_bild:
+        teile += ["_Keine gerenderten Bilder im Projekt gefunden._", ""]
+    if ansichten:
+        teile += ["## Festgehaltene Ansichten aus dem Browser-Betrachter", "",
+                  "_Diese Bilder stammen nicht aus einem Erzeuger, sondern aus dem "
+                  "3-D-Betrachter: Blickrichtung, Schnitt, Farbskala und Lastfall "
+                  "sind so eingestellt, wie sie gezeigt werden sollen._", ""]
+        for rel, cap in ansichten:
+            if os.path.exists(os.path.join(projekt_dir, rel)):
+                teile += ["![%s](%s)" % (cap, rel), ""]
+
+    md = "\n".join(teile)
+    _log("Rendere PDF (pandoc + xelatex)…", 82)
+    pdf = render_pdf(md, projekt_dir, out_filename="bericht_elmer.pdf",
+                     md_filename="bericht_elmer.md")
+    _log("✓ Elmer-Bericht fertig.", 100)
+    return {"pdf": pdf, "md": os.path.join(projekt_dir, "bericht_elmer.md"),
+            "model": model, "n_loeser": len(loeser)}
+
+
+_IMAGE_PAIRS_EM3D = (
+    ("em3d_model_iso",   "charts/em3d_model_iso.png",   "3-D-Modell (Isometrie, aufgeschnitten)"),
+    ("em3d_model_axial", "charts/em3d_model_axial.png", "Magnet-/Polanordnung (Blick entlang der Achse)"),
+    ("em3d_mesh_slice",  "charts/em3d_mesh_slice.png",  "Netz im Querschnitt (hell = fein)"),
+    ("em3d_field3d",     "charts/em3d_field3d.png",     "3-D-Feld |B| (aufgeschnitten)"),
+    ("em3d_slice_mid",   "charts/em3d_slice_mid.png",   "|B|-Schnitt in der Paketmitte (z = L/2)"),
+    ("em3d_endeffect",   "charts/em3d_endeffect.png",   "Endeffekt: axialer Verlauf B(z)"),
+    ("em3d_airgap_2d3d", "charts/em3d_airgap_2d3d.png", "Luftspaltinduktion: 2-D-FDM gegen 3-D-Elmer"),
+)
+
+
 def generate_paramstudy_report(study: dict, payload: dict, out_dir: str,
                                model: str = DEFAULT_MODEL, progress_cb=None) -> dict:
     """LLM report for a parameter study. The study data (per-metric trends) is the

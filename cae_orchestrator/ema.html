@@ -244,6 +244,7 @@
     <button class="tab-btn"        id="tbtn-oil"     onclick="switchTab('oil')">💧 Spritzöl-Kühlung</button>
     <button class="tab-btn"        id="tbtn-cfd"     onclick="switchTab('cfd')">🌊 OpenFOAM (quant.)</button>
     <button class="tab-btn"        id="tbtn-fx3d"    onclick="switchTab('fx3d')">🌀 FluidX3D (LBM)</button>
+    <button class="tab-btn"        id="tbtn-doku"    onclick="switchTab('doku')">📝 Bericht</button>
     <button class="tab-btn"        id="tbtn-spraytest" onclick="switchTab('spraytest')">🧪 Spray-Test</button>
     <button class="tab-btn"        id="tbtn-ki"      onclick="switchTab('ki')">🧠 KI-Training</button>
     <button class="tab-btn"        id="tbtn-jobs"    onclick="switchTab('jobs')">⏳ Jobs<span id="jobs-badge" style="display:none;margin-left:5px;background:#e67e22;color:#fff;border-radius:9px;padding:0 6px;font-size:.68rem"></span></button>
@@ -1511,6 +1512,24 @@
   </div>
 
   <div class="e3-card">
+    <div class="section-title">📄 Elmer-Auswertung (PDF)</div>
+    <p style="font-size:.8rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      Ein Bericht über <b>diesen</b> 3D-Lauf mit Schwerpunkt auf dem <b>Löser</b>, nicht auf
+      der Maschine: was Elmer wirklich gerechnet hat (aus der <code>case.sif</code> gelesen),
+      wie fein das Netz wo ist, was der 2D-Vergleich sagt — und die Warnungen des Laufs im
+      Wortlaut, weil sie die Geltungsgrenzen tragen. Die im Browser-Betrachter
+      <b>📷 festgehaltenen Ansichten</b> kommen mit hinein.
+    </p>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <button id="btn_em3d_bericht" onclick="startEm3dBericht()" style="background:#7a5a3a;width:auto;padding:8px 14px;font-size:.8rem">📄 Elmer-Bericht erzeugen</button>
+      <label style="display:flex;gap:6px;align-items:center;font-size:.76rem;color:#9aa;cursor:pointer">
+        <input type="checkbox" id="e3_bericht_ansichten" checked style="width:auto"/> festgehaltene Ansichten einfügen</label>
+      <span id="e3_bericht_msg" style="font-size:.76rem;color:#9aa"></span>
+    </div>
+    <div id="e3_ansichten_liste" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px"></div>
+  </div>
+
+  <div class="e3-card">
     <div class="section-title">🧲 Gespeicherte 3D-Läufe</div>
     <p style="font-size:.8rem;color:#9aa;line-height:1.5;margin:0 0 8px">
       Fertige 3D-Läufe des aktiven Projekts — auch <b>als Job gerechnete</b> (die werden
@@ -2586,6 +2605,55 @@
 
  </div>
 </div><!-- /panel-fx3d -->
+
+<div class="tab-panel" id="panel-doku">
+ <div class="e3-wrap">
+
+  <div class="e3-card">
+    <div class="section-title">📝 Bericht selbst schreiben</div>
+    <p style="font-size:.82rem;color:#9aa;line-height:1.5;margin:0 0 8px">
+      Alle anderen Berichte hier sind <b>erzeugt</b>: die Kette baut das Gerüst, das Modell
+      schreibt die Prosa. Dieser hier ist deiner — eigener Text (Markdown), dazu
+      <b>Bilder und Videos aus dem Projekt</b> in der Reihenfolge, die du willst.
+      Verwiesen, nicht kopiert: die Dateien bleiben, wo sie entstanden sind.
+    </p>
+    <div style="background:#2a2620;border:1px solid #6a5a2e;border-radius:5px;padding:8px 11px;font-size:.76rem;color:#d8c89a;line-height:1.45">
+      ⚠ Ein <b>PDF kann kein Video abspielen</b>. Ein Videoblock erscheint dort als
+      <b>Standbild</b> (aus der Mitte des Films) samt Dateiname — und in der
+      <b>HTML-Fassung</b> desselben Berichts läuft er wirklich. Beide entstehen aus
+      derselben Blockliste.
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:9px">
+      <input type="text" id="br_neu_titel" placeholder="Titel des neuen Berichts" style="flex:1;min-width:180px"/>
+      <button onclick="brNeu()" style="background:#2d7d5a;width:auto;padding:8px 14px;font-size:.8rem">＋ Neuer Bericht</button>
+      <button onclick="brRefreshListe()" style="background:#456;width:auto;padding:8px 12px;font-size:.78rem">↻</button>
+    </div>
+    <div id="br_liste" style="display:flex;flex-direction:column;gap:5px;margin-top:9px">—</div>
+  </div>
+
+  <div class="e3-card" id="br_editor" style="display:none">
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <input type="text" id="br_titel" placeholder="Titel" style="flex:1;min-width:200px;font-size:1rem"/>
+      <button onclick="brSpeichern()" style="background:#2d7d5a;width:auto;padding:8px 14px;font-size:.8rem">💾 Speichern</button>
+      <button onclick="brRendern()" id="btn_br_render" style="background:#7a5a3a;width:auto;padding:8px 14px;font-size:.8rem">📄 PDF + HTML erzeugen</button>
+      <span id="br_msg" style="font-size:.76rem;color:#9aa"></span>
+    </div>
+    <input type="text" id="br_untertitel" placeholder="Untertitel (freiwillig)" style="width:100%;margin-top:6px;font-size:.85rem"/>
+
+    <div style="display:flex;gap:7px;flex-wrap:wrap;margin:11px 0 7px;border-top:1px solid #222a33;padding-top:9px">
+      <span style="font-size:.76rem;color:#9aa;align-self:center">Block anhängen:</span>
+      <button onclick="brAdd('text')"    style="background:#3a4a5a;width:auto;padding:5px 11px;font-size:.75rem">¶ Text</button>
+      <button onclick="brAdd('tabelle')" style="background:#3a4a5a;width:auto;padding:5px 11px;font-size:.75rem">▦ Tabelle</button>
+      <button onclick="brAdd('bild')"    style="background:#3a5a4a;width:auto;padding:5px 11px;font-size:.75rem">🖼 Bild</button>
+      <button onclick="brAdd('video')"   style="background:#5a3a4a;width:auto;padding:5px 11px;font-size:.75rem">🎬 Video</button>
+      <button onclick="brAdd('umbruch')" style="background:#444;width:auto;padding:5px 11px;font-size:.75rem">⤓ Seitenumbruch</button>
+    </div>
+    <div id="br_bloecke" style="display:flex;flex-direction:column;gap:8px"></div>
+    <div id="br_meldungen" style="font-size:.74rem;color:#e9a;margin-top:8px"></div>
+  </div>
+
+ </div>
+</div><!-- /panel-doku -->
 
 <!-- ════════ TAB: Spray-Test-Prüfstand (iteratives Spray-Tuning) ════════ -->
 <div class="tab-panel" id="panel-spraytest">
@@ -3805,7 +3873,7 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['projekt','geo','betrieb','calc','live','designer','import','getriebe','em3d','oil','cfd','fx3d','spraytest','ki','jobs','results','compare','agent','agenth','studio'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','getriebe','em3d','oil','cfd','fx3d','doku','spraytest','ki','jobs','results','compare','agent','agenth','studio'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
@@ -3813,7 +3881,7 @@ const PANEL_OF = {
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
   designer:'panel-designer', import:'panel-import', getriebe:'panel-getriebe',
   em3d:'panel-em3d', oil:'panel-oil',
-  cfd:'panel-cfd', fx3d:'panel-fx3d', spraytest:'panel-spraytest', ki:'panel-ki', jobs:'panel-jobs',
+  cfd:'panel-cfd', fx3d:'panel-fx3d', doku:'panel-doku', spraytest:'panel-spraytest', ki:'panel-ki', jobs:'panel-jobs',
   results:'tab-results', compare:'tab-compare', agent:'panel-agent',
   agenth:'panel-agent-hermes', studio:'panel-agent-studio'
 };
@@ -3884,6 +3952,8 @@ function switchTab(name) {
     if (typeof oilRefreshPresets === 'function') oilRefreshPresets();  // gespeicherte Darstellungen
   }
   if (name === 'calc' && typeof studyRefreshSaved === 'function') studyRefreshSaved();
+  if (name === 'em3d' && typeof e3RefreshAnsichten === 'function') e3RefreshAnsichten();
+  if (name === 'doku' && typeof brAktivieren === 'function') brAktivieren();
   if (name === 'cfd' && typeof _cfdSyncInherited === 'function') _cfdSyncInherited();
   if (name === 'fx3d' && typeof _fx3dSyncInherited === 'function') { _fx3dSyncInherited(); _fx3dKosten(); fx3dRefreshSaved(); }
   if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
@@ -9244,6 +9314,8 @@ function _renderEm3d(res) {
          + `<input type="range" id="e3_clip_pos" min="0" max="1000" value="500" oninput="_e3SetClip()" style="flex:1"></label>`
          + `<button onclick="_e3FlipClip()" style="width:auto;padding:4px 10px;background:#3a4a6a">↔ Seite</button>`
          + `<label style="display:flex;gap:6px;align-items:center;cursor:pointer;border-left:1px solid #2e2e36;padding-left:12px"><input type="checkbox" id="e3_lines_on" onchange="_e3ToggleLines()" style="width:auto"> 🧵 Feldlinien</label>`
+         + `<button onclick="_e3Festhalten()" title="Diese Ansicht festhalten — sie landet im Projekt und lässt sich in den Elmer-Bericht und in eigene Berichte einfügen" style="width:auto;padding:3px 9px;background:#5a3a6a;border-left:1px solid #2e2e36;margin-left:6px">📷 Festhalten</button>`
+         + `<span id="e3_shot_msg" style="font-size:.7rem;color:#6c8"></span>`
          + `<label id="e3_line_dens_wrap" style="display:none;gap:5px;align-items:center" title="Dichte der Feldlinien (wenige ↔ viele)">Dichte `
          + `<input type="range" id="e3_line_density" min="8" max="100" value="45" oninput="_e3ApplyLineDensity()" style="width:90px"></label>`
          + `<label style="display:flex;gap:6px;align-items:center;cursor:pointer"><input type="checkbox" id="e3_mesh_on" onchange="_e3ToggleMesh()" style="width:auto"> 🕸 Netz</label>`
@@ -9350,6 +9422,316 @@ function _e3ShowPointData(pd, fixScale) {
   _e3SetClip();      // Schnittebene an die (ggf. leicht anderen) Bounds anpassen
   _e3ApplyColor();   // Skala/Legende neu (bei fixScale unverändert)
   _e3rw.getRenderWindow().render();
+}
+
+// ── 📝 Berichtsreiter: selbst geschrieben, mit Bildern und Videos ───────────
+// Der Bericht ist eine Liste BLOECKE. Der Zustand liegt in `_brDoc`; jede
+// Aenderung schreibt dorthin, gespeichert wird auf Knopfdruck — ein Autosave
+// bei jedem Tastendruck schriebe hunderte Fassungen, und der Server prueft die
+// Pfade ohnehin bei jedem Speichern.
+let _brDoc = null, _brKennung = null, _brBestand = { bilder: [], videos: [] };
+
+function _brPid() {
+  return (window._activeProject && window._activeProject.id) || 'current';
+}
+
+async function brAktivieren() {
+  await brRefreshBestand();
+  brRefreshListe();
+}
+
+async function brRefreshBestand() {
+  try { _brBestand = await fetch('/project/' + _brPid() + '/berichte/bestand').then(r => r.json()); }
+  catch (e) { _brBestand = { bilder: [], videos: [] }; }
+  if (_brDoc) brZeichne();
+}
+
+async function brRefreshListe() {
+  const box = document.getElementById('br_liste');
+  if (!box) return;
+  let l = [];
+  try { l = await fetch('/project/' + _brPid() + '/berichte').then(r => r.json()); } catch (e) {}
+  if (!Array.isArray(l) || !l.length) {
+    box.innerHTML = '<span style="font-size:.76rem;color:#789">Noch kein Bericht — oben einen anlegen.</span>';
+    return;
+  }
+  const pid = _brPid();
+  box.innerHTML = l.map(e => {
+    const arten = Object.entries(e.arten || {}).map(([k, v]) => v + '× ' + k).join(', ');
+    return `<div style="display:flex;align-items:center;gap:7px;background:#141821;border:1px solid #222a33;border-radius:5px;padding:6px 9px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.82rem;color:#cde;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHtml(e.titel)}</div>
+        <div style="font-size:.68rem;color:#789">${escHtml(e.geaendert)} · ${e.n_bloecke} Blöcke${arten ? ' (' + escHtml(arten) + ')' : ''}</div>
+      </div>
+      <button onclick="brOeffnen('${escHtml(e.kennung)}')" style="background:#456;width:auto;padding:4px 9px;font-size:.7rem" title="bearbeiten">✎</button>
+      ${e.pdf ? `<a href="/project/${pid}/berichte/${encodeURIComponent(e.kennung)}/pdf" target="_blank" style="background:#3a5a6a;color:#fff;text-decoration:none;border-radius:4px;padding:4px 9px;font-size:.7rem" title="PDF">📕</a>` : ''}
+      ${e.html ? `<a href="/project/${pid}/berichte/${encodeURIComponent(e.kennung)}/html" target="_blank" style="background:#3a6a5a;color:#fff;text-decoration:none;border-radius:4px;padding:4px 9px;font-size:.7rem" title="HTML-Fassung — hier laufen die Videos">▶ HTML</a>` : ''}
+      <button onclick="brLoeschen('${escHtml(e.kennung)}')" style="background:#633;width:auto;padding:4px 9px;font-size:.7rem">🗑</button>
+    </div>`;
+  }).join('');
+}
+
+async function brNeu() {
+  const t = (document.getElementById('br_neu_titel')?.value || '').trim();
+  const r = await fetch('/project/' + _brPid() + '/berichte/neu', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ titel: t }) }).then(x => x.json());
+  if (r.error) { alert(r.error); return; }
+  const el = document.getElementById('br_neu_titel'); if (el) el.value = '';
+  await brRefreshListe();
+  brOeffnen(r.kennung);
+}
+
+async function brOeffnen(kennung) {
+  const doc = await fetch('/project/' + _brPid() + '/berichte/' + encodeURIComponent(kennung))
+                    .then(r => r.json());
+  if (doc.error) { alert(doc.error); return; }
+  _brDoc = doc; _brKennung = kennung;
+  document.getElementById('br_editor').style.display = '';
+  document.getElementById('br_titel').value = doc.titel || '';
+  document.getElementById('br_untertitel').value = doc.untertitel || '';
+  brZeichne();
+}
+
+async function brLoeschen(kennung) {
+  if (!confirm('Bericht löschen? Der ganze Ordner geht weg (die Bilder und Videos bleiben, sie liegen woanders).')) return;
+  await fetch('/project/' + _brPid() + '/berichte/' + encodeURIComponent(kennung) + '/delete', { method: 'POST' });
+  if (_brKennung === kennung) { _brDoc = null; _brKennung = null;
+    document.getElementById('br_editor').style.display = 'none'; }
+  brRefreshListe();
+}
+
+function brAdd(art) {
+  if (!_brDoc) return;
+  const b = { art };
+  if (art === 'text') b.text = '## Überschrift\n\nText …';
+  if (art === 'tabelle') b.text = '| Größe | Wert |\n|---|---|\n| … | … |';
+  if (art === 'bild') { b.pfad = (_brBestand.bilder[0] || {}).pfad || ''; b.beschriftung = ''; b.breite = 100; }
+  if (art === 'video') { b.pfad = (_brBestand.videos[0] || {}).pfad || ''; b.beschriftung = ''; }
+  _brDoc.bloecke = _brDoc.bloecke || [];
+  _brDoc.bloecke.push(b);
+  brZeichne();
+}
+
+function brMove(i, d) {
+  const b = _brDoc.bloecke, j = i + d;
+  if (j < 0 || j >= b.length) return;
+  [b[i], b[j]] = [b[j], b[i]];
+  brZeichne();
+}
+
+function brDel(i) { _brDoc.bloecke.splice(i, 1); brZeichne(); }
+function brSet(i, feld, wert) { _brDoc.bloecke[i][feld] = wert; }
+
+function _brAuswahl(liste, aktuell, i) {
+  // nach Gruppen sortiert — ein Projekt hat schnell fünfzig Bilder
+  const gruppen = {};
+  liste.forEach(x => { (gruppen[x.gruppe] = gruppen[x.gruppe] || []).push(x); });
+  return Object.entries(gruppen).map(([g, xs]) =>
+    `<optgroup label="${escHtml(g)}">` + xs.map(x =>
+      `<option value="${escHtml(x.pfad)}"${x.pfad === aktuell ? ' selected' : ''}>${escHtml(x.name)}</option>`
+    ).join('') + '</optgroup>').join('');
+}
+
+function brZeichne() {
+  const box = document.getElementById('br_bloecke');
+  if (!box || !_brDoc) return;
+  const pid = _brPid();
+  const bl = _brDoc.bloecke || [];
+  if (!bl.length) {
+    box.innerHTML = '<span style="font-size:.78rem;color:#789">Noch kein Block — oben einen anhängen.</span>';
+    return;
+  }
+  box.innerHTML = bl.map((b, i) => {
+    const kopf = `<div style="display:flex;gap:5px;align-items:center;margin-bottom:5px">
+        <span style="font-size:.72rem;color:#789;flex:1">${i + 1}. ${escHtml(b.art)}</span>
+        <button onclick="brMove(${i},-1)" style="background:#3a4150;width:auto;padding:2px 7px;font-size:.7rem">↑</button>
+        <button onclick="brMove(${i},1)"  style="background:#3a4150;width:auto;padding:2px 7px;font-size:.7rem">↓</button>
+        <button onclick="brDel(${i})"     style="background:#633;width:auto;padding:2px 7px;font-size:.7rem">🗑</button>
+      </div>`;
+    let rumpf = '';
+    if (b.art === 'text' || b.art === 'tabelle') {
+      rumpf = `<textarea oninput="brSet(${i},'text',this.value)" rows="${b.art === 'tabelle' ? 5 : 7}"
+        style="width:100%;font-family:ui-monospace,monospace;font-size:.78rem;line-height:1.5"
+        placeholder="Markdown">${escHtml(b.text || '')}</textarea>`;
+    } else if (b.art === 'bild') {
+      rumpf = `<div style="display:flex;gap:9px;align-items:flex-start;flex-wrap:wrap">
+        <img src="/project/${pid}/datei/${b.pfad}" style="width:150px;border-radius:4px;background:#0d1014" onerror="this.style.opacity=.25"/>
+        <div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:5px">
+          <select onchange="brSet(${i},'pfad',this.value);brZeichne()" style="width:100%">${_brAuswahl(_brBestand.bilder, b.pfad, i)}</select>
+          <input type="text" value="${escHtml(b.beschriftung || '')}" oninput="brSet(${i},'beschriftung',this.value)" placeholder="Bildunterschrift"/>
+          <label style="font-size:.72rem;color:#9aa">Breite ${b.breite || 100} %
+            <input type="range" min="20" max="100" step="5" value="${b.breite || 100}"
+                   oninput="brSet(${i},'breite',+this.value);this.previousSibling.textContent=' Breite '+this.value+' % '" style="width:100%"/></label>
+        </div></div>`;
+    } else if (b.art === 'video') {
+      rumpf = `<div style="display:flex;gap:9px;align-items:flex-start;flex-wrap:wrap">
+        <video src="/project/${pid}/datei/${b.pfad}" muted loop controls style="width:190px;border-radius:4px;background:#000"></video>
+        <div style="flex:1;min-width:200px;display:flex;flex-direction:column;gap:5px">
+          <select onchange="brSet(${i},'pfad',this.value);brZeichne()" style="width:100%">${_brAuswahl(_brBestand.videos, b.pfad, i)}</select>
+          <input type="text" value="${escHtml(b.beschriftung || '')}" oninput="brSet(${i},'beschriftung',this.value)" placeholder="Bildunterschrift"/>
+          <span style="font-size:.72rem;color:#9aa">Im PDF erscheint ein Standbild aus der Mitte, in der HTML-Fassung läuft es.</span>
+        </div></div>`;
+    } else {
+      rumpf = '<div style="font-size:.76rem;color:#789;border-top:1px dashed #3a4150;padding-top:6px">— Seitenumbruch —</div>';
+    }
+    return `<div style="background:#141821;border:1px solid #222a33;border-radius:6px;padding:8px 10px">${kopf}${rumpf}</div>`;
+  }).join('');
+}
+
+async function brSpeichern() {
+  if (!_brDoc) return;
+  _brDoc.titel = document.getElementById('br_titel').value;
+  _brDoc.untertitel = document.getElementById('br_untertitel').value;
+  const msg = document.getElementById('br_msg');
+  const r = await fetch('/project/' + _brPid() + '/berichte/' + encodeURIComponent(_brKennung), {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(_brDoc) }).then(x => x.json());
+  const mel = document.getElementById('br_meldungen');
+  if (mel) mel.innerHTML = (r.meldungen || []).map(m => '⚠ ' + escHtml(m)).join('<br>');
+  if (r.bloecke) { _brDoc.bloecke = r.bloecke; brZeichne(); }
+  if (msg) { msg.style.color = '#9c9'; msg.textContent = '✓ gespeichert'; }
+  brRefreshListe();
+}
+
+async function brRendern() {
+  if (!_brDoc) return;
+  await brSpeichern();
+  const btn = document.getElementById('btn_br_render');
+  const msg = document.getElementById('br_msg');
+  if (btn) btn.disabled = true;
+  if (msg) { msg.style.color = '#9aa'; msg.textContent = '⏳ rendere …'; }
+  const r = await fetch('/project/' + _brPid() + '/berichte/' + encodeURIComponent(_brKennung) + '/rendern',
+                        { method: 'POST' }).then(x => x.json());
+  if (r.error) {
+    if (btn) btn.disabled = false;
+    if (msg) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + r.error; }
+    return;
+  }
+  _brPoll();
+}
+
+async function _brPoll() {
+  let s;
+  try { s = await fetch('/berichte/status').then(x => x.json()); }
+  catch (e) { setTimeout(_brPoll, 1500); return; }
+  const msg = document.getElementById('br_msg');
+  if (msg) msg.textContent = (s.log || []).slice(-1)[0] || '…';
+  if (s.status === 'running') { setTimeout(_brPoll, 900); return; }
+  const btn = document.getElementById('btn_br_render');
+  if (btn) btn.disabled = false;
+  if (!msg) return;
+  if (s.status === 'error') { msg.style.color = '#e57'; msg.textContent = '⚠ ' + (s.error || 'Fehler'); return; }
+  const pid = _brPid(), k = encodeURIComponent(_brKennung);
+  msg.style.color = '#9c9';
+  msg.innerHTML = '✓ fertig — <a href="/project/' + pid + '/berichte/' + k + '/pdf" target="_blank" style="color:#6cf">PDF</a>'
+                + ' · <a href="/project/' + pid + '/berichte/' + k + '/html" target="_blank" style="color:#6cf">HTML (mit laufendem Video)</a>';
+  brRefreshListe();
+}
+
+// ── 📄 Elmer-Bericht ueber den 3-D-Lauf ─────────────────────────────────────
+async function startEm3dBericht() {
+  const btn = document.getElementById('btn_em3d_bericht');
+  const msg = document.getElementById('e3_bericht_msg');
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  const mitAnsichten = document.getElementById('e3_bericht_ansichten')?.checked;
+  if (btn) btn.disabled = true;
+  if (msg) { msg.style.color = '#9aa'; msg.textContent = '⏳ Elmer-Bericht …'; }
+  let auswahl = null;
+  if (!mitAnsichten) auswahl = [];        // leere Liste = ausdruecklich keine
+  const r = await fetch('/em3d/bericht', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ projekt: pid, ansichten: auswahl }) }).then(x => x.json());
+  if (r.error) {
+    if (btn) btn.disabled = false;
+    if (msg) { msg.style.color = '#e57'; msg.textContent = '⚠ ' + r.error; }
+    return;
+  }
+  _pollEm3dBericht();
+}
+
+async function _pollEm3dBericht() {
+  let s;
+  try { s = await fetch('/em3d/bericht/status').then(x => x.json()); }
+  catch (e) { setTimeout(_pollEm3dBericht, 1500); return; }
+  const msg = document.getElementById('e3_bericht_msg');
+  if (msg) msg.textContent = (s.log || []).slice(-1)[0] || '…';
+  if (s.status === 'running') { setTimeout(_pollEm3dBericht, 1000); return; }
+  const btn = document.getElementById('btn_em3d_bericht');
+  if (btn) btn.disabled = false;
+  if (!msg) return;
+  if (s.status === 'error') { msg.style.color = '#e57'; msg.textContent = '⚠ ' + (s.error || 'Fehler'); return; }
+  msg.style.color = '#9c9';
+  msg.innerHTML = '✓ fertig — <a href="/em3d/bericht/download" target="_blank" style="color:#6cf">bericht_elmer.pdf öffnen</a>';
+}
+
+// Die festgehaltenen Ansichten des Projekts als kleine Vorschau + Löschen.
+async function e3RefreshAnsichten() {
+  const box = document.getElementById('e3_ansichten_liste');
+  if (!box) return;
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  let l = [];
+  try { l = await fetch('/project/' + pid + '/ansichten').then(r => r.json()); } catch (e) {}
+  if (!Array.isArray(l) || !l.length) {
+    box.innerHTML = '<span style="font-size:.72rem;color:#789">Noch keine Ansicht festgehalten — im Browser-Betrachter auf 📷 drücken.</span>';
+    return;
+  }
+  box.innerHTML = l.map(a => `<figure style="margin:0;width:110px">
+      <img src="/project/${pid}/ansicht/${encodeURIComponent(a.datei)}" style="width:100%;border-radius:4px;cursor:zoom-in"
+           onclick="window.open(this.src)" title="${escHtml((a.einstellungen&&a.einstellungen.skala)||'')}"/>
+      <figcaption style="font-size:.62rem;color:#789;text-align:center;line-height:1.25">
+        ${escHtml((a.zeit||'').slice(5))}
+        <button onclick="e3DeleteAnsicht('${escHtml(a.datei)}')" style="background:#633;width:auto;padding:1px 5px;font-size:.6rem;margin-top:2px">🗑</button>
+      </figcaption></figure>`).join('');
+}
+
+async function e3DeleteAnsicht(datei) {
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  try { await fetch('/project/' + pid + '/ansicht/' + encodeURIComponent(datei) + '/delete', { method: 'POST' }); } catch (e) {}
+  e3RefreshAnsichten();
+}
+
+// ── 📷 Die eingestellte Ansicht festhalten ──────────────────────────────────
+// Was hier eingestellt ist — Blickrichtung, Schnittebene, Farbskala, Feldlinien,
+// Lastfall — kommt aus KEINEM Erzeuger: die Berichtsbilder rendert matplotlib
+// bzw. `render_field_3d` mit fester Kamera. Wer die gedrehte, aufgeschnittene
+// Ansicht zeigen wollte, machte bisher ein Bildschirmfoto.
+// vtk.js gibt das WebGL-Bild ueber `captureNextImage()` heraus: erst anmelden,
+// dann rendern, dann faellt die data-URL an. Ein `canvas.toDataURL()` liefert
+// ohne `preserveDrawingBuffer` ein leeres Bild.
+async function _e3Festhalten() {
+  const msg = document.getElementById('e3_shot_msg');
+  const zeig = (t, f) => { if (msg) { msg.style.color = f || '#6c8'; msg.textContent = t; } };
+  if (!_e3rw) { zeig('⚠ kein Betrachter offen', '#e9a'); return; }
+  const pid = (window._activeProject && window._activeProject.id) || 'current';
+  try {
+    const ogl = _e3rw.getOpenGLRenderWindow ? _e3rw.getOpenGLRenderWindow() : null;
+    if (!ogl || !ogl.captureNextImage) { zeig('⚠ dieser vtk.js-Build kann nicht abgreifen', '#e9a'); return; }
+    zeig('📷 …');
+    const p = ogl.captureNextImage();
+    _e3rw.getRenderWindow().render();
+    const png = await p;
+    // Die Einstellungen gehoeren zum Bild: ein |B|-Bild ohne seine Skala ist
+    // kein Messwert, sondern ein Muster.
+    const leg = document.getElementById('e3_legend');
+    const sel = document.getElementById('e3_view_speed');
+    const ein = {
+      skala: leg ? leg.textContent.replace(/\s+/g, ' ').trim().slice(0, 60) : '',
+      lastfall: (sel && sel.options.length) ? sel.options[sel.selectedIndex].text : '',
+      schnitt: document.getElementById('e3_clip_on')?.checked
+               ? ('Schnitt ' + (document.getElementById('e3_clip_axis')?.value || '')) : '',
+      feldlinien: !!document.getElementById('e3_lines_on')?.checked,
+    };
+    const name = 'e3_' + (ein.lastfall || 'ansicht').replace(/[^A-Za-z0-9]+/g, '_').slice(0, 20);
+    const r = await fetch('/project/' + pid + '/ansicht', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ png, name, beschriftung: '3-D-Feld |B| aus dem Betrachter',
+                             einstellungen: ein }) }).then(x => x.json());
+    if (r.error) { zeig('⚠ ' + r.error, '#e57'); return; }
+    zeig('✓ festgehalten (' + Math.round((r.bytes || 0) / 1024) + ' kB)');
+    e3RefreshAnsichten();
+    if (typeof brRefreshBestand === 'function') brRefreshBestand();
+  } catch (e) { zeig('⚠ ' + e.message, '#e57'); }
 }
 
 async function openBrowser3d(idx, swap) {
