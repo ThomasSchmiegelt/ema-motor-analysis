@@ -65,6 +65,7 @@ Alle übrigen Verben laufen unter `python3`.
 | `feld2d` | **Die Feldstufe des Käfigläufers** (Elmer 2-D, harmonisch). Sättigt den Läufersteg **durch Messung**, misst den Carter-Faktor der *gezeichneten* Nut (2,27 gegen die 1,15, die `ema_asm` ansetzt) und tastet die Momenten-Schlupf-Kennlinie ab. Zwei unabhängige Momentwege (Arkkio und Leistungsbilanz) stimmen auf 0,00 % überein |
 | `feld3d` | **Was der Kurzschlussring wirklich kostet** (Elmer 3-D, harmonisch). Die eine Größe, die ein Querschnitt grundsätzlich nicht hergibt. Das Modell ist an zwei Punkten gegen `feld2d` geprüft, an denen der Ring keine Rolle spielt (ohne Käfigstrom 0,3 %, bei ideal kurzgeschlossenem Käfig 0,14 %). Die Ringzahl selbst ist eine **untere Schranke** — 63–78 % des Stabverlusts je nach Netz, jede Verfeinerung schiebt sie nach oben, sie konvergiert auf dieser Maschine nicht aus. Sicher ist damit nur: die früher angesetzten pauschalen 20 % sind um mindestens das Dreifache zu klein; `ema_asm.kurzschlussring_zuschlag` rechnet den Zuschlag seitdem aus der Geometrie. `--nur-netz` sagt vorher, was der Lauf kostet — und warnt ab 150.000 Knoten (gemessen: 102.918 Knoten brauchen 12,9 GB, bei rund 200.000 bricht MUMPS mit fehlendem Arbeitsspeicher ab; Elmer meldet danach trotzdem „FINISHED“ und schreibt ein Nullfeld). Der 0,7-mm-Luftspalt ist seit dem Scheibenbau des Netzes **aufgelöst** (zwei Elementlagen bei 59.796 Knoten — vorher eine einzige bei 166.614 Tetraedern) |
 | `beitrag <kanal>` | **Beitragsentwurf für Instagram oder X** aus dem, was gerechnet wurde: Text, Hashtags, Bildauswahl, Alternativtexte — und aus den Marken einer Bildschirmaufnahme Schnittvorschläge. **Veröffentlicht wird nichts** |
+| `bericht` | **Berichte nachsehen und erzeugen.** `--art liste` (Vorgabe) sagt, was das Projekt an Berichten, eigenen Berichten und abgelegten Parameterstudien hat. `--art studie [--kennung K]` macht ein PDF über EINE Studie, `--art reihe` eines über ALLE (Rangliste: welcher Parameter bewegt was, und welcher zuerst anzufassen ist), `--art elmer` die Auswertung des 3-D-Laufs mit Schwerpunkt auf dem Löser (aus der `case.sif` gelesen), `--art eigen` einen **selbst geschriebenen** Bericht aus Blöcken — mit `--bausteine steckbrief,getriebe,elmer,studien,sicherheit` werden gerechnete Abschnitte eingesetzt, die beim Rendern **frisch** aus der Ablage kommen. Jeder eigene Bericht entsteht als PDF **und** HTML: ein PDF kann kein Video abspielen, dort steht ein Standbild, in der HTML-Fassung läuft es |
 | `raw GET/POST <pfad>` | beliebige Route — Notausgang für alles Übrige |
 
 **`--frisch` gegen `--from-project`** — gilt für `run`, `rotor-check`, `screen`, `paarvergleich`, `bilddaten`, `lernen`, `struktur`, `topopt`, `feldbild`:
@@ -308,6 +309,8 @@ python3 cae_cli.py zielwert --from-project last --ziel Kt --max \
         --grenze T_magnet:le:150 --frei magWidth,magThick,magAngle
 ```
 
+* **Jede Studie landet in ihrem eigenen Ordner** (`<projekt>/parameterstudien/<zeit>_<parameter>/`) mit Zahlen, Diagramm, CSV und dem Payload, aus dem sie gerechnet wurde. Erst dadurch sieht `bericht --art studie|reihe` sie überhaupt. `--felder N` rendert zusätzlich N Feldbilder über den Bereich (und ab 2 ein Video) — das kostet rund 8 s je Bild, also nur wenn danach gefragt ist.
+* **Wellendurchmesser und Wellenbohrung sind Studienparameter** (`shaftD`, `shaftBore`). Dabei werden die Magnete an ihrer **absoluten** Lage gehalten: `magDepthRel` ist eine RELATIVE Lage zwischen Welle und Rand, ohne die Rückrechnung wanderten die Magnete mit und die Kurve zeigte zwei Änderungen auf einmal. Wo das Halten geometrisch nicht geht — Speiche und Bar spannen den Ringraum aus — steht es als Hinweis an der Studie.
 * `studie` gibt eine **Tabelle** aus und darüber die Antwort: welcher Kennwert
   sich über den Bereich am stärksten bewegt und welcher gar nicht. Das Diagramm
   landet unter `<projekt>/charts/studie_<param>.png`.
@@ -424,6 +427,29 @@ gerechneten Auslegungen liegt dort". Worauf geeicht ist:
 * **Leistungsband** aus den tatsächlich gerechneten Läufen (`db liste`), nicht
   hingeschrieben.
 
+### Wenn ein Tor reißt, steht da, was helfen würde
+
+Bricht `run analyse` an der **Fliehkraft** ab, ist das keine nackte Absage mehr.
+Die Ringspannung ist eine geschlossene Formel, also rechnet das Tor die Auswege
+aus und `wait` gibt sie aus — jeder mit der fertigen `--set`-Zeile und seinem
+Preis:
+
+```
+Fliehkraft am 189-mm-Läufer bei 20000 min-1: 390 MPa gegen 340 MPa — Sicherheit 0,87 statt 1,30.
+Was helfen wuerde (gerechnet, jeder Weg nachgeprueft):
+  * Hoechstdrehzahl auf 16350 min-1 senken (jetzt 20000)
+      --set rpm_to=16350.0   (Die Spannung geht mit dem QUADRAT der Drehzahl …)
+  * Rotorblech mit mindestens 507 MPa Fliessgrenze — 42CrMo4 hat 900 MPa
+      --set rotor_lam=steel_42crmo4   (… höhere Ummagnetisierungsverluste)
+```
+
+**Jeder Weg ist gegen dasselbe Tor nachgeprüft** — einer, der es erneut reißen
+ließe, steht nicht da. Aber: **vorgeschlagen ist nicht gewählt.** Welcher Weg
+gegangen wird, ist eine Auslegungsentscheidung; nenne dem Auftraggeber die
+Möglichkeiten mit ihrem Preis, statt eine davon stillschweigend zu nehmen. Beim
+`rotorOD` muss die Statorbohrung mitwandern (`statorID = rotorOD + 2·Luftspalt`),
+sonst reißt beim nächsten Anlauf das Luftspalt-Tor.
+
 ### Wenn ein Ziel nicht erreichbar ist
 
 **„Nicht erreichbar, weil …" ist die richtige und vollständige Antwort.** Ein
@@ -507,6 +533,7 @@ python3 cae_cli.py run cad     --from-project last --wait \
         --set slotDepth=30 --set p=8 --set project_name=Variante_A #  … dann bauen
 ```
 
+* **Stufen:** `analyse` (volle Kette) · `cad` (nur Geometrie) · `em3d` / `em3d_sweep` (3-D-Feld, Elmer) · `cfd` (OpenFOAM, liefert den HTC) · `oilspray` (Mantaflow, qualitativ) · **`fluidx3d`** (Lattice-Boltzmann auf der GPU: ein Fenster um EINE Düse mit aufgelöster Bohrung, **isotherm** — kein Wärmeübergang) · `smoke`.
 * `--frisch` baut den Payload aus den Schemavorgaben — **kein Altprojekt**. Das ist der
   Start jeder neuen Auslegung; alles Weitere entscheidest du mit `paarvergleich`.
 * `--from-project last` nimmt die jüngste **gerechnete** Auslegung (die mit `meta.json`)

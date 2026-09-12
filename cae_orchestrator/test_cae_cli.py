@@ -510,6 +510,45 @@ def test_fehlendes_modul_ist_kein_geometriebefund():
           "genannt, echte Fehlschlaege bleiben Exit 1, keine nackten Exit-Codes")
 
 
+def test_bericht_verb_ist_da():
+    """Ein Knopf, den nur die Oberflaeche hat, ist fuer den Agenten nicht
+    vorhanden — derselbe Grund, aus dem es `studie` und `zielwert` als Verben
+    gibt. Die fuenf Berichtswege hingen alle an Knoepfen."""
+    import cae_cli
+    par = cae_cli._parser() if hasattr(cae_cli, "_parser") else None
+    quelle = open(os.path.join(os.path.dirname(os.path.abspath(cae_cli.__file__)),
+                               "cae_cli.py"), encoding="utf-8").read()
+    assert "def cmd_bericht(" in quelle
+    assert 'sub.add_parser("bericht"' in quelle
+    for art in ("liste", "studie", "reihe", "elmer", "eigen"):
+        assert '"%s"' % art in quelle, art
+    # `run fluidx3d` ist erreichbar
+    assert '"fluidx3d":   ("/fluidx3d"' in quelle, "run fluidx3d fehlt"
+    # die Studie legt im Store ab (sonst sieht der Bericht sie nicht)
+    assert "studie_anlegen" in quelle and "PS.ablegen" in quelle
+    assert "--felder" in quelle
+    # und `wait` gibt die gerechneten Auswege aus
+    assert 'st.get("vorschlaege")' in quelle
+    assert "Vorgeschlagen ist nicht gewaehlt" in quelle
+    print("✓ CLI: bericht-Verb, run fluidx3d, Studien-Store, Wege im wait")
+
+
+def test_skill_kennt_die_neuen_wege():
+    """Die drei Koepfe lesen EINE SKILL.md. Steht ein Verb nicht darin, wird es
+    nicht benutzt — auch wenn es existiert."""
+    # ..../ai-workspace/cae_orchestrator/test_cae_cli.py -> ai-workspace/.agents/…
+    p = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                     ".agents", "skills", "cae-orchestrator", "SKILL.md")
+    if not os.path.exists(p):
+        print("• SKILL.md nicht gefunden — uebersprungen")
+        return
+    t = open(p, encoding="utf-8").read()
+    for was in ("`bericht`", "--art reihe", "--bausteine", "fluidx3d",
+                "shaftBore", "--felder", "jeder Weg nachgeprueft"):
+        assert was in t, was
+    print("✓ SKILL.md: Bericht, fluidx3d, Wellenparameter und die Tor-Wege stehen drin")
+
+
 if __name__ == "__main__":
     test_placement()
     test_types_and_bounds()
@@ -530,4 +569,6 @@ if __name__ == "__main__":
     test_schema_has_no_second_geom_table()
     test_schema_vs_payload()
     test_fehlendes_modul_ist_kein_geometriebefund()
+    test_bericht_verb_ist_da()
+    test_skill_kennt_die_neuen_wege()
     print("\nALLE CAE-CLI-TESTS BESTANDEN ✅")

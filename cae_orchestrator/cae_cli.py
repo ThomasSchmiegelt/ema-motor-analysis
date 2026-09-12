@@ -642,6 +642,7 @@ RUN_ROUTES = {
     "em3d_sweep": ("/em3d_sweep",  "/em3d/status"),
     "cfd":        ("/cfd",         "/cfd/status"),           # OpenFOAM-Kühlung
     "oilspray":   ("/oilspray",    "/oilspray/status"),      # Blender/Mantaflow-Ölnebel
+    "fluidx3d":   ("/fluidx3d",    "/fluidx3d/status"),      # Lattice-Boltzmann auf der GPU
     "smoke":      ("/smoke_test",  "/smoke_test/status"),
 }
 
@@ -2401,10 +2402,32 @@ def cmd_studie(args) -> int:
 
     print(f"Parameterstudie: {spec['label']}  {von:g} → {bis:g} "
           f"in {args.punkte} Schritten")
+
+    # EIGENER Ordner je Studie — derselbe Store, den auch der Browser benutzt.
+    # Ohne das haette der Agent zwar gerechnet, aber seine Studie waere in der
+    # Uebersicht, im Studienbericht und in der Reihenauswertung nicht
+    # aufgetaucht: die lesen alle den Store. Ein Ergebnis, das nur der eine Weg
+    # sieht, ist ein halbes.
+    _pdir = _projekt_pfad(getattr(args, "projekt", "")
+                          or getattr(args, "_pid", "") or "")
+    _pfad = _kennung = None
+    if _pdir and not getattr(args, "ohne_ablage", False):
+        _wurzel = PS.studien_wurzel(_pdir)
+        _kennung, _pfad = PS.studie_anlegen(_wurzel, args.param)
+        print(f"  Studienordner: {os.path.relpath(_pfad, os.path.dirname(_pdir))}")
     erg = PS.run_study(payload, args.param, von, bis, steps=args.punkte,
-                       rpm=args.rpm,
+                       rpm=args.rpm, out_dir=_pfad,
+                       field_frames=int(getattr(args, "felder", 0) or 0),
                        progress_cb=(lambda m, p=None: None) if args.json
                                    else (lambda m, p=None: print(f"  {m}")))
+    if _pfad:
+        _abl = PS.ablegen(erg, _pfad, payload=payload,
+                          notiz="cae_cli studie " + args.param)
+        erg["kennung"] = _kennung
+        erg["gespeichert"] = bool(_abl.get("ok"))
+        if _abl.get("ok"):
+            print(f"  Studie abgelegt: {_kennung} "
+                  f"(studie.json, studie.csv, verlauf.png)")
 
     zeilen = _studie_tabelle(erg, spec)
     text = "\n".join(zeilen)
@@ -2426,6 +2449,151 @@ def cmd_studie(args) -> int:
                     if k not in ("chart_b64", "field_images")},
              ok=bool(erg.get("n_ok")))
     return 0 if erg.get("n_ok") else 1
+
+
+def cmd_bericht(args) -> int:
+    """Berichte: nachsehen, erzeugen — alles, was die Oberflaeche auch kann.
+
+    Es gab fuenf Berichtswege und keinen einzigen davon fuer einen Agenten: die
+    Studienberichte, die Reihenauswertung, die Elmer-Auswertung und der selbst
+    geschriebene Bericht hingen alle an Knoepfen. Ein Knopf, den nur die
+    Oberflaeche hat, ist fuer den Agenten nicht vorhanden — derselbe Grund, aus
+    dem es ``studie`` und ``zielwert`` als Verben gibt.
+
+    EIN Verb mit ``--art`` statt fuenf Verben: ein oertliches Modell haelt keine
+    fuenf Schemata auseinander, die alle „Bericht" heissen.
+
+    Exit: 0 = fertig, 1 = nichts zu berichten, 2 = Bedienfehler.
+    """
+    pid = getattr(args, "projekt", "") or getattr(args, "_pid", "") or ""
+    pdir = _projekt_pfad(pid)
+    if not pdir:
+        return _die("Fuer Berichte braucht es ein Projekt: --projekt <id> "
+                    "(oder --from-project). Ohne Projekt gibt es weder die "
+                    "Zahlen noch einen Ort fuer das PDF.", EXIT_USAGE)
+    import ema_bericht as BR
+    import ema_paramstudy as PS
+    art = args.art
+    melde = (lambda m, p=None: None) if args.json else (lambda m, p=None: print(f"  {m}"))
+
+    if art == "liste":
+        berichte = BR.alle_berichte(pdir)
+        studien = PS.liste(PS.studien_wurzel(pdir))
+        eigene = BR.baum(pdir)
+        z = ["BERICHTE  " + os.path.basename(pdir), ""]
+        z.append("Fertige Berichte (%d):" % len(berichte))
+        for e in berichte:
+            z.append("  %-52s %6.2f MB  %s  [%s]"
+                     % (e["pfad"][:52], e["mb"], e["zeit"], e["art"]))
+        if not berichte:
+            z.append("  (keiner)")
+        z += ["", "Eigene Berichte (%d, Varianten eingerueckt):" % len(eigene)]
+        for e in eigene:
+            z.append("  %s%-40s %2d Bloecke, %2d Fassungen  %s"
+                     % ("  " * e["tiefe"] + ("+ " if e["tiefe"] else ""),
+                        (e["titel"] or "")[:40], e["n_bloecke"],
+                        e.get("n_fassungen", 0), e["kennung"]))
+        if not eigene:
+            z.append("  (keiner) — anlegen mit: bericht --art eigen --titel '...'")
+        z += ["", "Abgelegte Parameterstudien (%d):" % len(studien)]
+        for e in studien:
+            z.append("  %-30s %-22s %s Schritte%s"
+                     % (e["kennung"], (e["label"] or "")[:22], e["steps"],
+                        "  [Bericht da]" if e.get("bericht") else ""))
+        if not studien:
+            z.append("  (keine)")
+        z += ["", "Bausteine fuer einen eigenen Bericht: "
+              + ", ".join(BR.BAUSTEINE)]
+        text = "\n".join(z)
+        print(json.dumps({"berichte": berichte, "eigene": eigene,
+                          "studien": studien, "bausteine": list(BR.BAUSTEINE)},
+                         ensure_ascii=False, indent=1, default=str)
+              if args.json else text)
+        return 0 if (berichte or eigene or studien) else 1
+
+    if art == "studie":
+        wurzel = PS.studien_wurzel(pdir)
+        kennung = args.kennung
+        if not kennung:
+            vorhanden = PS.liste(wurzel)
+            if not vorhanden:
+                return _die("Keine abgelegte Studie in diesem Projekt. Erst "
+                            "`studie` rechnen.", EXIT_REMOTE)
+            kennung = vorhanden[0]["kennung"]
+            print(f"  (neueste Studie: {kennung})")
+        st = PS.laden(wurzel, kennung)
+        if st is None:
+            return _die(f"Studie '{kennung}' gibt es nicht.", EXIT_USAGE)
+        import ema_report
+        r = ema_report.generate_paramstudy_report(
+            st, st.get("payload") or {}, os.path.join(wurzel, kennung),
+            model=args.modell, progress_cb=melde)
+        print(f"PDF: {r['pdf']}")
+        return 0
+
+    if art == "reihe":
+        wurzel = PS.studien_wurzel(pdir)
+        eintraege = PS.liste(wurzel)
+        if args.kennung:
+            gewuenscht = [k.strip() for k in args.kennung.split(",") if k.strip()]
+            eintraege = [e for e in eintraege if e["kennung"] in gewuenscht]
+        studien = [PS.laden(wurzel, e["kennung"]) for e in eintraege]
+        studien = [x for x in studien if x]
+        if not studien:
+            return _die("Keine abgelegte Studie in diesem Projekt.", EXIT_REMOTE)
+        ausw = PS.reihe_auswerten(studien)
+        for w in ausw.get("warnungen") or []:
+            print("  ⚠ " + w)
+        import ema_report
+        r = ema_report.generate_studienreihe_report(
+            studien, pdir, model=args.modell, progress_cb=melde,
+            titel=args.titel or "")
+        print(f"PDF: {r['pdf']}  ({len(studien)} Studien)")
+        return 0
+
+    if art == "elmer":
+        rj = os.path.join(pdir, "results.json")
+        if not os.path.exists(rj):
+            return _die("Kein results.json — in diesem Projekt lief noch keine "
+                        "Rechnung.", EXIT_REMOTE)
+        with open(rj, encoding="utf-8") as f:
+            res = json.load(f) or {}
+        if not res.get("em3d"):
+            return _die("Kein 3-D-Lauf (Elmer) abgelegt. Erst `run em3d`.",
+                        EXIT_REMOTE)
+        payload = {}
+        mp = os.path.join(pdir, "meta.json")
+        if os.path.exists(mp):
+            with open(mp, encoding="utf-8") as f:
+                payload = (json.load(f) or {}).get("payload") or {}
+        import ema_ansichten, ema_report
+        r = ema_report.generate_em3d_report(
+            res, payload, pdir, projekt_dir=pdir,
+            ansichten=ema_ansichten.als_bildpaare(pdir),
+            model=args.modell, progress_cb=melde)
+        print(f"PDF: {r['pdf']}  ({r['n_loeser']} Solver aus der case.sif)")
+        return 0
+
+    if art == "eigen":
+        kennung = args.kennung
+        if not kennung:
+            kennung = BR.anlegen(pdir, args.titel or "Bericht")
+            print(f"  neuer Bericht angelegt: {kennung}")
+            bloecke = [{"art": "baustein", "quelle": q} for q in
+                       (args.bausteine.split(",") if args.bausteine
+                        else ["steckbrief"])]
+            BR.speichern(pdir, kennung,
+                         {"titel": args.titel or "Bericht", "bloecke": bloecke},
+                         anlass="cae_cli bericht --art eigen")
+        doc = BR.laden(pdir, kennung)
+        if doc is None:
+            return _die(f"Bericht '{kennung}' gibt es nicht.", EXIT_USAGE)
+        r = BR.rendern(pdir, kennung, progress_cb=melde)
+        print(f"PDF : {r['pdf']}")
+        print(f"HTML: {r['html']}   (hier laufen die Videos)")
+        return 0
+
+    return _die(f"Unbekannte Art '{art}'.", EXIT_USAGE)
 
 
 def _studie_tabelle(erg: dict, spec: dict) -> list:
@@ -2814,6 +2982,24 @@ def _wait(args, status_path="/status") -> int:
                 print(f"  {line}")
             if st.get("error"):
                 print(f"FEHLER: {st['error']}", file=sys.stderr)
+            # Ein gerissenes Tor kennt gerechnete Auswege (`AuslegungReisst`).
+            # Sie NICHT auszugeben hiesse, den Agenten raten zu lassen — und er
+            # raet dann an derselben Stelle wie der Mensch vorher: „irgendwas
+            # kleiner machen". Jeder Weg ist gegen dasselbe Tor nachgeprueft.
+            wege = st.get("vorschlaege") or []
+            if wege:
+                if st.get("befund"):
+                    print("\n" + st["befund"], file=sys.stderr)
+                print("Was helfen wuerde (gerechnet, jeder Weg nachgeprueft):",
+                      file=sys.stderr)
+                for w in wege:
+                    print("  * " + w.get("text", ""), file=sys.stderr)
+                    if w.get("schluessel"):
+                        print("      --set %s=%s   (%s)"
+                              % (w["schluessel"], w["wert"], w.get("preis", "")),
+                              file=sys.stderr)
+                print("  Vorgeschlagen ist nicht gewaehlt: welcher Weg gegangen "
+                      "wird, ist eine Auslegungsentscheidung.", file=sys.stderr)
             return EXIT_REMOTE if (s == "error" or st.get("error")) else EXIT_OK
         if s == "idle" and not seen_running and time.time() - t0 > _IDLE_GRACE_S:
             return _die(f"{status_path} steht nach {_IDLE_GRACE_S:.0f}s noch auf 'idle' "
@@ -3351,9 +3537,38 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Zahl der Stuetzstellen (2-500, Vorgabe 60; ~0,5 s je Punkt)")
     s.add_argument("--rpm", type=float, default=None,
                    help="feste Drehzahl fuer die Studie (Vorgabe: rpm_to des Payloads)")
+    s.add_argument("--felder", type=int, default=0,
+                   help="zusaetzlich N Feldbilder ueber den Bereich rendern "
+                        "(0 = keine; ab 2 entsteht auch ein Video). Kostet "
+                        "~8 s je Bild bei N=300.")
     _add_ablage(s)
     _add_globals(s, json_hilfe="vollstaendig als JSON (ohne die Bilder)")
     s.set_defaults(fn=cmd_studie)
+
+    s = sub.add_parser("bericht",
+                       help="Berichte nachsehen und erzeugen (Studie, Reihe, "
+                            "Elmer, eigener Bericht mit Bausteinen)")
+    _basis(s)
+    s.add_argument("--projekt",
+                   help="Projektkennung ('last' = juengstes). Ohne Projekt gibt "
+                        "es weder die Zahlen noch einen Ort fuer das PDF.")
+    s.add_argument("--art", default="liste",
+                   choices=("liste", "studie", "reihe", "elmer", "eigen"),
+                   help="liste = was da ist; studie/reihe/elmer = PDF erzeugen; "
+                        "eigen = selbst geschriebener Bericht (PDF + HTML)")
+    s.add_argument("--kennung", default="",
+                   help="welche Studie bzw. welcher Bericht (bei --art reihe "
+                        "auch mehrere, durch Komma getrennt). Ohne Angabe: die "
+                        "neueste bzw. alle.")
+    s.add_argument("--titel", default="", help="Titel (bei --art reihe/eigen)")
+    s.add_argument("--bausteine", default="",
+                   help="bei --art eigen und neuem Bericht: gerechnete "
+                        "Abschnitte einsetzen, durch Komma getrennt "
+                        "(steckbrief,getriebe,elmer,studien,sicherheit)")
+    s.add_argument("--modell", default=None, help="LLM fuer die Prosa")
+    _add_ablage(s)
+    _add_globals(s, json_hilfe="Liste als JSON (nur bei --art liste)")
+    s.set_defaults(fn=cmd_bericht)
 
     s = sub.add_parser("zielwert",
                        help="Zielwertoptimierung: freie Parameter suchen lassen, bis Ziel und Randbedingungen halten")
