@@ -21,17 +21,38 @@ import matplotlib.pyplot as plt
 
 import ema_optimize as O
 
-# Metrics shown in the study, in plot order: (metric key, label, unit)
-_STUDY_METRICS = [
-    ("Kt",           "Kt",                 "Nm/A"),
-    ("T_maxwell",    "Maxwell-Moment",     "Nm"),
-    ("B_gap",        "B_gap (Peak)",       "T"),
-    ("max_safe_rpm", "max. sichere Drehzahl", "U/min"),
-    ("mass_g",       "Aktivteil-Masse",    "g"),
-    ("T_magnet",     "T_Magnet",           "°C"),
-    ("T_winding",    "T_Wicklung",         "°C"),
-    ("P_total",      "Verluste P_ges",     "W"),
-]
+# Welche Kennzahlen gezeigt werden, in Plot-Reihenfolge — die BESCHRIFTUNG kommt
+# aus `ema_optimize.METRICS`, derselben Quelle, aus der auch die Zahlen stammen.
+#
+# Hier stand bis zum 12.09.2026 eine zweite, handgefuehrte Tabelle, und sie war
+# auseinandergelaufen: `mass_g` hiess hier **„Aktivteil-Masse"**, waehrend die
+# Zahl in `ema_optimize._eval_geom` als `rotor + magnet` gerechnet wird — ohne
+# Statoreisen und ohne Kupfer (dort korrekt „Rotor+Magnet-Masse" beschriftet).
+# Aufgefallen ist es an einer Luftspalt-Studie: der Luftspalt aendert ueber
+# `statorID` NUR den Stator, also stand die Spalte ueber 0,1…2,0 mm bei exakt
+# 23008 g still — was wie ein Rechenfehler aussieht und keiner war. Eine falsche
+# Beschriftung ist hier teurer als eine fehlende: sie laesst eine richtige Zahl
+# falsch erscheinen.
+_STUDY_KEYS = ["Kt", "T_maxwell", "B_gap", "max_safe_rpm",
+               "mass_g", "T_magnet", "T_winding", "P_total"]
+
+
+def _ohne_einheit(label: str) -> str:
+    """Eine nachgestellte ``[Einheit]`` aus dem Label nehmen.
+
+    ``O.METRICS`` fuehrt sie uneinheitlich mit (``"Kt [Nm/A]"``, aber
+    ``"T_Magnet"``), und Kopfzeile wie Achsenbeschriftung haengen die Einheit
+    ohnehin aus dem eigenen Feld an — sonst stuende ``Kt [Nm/A] [Nm/A]`` in der
+    CSV. Die Einheit bleibt also EIN Feld, und das Label bleibt EINE Quelle.
+    """
+    lab = label.strip()
+    if lab.endswith("]") and " [" in lab:
+        lab = lab[:lab.rindex(" [")].strip()
+    return lab
+
+
+_STUDY_METRICS = [(k, _ohne_einheit(O.METRICS[k]["label"]), O.METRICS[k]["unit"])
+                  for k in _STUDY_KEYS if k in O.METRICS]
 
 
 def _fig_b64(fig, dpi=120):

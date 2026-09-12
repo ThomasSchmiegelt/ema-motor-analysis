@@ -2485,8 +2485,49 @@ def run_pipeline(data: dict, state: dict, frames: list,
                     _log(state, f"   Meldung: {_err[:200]}", 88)
                 for _a in _att[:4]:
                     _log(state, f"   • {_a}", 88)
-                _log(state, "   → Verformung und Spannung kommen aus der analytischen "
-                            "Naeherung (Lamé), NICHT aus der FEM.", 88)
+                # ── Zweiter Anlauf mit dem EIGENEN Rechensatz, bevor Lamé greift ──
+                #
+                # Gemeldet am 12.09.2026: „fuer die Festigkeit wurde nicht Code
+                # Aster verwendet" — und das stimmte, aber der Grund lag davor.
+                # Ohne `.frd` fiel die Kette DIREKT auf die rotierende Vollscheibe
+                # zurueck: einen glatten Ring ohne Magnete und ohne Taschen, dem
+                # genau das fehlt, worauf es ankommt — die Spannungsueberhoehung
+                # an den duennen Eisenstegen ueber den Taschen.
+                #
+                # Dabei liegt der eigene Rechensatz daneben und braucht dafuer
+                # SEKUNDEN (gemessen: 13.669 Elemente vernetzt in 0,4 s, ccx
+                # 0,35 s — gegen Minuten plus 40 s FreeCAD-Start). Er wurde nur
+                # nie gefragt, weil `struct_solver` eine Entweder-oder-Wahl war
+                # statt einer Reihenfolge. Zwischen „FEM mit Taschen" und
+                # „glatter Ring" liegt kein Abwaegen: der Rueckfall ist immer
+                # schlechter, und er kostet nichts, ihn vorher zu versuchen.
+                #
+                # Gerechnet wird mit `ccx` auf dem Polsektor (der schnellste der
+                # drei); die Gegenprobe mit Z88/Code Aster bleibt die
+                # ausdrueckliche Wahl `beide`/`alle`, denn drei Loeser auf
+                # demselben Netz pruefen den LOESER, und das ist hier nicht die
+                # Frage — hier fehlt ueberhaupt ein Ergebnis.
+                _log(state, "   → zweiter Anlauf mit dem eigenen Rechensatz (Gmsh + "
+                            "CalculiX, Sekunden) statt sofort auf Lamé…", 88)
+                try:
+                    _zweit = _struktur_eigener_satz(geom, mat, rpm_fem, proj, "ccx",
+                                                    struct_mesh_mm, state)
+                except Exception as _e2:
+                    _zweit = {"solver_status": "FAILED",
+                              "log": f"{type(_e2).__name__}: {_e2}"}
+                if _zweit.get("max_von_mises_MPa"):
+                    _zweit["ersatz_fuer"] = "freecad"
+                    _zweit["fehlgrund_freecad"] = _grund
+                    fem_r = _zweit
+                    _log(state, f"✓ eigener Rechensatz eingesprungen: "
+                                f"{_zweit['max_von_mises_MPa']:.0f} MPa Rohmax, "
+                                f"P99 {_zweit.get('notch_peak_MPa', 0):.0f} MPa — "
+                                f"MIT Magnettaschen, im Gegensatz zu Lamé.", 88)
+                else:
+                    _log(state, "   auch der eigene Rechensatz lieferte nichts "
+                                f"({_zweit.get('log', '')[:120]})", 88)
+                    _log(state, "   → Verformung und Spannung kommen aus der analytischen "
+                                "Naeherung (Lamé), NICHT aus der FEM.", 88)
             results["structural_fem"] = fem_r
         else:
             fem_r = results.get("structural_fem", {}) or {}
