@@ -2153,7 +2153,8 @@ def run_pipeline(data: dict, state: dict, frames: list,
         # (frames self-calibrate), so raising N here is safe.
         em_n   = max(fdm_res, ema_analysis.AIRGAP_PROFILE_N)
         _log(state, f"🔬 Berechne EM-Feld (FDM {em_n}×{em_n})...", 22)
-        em0    = ema_analysis.run_em_analysis(geom, N=em_n, rotor_angle=0.0)
+        em0    = ema_analysis.run_em_analysis(geom, N=em_n, rotor_angle=0.0,
+                                              axial_mm=axial)
         sf_ref = em0["sf_ref"]   # OC calibration factor — reused for all loaded frames
         perf   = em0["performance"]
         # Welchen Luftspalt dieses Netz wirklich geoeffnet hat. Bei genuegend feinem
@@ -2340,7 +2341,8 @@ def run_pipeline(data: dict, state: dict, frames: list,
         # ── 4. EM speed sweep (analytical, for charts) ───────────────────────
         _log(state, "📈 EM-Kennlinie über Drehzahlbereich...", 75)
         from ema_analysis import compute_performance
-        em_sweep = [compute_performance(geom, perf["B_gap_T"], float(r)) for r in sweep_rpms]
+        em_sweep = [compute_performance(geom, perf["B_gap_T"], float(r),
+                                        axial_mm=axial) for r in sweep_rpms]
         results["em"]["speed_sweep"]        = em_sweep
         em_sweep_b64 = _em_sweep_chart(em_sweep)
         _save_png_b64(em_sweep_b64, os.path.join(proj, "charts", "em_curve.png"))

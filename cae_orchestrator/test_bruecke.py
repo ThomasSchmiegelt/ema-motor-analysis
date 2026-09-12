@@ -212,6 +212,26 @@ with tempfile.TemporaryDirectory() as tmp:
            "die Liste laedt die Payloads NICHT mit — sie steht in der "
            "Oberflaeche, nicht im Speicher")
 
+    # Zwei Knoten in DERSELBEN Millisekunde: die Marke traegt Millisekunden,
+    # aber ein gerechneter Lauf legt automatisch einen an, und wer unmittelbar
+    # danach von Hand abzweigt, ueberschrieb ihn — `zurueck` fuehrte dann an
+    # den falschen Stand, und der eigentliche Rueckkehrpunkt war weg. Der Test
+    # war dadurch gemessen in rund jedem vierten Lauf rot, ohne dass sich am
+    # Code etwas geaendert haette.
+    viele = [PJ.knoten_setzen(pdir, label=f'schnell {n}', payload=a)
+             for n in range(50)]
+    marken = [k['marke'] for k in viele]
+    pruefe(all(k['ok'] for k in viele) and len(set(marken)) == 50,
+           'fuenfzig Knoten in Folge bekommen fuenfzig verschiedene Marken — '
+           'sonst ueberschreibt ein Rueckkehrpunkt den anderen')
+    pruefe(all(PJ.knoten_holen(pdir, m) for m in marken),
+           'und jede davon laesst sich wieder holen — die Markenpruefung muss '
+           'den Kollisionszusatz kennen, sonst ist der Knoten zwar da und '
+           'trotzdem unerreichbar')
+    pruefe(PJ.knoten_holen(pdir, '../../etc/passwd') is None
+           and PJ.knoten_holen(pdir, marken[0] + '-x') is None,
+           'ein Pfad und ein erfundener Zusatz werden weiter abgewiesen')
+
 
 print("\n5. Die Seite: beide Richtungen, und das Formular hat Vorrang")
 _hier = os.path.dirname(os.path.abspath(__file__))

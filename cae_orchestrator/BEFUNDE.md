@@ -77,9 +77,64 @@ deshalb eine Entscheidung des Menschen, kein Nebenprodukt einer Parameterstudie
 (`ema_werkzeugstand`: ein Ziel wird nie durch eine stille Änderung am Rechenkern
 erreicht).
 
-**Status:** offen, gemessen. Die Längenstudie der Testreihe
-(`<projekt>/parameterstudien/*_axial/`) trägt diesen Fehler; alle übrigen zehn
-Studien laufen bei L = 80 mm und sind davon nicht berührt.
+**Status: BEHOBEN am 12.09.2026.** Der Rückfall liegt jetzt in **einer**
+Funktion, `ema_analysis.stapellaenge_m(geom, axial_mm)`, und geht in dieser
+Reihenfolge: ausdrückliche Angabe → `geom["axialLen"]` → 80 mm. Sie wird von
+`compute_performance`, `compute_advanced_em` und `run_em_analysis` benutzt; die
+festen 80 mm bleiben nur noch als letzter Rückfall stehen, damit eine Geometrie
+ohne `axialLen` (Handzeichnungen, ältere Testsätze) weiter rechnet. Zusätzlich
+geben die vier Stellen die Länge jetzt ausdrücklich mit, an denen sie **neben**
+der Geometrie geführt wird: `ema_optimize._eval_geom`,
+`ema_paramstudy._render_field_series` und die Pipeline (statische EM-Stufe +
+Drehzahl-Sweep). `ema_optimize._apply_params` schreibt die Länge außerdem **in**
+die Geometrie zurück — zwei Wahrheiten über dieselbe Größe sind eine zu viel.
+
+Nachgemessen am schnellen Bewerter: Kt 0,0210 / 0,0410 / 0,0620 bei 40 / 80 /
+120 mm, Verhältnis 2,95 statt vorher 1,00. Die Wicklungstemperatur derselben
+Studie fällt jetzt von 143,9 °C (40 mm) auf 75,6 °C (120 mm) — die längere
+Maschine braucht für dasselbe Moment weniger Strom.
+
+**Was sich dadurch bewegt.** Von 74 gespeicherten Projekten haben **50** eine
+Baulänge ≠ 80 mm; deren Kt, ψ_pm, EMK und alles daraus Abgeleitete verschieben
+sich linear mit L/80 — bei 60 mm also um −25 %, bei 160 mm um +100 %. Zwei
+festgenagelte Erwartungen in `test_zyklen.py` waren davon betroffen und sind
+korrigiert: der 75-mm-Antrieb dort trägt `axialLen=60`, seine
+Spannungsausnutzung fällt von 310 % auf 231 % und die passende Windungszahl
+steigt von 2 auf 3. `test_fdm_golden.py` gibt `axial_mm` seit jeher
+ausdrücklich mit und ist unberührt.
+
+Festgenagelt in `test_zyklen.py` (`stapellaenge_m` in allen drei Fällen, Kt
+linear in L).
+
+---
+
+## 2026-09-12 — Zwei Rückkehrpunkte in derselben Millisekunde überschreiben sich
+
+**Beobachtung.** `test_bruecke.py` war flatterhaft: gemessen **rund jeder vierte
+Lauf** rot, ohne dass sich am Code etwas geändert hätte, und immer an derselben
+Stelle — „zurück auf 'None'", der Knoten war nicht auffindbar.
+
+**Messung.** `ema_projekt._marke_jetzt` liefert `%Y%m%d_%H%M%S_%f` auf
+Millisekunden gekürzt, und `knoten_setzen` schrieb ohne jede Prüfung nach
+`knoten/<marke>.json`. Ein gerechneter Lauf legt automatisch einen Rückkehrpunkt
+an; wer unmittelbar danach von Hand abzweigt, trifft dieselbe Millisekunde. 25
+Läufe nach der Absicherung: 25 grün. 50 Knoten in Folge ergeben jetzt 50
+verschiedene Marken (vorher gemessen Kollisionen).
+
+**Warum das nicht kosmetisch ist.** Der zweite Knoten überschrieb den ersten,
+und `zurueck` führte danach an den **falschen Stand** — der eigentliche
+Rückkehrpunkt war weg. Das ist genau die Sorte Verlust, gegen die die
+Schnappschüsse gebaut sind.
+
+**Fundstelle.** `ema_projekt.knoten_setzen` (`:360`) und `knoten_holen` (`:411`).
+Letzteres prüfte die Marke gegen `[0-9_]{1,32}` — der Kollisionszusatz `-2`
+wäre daran gescheitert, der Knoten also geschrieben und trotzdem unerreichbar
+gewesen. Beides zusammen gehört.
+
+**Status: BEHOBEN am 12.09.2026.** Dieselbe Absicherung wie in
+`ema_steckbrief.ablegen` und `ema_paramstudy.studie_anlegen`: existiert die
+Datei, wird `-2`, `-3`, … angehängt; das Markenmuster kennt den Zusatz, weist
+aber Pfade und erfundene Zusätze weiter ab. Festgenagelt in `test_bruecke.py`.
 
 ---
 

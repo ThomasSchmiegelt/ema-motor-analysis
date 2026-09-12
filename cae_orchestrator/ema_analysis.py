@@ -1142,17 +1142,56 @@ def _analytical_Barm(geom: dict, i_pk: float) -> float:
     return float(np.clip(B_arm, 0.0, 5.0))
 
 
+def stapellaenge_m(geom: dict, axial_mm=None) -> float:
+    """Blechpaketlaenge in **Metern** — die EINE Stelle, an der sie bestimmt wird.
+
+    Reihenfolge: ausdrueckliche Angabe → ``geom["axialLen"]`` → 80 mm.
+
+    **Warum der mittlere Schritt noetig war** (Befund 12.09.2026, s. ``BEFUNDE.md``):
+    ``axial_mm`` war ein OPTIONALES Argument mit einem stillen Rueckfall auf feste
+    80 mm, und vier Produktivstellen gaben es nicht mit — der schnelle Bewerter
+    (``ema_optimize._eval_geom``, an dem Zielwertoptimierung, Parameterstudie,
+    Magnet-Feinoptimierer und die Vorsortierung der KI-Entwuerfe haengen), die
+    Feldbilder der Parameterstudie, die statische EM-Stufe der Pipeline samt
+    Drehzahl-Sweep und der Handy-Pfad. ``psi_pm`` und damit ``Kt`` sind in L
+    **linear**; gemessen stand ``Kt`` ueber 40…120 mm auf 0,0410 Nm/A still, wo
+    0,021/0,041/0,062 richtig sind — bei 40 mm also um den Faktor 2 zu hoch.
+
+    Der Rueckfall gehoert deshalb nicht auf eine Zahl, sondern auf die
+    Geometrie: jeder Aufrufer, der die Laenge ohnehin in seinem ``geom`` fuehrt,
+    ist damit richtig, auch der naechste, der das Argument vergisst. Eine
+    ausdrueckliche Angabe gewinnt weiterhin — dort, wo die Laenge NEBEN der
+    Geometrie gefuehrt wird (``payload["axial_len"]``, der Studien-Sweep), ist
+    sie die massgebliche.
+
+    Die 80 mm bleiben als letzter Rueckfall, damit eine Geometrie ohne
+    ``axialLen`` (Handzeichnungen, aeltere Testsaetze) weiter rechnet.
+    """
+    try:
+        if axial_mm is not None and float(axial_mm) > 0.0:
+            return float(axial_mm) / 1000.0
+    except (TypeError, ValueError):
+        pass
+    try:
+        L = float((geom or {}).get("axialLen") or 0.0)
+        if L > 0.0:
+            return L / 1000.0
+    except (TypeError, ValueError):
+        pass
+    return 0.080
+
+
 def compute_performance(geom: dict, B_gap: float, rpm: float = 1000.0,
                         axial_mm: float | None = None) -> dict:
     """Key EM performance metrics from air gap flux density.
 
-    axial_mm: actual stack length [mm]; defaults to 80 mm if not given.
-    Passing the real axial length makes Kt, psi_pm and EMK geometry-accurate.
+    axial_mm: stack length [mm]; without it ``geom["axialLen"]``, sonst 80 mm
+    (s. ``stapellaenge_m``). Kt, psi_pm und EMK sind darin linear.
     """
     p       = int(geom["p"])
     poles   = p * 2
     n_slots = int(geom["slots"])
-    L_ax    = (axial_mm / 1000.0) if axial_mm is not None else 0.080
+    L_ax    = stapellaenge_m(geom, axial_mm)
     R_gap   = r_gap_m(geom)                                          # m
 
     # Flux linkage (normalised, 1 turn per slot assumed)
@@ -1432,7 +1471,7 @@ def compute_advanced_em(geom: dict, perf: dict, axial_mm: float,
     """
     p        = int(geom["p"])
     n_slots  = int(geom["slots"])
-    L_ax     = (axial_mm / 1000.0) if axial_mm else 0.080
+    L_ax     = stapellaenge_m(geom, axial_mm)
     R_gap    = r_gap_m(geom)
     g        = luftspalt_mm(geom) / 1000.0                          # m
     hm       = float(geom["magThick"]) / 1000.0
@@ -1722,7 +1761,8 @@ def run_em_analysis(geom: dict, N: int = 150, rotor_angle: float = 0.0,
                     saturate: bool = False) -> dict:
     """Full EM analysis: FDM solve + calibrated physical quantities.
 
-    axial_mm  : actual stack length [mm] for geometry-accurate Kt/EMK (default 80 mm).
+    axial_mm  : stack length [mm] for geometry-accurate Kt/EMK; without it
+                ``geom["axialLen"]``, sonst 80 mm (s. ``stapellaenge_m``).
     fdm_iters : SOR iterations; None → default (180 for static, pass 120 for animation).
     sf_ref    : pre-computed calibration factor [T/rel.unit] from an OC run.
                 Pass this for physically correct amplitude when stator currents are present:
@@ -1801,7 +1841,7 @@ def run_em_analysis(geom: dict, N: int = 150, rotor_angle: float = 0.0,
             B_T  = np.hypot(Bx_T, By_T)
             A    = A_nl * sc_nl
 
-    L_ax = (axial_mm / 1000.0) if axial_mm is not None else 0.080
+    L_ax = stapellaenge_m(geom, axial_mm)
     perf = compute_performance(geom, B_analytical, axial_mm=axial_mm)
 
     # Maxwell-stress torque estimate from FDM (in physical units).

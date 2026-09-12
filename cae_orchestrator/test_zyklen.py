@@ -360,8 +360,13 @@ pruefe(_p["ok"] and 0.4 <= _p["spannungsausnutzung"] <= _p["reserve"],
        f"{_p['spannungsausnutzung']*100:.0f} % der Klemmenspannung")
 _p_viel = _A.umrichter_passt(dict(_g75, inverterVdc=24, turnsPerSlot=10,
                                  umrichterBezug="wicklung"), 2500)
+# n_soll war hier bis zum 12.09.2026 auf 2 festgenagelt — gerechnet mit festen
+# 80 mm, waehrend `_g75` `axialLen=60` traegt (s. `BEFUNDE.md`: die Baulaenge
+# erreichte das analytische EM-Modell nicht). Mit der wirklichen Laenge faellt
+# die Gegen-EMK um 60/80, die Ausnutzung von 310 % auf 231 % und die passende
+# Windungszahl steigt von 2 auf 3.
 pruefe(not _p_viel["ok"] and _p_viel["spannungsausnutzung"] > 1.0
-       and _p_viel["n_soll"] == 2,
+       and _p_viel["n_soll"] == 3,
        f"zehn Windungen passen nicht — {_p_viel['spannungsausnutzung']*100:.0f} % der "
        f"Spannung, die Maschine erreicht die Drehzahl nicht; passend waeren "
        f"{_p_viel['n_soll']}")
@@ -378,7 +383,7 @@ _krit = {k["name"]: k for k in _S.pruefen(
                                       inverterImax=200, turnsPerSlot=10,
                                       umrichterBezug="wicklung")})["kriterien"]}
 pruefe("umrichter" in _krit and not _krit["umrichter"]["ok"]
-       and "turnsPerSlot=2" in _krit["umrichter"]["text"],
+       and "turnsPerSlot=3" in _krit["umrichter"]["text"],   # 60 mm, nicht 80
        "'sicherheit' beanstandet eine Wicklung, die nicht zum Umrichter passt, und "
        "nennt die Windungszahl, die passen wuerde")
 _krit_falle = {k["name"]: k for k in _S.pruefen(
@@ -393,6 +398,22 @@ _krit0 = {k["name"] for k in _S.pruefen(
 pruefe("umrichter" not in _krit0,
        "ohne vorgegebenen Umrichter wird nichts beanstandet — die 1 Wdg/Nut sind "
        "dort eine Bezugsgroesse und keine Wicklung, die passen muesste")
+
+
+# Die Baulaenge erreichte das analytische EM-Modell nicht (Befund 12.09.2026,
+# s. `BEFUNDE.md`): `run_em_analysis`/`compute_performance` fielen ohne
+# ausdrueckliches `axial_mm` auf feste 80 mm zurueck, obwohl `_g75` 60 mm
+# traegt. Kt ist in L linear -- es stand ueber 40...120 mm dieselbe Zahl.
+pruefe(abs(_A.stapellaenge_m(_g75) - 0.060) < 1e-9
+       and abs(_A.stapellaenge_m(_g75, 120) - 0.120) < 1e-9
+       and abs(_A.stapellaenge_m({}) - 0.080) < 1e-9,
+       "die Baulaenge kommt aus der Geometrie, wenn sie nicht ausdruecklich "
+       "genannt ist — die festen 80 mm sind nur noch der letzte Rueckfall")
+_kt60 = _A.compute_performance(_g75, 0.5)["Kt_Nm_per_A"]
+_kt120 = _A.compute_performance(dict(_g75, axialLen=120), 0.5)["Kt_Nm_per_A"]
+pruefe(abs(_kt120 / _kt60 - 2.0) < 0.02,
+       f"und Kt ist in ihr LINEAR: {_kt60:.4f} bei 60 mm gegen {_kt120:.4f} bei "
+       f"120 mm (Faktor {_kt120/_kt60:.2f}) — vorher stand dort zweimal dieselbe Zahl")
 
 
 print("\n11. Rastmoment — die Groesse hinter 'sehr praezise'")

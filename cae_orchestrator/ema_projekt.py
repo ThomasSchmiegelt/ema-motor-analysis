@@ -357,8 +357,19 @@ def knoten_setzen(project_dir: str, *, label: str = "", note: str = "",
         p = payload if payload is not None else (m.get("inputs") or {}).get("payload")
         if not isinstance(p, dict) or not p:
             return {"ok": False, "grund": "kein Payload zum Sichern"}
-        marke = _marke_jetzt()
         os.makedirs(os.path.join(project_dir, KNOTEN_ORDNER), exist_ok=True)
+        # Die Marke traegt Millisekunden, aber zwei Knoten koennen in dieselbe
+        # fallen — ein gerechneter Lauf legt automatisch einen an, und wer
+        # unmittelbar danach von Hand abzweigt, ueberschrieb ihn. Der Schaden
+        # ist nicht kosmetisch: `zurueck` fuehrt dann an den falschen Stand,
+        # und der eigentliche Rueckkehrpunkt ist weg (gemessen am flatterhaften
+        # `test_bruecke`, rund jeder vierte Lauf). Dieselbe Absicherung wie in
+        # `ema_steckbrief.ablegen` und `ema_paramstudy.studie_anlegen`.
+        basis = _marke_jetzt()
+        marke, n = basis, 1
+        while os.path.exists(_knoten_pfad(project_dir, marke)):
+            n += 1
+            marke = "%s-%d" % (basis, n)
         with open(_knoten_pfad(project_dir, marke), "w", encoding="utf-8") as f:
             json.dump({"marke": marke, "ts": _now(), "label": label,
                        "note": note, "action": action,
@@ -397,7 +408,7 @@ def knoten_liste(project_dir: str) -> list[dict]:
 
 def knoten_holen(project_dir: str, marke: str) -> dict | None:
     """Einen Knoten samt Payload. ``None``, wenn es ihn nicht gibt."""
-    if not re.fullmatch(r"[0-9_]{1,32}", str(marke or "")):
+    if not re.fullmatch(r"[0-9_]{1,32}(?:-[0-9]{1,3})?", str(marke or "")):
         return None
     try:
         with open(_knoten_pfad(project_dir, marke), encoding="utf-8") as f:

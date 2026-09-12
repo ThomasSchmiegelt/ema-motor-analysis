@@ -277,7 +277,10 @@ def _render_field_series(base_geom, base_axial, param, lo, hi, n_frames, cast,
             val = cast(lo + (hi - lo) * j / (n_frames - 1))
             geom, _ax = O._apply_params(base_geom, base_axial, {param: val})
             try:
-                em0   = ema_analysis.run_em_analysis(geom, N=min(field_N, 160), rotor_angle=0.0)
+                # `_ax` wurde bis zum 12.09.2026 verworfen — eine Laengenstudie
+                # rechnete ihre Feldbilder deshalb auf festen 80 mm.
+                em0   = ema_analysis.run_em_analysis(geom, N=min(field_N, 160),
+                                                     rotor_angle=0.0, axial_mm=_ax)
                 b_gap = em0["performance"]["B_gap_T"]
                 iq, id_ = ema_analysis.estimate_dq_currents(
                     geom, rpm_fix, op["load_nm"], b_gap_t=b_gap, rpm_base=op["rpm_base"])

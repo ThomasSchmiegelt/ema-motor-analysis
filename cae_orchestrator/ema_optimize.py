@@ -91,6 +91,12 @@ def _apply_params(base_geom, base_axial, params):
             continue
         if spec.get("special") == "axial":
             axial = float(v)
+            # Auch IN die Geometrie schreiben. Sonst traegt `geom` weiter die
+            # Laenge des Ausgangsentwurfs, waehrend `axial` daneben die neue
+            # fuehrt — und jeder Aufrufer, der nur `geom` bekommt, rechnet die
+            # falsche Maschine (Befund 12.09.2026: `Kt` stand ueber 40…120 mm
+            # still). Zwei Wahrheiten ueber dieselbe Groesse sind eine zu viel.
+            geom["axialLen"] = axial
         elif spec.get("special") == "airgap":
             # stator-rotor air gap drives the stator bore: statorID = rotorOD + 2·gap
             geom["statorID"] = float(geom["rotorOD"]) + 2.0 * float(v)
@@ -112,7 +118,13 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
     _Br, _mu = ema_analysis.Br_NdFeB, ema_analysis.MU_R_MAG
     ema_analysis.Br_NdFeB, ema_analysis.MU_R_MAG = mag["Br"], mag["mu_r"]
     try:
-        em   = ema_analysis.run_em_analysis(geom, N=N, rotor_angle=0.0)
+        # Die Baulaenge MIT hineingeben: sie wird hier neben der Geometrie
+        # gefuehrt (`_apply_params` gibt sie getrennt zurueck), und ohne sie
+        # rechnete `run_em_analysis` auf festen 80 mm — an diesem Bewerter
+        # haengen Zielwertsuche, Parameterstudie, Magnet-Feinoptimierer und die
+        # Vorsortierung der KI-Entwuerfe (s. `BEFUNDE.md`, 12.09.2026).
+        em   = ema_analysis.run_em_analysis(geom, N=N, rotor_angle=0.0,
+                                            axial_mm=axial)
         perf = em["performance"]
         rpm_t   = op["rpm_thermal"]
         iq, id_ = ema_analysis.estimate_dq_currents(
