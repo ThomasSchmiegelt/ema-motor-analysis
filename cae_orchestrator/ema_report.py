@@ -16,6 +16,8 @@ from __future__ import annotations
 import os, json, re, shutil, subprocess, urllib.request
 from typing import Iterable
 
+import ema_llm as _llm
+
 from ema_topology import TOPOLOGY_LABELS
 
 
@@ -461,11 +463,14 @@ def call_ollama(prompt: str, model: str = DEFAULT_MODEL,
             "num_ctx":     DEFAULT_NUM_CTX,
         },
     }).encode("utf-8")
-    req = urllib.request.Request(
-        f"{base_url}/api/generate", data=body,
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        resp = json.loads(r.read())
+    # EINE Stelle fuer alle sechs Anlaufstellen (`ema_llm`): lokal geht der Rumpf
+    # UNVERAENDERT weiter -- Byte fuer Byte dieselbe Anfrage wie vorher --, ein
+    # API-Anbieter aus dem Katalog wird uebersetzt. Der Rumpf oben bleibt
+    # absichtlich unangetastet: haette jeder Aufrufer eine neue Schnittstelle
+    # bekommen, waere jede der sechs Stellen eine eigene Gelegenheit gewesen,
+    # das lokale Verhalten zu verschieben.
+    resp = _llm.senden(json.loads(body), "generate",
+                       base_url=base_url, timeout=timeout)
     raw = resp.get("response", "").strip() or resp.get("thinking", "").strip()
     return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
 

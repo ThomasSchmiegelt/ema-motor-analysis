@@ -29,6 +29,8 @@ import math
 import re
 import urllib.request
 
+import ema_llm as _llm
+
 import ema_text2ema as T2E
 import ema_topology as TOPO
 from ema_report import OLLAMA_URL, DEFAULT_MODEL, DEFAULT_NUM_CTX
@@ -337,10 +339,13 @@ def _ollama(messages, model, timeout):
                        "format": "json",
                        "options": {"temperature": 0.35, "num_ctx": DEFAULT_NUM_CTX,
                                    "num_predict": 1600}}).encode("utf-8")
-    req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        resp = json.loads(r.read())
+    # EINE Stelle fuer alle sechs Anlaufstellen (`ema_llm`): lokal geht der Rumpf
+    # UNVERAENDERT weiter -- Byte fuer Byte dieselbe Anfrage wie vorher --, ein
+    # API-Anbieter aus dem Katalog wird uebersetzt. Der Rumpf oben bleibt
+    # absichtlich unangetastet: haette jeder Aufrufer eine neue Schnittstelle
+    # bekommen, waere jede der sechs Stellen eine eigene Gelegenheit gewesen,
+    # das lokale Verhalten zu verschieben.
+    resp = _llm.senden(json.loads(body), "chat", timeout=timeout)
     return _THINK_RE.sub("", (resp.get("message", {}) or {}).get("content", "")).strip()
 
 

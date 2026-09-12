@@ -12,6 +12,8 @@ import json
 import re
 import urllib.request
 
+import ema_llm as _llm
+
 import ema_maschinenart
 import ema_radien
 import ema_wicklung
@@ -351,10 +353,13 @@ def derive(description: str, timeout: int = 180) -> dict:
         "options": {"temperature": 0.4, "num_ctx": DEFAULT_NUM_CTX,
                     "num_predict": 1200},
     }).encode("utf-8")
-    req = urllib.request.Request(f"{OLLAMA_URL}/api/chat", data=body,
-                                 headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        resp = json.loads(r.read())
+    # EINE Stelle fuer alle sechs Anlaufstellen (`ema_llm`): lokal geht der Rumpf
+    # UNVERAENDERT weiter -- Byte fuer Byte dieselbe Anfrage wie vorher --, ein
+    # API-Anbieter aus dem Katalog wird uebersetzt. Der Rumpf oben bleibt
+    # absichtlich unangetastet: haette jeder Aufrufer eine neue Schnittstelle
+    # bekommen, waere jede der sechs Stellen eine eigene Gelegenheit gewesen,
+    # das lokale Verhalten zu verschieben.
+    resp = _llm.senden(json.loads(body), "chat", timeout=timeout)
     txt = _THINK_RE.sub("", (resp.get("message", {}) or {}).get("content", "")).strip()
     obj = _extract_obj(txt)
     raw = obj.get("params", obj) if isinstance(obj, dict) else {}

@@ -9,6 +9,8 @@ from __future__ import annotations
 import json, math, os, re, urllib.request
 from typing import Callable
 
+import ema_llm as _llm
+
 from ema_topology import TOPOLOGY_LABELS
 from ema_report import DEFAULT_MODEL, DEFAULT_NUM_CTX
 
@@ -88,11 +90,14 @@ def _call(prompt: str, model: str = EXPERT_MODEL, timeout: int = 300) -> str:
             "num_ctx":     DEFAULT_NUM_CTX,
         },
     }).encode()
-    req = urllib.request.Request(
-        f"{OLLAMA_URL}/api/generate", data=body,
-        headers={"Content-Type": "application/json"})
-    with urllib.request.urlopen(req, timeout=timeout) as r:
-        resp = json.loads(r.read())
+    # EINE Stelle fuer alle sechs Anlaufstellen (`ema_llm`): lokal geht der Rumpf
+    # UNVERAENDERT weiter -- Byte fuer Byte dieselbe Anfrage wie vorher --, ein
+    # API-Anbieter aus dem Katalog wird uebersetzt. Der Rumpf oben bleibt
+    # absichtlich unangetastet: haette jeder Aufrufer eine neue Schnittstelle
+    # bekommen, waere jede der sechs Stellen eine eigene Gelegenheit gewesen,
+    # das lokale Verhalten zu verschieben.
+    resp = _llm.senden(json.loads(body), "generate",
+                       base_url="", timeout=timeout)
     raw = resp.get("response", "").strip() or resp.get("thinking", "").strip()
     # Strip <think> blocks (Qwen3 style)
     raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
