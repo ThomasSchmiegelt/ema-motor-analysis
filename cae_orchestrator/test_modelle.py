@@ -196,7 +196,72 @@ try:
 finally:
     urllib.request.urlopen = _echt_urlopen
 
-print("\n7. Und die Sperre sitzt im Server, nicht in der Maske")
+print("\n7. Ein EIGENER Anbieter — Adresse und API-Form aus der Maske")
+with tempfile.TemporaryDirectory() as tmp:
+    p = _neue_datei(tmp)
+    r = M.anbieter_setzen("groq", "sk-GEHEIM3",
+                          [{"id": "llama-3.3-70b"}, {"id": "mixtral-8x7b"}],
+                          pfad=p, base_url="https://api.groq.com/openai/v1",
+                          api="openai-completions")
+    pruefe(r["ok"] and r["anbieter"] == "groq" and len(r["modelle"]) == 2,
+           "ein Anbieter, der in BEKANNT gar nicht steht, laesst sich eintragen "
+           "— sonst waere die Auswahl auf drei Dienste festgenagelt")
+    pruefe(r["lokal"] is False,
+           "und gilt als nicht lokal — an der ADRESSE gemessen, nicht am Namen")
+    d = json.load(open(p))["providers"]["groq"]
+    pruefe(d["baseUrl"] == "https://api.groq.com/openai/v1"
+           and d["api"] == "openai-completions",
+           "Basisadresse und API-Form stehen so im Katalog, wie sie getippt wurden")
+    k = M.katalog(p, pruefe_ollama=False)
+    pruefe("GEHEIM3" not in json.dumps(k, ensure_ascii=False),
+           "und auch hier verlaesst der Schluessel das Modul nicht")
+
+    # Ohne Basisadresse ist ein unbekannter Anbieter nicht eintragbar — geraten
+    # wird keine. (Der Server weist es ab, die Maske sagt es vorher.)
+    r2 = M.anbieter_setzen("garnicht", "sk-1", [{"id": "x"}], pfad=p)
+    pruefe(not r2["ok"] and "unbekannt" in r2["grund"],
+           f"ohne Adresse abgewiesen: {r2['grund']!r}")
+
+print("\n8. Die Modellliste eines eigenen Anbieters: /models wird VERSUCHT")
+_gerufen = {}
+class _A2:
+    def read(self): return json.dumps({"data": [{"id": "llama-3.3-70b"}]}).encode()
+    def __enter__(self): return self
+    def __exit__(self, *a): return False
+def _spion(req, timeout=None):
+    _gerufen["url"] = req.full_url
+    return _A2()
+_echt2 = urllib.request.urlopen
+urllib.request.urlopen = _spion
+try:
+    r = M.fremde_modelle("groq", "sk-1", basis="https://api.groq.com/openai/v1")
+    pruefe(r["ok"] and _gerufen["url"] == "https://api.groq.com/openai/v1/models",
+           f"gefragt wird {_gerufen.get('url')} — der OpenAI-Standardpfad")
+    pruefe([m["id"] for m in r["modelle"]] == ["llama-3.3-70b"],
+           "und die Kennungen kommen zurueck")
+finally:
+    urllib.request.urlopen = _echt2
+
+r = M.fremde_modelle("garnichtbekannt", "sk-1")
+pruefe(not r["ok"] and "Hand" in r["grund"],
+       "ohne Basis und ohne Hinterlegung sagt es, dass man die Kennungen von "
+       "Hand eintragen kann — statt nur 'geht nicht'")
+
+print("\n9. Die Maske fuehrt die Felder und reicht sie durch")
+_h = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "ema_agent.html"), encoding="utf-8").read()
+for feld in ("kat_name", "kat_basis", "kat_api", "kat_ids"):
+    pruefe(f'id="{feld}"' in _h, f"Feld {feld} vorhanden")
+pruefe('value="__eigen__"' in _h,
+       "und ein Eintrag 'eigener Anbieter' in der Auswahl")
+pruefe(_h.count("katAnbieterFelder()") >= 2,
+       "Suchen UND Eintragen holen die Angaben aus DERSELBEN Stelle — zwei "
+       "Abschriften liefen beim ersten Feld auseinander")
+pruefe("kat_ids" in _h.split("function katEintragen")[1][:1200],
+       "von Hand getippte Kennungen werden mit eingetragen — ohne sie waere ein "
+       "Anbieter ohne /models gar nicht eintragbar")
+
+print("\n10. Und die Sperre sitzt im Server, nicht in der Maske")
 try:
     import server
     c = server.app.test_client()

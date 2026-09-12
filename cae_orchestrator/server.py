@@ -4387,7 +4387,9 @@ def agent_anbieter_liste():
     r = ema_modelle.fremde_modelle(str(d.get("anbieter", "")),
                                    str(d.get("schluessel", "")),
                                    str(d.get("suche", "")),
-                                   grenze=int(d.get("grenze") or 60))
+                                   grenze=int(d.get("grenze") or 60),
+                                   basis=str(d.get("basis", "")),
+                                   api=str(d.get("api", "")))
     return jsonify(r), (200 if r["ok"] else 400)
 
 

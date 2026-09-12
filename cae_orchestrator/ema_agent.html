@@ -230,6 +230,46 @@
               <select id="kat_anb" onchange="katAnbieterUm()"
                       style="font-size:11.5px"></select>
             </div>
+
+            <!-- Eigener Anbieter: Name, Adresse und API-Form von Hand. Die drei
+                 hinterlegten sparen nur das Tippen — gebunden ist nichts an sie,
+                 `anbieter_setzen` nimmt Basisadresse und Form ohnehin entgegen. -->
+            <div id="kat_eigen" style="display:none;border-left:2px solid #3a5a6a;
+                 padding-left:9px;flex-direction:column;gap:6px">
+              <div>
+                <label for="kat_name" style="font-size:11.5px">Name</label>
+                <input type="text" id="kat_name" placeholder="z. B. groq"
+                       autocomplete="off" style="font-size:11.5px">
+                <div class="hint" style="color:var(--tx2)">
+                  Der Schlüssel, unter dem der Anbieter im Katalog steht —
+                  kleingeschrieben, ohne Leerzeichen.</div>
+              </div>
+              <div>
+                <label for="kat_basis" style="font-size:11.5px">Basisadresse</label>
+                <input type="text" id="kat_basis"
+                       placeholder="https://api.beispiel.com/v1"
+                       autocomplete="off" style="font-size:11.5px">
+                <div class="hint" style="color:var(--tx2)">
+                  Ohne <code>/chat/completions</code> — das hängt die Brücke an.
+                  Die Modellliste wird unter <code>…/models</code> versucht.</div>
+              </div>
+              <div>
+                <label for="kat_api" style="font-size:11.5px">API-Form</label>
+                <select id="kat_api" style="font-size:11.5px">
+                  <option value="openai-completions">OpenAI-kompatibel (/chat/completions, Bearer)</option>
+                  <option value="anthropic">Anthropic (/messages, x-api-key)</option>
+                </select>
+              </div>
+              <div>
+                <label for="kat_ids" style="font-size:11.5px">Modelle von Hand</label>
+                <input type="text" id="kat_ids"
+                       placeholder="modell-a, anbieter/modell-b"
+                       autocomplete="off" style="font-size:11.5px">
+                <div class="hint" style="color:var(--tx2)">
+                  Kommagetrennt — für Anbieter ohne <code>/models</code>. Was
+                  hier steht, wird zusätzlich zu den angehakten eingetragen.</div>
+              </div>
+            </div>
             <div>
               <label for="kat_key" style="font-size:11.5px">Schlüssel</label>
               <input type="password" id="kat_key" autocomplete="off"
@@ -466,7 +506,8 @@ async function katLaden(){
 
   const sel = $('kat_anb');
   sel.innerHTML = (KAT.bekannt || []).map(b =>
-    `<option value="${esc(b.name)}">${esc(b.label)} — ${esc(b.baseUrl)}</option>`).join('');
+    `<option value="${esc(b.name)}">${esc(b.label)} — ${esc(b.baseUrl)}</option>`).join('')
+    + '<option value="__eigen__">➕ eigener Anbieter (Adresse selbst eintragen)…</option>';
   // Die Sperre sitzt im Server; die Maske sagt nur, warum die Felder nichts tun.
   const aus = !KAT.lokal;
   ['kat_key','kat_suche','kat_anb'].forEach(id => { const e=$(id); if(e) e.disabled = aus; });
@@ -476,7 +517,20 @@ async function katLaden(){
   katAnbieterUm();
 }
 
+// Gibt den Anbieter zurueck, wie ihn die Routen brauchen: entweder einer der
+// hinterlegten (Name genuegt) oder der selbst eingetragene samt Adresse und
+// Form. EINE Stelle, damit Suchen und Eintragen nicht auseinanderlaufen.
+function katAnbieterFelder(){
+  const wahl = $('kat_anb').value;
+  if(wahl !== '__eigen__') return {anbieter: wahl, basis: '', api: ''};
+  return {anbieter: ($('kat_name').value || '').trim().toLowerCase(),
+          basis:    ($('kat_basis').value || '').trim(),
+          api:      $('kat_api').value};
+}
+
 function katAnbieterUm(){
+  const eigen = $('kat_anb').value === '__eigen__';
+  $('kat_eigen').style.display = eigen ? 'flex' : 'none';
   const b = (KAT?.bekannt || []).find(x => x.name === $('kat_anb').value);
   const m = $('kat_meldung');
   m.innerHTML = b?.schluessel_ab
@@ -503,7 +557,7 @@ async function katSuchen(){
   try{
     const r = await fetch(K('/agent/anbieter/liste'), {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({anbieter: $('kat_anb').value,
+      body: JSON.stringify({...katAnbieterFelder(),
                             schluessel: $('kat_key').value,
                             suche: $('kat_suche').value})});
     const d = await r.json();
@@ -523,24 +577,35 @@ async function katSuchen(){
 
 async function katEintragen(){
   const m = $('kat_meldung');
+  const feld = katAnbieterFelder();
+  if(!feld.anbieter){ m.innerHTML =
+    '<b style="color:#e6a23c">Der eigene Anbieter braucht einen Namen.</b>'; return; }
+  if($('kat_anb').value === '__eigen__' && !feld.basis){ m.innerHTML =
+    '<b style="color:#e6a23c">…und eine Basisadresse — geraten wird keine.</b>';
+    return; }
   const alle = JSON.parse($('kat_treffer').dataset.modelle || '[]');
   const gewaehlt = [...$('kat_treffer').querySelectorAll('input:checked')]
                      .map(c => alle[+c.dataset.i]).filter(Boolean);
-  if(!gewaehlt.length){ m.innerHTML =
-    '<b style="color:#e6a23c">Nichts angehakt — ein Anbieter ohne Modell steht ' +
-    'in keiner Auswahl.</b>'; return; }
+  // Von Hand getippte Kennungen kommen dazu — fuer Anbieter ohne `/models`.
+  // Ohne sie waere ein solcher Dienst gar nicht eintragbar.
+  const vonHand = (($('kat_ids')?.value) || '').split(',')
+                    .map(x => x.trim()).filter(Boolean).map(id => ({id}));
+  const zusammen = gewaehlt.concat(vonHand);
+  if(!zusammen.length){ m.innerHTML =
+    '<b style="color:#e6a23c">Kein Modell — weder angehakt noch eingetippt. Ein ' +
+    'Anbieter ohne Modell steht in keiner Auswahl.</b>'; return; }
   m.textContent = 'trage ein …';
   try{
     const r = await fetch(K('/agent/anbieter'), {
       method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({anbieter: $('kat_anb').value,
-                            schluessel: $('kat_key').value,
-                            modelle: gewaehlt})});
+      body: JSON.stringify({...feld, schluessel: $('kat_key').value,
+                            modelle: zusammen})});
     const d = await r.json();
     if(!d.ok){ m.innerHTML = `<b style="color:#e6a23c">${esc(d.grund || d.error)}</b>`; return; }
     // Der Schlüssel wird sofort aus dem Feld genommen: er steht jetzt in der
     // Datei, und im DOM hat er nichts mehr verloren.
     $('kat_key').value = '';
+    if($('kat_ids')) $('kat_ids').value = '';
     m.innerHTML = `<b style="color:#67c23a">✓ ${esc(d.anbieter)}: ` +
                   `${d.modelle.length} Modelle</b>`;
     await katLaden(); await auswahlLaden();

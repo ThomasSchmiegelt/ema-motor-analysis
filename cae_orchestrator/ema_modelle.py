@@ -346,7 +346,7 @@ def anbieter_fuer(modell: str, pfad: str = "") -> str:
 
 def fremde_modelle(anbieter: str, schluessel: str = "",
                    suche: str = "", timeout: float = 10.0,
-                   grenze: int = 60) -> dict:
+                   grenze: int = 60, basis: str = "", api: str = "") -> dict:
     """Die Modellliste eines API-Anbieters holen — zum Auswaehlen, nicht zum Eintragen.
 
     OpenRouter fuehrt mehrere hundert; alle einzutragen machte den Katalog und
@@ -354,10 +354,22 @@ def fremde_modelle(anbieter: str, schluessel: str = "",
     wird nur, was der Mensch anklickt.
     """
     anbieter = (anbieter or "").strip().lower()
-    vor = BEKANNT.get(anbieter)
+    vor = dict(BEKANNT.get(anbieter) or {})
+    if basis:
+        # EIGENER Anbieter: die Basisadresse kommt aus der Maske. `/models` ist
+        # der OpenAI-Standardpfad, und fast jeder kompatible Dienst bedient ihn
+        # -- probiert wird es also, aber es ist ausdruecklich ein Versuch: wer
+        # ihn nicht hat, traegt seine Modellkennungen von Hand ein, und dafuer
+        # gibt es das Feld daneben.
+        vor.setdefault("label", anbieter or "eigener Anbieter")
+        vor["api"] = api or vor.get("api") or "openai-completions"
+        vor["baseUrl"] = basis
+        vor["modelle_url"] = basis.rstrip("/") + "/models"
     if not vor or not vor.get("modelle_url"):
         return {"ok": False, "grund": f"fuer '{anbieter}' ist keine Modell-"
-                                      f"Auskunft hinterlegt", "modelle": []}
+                                      f"Auskunft hinterlegt — die Kennungen "
+                                      f"lassen sich von Hand eintragen",
+                "modelle": []}
     kopf = {"User-Agent": "cae-orchestrator"}
     if schluessel:
         if vor["api"] == "anthropic":
