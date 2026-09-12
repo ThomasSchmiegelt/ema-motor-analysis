@@ -96,3 +96,14 @@ restart.sh
 # hereingerutscht und mit dem naechsten Commit wieder herausgenommen worden.
 magnetvergleich_warteschlange.sh
 magnetvergleich_warteschlange.log
+
+# FluidX3D (ProjectPhysX) — fremder Quellbaum mit EIGENER Lizenz, kein Teil
+# dieses Repos. Er lag hier nur zufaellig untracked; ein `git add -A` haette
+# 408 MB Fremdcode samt fremder Lizenz in dieses Repo gezogen. Dieselbe
+# Behandlung wie die pikogk-Unterbaeume: eigenes Repo auf der Platte, hier
+# ausgeschlossen statt als gitlink gefuehrt.
+# Die Lizenz erlaubt Weitergabe ausdruecklich, verbietet aber kommerziellen und
+# militaerischen Einsatz und das TRAINIEREN von KI-Modellen auf dem Quelltext.
+# Dieses Repo fuehrt einen Trainingsdatensatz und eine Wissensbasis — der
+# Quelltext darf also weder dorthin noch hier hinein.
+/FluidX3D/
