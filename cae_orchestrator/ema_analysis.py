@@ -1346,6 +1346,68 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
     return float(iq), float(id_)
 
 
+def moment_erreichbar(geom: dict, perf: dict, axial_mm: float, rpm: float,
+                      load_nm: float, rpm_base: float | None = None,
+                      rpm_max: float | None = None,
+                      mag: dict | None = None) -> dict:
+    """Gibt es diesen Betriebspunkt ueberhaupt? — das Recht auf ein begruendetes Nein.
+
+    ``estimate_dq_currents`` **klemmt** den Strom still auf die Umrichtergrenze
+    (``iq_pure = max(min(T_req/Kt, i_lim), i_min)``). Reicht die Grenze fuer das
+    geforderte Moment nicht, kommt trotzdem ein Strompaar zurueck, und alles
+    dahinter — Verluste, Temperaturen, Wirkungsgrad — wird daraus gerechnet, als
+    waere der Punkt erreicht. Ein geklemmter Strom liest sich dann wie ein
+    gerechneter Betriebspunkt.
+
+    Gemessen am 12.09.2026 an einer Luftspalt-Parameterstudie: ueber 0,1…2,0 mm
+    fiel ``B_gap`` um 28 %, waehrend die Verluste bei ~3900 W nahezu STILLSTANDEN
+    und sogar leicht SANKEN — das Bild einer Maschine am Anschlag, bei der das
+    Kupfer einen festen Beitrag liefert und nur der kleine Eisenanteil noch B²
+    folgt. Zum Vergleich derselbe Sweep an einer Auslegung, die ihren Punkt
+    erreicht: 1436 → 3082 W, also +115 %. Daneben standen 375 °C Magnet- und
+    404 °C Wicklungstemperatur, als waeren sie gemessen.
+
+    Geurteilt wird ueber ``power_envelope`` — **dieselbe** Kennfeldrechnung, die
+    auch die Leistungskurve baut, bei EINER Drehzahl. Damit zaehlt der
+    Reluktanzanteil mit: ein Urteil allein aus ``T/Kt`` (reines Magnetmoment)
+    waere fuer reluktanzstarke Laeufer falsch — dort traegt die Reluktanz
+    gemessen 63–73 % (``ema_referenz``), und die Auslegung wuerde grundlos
+    verworfen.
+
+    Rueckgabe: ``erreichbar`` plus die Zahlen, die das Urteil tragen. Wie in
+    ``ema_asm`` gilt: was nicht existiert, ist ``None`` und nicht 0,0.
+    """
+    rpm_max = float(rpm_max or rpm)
+    rpm_base = float(rpm_base or rpm)
+    T_soll = float(load_nm)
+    try:
+        adv = compute_advanced_em(geom, perf, axial_mm, rpm_base, rpm_max,
+                                  T_soll, mag)
+        env = power_envelope(geom, adv, rpm_max=max(1.0, float(rpm)),
+                             T_rated_Nm=0.0, n_pts=1)
+        T_moeglich = float((env.get("T_peak_Nm") or [0.0])[0])
+    except Exception as e:                       # lieber kein Urteil als ein falsches
+        return {"erreichbar": None, "grund": f"nicht beurteilbar ({type(e).__name__})",
+                "T_moeglich_Nm": None, "T_gefordert_Nm": round(T_soll, 2)}
+
+    u = umrichter(geom, rpm)
+    ok = T_moeglich >= T_soll * 0.995            # halbes Prozent Rundungsluft
+    aus = {"erreichbar": bool(ok),
+           "T_moeglich_Nm": round(T_moeglich, 2),
+           "T_gefordert_Nm": round(T_soll, 2),
+           "i_max_A": round(u["i_max_A"]),
+           "v_dc_V": round(u["v_dc_V"]),
+           "grund": ""}
+    if not ok:
+        aus["grund"] = (
+            f"Das geforderte Moment wird bei {rpm:.0f} min-1 nicht erreicht: "
+            f"moeglich sind {T_moeglich:.1f} Nm gegen {T_soll:.1f} Nm gefordert "
+            f"(Grenzen {u['i_max_A']:.0f} A / {u['v_dc_V']:.0f} V). Der Strom "
+            f"steht damit am Anschlag; Verluste und Temperaturen daraus waeren "
+            f"keine Aussage ueber einen Betriebspunkt, den es nicht gibt.")
+    return aus
+
+
 def compute_advanced_em(geom: dict, perf: dict, axial_mm: float,
                         rpm_base: float, rpm_max: float, load_nm: float,
                         mag: dict | None = None,

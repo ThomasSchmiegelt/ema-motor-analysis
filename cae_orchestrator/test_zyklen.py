@@ -488,6 +488,75 @@ pruefe("rastmoment" in _kr and "GESCHAETZT" in _kr["rastmoment"]["text"],
        "als Tor mit fester Schranke")
 
 
+# ── Der schnelle Bewerter darf Nein sagen ────────────────────────────────────
+#
+# `estimate_dq_currents` klemmt den Strom STILL auf die Umrichtergrenze
+# (`iq_pure = max(min(T_req/Kt, i_lim), i_min)`). Reichte die Grenze nicht, kam
+# trotzdem ein Strompaar zurueck, und Verluste, Temperaturen und Wirkungsgrad
+# wurden daraus gerechnet, als waere der Punkt erreicht.
+#
+# Gemessen am 12.09.2026 an einer Luftspalt-Parameterstudie: ueber 0,1…2,0 mm
+# fiel `B_gap` um 28 %, waehrend die Verluste bei ~3900 W STILLSTANDEN und sogar
+# leicht SANKEN — das Bild einer Maschine am Anschlag. Dieselbe Studie an einer
+# Auslegung, die ihren Punkt erreicht: 1436 → 3082 W (+115 %). Daneben standen
+# 375 °C Magnet- und 404 °C Wicklungstemperatur, als waeren sie gemessen.
+print("\n12. Der schnelle Bewerter darf Nein sagen")
+import ema_optimize as _O
+import ema_analysis as _A
+import ema_pipeline as _Pl
+
+_gU = dict(cae_cli.frischer_payload()["geom"])
+_gU.update({"statorOD": 305.0, "rotorOD": 188.6, "statorID": 190.0,
+            "shaftD": 60.0, "poles": 6, "slots": 36, "magShape": "u"})
+_mats = (_Pl.LAMINATES["m270_35a"], _Pl.LAMINATES["m270_35a"],
+         _Pl.HAIRPIN_MATS["cu_etp"], _Pl.MAGNETS["ndfeb_n35"])
+_sw = [3000.0, 6000.0, 9000.0, 12000.0]
+_bew = lambda last: _O.evaluate_fast(
+    _gU, 150.0, {}, _mats,
+    {"rpm_thermal": 5000.0, "load_nm": last, "rpm_base": 5000.0},
+    "oil", 40.0, _sw, N=140)
+
+_gut, _nein = _bew(50.0), _bew(2000.0)
+pruefe(_gut.get("erreichbar") is not False
+       and _gut["P_total"] is not None and _gut["T_magnet"] is not None,
+       "ein erreichbarer Punkt liefert Verluste und Temperaturen wie bisher")
+pruefe(_nein.get("erreichbar") is False,
+       f"2000 Nm an dieser Maschine: NICHT erreichbar "
+       f"(moeglich {_nein.get('T_moeglich_Nm')} Nm)")
+pruefe(_nein["P_total"] is None and _nein["T_magnet"] is None
+       and _nein["T_winding"] is None,
+       "Verluste und Temperaturen sind None — eine 0 laese sich wie ein "
+       "gerechnetes Ergebnis, und genau so wurden 375 °C gelesen")
+pruefe(_nein["B_gap"] is not None and _nein["Kt"] is not None
+       and _nein["mass_g"] is not None,
+       "was NICHT am Betriebspunkt haengt, bleibt stehen (B_gap, Kt, Masse)")
+pruefe(bool(_nein.get("grund")) and "Nm" in _nein["grund"],
+       "mit einer Begruendung, die die Zahlen nennt")
+
+# Der eigentliche Fallstrick: `_violation` ueberspringt `None`-Kennzahlen. Ohne
+# eigene Behandlung saehe die unerreichbare Auslegung BEDINGUNGSFREI aus und
+# koennte eine Zielwertsuche gewinnen.
+_gr = [{"metric": "T_magnet", "op": "<=", "value": 150.0}]
+pruefe(_O._violation(_nein, _gr) > 1e6,
+       "sie gilt als schwer verletzt statt als bedingungsfrei — `_violation` "
+       "ueberspringt None, also haette sie sonst JEDE Grenze 'erfuellt'")
+pruefe(_O._fitness(_nein, {"metric": "Kt", "goal": "max"}, _gr)
+       < _O._fitness(_gut, {"metric": "Kt", "goal": "max"}, _gr),
+       "und rangiert unter jeder erreichbaren Loesung")
+
+# Das Urteil kommt aus `power_envelope` — also MIT Reluktanzanteil. Ein Urteil
+# allein aus T/Kt (reines Magnetmoment) waere fuer reluktanzstarke Laeufer
+# falsch: dort traegt die Reluktanz gemessen 63–73 % (ema_referenz).
+_em = _A.run_em_analysis(_gU, N=140, rotor_angle=0.0)
+_perf = _em["performance"]
+_r = _A.moment_erreichbar(_gU, _perf, 150.0, 5000.0, 2000.0, 5000.0, 12000.0,
+                          _mats[3])
+_nur_magnet = _perf["Kt_Nm_per_A"] * _r["i_max_A"]
+pruefe(_r["T_moeglich_Nm"] > _nur_magnet,
+       f"das moegliche Moment ({_r['T_moeglich_Nm']:.0f} Nm) liegt UEBER dem "
+       f"reinen Magnetmoment am Stromanschlag ({_nur_magnet:.0f} Nm) — die "
+       f"Reluktanz zaehlt mit")
+
 print("\n" + "=" * 60)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

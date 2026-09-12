@@ -106,7 +106,8 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
 
     cast = spec["type"]
     xs, metric_series = [], {k: [] for k, _, _ in _STUDY_METRICS}
-    n_ok = n_fail = 0
+    n_ok = n_fail = n_unerreichbar = 0
+    unerreichbar_grund = ""
     label = spec["label"]
     log(f"Parameterstudie: {label}  {lo:g} → {hi:g} in {steps} Schritten @ {rpm_fix:.0f} U/min", 2)
 
@@ -122,6 +123,14 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
                 metric_series[k].append(None)
         else:
             n_ok += 1
+            if m.get("erreichbar") is False:
+                # Der Punkt existiert nicht: Verluste und Temperaturen sind
+                # `None`. Ohne diesen Zaehler steht spaeter eine leere Spalte da,
+                # und eine leere Spalte sieht wie ein Rechenfehler aus — genau
+                # so wurde sie auch gemeldet.
+                n_unerreichbar += 1
+                if not unerreichbar_grund:
+                    unerreichbar_grund = m.get("grund", "")
             for k in metric_series:
                 metric_series[k].append(m.get(k))
         if (i + 1) % max(1, steps // 20) == 0 or i + 1 == steps:
@@ -137,8 +146,19 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
             mats[3], op, rpm_fix, float(payload.get("field_bmax", 0) or 0),
             int(field_N), out_dir, label, log)
 
-    log(f"✓ Fertig: {n_ok} ausgewertet, {n_fail} fehlgeschlagen", 100)
+    hinweis = ""
+    if n_unerreichbar:
+        hinweis = (
+            f"{n_unerreichbar} von {steps} Schritten erreichen den geforderten "
+            f"Betriebspunkt NICHT — dort sind Verluste und Temperaturen leer "
+            f"(und nicht 0). {unerreichbar_grund}")
+        log("⚠ " + hinweis, 99)
+    log(f"✓ Fertig: {n_ok} ausgewertet, {n_fail} fehlgeschlagen"
+        + (f", {n_unerreichbar} ohne erreichbaren Betriebspunkt" if n_unerreichbar else ""),
+        100)
     return {
+        "n_unerreichbar": n_unerreichbar,
+        "hinweis":        hinweis,
         "param":    param,
         "label":    label,
         "rpm":      rpm_fix,

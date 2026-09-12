@@ -124,6 +124,40 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
         # Spalt). Ein Lastlauf kostete also und lieferte garantiert 0,0.
         # ``T_maxwell`` bleibt deshalb das, was ``run_em_analysis`` sagt -- und
         # das ist jetzt ``None`` statt 0,0, wo es nicht aufgeloest ist.
+        # Gibt es diesen Betriebspunkt ueberhaupt? `estimate_dq_currents` klemmt
+        # den Strom still auf die Umrichtergrenze -- alles dahinter waere sonst
+        # aus einem Anschlag gerechnet und saehe wie ein Betriebspunkt aus.
+        # (Gemessen an einer Luftspalt-Studie: Verluste standen bei ~3900 W
+        # still, waehrend B_gap um 28 % fiel, daneben 375 °C Magnettemperatur.)
+        erb = ema_analysis.moment_erreichbar(
+            geom, perf, axial, rpm_t, op["load_nm"], op["rpm_base"],
+            max(sweep_rpms) if sweep_rpms else rpm_t, mag)
+        if erb.get("erreichbar") is False:
+            import ema_pipeline as _P
+            ss = _P._struct_sweep(geom, mat, sweep_rpms)
+            max_safe = next((x["rpm"] for x in reversed(ss)
+                             if x["safety_factor"] >= 1.5), ss[0]["rpm"])
+            caps = ema_thermal.compute_capacities(geom, axial, mat, st_mat,
+                                                  hp_mat, mag)
+            m = caps["_masses_g"]
+            # Was NICHT vom Betriebspunkt abhaengt, bleibt stehen; was daran
+            # haengt, ist `None` und nicht 0,0 -- eine Null liest sich wie ein
+            # gerechnetes Ergebnis (dieselbe Regel wie in `ema_asm`).
+            return {
+                "Kt":           round(perf["Kt_Nm_per_A"], 4),
+                "T_maxwell":    (None if perf.get("T_maxwell_Nm") is None
+                                 else round(perf["T_maxwell_Nm"], 2)),
+                "B_gap":        round(perf["B_gap_T"], 4),
+                "max_safe_rpm": round(float(max_safe), 0),
+                "mass_g":       round(float(m.get("rotor", 0) + m.get("magnet", 0)), 0),
+                "T_magnet":     None,
+                "T_winding":    None,
+                "P_total":      None,
+                "erreichbar":   False,
+                "grund":        erb.get("grund", ""),
+                "T_moeglich_Nm": erb.get("T_moeglich_Nm"),
+            }
+
         losses = ema_thermal.compute_losses(geom, axial, rpm_t, iq, id_, perf,
                                             mat, st_mat, hp_mat, mag)
         G  = ema_thermal.conductances(geom, axial, cooling, rpm_t)
@@ -165,6 +199,13 @@ def _violation(metrics, constraints):
     """0 if all constraints hold, else a positive normalised total violation."""
     if "error" in metrics:
         return 1e9
+    if metrics.get("erreichbar") is False:
+        # WICHTIG: ohne diese Zeile saehe eine unerreichbare Auslegung
+        # BEDINGUNGSFREI aus -- ihre Kennzahlen sind `None`, und die Schleife
+        # unten ueberspringt `None`. Sie wuerde also jede Nebenbedingung
+        # "erfuellen" und koennte gewinnen. Sie rangiert stattdessen unter jeder
+        # erreichbaren Loesung, aber ueber einem echten Fehler (1e9).
+        return 1e8
     tot = 0.0
     for c in constraints:
         val = metrics.get(c["metric"])
