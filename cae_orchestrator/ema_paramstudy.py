@@ -64,6 +64,56 @@ def _fig_b64(fig, dpi=120):
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def wirkungslos_grund(payload, param, lo, hi):
+    """Bewegt dieser Parameter in DIESER Auslegung ueberhaupt etwas — und wenn
+    nicht, warum? Gibt einen Satz zurueck oder ``""``.
+
+    Anlass: eine Testreihe ueber alle elf Parameter, 15 Schritte je Studie.
+    **Vier** davon lieferten eine vollkommen flache Kurve, und an der Kurve war
+    nicht zu erkennen, ob die Auslegung unempfindlich ist oder das Werkzeug
+    nichts tut. Gemessen war es dreimal das Zweite und einmal das Erste:
+
+    * ``magDist`` und ``magDepthRel`` sind im **Wandmodus** (`pocketMode="wand"`,
+      die Vorgabe von ``--frisch``) ABGELEITETE Groessen — sie werden aus den
+      Wandstaerken gerechnet und zurueckgeschrieben. Als Eingabe tun sie nichts;
+      im Positionsmodus bewegen dieselben Werte die Taschen sofort (nachgeprueft
+      an ``ema_topology.magnet_legs``).
+    * ``magAsym`` gilt nur fuer ``magShape="vasym"``. An einer symmetrischen
+      V-Form ist er wirkungslos — an der asymmetrischen kippt er die Schenkel
+      (gemessen 1,047/−1,047 rad → 1,484/−0,524).
+    * ``magGap`` bewegt die Tasche sehr wohl, aber nicht die Kennzahlen: der
+      Klebespalt aendert die Tasche, nicht den Magneten, und ``_analytical_Bgap``
+      rechnet aus Magnetlaenge und -dicke. Das ist richtig so und im 3-D-Pfad
+      anders — hier ist es eine Aussage ueber das Modell, kein Fehler.
+
+    Eine flache Kurve ohne Begruendung ist die teuerste Art von Ergebnis: sie
+    sieht nach einem Rechenfehler aus und ist keiner (derselbe Grund, aus dem
+    ``ema_paarvergleich`` „bewegt NICHT: alles" ausdruecklich hinschreibt).
+    """
+    geom = payload.get("geom") or {}
+    if param in ("magDist", "magDepthRel") and str(geom.get("pocketMode")) == "wand":
+        return ("%s ist im Wandmodus (`pocketMode=\"wand\"`) eine ABGELEITETE "
+                "Groesse — sie folgt aus den Wandstaerken und wird zurueck-"
+                "geschrieben. Als Eingabe bewegt sie nichts. Fuer eine Studie "
+                "darueber `pocketMode=\"position\"` setzen." % param)
+    if param == "magAsym" and str(geom.get("magShape")) != "vasym":
+        return ("magAsym gilt nur fuer die asymmetrische V-Form "
+                "(`magShape=\"vasym\"`); diese Auslegung ist `%s`."
+                % geom.get("magShape"))
+    # Allgemeiner Fall: erreicht der Parameter die Geometrie ueberhaupt?
+    base_geom = geom
+    base_axial = float(payload.get("axial_len", geom.get("axialLen", 80)))
+    try:
+        g_lo, a_lo = O._apply_params(base_geom, base_axial, {param: lo})
+        g_hi, a_hi = O._apply_params(base_geom, base_axial, {param: hi})
+    except Exception:                                           # noqa: BLE001
+        return ""
+    if g_lo == g_hi and a_lo == a_hi:
+        return ("%s erreicht die Geometrie dieser Auslegung nicht — zwischen "
+                "%g und %g aendert sich kein einziger Zeichnungswert." % (param, lo, hi))
+    return ""
+
+
 def run_study(payload, param, lo, hi, steps=100, rpm=None,
               field_frames=0, field_N=160, out_dir=None, progress_cb=None):
     """Sweep one parameter from ``lo`` to ``hi`` in ``steps`` points at a FIXED speed.
@@ -147,8 +197,20 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
             int(field_N), out_dir, label, log)
 
     hinweis = ""
+    # Bewegt sich ueberhaupt etwas — und wenn nicht, warum nicht?
+    flach = [k for k, _, _ in _STUDY_METRICS
+             if len({v for v in metric_series[k] if v is not None}) <= 1]
+    grund = wirkungslos_grund(payload, param, lo, hi)
+    if grund:
+        hinweis = grund
+        log("⚠ " + grund, 99)
+    elif len(flach) == len(_STUDY_METRICS):
+        hinweis = ("%s bewegt die Zeichnung, aber KEINE der gerechneten "
+                   "Kennzahlen — der schnelle Bewerter rechnet analytisch und "
+                   "sieht diese Groesse nicht." % label)
+        log("⚠ " + hinweis, 99)
     if n_unerreichbar:
-        hinweis = (
+        hinweis = ((hinweis + " ") if hinweis else "") + (
             f"{n_unerreichbar} von {steps} Schritten erreichen den geforderten "
             f"Betriebspunkt NICHT — dort sind Verluste und Temperaturen leer "
             f"(und nicht 0). {unerreichbar_grund}")
@@ -159,6 +221,7 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
     return {
         "n_unerreichbar": n_unerreichbar,
         "hinweis":        hinweis,
+        "flache_kennzahlen": flach,
         "param":    param,
         "label":    label,
         "rpm":      rpm_fix,
@@ -225,7 +288,11 @@ def _render_field_series(base_geom, base_axial, param, lo, hi, n_frames, cast,
                     P._save_png_b64(b64, os.path.join(out_dir, f"frame_{n_disk:04d}.png"))
                     n_disk += 1
                 if j in gallery_idx:              # only a sample → returned gallery
-                    images.append({"value": val, "b64": b64})
+                    # Die Datei wird MITGEFUEHRT, damit der Studien-Store die
+                    # Galerie spaeter aus denselben Bildern wiederherstellen
+                    # kann, statt eine zweite Kopie danebenzulegen.
+                    images.append({"value": val, "b64": b64,
+                                   "datei": (f"frame_{n_disk-1:04d}.png" if out_dir else None)})
             except Exception as e:
                 log(f"  ⚠ Feldbild bei {label}={val:g} fehlgeschlagen: {e}")
             if (j + 1) % max(1, n_frames // 20) == 0 or j + 1 == n_frames:
@@ -273,3 +340,208 @@ def _build_chart(xs, series, xlabel, x_is_int, rpm_fix):
                  color="#eee", fontsize=11, y=1.0)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
     return _fig_b64(fig)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Studien-Store — jede Studie in ihren EIGENEN Ordner
+# ─────────────────────────────────────────────────────────────────────────────
+# Bis zum 12.09.2026 schrieben ALLE Studien in EINEN Ordner
+# (`server.STUDY_FIELD_DIR` = `~/cae_projekte/_paramstudy`), und
+# `_render_field_series` raeumte ihn zu Beginn jedes Laufs leer — die zweite
+# Studie ueberschrieb also die Bilder und das Video der ersten. Schlimmer: das
+# Ergebnis selbst (Zahlen, Diagramm, CSV) lag ueberhaupt nur im Serverspeicher
+# (`_study_state["result"]`), war nach einem Neustart weg und liess sich nie
+# wieder ansehen. Aus der Sicht dessen, der davorsitzt, ist „gerechnet, aber
+# nicht auffindbar" dasselbe wie „nicht gerechnet" — derselbe Befund wie bei
+# den Agentenlaeufen vor `/agent/laeufe` und bei den Verbergebnissen vor
+# `ema_steckbrief.ablegen`.
+#
+# Jetzt: ein Ordner je Studie, benannt nach Zeit UND Parameter (`20260912_
+# 121500_magAngle`), mit allem darin — Zahlen, Diagramm, CSV, Feldbilder,
+# Video und dem Payload, aus dem sie gerechnet wurde. Er liegt beim PROJEKT,
+# wenn eines gebunden ist (`<projekt>/parameterstudien/`), sonst unter
+# `~/cae_projekte/_paramstudy/`; dasselbe Verhaeltnis wie bei den
+# em3d-/Oel-/FluidX3D-Varianten.
+
+import json
+import os
+import time
+
+STUDIEN_UNTERORDNER = "parameterstudien"
+GLOBALE_WURZEL = os.path.expanduser("~/cae_projekte/_paramstudy")
+
+
+def studien_wurzel(project_dir=None):
+    """Wo die Studien dieses Laufs hingehoeren: ans Projekt, sonst global."""
+    if project_dir and os.path.isdir(project_dir):
+        return os.path.join(project_dir, STUDIEN_UNTERORDNER)
+    return GLOBALE_WURZEL
+
+
+def studie_anlegen(wurzel, param):
+    """Legt den Ordner fuer EINE Studie an und gibt (kennung, pfad) zurueck.
+
+    Wird VOR dem Lauf gerufen, weil die Feldbilder waehrend des Laufs
+    hineingeschrieben werden. Zwei Studien in derselben Sekunde bekommen ein
+    ``-2`` angehaengt (dasselbe wie `ema_steckbrief.ablegen` — ein Agentenzug
+    kann zwei Studien in Millisekunden starten)."""
+    os.makedirs(wurzel, exist_ok=True)
+    basis = "%s_%s" % (time.strftime("%Y%m%d_%H%M%S"), _dateiname(param))
+    kennung, n = basis, 1
+    while os.path.exists(os.path.join(wurzel, kennung)):
+        n += 1
+        kennung = "%s-%d" % (basis, n)
+    pfad = os.path.join(wurzel, kennung)
+    os.makedirs(pfad, exist_ok=True)
+    return kennung, pfad
+
+
+def _dateiname(text):
+    """Parametername als Ordnerbestandteil — nur das, was sicher ist."""
+    return "".join(c if (c.isalnum() or c in "._-") else "_" for c in str(text))[:40] or "studie"
+
+
+def csv_text(result):
+    """Die Studie als CSV — **eine** Quelle fuer den Download und die abgelegte
+    Datei. Sie stand vorher nur in `server.param_study_csv`; eine zweite
+    Fassung fuer den Store waere genau die Art Abschrift, die auseinanderlaeuft
+    (der Spaltenkopf der Metriken kommt ohnehin schon aus `ema_optimize`)."""
+    xs = result.get("x") or []
+    mets = result.get("metrics") or {}
+    meta = result.get("metric_meta") or []
+    keys = [m["key"] for m in meta]
+    kopf = [result.get("label", result.get("param", "param"))] + \
+           [("%s [%s]" % (m["label"], m["unit"])) if m.get("unit") else m["label"]
+            for m in meta]
+    zeilen = [";".join(kopf)]
+    for i, x in enumerate(xs):
+        reihe = ["%g" % x]
+        for k in keys:
+            v = (mets.get(k) or [None] * len(xs))[i]
+            reihe.append("" if v is None else "%g" % v)
+        zeilen.append(";".join(reihe))
+    return "\n".join(zeilen)
+
+
+def ablegen(result, pfad, payload=None, notiz=""):
+    """Schreibt die fertige Studie in ihren Ordner: ``studie.json`` (schlank,
+    ohne base64), ``studie.csv``, ``verlauf.png`` und — wenn vorhanden — die
+    Feldbilder/das Video, die waehrend des Laufs schon dort gelandet sind.
+
+    ``payload`` kommt mit, damit die Studie **nachvollziehbar** ist: ohne die
+    Geometrie, an der sie gerechnet wurde, ist eine Kurve eine Behauptung."""
+    import base64
+    os.makedirs(pfad, exist_ok=True)
+    schlank = {k: v for k, v in result.items()
+               if k not in ("chart_b64", "field_images")}
+    schlank["field_images"] = [{"value": b.get("value"), "datei": b.get("datei")}
+                               for b in (result.get("field_images") or [])
+                               if b.get("datei")]
+    schlank["kennung"] = os.path.basename(pfad)
+    schlank["zeitpunkt"] = time.strftime("%Y-%m-%d %H:%M")
+    schlank["notiz"] = notiz or ""
+    if payload is not None:
+        schlank["payload"] = payload
+    try:
+        if result.get("chart_b64"):
+            with open(os.path.join(pfad, "verlauf.png"), "wb") as f:
+                f.write(base64.b64decode(result["chart_b64"]))
+        with open(os.path.join(pfad, "studie.csv"), "w", encoding="utf-8") as f:
+            f.write(csv_text(result) + "\n")
+        tmp = os.path.join(pfad, "studie.json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(schlank, f, ensure_ascii=False)
+        os.replace(tmp, os.path.join(pfad, "studie.json"))
+    except (OSError, ValueError) as e:                     # noqa: BLE001
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "kennung": schlank["kennung"], "pfad": pfad}
+
+
+def _kurz(studie, pfad):
+    """Eine Zeile fuer die Uebersicht — ohne die Zahlenreihen einzulesen."""
+    mets = studie.get("metrics") or {}
+    def spanne(k):
+        werte = [v for v in (mets.get(k) or []) if v is not None]
+        return (min(werte), max(werte)) if werte else None
+    return {
+        "kennung": studie.get("kennung", os.path.basename(pfad)),
+        "zeitpunkt": studie.get("zeitpunkt", ""),
+        "param": studie.get("param"), "label": studie.get("label"),
+        "x_von": (studie.get("x") or [None])[0],
+        "x_bis": (studie.get("x") or [None])[-1],
+        "steps": studie.get("steps"), "rpm": studie.get("rpm"),
+        "n_ok": studie.get("n_ok"), "n_fail": studie.get("n_fail"),
+        "n_unerreichbar": studie.get("n_unerreichbar"),
+        "video": os.path.exists(os.path.join(pfad, "anim.mp4")),
+        "n_feldbilder": len(studie.get("field_images") or []),
+        "Kt_spanne": spanne("Kt"), "notiz": studie.get("notiz", ""),
+    }
+
+
+def liste(wurzel):
+    """Alle abgelegten Studien, neueste zuerst."""
+    out = []
+    if not os.path.isdir(wurzel):
+        return out
+    for kennung in sorted(os.listdir(wurzel), reverse=True):
+        pfad = os.path.join(wurzel, kennung)
+        datei = os.path.join(pfad, "studie.json")
+        if not os.path.isdir(pfad) or not os.path.exists(datei):
+            continue
+        try:
+            with open(datei, encoding="utf-8") as f:
+                out.append(_kurz(json.load(f), pfad))
+        except (OSError, ValueError):
+            continue
+    return out
+
+
+def laden(wurzel, kennung):
+    """Eine abgelegte Studie im Format von ``run_study`` zurueckgeben —
+    Diagramm und Feldbilder wieder als base64, damit das Frontend sie durch
+    DIESELBE Zeichenfunktion schickt wie einen frischen Lauf (eine zweite
+    waere die naechste Stelle, an der zwei Darstellungen auseinanderlaufen)."""
+    import base64
+    pfad = os.path.join(wurzel, kennung)
+    datei = os.path.join(pfad, "studie.json")
+    if not os.path.exists(datei):
+        return None
+    try:
+        with open(datei, encoding="utf-8") as f:
+            studie = json.load(f)
+    except (OSError, ValueError):
+        return None
+    chart = os.path.join(pfad, "verlauf.png")
+    if os.path.exists(chart):
+        with open(chart, "rb") as f:
+            studie["chart_b64"] = base64.b64encode(f.read()).decode()
+    bilder = []
+    for b in studie.get("field_images") or []:
+        bp = os.path.join(pfad, b.get("datei") or "")
+        if b.get("datei") and os.path.exists(bp):
+            with open(bp, "rb") as f:
+                bilder.append({"value": b.get("value"),
+                               "b64": base64.b64encode(f.read()).decode()})
+    studie["field_images"] = bilder
+    studie["field_video"] = os.path.exists(os.path.join(pfad, "anim.mp4"))
+    studie["gespeichert"] = True
+    return studie
+
+
+def video_pfad(wurzel, kennung):
+    p = os.path.join(wurzel, kennung, "anim.mp4")
+    return p if os.path.exists(p) else None
+
+
+def csv_pfad(wurzel, kennung):
+    p = os.path.join(wurzel, kennung, "studie.csv")
+    return p if os.path.exists(p) else None
+
+
+def loeschen(wurzel, kennung):
+    import shutil
+    p = os.path.join(wurzel, kennung)
+    if os.path.isdir(p) and os.path.exists(os.path.join(p, "studie.json")):
+        shutil.rmtree(p, ignore_errors=True)
+        return True
+    return False

@@ -17,6 +17,72 @@ kann.
 
 ---
 
+## 2026-09-12 — Die Baulänge erreicht das analytische EM-Modell nicht (Kt hängt nicht an L)
+
+**Beobachtung.** In einer Testreihe von elf Parameterstudien à 15 Schritten blieb
+`Kt` über die **Blechpaketlänge** von 40 bis 120 mm auf **0,0410 Nm/A stehen**,
+während die Masse im selben Lauf sauber mit 3 skalierte (7 665 → 22 995 g). Das
+kann nicht sein: `psi_pm = p·(2/π)·B_gap·R_gap·L_ax` und `Kt = 1,5·p·psi_pm`
+(`ema_analysis.py:1159`/`:1163`) sind in L **linear**. Eine doppelt so lange
+Maschine muss das doppelte Moment je Ampere liefern.
+
+**Messung.** Dieselbe Geometrie, einmal über den schnellen Bewerter, einmal direkt:
+
+| Baulänge | `_eval_geom` (so rechnet die Studie) | `run_em_analysis(…, axial_mm=L)` |
+|---:|---:|---:|
+| 40 mm | Kt = 0,0410 | Kt = 0,0210 |
+| 80 mm | Kt = 0,0410 | Kt = 0,0410 |
+| 120 mm | Kt = 0,0410 | Kt = 0,0620 |
+
+Bei 40 mm ist der Wert damit **um den Faktor 2 zu hoch**, bei 120 mm um ein
+Drittel zu niedrig. `B_gap` ist korrekt unverändert (es kommt aus der Formel und
+kennt kein L), `mass_g` ist korrekt proportional — nur der Pfad über `psi_pm`
+ist es nicht.
+
+**Fundstelle.** `ema_analysis.run_em_analysis` nimmt `axial_mm` als **optionales**
+Argument und fällt ohne Angabe auf **fest 80 mm** zurück
+(`ema_analysis.py:1804`: `L_ax = (axial_mm/1000.0) if axial_mm is not None else 0.080`,
+ebenso `compute_performance`, `ema_analysis.py:1155`). Vier Produktivstellen geben
+es nicht mit:
+
+* `ema_optimize._eval_geom` — `run_em_analysis(geom, N=N, rotor_angle=0.0)`. Das
+  ist der **schnelle Bewerter**, und an ihm hängen die Zielwertoptimierung
+  (`axial` ist dort selbst ein freier Parameter!), die Parameterstudie, der
+  Magnet-Feinoptimierer und die Vorsortierung der KI-Entwürfe samt ihrer
+  Trainingslabels.
+* `ema_paramstudy._render_field_series` — dieselbe Auslassung für die Feldbilder;
+  `O._apply_params` gibt die Länge zwar zurück (`geom, _ax`), sie wird aber
+  verworfen.
+* `ema_pipeline` — die statische EM-Stufe (`ema_pipeline.py:2156`) und der
+  Drehzahl-Sweep (`:2343`, `compute_performance(geom, B_gap, rpm)`).
+* `ema_mobil` (`:423`).
+
+`compute_advanced_em` und `moment_erreichbar` bekommen die Länge dagegen
+**positional** und sind richtig — was den Fehler schwer sichtbar macht: in
+demselben Ergebnisdict steht ein längenblindes `Kt` neben längenrichtigen
+abgeleiteten Größen.
+
+**Warum es lange unauffällig blieb.** Die Vorgabe *ist* 80 mm, und 80 mm ist die
+Blechpaketlänge des `--frisch`-Payloads und der meisten Testgeometrien. Am
+Auslegungspunkt stimmt die Zahl deshalb zufällig; falsch wird sie erst, sobald
+jemand die Länge ändert — also genau in einer Längenstudie oder in einer
+Optimierung, die an der Länge dreht.
+
+**Naheliegende Abhilfe** (bewusst NICHT im selben Zug gemacht): der Rückfall
+gehört nicht auf eine feste Zahl, sondern auf `geom["axialLen"]`; dann ist jeder
+heutige und künftige Aufrufer richtig, der die Länge ohnehin in seiner Geometrie
+führt, und ein ausdrückliches `axial_mm` gewinnt weiterhin. Das verschiebt die
+Kennzahlen **jeder** Auslegung mit L ≠ 80 mm — auch gespeicherter — und ist
+deshalb eine Entscheidung des Menschen, kein Nebenprodukt einer Parameterstudie
+(`ema_werkzeugstand`: ein Ziel wird nie durch eine stille Änderung am Rechenkern
+erreicht).
+
+**Status:** offen, gemessen. Die Längenstudie der Testreihe
+(`<projekt>/parameterstudien/*_axial/`) trägt diesen Fehler; alle übrigen zehn
+Studien laufen bei L = 80 mm und sind davon nicht berührt.
+
+---
+
 ## 2026-09-11 — Vier Verben laufen im System-Python nicht, und melden dabei das Falsche
 
 **Beobachtung.** `python3 cae_cli.py struktur --frisch` bricht ab mit

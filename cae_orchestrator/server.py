@@ -62,8 +62,15 @@ _getriebe_state = {"status": "idle", "progress": 0, "log": [], "result": None,
 # Parameter-study state (one parameter swept at a fixed speed, fast evaluator)
 _study_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
 # Field-line frames/video of the most recent parameter study (overwritten each run)
+# Wurzel fuer Parameterstudien OHNE gebundenes Projekt. Bis zum 12.09.2026 war
+# das der EINE Ordner, in den ALLE Studien schrieben — die zweite ueberschrieb
+# die Bilder und das Video der ersten, und das Ergebnis selbst lag ueberhaupt
+# nur im Serverspeicher. Jetzt liegt je Studie ein Unterordner darin bzw., wenn
+# ein Projekt gebunden ist, unter `<projekt>/parameterstudien/`.
 STUDY_FIELD_DIR = os.path.join(PROJECTS_ROOT, "_paramstudy")
 os.makedirs(STUDY_FIELD_DIR, exist_ok=True)
+# Ordner der zuletzt gelaufenen Studie (fuer /param_study/csv|video ohne Kennung)
+_study_ordner = {"wurzel": STUDY_FIELD_DIR, "kennung": None, "pfad": None}
 
 # Geometry-only CAD preview + smoke-test state (staged workflow, separate threads)
 _cad_state   = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
@@ -1925,12 +1932,28 @@ def _param_study_body(data):
         if pct is not None:
             _study_state["progress"] = int(pct)
     try:
-        _study_state["result"] = ema_paramstudy.run_study(
+        # EIGENER Ordner je Studie, VOR dem Lauf angelegt — die Feldbilder
+        # entstehen waehrend des Laufs und muessen gleich dort landen.
+        wurzel = ema_paramstudy.studien_wurzel(_study_projekt(data))
+        kennung, pfad = ema_paramstudy.studie_anlegen(wurzel, data["param"])
+        _study_ordner.update({"wurzel": wurzel, "kennung": kennung, "pfad": pfad})
+        cb("🗂 Studienordner: %s" % pfad)
+        res = ema_paramstudy.run_study(
             data["payload"], data["param"], data["lo"], data["hi"],
             steps=int(data.get("steps", 100)), rpm=data.get("rpm"),
             field_frames=int(data.get("field_frames", 0)),
             field_N=int(data.get("field_N", 300)),
-            out_dir=STUDY_FIELD_DIR, progress_cb=cb)
+            out_dir=pfad, progress_cb=cb)
+        abl = ema_paramstudy.ablegen(res, pfad, payload=data.get("payload"),
+                                     notiz=str(data.get("notiz", "")))
+        res["kennung"] = kennung
+        res["ordner"] = pfad
+        res["gespeichert"] = bool(abl.get("ok"))
+        if abl.get("ok"):
+            cb("💾 Studie abgelegt: %s" % os.path.join(pfad, "studie.json"))
+        else:
+            cb("⚠ Ablage fehlgeschlagen: %s" % abl.get("error"))
+        _study_state["result"] = res
         _study_state["status"] = "done"
         _study_state["progress"] = 100
     except Exception as e:
@@ -1939,6 +1962,111 @@ def _param_study_body(data):
         _study_state["log"].append("⚠ " + str(e))
         _study_state["status"] = "error"
         print(traceback.format_exc())
+
+
+def _study_projekt(data):
+    """Projektverzeichnis einer Studie: ausdrueckliche `project_id` im Payload,
+    sonst das aktive Projekt — dieselbe Regel wie `_em3d_project_dir`, nur ohne
+    ein frisches Projekt anzulegen (eine Studie ist kein Entwurf)."""
+    pid = (data.get("project_id") or (data.get("payload") or {}).get("project_id"))
+    if pid and _safe_name(pid):
+        d = os.path.join(PROJECTS_ROOT, pid)
+        if os.path.isdir(d):
+            return d
+    return _state.get("project_dir")
+
+
+def _study_wurzel_von(pid):
+    """Studienwurzel fuer die Store-Routen (`pid` oder aktives Projekt)."""
+    import ema_paramstudy
+    if pid in (None, "", "global"):
+        return ema_paramstudy.GLOBALE_WURZEL
+    if pid == "current":
+        return ema_paramstudy.studien_wurzel(_state.get("project_dir"))
+    if not _safe_name(pid):
+        return None
+    d = os.path.join(PROJECTS_ROOT, pid)
+    return ema_paramstudy.studien_wurzel(d) if os.path.isdir(d) else None
+
+
+@app.route("/param_study/gespeichert")
+def param_study_saved_list():
+    """Alle abgelegten Parameterstudien — je Studie EIN Ordner. ``?projekt=``
+    waehlt das Projekt (``current`` = aktives, ``global`` = die projektlose
+    Wurzel); ohne Angabe werden beide zusammengefuehrt, damit eine Studie nicht
+    deshalb unauffindbar ist, weil beim Rechnen kein Projekt gebunden war."""
+    import ema_paramstudy
+    pid = request.args.get("projekt")
+    if pid:
+        w = _study_wurzel_von(pid)
+        return jsonify([] if not w else
+                       [{**e, "wurzel": pid} for e in ema_paramstudy.liste(w)])
+    out = []
+    akt = ema_paramstudy.studien_wurzel(_state.get("project_dir"))
+    if _state.get("project_dir"):
+        out += [{**e, "wurzel": "current"} for e in ema_paramstudy.liste(akt)]
+    if akt != ema_paramstudy.GLOBALE_WURZEL:
+        out += [{**e, "wurzel": "global"}
+                for e in ema_paramstudy.liste(ema_paramstudy.GLOBALE_WURZEL)]
+    out.sort(key=lambda e: e.get("kennung", ""), reverse=True)
+    return jsonify(out)
+
+
+@app.route("/param_study/gespeichert/<kennung>")
+def param_study_saved_load(kennung: str):
+    """Eine abgelegte Studie laden (ohne Neurechnen) — im Format von
+    ``run_study``, damit das Frontend dieselbe Zeichenfunktion benutzt."""
+    import ema_paramstudy
+    if not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    w = _study_wurzel_von(request.args.get("projekt", "current"))
+    st = ema_paramstudy.laden(w, kennung) if w else None
+    if st is None and w != ema_paramstudy.GLOBALE_WURZEL:
+        st = ema_paramstudy.laden(ema_paramstudy.GLOBALE_WURZEL, kennung)
+    if st is None:
+        return jsonify({"error": "Studie nicht gefunden"}), 404
+    return jsonify(st)
+
+
+@app.route("/param_study/gespeichert/<kennung>/csv")
+def param_study_saved_csv(kennung: str):
+    import ema_paramstudy
+    if not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    for w in (_study_wurzel_von(request.args.get("projekt", "current")),
+              ema_paramstudy.GLOBALE_WURZEL):
+        p = ema_paramstudy.csv_pfad(w, kennung) if w else None
+        if p:
+            return send_file(p, mimetype="text/csv", as_attachment=True,
+                             download_name="%s.csv" % kennung)
+    return jsonify({"error": "keine CSV"}), 404
+
+
+@app.route("/param_study/gespeichert/<kennung>/video")
+def param_study_saved_video(kennung: str):
+    import ema_paramstudy
+    if not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    for w in (_study_wurzel_von(request.args.get("projekt", "current")),
+              ema_paramstudy.GLOBALE_WURZEL):
+        p = ema_paramstudy.video_pfad(w, kennung) if w else None
+        if p:
+            return send_file(p, mimetype="video/mp4")
+    return jsonify({"error": "kein Video"}), 404
+
+
+@app.route("/param_study/gespeichert/<kennung>/delete", methods=["POST", "OPTIONS"])
+def param_study_saved_delete(kennung: str):
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_paramstudy
+    if not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    for w in (_study_wurzel_von(request.args.get("projekt", "current")),
+              ema_paramstudy.GLOBALE_WURZEL):
+        if w and ema_paramstudy.loeschen(w, kennung):
+            return jsonify({"status": "deleted"})
+    return jsonify({"status": "missing"})
 
 
 @app.route("/param_study/status")
@@ -1954,30 +2082,23 @@ def param_study_status():
 
 @app.route("/param_study/csv")
 def param_study_csv():
-    """Per-step values of the most recent study as CSV (parameter + all metrics)."""
+    """Die zuletzt gelaufene Studie als CSV. Gebaut wird sie in
+    ``ema_paramstudy.csv_text`` — dieselbe Quelle wie die abgelegte
+    ``studie.csv``; hier stand bis zum 12.09.2026 eine zweite Fassung."""
+    import ema_paramstudy
     res = _study_state.get("result")
     if not res:
         return jsonify({"error": "keine Parameterstudie"}), 404
-    xs   = res.get("x", [])
-    mets = res.get("metrics", {})
-    meta = res.get("metric_meta", [])
-    keys = [m["key"] for m in meta]
-    header = [res.get("label", res.get("param", "param"))] + \
-             [f"{m['label']} [{m['unit']}]" if m['unit'] else m['label'] for m in meta]
-    lines = [";".join(header)]
-    for i, x in enumerate(xs):
-        row = [f"{x:g}"] + [("" if mets.get(k, [None]*len(xs))[i] is None
-                             else f"{mets[k][i]:g}") for k in keys]
-        lines.append(";".join(row))
-    csv = "\n".join(lines)
-    return Response(csv, mimetype="text/csv",
-                    headers={"Content-Disposition": "attachment; filename=parameterstudie.csv"})
+    return Response(ema_paramstudy.csv_text(res), mimetype="text/csv",
+                    headers={"Content-Disposition":
+                             "attachment; filename=%s.csv"
+                             % (res.get("kennung") or "parameterstudie")})
 
 
 @app.route("/param_study/video")
 def param_study_video():
     """Serve the field-line animation of the most recent parameter study (if rendered)."""
-    path = os.path.join(STUDY_FIELD_DIR, "anim.mp4")
+    path = os.path.join(_study_ordner.get("pfad") or STUDY_FIELD_DIR, "anim.mp4")
     if not os.path.exists(path):
         return jsonify({"error": "kein Video"}), 404
     return send_file(path, mimetype="video/mp4")
@@ -2010,7 +2131,8 @@ def param_study_report():
                 _study_report_state["progress"] = int(pct)
         try:
             r = ema_report.generate_paramstudy_report(
-                study, payload, STUDY_FIELD_DIR, model=model, progress_cb=cb)
+                study, payload, _study_ordner.get("pfad") or STUDY_FIELD_DIR,
+                model=model, progress_cb=cb)
             _study_report_state["pdf_path"] = r["pdf"]
             _study_report_state["status"]   = "done"
             _study_report_state["progress"] = 100

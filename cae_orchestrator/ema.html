@@ -1088,6 +1088,17 @@
       </div>
     </div>
     <div id="study_result" style="margin-top:10px"></div>
+    <div style="margin-top:12px;border-top:1px solid #222a33;padding-top:9px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="section-h" style="margin:0">🗂 Gespeicherte Studien</span>
+        <button onclick="studyRefreshSaved()" style="margin-left:auto;background:#456;width:auto;padding:4px 9px;font-size:.7rem">↻</button>
+      </div>
+      <div style="font-size:.7rem;color:#789;margin:3px 0 6px">
+        Jede Studie liegt in ihrem eigenen Ordner (Zahlen, Diagramm, CSV, Feldbilder, Video
+        und der Payload, aus dem sie gerechnet wurde) — beim aktiven Projekt, sonst global.
+      </div>
+      <div id="study_saved_list" style="display:flex;flex-direction:column;gap:5px">—</div>
+    </div>
   </div>
 
   </div><!-- /panel-grid -->
@@ -3868,6 +3879,7 @@ function switchTab(name) {
     if (typeof _oilDrawAngleFig === 'function') _oilDrawAngleFig();  // Winkel-Skizzen aktualisieren
     if (typeof oilRefreshPresets === 'function') oilRefreshPresets();  // gespeicherte Darstellungen
   }
+  if (name === 'calc' && typeof studyRefreshSaved === 'function') studyRefreshSaved();
   if (name === 'cfd' && typeof _cfdSyncInherited === 'function') _cfdSyncInherited();
   if (name === 'fx3d' && typeof _fx3dSyncInherited === 'function') { _fx3dSyncInherited(); _fx3dKosten(); fx3dRefreshSaved(); }
   if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
@@ -6013,7 +6025,8 @@ function _studyRenderDone(s) {
       `<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">`
       + `<span style="font-size:.72rem;color:#888">${res.n_ok} ausgewertet`
       + (res.n_fail ? `, ${res.n_fail} fehlgeschlagen` : '') + `</span>`
-      + `<a href="/param_study/csv?t=${Date.now()}" style="margin-left:auto;background:#3a5a6a;color:#fff;text-decoration:none;border-radius:4px;padding:6px 12px;font-size:.74rem">⬇ Schritt-Werte (CSV)</a>`
+      + (res.kennung ? `<span style="font-size:.7rem;color:#6a8" title="${escHtml(res.ordner||'')}">🗂 ${escHtml(res.kennung)}</span>` : '')
+      + `<a href="${res.gespeichert && res.kennung ? '/param_study/gespeichert/'+encodeURIComponent(res.kennung)+'/csv' : '/param_study/csv'}?t=${Date.now()}" style="margin-left:auto;background:#3a5a6a;color:#fff;text-decoration:none;border-radius:4px;padding:6px 12px;font-size:.74rem">⬇ Schritt-Werte (CSV)</a>`
       + `<button id="btn_study_report" onclick="makeStudyReport()" style="background:#7a5a3a;width:auto;padding:6px 12px;font-size:.74rem">📄 Studienbericht (PDF)</button>`
       + `</div>`
       + `<div id="study_report_msg" style="font-size:.74rem;color:#9aa;margin-bottom:6px"></div>`
@@ -6023,7 +6036,10 @@ function _studyRenderDone(s) {
     if (imgs.length) {
       html += `<div class="section-h" style="margin-top:12px">Feldlinien über ${escHtml(res.label)}</div>`;
       if (res.field_video) {
-        html += `<video src="/param_study/video?t=${Date.now()}" controls loop autoplay muted `
+        const vsrc = (res.gespeichert && res.kennung)
+          ? '/param_study/gespeichert/' + encodeURIComponent(res.kennung) + '/video'
+          : '/param_study/video';
+        html += `<video src="${vsrc}?t=${Date.now()}" controls loop autoplay muted `
               + `style="width:100%;border-radius:4px;margin-bottom:8px;background:#000"></video>`;
       }
       html += `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:6px">`
@@ -6035,8 +6051,60 @@ function _studyRenderDone(s) {
         + `</div>`;
     }
     document.getElementById('study_result').innerHTML = html;
+    if (typeof studyRefreshSaved === 'function') studyRefreshSaved();
   }
 }
+
+// ── 🗂 Studien-Store: je Studie EIN Ordner ───────────────────────────────────
+// Vorher schrieben alle Studien in denselben Ordner und das Ergebnis lag nur im
+// Serverspeicher — die zweite Studie loeschte die Bilder der ersten, und nach
+// einem Neustart war alles weg. Geladen wird durch DIESELBE Zeichenfunktion wie
+// ein frischer Lauf (`_studyRenderDone`), damit die beiden nicht auseinanderlaufen.
+async function studyRefreshSaved() {
+  const box = document.getElementById('study_saved_list');
+  if (!box) return;
+  let list = [];
+  try { list = await fetch('/param_study/gespeichert').then(r => r.json()); } catch (e) {}
+  if (!Array.isArray(list) || !list.length) {
+    box.innerHTML = '<span style="font-size:.72rem;color:#789">Noch keine Studie abgelegt.</span>';
+    return;
+  }
+  box.innerHTML = list.map(e => {
+    const sp = (e.x_von != null && e.x_bis != null)
+      ? (+e.x_von).toPrecision(3) + '…' + (+e.x_bis).toPrecision(3) : '';
+    const warn = e.n_unerreichbar
+      ? ` <span style="color:#e9a" title="Schritte ohne erreichbaren Betriebspunkt">⚠${e.n_unerreichbar}</span>` : '';
+    const q = '?projekt=' + encodeURIComponent(e.wurzel || 'current');
+    return `<div style="display:flex;align-items:center;gap:7px;background:#141821;border:1px solid #222a33;border-radius:5px;padding:6px 9px">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:.76rem;color:#cde;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+          ${escHtml(e.label || e.param || '?')} · ${escHtml(sp)} · ${e.steps} Schritte${warn}</div>
+        <div style="font-size:.68rem;color:#789">${escHtml(e.zeitpunkt || e.kennung)} · ${e.rpm ? Math.round(e.rpm)+' U/min' : ''}${e.video ? ' · 🎬' : ''}${e.wurzel === 'global' ? ' · global' : ''}</div>
+      </div>
+      <button onclick="studyLoadSaved('${escHtml(e.kennung)}','${escHtml(e.wurzel||'current')}')" style="background:#456;width:auto;padding:4px 9px;font-size:.7rem">📂</button>
+      <a href="/param_study/gespeichert/${encodeURIComponent(e.kennung)}/csv${q}" style="background:#3a5a6a;color:#fff;text-decoration:none;border-radius:4px;padding:4px 9px;font-size:.7rem">⬇</a>
+      <button onclick="studyDeleteSaved('${escHtml(e.kennung)}','${escHtml(e.wurzel||'current')}')" style="background:#633;width:auto;padding:4px 9px;font-size:.7rem">🗑</button>
+    </div>`;
+  }).join('');
+}
+
+async function studyLoadSaved(kennung, wurzel) {
+  try {
+    const st = await fetch('/param_study/gespeichert/' + encodeURIComponent(kennung)
+                           + '?projekt=' + encodeURIComponent(wurzel || 'current')).then(r => r.json());
+    if (st && !st.error) _studyRenderDone({ status: 'done', result: st });
+  } catch (e) {}
+}
+
+async function studyDeleteSaved(kennung, wurzel) {
+  if (!confirm('Studie ' + kennung + ' loeschen? Der ganze Ordner geht weg.')) return;
+  try {
+    await fetch('/param_study/gespeichert/' + encodeURIComponent(kennung) + '/delete?projekt='
+                + encodeURIComponent(wurzel || 'current'), { method: 'POST' });
+  } catch (e) {}
+  studyRefreshSaved();
+}
+
 async function makeStudyReport() {
   const btn = document.getElementById('btn_study_report');
   const msg = document.getElementById('study_report_msg');
