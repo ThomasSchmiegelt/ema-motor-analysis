@@ -2367,6 +2367,103 @@ def project_bericht_loeschen(pid: str, kennung: str):
     return jsonify({"status": "deleted" if ok else "missing"})
 
 
+@app.route("/project/<pid>/berichte/<kennung>/vorschau", methods=["POST", "OPTIONS"])
+def project_bericht_vorschau(pid: str, kennung: str):
+    """HTML-Vorschau des Berichts, wie er JETZT im Editor steht — ohne zu
+    speichern und ohne zu rendern. Gebaut wird sie mit `als_html`, derselben
+    Funktion, die auch die ausgelieferte HTML-Fassung schreibt; eine zweite
+    Vorschau-Darstellung waere genau die Stelle, an der Vorschau und Ergebnis
+    auseinanderlaufen."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    if not base or not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    d = request.get_json(force=True) or {}
+    bloecke, meldungen = ema_bericht._pruefe(base, d)
+    doc = {"kennung": kennung, "titel": d.get("titel") or "Bericht",
+           "untertitel": d.get("untertitel") or "", "bloecke": bloecke}
+    try:
+        html = ema_bericht.als_html(base, doc)
+    except Exception as e:                                   # noqa: BLE001
+        return jsonify({"error": str(e)}), 500
+    # Die Vorschau haengt im iframe unter /project/<pid>/ — `base href` muss
+    # deshalb dorthin zeigen, nicht zwei Ebenen hoch wie bei der Datei.
+    html = html.replace('<base href="../../">',
+                        '<base href="/project/%s/datei/">' % pid, 1)
+    return Response(html, mimetype="text/html")
+
+
+@app.route("/project/<pid>/berichte/<kennung>/fassungen")
+def project_bericht_fassungen(pid: str, kennung: str):
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    if not base or not _safe_name(kennung):
+        return jsonify([])
+    return jsonify(ema_bericht.fassungen(base, kennung))
+
+
+@app.route("/project/<pid>/berichte/<kennung>/zurueck", methods=["POST", "OPTIONS"])
+def project_bericht_zurueck(pid: str, kennung: str):
+    """Zu einer frueheren Fassung zurueck. Der verlassene Stand wird vorher
+    gesichert — sonst waere der Rueckweg der einzige Schritt, den man nicht
+    rueckgaengig machen kann."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    if not base or not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    marke = (request.get_json(silent=True) or {}).get("marke", "")
+    if not _safe_name(marke):
+        return jsonify({"error": "ungueltige Marke"}), 403
+    r = ema_bericht.zurueck(base, kennung, marke)
+    return jsonify(r) if r.get("ok") else (jsonify({"error": r.get("grund")}), 404)
+
+
+@app.route("/project/<pid>/berichte/<kennung>/abzweigen", methods=["POST", "OPTIONS"])
+def project_bericht_abzweigen(pid: str, kennung: str):
+    """Eine VARIANTE: ein neuer Bericht, der von diesem (oder einer seiner
+    Fassungen) ausgeht und seine Herkunft mitfuehrt."""
+    if request.method == "OPTIONS":
+        return "", 200
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    if not base or not _safe_name(kennung):
+        return jsonify({"error": "ungueltig"}), 403
+    d = request.get_json(silent=True) or {}
+    marke = d.get("marke") or None
+    if marke and not _safe_name(marke):
+        return jsonify({"error": "ungueltige Marke"}), 403
+    r = ema_bericht.abzweigen(base, kennung, marke, d.get("titel", ""))
+    return jsonify(r) if r.get("ok") else (jsonify({"error": r.get("grund")}), 404)
+
+
+@app.route("/project/<pid>/berichte/baum")
+def project_berichte_baum(pid: str):
+    """Die Berichte als Baum — Varianten haengen unter ihrer Vorlage."""
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    return jsonify(ema_bericht.baum(base) if base else [])
+
+
+@app.route("/project/<pid>/berichte/alle")
+def project_berichte_alle(pid: str):
+    """JEDES Berichts-PDF/HTML dieses Projekts, egal welche Stufe es erzeugt
+    hat. Sie liegen alle im Projektordner — nur an fuenf Stellen, weil jede
+    Stufe ihren Bericht neben ihre Zahlen legt. Das ist die eine Liste."""
+    import ema_bericht
+    base = _fx3d_project_base(pid)
+    return jsonify(ema_bericht.alle_berichte(base) if base else [])
+
+
+@app.route("/project/<pid>/berichte/bausteine")
+def project_berichte_bausteine(pid: str):
+    import ema_bericht
+    return jsonify([{"quelle": k, "label": v} for k, v in ema_bericht.BAUSTEINE.items()])
+
+
 @app.route("/project/<pid>/berichte/<kennung>/rendern", methods=["POST", "OPTIONS"])
 def project_bericht_rendern(pid: str, kennung: str):
     """PDF UND HTML erzeugen. Zwei Fassungen, weil ein PDF kein Video
@@ -2561,10 +2658,20 @@ def _run(data):
             proj_dir, proj_id = create_project_dir(PROJECTS_ROOT, data.get("project_name", ""))
         _state["project_dir"] = proj_dir
         _state["project_id"]  = proj_id
+        _state["vorschlaege"] = []
         run_pipeline(data, _state, _frames, WORKSPACE, proj_dir)
     except Exception as e:
         import traceback
-        _state["log"].append(f"FATAL: {e}\n{traceback.format_exc()[:600]}")
+        # Ein Tor, das gerechnete Auswege kennt, gibt sie mit (AuslegungReisst).
+        # Die Oberflaeche macht daraus Knoepfe, statt "Analyse fehlgeschlagen"
+        # anzuzeigen und den Benutzer selbst rechnen zu lassen.
+        wege = list(getattr(e, "wege", []) or [])
+        _state["vorschlaege"] = wege
+        _state["befund"] = getattr(e, "befund", "") or ""
+        _state["tor"] = getattr(e, "tor", "") or ""
+        _state["log"].append(
+            f"FATAL: {e}" if wege else
+            f"FATAL: {e}\n{traceback.format_exc()[:600]}")
         _state["status"] = "error"
 
 
@@ -2575,6 +2682,10 @@ def status():
         "progress":   _state["progress"],
         "log":        _state["log"][-30:],
         "project_id": _state.get("project_id"),
+        # Gerechnete Auswege eines gerissenen Tors (leer im Normalfall).
+        "vorschlaege": _state.get("vorschlaege") or [],
+        "befund":      _state.get("befund") or "",
+        "tor":         _state.get("tor") or "",
     })
 
 

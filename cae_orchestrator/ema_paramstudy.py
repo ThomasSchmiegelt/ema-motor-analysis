@@ -197,12 +197,25 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
             int(field_N), out_dir, label, log)
 
     hinweis = ""
+    # Wandern die Magnete mit? Bei den Wellenparametern wird ihre absolute Lage
+    # gehalten (`ema_optimize.magnete_halten`); wo das geometrisch nicht geht —
+    # Speiche und Bar spannen den Ringraum zwischen Welle und Rand aus —, sagt
+    # es der Hinweis, statt eine Kurve zu zeigen, in der zwei Aenderungen
+    # stecken.
+    if spec.get("haelt_magnete"):
+        _hin = ""
+        for _v in (lo, hi):
+            _g, _ = O._apply_params(base_geom, base_axial, {param: cast(_v)})
+            _hin = _g.get("_magnetlage_hinweis") or _hin
+        if _hin:
+            hinweis = _hin
+            log("⚠ " + _hin, 99)
     # Bewegt sich ueberhaupt etwas — und wenn nicht, warum nicht?
     flach = [k for k, _, _ in _STUDY_METRICS
              if len({v for v in metric_series[k] if v is not None}) <= 1]
     grund = wirkungslos_grund(payload, param, lo, hi)
     if grund:
-        hinweis = grund
+        hinweis = ((hinweis + " ") if hinweis else "") + grund
         log("⚠ " + grund, 99)
     elif len(flach) == len(_STUDY_METRICS):
         hinweis = ("%s bewegt die Zeichnung, aber KEINE der gerechneten "

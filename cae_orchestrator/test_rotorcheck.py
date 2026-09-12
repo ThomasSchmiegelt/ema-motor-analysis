@@ -24,6 +24,7 @@ import sys
 import tempfile
 
 import ema_purge
+import ema_rotorcheck as rc
 from ema_rotorcheck import (KT_POCKET, _bore_hoop_mpa, rotor_layout_check,
                             rotor_stress_check)
 
@@ -342,11 +343,84 @@ def test_steg_zur_welle():
           f"V behaelt {v:.2f} mm, U nur {u:.2f} mm")
 
 
+def test_entlastung_schlaegt_vor_statt_abzusagen():
+    """Ein gerissenes Fliehkraft-Tor sagte nur "Analyse fehlgeschlagen". Die
+    Ringspannung ist aber eine geschlossene Formel -- jeder Hebel darin laesst
+    sich nach dem zulaessigen Wert aufloesen. Und jeder Vorschlag wird gegen
+    DASSELBE Tor nachgeprueft, bevor er vorgeschlagen wird: einer, der das Tor
+    erneut reissen laesst, ist keiner."""
+    import ema_pipeline as P
+    g = dict(statorOD=280, statorID=190, rotorOD=188.6, shaftD=60, shaftBoreD=0,
+             p=3, slots=54, magShape="v", magAngle=120, magWidth=42.2, magThick=6,
+             magDist=9.4, magDepthRel=0.45, magLayers=3, magLayerGap=8,
+             slotDepth=25, magGapMm=0.1, axialLen=80, pocketMode="wand")
+    mat = {"density": 7650, "yield_mpa": 340, "nu": 0.3}
+    e = rc.entlastung(g, mat, {"n_max": 20000}, 1.3, P.LAMINATES)
+    check("entlastung: Wege vorhanden", (not e["ok"]) and bool(e["wege"]))
+    check("entlastung: der Befund nennt die Zahlen",
+          "MPa" in e["befund"] and "Sicherheit" in e["befund"])
+    check("entlastung: Drehzahl ist dabei (staerkster Hebel)",
+          "rpm_to" in {w["schluessel"] for w in e["wege"]})
+
+    for w in e["wege"]:
+        k, v = w["schluessel"], w["wert"]
+        if k == "rpm_to":
+            r = rc.rotor_stress_check(g, mat, {"n_max": v}, 1.3)
+        elif k == "rotorOD":
+            r = rc.rotor_stress_check(dict(g, rotorOD=v), mat, {"n_max": 20000}, 1.3)
+        elif k == "shaftD":
+            r = rc.rotor_stress_check(dict(g, shaftD=v), mat, {"n_max": 20000}, 1.3)
+        elif k == "rotor_lam":
+            lam = P.LAMINATES[v]
+            r = rc.rotor_stress_check(g, {"density": lam["density"],
+                                          "yield_mpa": lam["yield_mpa"], "nu": 0.3},
+                                      {"n_max": 20000}, 1.3)
+        else:
+            continue
+        check("entlastung: '%s=%s' haelt das Tor (SF %.3f)"
+              % (k, v, r["safety_factor_peak"]), r["ok"])
+        check("entlastung: '%s' nennt seinen Preis" % k, bool(w.get("preis")))
+
+    ok = rc.entlastung(g, mat, {"n_max": 6000}, 1.3, P.LAMINATES)
+    check("entlastung: haltende Auslegung -> keine Vorschlaege",
+          ok["ok"] and not ok["wege"])
+
+
+def test_tor_wirft_die_wege_mit():
+    """Das Tor traegt die Wege in der Ausnahme -- sonst muesste der Server sie
+    ein zweites Mal ausrechnen, und das waere die naechste Stelle, an der zwei
+    Fassungen auseinanderlaufen."""
+    import ema_pipeline as P
+    g = dict(statorOD=280, statorID=190, rotorOD=188.6, shaftD=60, shaftBoreD=0,
+             p=3, slots=54, magShape="v", magAngle=120, magWidth=42.2, magThick=6,
+             magDist=9.4, magDepthRel=0.45, magLayers=3, magLayerGap=8,
+             slotDepth=25, magGapMm=0.1, axialLen=80, pocketMode="wand")
+    st = {"log": [], "progress": 0}
+    data = {"geom": g, "rpm_to": 20000, "rotor_lam": "m270_35a"}
+    try:
+        P._gate_rotor_stress(data, st, fatal=True)
+        check("Tor: Abbruch bei SF < 1", False)
+    except P.AuslegungReisst as e:
+        check("Tor: benannt", e.tor == "fliehkraft")
+        check("Tor: mindestens zwei Wege im Gepaeck", len(e.wege) >= 2)
+        check("Tor: die Wege stehen auch im Protokoll",
+              any("Was helfen wuerde" in z for z in st["log"]))
+    except Exception as exc:                                 # noqa: BLE001
+        check("Tor: richtige Ausnahme (war %s)" % type(exc).__name__, False)
+
+    st2 = {"log": [], "progress": 0}
+    P._gate_rotor_stress(data, st2, fatal=False)
+    check("Tor: beim Nachrechnen warnen statt verweigern",
+          any("nicht bestanden" in z for z in st2["log"]))
+
+
 if __name__ == "__main__":
     for t in (test_bore_hoop, test_struct_sweep, test_layout_gate,
               test_stress_gate, test_purge_paritaet,
               test_purge_volcut_ohne_nachwirkung, test_purge_riegel,
-              test_steg_zur_welle):
+              test_steg_zur_welle,
+              test_entlastung_schlaegt_vor_statt_abzusagen,
+              test_tor_wirft_die_wege_mit):
         t()
     print()
     if _fails:

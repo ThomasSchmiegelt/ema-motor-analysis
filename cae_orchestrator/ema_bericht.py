@@ -14,6 +14,14 @@ stehen sollen:
 * ``video``  — eine MP4 aus dem Projekt
 * ``tabelle``— eine Markdown-Tabelle von Hand
 * ``umbruch``— Seitenumbruch
+* ``baustein``— ein GERECHNETER Abschnitt (Steckbrief, Getriebe, Elmer,
+  Studienreihe, Sicherheit), der beim Rendern aus dem Projekt geholt wird
+
+Der letzte macht diesen Bericht zum **Gesamtbericht ueber die ganze Maschine**:
+das Getriebe, das 3-D-Feld und die Parameterstudien rechnen ihre eigenen
+Abschnitte, hier stehen sie NEBEN dem selbst geschriebenen Text — und sie werden
+beim Rendern frisch geholt, nicht eingefroren. Eine Zahl im Bericht, die von der
+Ablage abweicht, waere die schlimmste Sorte Fehler: sie sieht richtig aus.
 
 **Verwiesen, nicht kopiert.** Ein Block nennt den projektrelativen Pfad; die
 Datei bleibt, wo sie entstanden ist. Ein Bericht, der Bilder kopiert, zeigt beim
@@ -35,7 +43,7 @@ import subprocess
 import time
 
 ORDNER = "berichte"
-ARTEN = ("text", "bild", "video", "tabelle", "umbruch")
+ARTEN = ("text", "bild", "video", "tabelle", "umbruch", "baustein")
 MAX_BLOECKE = 200
 MAX_TEXT = 40000
 
@@ -149,6 +157,13 @@ def _pruefe(project_dir, doc):
         neu = {"art": art}
         if art in ("text", "tabelle"):
             neu["text"] = str(b.get("text") or "")[:MAX_TEXT]
+        elif art == "baustein":
+            q = str(b.get("quelle") or "")
+            if q not in BAUSTEINE:
+                meldungen.append("Block %d: unbekannter Baustein '%s'" % (i + 1, q[:30]))
+                continue
+            neu["quelle"] = q
+            neu["ueberschrift"] = str(b.get("ueberschrift") or BAUSTEINE[q])[:200]
         elif art in ("bild", "video"):
             rel = str(b.get("pfad") or "")
             if not _rel_ok(project_dir, rel):
@@ -166,18 +181,29 @@ def _pruefe(project_dir, doc):
     return bloecke, meldungen
 
 
-def speichern(project_dir, kennung, doc):
+def speichern(project_dir, kennung, doc, anlass="gespeichert"):
     d = os.path.join(wurzel(project_dir), _sicher(kennung))
     os.makedirs(d, exist_ok=True)
     bloecke, meldungen = _pruefe(project_dir, doc)
+    eltern = (doc or {}).get("eltern")
+    if not isinstance(eltern, dict):
+        # Die Herkunft ueberlebt ein Speichern, auch wenn die Oberflaeche sie
+        # nicht mitschickt — sonst waere der Baum nach der ersten Aenderung flach.
+        eltern = ((laden(project_dir, kennung) or {}).get("eltern")
+                  if os.path.exists(os.path.join(d, "bericht.json")) else None)
     raus = {"kennung": os.path.basename(d),
             "titel": str((doc or {}).get("titel") or "Bericht")[:200],
             "untertitel": str((doc or {}).get("untertitel") or "")[:300],
+            "eltern": eltern if isinstance(eltern, dict) else None,
             "bloecke": bloecke, "geaendert": time.strftime("%Y-%m-%d %H:%M")}
     tmp = os.path.join(d, "bericht.json.tmp")
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(raus, f, ensure_ascii=False, indent=1)
     os.replace(tmp, os.path.join(d, "bericht.json"))
+    try:
+        raus["fassung"] = fassung_ablegen(project_dir, raus["kennung"], raus, anlass)
+    except Exception:                                        # noqa: BLE001
+        raus["fassung"] = None
     raus["meldungen"] = meldungen
     return raus
 
@@ -220,6 +246,144 @@ def loeschen(project_dir, kennung):
         shutil.rmtree(d, ignore_errors=True)
         return True
     return False
+
+
+# ── Bausteine: gerechnete Abschnitte, beim Rendern frisch geholt ────────────
+BAUSTEINE = {
+    "steckbrief": "Steckbrief — was dieses Projekt ist und was gerechnet wurde",
+    "getriebe":   "Getriebeauslegung",
+    "elmer":      "3-D-Magnetfeld (Elmer)",
+    "studien":    "Parameterstudien (Uebersicht)",
+    "sicherheit": "Sicherheitskriterien",
+}
+
+
+def baustein_md(project_dir, quelle):
+    """Einen gerechneten Abschnitt als Markdown. Immer FRISCH aus der Ablage —
+    eine eingefrorene Zahl im Bericht, die von der Ablage abweicht, ist die
+    schlimmste Sorte Fehler: sie sieht richtig aus.
+
+    Was es nicht gibt, sagt das auch. Ein Bericht, in dem ein leerer Abschnitt
+    steht, ist besser als einer, in dem er fehlt: das Fehlen ist die Auskunft."""
+    try:
+        if quelle == "steckbrief":
+            import ema_steckbrief
+            sb = ema_steckbrief.steckbrief(project_dir, mit_laeufen=False)
+            return ema_steckbrief.als_markdown(sb)
+        if quelle == "getriebe":
+            import ema_steckbrief
+            g = ema_steckbrief.getriebe(project_dir)
+            if not g:
+                return "_Fuer dieses Projekt ist keine Getriebeauslegung abgelegt._"
+            return _getriebe_md(g)
+        if quelle == "elmer":
+            return _elmer_md(project_dir)
+        if quelle == "studien":
+            return _studien_md(project_dir)
+        if quelle == "sicherheit":
+            return _sicherheit_md(project_dir)
+    except Exception as e:                                   # noqa: BLE001
+        return "_Der Abschnitt konnte nicht geholt werden: %s_" % e
+    return "_Unbekannter Baustein: %s_" % quelle
+
+
+def _tab(zeilen, kopf=("Groesse", "Wert")):
+    aus = ["| " + " | ".join(kopf) + " |", "|" + "---|" * len(kopf)]
+    for z in zeilen:
+        aus.append("| " + " | ".join("—" if v is None else str(v) for v in z) + " |")
+    return "\n".join(aus)
+
+
+def _getriebe_md(g):
+    e = g.get("ergebnis") if isinstance(g.get("ergebnis"), dict) else g
+    zeilen = []
+    for name, schl, eh in (("Bauart", "art", ""), ("Einbauort", "einbau", ""),
+                           ("Uebersetzung (soll)", "i_soll", ""),
+                           ("Uebersetzung (ist)", "i_ist", ""),
+                           ("Stufen", "stufen", ""),
+                           ("Wirkungsgrad", "eta", ""),
+                           ("Masse", "masse_kg", "kg"),
+                           ("Traegheit (auf die Motorwelle)", "J_red_kgm2", "kg m^2")):
+        v = e.get(schl)
+        if v is not None:
+            zeilen.append((name, ("%s %s" % (v, eh)).strip()))
+    for i, st in enumerate(e.get("stufen_detail") or e.get("stufen_liste") or [], 1):
+        if not isinstance(st, dict):
+            continue
+        zeilen.append(("Stufe %d" % i,
+                       "z %s/%s, m %s mm, b %s mm, a %s mm, S_F %s, S_H %s"
+                       % (st.get("z1"), st.get("z2"), st.get("m"), st.get("b"),
+                          st.get("a"), st.get("S_F"), st.get("S_H"))))
+    txt = _tab(zeilen) if zeilen else "_Die Getriebeablage enthaelt keine auswertbaren Felder._"
+    hin = e.get("hinweis") or e.get("vorbehalt")
+    if hin:
+        txt += "\n\n> " + str(hin)
+    return txt
+
+
+def _elmer_md(project_dir):
+    rj = os.path.join(project_dir, "results.json")
+    if not os.path.exists(rj):
+        return "_Kein `results.json` — es lief noch keine Rechnung in diesem Projekt._"
+    try:
+        with open(rj, encoding="utf-8") as f:
+            e3 = (json.load(f) or {}).get("em3d")
+    except (OSError, ValueError):
+        e3 = None
+    if not e3:
+        return "_Fuer dieses Projekt ist kein 3-D-Lauf (Elmer) abgelegt._"
+    import ema_report
+    teile = [ema_report._em3d_md_netz(e3), "", ema_report._em3d_md_ergebnis(e3)]
+    sif = os.path.join(project_dir, "em3d", "case.sif")
+    if os.path.exists(sif):
+        try:
+            with open(sif, encoding="utf-8", errors="replace") as f:
+                teile = [ema_report._em3d_md_loeser(ema_report.sif_loeser(f.read())), ""] + teile
+        except OSError:
+            pass
+    warn = [str(w) for w in (e3.get("warnings") or [])]
+    if warn:
+        teile += ["", "**Warnungen des Laufs:**", ""] + ["- " + w for w in warn]
+    return "\n".join(teile)
+
+
+def _studien_md(project_dir):
+    import ema_paramstudy
+    w = ema_paramstudy.studien_wurzel(project_dir)
+    eintraege = ema_paramstudy.liste(w)
+    if not eintraege:
+        return "_In diesem Projekt ist keine Parameterstudie abgelegt._"
+    studien = [ema_paramstudy.laden(w, e["kennung"]) for e in eintraege]
+    studien = [x for x in studien if x]
+    ausw = ema_paramstudy.reihe_auswerten(studien)
+    import ema_report
+    teile = [ema_report._reihe_md_rangliste(ausw)]
+    if ausw.get("warnungen"):
+        teile += ["", "**Vorbehalte:**", ""] + ["- " + x for x in ausw["warnungen"]]
+    return "\n".join(teile)
+
+
+def _sicherheit_md(project_dir):
+    rj = os.path.join(project_dir, "results.json")
+    mj = os.path.join(project_dir, "meta.json")
+    if not os.path.exists(rj):
+        return "_Kein `results.json` — es lief noch keine Rechnung in diesem Projekt._"
+    try:
+        import ema_sicherheit
+        with open(rj, encoding="utf-8") as f:
+            res = json.load(f) or {}
+        meta = {}
+        if os.path.exists(mj):
+            with open(mj, encoding="utf-8") as f:
+                meta = json.load(f) or {}
+        erg = ema_sicherheit.pruefen(res, meta)
+    except Exception as e:                                   # noqa: BLE001
+        return "_Die Sicherheitspruefung lief nicht: %s_" % e
+    zeilen = [(k.get("name"), ("bestanden" if k.get("ok") else "VERLETZT"),
+               (k.get("text") or "")[:160]) for k in (erg.get("kriterien") or [])]
+    if not zeilen:
+        return "_Keine Kriterien auswertbar._"
+    return _tab(zeilen, kopf=("Kriterium", "Befund", "Bemerkung"))
 
 
 # ── Standbild aus einem Video (fuer das PDF) ─────────────────────────────────
@@ -279,6 +443,9 @@ def als_markdown(project_dir, doc, standbilder=True):
                       "HTML-Fassung dieses Berichts laeuft es._" % b["pfad"], ""]
         elif art == "umbruch":
             teile += ["\\newpage", ""]
+        elif art == "baustein":
+            teile += ["## " + (b.get("ueberschrift") or BAUSTEINE.get(b["quelle"], "")), "",
+                      baustein_md(project_dir, b["quelle"]), ""]
     return "\n".join(teile)
 
 
@@ -329,6 +496,10 @@ def als_html(project_dir, doc):
                             if b.get("beschriftung") else ""))
         elif art == "umbruch":
             teile.append("<hr>")
+        elif art == "baustein":
+            teile.append("<h2>%s</h2>" % _h.escape(
+                b.get("ueberschrift") or BAUSTEINE.get(b["quelle"], "")))
+            teile.append(_md_zu_html(baustein_md(project_dir, b["quelle"])))
     return "\n".join(teile)
 
 
@@ -385,3 +556,235 @@ def rendern(project_dir, kennung, progress_cb=None):
     _log("✓ fertig.", 100)
     return {"pdf": pdf_p if os.path.exists(pdf_p) else None,
             "html": html_p, "md": md_p}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Fassungen und Abzweige — zurueck zu einer Aenderung, weiter als Variante
+# ─────────────────────────────────────────────────────────────────────────────
+# Gewuenscht als „eine Art Baumstruktur, dass ich zu Aenderungen und Varianten
+# zurueckgehen kann". Zwei verschiedene Dinge, und sie brauchen zwei Mechanismen:
+#
+#   * **Fassung** — derselbe Bericht zu einem frueheren Zeitpunkt. Jedes
+#     Speichern legt eine ab; `zurueck` holt sie zurueck.
+#   * **Abzweig** — ein NEUER Bericht, der von einer Fassung ausgeht. Er traegt
+#     seine Herkunft (`eltern`), und daraus wird der Baum.
+#
+# **Die Geschichte wird nicht umgeschrieben.** `zurueck` sichert vorher den
+# verlassenen Stand als eigene Fassung und haengt die Rueckkehr als neue an —
+# dieselbe Haltung wie `ema_projekt.zurueck`: dass ein Zweig probiert wurde und
+# sich nicht bewaehrt hat, ist selbst eine Auskunft.
+
+FASSUNGEN = "fassungen"
+MAX_FASSUNGEN = 60
+
+
+def _fassungen_dir(project_dir, kennung):
+    return os.path.join(wurzel(project_dir), _sicher(kennung), FASSUNGEN)
+
+
+def _inhalt_marke(doc):
+    """Fingerabdruck ueber das, was den Bericht ausmacht — Titel und Bloecke.
+    Ohne ihn legte jedes Speichern eine Fassung an, auch wenn sich nichts
+    geaendert hat, und die Liste waere binnen eines Nachmittags unlesbar."""
+    import hashlib
+    kern = {"titel": doc.get("titel"), "untertitel": doc.get("untertitel"),
+            "bloecke": doc.get("bloecke") or []}
+    roh = json.dumps(kern, sort_keys=True, ensure_ascii=False, default=str)
+    return hashlib.sha1(roh.encode("utf-8")).hexdigest()[:12]
+
+
+def fassung_ablegen(project_dir, kennung, doc, anlass="gespeichert"):
+    """Den aktuellen Stand als Fassung sichern. Gibt die Marke zurueck — oder
+    None, wenn sich gegenueber der letzten Fassung nichts geaendert hat."""
+    d = _fassungen_dir(project_dir, kennung)
+    os.makedirs(d, exist_ok=True)
+    marke_inhalt = _inhalt_marke(doc)
+    vorhanden = fassungen(project_dir, kennung)
+    if vorhanden and vorhanden[0].get("inhalt") == marke_inhalt:
+        return None
+    basis = time.strftime("%Y%m%d_%H%M%S")
+    marke, n = basis, 1
+    while os.path.exists(os.path.join(d, marke + ".json")):
+        n += 1
+        marke = "%s-%d" % (basis, n)
+    satz = dict(doc)
+    satz.update({"marke": marke, "inhalt": marke_inhalt, "anlass": anlass,
+                 "zeit": time.strftime("%Y-%m-%d %H:%M:%S")})
+    with open(os.path.join(d, marke + ".json"), "w", encoding="utf-8") as f:
+        json.dump(satz, f, ensure_ascii=False)
+    alt = sorted((f for f in os.listdir(d) if f.endswith(".json")),
+                 key=lambda f: _marke_key(f[:-5]))
+    for f in alt[:-MAX_FASSUNGEN]:
+        try:
+            os.remove(os.path.join(d, f))
+        except OSError:
+            pass
+    return marke
+
+
+def _marke_key(marke):
+    """Sortierschluessel einer Marke: (Zeitstempel, laufende Nummer).
+
+    NICHT die Zeichenkette. Zwei Fassungen derselben Sekunde heissen
+    ``…165038`` und ``…165038-2``; im Dateinamen sortiert der Bindestrich (0x2D)
+    UNTER den Punkt (0x2E), also stuende ``…165038.json`` vor ``…165038-2.json``
+    und die aeltere gaelte als die juengere. Genau dieser Fehler steht schon in
+    `ema_getriebe.rechnungen()` — hier waere er beim Doppel-Speichern
+    aufgefallen: die Dubletten-Erkennung verglich gegen den falschen Stand."""
+    m = str(marke or "")
+    basis, _, rest = m.partition("-")
+    try:
+        n = int(rest) if rest else 1
+    except ValueError:
+        n = 1
+    return (basis, n)
+
+
+def fassungen(project_dir, kennung):
+    """Alle Fassungen eines Berichts, neueste zuerst — ohne die Bloecke zu
+    laden (die Uebersicht steht in der Oberflaeche, nicht im Speicher)."""
+    d = _fassungen_dir(project_dir, kennung)
+    if not os.path.isdir(d):
+        return []
+    out = []
+    dateien = sorted((f for f in os.listdir(d) if f.endswith(".json")),
+                     key=lambda f: _marke_key(f[:-5]), reverse=True)
+    for f in dateien:
+        try:
+            with open(os.path.join(d, f), encoding="utf-8") as fh:
+                s = json.load(fh) or {}
+        except (OSError, ValueError):
+            continue
+        out.append({"marke": s.get("marke", f[:-5]), "zeit": s.get("zeit", ""),
+                    "anlass": s.get("anlass", ""), "inhalt": s.get("inhalt", ""),
+                    "titel": s.get("titel", ""),
+                    "n_bloecke": len(s.get("bloecke") or [])})
+    return out
+
+
+def fassung_holen(project_dir, kennung, marke):
+    p = os.path.join(_fassungen_dir(project_dir, kennung), _sicher(marke) + ".json")
+    if not os.path.exists(p):
+        return None
+    try:
+        with open(p, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def zurueck(project_dir, kennung, marke):
+    """Zu einer Fassung zurueck. Der VERLASSENE Stand wird vorher gesichert —
+    sonst waere der Rueckweg der einzige Schritt, den man nicht rueckgaengig
+    machen kann."""
+    alt = fassung_holen(project_dir, kennung, marke)
+    if not alt:
+        return {"ok": False, "grund": "Fassung '%s' gibt es nicht" % marke}
+    jetzt = laden(project_dir, kennung)
+    if jetzt:
+        fassung_ablegen(project_dir, kennung, jetzt, anlass="vor der Rueckkehr")
+    doc = {"titel": alt.get("titel"), "untertitel": alt.get("untertitel"),
+           "bloecke": alt.get("bloecke") or [], "eltern": (jetzt or {}).get("eltern")}
+    r = speichern(project_dir, kennung, doc, anlass="zurueck auf %s" % marke)
+    return {"ok": True, "marke": marke, "bericht": r}
+
+
+def abzweigen(project_dir, kennung, marke=None, titel=""):
+    """Von einem Bericht (oder einer seiner Fassungen) eine **Variante** —
+    ein neuer Bericht, der seine Herkunft mitfuehrt. Daraus entsteht der Baum."""
+    quelle = (fassung_holen(project_dir, kennung, marke) if marke
+              else laden(project_dir, kennung))
+    if not quelle:
+        return {"ok": False, "grund": "Vorlage nicht gefunden"}
+    neu = anlegen(project_dir, titel or ((quelle.get("titel") or "Bericht") + " Variante"))
+    speichern(project_dir, neu, {
+        "titel": titel or ((quelle.get("titel") or "Bericht") + " (Variante)"),
+        "untertitel": quelle.get("untertitel", ""),
+        "bloecke": quelle.get("bloecke") or [],
+        "eltern": {"kennung": kennung, "marke": marke or ""}},
+        anlass="abgezweigt von %s%s" % (kennung, ("@" + marke) if marke else ""))
+    return {"ok": True, "kennung": neu}
+
+
+def baum(project_dir):
+    """Die Berichte als Baum: Wurzeln sind die ohne Eltern, Kinder haengen
+    darunter. Flach zurueckgegeben (mit ``tiefe``), weil die Oberflaeche eine
+    Liste zeichnet und keine Rekursion braucht."""
+    alle = {e["kennung"]: e for e in liste(project_dir)}
+    for k, e in alle.items():
+        doc = laden(project_dir, k) or {}
+        e["eltern"] = (doc.get("eltern") or {}).get("kennung") or None
+        e["eltern_marke"] = (doc.get("eltern") or {}).get("marke") or ""
+        e["n_fassungen"] = len(fassungen(project_dir, k))
+    kinder = {}
+    for k, e in alle.items():
+        kinder.setdefault(e["eltern"] if e["eltern"] in alle else None, []).append(k)
+    aus = []
+
+    def _rein(k, tiefe):
+        e = dict(alle[k]); e["tiefe"] = tiefe
+        aus.append(e)
+        for kind in sorted(kinder.get(k, [])):
+            _rein(kind, tiefe + 1)
+
+    for k in sorted(kinder.get(None, []), reverse=True):
+        _rein(k, 0)
+    return aus
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Alle Berichte EINES Projekts — auch die, die woanders entstanden sind
+# ─────────────────────────────────────────────────────────────────────────────
+# Gewuenscht als „ich moechte die Berichte auch im Projektordner haben". Sie
+# LIEGEN dort, jeder einzelne — nur an fuenf verschiedenen Stellen, weil jede
+# Stufe ihren Bericht dort ablegt, wo ihre Zahlen liegen: der Studienbericht
+# beim Studienordner, der Reihenbericht eine Ebene darueber, der Elmer-Bericht
+# und der Projektbericht in der Projektwurzel. Das ist richtig so — ein Bericht
+# neben seinen Zahlen ist zuzuordnen, ein Bericht in einem Sammelordner nicht.
+# Was fehlte, ist die EINE Liste, die sie alle nennt.
+
+_BERICHT_ORTE = (
+    ("bericht.pdf",           "Projektbericht (LLM)"),
+    ("bericht_agentisch.pdf", "Projektbericht (6 Experten)"),
+    ("bericht_elmer.pdf",     "Elmer-Auswertung (3-D-Feld)"),
+    ("studienreihe.pdf",      "Parameterstudien — Reihenauswertung"),
+    ("parameterstudie.pdf",   "Parameterstudie"),
+)
+
+
+def alle_berichte(project_dir):
+    """Jedes PDF/HTML dieses Projekts, egal welche Stufe es erzeugt hat —
+    mit projektrelativem Pfad, Groesse und Zeit. Neueste zuerst."""
+    aus = []
+
+    def _nimm(rel, art, woher=""):
+        p = os.path.join(project_dir, rel)
+        if not os.path.exists(p):
+            return
+        try:
+            gr, ts = os.path.getsize(p), os.path.getmtime(p)
+        except OSError:
+            return
+        aus.append({"pfad": rel.replace(os.sep, "/"), "art": art, "woher": woher,
+                    "bytes": gr, "mb": round(gr / 1e6, 2),
+                    "zeit": time.strftime("%Y-%m-%d %H:%M", time.localtime(ts)),
+                    "_ts": ts})
+
+    for datei, art in _BERICHT_ORTE:
+        _nimm(datei, art, "Projektwurzel")
+    st = os.path.join(project_dir, "parameterstudien")
+    if os.path.isdir(st):
+        for k in sorted(os.listdir(st)):
+            _nimm(os.path.join("parameterstudien", k, "parameterstudie.pdf"),
+                  "Parameterstudie", k)
+    for k in sorted((os.listdir(wurzel(project_dir))
+                     if os.path.isdir(wurzel(project_dir)) else [])):
+        doc = laden(project_dir, k)
+        titel = (doc or {}).get("titel") or k
+        for was, art in (("pdf", "eigener Bericht (PDF)"),
+                         ("html", "eigener Bericht (HTML, mit Video)")):
+            _nimm(os.path.join(ORDNER, k, "bericht." + was), art, titel)
+    aus.sort(key=lambda e: -e["_ts"])
+    for e in aus:
+        e.pop("_ts", None)
+    return aus

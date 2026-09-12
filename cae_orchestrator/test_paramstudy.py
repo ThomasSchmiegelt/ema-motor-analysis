@@ -280,6 +280,83 @@ def test_bericht_liegt_bei_der_studie():
     print("✓ Bericht: liegt im Studienordner, der Reihenbericht eine Ebene darueber")
 
 
+def test_welle_haelt_die_magnete():
+    """Wellendurchmesser und Wellenbohrung sind neue Studienparameter — und der
+    Wellendurchmesser bewegt die Magnete MIT, wenn man ihn laesst:
+    ``r_pos = r_shaft + (r_rot - r_shaft) * magDepthRel`` ist eine RELATIVE
+    Lage. Eine Wellenstudie zeigte damit zwei Aenderungen auf einmal.
+
+    Geprueft wird dreierlei: die Parameter sind da, der Ausgangspunkt aendert
+    sich um keine Ziffer, und ueber den geometrisch moeglichen Bereich stehen
+    die Magnete still."""
+    import ema_optimize as O
+    import ema_topology as T
+    for k in ("shaftD", "shaftBore"):
+        assert k in O.FREE_PARAMS, k
+        assert O.FREE_PARAMS[k].get("haelt_magnete") is True, k
+    assert O.FREE_PARAMS["shaftD"]["geom"] == "shaftD"
+    assert O.FREE_PARAMS["shaftBore"]["geom"] == "shaftBoreD"
+
+    g = {"statorOD": 280, "statorID": 190, "rotorOD": 188.6, "shaftD": 60,
+         "shaftBoreD": 0, "p": 3, "slots": 54, "magShape": "v", "magAngle": 120,
+         "magWidth": 42.2381, "magThick": 6, "magDist": 9.4, "magDepthRel": 0.44566,
+         "magLayers": 3, "magLayerGap": 8, "slotDepth": 25, "magGapMm": 0.1,
+         "axialLen": 80, "pocketMode": "position"}
+
+    # Der Ausgangspunkt bleibt, wo er ist — KEIN Modellwechsel.
+    basis = O.magnetlage(g)
+    gg, _ = O._apply_params(g, 80.0, {"shaftD": 60.0})
+    assert O.magnetlage(gg) == basis
+    assert gg.get("magShape") == "v", \
+        "die Bauform darf nicht auf 'custom' umgestellt werden"
+    assert "customLegs" not in gg, \
+        ("Ein erster Entwurf fror die Schenkel als customLegs ein. Gemessen kam "
+         "am selben Punkt bei U 0,711 statt 0,630 T heraus, weil `custom` kein "
+         "Salienzband hat und `_analytical_Bgap` anders summiert — die Studie "
+         "haette den Modellwechsel gezeigt statt der Welle.")
+
+    # Ueber den moeglichen Bereich stehen die Magnete still.
+    for d in (20, 40, 80, 100, 116):
+        gg, _ = O._apply_params(g, 80.0, {"shaftD": float(d)})
+        assert O.magnetlage(gg) == basis, (d, O.magnetlage(gg))
+        assert not gg.get("_magnetlage_hinweis"), d
+
+    # Wo es nicht geht, wird es GESAGT: bei shaftD=120 laege der Sitz (r 58,7 mm)
+    # INNERHALB der Welle (r 60 mm).
+    gg, _ = O._apply_params(g, 80.0, {"shaftD": 120.0})
+    assert O.magnetlage(gg) != basis
+    assert "nicht ganz halten" in (gg.get("_magnetlage_hinweis") or "")
+
+    # Speiche: der Magnet spannt den Ringraum aus, eine andere Welle MUSS ihn
+    # aendern. Das ist Physik und wird benannt, nicht wegoptimiert.
+    gs = dict(g, magShape="spoke", pocketMode="wand")
+    gg, _ = O._apply_params(gs, 80.0, {"shaftD": 100.0})
+    assert "spoke" in (gg.get("_magnetlage_hinweis") or "")
+    print("✓ Welle: Magnete stehen still, wo es geht — und es wird gesagt, wo nicht")
+
+
+def test_welle_studie_zeigt_nur_die_welle():
+    """Die Probe aufs Ganze: eine Wellenstudie an der V-Form laesst Kt und
+    B_gap unberuehrt (die Magnete stehen) und bewegt nur die Masse."""
+    import json as _j
+    import sys as _s
+    _s.argv = ["x"]
+    import cae_cli
+    pl = cae_cli.frischer_payload()
+    pl.update(rpm_from=2000, rpm_to=6000, load_nm=20, cooling="oil")
+    r = S.run_study(_j.loads(_j.dumps(pl)), "shaftD", 30, 110, steps=5, rpm=6000,
+                    progress_cb=lambda m, p=None: None)
+    kt = {v for v in r["metrics"]["Kt"] if v is not None}
+    bg = {v for v in r["metrics"]["B_gap"] if v is not None}
+    ms = [v for v in r["metrics"]["mass_g"] if v is not None]
+    assert len(kt) == 1, "Kt darf sich nicht bewegen: %s" % sorted(kt)
+    assert len(bg) == 1, "B_gap darf sich nicht bewegen: %s" % sorted(bg)
+    assert max(ms) - min(ms) > 100, "die Masse MUSS sich bewegen: %s" % ms
+    assert "nicht ganz halten" not in (r["hinweis"] or "")
+    print("✓ Wellenstudie: Kt und B_gap stehen (%.4f / %.3f), nur die Masse "
+          "bewegt sich (%.0f…%.0f g)" % (kt.pop(), bg.pop(), min(ms), max(ms)))
+
+
 def main():
     test_studien_ueberschreiben_sich_nicht()
     test_zwei_studien_in_derselben_sekunde()
@@ -292,6 +369,8 @@ def main():
     test_reihe_meldet_ungeklaerte_und_unerreichbare()
     test_berichtskopf_ist_kein_prompt()
     test_bericht_liegt_bei_der_studie()
+    test_welle_haelt_die_magnete()
+    test_welle_studie_zeigt_nur_die_welle()
     print("\nALLE PARAMETERSTUDIEN-TESTS BESTANDEN ✅")
 
 

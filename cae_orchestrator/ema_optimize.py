@@ -44,6 +44,17 @@ FREE_PARAMS = {
                     # Grenzen aus ema_grenzen.LUFTSPALT_MM -- eine Quelle fuer alle Wege.
                     "lo": _GRENZEN.LUFTSPALT_MM[0], "hi": _GRENZEN.LUFTSPALT_MM[1], "type": float},
     "magGap":      {"geom": "magGapMm",    "label": "Magnet-Luftspalt [mm]",  "lo": 0.05,"hi": 0.3, "type": float},
+    # Welle und Wellenbohrung. `haelt_magnete` ist hier nicht Kosmetik: der
+    # Wellendurchmesser bewegt in `pocketMode="position"` JEDE Bauform die
+    # Magnete mit, und im Wandmodus immer noch Speiche, Bar und PMa-SynRM
+    # (gemessen 12.09.2026). Eine Studie darueber verglich damit zwei Dinge auf
+    # einmal — Welle UND Magnetlage — und die Kurve haette gezeigt, was man
+    # nicht gefragt hat. Mit dem Merker friert `_apply_params` die Magnete auf
+    # ihrer Ausgangslage ein, bevor es die Welle setzt.
+    "shaftD":    {"geom": "shaftD", "label": "Wellendurchmesser [mm]",
+                  "lo": 8.0, "hi": 400.0, "type": float, "haelt_magnete": True},
+    "shaftBore": {"geom": "shaftBoreD", "label": "Wellenbohrung (innen) [mm]",
+                  "lo": 0.0, "hi": 380.0, "type": float, "haelt_magnete": True},
 }
 
 # Metrics the evaluator produces (objective / constraints pick from these)
@@ -82,9 +93,85 @@ def _clamp(params):
     return out
 
 
+def magnetlage(geom):
+    """Die ABSOLUTE Lage der Magnete dieser Geometrie — Sitzradius, Versatz,
+    Neigung, Laenge, Dicke je Schenkel. Zum Vergleichen, nicht zum Einsetzen."""
+    import ema_topology
+    try:
+        legs, _ = ema_topology.magnet_legs(geom)
+    except Exception:                                        # noqa: BLE001
+        return None
+    return [(round(l.r_pos, 6), round(l.offset, 6), round(l.tilt, 8),
+             round(l.length, 6), round(l.thickness, 6)) for l in legs] or None
+
+
+def magnete_halten(basis_geom, neu_geom):
+    """Die Magnete an ihrer ABSOLUTEN Stelle halten, wenn sich die Welle
+    geaendert hat — ohne das Modell anzufassen.
+
+    Der Grund steht in `ema_topology._common`:
+
+        r_pos = r_shaft + (r_rot - r_shaft) * magDepthRel
+
+    ``magDepthRel`` ist eine RELATIVE Lage zwischen Welle und Rotorrand. Waechst
+    die Welle, wandert der Sitz zwangslaeufig mit — nicht aus Versehen, sondern
+    per Definition. Wer den Wellendurchmesser durchfaehrt und die Magnete stehen
+    lassen will, muss also die relative Lage zurueckrechnen:
+
+        magDepthRel_neu = (r_pos_alt - r_shaft_neu) / (r_rot - r_shaft_neu)
+
+    **Ein erster Entwurf fror die Schenkel statt dessen als ``customLegs`` ein.
+    Das war falsch** und faellt nur auf, wenn man nachmisst: fuer ``custom``
+    kennt `estimate_saliency` kein Salienzband und `_analytical_Bgap` summiert
+    anders — am selben Ausgangspunkt kamen bei U 0,711 statt 0,630 T heraus und
+    bei der Speiche 0,469 statt 0,551 T. Eine Studie haette damit nicht die
+    Welle gezeigt, sondern den Modellwechsel.
+
+    **Wo es nicht geht, wird es gesagt:** bei Speiche und Bar spannt der Magnet
+    den Ringraum zwischen Welle und Rand aus; eine dickere Welle MUSS ihn
+    kuerzen, sonst raegte er in die Welle. Das ist Physik und kein Artefakt.
+    Returns ``(geom, hinweis)`` — ``hinweis`` ist leer, wenn alles steht.
+    """
+    lage_alt = magnetlage(basis_geom)
+    if lage_alt is None:
+        return neu_geom, ""
+    g = dict(neu_geom)
+    try:
+        r_rot = float(g["rotorOD"]) / 2.0
+        r_sh_neu = float(g["shaftD"]) / 2.0
+        r_pos_alt = float(lage_alt[0][0])
+        spanne = r_rot - r_sh_neu
+        if spanne > 1e-6:
+            rel = (r_pos_alt - r_sh_neu) / spanne
+            if 0.0 <= rel <= 1.0:
+                g["magDepthRel"] = rel
+    except (KeyError, TypeError, ValueError, ZeroDivisionError):
+        return neu_geom, ""
+    lage_neu = magnetlage(g)
+    if lage_neu == lage_alt:
+        return g, ""
+    if lage_neu is None:
+        return neu_geom, ""
+    # Was bleibt, ist echte Geometrie: benennen statt verschweigen.
+    dr = max(abs(a[0] - b[0]) for a, b in zip(lage_alt, lage_neu))
+    dl = max(abs(a[3] - b[3]) for a, b in zip(lage_alt, lage_neu))
+    teile = []
+    if dr > 0.01:
+        teile.append("Sitzradius um bis zu %.2f mm" % dr)
+    if dl > 0.01:
+        teile.append("Magnetlaenge um bis zu %.2f mm" % dl)
+    if not teile:
+        return g, ""
+    return g, ("Die Magnete lassen sich bei dieser Bauform (%s) nicht ganz "
+               "halten — %s. Der Magnet spannt hier den Ringraum zwischen Welle "
+               "und Rand aus; eine andere Welle aendert ihn zwangslaeufig."
+               % (basis_geom.get("magShape", "?"), " und ".join(teile)))
+
+
 def _apply_params(base_geom, base_axial, params):
     geom = dict(base_geom)
     axial = float(base_axial)
+    _halten = any((FREE_PARAMS.get(k) or {}).get("haelt_magnete") for k in params)
     for k, v in params.items():
         spec = FREE_PARAMS.get(k)
         if not spec:
@@ -102,6 +189,12 @@ def _apply_params(base_geom, base_axial, params):
             geom["statorID"] = float(geom["rotorOD"]) + 2.0 * float(v)
         else:
             geom[spec["geom"]] = spec["type"](v)
+    if _halten:
+        # NACH dem Setzen: die relative Lage wird gegen die neue Welle
+        # zurueckgerechnet, damit der absolute Sitzradius stehen bleibt.
+        geom, _hin = magnete_halten(base_geom, geom)
+        if _hin:
+            geom["_magnetlage_hinweis"] = _hin
     return geom, axial
 
 

@@ -559,3 +559,156 @@ if __name__ == "__main__":
         print(json.dumps(rep, indent=2, ensure_ascii=False))
         sys.exit(0 if rep["ok"] else 1)
     print(__doc__)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Was tun, wenn die Fliehkraft nicht reicht — GERECHNET, nicht geraten
+# ─────────────────────────────────────────────────────────────────────────────
+# Gemeldet als: „wenn ich eine Analyse starte und die Festigkeit reicht nicht,
+# startet er sie nicht. Er sagt nur 'Analyse fehlgeschlagen'." Das stimmte: das
+# Tor warf einen Text, und der Lauf war zu Ende. Dabei ist der Fall der
+# denkbar einfachste zum Nachrechnen — die Ringspannung ist eine geschlossene
+# Formel, und jeder Hebel darin laesst sich nach dem zulaessigen Wert aufloesen:
+#
+#   sigma ~ rho * omega^2 * ((1-lam)*a^2 + (3+lam)*b^2)
+#
+# also n ~ 1/sqrt(sigma), b ~ 1/sqrt(sigma) bei festem a, und die noetige
+# Fliessgrenze ist schlicht sigma_peak * SF_ziel. Ein „geht nicht" ohne diese
+# vier Zahlen ist eine Auskunft, die der Benutzer selbst haette ausrechnen
+# koennen — und genau deshalb keine.
+#
+# Vorgeschlagen wird NICHT gewaehlt: jeder Vorschlag nennt seinen Preis
+# (weniger Drehzahl heisst weniger Leistung, kleinerer Aussendurchmesser
+# heisst weniger Moment, ein anderes Blech kostet Ummagnetisierungsverluste).
+# Die Entscheidung ist eine Auslegungsentscheidung und bleibt beim Menschen.
+
+def _sf_bei(geom, mat, n_rpm, *, a_mm=None, b_mm=None, sigy=None):
+    """Sicherheitsfaktor (mit Kerbfaktor, also der bindende) fuer geaenderte
+    Groessen — ohne die Geometrie anzufassen."""
+    import ema_radien
+    r = ema_radien.radien(geom)
+    a = (float(a_mm) if a_mm is not None else float(r["r_traeger_innen_mm"])) / 1e3
+    b = (float(b_mm) if b_mm is not None else float(r["r_traeger_aussen_mm"])) / 1e3
+    rho = float(mat.get("density", 7650.0))
+    nu = float(mat.get("nu", 0.30))
+    sy = float(sigy if sigy is not None else mat.get("yield_mpa", 340.0))
+    w = 2.0 * math.pi * float(n_rpm) / 60.0
+    sig = _bore_hoop_mpa(a, b, rho, w, nu / (1.0 - nu))
+    kt = KT_POCKET if ema_radien.magnethaltung(geom)["steg_traegt_magnete"] else 1.0
+    peak = sig * kt
+    return (sy / peak) if peak > 0 else float("inf"), peak
+
+
+def _suche(f, lo, hi, ziel, schritte=60):
+    """Halbierung auf ein monotones f. Gibt None, wenn das Ziel im Bereich
+    nicht erreichbar ist — lieber kein Vorschlag als ein unerreichbarer."""
+    flo, fhi = f(lo), f(hi)
+    if (flo - ziel) * (fhi - ziel) > 0:
+        return None
+    for _ in range(schritte):
+        m = 0.5 * (lo + hi)
+        if (f(lo) - ziel) * (f(m) - ziel) <= 0:
+            hi = m
+        else:
+            lo = m
+    return 0.5 * (lo + hi)
+
+
+def entlastung(geom: dict, mat: dict, target: dict, sf_target: float = 1.3,
+               laminate: dict | None = None) -> dict:
+    """Konkrete, gerechnete Wege aus einem gerissenen Fliehkraft-Tor.
+
+    Returns ``{"ok": bool, "befund": str, "wege": [...]}``; jeder Weg traegt
+    ``{schluessel, wert, jetzt, text, preis, ebene}`` — ``ebene`` sagt, wo der
+    Wert hingehoert (``payload`` oder ``geom``), damit die Oberflaeche ihn
+    einsetzen kann, ohne raten zu muessen.
+    """
+    import ema_radien
+    chk = rotor_stress_check(geom, mat, target, sf_target)
+    if chk["ok"]:
+        return {"ok": True, "befund": "", "wege": [], "check": chk}
+    r = ema_radien.radien(geom)
+    n_ist = float(target["n_max"])
+    a_ist = float(r["r_traeger_innen_mm"])
+    b_ist = float(r["r_traeger_aussen_mm"])
+    sf_ist = float(chk["safety_factor_peak"])
+    wege = []
+
+    # 1) Drehzahl — sigma ~ n^2, also n_zul = n * sqrt(SF_ist/SF_ziel). Exakt,
+    #    keine Suche noetig.
+    n_zul = n_ist * math.sqrt(max(0.0, sf_ist) / sf_target)
+    # ABrunden, nicht runden: auf 50 aufgerundet liegt die Sicherheit wieder
+    # knapp unter dem Ziel (gemessen 1,297 statt 1,30), und ein Vorschlag, der
+    # das Tor erneut reissen laesst, ist keiner.
+    n_vor = math.floor(n_zul / 50.0) * 50.0
+    if n_vor >= 100.0:
+        wege.append({
+            "schluessel": "rpm_to", "ebene": "payload",
+            "wert": n_vor, "jetzt": n_ist,
+            "text": "Hoechstdrehzahl auf %.0f min-1 senken (jetzt %.0f)"
+                    % (n_vor, n_ist),
+            "preis": "Die Spannung geht mit dem QUADRAT der Drehzahl — das ist "
+                     "der staerkste Hebel und kostet Eckleistung."})
+
+    # 2) Fliessgrenze — was das Blech koennen muesste, und ob es das gibt.
+    noetig = float(chk["sigma_peak_MPa"]) * sf_target
+    besser = []
+    for key, lam in sorted((laminate or {}).items()):
+        try:
+            sy = float(lam.get("yield_mpa") or 0.0)
+        except (TypeError, ValueError):
+            continue
+        if sy >= noetig:
+            besser.append((sy, key, lam.get("label", key)))
+    besser.sort()
+    if besser:
+        sy, key, label = besser[0]
+        wege.append({
+            "schluessel": "rotor_lam", "ebene": "payload", "wert": key,
+            "jetzt": None,
+            "text": "Rotorblech mit mindestens %.0f MPa Fliessgrenze — %s hat %.0f MPa"
+                    % (noetig, label, sy),
+            "preis": "Ein festeres Blech hat in der Regel hoehere "
+                     "Ummagnetisierungsverluste; die Thermik aendert sich mit."})
+    else:
+        wege.append({
+            "schluessel": None, "ebene": None, "wert": None, "jetzt": None,
+            "text": "Noetig waeren %.0f MPa Fliessgrenze — das hat keines der "
+                    "hinterlegten Bleche" % noetig,
+            "preis": "Bleibt nur Drehzahl, Durchmesser oder Bohrung."})
+
+    # 3) Aussendurchmesser — b nach unten suchen (sigma waechst mit b^2).
+    b_zul = _suche(lambda b: _sf_bei(geom, mat, n_ist, b_mm=b)[0],
+                   max(a_ist + 5.0, 10.0), b_ist, sf_target)
+    if b_zul and b_zul < b_ist - 0.5:
+        d_zul = math.floor(2.0 * b_zul * 10.0) / 10.0     # abrunden, s. o.
+        wege.append({
+            "schluessel": "rotorOD", "ebene": "geom", "wert": round(d_zul, 1),
+            "jetzt": round(2.0 * b_ist, 1),
+            "text": "Rotoraussendurchmesser auf %.1f mm verkleinern (jetzt %.1f)"
+                    % (d_zul, 2.0 * b_ist),
+            "preis": "Weniger Luftspaltflaeche heisst weniger Moment — der "
+                     "Luftspalt muss mitwandern (statorID), sonst reisst das "
+                     "Luftspalt-Tor."})
+
+    # 4) Bohrung/Welle — kleiner ist besser (die Ringspannung an der Bohrung
+    #    faellt, wenn a schrumpft; bei a -> 0 geht sie gegen den Vollscheibenwert).
+    if a_ist > 1.0:
+        a_zul = _suche(lambda a: _sf_bei(geom, mat, n_ist, a_mm=a)[0],
+                       0.5, a_ist, sf_target)
+        if a_zul and a_zul < a_ist - 0.5:
+            wege.append({
+                "schluessel": "shaftD", "ebene": "geom", "wert": round(2.0 * a_zul, 1),
+                "jetzt": round(2.0 * a_ist, 1),
+                "text": "Wellendurchmesser auf %.1f mm verkleinern (jetzt %.1f)"
+                        % (2.0 * a_zul, 2.0 * a_ist),
+                "preis": "Eine duennere Welle traegt weniger Moment und ist "
+                         "torsionsweicher — das prueft diese Rechnung NICHT."})
+
+    befund = ("Fliehkraft am %.0f-mm-Laeufer bei %.0f min-1: %.0f MPa an der "
+              "Bohrung, mit Kerbfaktor %.1f sind das %.0f MPa gegen %.0f MPa "
+              "Fliessgrenze — Sicherheit %.2f statt %.2f."
+              % (2 * b_ist, n_ist, chk["sigma_bore_conservative_MPa"],
+                 chk["kt_pocket"], chk["sigma_peak_MPa"], chk["yield_mpa"],
+                 sf_ist, sf_target))
+    return {"ok": False, "befund": befund, "wege": wege, "check": chk}

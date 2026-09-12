@@ -254,6 +254,139 @@ def test_zwei_berichte_in_derselben_sekunde():
     print("✓ Bericht: vier Anlagen in derselben Sekunde, vier Ordner")
 
 
+def test_fassungen_und_dedup():
+    """Jedes Speichern legt eine Fassung ab — unveraendert aber KEINE neue,
+    sonst waere die Liste nach einem Nachmittag unlesbar."""
+    with tempfile.TemporaryDirectory() as d:
+        _projekt(d)
+        k = BR.anlegen(d, "H")
+        for t in ("A", "A", "A", "B"):
+            BR.speichern(d, k, {"titel": "Stand " + t,
+                                "bloecke": [{"art": "text", "text": t}]})
+        f = BR.fassungen(d, k)
+        # anlegen() + A + B = 3 (die beiden Wiederholungen von A fallen weg)
+        assert len(f) == 3, [(x["titel"], x["marke"]) for x in f]
+        assert f[0]["titel"] == "Stand B", f[0]
+    print("✓ Fassungen: Wiederholung ohne Aenderung legt keine neue an")
+
+
+def test_marken_sortieren_nach_ZAHL_nicht_nach_zeichen():
+    """Zwei Fassungen derselben Sekunde heissen ``…038`` und ``…038-2``. Im
+    Dateinamen sortiert der Bindestrich (0x2D) UNTER den Punkt (0x2E) — als
+    Zeichenkette sortiert gaelte die aeltere als die juengere, und die
+    Dubletten-Erkennung verglich gegen den falschen Stand. Derselbe Fehler
+    steht schon in `ema_getriebe.rechnungen()`."""
+    roh = ["20260912_165038", "20260912_165038-2", "20260912_165038-10",
+           "20260912_165039"]
+    assert sorted(roh, key=BR._marke_key, reverse=True) == [
+        "20260912_165039", "20260912_165038-10", "20260912_165038-2",
+        "20260912_165038"]
+    # die naive Sortierung stellt es falsch herum — Gegenprobe
+    assert sorted(roh, reverse=True)[1] != "20260912_165038-10"
+    with tempfile.TemporaryDirectory() as d:
+        _projekt(d)
+        k = BR.anlegen(d, "H")
+        marken = {BR.fassung_ablegen(d, k, {"titel": "T", "bloecke":
+                  [{"art": "text", "text": str(i)}]}) for i in range(5)}
+        assert len(marken) == 5, marken
+    print("✓ Marken: nach Zeit UND laufender Nummer sortiert, nicht als Zeichenkette")
+
+
+def test_zurueck_schreibt_die_geschichte_nicht_um():
+    with tempfile.TemporaryDirectory() as d:
+        _projekt(d)
+        k = BR.anlegen(d, "H")
+        BR.speichern(d, k, {"titel": "A", "bloecke": [{"art": "text", "text": "a"}]})
+        marke_a = BR.fassungen(d, k)[0]["marke"]
+        BR.speichern(d, k, {"titel": "B", "bloecke": [{"art": "text", "text": "b"},
+                                                     {"art": "umbruch"}]})
+        vorher = len(BR.fassungen(d, k))
+        r = BR.zurueck(d, k, marke_a)
+        assert r["ok"]
+        jetzt = BR.laden(d, k)
+        assert jetzt["titel"] == "A" and len(jetzt["bloecke"]) == 1
+        # Der VERLASSENE Stand ist auffindbar — sonst waere der Rueckweg der
+        # einzige Schritt, den man nicht rueckgaengig machen kann. Eine eigene
+        # "vor der Rueckkehr"-Fassung entsteht dabei NICHT immer, und das ist
+        # richtig: der verlassene Stand IST schon die neueste Fassung, eine
+        # zweite mit demselben Inhalt waere eine Dublette.
+        f = BR.fassungen(d, k)
+        assert len(f) > vorher, "die Rueckkehr selbst ist eine Fassung"
+        assert any(x["titel"] == "B" for x in f), "der Stand B ist noch da"
+        assert any("zurueck auf" in (x["anlass"] or "") for x in f), \
+            [x["anlass"] for x in f]
+        # …und von dort geht es auch wieder vorwaerts
+        zu_b = next(x["marke"] for x in f if x["titel"] == "B")
+        assert BR.zurueck(d, k, zu_b)["ok"]
+        assert BR.laden(d, k)["titel"] == "B"
+        assert BR.zurueck(d, k, marke_a)["ok"]
+        assert BR.zurueck(d, k, "gibtsnicht")["ok"] is False
+    print("✓ Zurueck: der verlassene Stand wird gesichert, B bleibt auffindbar")
+
+
+def test_abzweig_und_baum():
+    with tempfile.TemporaryDirectory() as d:
+        _projekt(d)
+        a = BR.anlegen(d, "Haupt")
+        BR.speichern(d, a, {"titel": "Haupt", "bloecke": [{"art": "text", "text": "x"}]})
+        b = BR.abzweigen(d, a, titel="Variante 1")["kennung"]
+        c = BR.abzweigen(d, b, titel="Variante 1.1")["kennung"]
+        baum = BR.baum(d)
+        tiefen = {e["kennung"]: e["tiefe"] for e in baum}
+        assert tiefen[a] == 0 and tiefen[b] == 1 and tiefen[c] == 2, tiefen
+        eltern = {e["kennung"]: e["eltern"] for e in baum}
+        assert eltern[b] == a and eltern[c] == b
+        # Die Herkunft ueberlebt ein Speichern, auch ohne dass sie mitgeschickt wird
+        BR.speichern(d, b, {"titel": "Variante 1", "bloecke": []})
+        assert (BR.laden(d, b).get("eltern") or {}).get("kennung") == a
+        assert {e["kennung"] for e in BR.baum(d)} == {a, b, c}
+    print("✓ Baum: Varianten haengen unter ihrer Vorlage, Herkunft ueberlebt das Speichern")
+
+
+def test_bausteine_werden_frisch_geholt():
+    """Ein Baustein friert nichts ein — er wird beim Setzen aus dem Projekt
+    geholt. Eine eingefrorene Zahl, die von der Ablage abweicht, sieht richtig
+    aus und ist es nicht."""
+    with tempfile.TemporaryDirectory() as d:
+        _projekt(d)
+        k = BR.anlegen(d, "G")
+        r = BR.speichern(d, k, {"titel": "Gesamt", "bloecke": [
+            {"art": "baustein", "quelle": "getriebe"},
+            {"art": "baustein", "quelle": "gibtsnicht"}]})
+        assert [b["art"] for b in r["bloecke"]] == ["baustein"]
+        assert any("unbekannter Baustein" in m for m in r["meldungen"])
+        md = BR.als_markdown(d, BR.laden(d, k), standbilder=False)
+        # Was es nicht gibt, sagt das auch — das Fehlen ist die Auskunft
+        assert "keine Getriebeauslegung abgelegt" in md
+        assert "## " + BR.BAUSTEINE["getriebe"] in md
+        html = BR.als_html(d, BR.laden(d, k))
+        assert BR.BAUSTEINE["getriebe"] in html
+        assert set(BR.BAUSTEINE) >= {"steckbrief", "getriebe", "elmer",
+                                     "studien", "sicherheit"}
+    print("✓ Bausteine: frisch geholt, Unbekanntes abgewiesen, Fehlendes benannt")
+
+
+def test_alle_berichte_findet_jede_stufe():
+    with tempfile.TemporaryDirectory() as d:
+        _projekt(d)
+        for rel in ("bericht_elmer.pdf", "studienreihe.pdf"):
+            with open(os.path.join(d, rel), "wb") as f:
+                f.write(b"%PDF-1.4")
+        os.makedirs(os.path.join(d, "parameterstudien", "s1"), exist_ok=True)
+        with open(os.path.join(d, "parameterstudien", "s1", "parameterstudie.pdf"), "wb") as f:
+            f.write(b"%PDF-1.4")
+        k = BR.anlegen(d, "Eigen")
+        with open(os.path.join(BR.wurzel(d), k, "bericht.pdf"), "wb") as f:
+            f.write(b"%PDF-1.4")
+        pfade = {e["pfad"] for e in BR.alle_berichte(d)}
+        assert "bericht_elmer.pdf" in pfade
+        assert "studienreihe.pdf" in pfade
+        assert "parameterstudien/s1/parameterstudie.pdf" in pfade
+        assert ("berichte/%s/bericht.pdf" % k) in pfade
+        assert all(e["mb"] is not None and e["zeit"] for e in BR.alle_berichte(d))
+    print("✓ Uebersicht: jede Stufe wird gefunden, wo immer sie ablegt")
+
+
 def main():
     test_ansicht_nimmt_data_url_und_haelt_die_einstellungen()
     test_ansicht_weist_fremdes_ab()
@@ -266,6 +399,12 @@ def main():
     test_html_hat_base_und_echtes_video()
     test_umbruch_und_liste()
     test_zwei_berichte_in_derselben_sekunde()
+    test_fassungen_und_dedup()
+    test_marken_sortieren_nach_ZAHL_nicht_nach_zeichen()
+    test_zurueck_schreibt_die_geschichte_nicht_um()
+    test_abzweig_und_baum()
+    test_bausteine_werden_frisch_geholt()
+    test_alle_berichte_findet_jede_stufe()
     print("\nALLE BERICHTS-TESTS BESTANDEN ✅  (PDF-Rendern separat, braucht pandoc)")
 
 

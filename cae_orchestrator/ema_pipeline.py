@@ -11,8 +11,31 @@ from matplotlib.lines import Line2D
 
 from freecad_runner import run_freecad_script
 from ema_freecad   import build_full_motor_script, build_rotor_fem_script
-from ema_rotorcheck import rotor_layout_check, rotor_stress_check, _bore_hoop_mpa
+from ema_rotorcheck import rotor_layout_check, rotor_stress_check
+from ema_rotorcheck import entlastung as rotor_entlastung, _bore_hoop_mpa
 import ema_maschinenart
+
+
+class AuslegungReisst(RuntimeError):
+    """Ein Tor haelt den Lauf an — MIT gerechneten Auswegen.
+
+    Gemeldet als: „wenn die Festigkeit nicht reicht, sagt er nur 'Analyse
+    fehlgeschlagen'." Eine nackte Absage ist bei diesem Tor besonders aermlich,
+    denn die Ringspannung ist eine geschlossene Formel: jeder Hebel darin laesst
+    sich nach dem zulaessigen Wert aufloesen (``ema_rotorcheck.entlastung``).
+    Die Ausnahme traegt die Wege deshalb mit, der Server reicht sie in den
+    Zustand, und die Oberflaeche macht Knoepfe daraus.
+
+    **Vorgeschlagen ist nicht gewaehlt.** Jeder Weg nennt seinen Preis; welcher
+    gegangen wird, ist eine Auslegungsentscheidung und bleibt beim Menschen —
+    dieselbe Haltung wie bei `ema_asm`s „nicht erreichbar, weil …".
+    """
+
+    def __init__(self, text, wege=None, befund="", tor=""):
+        super().__init__(text)
+        self.wege = list(wege or [])
+        self.befund = befund or ""
+        self.tor = tor or ""
 
 
 def _gate_maschinenart(data: dict, state: dict | None = None,
@@ -173,10 +196,21 @@ def _gate_rotor_stress(data: dict, state: dict | None = None,
             f"Rotor-Festigkeitsgate nicht bestanden: Peak-Spannung (2D-Ring x Kt={st['kt_pocket']}) "
             f"{st['sigma_peak_MPa']:.1f} MPa an der Bohrung bei {nmax:.0f} U/min "
             f"gibt SF {st['safety_factor_peak']:.2f} < 1.0 - Rotor fliesst sicher. "
-            f"(Fliess {st['yield_mpa']:.0f} MPa) Geometrie verkleinern (rotorOD/Aufnahme) "
-            f"oder n_max senken, dann neu laufen lassen.")
+            f"(Fliess {st['yield_mpa']:.0f} MPa)")
         if fatal:
-            raise RuntimeError(_mkmsg)
+            # Nicht nur absagen: ausrechnen, WAS helfen wuerde. Jeder Weg wird
+            # gegen dasselbe Tor nachgeprueft, bevor er vorgeschlagen wird.
+            try:
+                ent = rotor_entlastung(geom, mat, {"n_max": nmax}, SF_TARGET, LAMINATES)
+                wege, befund = ent["wege"], ent["befund"]
+            except Exception:                                # noqa: BLE001
+                wege, befund = [], ""
+            if wege and state is not None:
+                _log(state, "   Was helfen wuerde (gerechnet, nicht geraten):", 5)
+                for w in wege:
+                    _log(state, "     • " + w["text"], 5)
+            raise AuslegungReisst(_mkmsg, wege=wege, befund=befund,
+                                  tor="fliehkraft")
         _log(state, "\u26A0 " + _mkmsg + " (Nachrechnen laeuft trotzdem weiter.)", 5)
     elif state is not None and not st["ok"]:
         _log(state, f"   ⚠ Tier-1: SF_peak {st['safety_factor_peak']:.2f} unter Ziel "
