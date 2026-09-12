@@ -291,6 +291,31 @@ def _magnet_pieces(rects: list, L: float, opts: dict):
 
 # ── 3D-Mesh (Gmsh OCC) ──────────────────────────────────────────────────────────
 
+class LayoutUngueltig(ValueError):
+    """Die GEOMETRIE ist ungueltig -- nicht das Netz.
+
+    Gemessen am 12.09.2026 an einer gemeldeten U-Anordnung (Stator 305, Rotor
+    188,6, **Welle 100**, 6 Pole, 36 Nuten, L=150): der Bodenbalken der U-Form
+    sitzt bei ``r_pos = 50,156`` und ist 6 mm dick, der Wellenradius betraegt
+    50,0 -- die Tasche ragt **2,72 mm in die Bohrung**, sechsmal, einmal je Pol.
+    ``rotor_layout_check`` sagt das in Millisekunden und nennt Pol und Leg.
+
+    Nur: **kein einziger der fuenf em3d-Einstiege hat je danach gefragt**
+    (``rotor_layout_check`` kam in diesem Modul null mal vor). Statt dessen lief
+    der Selbstheil-Monitor seine ganze Leiter durch -- Netzqualitaet hoch,
+    Zonen vergroebern, Taschen aus, Skew aus, Nuten aus -- und meldete am Ende
+    ``Invalid boundary mesh (overlapping facets) on surface 127``. Das ist die
+    Nummer einer Gmsh-Flaeche und sagt dem, der davorsitzt, gar nichts; gesucht
+    wird danach am Netz, waehrend der Fehler in der Zeichnung steht. Und keine
+    Stufe der Leiter kann ihn beheben: sie dreht an Zellgroessen und nimmt
+    Modellmerkmale heraus, aber der Magnet bleibt, wo er ist -- er IST das
+    Modell.
+
+    Die Pipeline hat dieses Tor seit jeher (``ema_pipeline._gate_rotor_layout``,
+    Stufe 0, vor Feld UND vor CAD). Der 3-D-Pfad ist daran vorbeigewachsen.
+    """
+
+
 class _DegenerateMeshError(RuntimeError):
     """Das Netz wurde gebaut, enthält aber entartete Tetraeder (Sliver), auf denen der Elmer-
     Löser still scheitern würde. Getrennter Typ, damit ``build_mesh`` NICHT die (hier hilfreichen)
@@ -2575,6 +2600,57 @@ def _mesh_mitigations():
     return [m_quality, m_coarsen_fine, m_ratio, m_coarsen_all, m_no_pockets, m_no_skew, m_no_slots]
 
 
+def _tor_layout(geom: dict, opts: dict | None = None, log=None) -> list:
+    """Stufe 0 fuer den 3-D-Pfad: taugt die ZEICHNUNG, bevor Gmsh laeuft?
+
+    Kostet Millisekunden (reine 2-D-Algebra aus ``ema_rotorcheck``) und steht
+    vor einem Netzbau, der gemessen Minuten und dreizehn Versuche kostet.
+
+    ``fatal``-Befunde (Taschendurchbruch in die Bohrung oder ueber den Rand,
+    Kollision zweier Taschen) fuehren zu ``LayoutUngueltig``. Das ist dieselbe
+    Haltung wie in der Pipeline und aus demselben Grund: eine Tasche, die durch
+    die Wellenbohrung geht, ist nicht die Maschine, die jemand gezeichnet hat --
+    ob Gmsh sie zufaellig noch vernetzt bekommt, aendert daran nichts.
+
+    Wer sie ausdruecklich trotzdem will, setzt ``geom['layoutFreigabe']`` (oder
+    ``opts['layout_freigabe']``); dann steht der Befund als ⚠ im Protokoll,
+    statt unbemerkt durchzugehen -- dasselbe Muster wie ``luftspaltFreigabe``
+    in ``ema_grenzen``.
+
+    Gibt die nicht-fatalen Befunde als Warnungen zurueck.
+    """
+    from ema_rotorcheck import rotor_layout_check
+    try:
+        chk = rotor_layout_check(geom)
+    except Exception as e:                     # ein kaputtes Tor darf nichts aufhalten
+        if log:
+            log(f"⚠ Layouttor nicht auswertbar ({type(e).__name__}) — ungeprueft weiter")
+        return []
+    schlimm = list(chk.get("fatal") or [])
+    frei = bool((geom or {}).get("layoutFreigabe")
+                or (opts or {}).get("layout_freigabe"))
+    if schlimm and not frei:
+        raise LayoutUngueltig(
+            "Die Geometrie faellt durch das Rotor-Layouttor — das ist ein Fehler "
+            "der ZEICHNUNG, nicht des Netzes, und kein Netzbau behebt ihn:\n  · "
+            + "\n  · ".join(schlimm[:4])
+            + (f"\n  · … und {len(schlimm) - 4} weitere" if len(schlimm) > 4 else "")
+            + "\nAbhilfe: die genannte Tasche kleiner/weiter aussen setzen, die "
+              "Welle duenner, oder — wenn es so gemeint ist — geom.layoutFreigabe "
+              "setzen; dann steht der Befund als Warnung im Protokoll.")
+    warn = []
+    if schlimm and frei:
+        for b in schlimm:
+            warn.append(f"⚠ Layout freigegeben trotz: {b}")
+            if log:
+                log(warn[-1])
+    for b in (chk.get("warn") or []):
+        warn.append(f"⚠ Layout: {b}")
+        if log:
+            log(warn[-1])
+    return warn
+
+
 def _build_mesh_capped(geom, axial, opts, msh, log=None):
     """Selbstheilender, ziel-gesteuerter 3D-Netzbau mit Logfile (``mesh_build.log`` neben ``msh``).
 
@@ -2591,7 +2667,9 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
 
     Gibt ``(tags, warnings)`` zurück."""
     wl, logpath = _mesh_logger(msh, log)
-    warns = []
+    # Stufe 0 ZUERST: Millisekunden, und sie erspart im Fehlerfall dreizehn
+    # Netzversuche samt einer Gmsh-Flaechennummer als einziger Auskunft.
+    warns = _tor_layout(geom, opts, log=wl)
 
     tn = opts.get("target_nodes")
     if tn:
@@ -3302,6 +3380,10 @@ def _build_sector_mesh(geom: dict, axial: float, opts: dict, msh_path: str) -> d
     Luftspalt sehr fein (gap_cl), Magnete+Barrieren+Nuten fein mit Distanz-Auslauf (mag_cl→mesh_cl
     über mag_grow), Rest grob (mesh_cl) — per gmsh ``Min``-Feld. Returns ``tags`` analog
     ``_build_mesh_once`` + ``master_pid``/``slave_pid``/``outer_pid``/``alpha``/``PC``/``poles``."""
+    # Dasselbe Stufe-0-Tor wie im Vollmodell: der Sektor baut ueber einen eigenen
+    # Weg und waere sonst der einzige, der an einer ungueltigen Zeichnung
+    # weiterrechnet (s. `_tor_layout`).
+    _tor_layout(geom, opts)
     import gmsh
 
     L = float(axial)

@@ -1058,6 +1058,30 @@ wird. **v1-Scope:** Leerlauf (nur Magnete) + Magnete (+ Taschen) + Statornuten +
 nur näherungsweise). Test:
 `test_sector_mesh_and_sif` (ohne Elmer: Periodik+Außenrand-BC, Nuten/Pol) + `test_sector_full_resolve`
 (mit Elmer: physikalisch, Anti-Periodizität < 15 %, voller Motor gespiegelt).
+**Stufe 0 fuer den 3-D-Pfad (`_tor_layout`, 12.09.2026).** Der Netzbau fragt jetzt
+ZUERST das Rotor-Layouttor — dieselbe 2-D-Algebra aus `ema_rotorcheck`, die die
+Pipeline seit jeher vor Feld und CAD fuehrt. **`ema_em3d` hatte sie nie gerufen**
+(null Treffer auf `rotor_layout_check`), und das faellt erst auf, wenn eine
+Zeichnung ungueltig ist: gemeldet wurde `Invalid boundary mesh (overlapping
+facets) on surface 127`, davor sieben Stufen Selbstheil-Monitor, dahinter ein
+Traceback. Gemessen an der gemeldeten Geometrie (Stator 305 / Rotor 188,6 /
+**Welle 100**, 6 Pole, 36 Nuten, U-Form, L=150) sitzt der **Bodenbalken der
+U-Form** bei r = 50,156 mm und ist 6 mm dick, waehrend der Wellenradius 50,0 mm
+betraegt — die Tasche ragt **2,72 mm in die Bohrung**, sechsmal, einmal je Pol.
+Das Tor sagt das in Millisekunden und nennt Pol und Leg; die Flaechennummer
+sagte niemandem etwas, und man sucht danach am Netz, waehrend der Fehler in der
+Zeichnung steht. **Keine Stufe der Mitigationsleiter kann so etwas beheben** —
+sie dreht an Zellgroessen und nimmt Modellmerkmale heraus (Taschen, Skew,
+Nuten), aber der Magnet bleibt, wo er ist: er IST das Modell. Gerufen aus
+`_build_mesh_capped` (Vollmodell, Vorschau, Sweep, Verfeinerung) **und**
+`_build_sector_mesh` — zwei Aufrufer, EINE Pruefung, weil der Sektor sonst der
+einzige bliebe, der weiterrechnet. `fatal`-Befunde werfen `LayoutUngueltig`
+samt Mass, Stelle und Abhilfe; wer es ausdruecklich trotzdem will, setzt
+`geom.layoutFreigabe` (Muster `luftspaltFreigabe`), dann steht der Befund als ⚠
+im Protokoll statt unbemerkt durchzugehen. Test:
+`test_em3d.test_layouttor_vor_dem_netzbau` — samt der Gegenprobe, dass `gmsh`
+dabei **gar nicht** gerufen wird.
+
 **Prerequisite:**
 Elmer (`sudo apt install elmerfem-csc` via PPA `elmer-csc-ubuntu/elmer-csc-ppa`) + die
 Python-Pakete `gmsh`/`vtk` (in `requirements.txt`). Mesh/sif sind ohne Elmer test- und

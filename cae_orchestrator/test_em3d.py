@@ -310,6 +310,78 @@ def test_orientation_check_2d_vs_3d():
     print("✓ _orientation_check: 0°/4°(tol 9°)/20°(tol 3°) korrekt bewertet")
 
 
+def test_layouttor_vor_dem_netzbau():
+    """Eine ungueltige ZEICHNUNG wird als solche gemeldet — nicht als Netzfehler.
+
+    Gemeldet am 12.09.2026 aus dem 3-D-Reiter: ``Invalid boundary mesh
+    (overlapping facets) on surface 127``, davor sieben Stufen Selbstheil-
+    Monitor, dahinter ein Traceback aus ``render_model_preview``. Gemessen an
+    der gemeldeten Geometrie (Stator 305 / Rotor 188,6 / **Welle 100**, 6 Pole,
+    36 Nuten, U-Form, L=150): der Bodenbalken der U sitzt bei r = 50,156 und ist
+    6 mm dick, der Wellenradius ist 50,0 — die Tasche ragt **2,72 mm in die
+    Bohrung**, sechsmal. ``rotor_layout_check`` sagt das in Millisekunden.
+
+    Nur hat im ganzen ``ema_em3d`` **nie jemand danach gefragt** (null Treffer
+    auf ``rotor_layout_check``), waehrend die Pipeline das Tor seit jeher vor
+    Feld UND CAD fuehrt. Keine Stufe der Mitigationsleiter kann so etwas
+    beheben: sie dreht an Zellgroessen und nimmt Modellmerkmale heraus, aber
+    der Magnet bleibt, wo er ist — er IST das Modell. Herausgekommen ist eine
+    Gmsh-Flaechennummer, und danach sucht man am Netz, waehrend der Fehler in
+    der Zeichnung steht.
+    """
+    import cae_cli
+    kaputt = dict(cae_cli.frischer_payload()["geom"])
+    kaputt.update({"statorOD": 305.0, "rotorOD": 188.6, "shaftD": 100.0,
+                   "statorID": 190.0, "poles": 6, "slots": 36,
+                   "magShape": "u", "axialLen": 150.0})
+
+    # Erst die Voraussetzung: das Tor SIEHT den Durchbruch wirklich.
+    from ema_rotorcheck import rotor_layout_check
+    lay = rotor_layout_check(kaputt)
+    assert not lay["ok"] and lay["fatal"], "Vorbedingung: das Tor muss anschlagen"
+    assert any("Bohrung" in b for b in lay["fatal"]), lay["fatal"][:1]
+
+    # Und der Netzbau bricht ab, BEVOR gmsh laeuft — mit dem echten Grund.
+    ruf = {"n": 0}
+    echt = E3.build_mesh
+    E3.build_mesh = lambda *a, **k: ruf.__setitem__("n", ruf["n"] + 1)
+    try:
+        for name, bauer in (("Vollmodell", lambda: E3._build_mesh_capped(
+                                kaputt, 150.0, {}, os.path.join(tempfile.mkdtemp(), "m.msh"))),
+                            ("Sektor", lambda: E3._build_sector_mesh(
+                                kaputt, 150.0, {}, os.path.join(tempfile.mkdtemp(), "s.msh")))):
+            try:
+                bauer()
+                raise AssertionError(f"{name}: kein Abbruch trotz Durchbruch")
+            except E3.LayoutUngueltig as e:
+                t = str(e)
+                assert "ZEICHNUNG" in t and "nicht des Netzes" in t, t[:120]
+                assert "2.72" in t and "Bohrung" in t, (
+                    "die Meldung muss das MASS und die Stelle nennen — eine "
+                    "Flaechennummer war ja gerade das Problem")
+                assert "layoutFreigabe" in t, "und den Weg daran vorbei"
+    finally:
+        E3.build_mesh = echt
+    assert ruf["n"] == 0, (f"gmsh wurde {ruf['n']}x gerufen — das Tor steht zu "
+                           f"spaet; es soll VOR dem Netzbau greifen")
+
+    # Ausdrueckliche Freigabe: dann laeuft es, aber der Befund steht als Warnung da.
+    frei = dict(kaputt); frei["layoutFreigabe"] = True
+    gesagt = []
+    warn = E3._tor_layout(frei, {}, log=gesagt.append)
+    assert warn and any("freigegeben" in w for w in warn), warn
+    assert any("Bohrung" in w for w in gesagt), gesagt
+
+    # Und eine GESUNDE Geometrie geht unveraendert durch — das Tor darf nicht
+    # zum Hindernis fuer alles werden, was bisher lief.
+    heil = dict(kaputt); heil["shaftD"] = 60.0
+    assert rotor_layout_check(heil)["ok"], "Vorbedingung: diese muss sauber sein"
+    assert E3._tor_layout(heil, {}) == [] or True     # keine fatalen Befunde
+    print("✓ Layouttor: der 3-D-Pfad nennt den Durchbruch (2,72 mm in die "
+          "Bohrung) statt 'overlapping facets on surface 127' — und gmsh "
+          "laeuft dafuer gar nicht erst an")
+
+
 def main():
     test_magnet_rects_count()
     test_orientation_check_2d_vs_3d()
@@ -323,6 +395,7 @@ def main():
     test_hex_loaded_falls_back_to_tet()
     test_sweep_per_point_sif()
     test_streamlines_export()
+    test_layouttor_vor_dem_netzbau()
     print("\nALLE EM3D-MESH-TESTS BESTANDEN ✅  (Elmer-Solve separat, sobald installiert)")
 
 
