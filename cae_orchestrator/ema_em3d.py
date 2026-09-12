@@ -583,7 +583,7 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         # Teilkreis-Position (Anzahl = Polzahl), wie FreeCAD. Nur wenn `genBalanceBolts`.
         bolt_tags = []
         bolt_pieces = []
-        if bool(geom.get("genBalanceBolts", False)):
+        if bool(geom.get("genBalanceBolts", False)) and not opts.get("drop_balance_bolts"):
             _TH = {"M4": 4., "M5": 5., "M6": 6., "M8": 8., "M10": 10., "M12": 12.,
                    "M16": 16., "M20": 20.}
             _bhr = (_TH.get(str(geom.get("balanceBoltThread", "M6")), 6.0) + 0.4) / 2.0
@@ -931,6 +931,15 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         # Taschen längst über den Fallback in `build_mesh` abgeschaltet waren.
         tags["n_pockets"] = len(cap_vols)
         tags["n_pockets_want"] = len(cap_pieces)
+        # Dieselbe Frage wie bei den Taschen, nur fuer die Wuchtbolzen: WOLLTE der
+        # Bau sie (`n_bolts_want`) und sind sie auch zugeordnet worden
+        # (`n_bolts`)? Zugeordnet heisst zugleich: in der Feinzone `mag_cl` und
+        # als Luft getaggt. Ohne diesen Zaehler ist aus dem Logfile nicht zu
+        # sehen, ob ein Loch ueberhaupt im Netz steht.
+        tags["n_bolts"] = len(bolt_vols)
+        tags["n_bolts_want"] = len(bolt_pieces)
+        tags["n_barriers"] = len(bar_vols)
+        tags["n_slots_meshed"] = len(slot_vols)
         tags["mag_pockets_effective"] = bool(cap_vols)
         tags["n_bodies"] = {k: len(v) for k, v in groups.items()}
         tags["skew_segments"] = n_seg
@@ -2596,8 +2605,33 @@ def _mesh_mitigations():
     def m_no_slots(o, cl):
         return "Statornuten aus dem Mesh nehmen", dict(o, stator_slots=False)
 
+    def m_no_bolts(o, cl):
+        """Wuchtbolzen-Loecher heraus — die Stufe, die es bisher NICHT gab.
+
+        Gemessen am 12.09.2026: die Leiter lief acht Versuche lang, und keiner
+        konnte den Fehler beheben, weil sie fuer die Bolzen gar keine Stufe
+        hatte. Sie sind auch nicht am Netz zu retten — ein feineres Feld half
+        nicht (``mag_cl`` 6/3/2 alle gleich), die Bolzen sind sogar sauber
+        zugeordnet (6/6) und in der Feinzone.
+
+        Ausloeser ist die KOMBINATION: an einer U-/Delta-Anordnung, deren
+        innerer Magnet dem Wellensitz auf **0,06 mm** nahe kommt, steht ein
+        haarduenner Eisensplitter ueber die ganze Paketlaenge (nachgemessen als
+        0,22 mm breite Flaeche). Ohne Bolzen mesht das gerade noch (79.306
+        Knoten); mit sechs weiteren kleinen Loechern kippt es. Auf sauberer
+        Geometrie (Welle 60) meshen dieselben Bolzen dagegen anstandslos
+        (80.919 Knoten) — deshalb wird hier NICHT pauschal das Netz verfeinert,
+        das waere an der falschen Stelle teuer.
+
+        Steht ganz am Ende, weil es ein Modell-Feature entfernt: die Loecher
+        sind dann nicht im Feldmodell, und das Ergebnis sagt es.
+        """
+        return ("Wuchtbolzen-Löcher aus dem Netz nehmen", 
+                dict(o, drop_balance_bolts=True))
+
     # Netzqualität/-dichte/-verhältnisse zuerst, Modell-Features zuletzt.
-    return [m_quality, m_coarsen_fine, m_ratio, m_coarsen_all, m_no_pockets, m_no_skew, m_no_slots]
+    return [m_quality, m_coarsen_fine, m_ratio, m_coarsen_all, m_no_pockets,
+            m_no_skew, m_no_slots, m_no_bolts]
 
 
 def _tor_layout(geom: dict, opts: dict | None = None, log=None) -> list:
@@ -2698,7 +2732,8 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
     pocket_ok_nodes = []           # Knotenzahlen der Versuche, die die Taschen getragen haben
     # 7 Mitigationsstufen + bis zu 4 Ziel-/Cap-Nachführungen; seit die Taschen nicht mehr
     # vorab still abgeschaltet werden, kann die Leiter tatsächlich bis ans Ende laufen.
-    max_attempts = 13
+    # 8 Leiterstufen + bis zu 4 Skalier-Paesse + der erste Versuch.
+    max_attempts = 14
 
     tags = None
     for attempt in range(1, max_attempts + 1):
