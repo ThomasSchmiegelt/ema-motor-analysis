@@ -52,6 +52,12 @@ FREE_PARAMS = {
     # ihn konnte eine Suche gegen die Saettigung gar nichts ausrichten.
     # Enger geklemmt als das Schema: unter 0,25 wird die Nut zum Schlitz (kein
     # Kupfer), ueber 0,7 der Zahn zum Steg.
+    # Die Zahl der Leistungselektroniken. Ganzzahlig, und sie bewegt in diesem
+    # Modell NUR die Spannungsreserve: die Durchflutung bleibt (s.
+    # ema_umrichter). Als Studienachse ist gerade das die Auskunft -- bewegt
+    # sich Kt darueber, ist die Bruecke in `umrichter()` falsch.
+    "inverterAnzahl": {"geom": "inverterAnzahl", "label": "Leistungselektroniken",
+                       "lo": 1, "hi": 8, "type": int},
     "slotWidthRatio": {"geom": "slotWidthRatio", "label": "Nutbreite/Nutteilung [-]",
                        "lo": 0.25, "hi": 0.70, "type": float},
     "magGap":      {"geom": "magGapMm",    "label": "Magnet-Luftspalt [mm]",  "lo": 0.05,"hi": 0.3, "type": float},
@@ -217,6 +223,28 @@ def _apply_params(base_geom, base_axial, params):
         if _hin:
             geom["_magnetlage_hinweis"] = _hin
     return geom, axial
+
+
+def _wickelbar(geom) -> dict:
+    """Laesst sich die Wicklung in k Dreiphasensysteme teilen?
+
+    Dasselbe Tor wie `_baubar` und `_stimmig`, nur fuer die Leistungselektronik:
+    `slots % 3k`, bei `sektoriert` zusaetzlich eine ganze Polzahl je Sektor.
+    Ohne das liefert eine Studie ueber `inverterAnzahl` auch fuer k = 5 und 7
+    saubere Kennwerte, obwohl 36 Nuten sich darauf nicht teilen lassen -- und
+    eine Kurve, die durch unbaubare Punkte laeuft, sieht aus wie ein Verlauf.
+
+    Bei k = 1 ist nichts zu teilen; dann ist es immer wahr und kostet nichts.
+    """
+    try:
+        import ema_umrichter
+        if ema_umrichter.anzahl(geom) <= 1:
+            return {"wickelbar": True, "wickelbar_grund": ""}
+        w = ema_umrichter.wickelbar(geom)
+        return {"wickelbar": bool(w["ok"]),
+                "wickelbar_grund": (w.get("grund") or "")[:160]}
+    except Exception:                                            # noqa: BLE001
+        return {"wickelbar": True, "wickelbar_grund": ""}
 
 
 def _stimmig(geom) -> dict:
@@ -402,6 +430,7 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
                 "T_moeglich_Nm": erb.get("T_moeglich_Nm"),
                 **_baubar(geom),
                 **_stimmig(geom),
+                **_wickelbar(geom),
             }
 
         losses = ema_thermal.compute_losses(geom, axial, rpm_t, iq, id_, perf,
@@ -427,6 +456,7 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
             "P_total":      round(losses["P_total"], 1),
             **_baubar(geom),
             **_stimmig(geom),
+            **_wickelbar(geom),
             **_saettigung(geom, axial, perf, iq, id_, st_mat),
         }
     except Exception as e:
@@ -448,6 +478,10 @@ def _violation(metrics, constraints):
     """0 if all constraints hold, else a positive normalised total violation."""
     if "error" in metrics:
         return 1e9
+    if metrics.get("wickelbar") is False:
+        # Eine Wicklung, die sich nicht in k Systeme teilen laesst, ist keine
+        # Loesung -- rangiert wie das Unbaubare.
+        return 1e8
     if metrics.get("stimmig") is False:
         # Radien, die nicht ineinander passen: rangiert wie das Unbaubare. Ohne
         # diese Zeile gewinnt der Kandidat mit der negativen Wellenmasse.

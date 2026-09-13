@@ -140,6 +140,23 @@ def wirkungslos_grund(payload, param, lo, hi):
                 "Groesse — sie folgt aus den Wandstaerken und wird zurueck-"
                 "geschrieben. Als Eingabe bewegt sie nichts. Fuer eine Studie "
                 "darueber `pocketMode=\"position\"` setzen." % param)
+    if param == "inverterAnzahl":
+        # Hier ist die flache Kurve die RICHTIGE Antwort und kein Mangel: mehr
+        # Module teilen die Scheinleistung, aendern aber die Durchflutung nicht
+        # -- Kt, B_gap und die Masse MUESSEN stillstehen (s. ema_umrichter).
+        # Bewegte sich Kt darueber, waere die Bruecke in `umrichter()` falsch.
+        # Der allgemeine Text unten ("der Bewerter sieht diese Groesse nicht")
+        # laese sich hier wie ein Defekt, und das waere das Gegenteil dessen,
+        # was der Lauf zeigt.
+        return ("Dass hier nichts steigt, ist das ERWARTETE Ergebnis und kein "
+                "Mangel: mehr Leistungselektroniken teilen die Scheinleistung, "
+                "die Amperewindungen bleiben. Kt, B_gap und Masse muessen "
+                "stillstehen — bewegte sich Kt, waere die Umrechnung in "
+                "`ema_analysis.umrichter` falsch. Was sich WIRKLICH aendert, "
+                "ist die Spannungsreserve und damit die Eckdrehzahl; der "
+                "schnelle Bewerter rechnet EINEN Betriebspunkt und keine "
+                "Huellkurve und sieht das daher nicht. Dafuer `umrichter` "
+                "(Modulkennwerte, n-1) und `leistung` (Kennlinie).")
     if param == "magAsym" and str(geom.get("magShape")) != "vasym":
         return ("magAsym gilt nur fuer die asymmetrische V-Form "
                 "(`magShape=\"vasym\"`); diese Auslegung ist `%s`."
@@ -211,6 +228,7 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
     # abgeschnittenes Ende sagt nicht warum --, aber jeder Punkt traegt sein
     # Urteil, und der Hinweis nennt den ersten Grund.
     baubar, n_unbaubar, unbaubar_grund, unbaubar_ab = [], 0, "", None
+    unbaubar_tor = "Layouttor"
     label = spec["label"]
     log(f"Parameterstudie: {label}  {lo:g} → {hi:g} in {steps} Schritten @ {rpm_fix:.0f} U/min", 2)
 
@@ -220,12 +238,27 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
         m = O.evaluate_fast(base_geom, base_axial, {param: val}, mats, op,
                             cooling, T_amb, sweep_rpms)
         xs.append(val)
+        # Das Wickeltor zaehlt wie das Layouttor: ein Punkt, an dem sich die
+        # Wicklung nicht in k Systeme teilen laesst, ist genauso wenig eine
+        # Auslegung wie einer mit kollidierenden Magnettaschen. Beide faerben
+        # denselben roten Streifen -- zwei Farben fuer "geht nicht" waeren eine
+        # Unterscheidung ohne Unterschied.
         bb = m.get("baubar")
+        if m.get("wickelbar") is False:
+            bb = False
         baubar.append(bb)
         if bb is False:
             n_unbaubar += 1
             if not unbaubar_grund:
-                unbaubar_grund = m.get("baubar_grund", "")
+                # WELCHES Tor abgewiesen hat, gehoert in den Satz: "das
+                # Layouttor" ueber einer Wicklung, die sich nicht teilen laesst,
+                # schickt die Suche an die falsche Stelle.
+                if m.get("baubar") is False:
+                    unbaubar_grund = m.get("baubar_grund", "")
+                    unbaubar_tor = "Layouttor"
+                else:
+                    unbaubar_grund = m.get("wickelbar_grund", "")
+                    unbaubar_tor = "Wickeltor"
                 unbaubar_ab = val
         if "error" in m:
             n_fail += 1
@@ -292,7 +325,7 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
                else f" (ab {label} = {unbaubar_ab:g})")
         hinweis = ((hinweis + " ") if hinweis else "") + (
             f"{n_unbaubar} von {steps} Schritten sind NICHT BAUBAR{_ab} — das "
-            f"Layouttor weist sie ab. Die Kennwerte stehen trotzdem da, damit "
+            f"{unbaubar_tor} weist sie ab. Die Kennwerte stehen trotzdem da, damit "
             f"die Grenze sichtbar wird; als Auslegung taugen sie nicht. "
             f"{unbaubar_grund}")
         log("⚠ " + hinweis, 99)

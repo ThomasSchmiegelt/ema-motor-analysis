@@ -154,6 +154,69 @@ pruefe("und was die Maschine sieht", "die Maschine sieht" in t)
 pruefe("bei k=1 steht der Satz NICHT da (er waere sinnlos)",
        "NICHT staerker" not in U.als_text(U.zerlegung(GEOM, 10000.0)))
 
+# ── 6b. Gegenprobe gegen etwas UNABHAENGIGES ───────────────────────────────
+#
+# Alles bisher prueft ema_umrichter gegen sich selbst. Die tragende Behauptung
+# -- "Aufteilen laesst die Durchflutung unveraendert" -- muss gegen eine andere
+# Kette gehalten werden, sonst prueft die Bruecke sich selbst.
+print("\n[6b] Die Durchflutung bleibt (unabhaengig gerechnet)")
+_pj = os.path.expanduser("~/cae_projekte/20260913_201143_saettigungsprobe/meta.json")
+if os.path.exists(_pj):
+    import json as _js                                            # noqa: E402
+    _pl = _js.load(open(_pj, encoding="utf-8"))["payload"]
+    _g = _pl["geom"]
+    _rpm, _T = 4440.0, 40.0
+    _b = EA._analytical_Bgap(_g)
+    # estimate_dq_currents liest die Grenzen ueber umrichter() -- also faellt
+    # die Modulzahl dort an, ohne dass diese Rechnung davon weiss.
+    _ref = EA.estimate_dq_currents(dict(_g, inverterAnzahl=1), _rpm, _T,
+                                   b_gap_t=_b, rpm_base=600.0)
+    for _k in (2, 3, 4):
+        # k Module zu je V/k muessen dieselbe Maschine ergeben wie EINES zu V:
+        # k*V_Modul ist die wirksame Spannung, also V_Modul = V/k.
+        _gk = dict(_g, inverterAnzahl=_k,
+                   inverterVdc=float(_g.get("inverterVdc") or 800.0) / _k)
+        _got = EA.estimate_dq_currents(_gk, _rpm, _T, b_gap_t=_b, rpm_base=600.0)
+        _abw = max(abs(a - b) for a, b in zip(_got, _ref))
+        pruefe(f"k={_k} zu je V/{_k} gibt dieselben dq-Stroeme wie k=1 zu V",
+               _abw < 1e-9,
+               f"i_q {_got[0]:.2f} / i_d {_got[1]:.2f} A, Abw {_abw:.1e}")
+    # Und die Gegenrichtung: MEHR Module bei GLEICHER Modulspannung muessen die
+    # Maschine anders sehen (mehr Spannungsreserve) -- sonst waere die Bruecke
+    # wirkungslos.
+    _u1 = EA.umrichter(dict(_g, inverterAnzahl=1), _rpm)
+    _u4 = EA.umrichter(dict(_g, inverterAnzahl=4), _rpm)
+    pruefe("bei gleicher Modulspannung wirkt k sehr wohl",
+           abs(_u4["v_dc_1t"] / _u1["v_dc_1t"] - 4.0) < 1e-9
+           and abs(_u4["i_max_1t"] - _u1["i_max_1t"]) < 1e-9,
+           f"{_u1['v_dc_1t']:.0f} -> {_u4['v_dc_1t']:.0f} V, Strom gleich")
+else:
+    print("   (Probeprojekt nicht da — uebersprungen)")
+
+# n-1 OHNE Spannungsgrenze muss exakt (k-1)/k sein -- gezeigt, nicht behauptet.
+print("\n[6c] n-1 gegen die Handrechnung")
+_echt2 = EA.power_envelope
+
+
+def _nur_strom(geom, adv, rpm_max, T_rated_Nm=0.0, v_dc=None, i_max=None,
+               n_pts=80):
+    """Gestellt OHNE Spannungsgrenze: die Leistung haengt nur am Strom."""
+    i = i_max if i_max is not None else EA.umrichter(geom, rpm_max)["i_max_1t"]
+    return {"rpm": [0, rpm_max], "P_peak_kW": [0.0, i],
+            "P_max_kW": float(i), "T_peak_Nm": [1.0, 1.0],
+            "T_cont_Nm": [1.0, 1.0], "P_cont_kW": [0.0, 1.0]}
+
+
+EA.power_envelope = _nur_strom
+try:
+    for _k in (2, 4, 8):
+        _a = U.ausfall(dict(GEOM, inverterAnzahl=_k), {}, 10000.0, 100.0)
+        pruefe(f"k={_k}: ohne Spannungsgrenze exakt (k-1)/k",
+               abs(_a["P_rest_kW"] / _a["P_voll_kW"] - (_k - 1) / _k) < 1e-9,
+               f"{_a['P_anteil']}")
+finally:
+    EA.power_envelope = _echt2
+
 # ── 7. Bilder ───────────────────────────────────────────────────────────────
 print("\n[7] Bilder")
 with tempfile.TemporaryDirectory() as tmp:
