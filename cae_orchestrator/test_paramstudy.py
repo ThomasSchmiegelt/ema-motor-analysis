@@ -357,6 +357,102 @@ def test_welle_studie_zeigt_nur_die_welle():
           "bewegt sich (%.0f…%.0f g)" % (kt.pop(), bg.pop(), min(ms), max(ms)))
 
 
+def _echter_payload(**geom_zusatz):
+    """Ein frischer Payload mit gesetzter Geometrie — wie `test_welle_studie…`."""
+    import json as _j, sys as _s
+    _s.argv = ["x"]
+    import cae_cli
+    pl = cae_cli.frischer_payload()
+    pl.update(rpm_from=2000, rpm_to=8000, load_nm=60, cooling="water")
+    pl["geom"].update(geom_zusatz)
+    return _j.loads(_j.dumps(pl))
+
+
+def test_unbaubare_punkte_werden_BENANNT():
+    """Gemessen am 13.09.2026 (s. BEFUNDE.md): eine Polpaar-Studie lieferte fuer
+    JEDEN Punkt Kennwerte, obwohl bei p = 7 und p = 8 die Magnettaschen
+    benachbarter Pole einander durchdringen (bei p = 8 um 1,25 mm). Der
+    schnelle Bewerter rechnet `n_legs*magWidth/pole_pitch` — ein VERHAELTNIS,
+    das nichts davon merkt, dass der Zaehler nicht mehr in den Nenner passt;
+    B_gap stieg deshalb exakt linear mit p und Kt exakt mit p^3.
+
+    Die Kurve bricht bewusst NICHT ab — eine Studie soll zeigen, WO die Grenze
+    liegt. Aber jeder Punkt traegt sein Urteil, in der CSV UND im Bild.
+    """
+    import ema_rotorcheck as RC
+    pl = _echter_payload(magShape="bar", p=4, slots=36, magWidth=27.0,
+                         magThick=6.0, magDist=12.5, pocketMode="position")
+    r = S.run_study(pl, "p", 2, 9, steps=8, rpm=6000,
+                    progress_cb=lambda m, p=None: None)
+
+    # Das Urteil steht je Schritt und stimmt mit dem ECHTEN Tor ueberein —
+    # kein zweites Abstandsmass daneben.
+    assert len(r["baubar"]) == len(r["x"])
+    for x, b in zip(r["x"], r["baubar"]):
+        g = dict(pl["geom"]); g["p"] = int(x)
+        assert b == RC.rotor_layout_check(g)["ok"], (x, b)
+
+    assert r["n_unbaubar"] > 0, "diese Reihe MUSS ueber das Tor hinauslaufen"
+    assert "NICHT BAUBAR" in r["hinweis"] and r["unbaubar_grund"]
+
+    # Und in der CSV, weil der Hinweis in einer Tabellenkalkulation fehlt.
+    zeilen = S.csv_text(r).splitlines()
+    assert zeilen[0].endswith(";baubar")
+    urteile = [z.rsplit(";", 1)[1] for z in zeilen[1:]]
+    assert urteile == ["ja" if b else "NEIN" for b in r["baubar"]]
+    print("✓ nicht baubare Punkte: je Schritt benannt, in CSV und Hinweis")
+
+
+def test_die_zielgroesse_belohnt_das_unbaubare_NICHT_mehr():
+    """Der eigentliche Schaden lag nicht in der Studie, sondern im Optimierer.
+
+    `_analytical_Bgap` waechst mit der Polbedeckung — und genau die waechst,
+    wenn die Magnete einander zu durchdringen beginnen. Gemessen stieg Kt an
+    einer 305-mm-Maschine von 0,314 am letzten baubaren Punkt auf 0,401
+    jenseits des Tors: eine Zielwertsuche auf `max Kt` haette den Rotor mit
+    ueberlappenden Taschen zum Sieger erklaert, und nichts haette widersprochen.
+    """
+    import ema_optimize as O, ema_rotorcheck as RC
+    # Die GEMESSENE Maschine (305 mm, Rotor 170, Welle 120) und nicht der
+    # frische Payload: dort deckelt `alpha_i` bei 0,92 schon VOR dem Layouttor,
+    # Kt steht ab magWidth 55 still, und der Test praefte nichts. Der Deckel ist
+    # richtig — aber er faellt nicht immer vor das Tor, und genau dann ist der
+    # Fehlerfall da.
+    pl = _echter_payload(magShape="bar", p=6, slots=36, magThick=6.0,
+                         magDist=12.5, pocketMode="position",
+                         statorOD=305.0, statorID=171.6, rotorOD=170.0,
+                         shaftD=120.0)
+    mats = O._materials(pl)
+    op = {"rpm": 6000.0, "load_nm": 60.0, "rpm_base": 6000.0,
+          "rpm_thermal": 6000.0}
+    ziel = {"metric": "Kt", "goal": "max"}
+    axial = float(pl.get("axial_len", 80))
+
+    bester_baubar = bester_kt_unbaubar = None
+    gesehen = {True: 0, False: 0}
+    for mw in (20.0, 27.0, 34.0, 38.0, 41.0, 48.0, 55.0):
+        g = dict(pl["geom"]); g["magWidth"] = mw
+        m = O._eval_geom(g, axial, mats, op, "water", 25.0, [3000.0, 6000.0], N=110)
+        if "error" in m:
+            continue
+        assert m.get("baubar") == RC.rotor_layout_check(g)["ok"]
+        gesehen[bool(m["baubar"])] += 1
+        f = O._fitness(m, ziel, [])
+        if m["baubar"]:
+            bester_baubar = f if bester_baubar is None else max(bester_baubar, f)
+        else:
+            # Die ROHE Kennzahl ist hier besser — das ist ja der Fehlerfall.
+            bester_kt_unbaubar = (m["Kt"] if bester_kt_unbaubar is None
+                                  else max(bester_kt_unbaubar, m["Kt"]))
+            assert f < -1e6, "unbaubar rangiert nicht unter jeder Loesung"
+
+    assert gesehen[True] and gesehen[False], \
+        "die Reihe trifft den Fehlerfall nicht mehr: %s" % gesehen
+    assert bester_kt_unbaubar > bester_baubar, \
+        "Kt muesste jenseits des Tors STEIGEN — sonst prueft der Test nichts"
+    print("✓ Zielgroesse: unbaubar rangiert unter jeder baubaren Loesung")
+
+
 def main():
     test_studien_ueberschreiben_sich_nicht()
     test_zwei_studien_in_derselben_sekunde()
@@ -371,6 +467,8 @@ def main():
     test_bericht_liegt_bei_der_studie()
     test_welle_haelt_die_magnete()
     test_welle_studie_zeigt_nur_die_welle()
+    test_unbaubare_punkte_werden_BENANNT()
+    test_die_zielgroesse_belohnt_das_unbaubare_NICHT_mehr()
     print("\nALLE PARAMETERSTUDIEN-TESTS BESTANDEN ✅")
 
 

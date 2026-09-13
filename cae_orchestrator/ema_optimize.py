@@ -198,6 +198,41 @@ def _apply_params(base_geom, base_axial, params):
     return geom, axial
 
 
+def _baubar(geom) -> dict:
+    """Laesst sich diese Zeichnung ueberhaupt bauen? — das Layouttor in Millisekunden.
+
+    Gemessener Anlass (13.09.2026, s. ``BEFUNDE.md``): eine Polpaar-Studie ueber
+    p = 1…8 lieferte fuer JEDEN Punkt Kennwerte, obwohl bei p = 7 und p = 8 die
+    Magnettaschen benachbarter Pole **einander durchdringen** (bei p = 8 um
+    1,25 mm, Stegbreite −1,253 mm). Der schnelle Bewerter rechnet rein
+    analytisch: ``alpha_i = n_legs·magWidth/pole_pitch`` ist ein VERHAELTNIS und
+    merkt nichts davon, dass der Zaehler nicht mehr in den Nenner passt.
+
+    Das ist nicht nur eine haessliche Kurve. ``_analytical_Bgap`` waechst mit
+    genau dieser Ueberdeckung, also **belohnt die Zielgroesse das Unbaubare**:
+    an derselben Maschine gemessen steigt Kt von 0,314 (letzter baubarer Punkt)
+    auf 0,401 jenseits des Tors — die Zielwertsuche haette den Rotor mit
+    ueberlappenden Taschen zum Sieger erklaert.
+
+    Die Pruefung sitzt deshalb HIER, im gemeinsamen Bewertungskern: so sehen sie
+    Parameterstudie, Zielwertsuche und Magnetfeinschliff zugleich, und nicht
+    eine von dreien. Sie kostet nichts gegen den FDM-Lauf daneben (reine 2-D-
+    Algebra) und ist dieselbe, die die Pipeline als Stufe 0 fuehrt — kein
+    zweites Abstandsmass, das danebenlaufen koennte.
+    """
+    try:
+        import ema_rotorcheck
+        tor = ema_rotorcheck.rotor_layout_check(geom)
+    except Exception as e:                                   # noqa: BLE001
+        # Ein Tor, das selbst scheitert, darf keinen Bewerter mitreissen — aber
+        # es darf auch nicht als „baubar" durchgehen.
+        return {"baubar": None, "baubar_grund": f"nicht pruefbar: {type(e).__name__}"}
+    if tor.get("ok"):
+        return {"baubar": True, "baubar_grund": ""}
+    grund = (tor.get("fatal") or tor.get("warnings") or ["Layouttor nicht bestanden"])[0]
+    return {"baubar": False, "baubar_grund": str(grund)[:200]}
+
+
 def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
     """FreeCAD/FEM-free metric evaluation for an ALREADY-built geometry dict.
 
@@ -263,6 +298,7 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
                 "erreichbar":   False,
                 "grund":        erb.get("grund", ""),
                 "T_moeglich_Nm": erb.get("T_moeglich_Nm"),
+                **_baubar(geom),
             }
 
         losses = ema_thermal.compute_losses(geom, axial, rpm_t, iq, id_, perf,
@@ -286,6 +322,7 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
             "T_magnet":     round(Tn["T_magnet"], 1),
             "T_winding":    round(Tn["T_winding"], 1),
             "P_total":      round(losses["P_total"], 1),
+            **_baubar(geom),
         }
     except Exception as e:
         return {"error": str(e)[:160]}
@@ -306,6 +343,20 @@ def _violation(metrics, constraints):
     """0 if all constraints hold, else a positive normalised total violation."""
     if "error" in metrics:
         return 1e9
+    if metrics.get("baubar") is False:
+        # Eine Zeichnung, die sich nicht bauen laesst, ist keine Loesung -- auch
+        # dann nicht, wenn ihre Kennwerte die besten sind. Und sie SIND die
+        # besten: `_analytical_Bgap` waechst mit der Polbedeckung
+        # (`n_legs*magWidth/pole_pitch`), und genau die waechst, wenn die
+        # Magnete einander zu durchdringen beginnen. Gemessen am 13.09.2026
+        # (s. BEFUNDE.md) steigt Kt an einer 305-mm-Maschine von 0,314 am
+        # letzten baubaren Punkt auf 0,401 jenseits des Tors: **die Zielgroesse
+        # belohnte das Unbaubare**, und nichts widersprach.
+        #
+        # Rangiert wie eine unerreichbare Auslegung -- unter jeder gueltigen,
+        # aber ueber einem echten Fehler (1e9): ein Kandidat, den man nur nicht
+        # bauen kann, ist immer noch mehr als einer, der die Rechnung wirft.
+        return 1e8
     if metrics.get("erreichbar") is False:
         # WICHTIG: ohne diese Zeile saehe eine unerreichbare Auslegung
         # BEDINGUNGSFREI aus -- ihre Kennzahlen sind `None`, und die Schleife

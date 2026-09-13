@@ -17,6 +17,86 @@ kann.
 
 ---
 
+## 2026-09-13 — Parameterstudie und Zielwertsuche fragen das Layouttor NICHT
+
+**Beobachtung (vom Nutzer gemeldet).** Eine Polpaar-Studie über p = 1…8 lieferte
+für jeden Punkt Kennwerte, und `B_gap` stieg dabei **exakt linear mit p**:
+0,084 / 0,169 / 0,253 / 0,337 / 0,422 / 0,506 / 0,590 / 0,675 T — `B_gap/p` ist
+über alle acht Punkte auf vier Stellen konstant (0,0843…0,0845). `Kt` folgt
+daraus **exakt p³** (Verhältnis zu p = 1: 1 / 8 / 28 / 66 / 129 / 223 / 354 /
+528 gegen 1 / 8 / 27 / 64 / 125 / 216 / 343 / 512), denn
+`Kt = 1,5·p·psi_pm` mit `psi_pm ∝ p·B_gap`.
+
+**Messung.** Die Ursache ist keine Physik, sondern eine fehlende Prüfung.
+`_analytical_Bgap` rechnet die Polbedeckung als
+`alpha_i = n_legs·magWidth/pole_pitch` mit `pole_pitch = π·statorID/(2p)` — ein
+**Verhältnis**, das linear mit p wächst, solange `magWidth` steht. Die Studie
+hält `magWidth` aber fest (sie variiert nur p), und ab einer gewissen Polzahl
+passt der Zähler nicht mehr in den Nenner: die Magnete benachbarter Pole
+**durchdringen einander**. An der gemeldeten Geometrie (Stator 305 / Rotor 170 /
+Welle 120, `bar`, magWidth 27 mm) gemessen:
+
+| p | Pol-Teilung | Magnet/Pol | Bedeckung | Layouttor |
+|---|---:|---:|---:|---|
+| 6 | 44,9 mm | 27,0 mm | 0,60 | OK |
+| 7 | 38,5 mm | 27,0 mm | 0,70 | **reißt** |
+| 8 | 33,7 mm | 27,0 mm | 0,80 | **reißt** |
+
+Bei p = 8 meldet `rotor_layout_check` wörtlich *„Kollision: Tasche (Pol 14,
+Leg 0) <-> Tasche (Pol 15, Leg 0) - Überlappung 1.25 mm"*, `min_web_found_mm` =
+**−1,253** — eine negative Stegbreite. Und ausgerechnet p = 7 und p = 8 sind die
+beiden Zeilen, die in der Studie Temperaturen tragen (440 °C Magnet bei p = 7,
+gegen 80 °C Grenze für N35).
+
+**Der eigentliche Schaden liegt nicht in der Studie, sondern im Optimierer.**
+`_violation` kennt nur die vom Menschen gesetzten Kennzahl-Grenzen und **keine
+geometrische Zulässigkeit**. Weil `B_gap` mit der Überdeckung wächst, **belohnt
+die Zielgröße das Unbaubare**; an derselben Maschine bei p = 6 gemessen:
+
+| magWidth | Steg | Layouttor | B_gap | Kt |
+|---:|---:|---|---:|---:|
+| 34 mm | 2,95 mm | OK | 0,637 T | 0,281 |
+| 38 mm | 2,86 mm | OK | 0,712 T | **0,314** |
+| 41 mm | 2,86 mm | **reißt** | 0,768 T | 0,338 |
+| 55 mm | 2,86 mm | **reißt** | 0,911 T | **0,401** |
+
+Eine Zielwertsuche auf `max Kt` hätte also den Rotor mit überlappenden Taschen
+zum Sieger erklärt — **+28 % gegenüber dem letzten baubaren Punkt** —, und
+nichts hätte widersprochen. Der Deckel `alpha_i ≤ 0,92` rettet das **nicht
+verlässlich**: er greift je nach Geometrie vor oder nach dem Tor (am frischen
+Payload bei magWidth ≈ 55 und damit vor dem Tor bei ≈ 70, an der gemeldeten
+Maschine erst danach).
+
+**Fundstelle.** `ema_analysis.py:1111` (`alpha_i`), `ema_optimize.py:305`
+(`_violation`), `ema_paramstudy.py:167` (die Schleife) — **null Treffer** auf
+`rotor_layout_check` in beiden Modulen. Das Tor selbst gibt es seit jeher, es
+kostet Millisekunden reiner 2-D-Algebra und führt die Pipeline als Stufe 0
+(`ema_pipeline._gate_rotor_layout`) sowie seit dem 12.09. auch den 3-D-Netzbau
+(`ema_em3d._tor_layout`) — gefragt hat es ausgerechnet an den beiden Stellen
+niemand, die die meisten Zahlen je Zeiteinheit erzeugen.
+
+**Status: BEHOBEN** (13.09.2026). `ema_optimize._baubar` fragt das Tor im
+**gemeinsamen** Bewertungskern `_eval_geom`, sodass Parameterstudie,
+Zielwertsuche und Magnet-Feinschliff es zugleich sehen; die Metriken tragen
+`baubar`/`baubar_grund`. `_violation` gibt für `baubar is False` dieselbe 1e8
+zurück wie für eine unerreichbare Auslegung — unter jeder gültigen Lösung, über
+einem echten Fehler. Die Studie **bricht nicht ab** (eine Studie soll zeigen, WO
+die Grenze liegt), sondern führt das Urteil je Schritt mit: rotes Band im
+Diagramm, Spalte `baubar` in der CSV, und ein Hinweis, der den ersten Grund und
+den Schwellwert nennt. Tests in `test_paramstudy.py`
+(`test_unbaubare_punkte_werden_BENANNT`,
+`test_die_zielgroesse_belohnt_das_unbaubare_NICHT_mehr` — letzterer prüft
+ausdrücklich mit, dass Kt jenseits des Tors **steigt**, sonst prüfte er nichts).
+
+**Was das NICHT behebt:** dass eine Polpaar-Studie bei festem `magWidth`
+überhaupt eine seltsame Frage ist. Eine reale Auslegung verkleinert die Magnete
+mit wachsender Polzahl; die Kurve vergleicht sonst Maschinen, die sich in mehr
+als einem Merkmal unterscheiden. Das Tor sagt jetzt, ab wo sie gar nicht mehr
+existieren — welche der verbleibenden Punkte man vergleichen *möchte*, bleibt
+eine Auslegungsfrage.
+
+---
+
 ## 2026-09-12 — `results.json` und `meta.json` wurden nicht atomar geschrieben
 
 **Beobachtung.** `ema_projekt._write` schreibt die Projektakte seit jeher über

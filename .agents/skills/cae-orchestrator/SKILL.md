@@ -333,6 +333,22 @@ python3 cae_cli.py zielwert --from-project last --ziel Kt --max \
 * `studie` gibt eine **Tabelle** aus und darüber die Antwort: welcher Kennwert
   sich über den Bereich am stärksten bewegt und welcher gar nicht. Das Diagramm
   landet unter `<projekt>/charts/studie_<param>.png`.
+* **Lies die Spalte `baubar`, bevor du eine Kurve deutest.** Die Studie bricht
+  am Layouttor bewusst nicht ab — sie soll zeigen, WO die Grenze liegt —, aber
+  jenseits davon sind es keine Auslegungen mehr: dort durchdringen sich die
+  Magnettaschen benachbarter Pole. Im Diagramm ist der Bereich **rot
+  hinterlegt**, in der CSV steht `NEIN`, und der Hinweis nennt den Grund und den
+  Schwellwert. **Und gerade dort steigt die Kurve oft am schönsten**: die
+  Polbedeckung, aus der `B_gap` folgt, wächst mit der Überlappung weiter.
+  Gemessen an einer Polpaar-Studie (s. `BEFUNDE.md`, 13.09.2026) stieg `B_gap`
+  exakt linear mit p und `Kt` exakt mit p³ — bis p = 6 baubar, ab p = 7 nicht
+  mehr. Ein Punkt mit dem besten Kt, der `baubar=NEIN` trägt, ist **kein
+  Ergebnis**, sondern die Stelle, an der die Reihe hätte enden müssen.
+* **Eine Studie über `p` bei festem `magWidth` vergleicht Maschinen, die sich in
+  mehr als einem Merkmal unterscheiden.** Eine reale Auslegung verkleinert die
+  Magnete mit wachsender Polzahl. Wenn du die Polzahl untersuchst, fahre
+  `magWidth` mit (oder nimm `pocketMode="wand"`, wo die Tasche aus ihren Wänden
+  folgt) — sonst misst du die Überdeckung und nicht die Polzahl.
 * `zielwert` ist der **richtige Weg zu einem Zielwert**. Von Hand mit `run --set`
   zu suchen ist der Umweg — und der Weg, auf dem die Versuchung entsteht, eine
   Grenze im Modell zu verschieben (s. „Was NICHT zu tun ist"). Hier schlägt das

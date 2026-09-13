@@ -158,6 +158,15 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
     xs, metric_series = [], {k: [] for k, _, _ in _STUDY_METRICS}
     n_ok = n_fail = n_unerreichbar = 0
     unerreichbar_grund = ""
+    # Laesst sich der Punkt ueberhaupt BAUEN? Der schnelle Bewerter rechnet rein
+    # analytisch und merkt nichts davon, dass die Magnettaschen einander
+    # durchdringen -- gemessen am 13.09.2026 an einer Polpaar-Studie, die fuer
+    # p = 7 und p = 8 Kennwerte lieferte, obwohl die Taschen benachbarter Pole
+    # sich um 1,25 mm ueberlappen (s. BEFUNDE.md). Die Kurve bricht deshalb
+    # NICHT ab -- eine Studie soll zeigen, wo die Grenze liegt, und ein
+    # abgeschnittenes Ende sagt nicht warum --, aber jeder Punkt traegt sein
+    # Urteil, und der Hinweis nennt den ersten Grund.
+    baubar, n_unbaubar, unbaubar_grund, unbaubar_ab = [], 0, "", None
     label = spec["label"]
     log(f"Parameterstudie: {label}  {lo:g} → {hi:g} in {steps} Schritten @ {rpm_fix:.0f} U/min", 2)
 
@@ -167,6 +176,13 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
         m = O.evaluate_fast(base_geom, base_axial, {param: val}, mats, op,
                             cooling, T_amb, sweep_rpms)
         xs.append(val)
+        bb = m.get("baubar")
+        baubar.append(bb)
+        if bb is False:
+            n_unbaubar += 1
+            if not unbaubar_grund:
+                unbaubar_grund = m.get("baubar_grund", "")
+                unbaubar_ab = val
         if "error" in m:
             n_fail += 1
             for k in metric_series:
@@ -186,7 +202,8 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
         if (i + 1) % max(1, steps // 20) == 0 or i + 1 == steps:
             log(f"  [{i+1}/{steps}]  {label}={val:g}", 2 + int(95 * (i + 1) / steps))
 
-    chart_b64 = _build_chart(xs, metric_series, label, spec.get("type") is int, rpm_fix)
+    chart_b64 = _build_chart(xs, metric_series, label, spec.get("type") is int,
+                             rpm_fix, baubar=baubar)
 
     field_images, field_video = [], False
     field_frames = int(field_frames or 0)
@@ -222,6 +239,15 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
                    "Kennzahlen — der schnelle Bewerter rechnet analytisch und "
                    "sieht diese Groesse nicht." % label)
         log("⚠ " + hinweis, 99)
+    if n_unbaubar:
+        _ab = ("" if unbaubar_ab is None
+               else f" (ab {label} = {unbaubar_ab:g})")
+        hinweis = ((hinweis + " ") if hinweis else "") + (
+            f"{n_unbaubar} von {steps} Schritten sind NICHT BAUBAR{_ab} — das "
+            f"Layouttor weist sie ab. Die Kennwerte stehen trotzdem da, damit "
+            f"die Grenze sichtbar wird; als Auslegung taugen sie nicht. "
+            f"{unbaubar_grund}")
+        log("⚠ " + hinweis, 99)
     if n_unerreichbar:
         hinweis = ((hinweis + " ") if hinweis else "") + (
             f"{n_unerreichbar} von {steps} Schritten erreichen den geforderten "
@@ -233,6 +259,9 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
         100)
     return {
         "n_unerreichbar": n_unerreichbar,
+        "n_unbaubar":     n_unbaubar,
+        "baubar":         baubar,
+        "unbaubar_grund": unbaubar_grund,
         "hinweis":        hinweis,
         "flache_kennzahlen": flach,
         "param":    param,
@@ -323,8 +352,15 @@ def _render_field_series(base_geom, base_axial, param, lo, hi, n_frames, cast,
     return images, video
 
 
-def _build_chart(xs, series, xlabel, x_is_int, rpm_fix):
-    """Small-multiples grid: one panel per metric, value over the parameter."""
+def _build_chart(xs, series, xlabel, x_is_int, rpm_fix, baubar=None):
+    """Small-multiples grid: one panel per metric, value over the parameter.
+
+    ``baubar`` (je Schritt True/False/None) legt ueber die nicht baubaren
+    Bereiche ein rotes Band. Das gehoert ins BILD und nicht nur in den Hinweis:
+    ein Diagramm wird angesehen, ein Hinweistext ueberlesen — und gerade die
+    Kurve steigt dort oft am schoensten, weil die Polbedeckung in
+    `_analytical_Bgap` mit der Ueberlappung waechst (s. BEFUNDE.md).
+    """
     specs = [(k, l, u) for k, l, u in _STUDY_METRICS if any(v is not None for v in series[k])]
     if not specs:
         specs = _STUDY_METRICS
@@ -348,12 +384,30 @@ def _build_chart(xs, series, xlabel, x_is_int, rpm_fix):
         for s in ax.spines.values():
             s.set_color("#30363d")
         ax.grid(True, color="#21262d", lw=0.6)
+        # Nicht baubare Bereiche hinterlegen. Zusammenhaengende Laeufe werden zu
+        # EINEM Band verschmolzen, sonst zeichnet eine 100-Punkte-Studie
+        # hundert Rechtecke uebereinander.
+        if baubar:
+            i = 0
+            while i < len(baubar):
+                if baubar[i] is False:
+                    j = i
+                    while j + 1 < len(baubar) and baubar[j + 1] is False:
+                        j += 1
+                    a = xs[max(0, i - 1)] if i > 0 else xs[i]
+                    b = xs[min(len(xs) - 1, j + 1)] if j + 1 < len(xs) else xs[j]
+                    ax.axvspan(a, b, color="#f85149", alpha=0.13, lw=0)
+                    i = j + 1
+                else:
+                    i += 1
 
     for ax in axes[n:]:
         ax.axis("off")
 
-    fig.suptitle(f"Parameterstudie über {xlabel}  @ {rpm_fix:,.0f} U/min".replace(",", "."),
-                 color="#eee", fontsize=11, y=1.0)
+    titel = f"Parameterstudie über {xlabel}  @ {rpm_fix:,.0f} U/min".replace(",", ".")
+    if baubar and any(b is False for b in baubar):
+        titel += "   —   rot hinterlegt: NICHT baubar (Layouttor)"
+    fig.suptitle(titel, color="#eee", fontsize=11, y=1.0)
     fig.tight_layout(rect=(0, 0, 1, 0.98))
     return _fig_b64(fig)
 
@@ -426,15 +480,23 @@ def csv_text(result):
     mets = result.get("metrics") or {}
     meta = result.get("metric_meta") or []
     keys = [m["key"] for m in meta]
+    # „baubar" gehoert in die Tabelle und nicht nur in den Hinweis: wer die CSV
+    # in eine Tabellenkalkulation zieht, hat den Hinweis nicht dabei — und eine
+    # Zeile mit dem hoechsten Kt, die sich nicht bauen laesst, ist genau die,
+    # die dann ausgewaehlt wird (s. BEFUNDE.md, 13.09.2026).
+    bau = result.get("baubar") or []
     kopf = [result.get("label", result.get("param", "param"))] + \
            [("%s [%s]" % (m["label"], m["unit"])) if m.get("unit") else m["label"]
-            for m in meta]
+            for m in meta] + (["baubar"] if bau else [])
     zeilen = [";".join(kopf)]
     for i, x in enumerate(xs):
         reihe = ["%g" % x]
         for k in keys:
             v = (mets.get(k) or [None] * len(xs))[i]
             reihe.append("" if v is None else "%g" % v)
+        if bau:
+            b = bau[i] if i < len(bau) else None
+            reihe.append("ja" if b is True else ("NEIN" if b is False else "?"))
         zeilen.append(";".join(reihe))
     return "\n".join(zeilen)
 
