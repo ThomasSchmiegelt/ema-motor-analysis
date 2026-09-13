@@ -1638,6 +1638,18 @@ def text2ema():
         return jsonify({"error": str(e)}), 500
 
 
+def _rpm_base_von(ema_analysis, geom, perf, v_dc_1t):
+    """Eckdrehzahl wie in ``estimate_dq_currents`` -- eine Formel, zwei Nutzer."""
+    import math as _m
+    try:
+        emf_1 = ema_analysis.compute_performance(
+            geom, float(perf["B_gap_T"]), 1000.0)["emf_peak_V"]
+        v_max = float(v_dc_1t) / _m.sqrt(3.0)
+        return 1000.0 * 0.4 * v_max / emf_1 if emf_1 > 0 else 5000.0
+    except Exception:                                            # noqa: BLE001
+        return 5000.0
+
+
 @app.route("/umrichter", methods=["POST"])
 def umrichter_pruefen():
     """Die Leistungselektronik pruefen — dieselbe Rechnung wie das Verb.
@@ -1660,6 +1672,66 @@ def umrichter_pruefen():
         z = ema_umrichter.zerlegung(geom, rpm)
     except Exception as exc:                                     # noqa: BLE001
         return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+
+    # ── Die dq-Groessen der WIRKLICHEN Maschine, fuer die Live-Vorschau ──────
+    #
+    # Sie rechnet ihr Moment aus `PHYS.Psi/Ld/Lq` -- und die standen bis zum
+    # 13.09.2026 als Literale im JavaScript (Psi 0,09, Ld 0,3 mH, Lq 0,8 mH,
+    # 800 V, Eckdrehzahl 5000). Das FELDBILD der Vorschau nutzte die gezeichnete
+    # Geometrie, das dq-Modell darueber eine erfundene Maschine; wer in der
+    # Umrichterkarte 200 A einstellte, sah weiter 800 A.
+    #
+    # Hier, nicht als zweite Formel im Browser: `compute_advanced_em` und
+    # `umrichter()` sind die Quellen, und sie bleiben es.
+    maschine = {}
+    if data.get("maschine"):
+        try:
+            import ema_analysis
+            axial = float(payload.get("axial_len") or geom.get("axialLen") or 80.0)
+            em = ema_analysis.run_em_analysis(geom, N=140, rotor_angle=0.0,
+                                              axial_mm=axial)
+            perf = em["performance"]
+            adv = ema_analysis.compute_advanced_em(
+                geom, perf, axial,
+                float(payload.get("rpm_from") or 0.0) or rpm,
+                rpm or 10000.0, float(payload.get("load_nm") or 0.0))
+            u = ema_analysis.umrichter(geom, rpm)
+            maschine = {
+                # In SI, damit die Vorschau nichts umrechnen muss -- eine
+                # Einheitenwandlung im Browser waere die naechste stille Falle.
+                "psi_pm_Wb": float(adv.get("psi_pm_Wb") or 0.0),
+                "Ld_H": float(adv.get("Ld_mH") or 0.0) / 1e3,
+                "Lq_H": float(adv.get("Lq_mH") or 0.0) / 1e3,
+                # Der Schluessel heisst schlicht `xi` -- der erste Entwurf
+                # riet `xi_LqLd`/`saliency` und bekam die 1,0 aus dem Rueckfall,
+                # also eine nicht-saliente Maschine, wo 2,14 stehen.
+                "xi": float(adv.get("xi") or 1.0),
+                # Die Eckdrehzahl steht in KEINEM Ergebnis -- `estimate_dq_currents`
+                # bildet sie intern (ema_analysis.py:1338): 40 % der
+                # Klemmenspannung gegen die Gegen-EMK bei 1000 1/min. Hier
+                # genauso gerechnet und nicht geraten; die Live-Vorschau hatte
+                # dafuer bisher die Zahl 5000 im Quelltext stehen.
+                "rpm_base": _rpm_base_von(ema_analysis, geom, perf, u["v_dc_1t"]),
+                "Kt_Nm_per_A": float(perf.get("Kt_Nm_per_A") or 0.0),
+                "B_gap_T": float(perf.get("B_gap_T") or 0.0),
+                # Auf EINE Windung bezogen -- dieselbe Bezugsgroesse, mit der
+                # Kt und die Stroeme der Vorschau rechnen.
+                "i_max_A": float(u["i_max_1t"]),
+                "v_dc_V": float(u["v_dc_1t"]),
+                "n_module": int(u.get("n_module") or 1),
+                "quelle": "compute_advanced_em + umrichter",
+            }
+        except Exception as exc:                                 # noqa: BLE001
+            maschine = {"fehler": f"{type(exc).__name__}: {exc}"}
+
+    # Welche Nut zu welchem System gehoert -- damit die Vorschau die Nuten
+    # einfaerben kann, OHNE die Regel ein zweites Mal in JavaScript zu fuehren.
+    zuordnung = []
+    try:
+        zuordnung = ema_umrichter.system_je_nut(
+            int(geom.get("slots") or 0), z["k"], z["topologie"])
+    except Exception:                                            # noqa: BLE001
+        zuordnung = []
 
     aus, bilder = {}, []
     if data.get("ausfall") and z["k"] > 1:
@@ -1694,7 +1766,8 @@ def umrichter_pruefen():
     # Die Huellkurven selbst sind zwei Listen zu je 80 Punkten und werden hier
     # nicht gebraucht -- die Karte zeigt Zahlen, das Bild zeigt die Kurve.
     schlank = {k: v for k, v in (aus or {}).items() if k not in ("voll", "rest")}
-    return jsonify({**z, "ausfall": schlank, "bilder": bilder})
+    return jsonify({**z, "ausfall": schlank, "bilder": bilder,
+                    "maschine": maschine, "system_je_nut": zuordnung})
 
 
 @app.route("/optimize/meta")

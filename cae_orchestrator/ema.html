@@ -884,6 +884,26 @@
       <div class="slider-header"><span>Geschwindigkeit (Darstellung)</span><span id="disp_speed">1.0x</span></div>
       <input type="range" id="sim_timescale" min="0.05" max="2.0" step="0.05" value="1.0"/>
     </div>
+    <div class="slider-group" style="margin-top:14px;padding-top:12px;border-top:1px solid #2a2f36">
+      <div class="slider-header"><span>⚡ Leistungselektronik</span><span id="disp_module">1 Modul</span></div>
+      <div style="font-size:.7rem;color:#888;margin:4px 0 6px">
+        Die Vorschau rechnete ihr dq-Modell bis 13.09.2026 mit FESTEN Werten
+        (ψ 0,09 Wb, Ld 0,3 mH, 800 V, Eckdrehzahl 5000) — unabhängig von der
+        gezeichneten Maschine. Jetzt kommen sie aus ihr.
+      </div>
+      <button class="btn" onclick="livePhysikLaden()" style="width:100%;margin-bottom:6px">
+        🔌 Elektrik aus der Geometrie holen</button>
+      <div id="live_phys_info" style="font-size:.72rem;color:#888;line-height:1.5">
+        noch nicht geholt — es gelten die alten Festwerte</div>
+      <label style="display:block;margin-top:8px;font-size:.78rem">
+        <input type="checkbox" id="chk_modul_aus" onchange="livePhysikAusfall()"/>
+        ein Modul ausgefallen (n-1)
+      </label>
+      <div style="font-size:.7rem;color:#666;margin-top:3px">
+        Dessen Nuten führen dann keinen Strom — bei „sektoriert“ sieht man die
+        Unsymmetrie direkt im Feldbild.</div>
+    </div>
+
     <div class="slider-group">
       <div class="slider-header"><span>Drehzahl-Sollwert (0 = frei)</span><span id="disp_rpm_set">frei</span></div>
       <input type="range" id="sim_rpm_set" min="0" max="24000" step="250" value="0"/>
@@ -3797,6 +3817,7 @@
     <div class="data-row"><span>Drehmoment:</span><span class="val" id="val_torque">0</span></div>
     <div class="data-row"><span>Strom I_q:</span><span class="val" id="val_iq">0</span></div>
     <div class="data-row"><span>Strom I_d:</span><span class="val" id="val_id">0</span></div>
+    <div class="data-row"><span>Strom |I_s| je Modul:</span><span class="val" id="val_modulstrom">0</span></div>
     <div class="data-row"><span>Leistung:</span><span class="val" id="val_power">0</span></div>
     <div class="data-row"><span>Grid:</span><span class="val" id="val_grid">100px</span></div>
     <div style="margin-top:8px;font-size:.73rem;color:#888">FDM Physikmodell<br>2p = <span id="poles_display">6</span></div>
@@ -12935,6 +12956,12 @@ function escHtml(s) {
     omega: 0, angle: 0, iq: 0, id: 0, torque: 0,
     load: 5, voltage: 800, id_manual: 0, timeScale: 1.0, rpmSet: 0,
     Rs: 0.02, Ld: 0.0003, Lq: 0.0008, Psi: 0.09, J: 0.1,
+    // ── Aus der WIRKLICHEN Maschine, sobald `livePhysikLaden()` lief ────────
+    // Bis dahin gelten die Festwerte darueber. Sie sind ausdruecklich als
+    // Startwerte stehengeblieben, damit die Vorschau ohne Serverantwort
+    // weiterlaeuft — aber `echt` sagt, woran man gerade sieht.
+    echt: false, iMax: 800, vDc: 800, rpmBase: 5000, xi: 2.67,
+    kModule: 1, sysJeNut: null, ausfallSystem: -1,
   };
 
   let GRID_SIZE_STD = 100, GRID_SIZE = 100;
@@ -13584,7 +13611,12 @@ function escHtml(s) {
     const slots = GEOM.slots, step = 2*Math.PI/slots, sw = step * GEOM.slotWidthRatio;
     for (let s = 0; s < slots; s++) {
       const ang = s*step, elAng = ang*GEOM.p;
-      const cur = PHYS.id*Math.cos(elAng - PHYS.angle*GEOM.p) - PHYS.iq*Math.sin(elAng - PHYS.angle*GEOM.p);
+      let cur = PHYS.id*Math.cos(elAng - PHYS.angle*GEOM.p) - PHYS.iq*Math.sin(elAng - PHYS.angle*GEOM.p);
+      // Das ausgefallene System fuehrt KEINEN Strom. Damit zeigt das Feldbild
+      // den Fehlerfall selbst: bei `sektoriert` fehlt ein ganzer
+      // Umfangsabschnitt, und die Unsymmetrie ist zu sehen statt nur benannt.
+      if (PHYS.ausfallSystem >= 0 && PHYS.sysJeNut
+          && PHYS.sysJeNut[s] === PHYS.ausfallSystem) cur = 0;
       const ca = Math.cos(ang), sa = Math.sin(ang);
       for (let r2 = 0; r2 < Math.ceil(slotD); r2++) {
         const rr = rSI + r2, w = rr*step*GEOM.slotWidthRatio, ws = Math.ceil(w);
@@ -13700,6 +13732,69 @@ function escHtml(s) {
   }
 
   const dt_base = 0.0005;
+  // Spiegel von ema_analysis.estimate_dq_currents -- per node geprueft.
+  // Der Marker steht ALLEIN auf seiner Zeile: die Extraktion schneidet
+  // direkt dahinter, und ein Kommentartext dahinter landete als nackter
+  // Ausdruck im erzeugten JS (gemessen: SyntaxError beim ersten Versuch).
+  // <<MTPA-START>>
+  // Der d-Strom im Momentmaximum je Ampere. Diese eine Formel steht zweimal --
+  // hier und in Python --, weil die Vorschau sechzig Mal je Sekunde rechnet und
+  // nicht fragen kann. `test_livesim.py` fuehrt BEIDE aus und vergleicht sie;
+  // laufen sie auseinander, zeigt die Vorschau ein anderes Moment als der Lauf.
+  function _mtpaId(psi, Ld, Lq, iq) {
+    const dL = Lq - Ld;
+    if (!(dL > 1e-12) || !(psi > 0)) return 0;          // nicht salient -> reines q
+    return (psi - Math.sqrt(psi*psi + 8*dL*dL*iq*iq)) / (4*dL);
+  }
+  // <<MTPA-END>>
+
+  // Die Elektrik der gezeichneten Maschine holen. Gerechnet wird auf dem
+  // SERVER (compute_advanced_em + umrichter) -- psi, Ld und Lq hier noch einmal
+  // herzuleiten waere die naechste Abschrift, die auseinanderlaeuft.
+  async function livePhysikLaden() {
+    const info = document.getElementById('live_phys_info');
+    if (info) info.innerHTML = '<span style="color:#888">… rechnet</span>';
+    try {
+      const payload = await buildPayload();
+      const r = await fetch('/umrichter', {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({payload, maschine:true})});
+      const d = await r.json();
+      const m = d.maschine || {};
+      if (!r.ok || d.error || m.fehler) {
+        if (info) info.innerHTML = '<span style="color:#e57373">' +
+          escHtml(d.error || m.fehler || ('HTTP '+r.status)) + '</span>';
+        return;
+      }
+      PHYS.Psi = m.psi_pm_Wb;  PHYS.Ld = m.Ld_H;  PHYS.Lq = m.Lq_H;
+      PHYS.xi = m.xi || 1;     PHYS.rpmBase = m.rpm_base || 5000;
+      PHYS.iMax = m.i_max_A;   PHYS.vDc = m.v_dc_V;
+      PHYS.kModule = m.n_module || 1;
+      PHYS.sysJeNut = (d.system_je_nut && d.system_je_nut.length) ? d.system_je_nut : null;
+      PHYS.echt = true;
+      const dm = document.getElementById('disp_module');
+      if (dm) dm.innerText = PHYS.kModule + (PHYS.kModule === 1 ? ' Modul' : ' Module');
+      if (info) info.innerHTML =
+        'ψ ' + (PHYS.Psi*1000).toFixed(1) + ' mWb · L<sub>d</sub> ' +
+        (PHYS.Ld*1e6).toFixed(1) + ' µH · L<sub>q</sub> ' + (PHYS.Lq*1e6).toFixed(1) +
+        ' µH · ξ ' + PHYS.xi.toFixed(2) + '<br>Eckdrehzahl ' +
+        Math.round(PHYS.rpmBase).toLocaleString() + ' 1/min · Grenzen ' +
+        Math.round(PHYS.vDc) + ' V / ' + Math.round(PHYS.iMax) + ' A' +
+        (PHYS.kModule > 1 ? ' (auf 1 Wdg/Nut, ' + PHYS.kModule + ' Module)' : '') +
+        '<br><span style="color:#81c784">aus der Geometrie</span>';
+      livePhysikAusfall();
+    } catch (e) {
+      if (info) info.innerHTML = '<span style="color:#e57373">' + escHtml(String(e)) + '</span>';
+    }
+  }
+
+  function livePhysikAusfall() {
+    const an = document.getElementById('chk_modul_aus');
+    // Ohne mehrere Module gibt es keinen n-1-Fall -- dann ist ein Ausfall der
+    // Totalausfall, und den als "ein Modul weniger" zu zeigen waere gelogen.
+    PHYS.ausfallSystem = (an && an.checked && PHYS.kModule > 1) ? 0 : -1;
+  }
+
   function stepPhysics() {
     const dt = PHYS.ultraSlow ? 0.000005 : dt_base*PHYS.timeScale;
     if (isNaN(PHYS.omega)) PHYS.omega = 0;
@@ -13708,9 +13803,26 @@ function escHtml(s) {
     // update so field weakening (i_d) reflects it — instead of the torque-driven
     // run-up. Same 9.55 (≈30/π) factor as the rpm display so the value matches.
     if (PHYS.rpmSet > 0) PHYS.omega = PHYS.rpmSet / 9.55;
-    const tiq = Math.min((PHYS.load+20)*1.5, 800);
-    let tid = -0.4*tiq;
-    if (Math.abs(PHYS.omega*9.55) > 5000) tid -= (Math.abs(PHYS.omega*9.55)-5000)*0.1;
+    // Stromgrenze, Eckdrehzahl und d/q kommen aus der Maschine, sobald sie
+    // geholt wurde. Vorher die alten Festwerte -- damit die Vorschau auch ohne
+    // Serverantwort laeuft, aber `PHYS.echt` sagt, woran man sieht.
+    //
+    // Bei n-1 traegt nur noch (k-1)/k der Wicklung: das deckelt sowohl den
+    // Strom als auch das erreichbare Moment, genau wie `ema_umrichter.ausfall`.
+    const _rest = (PHYS.ausfallSystem >= 0 && PHYS.kModule > 1)
+                    ? (PHYS.kModule - 1) / PHYS.kModule : 1.0;
+    const _iLim = PHYS.iMax * _rest;
+    const tiq = Math.min((PHYS.load+20)*1.5, _iLim);
+    // MTPA statt des festen -0,4: bei einem salienten Laeufer bringt der
+    // negative d-Strom Reluktanzmoment, und wieviel, haengt an psi, Ld und Lq.
+    let tid = _mtpaId(PHYS.Psi, PHYS.Ld, PHYS.Lq, tiq);
+    const _rpmNow = Math.abs(PHYS.omega*9.55), _rpmB = Math.max(PHYS.rpmBase, 1);
+    if (_rpmNow > _rpmB) {
+      // Feldschwaechung wie in estimate_dq_currents: proportional zur Last,
+      // umgekehrt zur Salienz, gedeckelt bei 1,5.
+      const fw = Math.min((_rpmNow - _rpmB) / _rpmB, 1.5);
+      tid -= tiq * fw / Math.max(PHYS.xi, 1e-6);
+    }
     tid -= PHYS.id_manual;
     PHYS.iq += (tiq - PHYS.iq)*0.1;
     PHYS.id += (tid - PHYS.id)*0.1;
@@ -13928,6 +14040,18 @@ function escHtml(s) {
     document.getElementById("val_iq").innerText     = PHYS.iq.toFixed(0)+" A";
     document.getElementById("val_id").innerText     = PHYS.id.toFixed(0)+" A";
     document.getElementById("val_power").innerText  = (Math.abs(PHYS.torque*PHYS.omega)/1000).toFixed(1)+" kW";
+    // Bei mehreren Modulen ist der Strang-Strom nicht der Modul-Strom. Die
+    // Zahl, die jemand beim Einkauf braucht, ist die je Modul.
+    const _im = document.getElementById("val_modulstrom");
+    if (_im) {
+      const _is = Math.hypot(PHYS.iq, PHYS.id);
+      _im.innerText = PHYS.kModule > 1
+        ? _is.toFixed(0) + " A  (" + PHYS.kModule + " × " + _is.toFixed(0) + " A)"
+        : _is.toFixed(0) + " A";
+      _im.style.color = PHYS.echt ? "" : "#c9a227";
+      _im.title = PHYS.echt ? "aus der Geometrie gerechnet"
+                            : "FESTWERTE — „Elektrik aus der Geometrie holen“ drücken";
+    }
     document.getElementById("val_grid").innerText   = GRID_SIZE + "px  #" + _frameCount;
   }
 
