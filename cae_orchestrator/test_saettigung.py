@@ -179,6 +179,43 @@ pruefe("die Pipeline schreibt sie ins summary",
 pruefe("und erzeugt die Bilder nach charts/",
        "ema_saettigung.bilder" in inspect.getsource(_PL.run_pipeline))
 
+# ── 7b. Die beiden Wege, die ich zuerst FALSCH behauptet hatte ─────────────
+# `renderSummary` in ema.html und `_single_md_tables` im Bericht bauen ihre
+# Zeilen AUSDRUECKLICH und lesen `summary` nicht generisch. Die Zusage "damit
+# haben Bericht und Ergebnisreiter sie ebenfalls" war deshalb falsch -- zweimal
+# derselbe Fehler an einem Tag. Diese Pruefungen sind das Gegenmittel.
+print("\n[7b] Ergebnisreiter und Bericht")
+import os                                                         # noqa: E402
+_html = open("ema.html", encoding="utf-8").read()
+pruefe("renderSummary hat eine Saettigungskachel",
+       "saettigung_pct" in _html and "renderSummary" in _html)
+pruefe("und sie sagt, woher die Zahl kommt",
+       "Flusserhaltung, kein Feldbild" in _html)
+pruefe("und was ein Altprojekt sieht (das Feld fehlt dort)",
+       "erst ab einem Lauf" in _html)
+_rep = open("ema_report.py", encoding="utf-8").read()
+pruefe("der Bericht traegt sie in ctx['em']", '"B_zahn_T":     summary.get' in _rep)
+pruefe("und hat Tabellenzeilen dafuer", "Flussdichte im Zahn B_Zahn" in _rep)
+# Wirklich durchgerechnet, nicht nur gegrept.
+import json as _json                                              # noqa: E402
+import tempfile as _tf                                            # noqa: E402
+import ema_report as _R                                           # noqa: E402
+_res = {"summary": {"B_gap_T": 0.5, "Kt_Nm_per_A": 0.2,
+                    "B_zahn_T": 1.29, "B_joch_T": 0.25,
+                    "B_eisen_T": 1.29, "saettigung_pct": 76.0,
+                    "saettigung_engstelle": "zahn"}}
+with _tf.TemporaryDirectory() as _t:
+    _json.dump(_res, open(os.path.join(_t, "results.json"), "w"))
+    _json.dump({"payload": {"geom": GEOM}}, open(os.path.join(_t, "meta.json"), "w"))
+    # `_fmt_val` setzt ein SCHMALES GESCHUETZTES Leerzeichen (U+202F) zwischen
+    # Zahl und Einheit -- typografisch richtig und beim Vergleich eine Falle:
+    # die erste Fassung dieses Tests suchte "1.29 T" mit gewoehnlichem
+    # Leerzeichen und schlug fehl, obwohl die Tabelle stimmte.
+    _tab = _R._single_md_tables(_R.build_context(_t)).replace("\u202f", " ")
+    pruefe("die Kennwerttabelle zeigt B_Zahn", "1.29 T" in _tab)
+    pruefe("und die Ausnutzung mit der Engstelle",
+           "Engstelle zahn" in _tab and "76 %" in _tab)
+
 # ── 8. Die Bilder ──────────────────────────────────────────────────────────
 print("\n[8] Bilder")
 import os                                                         # noqa: E402

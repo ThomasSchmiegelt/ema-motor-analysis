@@ -299,7 +299,8 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
     if n_unerreichbar:
         hinweis = ((hinweis + " ") if hinweis else "") + (
             f"{n_unerreichbar} von {steps} Schritten erreichen den geforderten "
-            f"Betriebspunkt NICHT — dort sind Verluste und Temperaturen leer "
+            f"Betriebspunkt NICHT — dort sind ALLE betriebspunktabhaengigen "
+            f"Kennwerte leer (Verluste, Temperaturen und die Saettigung) "
             f"(und nicht 0). {unerreichbar_grund}")
         log("⚠ " + hinweis, 99)
     log(f"✓ Fertig: {n_ok} ausgewertet, {n_fail} fehlgeschlagen"

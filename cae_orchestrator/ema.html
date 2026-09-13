@@ -12328,6 +12328,14 @@ function renderSummary(s) {
     metric('Füllgrad Hairpin',   ((s.fill_factor || 0) * 100).toFixed(1) + ' %', 'Leiter/Nutquerschnitt'),
     metric('P_Fe Schätzung',     (s.P_fe_W_est || 0).toFixed(0) + ' W','Stator, Leerlauf'),
     metric('LCM Nuten/Pole',     s.lcm_slots_poles,                     'Rastmoment-Güte'),
+    // Die vierte Auslegungsgrenze. `renderSummary` ist eine ausdrueckliche
+    // Kachelliste und zeigt `summary` NICHT generisch — ohne diese Zeile kaeme
+    // die Saettigung hier nicht an, obwohl sie im summary steht.
+    metric('Eisen ' + (s.saettigung_engstelle || ''),
+           s.saettigung_pct != null ? s.saettigung_pct.toFixed(0) + ' %' : '–',
+           s.B_eisen_T != null
+             ? s.B_eisen_T.toFixed(2) + ' T — Flusserhaltung, kein Feldbild'
+             : 'erst ab einem Lauf nach dem 13.09.2026'),
     metric('Rotorblech',         s.rotor_lam  || '–', ''),
     metric('Statorblech',        s.stator_lam || '–', ''),
     metric('Hairpin',            s.hairpin    || '–', ''),

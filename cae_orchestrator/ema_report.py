@@ -138,6 +138,16 @@ def build_context(project_dir: str) -> dict:
             "Kt_Nm_per_A":  summary.get("Kt_Nm_per_A"),
             "T_maxwell_Nm": summary.get("T_maxwell_Nm"),
             "lcm":          summary.get("lcm_slots_poles"),
+            # Die vierte Auslegungsgrenze. Sie steht seit dem 13.09.2026 im
+            # summary (`ema_pipeline._saettigung_summary`), und ohne diese vier
+            # Zeilen kaeme sie im Bericht trotzdem nicht an: `_single_md_tables`
+            # baut seine Zeilen ausdruecklich und liest `summary` nicht
+            # generisch.
+            "B_zahn_T":     summary.get("B_zahn_T"),
+            "B_joch_T":     summary.get("B_joch_T"),
+            "B_eisen_T":    summary.get("B_eisen_T"),
+            "saettigung_pct": summary.get("saettigung_pct"),
+            "saettigung_engstelle": summary.get("saettigung_engstelle"),
         },
         "structural": {
             "rpm_fem":        fem.get("rpm"),
@@ -1359,6 +1369,11 @@ def _single_md_tables(ctx: dict) -> str:
         ("Drehmomentkonstante Kt",            em.get("Kt_Nm_per_A"),  "Nm/A", 3),
         ("Maxwell-Moment",                    em.get("T_maxwell_Nm"), "Nm",   1),
         ("LCM (Nut/Pol)",                     em.get("lcm"),          "",     None),
+        ("Flussdichte im Zahn B_Zahn",        em.get("B_zahn_T"),     "T",    2),
+        ("Flussdichte im Joch B_Joch",        em.get("B_joch_T"),     "T",    2),
+        ("Eisenausnutzung (Engstelle "
+         + str(em.get("saettigung_engstelle") or "?") + ")",
+         em.get("saettigung_pct"),                                    "%",    0),
     ]
     if adv:
         dm = adv.get("demag", {}) or {}
