@@ -88,6 +88,50 @@ den Schwellwert nennt. Tests in `test_paramstudy.py`
 `test_die_zielgroesse_belohnt_das_unbaubare_NICHT_mehr` — letzterer prüft
 ausdrücklich mit, dass Kt jenseits des Tors **steigt**, sonst prüfte er nichts).
 
+**Nachtrag (13.09.2026) — die zweite Hälfte: Kt ∝ p³ = p² × p.**
+Auf die Rückfrage „macht das Sinn, die Sättigung wird doch mit mehr Magneten
+geringer?" nachgemessen. Hält man die **Polbedeckung konstant** (magWidth mit
+der Polteilung skaliert), steht `B_gap` über p = 1…8 **exakt still** (0,6747 T
+auf vier Stellen) — der lineare Anstieg war also restlos die feste Magnetlänge.
+`Kt` steigt trotzdem weiter, und zwar genau mit **p²**: 0,0080 → 0,5280 = ×64.
+
+Das ist **keine Physik, sondern die Hauskonvention „eine Windung je Nut"**
+(`psi_pm = p·(2/π)·B_gap·R·L`, `Kt = 1,5·p·psi_pm`). Mit der dokumentierten
+Normierungsbrücke `ema_asm.k_norm = π·k_w·N_ph/p²` zurückgerechnet ist der
+**physikalische** Kt über dieselbe Reihe **exakt konstant** — ungerundet
+0,118232 Nm/A für jedes p (die 3 % Streuung eines ersten Versuchs waren allein
+die Rundung von Kt auf vier Stellen, bei p = 1 ist Kt 0,0033). Das ist auch das
+klassische Ergebnis: bei gleichem Luftspaltfeld und gleicher Wicklung hängt das
+Moment **nicht** an der Polzahl.
+
+**Zur Sättigung selbst:** der Einwand trifft eine reale Größe, aber sie kann in
+diesen Zahlen gar nicht stecken. `_analytical_Bgap` enthält **keinen Eisenterm**
+— es rechnet nur die Magnet-Arbeitsgerade `h_m/(h_m+µ_r·k_c·g)` mal Polbedeckung
+und setzt das Eisen implizit unendlich permeabel; der FDM-Löser ist linear mit
+`MU_R_IRON = 500`, der Sättigungsdurchgang wirkt ausschließlich im
+Anzeigepfad (`_saturate_field`). Weniger Sättigung kann also weder `B_gap` noch
+`Kt` gutgeschrieben werden — **und mehr Sättigung wird auch nicht bestraft.**
+
+Was der Effekt wirklich ist, exakt aus der Flusserhaltung (kein Löser nötig):
+der Fluss je Pol fällt mit 1/p, gemessen 8,687 → 1,448 mWb über p = 2…12. Für
+ein 1,5-T-Joch heißt das 19,3 → 3,2 mm Jochhöhe, also **84 % weniger
+Rückeneisen**. Das ist der Grund, aus dem es hochpolige Maschinen gibt — nur
+rechnet dieses Werkzeug es nicht von selbst gut: wer es einlösen will, muss
+`statorOD`/`slotDepth` selbst verkleinern.
+
+**Und die Sättigung verschwindet nicht, sie WANDERT.** Während das Joch
+entlastet wird, werden die Stege zwischen benachbarten Taschen schmaler
+(gemessen 22,19 → 3,46 mm über p = 4…10 bei konstanter Bedeckung) und tragen
+die Last. Die Richtung ist im FDM sichtbar, **die Höhe nicht belastbar**: über
+N = 300/420/700 wandern die Rotorwerte um Faktor 1,18 bis 2,76, sie sind also
+nicht konvergiert (derselbe Vorbehalt, der in `CLAUDE.md` unter „die dünnen
+Eisenstege" steht). Deshalb steht hier keine Tesla-Zahl für den Rotor.
+
+`ema_paramstudy.deutungsfalle` schreibt die Normierung jetzt an jede
+`p`-Studie — das Gegenstück zu `wirkungslos_grund`: dort steht eine Kurve still
+und sieht nach einem Rechenfehler aus, hier steigt sie steil und sieht nach
+einem Gewinn aus, der keiner ist.
+
 **Was das NICHT behebt:** dass eine Polpaar-Studie bei festem `magWidth`
 überhaupt eine seltsame Frage ist. Eine reale Auslegung verkleinert die Magnete
 mit wachsender Polzahl; die Kurve vergleicht sonst Maschinen, die sich in mehr

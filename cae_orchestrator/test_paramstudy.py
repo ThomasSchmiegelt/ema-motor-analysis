@@ -453,6 +453,52 @@ def test_die_zielgroesse_belohnt_das_unbaubare_NICHT_mehr():
     print("✓ Zielgroesse: unbaubar rangiert unter jeder baubaren Loesung")
 
 
+def test_polzahl_studie_nennt_die_normierung():
+    """Eine Kurve, die zu VIEL zeigt — das Gegenstueck zur flachen Kurve.
+
+    Gemessen (13.09.2026, aus einer Nutzerfrage): haelt man die Polbedeckung
+    konstant, steht `B_gap` ueber p = 1…8 exakt still (0,6747 T auf vier
+    Stellen), aber Kt steigt 0,0080 → 0,5280 = genau x64 = p². Das ist die
+    Hauskonvention „eine Windung je Nut", nicht ein Momentgewinn: mit
+    `ema_asm.k_norm` zurueckgerechnet ist der physikalische Kt konstant.
+    """
+    import math, ema_analysis as A, ema_asm as ASM
+    pl = _echter_payload(magShape="bar", slots=36, magThick=6.0, magDist=12.5,
+                         pocketMode="position", statorOD=305.0, statorID=171.6,
+                         rotorOD=170.0, shaftD=120.0)
+    g0, L = pl["geom"], float(pl.get("axial_len", 80))
+    teil0 = math.pi * g0["statorID"] / (2 * 6)
+    bed = 27.0 / teil0                                   # Bedeckung festhalten
+
+    bgs, kts, phys = [], [], []
+    for p_ in (1, 2, 3, 4, 6, 8):
+        g = dict(g0); g["p"] = p_
+        g["magWidth"] = bed * math.pi * g["statorID"] / (2 * p_)
+        bg = A._analytical_Bgap(g)
+        # UNGERUNDET: `compute_performance` rundet Kt auf vier Stellen, und bei
+        # p = 1 ist Kt 0,0033 — die Rundung allein macht dort 1,7 %, und der
+        # Test pruefte dann die Rundung statt die Physik.
+        kt = 1.5 * p_ * (p_ * (2 / math.pi) * bg * A.r_gap_m(g)
+                         * A.stapellaenge_m(g, L))
+        bgs.append(bg); kts.append(kt); phys.append(kt * ASM.k_norm(g))
+
+    # B_gap steht still — der lineare Anstieg der gemeldeten Studie war allein
+    # die feste Magnetlaenge.
+    assert max(bgs) - min(bgs) < 1e-9, bgs
+    # Kt steigt trotzdem mit p^2 …
+    assert abs(kts[-1] / kts[0] - 64.0) < 0.2, kts
+    # … und der PHYSIKALISCHE Kt ist EXAKT konstant (klassisches Ergebnis:
+    # bei gleichem Luftspaltfeld und gleicher Wicklung haengt das Moment nicht
+    # an der Polzahl).
+    assert max(phys) - min(phys) < 1e-9, phys
+
+    # Und die Studie SAGT es, statt es den Leser herausfinden zu lassen.
+    falle = S.deutungsfalle(pl, "p")
+    assert "p²" in falle and "k_norm" in falle
+    assert S.deutungsfalle(pl, "magWidth") == ""
+    print("✓ Polzahl: B_gap steht still, Kt ist Normierung — und es steht dabei")
+
+
 def main():
     test_studien_ueberschreiben_sich_nicht()
     test_zwei_studien_in_derselben_sekunde()
@@ -469,6 +515,7 @@ def main():
     test_welle_studie_zeigt_nur_die_welle()
     test_unbaubare_punkte_werden_BENANNT()
     test_die_zielgroesse_belohnt_das_unbaubare_NICHT_mehr()
+    test_polzahl_studie_nennt_die_normierung()
     print("\nALLE PARAMETERSTUDIEN-TESTS BESTANDEN ✅")
 
 

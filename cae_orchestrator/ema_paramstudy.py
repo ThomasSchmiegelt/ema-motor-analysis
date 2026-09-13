@@ -64,6 +64,46 @@ def _fig_b64(fig, dpi=120):
     return base64.b64encode(buf.getvalue()).decode("ascii")
 
 
+def deutungsfalle(payload, param):
+    """Bewegt sich hier etwas, das man LEICHT FALSCH LIEST? Satz oder ``""``.
+
+    Das Gegenstueck zu ``wirkungslos_grund``: dort steht eine Kurve still und
+    sieht nach einem Rechenfehler aus; hier steigt sie steil und sieht nach
+    einem Gewinn aus, der keiner ist.
+
+    **Der gemessene Fall ist die Polzahl** (13.09.2026, aus einer Nutzerfrage).
+    Das ganze elektrische Modell rechnet mit **einer Windung je Nut**, also
+    ``psi_pm = p*(2/pi)*B_gap*R_gap*L`` und ``Kt = 1,5*p*psi_pm`` — in dieser
+    Hauskonvention waechst Kt mit **p²**, auch wenn sich an der Maschine nichts
+    aendert. Nachgemessen bei KONSTANT gehaltener Polbedeckung (magWidth mit
+    der Polteilung skaliert) ueber p = 1…8: ``B_gap`` steht exakt still
+    (0,6747 T auf vier Stellen), Kt steigt 0,0080 → 0,5280, also genau x64.
+    Mit der Normierungsbruecke ``ema_asm.k_norm = pi*k_w*N_ph/p²``
+    zurueckgerechnet ist der **physikalische** Kt konstant: 0,2865…0,2955 Nm/A
+    ueber dieselbe Reihe (Faktor 1,03). Das ist auch das klassische Ergebnis —
+    bei gleichem Luftspaltfeld und gleicher Wicklung haengt das Moment NICHT an
+    der Polzahl.
+
+    Wer die Polzahl also ueber Kt beurteilt, misst die Normierung. Was die
+    Polzahl wirklich bringt, steht daneben und ist ebenfalls gerechnet: der
+    Fluss je Pol faellt mit 1/p, das Statorjoch darf duenner werden.
+    """
+    if str(param) != "p":
+        return ""
+    return ("Kt waechst in dieser Studie mit **p²**, OHNE dass die Maschine "
+            "besser wird: das Modell rechnet mit einer Windung je Nut "
+            "(`psi_pm = p*(2/pi)*B_gap*R*L`, `Kt = 1,5*p*psi_pm`). Mit der "
+            "Normierungsbruecke `ema_asm.k_norm` zurueckgerechnet ist der "
+            "physikalische Kt ueber die Polzahl KONSTANT — das ist auch das "
+            "klassische Ergebnis. Beurteile die Polzahl nicht ueber Kt. Was sie "
+            "wirklich bringt: der Fluss je Pol faellt mit 1/p, das Statorjoch "
+            "darf duenner werden (und die Ummagnetisierungsverluste steigen mit "
+            "der Frequenz). Und wenn `magWidth` dabei fest bleibt, waechst "
+            "zusaetzlich die Polbedeckung `magWidth/Polteilung` — dann steigt "
+            "auch `B_gap` scheinbar linear mit p, bis die Taschen einander "
+            "durchdringen.")
+
+
 def wirkungslos_grund(payload, param, lo, hi):
     """Bewegt dieser Parameter in DIESER Auslegung ueberhaupt etwas — und wenn
     nicht, warum? Gibt einen Satz zurueck oder ``""``.
@@ -230,6 +270,10 @@ def run_study(payload, param, lo, hi, steps=100, rpm=None,
     # Bewegt sich ueberhaupt etwas — und wenn nicht, warum nicht?
     flach = [k for k, _, _ in _STUDY_METRICS
              if len({v for v in metric_series[k] if v is not None}) <= 1]
+    falle = deutungsfalle(payload, param)
+    if falle:
+        hinweis = ((hinweis + " ") if hinweis else "") + falle
+        log("⚠ " + falle, 99)
     grund = wirkungslos_grund(payload, param, lo, hi)
     if grund:
         hinweis = ((hinweis + " ") if hinweis else "") + grund

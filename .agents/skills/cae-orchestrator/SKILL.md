@@ -344,6 +344,18 @@ python3 cae_cli.py zielwert --from-project last --ziel Kt --max \
   exakt linear mit p und `Kt` exakt mit p³ — bis p = 6 baubar, ab p = 7 nicht
   mehr. Ein Punkt mit dem besten Kt, der `baubar=NEIN` trägt, ist **kein
   Ergebnis**, sondern die Stelle, an der die Reihe hätte enden müssen.
+* **Beurteile die Polzahl NICHT über Kt.** Das Modell rechnet mit einer
+  Windung je Nut, also `psi_pm = p·(2/π)·B_gap·R·L` und `Kt = 1,5·p·psi_pm` —
+  der angezeigte Kt wächst mit **p²**, auch wenn sich an der Maschine nichts
+  ändert. Gemessen bei konstant gehaltener Polbedeckung: `B_gap` steht exakt
+  still, Kt steigt über p = 1…8 um Faktor 64; mit `ema_asm.k_norm` zurück-
+  gerechnet ist der **physikalische** Kt exakt konstant (0,118232 Nm/A für
+  jedes p). Das ist auch das klassische Ergebnis — bei gleichem Luftspaltfeld
+  und gleicher Wicklung hängt das Moment nicht an der Polzahl. Was die Polzahl
+  wirklich bringt: der Fluss je Pol fällt mit 1/p, das Joch darf dünner werden
+  (84 % weniger Rückeneisen von p = 2 auf 12), dafür steigen die
+  Ummagnetisierungsverluste mit der Frequenz. Die Studie schreibt diesen Satz
+  seit dem 13.09.2026 selbst dazu (`deutungsfalle`).
 * **Eine Studie über `p` bei festem `magWidth` vergleicht Maschinen, die sich in
   mehr als einem Merkmal unterscheiden.** Eine reale Auslegung verkleinert die
   Magnete mit wachsender Polzahl. Wenn du die Polzahl untersuchst, fahre
