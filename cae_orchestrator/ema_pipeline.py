@@ -2471,10 +2471,21 @@ def run_pipeline(data: dict, state: dict, frames: list,
             _iqs, _ids = ema_analysis.estimate_dq_currents(
                 geom, rpm_to, load_nm, b_gap_t=float(perf["B_gap_T"]),
                 rpm_base=rpm_from) if (rpm_to > 0 and load_nm > 0) else (0.0, 0.0)
+            # Die GEMESSENE Luftspaltkurve mitgeben: die Grundwelle kennt bei
+            # q = 1 nur drei verschiedene Zahnwerte (Spreizung 2,0), die
+            # gerechnete Kurve streut gemessen um Faktor 7,5. Fuer ein Bild, das
+            # zeigen soll WELCHER Zahn eng wird, ist das der Unterschied
+            # zwischen Aussage und Behauptung. Der Massstab bleibt der der
+            # Formel -- die Kurve wird auf deren Spitzenwert normiert.
+            _kurve = None
+            try:
+                _kurve = (em0["Br_gap"], em0["theta"])
+            except Exception:                                    # noqa: BLE001
+                _kurve = None
             _sb = ema_saettigung.bilder(
                 geom, axial, float(perf["B_gap_T"]),
                 os.path.join(proj, "charts"), rpm=rpm_to,
-                i_q=_iqs, i_d=_ids, blech=st_mat)
+                i_q=_iqs, i_d=_ids, blech=st_mat, br_kurve=_kurve)
             results["em"]["saettigung_bilder"] = [os.path.basename(x) for x in _sb]
             _log(state, f"✓ Saettigungsbilder ({len(_sb)}) fertig", 79)
         except Exception as _exc:                                # noqa: BLE001

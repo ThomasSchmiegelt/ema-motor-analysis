@@ -281,7 +281,7 @@ def _farbe(q: float) -> str:
 
 def bild(geom: dict, axial_mm: float, b_gap_magnet: float, pfad: str,
          i_q: float = 0.0, i_d: float = 0.0, blech="m270_35a",
-         dpi: int = 130) -> str:
+         dpi: int = 130, br_kurve=None) -> str:
     """Der Querschnitt, Zahn und Joch nach ihrer AUSNUTZUNG eingefaerbt.
 
     Gezeichnet wird die Maschine ueber ``ema_pipeline.render_cross_section`` --
@@ -309,25 +309,41 @@ def bild(geom: dict, axial_mm: float, b_gap_magnet: float, pfad: str,
 
     fig, ax = plt.subplots(figsize=(7.4, 7.4))
     ema_pipeline.render_cross_section(geom, ax, beschriftung=False)
-    # Zahn und Joch bekommen ihre Beschriftung an VERSCHIEDENEN Winkeln (oben
-    # und unten). Beide auf die Senkrechte gesetzt lagen sie uebereinander und
-    # verdeckten einander -- gemessen am ersten erzeugten Bild.
+    # ── Je Zahn und je Jochabschnitt einzeln, nicht als EIN Ring ────────────
+    #
+    # Der gleichmaessig eingefaerbte Ring des ersten Entwurfs behauptete eine
+    # Homogenitaet, die es nicht gibt: gemessen streut die Zahnflussdichte ueber
+    # den Umfang um Faktor 7,5. Er verschwieg damit die eigentliche Auskunft --
+    # WELCHER Zahn eng wird. Und Zahn und Joch haben ihre Spitzen nicht an
+    # derselben Stelle: der Zahn im Polzentrum, das Joch in der q-Achse.
+    vt = verteilung(geom, axial_mm, e["B_gap_T"], blech, br_kurve=br_kurve)
+    n_s = max(len(vt["B_zahn_T"]), 1)
+    halb = 360.0 / n_s / 2.0 * 0.94
+    for i in range(n_s):
+        mitte = 360.0 * i / n_s
+        for r0, r1, wert in ((r_si, r_nut, vt["B_zahn_T"][i]),
+                             (r_nut, r_so, vt["B_joch_T"][i])):
+            ax.add_patch(Wedge((0, 0), r1, mitte - halb, mitte + halb,
+                               width=r1 - r0,
+                               facecolor=_farbe(wert / max(e["B_sat_T"], 1e-9)),
+                               alpha=0.42, edgecolor="none", zorder=6))
+    # Die Beschriftung nennt weiter den SPITZENwert -- er bemisst das Eisen.
     for r0, r1, q, name, wert, winkel in (
             (r_si, r_nut, e["B_zahn_T"] / e["B_sat_T"], "Zahn", e["B_zahn_T"], 90.0),
             (r_nut, r_so, e["B_joch_T"] / e["B_sat_T"], "Joch", e["B_joch_T"], -90.0)):
-        ax.add_patch(Wedge((0, 0), r1, 0, 360, width=r1 - r0,
-                           facecolor=_farbe(q), alpha=0.40, edgecolor="none",
-                           zorder=6))
         rm = (r0 + r1) / 2.0
         ax.text(rm * math.cos(math.radians(winkel)),
                 rm * math.sin(math.radians(winkel)),
-                f"{name}  {wert:.2f} T\n{q * 100:.0f} % von {e['B_sat_T']:.2f} T",
+                f"{name}  hoechstens {wert:.2f} T\n{q * 100:.0f} % von "
+                f"{e['B_sat_T']:.2f} T",
                 ha="center", va="center", zorder=7, fontsize=10,
                 fontweight="bold", color="#111",
                 bbox=dict(boxstyle="round,pad=0.35", fc="white", alpha=0.88,
                           ec="none"))
     ax.set_title(f"Eisenausnutzung — Engstelle {e['engstelle'].upper()}, "
-                 f"{e['ausnutzung'] * 100:.0f} %\n{e['blech']}", fontsize=10.5)
+                 f"{e['ausnutzung'] * 100:.0f} %\n"
+                 f"je Zahn einzeln, Spreizung {vt.get('zahn_spreizung', '?')}× "
+                 f"({vt.get('quelle', '?')})", fontsize=10.5)
     # Die Herkunft gehoert INS Bild: es sieht aus wie ein Feldbild und ist keines.
     fig.text(0.5, 0.02,
              "aus der FLUSSERHALTUNG (B_gap -> Zahn/Joch), nicht aus einem "
@@ -440,7 +456,7 @@ def _knie_suchen(geom, axial_mm, b_gap_magnet, rpm, blech, hoechstens=2000.0):
 
 def bilder(geom: dict, axial_mm: float, b_gap_magnet: float, ziel_dir: str,
            rpm: float = 0.0, i_q: float = 0.0, i_d: float = 0.0,
-           blech="m270_35a") -> list:
+           blech="m270_35a", br_kurve=None) -> list:
     """Beide Bilder nach ``<projekt>/charts`` -- wie ``ema_feldbild``.
 
     Der Ablageort ist nicht beliebig: die rechte Spalte beider Agentenkoepfe
@@ -451,7 +467,8 @@ def bilder(geom: dict, axial_mm: float, b_gap_magnet: float, ziel_dir: str,
     os.makedirs(ziel_dir, exist_ok=True)
     aus = []
     p1 = os.path.join(ziel_dir, "saettigung_eisen.png")
-    aus.append(bild(geom, axial_mm, b_gap_magnet, p1, i_q, i_d, blech))
+    aus.append(bild(geom, axial_mm, b_gap_magnet, p1, i_q, i_d, blech,
+                    br_kurve=br_kurve))
     if rpm > 0:
         p2 = os.path.join(ziel_dir, "saettigung_kennlinie.png")
         aus.append(diagramm(geom, axial_mm, b_gap_magnet, p2, rpm, blech=blech))
@@ -618,4 +635,110 @@ def rotorsteg(geom: dict, axial_mm: float, b_gap_t: float,
                f"durch den Steg passt — B_gap und Kt sind damit zu niedrig."
                if unmoeglich else
                f"Angenommen sind {k_ist:.3f}, das liegt innerhalb der Schranke.")),
+    }
+
+
+# ── Die Verteilung: eine Zahl genuegt nicht ──────────────────────────────────
+
+def verteilung(geom: dict, axial_mm: float, b_gap_t: float,
+               blech="m270_35a", br_kurve=None) -> dict:
+    """B_Zahn je NUT und B_Joch je Winkelschritt -- statt einer Zahl.
+
+    Gemessen am Probeprojekt streut die Zahnflussdichte ueber den Umfang um
+    **Faktor 7,5** (0,078 bis 0,587 T bei einem Rotorwinkel). Die eine Zahl, die
+    ``eisenwege`` ausgibt, ist der SPITZENwert -- fuer die Bemessung richtig,
+    denn der engste Zahn entscheidet. Ein gleichmaessig eingefaerbter Zahnring
+    behauptet aber eine Homogenitaet, die es nicht gibt, und verschweigt die
+    eigentliche Auskunft: **welcher** Zahn eng wird und wie viele unbeteiligt
+    sind.
+
+    Gerechnet wird ohne Feldlauf, aus derselben Grundwelle wie ``eisenwege``:
+    der Zahn bei der elektrischen Lage ``theta_el`` traegt den Fluss einer
+    Nutteilung an dieser Stelle, also ``B_gap * cos(theta_el)``. Das Joch fuehrt
+    das INTEGRAL davon -- es sammelt den Fluss aller Zaehne bis zu seiner Lage,
+    weshalb es in der **q-Achse** am hoechsten steht und im Polzentrum am
+    niedrigsten, also gerade umgekehrt zum Zahn. Genau diese Umkehr ist die
+    Auskunft, die eine einzelne Zahl nicht geben kann.
+    """
+    import ema_wicklung
+
+    g = geom or {}
+    p = max(int(g.get("p") or 1), 1)
+    slots = max(int(g.get("slots") or 1), 1)
+    ng = ema_wicklung.nutgeometrie(g)
+    e = eisenwege(g, axial_mm, b_gap_t, blech)
+    b_sat = e["B_sat_T"]
+
+    zahn, joch, winkel = [], [], []
+    quelle = "grundwelle"
+    if br_kurve is not None:
+        # GEMESSENE Form: der Zahn traegt den Fluss SEINER Nutteilung aus der
+        # gerechneten Luftspaltkurve. Das ist die ehrlichere Verteilung --
+        # gemessen streut sie um Faktor 7,5, waehrend die Grundwelle bei q = 1
+        # nur drei verschiedene Werte kennt (|cos| von 0, 120, 240 Grad el).
+        # Der MASSSTAB bleibt der der Formel: die Kurve wird auf den
+        # Spitzenwert aus `eisenwege` normiert, damit Verteilung und Kennzahl
+        # dieselbe Sprache sprechen (und dieselbe Unsicherheit tragen, s. die
+        # Spanne in `gegenprobe_fdm`).
+        try:
+            import numpy as _np
+            br = _np.asarray(br_kurve[0], dtype=float)
+            th_arr = _np.asarray(br_kurve[1], dtype=float)
+            n_pt = len(br)
+            w = max(2, int(round(n_pt / slots)))
+            roh = []
+            for s_i in range(slots):
+                a0 = s_i * w
+                seg = br[a0:a0 + w]
+                tseg = th_arr[a0:a0 + w]
+                roh.append(abs(float(_np.trapezoid(seg, tseg))))
+            gross = max(roh) or 1.0
+            for s_i in range(slots):
+                winkel.append(round(360.0 * s_i / slots, 2))
+                zahn.append(round(e["B_zahn_T"] * roh[s_i] / gross, 4))
+            # Das Joch sammelt auf: Teilsumme der Zahnfluesse, auf die Spitze
+            # normiert. Auch hier ist die LAGE die Auskunft, nicht der Betrag.
+            lauf, summe = 0.0, []
+            for v in roh:
+                lauf += v
+                summe.append(lauf)
+            mitte = sum(summe) / len(summe)
+            ab = [abs(x - mitte) for x in summe]
+            gro2 = max(ab) or 1.0
+            joch = [round(e["B_joch_T"] * x / gro2, 4) for x in ab]
+            quelle = "luftspaltkurve"
+        except Exception:                                        # noqa: BLE001
+            zahn, joch, winkel, quelle = [], [], [], "grundwelle"
+
+    if not zahn:
+        for s_i in range(slots):
+            th = 2.0 * math.pi * s_i / slots     # mechanisch
+            th_el = th * p                       # elektrisch
+            winkel.append(round(math.degrees(th), 2))
+            # Zahn: die oertliche Luftspaltflussdichte, auf den Zahn konzentriert.
+            zahn.append(round(e["B_zahn_T"] * abs(math.cos(th_el)), 4))
+            # Joch: das Integral ueber die Zaehne -> um 90 Grad EL versetzt und
+            # damit in der q-Achse am groessten.
+            joch.append(round(e["B_joch_T"] * abs(math.sin(th_el)), 4))
+
+    return {
+        "winkel_grad": winkel,
+        "B_zahn_T": zahn, "B_joch_T": joch,
+        "B_sat_T": b_sat, "blech": e["blech"],
+        "zahn_spitze_T": max(zahn) if zahn else 0.0,
+        "zahn_mittel_T": round(sum(zahn) / max(len(zahn), 1), 4),
+        "joch_spitze_T": max(joch) if joch else 0.0,
+        "joch_mittel_T": round(sum(joch) / max(len(joch), 1), 4),
+        # Die Spreizung ist die eigentliche Aussage dieser Funktion.
+        "zahn_spreizung": (round(max(zahn) / max(min(zahn), 1e-9), 1)
+                           if zahn else None),
+        "n_zaehne_ueber_90pct": sum(1 for b in zahn if b >= 0.9 * b_sat),
+        "quelle": quelle,
+        "hinweis": ("Der Zahn ist im POLZENTRUM am hoechsten, das Joch in der "
+                    "Q-ACHSE — beide Spitzen liegen also nicht uebereinander."
+                    + ("  Aus der GRUNDWELLE: bei q = 1 kennt sie nur drei "
+                       "verschiedene Werte, die gemessene Kurve streut "
+                       "deutlich staerker." if quelle == "grundwelle" else
+                       "  Aus der gerechneten Luftspaltkurve, auf den "
+                       "Spitzenwert der Formel normiert.")),
     }

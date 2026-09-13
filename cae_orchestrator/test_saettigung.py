@@ -263,6 +263,49 @@ pruefe("aber NICHT in der Ausnutzungsliste",
 pruefe("der Text nennt ihn als planmaessig gesaettigt",
        "planmaessig GESAETTIGT" in S.als_text(_be))
 
+# ── 7d. Die Verteilung ─────────────────────────────────────────────────────
+print("\n[7d] Verteilung statt einer Zahl")
+_v = S.verteilung(GEOM, AXIAL, 0.6, "m270_35a")
+pruefe("eine Zahl je Nut", len(_v["B_zahn_T"]) == GEOM["slots"]
+       and len(_v["B_joch_T"]) == GEOM["slots"], f"{GEOM['slots']} Nuten")
+# Der SPITZENwert muss der der Formel bleiben -- er bemisst das Eisen, und wer
+# `saettigung_pct` liest, muss weiter dasselbe lesen.
+_e = S.eisenwege(GEOM, AXIAL, 0.6, "m270_35a")
+pruefe("der Spitzenwert ist unveraendert der der Formel",
+       abs(_v["zahn_spitze_T"] - _e["B_zahn_T"]) < 1e-6,
+       f"{_v['zahn_spitze_T']:.4f} T")
+pruefe("das Mittel liegt darunter", _v["zahn_mittel_T"] < _v["zahn_spitze_T"])
+# Die eigentliche Aussage: Zahn und Joch haben ihre Spitzen NICHT am selben Ort.
+_iz = _v["B_zahn_T"].index(max(_v["B_zahn_T"]))
+_ij = _v["B_joch_T"].index(max(_v["B_joch_T"]))
+pruefe("Zahn- und Jochspitze liegen an verschiedenen Stellen", _iz != _ij,
+       f"Zahn bei Nut {_iz}, Joch bei Nut {_ij}")
+pruefe("und am Ort der Zahnspitze ist das Joch am kleinsten",
+       abs(_v["B_joch_T"][_iz] - min(_v["B_joch_T"])) < 1e-9)
+# Grundwelle gegen gemessene Kurve: die Grundwelle kennt bei q = 1 nur drei
+# Werte und UNTERSCHAETZT die Spreizung. Das gehoert gewusst, nicht geglaubt.
+pruefe("die Grundwelle kennt hier nur wenige verschiedene Werte",
+       len(set(_v["B_zahn_T"])) <= 3, f"{len(set(_v['B_zahn_T']))} Werte")
+pruefe("und nennt ihre Quelle", _v["quelle"] == "grundwelle")
+import math as _m                                                 # noqa: E402
+_n = 720
+_thc = [2 * _m.pi * i / _n for i in range(_n)]
+# Eine gespitzte Kunstkurve: sie MUSS eine groessere Spreizung ergeben.
+_brc = [(_m.cos(GEOM["p"] * t) ** 9) for t in _thc]
+_vm = S.verteilung(GEOM, AXIAL, 0.6, "m270_35a", br_kurve=(_brc, _thc))
+pruefe("mit Kurve wird die Quelle benannt", _vm["quelle"] == "luftspaltkurve")
+pruefe("und der Spitzenwert bleibt trotzdem der der Formel",
+       abs(_vm["zahn_spitze_T"] - _e["B_zahn_T"]) < 1e-6)
+pruefe("eine gespitzte Kurve spreizt staerker als die Grundwelle",
+       _vm["zahn_spreizung"] > _v["zahn_spreizung"],
+       f"{_vm['zahn_spreizung']}x gegen {_v['zahn_spreizung']}x")
+# Eine kaputte Kurve darf NICHT werfen, sondern auf die Grundwelle zurueckfallen.
+_vk = S.verteilung(GEOM, AXIAL, 0.6, "m270_35a", br_kurve=("quatsch", None))
+pruefe("eine unbrauchbare Kurve faellt still auf die Grundwelle zurueck",
+       _vk["quelle"] == "grundwelle" and len(_vk["B_zahn_T"]) == GEOM["slots"])
+_pl = open("ema_pipeline.py", encoding="utf-8").read()
+pruefe("die Pipeline reicht die gemessene Kurve durch", "br_kurve=_kurve" in _pl)
+
 # ── 8. Die Bilder ──────────────────────────────────────────────────────────
 print("\n[8] Bilder")
 import os                                                         # noqa: E402
