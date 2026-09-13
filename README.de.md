@@ -1423,6 +1423,7 @@ abgelegten Rechnungen des Projekts; kopiert und gepostet wird von Hand.
 - Gmsh — das benutzte ist das **Python-Modul im venv** (4.15.2, aus `requirements.txt`); `/usr/bin/gmsh` (4.12.1) liegt daneben und wird nicht gebraucht
 - Portables Blender → `/opt/cae-tools/blender_portable` (Symlink `~/blender_portable`)
 - OpenFOAM v2406 (`/usr/lib/openfoam`), Elmer, CUDA, pandoc/pdflatex — systemweit
+- **FluidX3D** (ProjectPhysX) → `~/ai-workspace/FluidX3D`, **nicht versioniert** — der dritte Löser für das Spritzöl (Lattice-Boltzmann mit freier Oberfläche auf der GPU, Reiter 🌀). Er hat **keine Eingabedatei**: jeder Fall ist eine C++-Funktion und wird neu übersetzt (gemessen 40 s). `ema_fluidx3d.py` arbeitet deshalb in einer **Kopie** unter `$CAE_FLUIDX3D_HEIM` (Vorgabe `~/fluidx3d_cae`) und rührt den Quellbaum nicht an — dort stehen die eigenen Fälle des Menschen. **Seine Lizenz schränkt die NUTZUNG ein** (nicht kommerziell, nicht militärisch, kein KI-Training auf dem Quelltext, veröffentlichte Ergebnisse ziehen die geänderte Quelle nach): s. `THIRD-PARTY-NOTICES.md`, Abschnitt „FluidX3D"
 - Ollama-Dienst auf `localhost:11434`
 
 ## Laufzeitdaten (NICHT versioniert)
@@ -1457,3 +1458,14 @@ was **mitverbreitet** wird (im Repo enthalten — Lizenztext und Copyright-Verme
 mitreisen) und was lediglich **vorausgesetzt** wird (lokal installiert oder selbst gebaut,
 nicht Teil dieses Repos). Dazu zählt insbesondere **PicoGK** von LEAP 71 (Apache-2.0):
 das `pikogk`-Subprojekt bindet es ein, enthält aber keinen PicoGK-Quellcode.
+
+**Eine Fremdkomponente schränkt die NUTZUNG ein und wird vom MIT-Vermerk nicht
+abgedeckt:** **FluidX3D** (ProjectPhysX, angesteuert von
+`cae_orchestrator/ema_fluidx3d.py`) erlaubt nur öffentliche Forschung, Lehre und
+private Nutzung — **keine kommerzielle, keine militärische Nutzung, kein KI-Training
+auf dem Quelltext**, und wer Daten oder Ergebnisse einer geänderten Fassung
+veröffentlicht, muss die geänderte Quelle mitveröffentlichen. MIT erlaubt wörtlich das
+*Verkaufen*; für diesen Pfad gilt das nicht. Der FluidX3D-Quellbaum ist **nicht** Teil
+dieses Repos (`.gitignore`) — mitverbreitet ist nur der Erzeuger, und das von ihm
+geschriebene `setup.cpp` trägt `ALTERED SOURCE VERSION` im Kopf. Die genauen Klauseln
+stehen in `THIRD-PARTY-NOTICES.md`, Abschnitt „FluidX3D".

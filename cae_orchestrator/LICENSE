@@ -19,3 +19,21 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+Der MIT-Vermerk oben gilt fuer den HIER ENTWICKELTEN Code. Dieses Werkzeug
+steuert ausserdem Fremdkomponenten an, die ihre eigenen Lizenzen behalten; keine
+davon wird mitverbreitet. Sie sind in THIRD-PARTY-NOTICES.md aufgefuehrt.
+
+WICHTIG — eine davon schraenkt die NUTZUNG ein, nicht nur die Weitergabe:
+FluidX3D (ProjectPhysX, angesteuert von cae_orchestrator/ema_fluidx3d.py)
+erlaubt nur oeffentliche Forschung, Lehre und private Nutzung. Keine
+kommerzielle und keine militaerische Nutzung, kein KI-Training auf dem
+Quelltext, und wer Daten oder Ergebnisse einer geaenderten Fassung
+veroeffentlicht, muss die geaenderte Quelle mitveroeffentlichen.
+
+Die MIT-Erlaubnis oben ("to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell") gilt dafuer also NICHT. Der FluidX3D-Quellbaum ist
+nicht Teil dieses Repositories (.gitignore). Einzelheiten und die genauen
+Klauseln: THIRD-PARTY-NOTICES.md, Abschnitt "FluidX3D".

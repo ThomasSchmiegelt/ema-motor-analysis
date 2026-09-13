@@ -1218,6 +1218,7 @@ copying and posting is done by hand.
 - **Z88Aurora®** V5 — freeware of the Chair for Engineering Design and CAD (LCAD), University of Bayreuth, by Prof. Dr.-Ing. Frank Rieg; batch solvers only. `z88r` needs `LD_LIBRARY_PATH` set to its own MKL and **two** runs — `-t` writes `Z88R.DYN`, which `-c` then reads. **Z88Arion has no Linux build**
 - **Code Aster 17.4.0** — from an unpacked Salome-Meca SIF image under `~/aster-build` (24 GB), sourced through its own `env_aster.sh`. Aster 17 runs as a **library** (`import code_aster`), **not** via `as_run` and not via an `.export` file — this image ships no `as_run`
 - Gmsh (the Python module in the orchestrator venv), OpenFOAM v2406, Elmer, CUDA, pandoc/pdflatex
+- **FluidX3D** (ProjectPhysX) at `~/ai-workspace/FluidX3D`, **not versioned** — the third oil-spray solver (free-surface lattice Boltzmann on the GPU, tab 🌀). It has **no input file**: every case is a C++ function and gets recompiled (measured 40 s), so `ema_fluidx3d.py` works in a **copy** under `$CAE_FLUIDX3D_HEIM` (default `~/fluidx3d_cae`) and never touches the source tree. **Its licence restricts USE** (no commercial, no military, no AI training on the source, published results pull the altered source with them) — see `THIRD-PARTY-NOTICES.md`, section „FluidX3D"
 - Ollama at `localhost:11434`
 
 ## Runtime data (never versioned)
@@ -1240,3 +1241,13 @@ Code developed here is **MIT** (`LICENSE`). Third-party components keep their ow
 licences; `THIRD-PARTY-NOTICES.md` separates what is **redistributed** from what is
 merely **required** (locally installed or self-built) — including **PicoGK** by LEAP 71
 (Apache-2.0) and **Z88Aurora** (University of Bayreuth).
+
+**One of them restricts USE, not just redistribution, and the MIT notice does not
+cover it:** **FluidX3D** (ProjectPhysX, driven by `cae_orchestrator/ema_fluidx3d.py`)
+permits public research, education and personal use only — **no commercial use, no
+military use, no AI training on its source code**, and if data or results produced by
+an altered version are published, the altered source must be published with them. MIT
+explicitly grants the right to *sell*; for that path it does not. The FluidX3D source
+tree is **not** part of this repository (`.gitignore`) — only the generator is, and the
+`setup.cpp` it emits is marked `ALTERED SOURCE VERSION`. Full clauses:
+`THIRD-PARTY-NOTICES.md`, section „FluidX3D".

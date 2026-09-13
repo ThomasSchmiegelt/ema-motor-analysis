@@ -54,6 +54,7 @@ baut sie selbst (s. `pikogk/EXPERIENCE_REPORT.md` und die `install.sh`-Skripte).
 | OpenFOAM (ESI, v2406) | VOF-Zweiphasenströmung | GPL-3.0 |
 | Blender | Mantaflow-FLIP-Fluidsimulation | GPL-3.0 |
 | Ollama + verwendete Modelle | lokale LLM-Dienste | Ollama MIT; Modelle mit je eigenen Bedingungen (das Standardmodell `qwen-gross`/`qwen3.8` = Qwen3.5 27B weist in seinen GGUF-Metadaten `general.license = apache-2.0` aus) |
+| **FluidX3D** — [ProjectPhysX](https://github.com/ProjectPhysX/FluidX3D) | Lattice-Boltzmann mit freier Oberfläche auf der GPU (`ema_fluidx3d.py`) | **eigene Lizenz — schränkt die NUTZUNG ein, s. eigenen Abschnitt unten** |
 | PI — [`@earendil-works/pi-coding-agent`](https://github.com/earendil-works/pi) | Agenten-Harness für die Bedienung per lokalem Modell (`start_agent.sh`) | MIT |
 | .NET 9 Runtime/SDK | Laufzeit des `pikogk`-Dienstes | MIT |
 
@@ -118,6 +119,53 @@ im venv des Orchestrators, installiert ueber `requirements.txt`; `/usr/bin/gmsh`
 liegt daneben und wird nicht gebraucht. Gmsh steht unter der GNU GPL v2+
 mit Ausnahmen; siehe <https://gmsh.info/>.
 
+### FluidX3D (Dr. Moritz Lehmann / ProjectPhysX)
+
+**Vorausgesetzt, nicht mitverbreitet** — und der **einzige** Eintrag dieser Liste,
+dessen Lizenz nicht nur die Weitergabe, sondern die **Nutzung** einschränkt.
+Deshalb ein eigener Abschnitt statt einer Tabellenzeile.
+
+Der Quellbaum liegt unter `~/ai-workspace/FluidX3D` und ist über die
+Wurzel-`.gitignore` (`/FluidX3D/`) von der Versionierung ausgenommen; dieses
+Repository enthält **keinen FluidX3D-Quellcode**. Mitverbreitet sind allein die
+eigenen Dateien `cae_orchestrator/ema_fluidx3d.py`, `fluidx3d_runner.py` und
+`test_fluidx3d.py`.
+
+Lizenz: `FluidX3D/LICENSE.md`, Copyright (c) 2022–2026 Dr. Moritz Lehmann.
+Erlaubt sind **öffentliche Forschung, Lehre und private Nutzung**. Die vier
+Punkte, die hier wirklich greifen:
+
+1. **Keine kommerzielle Nutzung** (Klausel 2). Das schließt ausdrücklich ein,
+   gegen Entgelt ein Produkt oder eine Dienstleistung anzubieten, deren Wert
+   sich aus der Funktionalität dieser Software ergibt — Hosting und Support
+   eingeschlossen. **Der MIT-Vermerk an der Wurzel gilt dafür nicht**: er
+   erlaubt wörtlich das Verkaufen, für diesen Pfad ist das falsch.
+2. **Keine militärische Nutzung** (Klausel 3).
+3. **Kein KI-Training auf dem Quelltext** (Klausel 4) — auf dem Original, auf
+   geänderten Fassungen und auf Teilen davon. Praktisch heißt das: den
+   FluidX3D-Quelltext nicht in `ema_rag` legen, nicht in den Trainingssatz
+   (`ema_training`) geben und nicht an ein Modell schicken. Das erzeugte
+   `setup.cpp` ist eine geänderte Fassung und fällt mit darunter.
+4. **Veröffentlichte Ergebnisse ziehen die Quelle nach** (Klausel 5): werden
+   Binärdateien **oder Daten oder Ergebnisse** einer geänderten Fassung
+   veröffentlicht, muss die geänderte Quelle mitveröffentlicht werden. Diese
+   Pflicht ist hier erfüllt, solange `ema_fluidx3d.py` — der Erzeuger des
+   `setup.cpp` — in diesem öffentlichen Repository liegt. Wer Bilder, Videos
+   oder Kennwerte aus dem 🌀-Reiter veröffentlicht, sollte darauf verweisen.
+
+**Was das Werkzeug von sich aus tut** (s. `cae_orchestrator/CLAUDE.md`): es
+arbeitet in einer **Kopie** unter `$CAE_FLUIDX3D_HEIM` (Vorgabe `~/fluidx3d_cae`)
+und rührt den Quellbaum nicht an; das erzeugte `setup.cpp` trägt im Kopf
+`ALTERED SOURCE VERSION` samt Verweis auf das Original (Klauseln 1 und 7),
+`vorbereiten` legt eine `HERKUNFT.txt` neben die Kopie, und
+`test_fluidx3d.test_setup_code_vollstaendig_und_lizenztreu` prüft die
+Kennzeichnung.
+
+**Bei wissenschaftlichen Veröffentlichungen** sollen die unter
+<https://github.com/ProjectPhysX/FluidX3D#references> genannten Arbeiten zitiert
+werden (Klausel 6). Der Name „FluidX3D" steht unter deutschem Werktitelschutz
+(§ 5 Abs. 3 MarkenG).
+
 ## Subprojekt `lego/`
 
 Die Quellen dieses Subprojekts sind in `lego/README.md` unter „Quellen und
@@ -139,3 +187,20 @@ Wer eine Fremdkomponente **in** das Repository legt (Binärdatei, gebündeltes
 Skript, kopierter Quellcode), trägt sie oben unter „Mitverbreitet" ein und legt
 den zugehörigen Lizenztext daneben. Für die reine Benutzung eines lokal
 installierten Werkzeugs genügt der Eintrag unter „Vorausgesetzt".
+
+**Eine dritte Frage gehört dazu, und an ihr ist FluidX3D durchgerutscht:
+schränkt die Lizenz die NUTZUNG ein?** Die beiden Fälle oben sortieren nach
+*Weitergabe* — mitverbreitet oder nicht. Eine Lizenz kann aber auch dann binden,
+wenn nichts weitergegeben wird: kein Verkauf, kein militärischer Einsatz, kein
+KI-Training, oder eine Pflicht, die erst beim Veröffentlichen von Ergebnissen
+entsteht. Das trifft **den Benutzer dieses Repositories**, nicht den Verteiler,
+und der MIT-Vermerk an der Wurzel sagt dazu von sich aus nichts — er erlaubt
+wörtlich das Verkaufen.
+
+Solche Komponenten bekommen deshalb einen **eigenen Abschnitt** statt einer
+Tabellenzeile, und der Verweis gehört zusätzlich in `LICENSE`,
+`cae_orchestrator/LICENSE` und die Lizenzabschnitte beider READMEs — sonst steht
+die Einschränkung an genau der Stelle nicht, an der jemand nach der Lizenz
+sieht. (FluidX3D kam am 12.09.2026 dazu und fehlte hier bis zum 13.09.: die
+Regel darüber fragte nur nach Weitergabe, und nach ihr war eine Tabellenzeile
+ausreichend.)
