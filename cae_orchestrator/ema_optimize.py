@@ -43,6 +43,17 @@ FREE_PARAMS = {
     "airgap":      {"special": "airgap",   "label": "Luftspalt Stator-Rotor [mm]",
                     # Grenzen aus ema_grenzen.LUFTSPALT_MM -- eine Quelle fuer alle Wege.
                     "lo": _GRENZEN.LUFTSPALT_MM[0], "hi": _GRENZEN.LUFTSPALT_MM[1], "type": float},
+    # Der eine Hebel, der die SAETTIGUNG bewegt -- und er fehlte hier, waehrend
+    # er im Schema (0,2...0,8) laengst stand. Weil `ema_wicklung.nutgeometrie`
+    # die Nutbreite als festen Anteil der Nutteilung setzt, kuerzt sich die
+    # Teilung aus B_zahn heraus: B_zahn = B_gap/((1-slotWidthRatio)*k_fe). Die
+    # Nutzahl bewegt die Zahnflussdichte also NICHT (24/36/48/60 Nuten geben
+    # gemessen alle 1,2500 T), dieser Wert dagegen von 0,962 auf 1,786 T. Ohne
+    # ihn konnte eine Suche gegen die Saettigung gar nichts ausrichten.
+    # Enger geklemmt als das Schema: unter 0,25 wird die Nut zum Schlitz (kein
+    # Kupfer), ueber 0,7 der Zahn zum Steg.
+    "slotWidthRatio": {"geom": "slotWidthRatio", "label": "Nutbreite/Nutteilung [-]",
+                       "lo": 0.25, "hi": 0.70, "type": float},
     "magGap":      {"geom": "magGapMm",    "label": "Magnet-Luftspalt [mm]",  "lo": 0.05,"hi": 0.3, "type": float},
     # Welle und Wellenbohrung. `haelt_magnete` ist hier nicht Kosmetik: der
     # Wellendurchmesser bewegt in `pocketMode="position"` JEDE Bauform die
@@ -198,6 +209,54 @@ def _apply_params(base_geom, base_axial, params):
     return geom, axial
 
 
+def _stimmig(geom) -> dict:
+    """Passen die Radien ueberhaupt ineinander? -- das Tor, das `_clamp` fehlt.
+
+    ``_clamp`` klemmt jeden Parameter **einzeln** gegen sein ``lo``/``hi`` und
+    kennt keine Beziehung zwischen ihnen. Eine Wellenbohrung von 190 mm in einer
+    39-mm-Welle verletzt keine einzelne Schranke und ist trotzdem kein Bauteil.
+
+    Gemessener Anlass (13.09.2026, s. ``BEFUNDE.md``): eine Suche auf
+    Leistungsdichte fuhr ``shaftD`` von 96 auf 39,3 mm herunter und ``shaftBore``
+    zugleich von 110 auf 190,1 mm hinauf. ``ema_screen.massen_und_kosten``
+    rechnete daraus eine **negative** Wellenmasse (-49,05 kg), die Gesamtmasse
+    fiel von 72,97 auf 35,24 kg, und der Zielwert stieg um Faktor 74. Der
+    Optimierer hatte keine Maschine verbessert, sondern ein Loch im Massenmodell
+    gefunden -- dieselbe Sorte Fehler wie das fehlende Layouttor und die
+    fehlende Saettigung, nur eine Ebene tiefer.
+
+    Die Regel wird **nicht neu erfunden**: ``ema_text2ema._validate`` erzwingt
+    die radiale Ordnung seit jeher (statorOD > statorID > rotorOD > shaftD >
+    shaftBoreD, Bohrung mindestens 2 mm unter der Welle). Sie lief nur auf dem
+    Suchpfad nicht mit, weil ``_validate`` dort nie gerufen wird.
+
+    Sitzt im **gemeinsamen** Bewerter, damit Zielwertsuche, Parameterstudie,
+    Magnetfeinschliff und Ausreizen sie zugleich sehen -- nicht eine von vieren.
+    Reine Algebra, Kosten null gegen den Feldlauf daneben.
+    """
+    try:
+        so = float(geom.get("statorOD") or 0.0)
+        si = float(geom.get("statorID") or 0.0)
+        ro = float(geom.get("rotorOD") or 0.0)
+        sd = float(geom.get("shaftD") or 0.0)
+        sb = float(geom.get("shaftBoreD") or 0.0)
+        for a, b, wie in ((so, si, "statorOD > statorID"),
+                          (si, ro, "statorID > rotorOD"),
+                          (ro, sd, "rotorOD > shaftD")):
+            if a <= b:
+                return {"stimmig": False,
+                        "stimmig_grund": f"{wie} verletzt ({a:.2f} <= {b:.2f} mm)"}
+        # Dieselbe Schranke wie ema_text2ema._validate: 2 mm Wand als Mindestmass.
+        if sb > 0.0 and sb >= sd - 2.0:
+            return {"stimmig": False,
+                    "stimmig_grund": (f"Wellenbohrung {sb:.2f} mm passt nicht in "
+                                      f"eine Welle von {sd:.2f} mm "
+                                      f"(mindestens 2 mm Wand)")}
+        return {"stimmig": True, "stimmig_grund": ""}
+    except (TypeError, ValueError) as exc:                       # noqa: BLE001
+        return {"stimmig": False, "stimmig_grund": f"Radien unlesbar: {exc}"}
+
+
 def _saettigung(geom, axial, perf, iq, id_, st_mat) -> dict:
     """Was das Eisen tragen MUSS -- die vierte Grenze, die bisher fehlte.
 
@@ -332,6 +391,7 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
                 "grund":        erb.get("grund", ""),
                 "T_moeglich_Nm": erb.get("T_moeglich_Nm"),
                 **_baubar(geom),
+                **_stimmig(geom),
             }
 
         losses = ema_thermal.compute_losses(geom, axial, rpm_t, iq, id_, perf,
@@ -356,6 +416,7 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
             "T_winding":    round(Tn["T_winding"], 1),
             "P_total":      round(losses["P_total"], 1),
             **_baubar(geom),
+            **_stimmig(geom),
             **_saettigung(geom, axial, perf, iq, id_, st_mat),
         }
     except Exception as e:
@@ -377,6 +438,10 @@ def _violation(metrics, constraints):
     """0 if all constraints hold, else a positive normalised total violation."""
     if "error" in metrics:
         return 1e9
+    if metrics.get("stimmig") is False:
+        # Radien, die nicht ineinander passen: rangiert wie das Unbaubare. Ohne
+        # diese Zeile gewinnt der Kandidat mit der negativen Wellenmasse.
+        return 1e8
     if metrics.get("baubar") is False:
         # Eine Zeichnung, die sich nicht bauen laesst, ist keine Loesung -- auch
         # dann nicht, wenn ihre Kennwerte die besten sind. Und sie SIND die

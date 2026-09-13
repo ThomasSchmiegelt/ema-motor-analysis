@@ -265,6 +265,15 @@ def kennlinie(payload: dict, rpms=None, N: int = 140, melde=None) -> dict:
     m0 = ema_optimize._eval_geom(geom, axial, mats, op0, cooling, T_amb, sweep, N=N)
     if "error" in m0:
         return {"error": m0["error"]}
+    # Zwei Tore, und sie meinen Verschiedenes: `stimmig` fragt, ob die RADIEN
+    # ueberhaupt ineinander passen (das, was `_clamp` parameterweise nicht sehen
+    # kann), `baubar` fragt das Magnet-Layout. Ein Kandidat, der am ersten
+    # scheitert, hat gar keine Geometrie, ueber die sich das zweite aeussern
+    # koennte -- deshalb in dieser Reihenfolge.
+    if m0.get("stimmig") is False:
+        return {"error": "Geometrie nicht stimmig: "
+                         + str(m0.get("stimmig_grund") or "Radien passen nicht"),
+                "stimmig": False}
     if m0.get("baubar") is False:
         return {"error": "nicht baubar: " + str(m0.get("baubar_grund") or
                                                  "Layouttor verletzt"),

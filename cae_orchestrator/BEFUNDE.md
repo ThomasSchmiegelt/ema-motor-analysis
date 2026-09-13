@@ -17,6 +17,71 @@ kann.
 
 ---
 
+## 2026-09-13 — Negative Wellenmasse: `_clamp` kennt keine Beziehungen zwischen Parametern
+
+**Beobachtung.** Der erste Lauf des neuen Ausreiz-Optimierers (`ema_ausreizen`,
+Ziel Leistungsdichte) steigerte den Zielwert von 0,3625 auf **26,89 kW/kg** —
+Faktor 74. Das ist kein Entwurfsgewinn, sondern ein Loch im Modell. Das
+Protokoll zeigt, wohin er lief: `shaftD` von 96 auf **39,32 mm** herunter,
+`shaftBore` gleichzeitig von 110 auf **190,1 mm** hinauf. Eine Bohrung von
+190 mm in einer Welle von 39 mm.
+
+**Messung** (`ema_screen.massen_und_kosten`, 305-mm-Maschine, L = 150 mm):
+
+| shaftD | shaftBore | welle_kg | gesamt_kg |
+|---:|---:|---:|---:|
+| 120,00 | 110,00 | 3,26 | 72,97 |
+| 96,00 | 132,00 | **−11,64** | 63,72 |
+| 61,44 | 158,40 | **−30,23** | 51,31 |
+| 39,32 | 190,10 | **−49,05** | 35,24 |
+
+`m_welle = π/4·(d_wel² − d_bohr²)·(L+80)·ρ` (`ema_screen.py:646`) wird negativ,
+sobald die Bohrung größer ist als die Welle, und eine negative Masse **senkt die
+Gesamtmasse**. Damit ist Leistung/Masse beliebig steigerbar, ohne dass sich an
+der Maschine etwas verbessert.
+
+**Ursache — und sie ist allgemeiner als dieser eine Ausdruck.**
+`ema_optimize._clamp` klemmt jeden freien Parameter **einzeln** gegen sein
+`lo`/`hi`. `shaftD = 39,32` ist für sich zulässig (8…400), `shaftBore = 190,1`
+ebenso (0…380) — die Kombination ist es nicht. **`_clamp` kennt keine
+Beziehungen zwischen Parametern**, und jede Suche über `FREE_PARAMS` kann
+deshalb geometrisch unmögliche Kombinationen erzeugen.
+
+Die Regel selbst fehlt nicht: `ema_text2ema._validate:301` erzwingt seit jeher
+`shaftBoreD >= shaftD − 2 → 0` und die ganze radiale Ordnung. Sie läuft auf dem
+**Suchpfad** nur nicht mit, weil `_validate` dort nie gerufen wird.
+
+**Das ist der dritte Fall desselben Musters an einem Tag** — nach dem fehlenden
+Layouttor im Bewerter und der fehlenden Sättigung. Immer dieselbe Form: die
+Zielgröße belohnt etwas, das es nicht gibt, und nichts widerspricht. Ein
+Optimierer ist dabei kein Verursacher, sondern ein **Messgerät**: er findet
+zuverlässig die schwächste Stelle des Modells, und genau deshalb ist sein erster
+Lauf so aufschlussreich.
+
+**Behoben, und ausdrücklich nicht still:**
+* `ema_screen.massen_und_kosten` klemmt die Bohrung auf `shaftD − 2`. Eine
+  negative Masse ist kein Modellierungsstandpunkt, sondern falsch; die Zahl
+  ändert sich nur für Geometrien, die es ohnehin nicht geben kann (gemessen:
+  −49,05 → 0,22 kg).
+* `ema_optimize._stimmig(geom)` prüft die radiale Ordnung im **gemeinsamen**
+  Bewertungskern, wie `_baubar` und `_saettigung` — damit sehen sie
+  Zielwertsuche, Parameterstudie, Magnetfeinschliff und Ausreizen zugleich statt
+  eine von vieren. `_violation` rangiert `stimmig is False` wie das Unbaubare
+  (1e8). `ema_leistung.kennlinie` fragt das Tor **vor** dem Layouttor: wessen
+  Radien nicht ineinander passen, hat keine Geometrie, über die sich das
+  Magnet-Layout äußern könnte.
+
+**Nicht angefasst:** die Pipeline-Stufe 0. Eine neue Ausschlussregel dort würde
+bestehende Auslegungen von einem Tag auf den anderen verweigern — dieselbe
+Zurückhaltung wie bei `zusatzteile_check`.
+
+**Status: behoben (Bewerterpfad), offen als Bauprinzip.** `_clamp` kennt
+weiterhin keine Beziehungen; `_stimmig` prüft *nach* dem Klemmen. Wer künftig
+einen freien Parameter hinzufügt, der mit einem anderen zusammenhängt, muss die
+Beziehung dort eintragen — es gibt keinen Mechanismus, der ihn daran erinnert.
+
+---
+
 ## 2026-09-13 — |B| im STATOREISEN konvergiert auch nicht (und was statt dessen geht)
 
 **Beobachtung.** Für die Sättigungsgrenze lag es nahe, |B| im Statoreisen aus dem

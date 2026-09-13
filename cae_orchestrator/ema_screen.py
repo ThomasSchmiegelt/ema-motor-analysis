@@ -643,6 +643,14 @@ def massen_und_kosten(payload: dict) -> dict:
     v_weg = sum(sl["depth"] * sl["width"] for sl in flux_barrier_slots(geom)) * L
     v_weg += sum(math.pi * h["r"] ** 2 for h in balance_bolt_holes(geom)) * L
     m_rot_fe = max(0.0, m_rot_fe - v_weg * 1e-9 * float(lam_rot["density"]))
+    # Die Bohrung kann nicht groesser sein als die Welle, in der sie sitzt --
+    # ungeprueft wird `m_welle` NEGATIV und senkt die Gesamtmasse. Gemessen am
+    # 13.09.2026 (s. BEFUNDE.md): shaftD 39,3 / shaftBore 190,1 ergab -49,05 kg
+    # Welle und 35,24 kg gesamt statt 72,97 kg, und eine Suche auf
+    # Leistungsdichte trieb genau dort hinein (Zielwert x74). Das Schema kennt
+    # die Regel laengst (`ema_text2ema._validate`: Bohrung >= shaftD-2 => 0),
+    # nur laeuft die Massenrechnung nicht darueber.
+    d_bohr = min(float(d_bohr), max(0.0, d_wel - 2.0))
     m_welle  = math.pi / 4 * (d_wel**2 - d_bohr**2) * (L + 80.0) * 1e-9 * 7850.0
     v_st_m3  = math.pi / 4 * (d_st_a**2 - d_st_i**2) * L * 1e-9
     m_st_fe  = v_st_m3 * float(lam_st["density"]) * 0.78          # abzueglich Nuten

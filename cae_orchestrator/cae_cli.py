@@ -2270,6 +2270,74 @@ def cmd_leistung(args) -> int:
     return EXIT_OK if ok else 1
 
 
+def cmd_ausreizen(args) -> int:
+    """Die Auslegung ins Gleichgewicht bringen -- alle Grenzen ausreizen.
+
+    Gleichgewicht ist kein Ziel, sondern ein Symptom: wer schlicht die Leistung
+    maximiert, laesst jede nicht bindende Grenze liegen, wo sie ist. Maximiert
+    man die LEISTUNGSDICHTE, wird aus einer brachliegenden Grenze entfernbares
+    Material -- und das Gleichgewicht stellt sich von selbst ein.
+
+    Gesucht wird deterministisch (Musterschritt, kein Sprachmodell): derselbe
+    Payload ergibt denselben Entwurf, und welcher Griff welchen Gewinn gebracht
+    hat, steht im Protokoll.
+
+    Exit: 0 = ein besserer Entwurf gefunden, 1 = keiner (der Ausgangsentwurf
+    bleibt der beste, oder er hat gar keinen zulaessigen Betriebspunkt).
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    echo_sets(applied)
+    if not (payload.get("geom") or {}):
+        return _die("Keine Geometrie im Payload — ausreizen braucht geom.",
+                    EXIT_USAGE)
+
+    import ema_ausreizen
+    frei = None
+    if getattr(args, "frei", None):
+        frei = [f.strip() for teil in args.frei for f in teil.split(",")
+                if f.strip()]
+    rpms = [float(x) for x in args.rpm] if getattr(args, "rpm", None) else None
+    still = getattr(args, "json", False)
+    melde = None if still else (lambda m, p=None: print(f"  … {m}"))
+    try:
+        erg = ema_ausreizen.ausreizen(payload, ziel=args.ziel, frei=frei,
+                                      budget=int(args.budget), rpms=rpms,
+                                      N=int(args.n), melde=melde)
+    except ValueError as exc:
+        return _die(str(exc), EXIT_USAGE)
+    if erg.get("error"):
+        return _die(str(erg["error"]), EXIT_USAGE)
+
+    brach = None
+    if not getattr(args, "ohne_empfindlichkeit", False):
+        brach = ema_ausreizen.brachliegend(
+            payload, erg["params"], erg["best"]["ausnutzung"], frei=frei,
+            ziel=args.ziel, rpms=rpms, N=int(args.n), melde=melde)
+    text = ema_ausreizen.als_text(erg, brach)
+    if still:
+        emit({**erg, "brachliegend": brach}, args)
+    else:
+        print(text)
+    besser = erg["best"]["ziel"] > erg["start"]["ziel"] * (1 + 1e-6)
+    _ablegen(args, "ausreizen", text,
+             daten={"ziel": erg["ziel"], "params": erg["params"],
+                    "start": {k: erg["start"].get(k)
+                              for k in ("ziel", "P_kW", "masse_kg", "bindend")},
+                    "best": {k: erg["best"].get(k)
+                             for k in ("ziel", "P_kW", "masse_kg", "bindend",
+                                       "rpm", "ausnutzung")},
+                    "protokoll": erg["protokoll"],
+                    "brachliegend": brach},
+             ok=besser)
+    return EXIT_OK if besser else 1
+
+
 def cmd_rotor_check(args) -> int:
     """2D-Layoutgate lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
     Exit: 0 = Layout OK, 1 = Check abgelehnt (defekte Geometrie)."""
@@ -3610,6 +3678,45 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_leistung)
+
+    s = sub.add_parser("ausreizen",
+                       help="Die Auslegung ins Gleichgewicht bringen: sucht den "
+                            "Entwurf, der ALLE Grenzen ausnutzt, und sagt, was "
+                            "danach noch brachliegt und welcher Griff es hebt")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--ziel", choices=sorted(("dichte", "leistung")),
+                   default="dichte",
+                   help="dichte = P_max/Masse (Vorgabe; das Gleichgewicht faellt "
+                        "dabei an) | leistung = P_max (fester Bauraum)")
+    s.add_argument("--frei", action="append", metavar="P1,P2",
+                   help="welche Parameter bewegt werden duerfen (Vorgabe: alle "
+                        "aus ema_optimize.FREE_PARAMS), mehrfach angebbar")
+    s.add_argument("--budget", type=int, default=200,
+                   help="hoechstens so viele Auswertungen (Vorgabe 200, "
+                        "gemessen 0,24-0,41 s je Stueck)")
+    s.add_argument("--rpm", action="append", type=float, metavar="N",
+                   help="Drehzahl-Stuetzstellen von Hand, mehrfach angebbar")
+    s.add_argument("--n", type=int, default=110,
+                   help="Rasterweite des Feldlaufs waehrend der Suche (Vorgabe 110)")
+    s.add_argument("--ohne-empfindlichkeit", action="store_true",
+                   dest="ohne_empfindlichkeit",
+                   help="die Messung, welcher Parameter eine brachliegende "
+                        "Grenze hebt, weglassen (spart rund 2*Parameterzahl "
+                        "Auswertungen)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--projekt", help="Zielprojekt fuer die Ablage")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_ausreizen)
 
     s = sub.add_parser("welle",
                        help="Vollwelle oder Hohlwelle? Misst am Feld, ob durch die "
