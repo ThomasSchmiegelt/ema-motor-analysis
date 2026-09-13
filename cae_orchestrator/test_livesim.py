@@ -124,6 +124,87 @@ if os.path.exists(_p):
 else:
     print("   (Probeprojekt nicht da — uebersprungen)")
 
+# ── 6. Die TENDENZEN -- darum geht es bei einer Vorschau ───────────────────
+#
+# Sie darf danebenliegen; sie muss in die richtige Richtung zeigen. Geprueft
+# wird die WIRKLICH emittierte Regelkette: der MTPA-Block aus ema.html plus die
+# Schritte aus stepPhysics, mit node ausgefuehrt.
+print("\n[6] Tendenzen der Vorschau")
+_m2 = re.search(r"// <<MTPA-START>>(.*?)// <<MTPA-END>>", HTML, re.S)
+_js = _m2.group(1) + """
+const PHYS = {load:5, iq:0, id:0, id_manual:0, omega:0,
+              Psi:0.0248, Ld:1.67e-5, Lq:3.58e-5, xi:2.14,
+              iMax:800, rpmBase:35529, kModule:1, ausfallSystem:-1};
+function schritt(last, rpm, k, aus) {
+  PHYS.load=last; PHYS.omega=rpm/9.55; PHYS.kModule=k;
+  PHYS.ausfallSystem = aus ? 0 : -1; PHYS.iq=0; PHYS.id=0;
+  for (let n=0;n<400;n++) {
+    const _rest=(PHYS.ausfallSystem>=0&&PHYS.kModule>1)?(PHYS.kModule-1)/PHYS.kModule:1.0;
+    const _iLim=PHYS.iMax*_rest;
+    const tiq=Math.min((PHYS.load+20)*1.5,_iLim);
+    let tid=_mtpaId(PHYS.Psi,PHYS.Ld,PHYS.Lq,tiq);
+    const r=Math.abs(PHYS.omega*9.55), b=Math.max(PHYS.rpmBase,1);
+    if (r>b) tid -= tiq*Math.min((r-b)/b,1.5)/Math.max(PHYS.xi,1e-6);
+    tid-=PHYS.id_manual;
+    PHYS.iq+=(tiq-PHYS.iq)*0.1; PHYS.id+=(tid-PHYS.id)*0.1;
+  }
+  return {iq:PHYS.iq, id:PHYS.id,
+          T:1.5*6*(PHYS.Psi*PHYS.iq+(PHYS.Ld-PHYS.Lq)*PHYS.id*PHYS.iq)};
+}
+console.log(JSON.stringify({
+  last: [5,20,50,100,200,400].map(L=>schritt(L,3000,1,false)),
+  dreh: [1000,10000,30000,40000,60000].map(n=>schritt(100,n,1,false)),
+  hoch: [1,2,4].map(k=>({k, heil:schritt(600,3000,k,false), aus:schritt(600,3000,k,true)})),
+  teil: [1,2,4].map(k=>({k, heil:schritt(100,3000,k,false), aus:schritt(100,3000,k,true)}))
+}));"""
+with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as f:
+    f.write(_js)
+    _pf = f.name
+try:
+    _d = json.loads(subprocess.run(["node", _pf], capture_output=True, text=True,
+                                   timeout=30).stdout)
+finally:
+    os.unlink(_pf)
+
+_T = [r["T"] for r in _d["last"]]
+pruefe("mehr Last -> mehr Moment, monoton",
+       all(_T[i] <= _T[i + 1] + 1e-9 for i in range(len(_T) - 1)),
+       f"{_T[0]:.1f} … {_T[-1]:.1f} Nm")
+_idd = [r["id"] for r in _d["dreh"]]
+pruefe("hoehere Drehzahl -> Feldschwaechung (i_d faellt)",
+       all(_idd[i] >= _idd[i + 1] - 1e-9 for i in range(len(_idd) - 1)),
+       f"{_idd[0]:.0f} … {_idd[-1]:.0f} A")
+pruefe("und sie setzt ERST an der echten Eckdrehzahl ein (nicht bei 5000)",
+       abs(_d["dreh"][1]["id"] - _d["dreh"][0]["id"]) < 1e-9
+       and _d["dreh"][3]["id"] < _d["dreh"][2]["id"] - 1e-9,
+       "bei 10.000 noch nichts, bei 40.000 schon")
+pruefe("salient -> i_d ist negativ (Reluktanzmoment wird genutzt)",
+       all(r["id"] < 0 for r in _d["last"][1:]))
+
+# Der Ausfall: bei TEILLAST bleibt das Moment (die uebrigen Module tragen mehr
+# Strom), erst wenn die Modulgrenze reisst, faellt es. Beides ist richtig, und
+# beides muss der Test wissen -- sonst haelt man das eine fuer einen Fehler.
+for _r in _d["teil"]:
+    pruefe(f"k={_r['k']}: bei Teillast bleibt das Moment beim Ausfall",
+           abs(_r["aus"]["T"] - _r["heil"]["T"]) < 1e-6)
+for _r in _d["hoch"]:
+    if _r["k"] == 1:
+        continue
+    _v = _r["aus"]["T"] / _r["heil"]["T"]
+    _soll = (_r["k"] - 1) / _r["k"]
+    pruefe(f"k={_r['k']}: an der Stromgrenze faellt es Richtung (k-1)/k",
+           abs(_v - _soll) < 0.12,
+           f"{_v * 100:.0f} % gegen {_soll * 100:.0f} %")
+
+# Und die Anzeige: je Modul steigt der Strom im Fehlerfall.
+pruefe("die Anzeige rechnet den Strom JE MODUL", "_proModul" in HTML)
+pruefe("und erhoeht ihn im Fehlerfall um k/(k-1)",
+       "PHYS.kModule / (PHYS.kModule - 1)" in HTML)
+pruefe("und faerbt ihn rot ueber der Modulgrenze",
+       "über der Modulgrenze" in HTML)
+pruefe("„k × I“ steht NICHT mehr da (es war falsch: je Modul ist es dasselbe I)",
+       '" × "' not in HTML)
+
 print()
 if FEHLER:
     print(f"FEHLGESCHLAGEN ({len(FEHLER)}): " + ", ".join(FEHLER))

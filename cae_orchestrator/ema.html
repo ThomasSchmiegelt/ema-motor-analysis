@@ -14044,13 +14044,32 @@ function escHtml(s) {
     // Zahl, die jemand beim Einkauf braucht, ist die je Modul.
     const _im = document.getElementById("val_modulstrom");
     if (_im) {
+      // |I_s| ist der auf EINE Windung bezogene Strom -- und der ist zugleich
+      // der Strom JE MODUL, solange alle Module tragen: k Systeme zu je N/k
+      // Windungen mit demselben Strom ergeben dieselbe Durchflutung wie eines
+      // mit N (s. ema_umrichter). "k × I" waere also falsch gewesen.
+      //
+      // Faellt eines aus, muessen die uebrigen k-1 den Strom um k/(k-1)
+      // erhoehen, um dieselbe Durchflutung zu halten. DAS ist die Tendenz, die
+      // man bei Teillast sieht -- das Moment bleibt, der Modulstrom steigt.
+      // Erst wenn er die Modulgrenze reisst, faellt auch das Moment.
       const _is = Math.hypot(PHYS.iq, PHYS.id);
-      _im.innerText = PHYS.kModule > 1
-        ? _is.toFixed(0) + " A  (" + PHYS.kModule + " × " + _is.toFixed(0) + " A)"
-        : _is.toFixed(0) + " A";
-      _im.style.color = PHYS.echt ? "" : "#c9a227";
-      _im.title = PHYS.echt ? "aus der Geometrie gerechnet"
-                            : "FESTWERTE — „Elektrik aus der Geometrie holen“ drücken";
+      const _aus = (PHYS.ausfallSystem >= 0 && PHYS.kModule > 1);
+      const _proModul = _aus ? _is * PHYS.kModule / (PHYS.kModule - 1) : _is;
+      let _t = _proModul.toFixed(0) + " A";
+      if (PHYS.kModule > 1) {
+        _t += _aus
+          ? "  (" + (PHYS.kModule - 1) + " von " + PHYS.kModule + " tragen, +"
+            + (100 / (PHYS.kModule - 1)).toFixed(0) + " %)"
+          : "  (je Modul, " + PHYS.kModule + " Stück)";
+      }
+      _im.innerText = _t;
+      const _ueber = _proModul > PHYS.iMax * 1.001;
+      _im.style.color = _ueber ? "#e57373" : (PHYS.echt ? "" : "#c9a227");
+      _im.title = _ueber
+        ? "über der Modulgrenze von " + Math.round(PHYS.iMax) + " A — das Moment fällt"
+        : (PHYS.echt ? "aus der Geometrie gerechnet"
+                     : "FESTWERTE — „Elektrik aus der Geometrie holen“ drücken");
     }
     document.getElementById("val_grid").innerText   = GRID_SIZE + "px  #" + _frameCount;
   }

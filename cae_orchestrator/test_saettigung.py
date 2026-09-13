@@ -126,6 +126,12 @@ pruefe("ueber der Blechgrenze -> gesaettigt", hoch["gesaettigt"],
 pruefe("Engstelle wird benannt", hoch["engstelle"] in ("zahn", "joch"),
        hoch["engstelle"])
 txt = S.als_text(hoch)
+pruefe("die Spanne nennt ALLE DREI Wege, nicht nur die Formel",
+       all(x in S.als_text(hoch) for x in ("Formel", "FDM", "Elmer")))
+pruefe("und sagt, dass keiner beglaubigt ist",
+       "KEINER ist beglaubigt" in S.als_text(hoch))
+pruefe("und in welche Richtung die Formel irrt (sichere Seite)",
+       "sicheren Seite" in S.als_text(hoch))
 pruefe("der Text sagt, dass es KEINE Wand ist", "keine Wand" in txt.lower()
        or "KEINE Wand" in txt)
 pruefe("und dass die Zahlen darueber zu optimistisch sind",

@@ -82,6 +82,67 @@ Beziehung dort eintragen — es gibt keinen Mechanismus, der ihn daran erinnert.
 
 ---
 
+## 2026-09-13 — Das körperangepasste Netz entscheidet die Eichungsfrage NICHT — es macht die Spanne größer
+
+**Anlass.** Der offene Punkt aus dem Eintrag „Die Sättigungszahl ist um Faktor
+1,8 unsicher": dieselbe Geometrie durch ein Netz rechnen, in dem die Nutöffnung
+wirklich aufgelöst ist. `ema_em2d_harm` scheidet aus — es ist **ASM-only**
+(`pruefe_stufe(art, "feld")`). Also `run_em3d_sector`: Ein-Pol-Sektor,
+anti-periodisch, Leerlauf, mit Statornuten und Magnettaschen, zum vollen Motor
+gespiegelt.
+
+**Die Lösung ist physikalisch sauber** — das ist geprüft, bevor sie benutzt wird:
+dominante Umfangsharmonische **genau p = 6**, daneben die 3. und 5. der Polwelle
+(Ordnung 18 und 30), Anti-Periodizität über eine Polteilung mit **0,0 %**
+Restfehler, und die eigene Kennzahl des Laufs (`b_gap_mid_peak = 0,375 T`)
+stimmt mit der unabhängigen Abtastung überein.
+
+**Messung** (Probeprojekt, Leerlauf, 234.360 Knoten im gespiegelten Motor):
+
+| | Spitze \|Br\| | Formfaktor | Grundwelle | B_Zahn |
+|---|---:|---:|---:|---:|
+| Formel (Flusserhaltung, analytisches B_gap) | 0,506 T | — | — | **1,054 T** |
+| FDM, auf 0,506 T geeicht | 0,506 T | 0,354 | 0,242 T | **0,588 T** |
+| **Elmer, körperangepasst** | **0,375 T** | **0,250** | **0,135 T** | **0,303 T** |
+
+Die Kette fällt in zwei Stufen zu je rund **1,8** — FDM/Elmer = 1,79 ist
+derselbe Faktor, der schon zwischen Formel und FDM stand. Die drei Wege spannen
+zusammen **Faktor 3,5**.
+
+**Was das heißt und was nicht.** Es heißt **nicht**, dass Elmer recht hat. Drei
+Vorbehalte an genau diesem Lauf:
+
+* `torque_Nm = 64,64` bei einem **Leerlauf**-Fall, dessen eigene Notiz „Netto-Moment
+  ≈ 0" sagt. 64 Nm sind kein Rundungsfehler; entweder ist das ein Rastmoment-
+  Artefakt der Vernetzung oder die Momentauswertung greift hier daneben. Für die
+  *Form* der Luftspaltkurve spricht das nicht dagegen, für die *Höhe* schon.
+* Knotenbudget 45 % (55.000 im Sektor) bei 0,80 mm Luftspalt — die Auflösung im
+  Spalt ist damit nicht großzügig.
+* Die Magnettaschen sind im 3-D-Pfad anders gebaut als im 2-D-Raster, und ihr
+  Einfluss ist dokumentiert groß (ohne Taschen steigt die 2-D-Grundwelle
+  gemessen um 75 %).
+
+**Der belastbare Schluss ist deshalb ein anderer, und er ist unbequem:** es gibt
+in diesem Werkzeug **drei Wege zur Luftspaltflussdichte und drei verschiedene
+Antworten**, und keiner davon ist gegen eine Messung beglaubigt. Die Formel
+liegt dabei durchweg am höchsten — für ein **Tor** ist das die sichere Seite
+(sie meldet eher Sättigung, als sie übersieht), für eine **ausgewiesene Zahl**
+ist es eine Unsicherheit von bis zu 3,5.
+
+Und die Folge reicht weiter als bis zur Sättigung: liegt Elmer richtig, ist
+`_analytical_Bgap` — und damit `Kt` — zu hoch. Das ist eine viel größere Aussage
+als die über den Zahn, und sie ist mit diesem einen Lauf **nicht** zu treffen.
+
+**Status: offen, Spanne erweitert und sichtbar.** Unter jeder Sättigungsausgabe
+stehen jetzt alle drei Wege mit ihrem Verhältnis statt nur der 1,8. Nicht
+angefasst: die Eichung, `_analytical_Bgap` und `K_LEAK_STEG`.
+
+**Was es klären würde:** ein Lastfall gegen ein gemessenes Moment, oder ein
+2-D-Netzlauf derselben Geometrie mit aufgelöster Nutöffnung und deutlich
+feinerem Spalt. Beides ist ein eigener Arbeitsschritt, kein Nebenbefund.
+
+---
+
 ## 2026-09-13 — Zwei Konstanten, wo die Physik Geometrie ist: Live-Elektrik und Stegstreuung
 
 **(a) Die Live-Vorschau rechnete eine erfundene Maschine.** `PHYS` in `ema.html`
