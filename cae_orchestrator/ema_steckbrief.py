@@ -324,7 +324,13 @@ STUFEN = [("em", "2D-EM-Feld (FDM)"),
 # in den Kontext eines Modells passen, nicht ihn fuellen.
 KENNWERTE = ["B_gap_T", "Kt_Nm_per_A", "T_maxwell_Nm", "T_peak_max_Nm",
              "P_max_kW", "max_safe_rpm", "safety_factor_fem", "structural_basis",
-             "T_winding_C", "T_magnet_C", "mass_g", "cycle_kWh100km"]
+             "T_winding_C", "T_magnet_C", "mass_g", "cycle_kWh100km",
+             # Die vierte Grenze. Sie gehoert hierher, weil der Steckbrief die
+             # Stelle ist, an der ein Agent (und ein Mensch) nachsieht, WAS an
+             # einem Projekt gerechnet ist -- und bis zum 13.09.2026 stand
+             # darueber nichts, obwohl es die Grenze ist, die am staerksten mit
+             # der Geometrie wandert.
+             "B_zahn_T", "B_joch_T", "B_eisen_T", "saettigung_pct"]
 
 
 def maschine(payload: dict, projektakte: dict) -> dict:

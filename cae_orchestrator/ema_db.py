@@ -80,6 +80,22 @@ HERKUNFT: dict[str, dict] = {
     "B_gap_T":          dict(einheit="T",     methode="analytisch",
                              detail="Luftspaltformel, auf das FDM-Feld kalibriert — NICHT aus dem Feldbild",
                              quelle="ema_analysis.compute_performance"),
+
+    # Die vierte Grenze. Herkunft ausdruecklich: NICHT aus dem Feldbild -- |B| im
+    # Statoreisen streut dort ueber N = 300...800 um 56...73 % (BEFUNDE.md
+    # 13.09.2026) -- sondern ueber die Flusserhaltung aus B_gap.
+    "B_zahn_T":  dict(einheit="T", methode="analytisch",
+                      detail="Flusserhaltung: B_gap*Nutteilung/(Zahnbreite*k_fe)",
+                      quelle="ema_saettigung.eisenwege"),
+    "B_joch_T":  dict(einheit="T", methode="analytisch",
+                      detail="Flusserhaltung: Polfluss/(2*Jochhoehe*L*k_fe)",
+                      quelle="ema_saettigung.eisenwege"),
+    "B_eisen_T": dict(einheit="T", methode="analytisch",
+                      detail="die Engstelle von beiden",
+                      quelle="ema_saettigung.eisenwege"),
+    "saettigung_pct": dict(einheit="%", methode="analytisch",
+                      detail="B_Eisen gegen B_sat des Blechs (LAMINATES)",
+                      quelle="ema_saettigung.eisenwege"),
     "Kt_Nm_per_A":      dict(einheit="Nm/A",  methode="analytisch",
                              detail="dq-Modell auf derselben Luftspaltformel",
                              quelle="ema_analysis.compute_performance"),

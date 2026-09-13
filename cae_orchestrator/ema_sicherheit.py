@@ -189,6 +189,51 @@ def pruefen(results: dict, meta: dict | None = None) -> dict:
                        f"{WICKLUNG_SPITZE_C:.0f} °C", twp, WICKLUNG_SPITZE_C, "°C",
                        quelle="drivecycle*.thermal.peak"))
 
+    # ── Saettigung: was das Eisen tragen muss ────────────────────────────────
+    #
+    # Die vierte Auslegungsgrenze, und bis zum 13.09.2026 die einzige, die hier
+    # gar nicht vorkam. Sie wird NICHT aus dem Feldbild gelesen -- |B| im
+    # Statoreisen streut dort ueber N = 300...800 um 56...73 % (s. BEFUNDE.md) --,
+    # sondern ueber die Flusserhaltung aus ``B_gap``, der aufloesungsunabhaengigen
+    # Groesse dieser Kette.
+    #
+    # Gerechnet wird der ANGEFORDERTE Betriebspunkt des Laufs, nicht der
+    # Leerlauf: unter Last traegt der Zahn Magnet- UND Ankerfluss, und das ist
+    # der Fall, um den es geht.
+    try:
+        import ema_analysis
+        import ema_saettigung
+        geom = payload.get("geom") or {}
+        b_gap = (s.get("B_gap_T") or
+                 ((results.get("em") or {}).get("performance") or {}).get("B_gap_T"))
+        if geom and b_gap:
+            axial = float(payload.get("axial_len") or geom.get("axialLen") or 80.0)
+            rpm = float(payload.get("rpm_to") or payload.get("rpm_from") or 0.0)
+            last = float(payload.get("load_nm") or 0.0)
+            iq = id_ = 0.0
+            if rpm > 0 and last > 0:
+                iq, id_ = ema_analysis.estimate_dq_currents(
+                    geom, rpm, last, b_gap_t=float(b_gap),
+                    rpm_base=float(payload.get("rpm_from") or rpm))
+            _lam = payload.get("stator_lam") or "m270_35a"
+            sa = ema_saettigung.bewerten(geom, axial, float(b_gap), iq, id_, _lam)
+            krit.append(_k(
+                "saettigung", not sa["gesaettigt"],
+                f"{sa['engstelle'].upper()} bei {sa['wert_T']:.2f} T gegen "
+                f"{sa['B_sat_T']:.2f} T ({sa['blech']}) — "
+                f"{sa['ausnutzung'] * 100:.0f} % ausgenutzt"
+                + ("; das lineare Modell verlangt vom Eisen mehr, als es hergibt "
+                   "— Kt, Moment und Leistung sind hier zu optimistisch"
+                   if sa["gesaettigt"] else ""),
+                sa["wert_T"], sa["B_sat_T"], "T",
+                # KEIN Versagen: die Maschine bleibt nicht stehen, sie liefert
+                # weniger Moment als gerechnet. Das ist ein anderer Befund als
+                # ein fliessender Rotor, und er wird auch anders benannt.
+                schwere="hinweis",
+                quelle="ema_saettigung (Flusserhaltung aus B_gap)"))
+    except Exception:                                            # noqa: BLE001
+        pass
+
     # ── Entmagnetisierung durch Ankerrueckwirkung ────────────────────────────
     dem = (results.get("em_advanced") or {}).get("demag") or {}
     if dem:

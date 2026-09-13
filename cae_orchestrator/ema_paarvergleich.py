@@ -175,6 +175,13 @@ METRIKEN = {
     # Zahl der Tabelle, an einer Pumpe belanglos. Die Stufe daneben sagt, wofuer es
     # reicht; gewichten muss der, der die Maschine bestellt.
     "T_rast_pct":   ("Rastmoment / T_dauer", "%",         "klein", False),
+    # Die vierte Grenze. Mitgefuehrt, nicht gezaehlt (s. ZUSATZSPALTEN): ob eine
+    # Auslegung ins Eisen laeuft, ist eine Aussage ueber ihre GUELTIGKEIT und
+    # nicht ueber ihre Guete -- eine Option bei 120 % ist nicht "schlechter",
+    # ihre uebrigen Zahlen sind schlicht zu optimistisch. Das gehoert
+    # danebengeschrieben, nicht in die Bilanz gerechnet.
+    "B_zahn_T":     ("B_Zahn",             "T",          "klein", False),
+    "saett_pct":    ("Eisenausnutzung",    "%",          "klein", False),
     "T_rast_Nm":    ("Rastmoment",          "Nm",         "klein", False),
     "U_dc_V":       ("Zwischenkreis",       "V",          "gross", False),
     "I_grenze_A":   ("Stromgrenze",         "A",          "gross", False),
@@ -203,13 +210,14 @@ METRIKEN = {
 # wichtig Drehgenauigkeit ist -- das entscheidet der Einsatz. Es wegzulassen hiesse,
 # eine Schraegungsachse zu zeigen, unter der „bewegt NICHT: ..." steht, obwohl sie
 # genau das bewegt, wofuer sie da ist. Also: zeigen, nicht gewichten.
-ZUSATZSPALTEN = ("T_rast_pct",)
+ZUSATZSPALTEN = ("T_rast_pct", "B_zahn_T", "saett_pct")
 
 KURZ = {"Kt_Nm_per_A": "Kt [Nm/A]", "T_dauer_Nm": "T_dauer [Nm]",
         "SF_n_max": "SF n_max", "P_verlust_W": "Verlust [W]",
         "gesamt_kg": "Masse [kg]", "kosten_EUR": "Kosten [EUR]",
         "T_verbind_Nm": "Welle [Nm]", "I_s_A": "I_s [A]",
-        "T_rast_pct": "Rast [%]"}
+        "T_rast_pct": "Rast [%]", "B_zahn_T": "B_Zahn [T]",
+        "saett_pct": "Eisen [%]"}
 
 # Schraegung als Anteil EINER Nutteilung. 0 = ungeschraegt, 1 = eine ganze
 # Nutteilung; dort ist das Rastmoment-Integral ueber eine volle Periode und damit
@@ -394,6 +402,18 @@ ACHSEN = {
         "werte": lambda b: list(ema_maschinenart.ARTEN),
         "beschriften": lambda w: ema_maschinenart.LABELS.get(w, w),
         "setzen": _setz_geom("machineType"),
+    },
+    # Der eine Hebel, der die Zahnflussdichte bewegt. Die Nutzahl tut es NICHT:
+    # `ema_wicklung.nutgeometrie` setzt die Nutbreite als festen Anteil der
+    # Nutteilung, also kuerzt sich die Teilung aus B_zahn heraus (gemessen geben
+    # 24/36/48/60 Nuten alle 1,2500 T). Wer gegen die Saettigung auslegt, dreht
+    # hier -- und diese Achse zeigt, was es kostet.
+    "nutbreite": {
+        "titel": "Nutbreite je Nutteilung (Rest ist Zahn)",
+        "werte": lambda b: [0.35, 0.40, 0.45, 0.50, 0.55, 0.60, 0.65],
+        "beschriften": lambda w: f"{float(w) * 100:.0f} % Nut / "
+                                 f"{(1 - float(w)) * 100:.0f} % Zahn",
+        "setzen": _setz_geom("slotWidthRatio"),
     },
     "anordnung": {
         "titel": "Anordnung der Magnete",
@@ -604,6 +624,30 @@ def _bewerte(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
             erg["rast_stufe"] = _rb["stufe"]
             erg["rast_kgv"] = _rb["ordnung"]["n_c"]
             erg["rast_hinweise"] = _rb["hinweise"]
+        except Exception:                                    # noqa: BLE001
+            pass
+        # Saettigung, aus denselben Groessen wie oben: B_gap und die Baulaenge.
+        # Ueber die Flusserhaltung, nicht aus dem Feldbild -- dort streut |B| im
+        # Statoreisen ueber N = 300...800 um 56...73 % (s. BEFUNDE.md).
+        try:
+            import ema_analysis as _EA
+            import ema_saettigung
+            _geom = payload.get("geom") or payload
+            _ax = float(payload.get("axial_len") or _geom.get("axialLen") or 0.0)
+            _bg = float(erg.get("B_gap_T") or 0.0)
+            if _ax > 0 and _bg > 0:
+                _rpm = float(payload.get("rpm_to") or payload.get("rpm_from") or 0.0)
+                _iq = _id = 0.0
+                if _rpm > 0 and float(last_nm or 0) > 0:
+                    _iq, _id = _EA.estimate_dq_currents(
+                        _geom, _rpm, float(last_nm), b_gap_t=_bg,
+                        rpm_base=float(payload.get("rpm_from") or _rpm))
+                _sa = ema_saettigung.bewerten(
+                    _geom, _ax, _bg, _iq, _id,
+                    payload.get("stator_lam") or "m270_35a")
+                erg["B_zahn_T"] = _sa["B_zahn_T"]
+                erg["saett_pct"] = round(_sa["ausnutzung"] * 100.0, 1)
+                erg["saett_engstelle"] = _sa["engstelle"]
         except Exception:                                    # noqa: BLE001
             pass
         # Was am Umrichter steht -- damit eine Spannungs- oder Stromachse eine

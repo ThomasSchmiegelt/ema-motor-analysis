@@ -34,7 +34,11 @@ import ema_optimize as O
 # Beschriftung ist hier teurer als eine fehlende: sie laesst eine richtige Zahl
 # falsch erscheinen.
 _STUDY_KEYS = ["Kt", "T_maxwell", "B_gap", "max_safe_rpm",
-               "mass_g", "T_magnet", "T_winding", "P_total"]
+               "mass_g", "T_magnet", "T_winding", "P_total",
+               # Die Saettigung gehoert in JEDE Studie: sie ist die Grenze, die
+               # am staerksten mit der Geometrie wandert, und eine Kurve, die
+               # ueber sie hinauslaeuft, sieht ohne sie wie ein Gewinn aus.
+               "B_zahn", "B_joch", "saettigung"]
 
 
 def _ohne_einheit(label: str) -> str:

@@ -145,6 +145,58 @@ kaputt = O._saettigung({"p": 0}, 0.0, {"B_gap_T": float("nan")}, 0, 0, None)
 pruefe("ein Fehler gibt None statt zu werfen",
        "saettigung" in kaputt and not FEHLER[-1:] == ["x"])
 
+# ── 7. Kommt die Zahl ueberhaupt irgendwo AN? ──────────────────────────────
+# Der Anlass ist eine Frage des Nutzers: „wo wird die Saettigung dargestellt?"
+# Die ehrliche Antwort war zuerst „fast nirgends" -- sie stand im Bewerter und
+# keine der Anzeigetabellen kannte sie. Dieser Block nagelt jeden Weg einzeln
+# fest, damit er nicht wieder still abreisst.
+print("\n[7] Anzeigewege")
+import ema_optimize as _O                                        # noqa: E402
+import ema_paramstudy as _PS                                     # noqa: E402
+import ema_db as _DB                                             # noqa: E402
+import ema_steckbrief as _SB                                     # noqa: E402
+import ema_paarvergleich as _PV                                  # noqa: E402
+import ema_sicherheit as _SI                                     # noqa: E402
+pruefe("METRICS kennt sie (Browser-Zielwert + Nebenbedingung)",
+       "saettigung" in _O.METRICS and "B_eisen" in _O.METRICS)
+pruefe("die Parameterstudie zeichnet sie",
+       "saettigung" in [k for k, _, _ in _PS._STUDY_METRICS],
+       f"{len(_PS._STUDY_METRICS)} Kurven")
+pruefe("HERKUNFT fuehrt sie mit Methode",
+       _DB.HERKUNFT.get("B_zahn_T", {}).get("methode") == "analytisch")
+pruefe("und die Herkunft sagt, dass sie NICHT aus dem Feldbild kommt",
+       "Flusserhaltung" in _DB.HERKUNFT.get("B_zahn_T", {}).get("detail", ""))
+pruefe("der Steckbrief listet sie", "saettigung_pct" in _SB.KENNWERTE)
+pruefe("der Paarvergleich fuehrt sie als Zusatzspalte (nicht gewichtet)",
+       "saett_pct" in _PV.ZUSATZSPALTEN and "B_zahn_T" in _PV.ZUSATZSPALTEN)
+pruefe("und hat eine Achse fuer den Hebel", "nutbreite" in _PV.ACHSEN)
+import inspect                                                    # noqa: E402
+pruefe("ema_sicherheit prueft sie", "saettigung" in inspect.getsource(_SI.pruefen))
+# Der Pipelinelauf ist die Stelle, an der sie in results.json kommt.
+import ema_pipeline as _PL                                        # noqa: E402
+pruefe("die Pipeline schreibt sie ins summary",
+       "saettigung_pct" in inspect.getsource(_PL._saettigung_summary))
+pruefe("und erzeugt die Bilder nach charts/",
+       "ema_saettigung.bilder" in inspect.getsource(_PL.run_pipeline))
+
+# ── 8. Die Bilder ──────────────────────────────────────────────────────────
+print("\n[8] Bilder")
+import os                                                         # noqa: E402
+import tempfile                                                   # noqa: E402
+with tempfile.TemporaryDirectory() as tmp:
+    aus = S.bilder(GEOM, AXIAL, 0.55, tmp, rpm=6000.0, i_q=120.0, i_d=-20.0)
+    pruefe("beide Bilder entstehen", len(aus) == 2, ", ".join(
+        os.path.basename(a) for a in aus))
+    pruefe("und sind nicht leer",
+           all(os.path.getsize(a) > 8000 for a in aus),
+           ", ".join(f"{os.path.getsize(a) // 1024} kB" for a in aus))
+    # Ohne Drehzahl gibt es kein Momentendiagramm -- und kein leeres Bild.
+    ohne = S.bilder(GEOM, AXIAL, 0.55, tmp, rpm=0.0)
+    pruefe("ohne Drehzahl nur der Querschnitt, kein leeres Diagramm",
+           len(ohne) == 1)
+pruefe("die Farbe folgt der Ausnutzung und kippt ueber 1,0",
+       S._farbe(0.2) != S._farbe(0.9) and S._farbe(0.9) != S._farbe(1.3))
+
 print()
 if FEHLER:
     print(f"FEHLGESCHLAGEN ({len(FEHLER)}): " + ", ".join(FEHLER))

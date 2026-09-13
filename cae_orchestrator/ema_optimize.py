@@ -78,6 +78,16 @@ METRICS = {
     "T_magnet":     {"label": "T_Magnet",             "unit": "°C"},
     "T_winding":    {"label": "T_Wicklung",           "unit": "°C"},
     "P_total":      {"label": "Verluste P_ges",       "unit": "W"},
+    # Die vierte Grenze, seit 13.09.2026 gerechnet (``ema_saettigung``, ueber die
+    # Flusserhaltung aus B_gap). Sie stand im gemeinsamen Bewerter, wurde aber
+    # NIRGENDS angezeigt: `_STUDY_METRICS` filtert ueber genau diese Tabelle, und
+    # `/optimize/meta` liefert sie an die Browser-Oberflaeche. Ein Kennwert, den
+    # der Bewerter fuehrt und keine Tabelle kennt, ist fuer die Studie und fuer
+    # die Zielwertsuche im Browser nicht vorhanden.
+    "B_zahn":       {"label": "B_Zahn [T]", "unit": "T"},
+    "B_joch":       {"label": "B_Joch [T]", "unit": "T"},
+    "B_eisen":      {"label": "B_Eisen (Engstelle) [T]", "unit": "T"},
+    "saettigung":   {"label": "Saettigung (Ausnutzung)", "unit": "-"},
 }
 
 

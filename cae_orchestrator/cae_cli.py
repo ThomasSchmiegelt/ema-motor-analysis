@@ -2260,9 +2260,50 @@ def cmd_leistung(args) -> int:
                                         else lambda m, p=None: print(f"  … {m}")))
     if erg.get("error"):
         return _die(str(erg["error"]), EXIT_USAGE)
+    # Bilder auf Zuruf -- ohne Pipelinelauf. Sie landen in `<projekt>/charts`,
+    # wo die rechte Spalte beider Agentenkoepfe sie ueber die Aenderungszeit
+    # findet; ein eigener Meldeweg waere die naechste Abschrift.
+    bilder = []
+    if getattr(args, "bilder", False):
+        # Dieselbe Aufloesung wie in `_ablegen` -- eine zweite Regel, welches
+        # Projekt gemeint ist, waere die Stelle, an der Bild und Ablage in zwei
+        # verschiedenen Ordnern landen.
+        pid = (getattr(args, "projekt", "") or getattr(args, "_pid", "") or "")
+        pdir = _projekt_pfad(pid) if pid else ""
+        if not pdir:
+            print("  ⚠ --bilder braucht ein Projekt (--from-project/--projekt)",
+                  file=sys.stderr)
+        else:
+            try:
+                import ema_analysis as _EA
+                import ema_saettigung
+                geom = payload["geom"]
+                axial = float(payload.get("axial_len")
+                              or geom.get("axialLen") or 80.0)
+                b0 = _EA._analytical_Bgap(geom)
+                rpm = float(erg.get("P_max_rpm") or payload.get("rpm_to") or 0.0)
+                iq = id_ = 0.0
+                best = next((q for q in erg.get("punkte", [])
+                             if q["rpm"] == erg.get("P_max_rpm")), None)
+                if rpm > 0 and best and best.get("T_Nm"):
+                    iq, id_ = _EA.estimate_dq_currents(
+                        geom, rpm, float(best["T_Nm"]), b_gap_t=b0,
+                        rpm_base=float(payload.get("rpm_from") or rpm))
+                ziel = os.path.join(pdir, "charts")
+                bilder = ema_saettigung.bilder(
+                    geom, axial, b0, ziel, rpm=rpm, i_q=iq, i_d=id_,
+                    blech=payload.get("stator_lam") or "m270_35a")
+            except Exception as exc:                             # noqa: BLE001
+                print(f"  ⚠ Bilder: {type(exc).__name__}: {exc}", file=sys.stderr)
+
     text = ema_leistung.als_text(erg)
+    if bilder:
+        text += ("\n\nBilder:\n  "
+                 + "\n  ".join(os.path.basename(b) for b in bilder)
+                 + f"\n  (in {pid}/charts — die rechte Spalte der Agentenseiten "
+                   f"findet sie von selbst)")
     if getattr(args, "json", False):
-        emit(erg, args)
+        emit({**erg, "bilder": [os.path.basename(b) for b in bilder]}, args)
     else:
         print(text)
     ok = bool(erg.get("P_max_kW"))
@@ -3674,6 +3715,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--rpm", action="append", type=float, metavar="N",
                    help="Drehzahl von Hand, mehrfach angebbar (Vorgabe: zehn "
                         "Stuetzstellen bis zur SICHEREN Drehzahl)")
+    s.add_argument("--bilder", action="store_true",
+                   help="Saettigungsbilder nach <projekt>/charts schreiben: "
+                        "Querschnitt nach Eisenausnutzung eingefaerbt und die "
+                        "Kennlinie B_Zahn/B_Joch ueber dem Moment")
     s.add_argument("--projekt", help="Zielprojekt fuer die Ablage")
     _add_ablage(s)
     _add_globals(s)

@@ -2039,6 +2039,34 @@ def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
     return aus
 
 
+def _saettigung_summary(geom, axial_mm, perf, st_mat, rpm, last, rpm_base):
+    """Saettigung am Auslegungspunkt -- als Summary-Felder.
+
+    Weich: faellt sie aus, fehlen die Felder, und "fehlt" ist unterscheidbar von
+    "geprueft und in Ordnung". Ein Nebenwert darf einen Pipelinelauf nicht
+    kosten.
+    """
+    try:
+        import ema_analysis
+        import ema_saettigung
+        b_gap = float(perf.get("B_gap_T") or 0.0)
+        if b_gap <= 0:
+            return {}
+        iq = id_ = 0.0
+        if float(rpm or 0) > 0 and float(last or 0) > 0:
+            iq, id_ = ema_analysis.estimate_dq_currents(
+                geom, float(rpm), float(last), b_gap_t=b_gap,
+                rpm_base=float(rpm_base or rpm))
+        e = ema_saettigung.bewerten(geom, float(axial_mm), b_gap, iq, id_, st_mat)
+        return {"B_zahn_T": e["B_zahn_T"], "B_joch_T": e["B_joch_T"],
+                "B_eisen_T": e["wert_T"], "saettigung_pct":
+                round(e["ausnutzung"] * 100.0, 1),
+                "saettigung_engstelle": e["engstelle"],
+                "B_gap_last_T": e["B_gap_T"]}
+    except Exception:                                            # noqa: BLE001
+        return {}
+
+
 def run_pipeline(data: dict, state: dict, frames: list,
                   workspace: str, project_dir: str | None = None,
                   stages: set | None = None):
@@ -2427,6 +2455,30 @@ def run_pipeline(data: dict, state: dict, frames: list,
         _save_png_b64(em_sweep_b64, os.path.join(proj, "charts", "em_curve.png"))
         results["em"]["em_sweep_chart_b64"] = em_sweep_b64
         _log(state, "✓ EM-Kennlinie fertig", 78)
+
+        # ── 4c. Saettigungsbilder — analog zum Feldbild, aber aus anderer Quelle ──
+        #
+        # Sie landen in `charts/` wie die Feldbilder, weil dort die rechte Spalte
+        # beider Agentenkoepfe ueber die Aenderungszeit nachsieht und weil der
+        # Bericht von dort liest. Kosten gemessen 1,1 s fuer beide.
+        #
+        # Was sie NICHT sind: geloeste Felder. Sie kommen aus der Flusserhaltung
+        # (ema_saettigung), und genau das steht in beiden Bildern drin -- ein
+        # Bild, das wie ein Feldbild aussieht und keines ist, waere die
+        # schlimmste Variante.
+        try:
+            import ema_saettigung
+            _iqs, _ids = ema_analysis.estimate_dq_currents(
+                geom, rpm_to, load_nm, b_gap_t=float(perf["B_gap_T"]),
+                rpm_base=rpm_from) if (rpm_to > 0 and load_nm > 0) else (0.0, 0.0)
+            _sb = ema_saettigung.bilder(
+                geom, axial, float(perf["B_gap_T"]),
+                os.path.join(proj, "charts"), rpm=rpm_to,
+                i_q=_iqs, i_d=_ids, blech=st_mat)
+            results["em"]["saettigung_bilder"] = [os.path.basename(x) for x in _sb]
+            _log(state, f"✓ Saettigungsbilder ({len(_sb)}) fertig", 79)
+        except Exception as _exc:                                # noqa: BLE001
+            _log(state, f"  ⚠ Saettigungsbilder uebersprungen: {_exc}", 79)
 
         # ── 5. Structural FEM (CalculiX, single solve @ rpm_to; other speeds scaled) ──
         # Slow, selectively re-runnable. When skipped (partial re-run), keep the saved
@@ -3037,6 +3089,16 @@ def run_pipeline(data: dict, state: dict, frames: list,
             "P_max_rpm":       (results.get("power") or {}).get("P_max_rpm"),
             "P_cont_max_kW":   (results.get("power") or {}).get("P_cont_max_kW"),
             "T_peak_max_Nm":   (results.get("power") or {}).get("T_peak_max_Nm"),
+            # ── Saettigung: die vierte Grenze, im Summary, damit sie ANKOMMT ──
+            #
+            # Gerechnet in ema_saettigung ueber die FLUSSERHALTUNG aus B_gap und
+            # nicht aus dem Feldbild (|B| im Statoreisen streut dort ueber
+            # N = 300...800 um 56...73 %, s. BEFUNDE.md). Hier im Summary, weil
+            # daran vier Verbraucher auf einmal haengen: Steckbrief (KENNWERTE),
+            # Bericht (_single_md_tables), der Ergebnisreiter und ema_db. Ein
+            # Kennwert, der nur im Bewerter steht, ist fuer sie alle nicht da.
+            **_saettigung_summary(geom, axial, perf, st_mat,
+                                  rpm_to, load_nm, rpm_from),
             "structural_ok":   structural_ok,
             # WORAUF die Festigkeitsaussage beruht. Ohne das steht ein gruenes
             # structural_ok auch dann da, wenn die FEM gar nicht gelaufen ist —

@@ -209,3 +209,211 @@ def als_text(e: dict) -> str:
         a(f"  ⚠ ueber {WARNSCHWELLE * 100:.0f} % der Saettigung -- die noetige "
           f"Feldstaerke und die Eisenverluste steigen dort schon stark.")
     return "\n".join(z)
+
+
+# ── Bilder: analog zum Magnetfeld, aber ehrlich anders ───────────────────────
+#
+# Das Magnetfeldbild kommt aus einem geloesten Feld. Diese beiden hier NICHT --
+# sie kommen aus der Flusserhaltung, weil |B| im Statoreisen bei den benutzten
+# Aufloesungen nicht konvergiert (56...73 % Streuung ueber N = 300...800, s.
+# BEFUNDE.md). Ein Bild, das wie ein Feldbild aussieht und keines ist, waere die
+# schlimmste Variante; deshalb steht die Herkunft IM Bild und nicht in einer
+# Bildunterschrift, die beim Kopieren verlorengeht.
+
+_FARBEN = ((0.00, "#2e7d32"), (0.70, "#f9a825"), (1.00, "#e64a19"),
+           (1.40, "#7b1fa2"))
+
+
+def _farbe(q: float) -> str:
+    """Ausnutzung -> Farbe. Ueber 1,0 wird es violett: das ist kein Betriebs-
+    zustand mehr, sondern die Aussage, dass das Modell hier zu optimistisch ist."""
+    q = max(0.0, float(q))
+    for i in range(len(_FARBEN) - 1):
+        q0, c0 = _FARBEN[i]
+        q1, c1 = _FARBEN[i + 1]
+        if q <= q1:
+            t = (q - q0) / max(q1 - q0, 1e-9)
+            a = tuple(int(c0[1 + 2 * j:3 + 2 * j], 16) for j in range(3))
+            b = tuple(int(c1[1 + 2 * j:3 + 2 * j], 16) for j in range(3))
+            return "#%02x%02x%02x" % tuple(
+                int(round(a[j] + t * (b[j] - a[j]))) for j in range(3))
+    return _FARBEN[-1][1]
+
+
+def bild(geom: dict, axial_mm: float, b_gap_magnet: float, pfad: str,
+         i_q: float = 0.0, i_d: float = 0.0, blech="m270_35a",
+         dpi: int = 130) -> str:
+    """Der Querschnitt, Zahn und Joch nach ihrer AUSNUTZUNG eingefaerbt.
+
+    Gezeichnet wird die Maschine ueber ``ema_pipeline.render_cross_section`` --
+    dieselbe Funktion, aus der das CAD-Schnittbild und der Bilddatensatz kommen,
+    also keine zweite Zeichnung, die auseinanderlaufen koennte. Darueber liegen
+    zwei halbdurchsichtige Ringe: das Zahnband (Bohrung bis Nutgrund) und das
+    Joch (Nutgrund bis Aussenrand).
+
+    Die Farbe ist die Ausnutzung, nicht |B| -- gruen bis gelb bis rot bis
+    violett, und violett heisst ausdruecklich *ueber* der Blechgrenze, also
+    "hier ist die Rechnung zu optimistisch" und nicht "hier ist es heiss".
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Wedge
+    import ema_pipeline
+    import ema_wicklung
+
+    e = bewerten(geom, axial_mm, b_gap_magnet, i_q, i_d, blech)
+    ng = ema_wicklung.nutgeometrie(geom)
+    r_si = ng["r_si_m"] * 1000.0
+    r_so = ng["r_so_m"] * 1000.0
+    r_nut = r_si + ng["nut_tiefe_m"] * 1000.0
+
+    fig, ax = plt.subplots(figsize=(7.4, 7.4))
+    ema_pipeline.render_cross_section(geom, ax, beschriftung=False)
+    # Zahn und Joch bekommen ihre Beschriftung an VERSCHIEDENEN Winkeln (oben
+    # und unten). Beide auf die Senkrechte gesetzt lagen sie uebereinander und
+    # verdeckten einander -- gemessen am ersten erzeugten Bild.
+    for r0, r1, q, name, wert, winkel in (
+            (r_si, r_nut, e["B_zahn_T"] / e["B_sat_T"], "Zahn", e["B_zahn_T"], 90.0),
+            (r_nut, r_so, e["B_joch_T"] / e["B_sat_T"], "Joch", e["B_joch_T"], -90.0)):
+        ax.add_patch(Wedge((0, 0), r1, 0, 360, width=r1 - r0,
+                           facecolor=_farbe(q), alpha=0.40, edgecolor="none",
+                           zorder=6))
+        rm = (r0 + r1) / 2.0
+        ax.text(rm * math.cos(math.radians(winkel)),
+                rm * math.sin(math.radians(winkel)),
+                f"{name}  {wert:.2f} T\n{q * 100:.0f} % von {e['B_sat_T']:.2f} T",
+                ha="center", va="center", zorder=7, fontsize=10,
+                fontweight="bold", color="#111",
+                bbox=dict(boxstyle="round,pad=0.35", fc="white", alpha=0.88,
+                          ec="none"))
+    ax.set_title(f"Eisenausnutzung — Engstelle {e['engstelle'].upper()}, "
+                 f"{e['ausnutzung'] * 100:.0f} %\n{e['blech']}", fontsize=10.5)
+    # Die Herkunft gehoert INS Bild: es sieht aus wie ein Feldbild und ist keines.
+    fig.text(0.5, 0.02,
+             "aus der FLUSSERHALTUNG (B_gap -> Zahn/Joch), nicht aus einem "
+             "geloesten Feld:\n|B| im Statoreisen konvergiert bei diesen "
+             "Aufloesungen nicht (s. BEFUNDE.md)",
+             ha="center", va="bottom", fontsize=7.5, color="#555")
+    fig.tight_layout(rect=(0, 0.075, 1, 1))
+    fig.savefig(pfad, dpi=dpi)
+    plt.close(fig)
+    return pfad
+
+
+def diagramm(geom: dict, axial_mm: float, b_gap_magnet: float, pfad: str,
+             rpm: float, t_bis: float = 0.0, blech="m270_35a",
+             punkte: int = 60, dpi: int = 130) -> str:
+    """B_Zahn und B_Joch ueber dem Moment -- mit der Blechgrenze als Linie.
+
+    Die Frage, die dieses Bild beantwortet, ist die eigentliche: **ab welchem
+    Moment laeuft die Auslegung ins Eisen?** Eine einzelne Zahl sagt das nicht,
+    und die Kurve zeigt zugleich, wie steil es dort wird.
+
+    Das Joch laeuft mit, obwohl es meist weit darunter bleibt -- gerade DAS ist
+    die Auskunft: ein Joch bei 25 %, waehrend der Zahn reisst, ist verschenktes
+    Material, und man sieht es hier auf einen Blick.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    import numpy as np
+    import ema_analysis
+
+    if t_bis <= 0:
+        t_bis = max(10.0, _knie_suchen(geom, axial_mm, b_gap_magnet, rpm,
+                                       blech) * 1.6)
+    ts = np.linspace(0.0, float(t_bis), int(punkte))
+    zahn, joch = [], []
+    for t in ts:
+        iq = id_ = 0.0
+        if t > 1e-9 and rpm > 0:
+            iq, id_ = ema_analysis.estimate_dq_currents(
+                geom, float(rpm), float(t), b_gap_t=b_gap_magnet, rpm_base=rpm)
+        e = bewerten(geom, axial_mm, b_gap_magnet, iq, id_, blech)
+        zahn.append(e["B_zahn_T"])
+        joch.append(e["B_joch_T"])
+    b_sat, label = _blech_bsat(blech)
+
+    fig, ax = plt.subplots(figsize=(8.2, 4.8))
+    ax.plot(ts, zahn, lw=2.2, color="#c62828", label="Zahn")
+    ax.plot(ts, joch, lw=2.2, color="#1565c0", label="Joch")
+    ax.axhline(b_sat, ls="--", lw=1.6, color="#37474f",
+               label=f"Blechgrenze {b_sat:.2f} T ({label})")
+    # Der Schnittpunkt ist die Antwort -- also wird er markiert und beziffert.
+    z = np.asarray(zahn)
+    ueber = np.where(z >= b_sat)[0]
+    if len(ueber):
+        t_knie = float(ts[ueber[0]])
+        ax.axvline(t_knie, ls=":", lw=1.4, color="#c62828")
+        # Nach RECHTS UNTEN: oben links sitzt die Legende, und der erste
+        # Entwurf schrieb die Beschriftung mitten hinein.
+        ax.annotate(f"ab {t_knie:.0f} Nm laeuft\nder Zahn ins Eisen",
+                    xy=(t_knie, b_sat), xytext=(t_knie * 1.12, b_sat * 0.45),
+                    fontsize=9, color="#c62828",
+                    arrowprops=dict(arrowstyle="->", color="#c62828", lw=1.2))
+    ax.set_xlabel(f"Moment [Nm]  (bei {rpm:.0f} 1/min)")
+    ax.set_ylabel("Flussdichte im Eisen [T]")
+    ax.set_title("Wo die Auslegung ins Eisen laeuft")
+    ax.grid(alpha=0.3)
+    ax.legend(loc="upper left", fontsize=9)
+    ax.set_ylim(0, max(b_sat * 1.6, float(z.max()) * 1.05))
+    fig.text(0.5, 0.015,
+             "Flusserhaltung aus B_gap (Magnet + Ankerrueckwirkung, vektoriell), "
+             "kein geloestes Feld.\nNut- und Zahnkopfstreuung nicht enthalten — "
+             "die Rechnung ist damit konservativ.",
+             ha="center", va="bottom", fontsize=7.5, color="#555")
+    fig.tight_layout(rect=(0, 0.085, 1, 1))
+    fig.savefig(pfad, dpi=dpi)
+    plt.close(fig)
+    return pfad
+
+
+def _knie_suchen(geom, axial_mm, b_gap_magnet, rpm, blech, hoechstens=2000.0):
+    """Das Moment, bei dem der Zahn die Blechgrenze erreicht -- durch Halbieren.
+
+    Nur fuer die Achsenskalierung des Diagramms: ohne das zeigt die Kurve
+    entweder nur den flachen Anfang oder laeuft weit ins Sinnlose.
+    """
+    import ema_analysis
+    b_sat, _ = _blech_bsat(blech)
+
+    def zahn(t):
+        iq = id_ = 0.0
+        if t > 1e-9 and rpm > 0:
+            iq, id_ = ema_analysis.estimate_dq_currents(
+                geom, float(rpm), float(t), b_gap_t=b_gap_magnet, rpm_base=rpm)
+        return bewerten(geom, axial_mm, b_gap_magnet, iq, id_, blech)["B_zahn_T"]
+
+    lo, hi = 0.0, 1.0
+    while hi < hoechstens and zahn(hi) < b_sat:
+        lo, hi = hi, hi * 2.0
+    if hi >= hoechstens:
+        return hoechstens * 0.5
+    for _ in range(24):
+        m = 0.5 * (lo + hi)
+        if zahn(m) < b_sat:
+            lo = m
+        else:
+            hi = m
+    return hi
+
+
+def bilder(geom: dict, axial_mm: float, b_gap_magnet: float, ziel_dir: str,
+           rpm: float = 0.0, i_q: float = 0.0, i_d: float = 0.0,
+           blech="m270_35a") -> list:
+    """Beide Bilder nach ``<projekt>/charts`` -- wie ``ema_feldbild``.
+
+    Der Ablageort ist nicht beliebig: die rechte Spalte beider Agentenkoepfe
+    findet neue Bilder dort ueber die Aenderungszeit. Wer sie woanders hinlegt,
+    baut einen zweiten Meldeweg.
+    """
+    import os
+    os.makedirs(ziel_dir, exist_ok=True)
+    aus = []
+    p1 = os.path.join(ziel_dir, "saettigung_eisen.png")
+    aus.append(bild(geom, axial_mm, b_gap_magnet, p1, i_q, i_d, blech))
+    if rpm > 0:
+        p2 = os.path.join(ziel_dir, "saettigung_kennlinie.png")
+        aus.append(diagramm(geom, axial_mm, b_gap_magnet, p2, rpm, blech=blech))
+    return aus
