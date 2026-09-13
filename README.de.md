@@ -1470,3 +1470,19 @@ veröffentlicht, muss die geänderte Quelle mitveröffentlichen. MIT erlaubt wö
 dieses Repos (`.gitignore`) — mitverbreitet ist nur der Erzeuger, und das von ihm
 geschriebene `setup.cpp` trägt `ALTERED SOURCE VERSION` im Kopf. Die genauen Klauseln
 stehen in `THIRD-PARTY-NOTICES.md`, Abschnitt „FluidX3D".
+
+**Nutzungsabsicht — eine Bitte, keine Bedingung.** Dieses Werkzeug ist für
+öffentliche Forschung, Lehre und private Konstruktionsarbeit gebaut; es soll
+**nicht militärisch** eingesetzt werden, und Ergebnisse daraus sollen nicht als
+belastbar ausgegeben werden, ohne die Geltungsgrenzen mitzunennen, die das
+Werkzeug selbst ausweist (Herkunft je Kennzahl, `ema_referenz.GELTUNG`,
+`BEFUNDE.md`). Das steht im Wortlaut am Ende von `LICENSE` und ist **bewusst
+nicht bindend formuliert**: ein Teil der Rechenkette steht unter der GNU GPL —
+**Gmsh** (GPL-2.0-or-later) wird sogar im selben Python-Prozess importiert
+(`ema_deck.py`, `ema_em3d.py`, `ema_em2d_harm.py`, `ema_em3d_harm.py`), Code
+Aster, CalculiX, OpenFOAM, Blender und Z88OS laufen als eigene Prozesse —, und
+die GPL untersagt in §6 (v2) bzw. §10 (v3) ausdrücklich, Empfängern *weitere*
+Beschränkungen aufzuerlegen. Eine bindende Klausel „nicht kommerziell" über
+diesem Code wäre also nicht durchsetzbar, aber im Weg. Wo eine solche
+Beschränkung wirklich gilt, kommt sie von der Fremdlizenz (FluidX3D, s. oben)
+und bindet unabhängig von diesem Vermerk.

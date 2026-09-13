@@ -3,6 +3,8 @@
 Dieses Repository steht unter der MIT-Lizenz (s. `LICENSE`). Der MIT-Vermerk an
 der Wurzel gilt für **den hier entwickelten Code**, nicht für die unten
 aufgeführten Fremdkomponenten — die behalten ihre eigenen Lizenzen.
+Am Ende von `LICENSE` steht außerdem eine **Nutzungsabsicht** — ausdrücklich eine
+Bitte und keine Bedingung (der Grund dafür steht im Gmsh-Abschnitt unten).
 
 Die Liste trennt bewusst zwei Fälle, weil daran unterschiedliche Pflichten
 hängen:

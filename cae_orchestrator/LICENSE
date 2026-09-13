@@ -37,3 +37,35 @@ Die MIT-Erlaubnis oben ("to use, copy, modify, merge, publish, distribute,
 sublicense, and/or sell") gilt dafuer also NICHT. Der FluidX3D-Quellbaum ist
 nicht Teil dieses Repositories (.gitignore). Einzelheiten und die genauen
 Klauseln: THIRD-PARTY-NOTICES.md, Abschnitt "FluidX3D".
+
+--------------------------------------------------------------------------------
+
+NUTZUNGSABSICHT (Bitte, keine Bedingung)
+
+Dieses Werkzeug ist fuer oeffentliche Forschung, Lehre und private
+Konstruktionsarbeit gebaut. Der Verfasser bittet darum, es NICHT fuer
+militaerische Zwecke einzusetzen, und Ergebnisse daraus nicht als belastbar
+auszugeben, ohne die Geltungsgrenzen mitzunennen, die das Werkzeug selbst
+ausweist (Herkunft je Kennzahl, ema_referenz.GELTUNG, BEFUNDE.md).
+
+Das ist eine BITTE und keine Lizenzbedingung. Sie aendert die MIT-Erlaubnis oben
+um kein Wort, und sie ist mit Absicht nicht bindend formuliert:
+
+  - Ein Teil der Rechenkette steht unter der GNU GPL. Gmsh (GPL-2.0-or-later)
+    wird sogar im selben Python-Prozess importiert (ema_deck.py, ema_em3d.py,
+    ema_em2d_harm.py, ema_em3d_harm.py); Code Aster (GPL-3.0-or-later),
+    CalculiX, OpenFOAM, Blender und Z88OS laufen als eigene Prozesse. Die GPL
+    untersagt in Abschnitt 6 (v2) bzw. 10 (v3) ausdruecklich, Empfaengern
+    WEITERE Beschraenkungen aufzuerlegen. Eine bindende Klausel "nicht
+    kommerziell" oder "nicht militaerisch" ueber diesem Code stuende damit im
+    Konflikt -- sie waere nicht durchsetzbar, aber sie waere im Weg.
+
+  - Wo eine solche Beschraenkung wirklich gilt, kommt sie von der Fremdlizenz
+    selbst und bindet unabhaengig von diesem Vermerk. Fuer FluidX3D steht sie
+    oben: das ist keine Bitte, sondern eine Bedingung.
+
+  - Und sie wirkt ohnehin nur nach vorn. Was unter MIT veroeffentlicht wurde,
+    bleibt fuer jeden, der es geholt hat, unter MIT.
+
+Kurz: was hier verboten IST, steht in THIRD-PARTY-NOTICES.md. Was hier erbeten
+wird, steht in diesem Abschnitt.

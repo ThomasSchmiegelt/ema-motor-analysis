@@ -1251,3 +1251,18 @@ explicitly grants the right to *sell*; for that path it does not. The FluidX3D s
 tree is **not** part of this repository (`.gitignore`) — only the generator is, and the
 `setup.cpp` it emits is marked `ALTERED SOURCE VERSION`. Full clauses:
 `THIRD-PARTY-NOTICES.md`, section „FluidX3D".
+
+**Statement of intent — a request, not a condition.** This tool is built for
+public research, teaching and private design work; it is **not meant for
+military use**, and results from it should not be presented as reliable without
+naming the limits of validity the tool itself reports (provenance per figure,
+`ema_referenz.GELTUNG`, `BEFUNDE.md`). The wording sits at the end of `LICENSE`
+and is **deliberately non-binding**: part of the compute chain is GPL — **Gmsh**
+(GPL-2.0-or-later) is even imported into the same Python process (`ema_deck.py`,
+`ema_em3d.py`, `ema_em2d_harm.py`, `ema_em3d_harm.py`), while Code Aster,
+CalculiX, OpenFOAM, Blender and Z88OS run as separate processes — and the GPL
+explicitly forbids imposing *further* restrictions on recipients (§6 in v2, §10
+in v3). A binding "non-commercial" clause over this code would therefore not be
+enforceable, but it would be in the way. Where such a restriction really does
+apply, it comes from the third-party licence itself (FluidX3D, above) and binds
+regardless of this notice.
