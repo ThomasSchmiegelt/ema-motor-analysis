@@ -50,13 +50,18 @@ import ema_sicherheit
 # Jeder Posten nennt die Groesse, den Grund und was ihn schliessen wuerde. Eine
 # Liste "ungeprueft" ohne den Weg dorthin ist eine Ausrede.
 UNGEPRUEFT = (
-    {"groesse": "Saettigung",
-     "grund":   "der FDM ist linear (MU_R_IRON=500), _analytical_Bgap hat keinen "
-                "Eisenterm, B_SAT_IRON wirkt nur im Anzeigepfad -- das Moment "
-                "waechst hier linear mit dem Strom weiter",
-     "weg":     "Saettigungsdurchgang (_saturate_field, konvergiert gemessen in "
-                "25 Iterationen) oder ema_em2d_harm, das den Rotorsteg messend "
-                "saettigt"},
+    {"groesse": "Saettigung im ROTOR und die oertliche Ueberhoehung",
+     "grund":   "gerechnet wird Zahn und Joch ueber die Flusserhaltung; die "
+                "duennen Rotorstege ueber den Magnettaschen und die Spitze am "
+                "Zahnfuss kennt sie nicht, und |B| aus dem Feldbild ist dort "
+                "nicht konvergent (56...73 % Streuung ueber N = 300...800)",
+     "weg":     "ema_em2d_harm saettigt den Rotorsteg messend; fuer den Zahnfuss "
+                "braeuchte es ein koerperangepasstes Netz"},
+    {"groesse": "Nut- und Zahnkopfstreuung",
+     "grund":   "die Flusserhaltung schickt den ganzen Polfluss durch Zahn und "
+                "Joch; in Wirklichkeit geht ein Teil als Streufluss daran vorbei "
+                "-- die Rechnung ist damit konservativ",
+     "weg":     "ein Feldlauf mit aufgeloester Nutoeffnung"},
     {"groesse": "Festigkeit (FEM)",
      "grund":   "max_safe_rpm kommt hier aus dem analytischen Lame-Sweep; die "
                 "Spannungsspitzen an den Stegen ueber den Magnettaschen kennt "
@@ -84,6 +89,13 @@ LASTGRENZEN = (
      "quelle": "thermal.steady (LPTN)"},
     {"name": "wicklung_dauer", "metrik": "T_winding", "einheit": "°C",
      "quelle": "thermal.steady (LPTN)"},
+    # Seit 13.09.2026 die vierte Grenze -- und die einzige, die vorher GAR NICHT
+    # gerechnet wurde. Gemessen wird sie ueber die Flusserhaltung
+    # (``ema_saettigung``) und nicht aus dem Feldbild: |B| im Statoreisen ist bei
+    # den hier benutzten Aufloesungen nicht konvergent (56...73 % Streuung ueber
+    # N = 300...800), waehrend ``B_gap`` ausdruecklich aufloesungsunabhaengig ist.
+    {"name": "saettigung",     "metrik": "B_eisen",   "einheit": "T",
+     "quelle": "Flusserhaltung aus B_gap (ema_saettigung)"},
 )
 
 # Bisektion: so fein, dass die Ausnutzung auf ein Promille steht -- feiner ist
@@ -100,10 +112,14 @@ def grenzwerte(payload: dict) -> dict:
     """
     payload = payload or {}
     t_mag, mag_label = ema_sicherheit._magnetgrenze(payload.get("magnet") or "")
+    import ema_saettigung
+    b_sat, blech = ema_saettigung._blech_bsat(payload.get("stator_lam")
+                                              or "m270_35a")
     return {
         "magnet_dauer":   {"grenze": float(t_mag), "label": mag_label},
         "wicklung_dauer": {"grenze": float(ema_sicherheit.ISOLIERKLASSE_C),
                            "label": "Isolierklasse H"},
+        "saettigung":     {"grenze": float(b_sat), "label": blech},
         "festigkeit":     {"grenze": float(ema_sicherheit.SF_ZIEL),
                            "label": "geforderter Sicherheitsfaktor"},
     }
@@ -418,6 +434,16 @@ def als_text(erg: dict) -> str:
         a(f"Hinweis: elektrische Huellkurve nicht verfuegbar "
           f"({erg['elektrisch_fehler']}) -- der Momentendeckel ist behelfsmaessig.")
 
+    if (erg.get("P_max_bindend") or "") == "saettigung":
+        a("")
+        for zeile in _umbrechen(
+                "Hinweis: bindend ist die SAETTIGUNG. Das ist keine Wand, an der "
+                "die Maschine stehenbleibt -- sie laeuft weiter, liefert aber "
+                "weniger Moment als hier gerechnet, weil das lineare Modell dem "
+                "Eisen mehr abverlangt als es hergibt. Oberhalb dieses Punktes "
+                "sind Kt, Moment und Leistung zu optimistisch.", 76):
+            a("  " + zeile)
+
     w = erg.get("widerspruch")
     if w:
         a("")
@@ -444,7 +470,10 @@ def als_text(erg: dict) -> str:
         for x in best["ausnutzung"]:
             if x.get("quotient") is None:
                 continue
-            a(f"  {x['name']:<16} {x['wert']:7.1f} / {x['grenze']:.0f} "
+            # Nachkommastellen nach der EINHEIT: 1,70 T ist eine Aussage,
+            # "2 T" waere eine andere. Grad werden ganzzahlig gelesen.
+            nk = 2 if x["einheit"] == "T" else 0
+            a(f"  {x['name']:<16} {x['wert']:7.{nk}f} / {x['grenze']:.{nk}f} "
               f"{x['einheit']:<3} = {x['quotient'] * 100:5.1f} %")
 
     a("")

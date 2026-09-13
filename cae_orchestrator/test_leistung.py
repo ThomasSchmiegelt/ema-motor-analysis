@@ -47,6 +47,17 @@ print("\n[2] Ausnutzungsgrad")
 a = L.ausnutzung({"T_magnet": 40.0, "T_winding": 90.0}, g35)
 q = {x["name"]: x["quotient"] for x in a}
 pruefe("Magnet 40/80 = 50 %", abs(q["magnet_dauer"] - 0.5) < 1e-9)
+# Die Saettigung ist seit 13.09.2026 das dritte LASTkriterium -- sie war die
+# eine der vier vom Menschen genannten Grenzen, die gar nicht gerechnet wurde.
+pruefe("die Saettigung ist ein Lastkriterium",
+       any(g["name"] == "saettigung" for g in L.LASTGRENZEN))
+pruefe("und ihre Grenze kommt aus der Blechtabelle",
+       abs(g35["saettigung"]["grenze"]
+           - __import__("ema_pipeline").LAMINATES["m270_35a"]["B_sat_T"]) < 1e-9,
+       f"{g35['saettigung']['grenze']} T")
+a3 = L.ausnutzung({"T_magnet": 40.0, "T_winding": 90.0, "B_eisen": 0.85}, g35)
+pruefe("Eisen 0,85/1,70 = 50 %",
+       abs([x for x in a3 if x["name"] == "saettigung"][0]["quotient"] - 0.5) < 1e-9)
 pruefe("Wicklung 90/180 = 50 %", abs(q["wicklung_dauer"] - 0.5) < 1e-9)
 fehlend = L.ausnutzung({"T_magnet": None, "T_winding": 90.0}, g35)
 pruefe("fehlender Wert wird None und nicht 0",
@@ -107,9 +118,15 @@ txt = L.als_text({"P_max_kW": 10.0, "P_max_rpm": 3000, "P_max_bindend": "magnet_
                               "ausnutzung": L.ausnutzung(
                                   {"T_magnet": 80.0, "T_winding": 75.0}, g35)}],
                   "ungeprueft": list(L.UNGEPRUEFT), "grenzen": g35})
-pruefe("die Saettigungsluecke steht im Text", "Saettigung" in txt)
-pruefe("und WARUM sie eine ist", "linear" in txt)
-pruefe("und wie man sie schliesst", "_saturate_field" in txt or "em2d" in txt)
+# Die Saettigung von Zahn und Joch wird seit 13.09.2026 GERECHNET; ungeprueft
+# blieb, was die Flusserhaltung nicht sieht. Der Text muss das Verbliebene
+# nennen -- eine Liste, die noch das Alte behauptet, waere schlimmer als keine.
+pruefe("die verbliebene Saettigungsluecke steht im Text", "Saettigung" in txt)
+pruefe("und benennt, WELCHE (Rotor/Ueberhoehung, nicht Zahn und Joch)",
+       "ROTOR" in txt)
+pruefe("und wie man sie schliesst", "em2d" in txt or "Netz" in txt)
+pruefe("die Streuung, die das Feldbild dort ausschliesst, steht dabei",
+       "%" in txt and "300" in txt)
 pruefe("die Ausnutzung des besten Punktes steht da", "100.0 %" in txt)
 
 # Ein Ergebnis ohne zulaessigen Punkt darf nicht wie ein Ergebnis aussehen.
@@ -166,6 +183,13 @@ else:
                for p in erg.get("punkte", [])))
     pruefe("das Feld 'widerspruch' existiert (None ist erlaubt)",
            "widerspruch" in erg)
+    _best = next((p for p in erg.get("punkte", [])
+                  if p["rpm"] == erg.get("P_max_rpm")), None)
+    if _best:
+        _namen = {x["name"] for x in _best.get("ausnutzung", [])}
+        pruefe("alle drei Lastgrenzen stehen im besten Punkt",
+               {"magnet_dauer", "wicklung_dauer", "saettigung"} <= _namen,
+               ", ".join(sorted(_namen)))
     w = erg.get("widerspruch")
     if w:
         pruefe("der Widerspruch nennt Moment, Drehzahl und Kriterium",

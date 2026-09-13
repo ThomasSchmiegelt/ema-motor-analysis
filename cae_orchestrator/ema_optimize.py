@@ -198,6 +198,39 @@ def _apply_params(base_geom, base_axial, params):
     return geom, axial
 
 
+def _saettigung(geom, axial, perf, iq, id_, st_mat) -> dict:
+    """Was das Eisen tragen MUSS -- die vierte Grenze, die bisher fehlte.
+
+    Der FDM hier ist linear (``MU_R_IRON = 500``) und ``_analytical_Bgap`` hat
+    keinen Eisenterm; das Moment waechst in diesem Bewerter also linear mit dem
+    Strom weiter, als gaebe es kein Eisen. Fuer eine Zielwertsuche ist das
+    dieselbe Falle wie das fehlende Layouttor: sie dreht den Strom hoch und
+    bekommt Moment, weil das Einzige, was sie stoppen wuerde, nicht im Modell
+    steht.
+
+    Gerechnet wird ueber die FLUSSERHALTUNG (``ema_saettigung``), nicht aus dem
+    Feldbild: |B| im Statoreisen ist bei den hier benutzten Aufloesungen
+    **nicht konvergent** (gemessen 56...73 % Streuung ueber N = 300...800, s.
+    ``BEFUNDE.md``), waehrend ``B_gap`` ausdruecklich aufloesungsunabhaengig ist.
+
+    Additiv: ein neuer Schluessel, den niemand lesen MUSS. Wer ihn liest --
+    ``ema_leistung``, die Parameterstudie, eine Nebenbedingung der
+    Zielwertsuche -- bekommt die Saettigung ohne weiteres Zutun.
+    """
+    try:
+        import ema_saettigung
+        e = ema_saettigung.bewerten(geom, axial, float(perf["B_gap_T"]),
+                                    iq, id_, st_mat or "m270_35a")
+        return {"B_zahn": e["B_zahn_T"], "B_joch": e["B_joch_T"],
+                "B_eisen": e["wert_T"], "B_sat": e["B_sat_T"],
+                "saettigung": e["ausnutzung"], "engstelle": e["engstelle"]}
+    except Exception:                                            # noqa: BLE001
+        # Eine fehlende Nebenangabe darf den Bewerter nicht werfen -- sie fehlt
+        # dann, und `None` ist unterscheidbar von "geprueft und in Ordnung".
+        return {"B_zahn": None, "B_joch": None, "B_eisen": None,
+                "B_sat": None, "saettigung": None, "engstelle": ""}
+
+
 def _baubar(geom) -> dict:
     """Laesst sich diese Zeichnung ueberhaupt bauen? — das Layouttor in Millisekunden.
 
@@ -323,6 +356,7 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
             "T_winding":    round(Tn["T_winding"], 1),
             "P_total":      round(losses["P_total"], 1),
             **_baubar(geom),
+            **_saettigung(geom, axial, perf, iq, id_, st_mat),
         }
     except Exception as e:
         return {"error": str(e)[:160]}

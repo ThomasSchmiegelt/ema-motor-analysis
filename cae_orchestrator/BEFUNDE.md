@@ -17,6 +17,56 @@ kann.
 
 ---
 
+## 2026-09-13 — |B| im STATOREISEN konvergiert auch nicht (und was statt dessen geht)
+
+**Beobachtung.** Für die Sättigungsgrenze lag es nahe, |B| im Statoreisen aus dem
+Feldlauf abzulesen. Für das *Rotoreisen* steht in diesem Werkzeug längst, dass
+das nicht geht (dünne Stege, 1 px breit, nicht aufgelöst). Für den Stator — Zähne
+von 7,5 mm und ein Joch von 36,7 mm — war die Erwartung, dass es konvergiert.
+**Tut es nicht.**
+
+**Messung** (Projekt `20260913_153549_super_auto_52`, 30 Nm bei 4440 1/min,
+p98 von |B| im Eisen ohne Randschicht):
+
+| N | 300 | 420 | 600 | 800 | Streuung der letzten drei |
+|---|---:|---:|---:|---:|---:|
+| Zahn | 0,209 | 0,206 | 0,128 | 0,465 T | **72,5 %** |
+| Joch | 0,056 | 0,052 | 0,038 | 0,128 T | **70,6 %** |
+| Rotor | 1,139 | 1,433 | 1,196 | 12,247 T | 90,2 % |
+
+Nicht konvergent und nicht einmal monoton. Die Werte sind zusätzlich
+unplausibel **niedrig** — ein IPM-Zahn unter Last läuft bei 1,5…1,8 T, nicht bei
+0,2.
+
+**Eine Falle dabei, die fast zum falschen Schluss geführt hätte.** Der erste
+Durchgang erodierte die Randschicht um eine feste Zahl von **Zellen** (3, wie
+`test_fdm_golden._iron_bulk_p98`). Bei N = 180 sind das 6,4 mm je Seite und bei
+N = 800 nur 1,4 mm — verglichen wurden also verschiedene *Gebiete*, nicht
+verschiedene Auflösungen; bei N = 180 blieb vom Zahn gar nichts übrig (`nan`).
+Mit fester Erosionstiefe von 1,5 mm bleibt die Nicht-Konvergenz bestehen, sie
+ist also echt und kein Maskenartefakt. **Hinweis für `test_fdm_golden`:** dessen
+`b_iron_bulk_p98` erodiert weiterhin in Zellen. Als *Regressionsanker* bei
+festem N ist das in Ordnung — als Größe, die man über N vergleicht, nicht.
+
+**Fundstelle.** `ema_analysis._solve_fdm` + `_curl_a`; der Anker ist
+`_analytical_Bgap`, an den der Luftspaltwert gepinnt wird, während das Eisenfeld
+frei mitläuft.
+
+**Folge — und sie ist konstruktiv.** Die Sättigungsgrenze (`ema_saettigung.py`,
+seit heute) wird deshalb **nicht** aus dem Feldbild genommen, sondern über die
+**Flusserhaltung** aus `B_gap` — der Größe, die in diesem Werkzeug ausdrücklich
+auflösungsunabhängig ist (über N = 120…600 auf vier Stellen identisch, weil sie
+aus der Formel kommt und nicht aus dem Raster). Gegenprobe: der Polfluss aus
+`B_gap` und der Fluss durch die Zähne stimmen auf **0,019 %** überein, und die
+Werte sind physikalisch plausibel (Zahn 1,05 T im Leerlauf, 1,29 T bei 30 Nm,
+102 % der Blechgrenze bei 60 Nm).
+
+**Status: offen für das Feldbild, umgangen für die Grenze.** Wer |B| im Eisen
+quantitativ braucht — etwa für die örtliche Überhöhung am Zahnfuß — braucht ein
+körperangepasstes Netz; `ema_em2d_harm` sättigt den Rotorsteg bereits messend.
+
+---
+
 ## 2026-09-13 — Das „Dauermoment" ist eine Bemessungsformel, keine Thermikrechnung
 
 **Beobachtung.** Beim Bau der Leistungsermittlung (`ema_leistung.py`) stellte sich
