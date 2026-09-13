@@ -81,6 +81,11 @@ STAPELFAKTOR = 0.96
 # an, und die Eisenverluste mit ihr.
 WARNSCHWELLE = 0.95
 
+# Darunter gibt es kein Rotorjoch im ueblichen Sinn -- bei Speiche und Balken
+# spannt der Magnet den Ringraum aus, und eine Flussdichte gegen Unendlich
+# auszurechnen waere eine Zahl statt einer Auskunft.
+RJOCH_MIN_M = 0.001
+
 
 def _blech_bsat(blech) -> tuple:
     """(B_sat [T], Bezeichnung) -- aus dem Werkstoff-DICT oder seinem Schluessel.
@@ -156,12 +161,49 @@ def eisenwege(geom: dict, axial_mm: float, b_gap_t: float,
     b_zahn_t = b * tau_nut / (b_zahn * STAPELFAKTOR)
     b_joch_t = phi_pol / (2.0 * h_joch * L * STAPELFAKTOR)
 
+    # ── Das ROTORjoch -- es fehlte, und das war eine echte Luecke ────────────
+    #
+    # Der Polfluss muss auch im Laeufer zurueck, zwischen Welle und Magneten,
+    # und teilt sich dort genauso in beide Umfangsrichtungen wie im Stator.
+    # Dieselbe Formel, nur mit der Rotorjochhoehe.
+    #
+    # Gemessen an der Probemaschine: 0,641 T gegen 0,205 T im Statorjoch --
+    # DREIMAL so viel. Nicht die Engstelle dort, aber der zweithoechste
+    # Eisenweg, und bei groesserer Welle oder duennerem Ring bindet er.
+    #
+    # Die Jochhoehe ist der Abstand von der Welle zum INNERSTEN Magnetpunkt
+    # (`leg.r_pos` ist das innere Ende jedes Schenkels). Bei der Speiche und
+    # beim Balken ueber den ganzen Ringraum bleibt davon fast nichts -- dann
+    # gibt es kein Rotorjoch im ueblichen Sinn, und das wird GESAGT statt eine
+    # Zahl gegen Null zu rechnen.
+    b_rotorjoch_t, h_rjoch, rj_grund = None, 0.0, ""
+    try:
+        import ema_topology
+        legs, _ = ema_topology.magnet_legs(geom)
+        r_wel = float(geom.get("shaftD", 0.0)) / 2000.0
+        r_mag_i = min(float(x.r_pos) for x in legs) / 1000.0
+        h_rjoch = r_mag_i - r_wel
+        if h_rjoch < RJOCH_MIN_M:
+            rj_grund = (f"kein nennenswertes Rotorjoch: zwischen Welle und "
+                        f"Magnet bleiben {h_rjoch * 1000:.2f} mm")
+        else:
+            b_rotorjoch_t = phi_pol / (2.0 * h_rjoch * L * STAPELFAKTOR)
+    except Exception as exc:                                     # noqa: BLE001
+        rj_grund = f"nicht gerechnet ({type(exc).__name__})"
+
     b_sat, label = _blech_bsat(blech)
-    schlimmer = "zahn" if b_zahn_t >= b_joch_t else "joch"
-    wert = max(b_zahn_t, b_joch_t)
+    _wege = {"zahn": b_zahn_t, "joch": b_joch_t}
+    if b_rotorjoch_t is not None:
+        _wege["rotorjoch"] = b_rotorjoch_t
+    schlimmer = max(_wege, key=_wege.get)
+    wert = _wege[schlimmer]
     return {
         "B_zahn_T": round(b_zahn_t, 3),
         "B_joch_T": round(b_joch_t, 3),
+        "B_rotorjoch_T": (None if b_rotorjoch_t is None
+                          else round(b_rotorjoch_t, 3)),
+        "rotorjoch_hoehe_mm": round(h_rjoch * 1000.0, 2),
+        "rotorjoch_grund": rj_grund,
         "B_gap_T": round(b, 4),
         "phi_pol_mWb": round(phi_pol * 1000.0, 4),
         "zahn_breite_mm": round(b_zahn * 1000.0, 2),
@@ -205,7 +247,12 @@ def als_text(e: dict) -> str:
       f"(Polfluss {e['phi_pol_mWb']:.3f} mWb)")
     a(f"  Zahn  {e['B_zahn_T']:6.3f} T  bei {e['zahn_breite_mm']:.2f} mm Breite "
       f"(Nutteilung {e['nutteilung_mm']:.2f} mm)")
-    a(f"  Joch  {e['B_joch_T']:6.3f} T  bei {e['joch_hoehe_mm']:.2f} mm Hoehe")
+    a(f"  Joch  {e['B_joch_T']:6.3f} T  bei {e['joch_hoehe_mm']:.2f} mm Hoehe (Stator)")
+    if e.get("B_rotorjoch_T") is not None:
+        a(f"  Rotorjoch {e['B_rotorjoch_T']:6.3f} T  bei "
+          f"{e['rotorjoch_hoehe_mm']:.2f} mm (Welle bis Magnet)")
+    elif e.get("rotorjoch_grund"):
+        a(f"  Rotorjoch: {e['rotorjoch_grund']}")
     a(f"  Grenze {e['B_sat_T']:.2f} T ({e['blech']}), Stapelfaktor "
       f"{e['stapelfaktor']:.2f}")
     a(f"  -> Engstelle {e['engstelle'].upper()}, Ausnutzung "
@@ -331,6 +378,28 @@ def bild(geom: dict, axial_mm: float, b_gap_magnet: float, pfad: str,
                                width=r1 - r0,
                                facecolor=_farbe(wert / max(e["B_sat_T"], 1e-9)),
                                alpha=0.42, edgecolor="none", zorder=6))
+    # ── Das ROTORjoch: Welle bis innerster Magnetpunkt ──────────────────────
+    # Es fehlte im ersten Entwurf ganz, und das war keine Kleinigkeit: bei der
+    # Speiche und bei grosser Welle ist es die ENGSTELLE (gemessen 0,839 bzw.
+    # 1,604 T gegen einen Zahn bei 0,657 bzw. 1,054 T). Ein Bild, das nur die
+    # Statorseite einfaerbt, zeigt dann die falsche Stelle als kritisch.
+    #
+    # Gleichmaessig eingefaerbt, nicht je Segment: dafuer steht EINE Zahl zur
+    # Verfuegung, und eine erfundene Winkelverteilung waere schlimmer als keine.
+    if e.get("B_rotorjoch_T") is not None:
+        _rw = float(geom.get("shaftD", 0.0)) / 2.0
+        _ri = _rw + e["rotorjoch_hoehe_mm"]
+        _q = e["B_rotorjoch_T"] / max(e["B_sat_T"], 1e-9)
+        ax.add_patch(Wedge((0, 0), _ri, 0, 360, width=_ri - _rw,
+                           facecolor=_farbe(_q), alpha=0.42, edgecolor="none",
+                           zorder=6))
+        ax.text(0.0, -(_rw + _ri) / 2.0,
+                f"Rotorjoch  {e['B_rotorjoch_T']:.2f} T\n{_q * 100:.0f} %",
+                ha="center", va="center", zorder=7, fontsize=9,
+                fontweight="bold", color="#111",
+                bbox=dict(boxstyle="round,pad=0.3", fc="white", alpha=0.88,
+                          ec="none"))
+
     # Die Beschriftung nennt weiter den SPITZENwert -- er bemisst das Eisen.
     for r0, r1, q, name, wert, winkel in (
             (r_si, r_nut, e["B_zahn_T"] / e["B_sat_T"], "Zahn", e["B_zahn_T"], 90.0),

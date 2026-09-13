@@ -230,6 +230,66 @@ with _tf.TemporaryDirectory() as _t:
     pruefe("und die Ausnutzung mit der Engstelle",
            "Engstelle zahn" in _tab and "76 %" in _tab)
 
+# ── 7b2. Das ROTORJOCH ─────────────────────────────────────────────────────
+# Es fehlte im ersten Entwurf ganz -- `eisenwege` war um die Statorseite herum
+# gebaut. Auf die Frage "warum ist der Rotor nicht beruecksichtigt" war das die
+# ehrliche Luecke: der Polfluss muss auch im Laeufer zurueck.
+print("\n[7b2] Rotorjoch")
+_e0 = S.eisenwege(GEOM, AXIAL, 0.6, "m270_35a")
+pruefe("es wird gerechnet", _e0.get("B_rotorjoch_T") is not None,
+       f"{_e0.get('B_rotorjoch_T')} T ueber {_e0.get('rotorjoch_hoehe_mm')} mm")
+# Dieselbe Formel wie das Statorjoch, nur mit der Rotorjochhoehe -- also muessen
+# sich die beiden umgekehrt wie ihre Hoehen verhalten.
+_v = (_e0["B_rotorjoch_T"] / _e0["B_joch_T"])
+_h = (_e0["joch_hoehe_mm"] / _e0["rotorjoch_hoehe_mm"])
+pruefe("B verhaelt sich umgekehrt zur Jochhoehe", abs(_v / _h - 1) < 2e-3,
+       f"{_v:.3f} gegen {_h:.3f}")
+# Und es zaehlt bei der Engstelle mit -- sonst waere es Zierde.
+_gross = dict(GEOM, shaftD=150.0)
+_eg = S.eisenwege(_gross, AXIAL, 0.6, "m270_35a")
+pruefe("bei grosser Welle wird es die ENGSTELLE",
+       _eg["engstelle"] == "rotorjoch",
+       f"{_eg['B_rotorjoch_T']} T gegen Zahn {_eg['B_zahn_T']} T")
+pruefe("und `wert_T` folgt ihm", abs(_eg["wert_T"] - _eg["B_rotorjoch_T"]) < 1e-9)
+# Wo es keines gibt, wird das GESAGT statt gegen Null gerechnet. Durch eine
+# normale Bauform ist dieser Fall NICHT erreichbar -- `ema_topology` haelt ueber
+# die Wandkonstanten immer einen Ring frei (bei der Speiche gemessen konstante
+# 5,20 mm, unabhaengig vom Wellendurchmesser). Die Abfrage ist also defensiv,
+# und sie wird defensiv geprueft: mit einem gestellten Schenkel, der auf der
+# Welle sitzt. Eine Bauform dafuer zu behaupten waere eine Erfindung.
+import ema_topology as _T2                                        # noqa: E402
+_echtLegs = _T2.magnet_legs
+
+
+class _AufDerWelle:
+    # AUS der Testgeometrie abgeleitet, nicht fest verdrahtet: der erste
+    # Entwurf schrieb 60,0 hin, GEOM hat aber shaftD = 110 -> 5 mm Joch, und
+    # die Abfrage feuerte nicht. Ein Stub mit einer geratenen Zahl prueft den
+    # Zweig nicht, den er zu pruefen vorgibt.
+    r_pos = float(GEOM["shaftD"]) / 2.0
+
+
+_T2.magnet_legs = lambda g: ([_AufDerWelle()], None)
+try:
+    _sp = S.eisenwege(GEOM, AXIAL, 0.6, "m270_35a")
+    pruefe("ohne nennenswertes Rotorjoch steht der Grund da, keine Zahl",
+           _sp["B_rotorjoch_T"] is None
+           and "Rotorjoch" in (_sp["rotorjoch_grund"] or ""),
+           (_sp["rotorjoch_grund"] or "")[:52])
+    pruefe("und die Engstelle faellt auf den Stator zurueck",
+           _sp["engstelle"] in ("zahn", "joch"))
+finally:
+    _T2.magnet_legs = _echtLegs
+# Gegenprobe zur Behauptung oben: die Speiche BEHAELT ihren Ring.
+_spr = S.eisenwege(dict(GEOM, magShape="spoke", shaftD=164.0), AXIAL, 0.6)
+pruefe("die Speiche behaelt trotz grosser Welle ihren Rotorring",
+       _spr["B_rotorjoch_T"] is not None,
+       f"{_spr['rotorjoch_hoehe_mm']} mm")
+pruefe("und der Text nennt es", "Rotorjoch" in S.als_text(_e0))
+_bd = open("ema_saettigung.py", encoding="utf-8").read()
+pruefe("das Bild faerbt den Rotorring", "Rotorjoch  {e['B_rotorjoch_T']" in _bd
+       or 'Rotorjoch  ' in _bd)
+
 # ── 7c. Der Rotorsteg ──────────────────────────────────────────────────────
 print("\n[7c] Rotorsteg")
 _st = S.rotorsteg(GEOM, AXIAL, 0.5, "m270_35a")
