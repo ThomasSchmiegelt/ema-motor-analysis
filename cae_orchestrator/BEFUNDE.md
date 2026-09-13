@@ -82,6 +82,70 @@ Beziehung dort eintragen — es gibt keinen Mechanismus, der ihn daran erinnert.
 
 ---
 
+## 2026-09-13 — Zwei Konstanten, wo die Physik Geometrie ist: Live-Elektrik und Stegstreuung
+
+**(a) Die Live-Vorschau rechnete eine erfundene Maschine.** `PHYS` in `ema.html`
+trug feste Werte, und die Regelgrößen standen als Literale im Quelltext:
+
+```js
+const PHYS = { voltage: 800, Rs: 0.02, Ld: 0.0003, Lq: 0.0008, Psi: 0.09 };
+const tiq = Math.min((PHYS.load+20)*1.5, 800);   // Stromgrenze
+let tid = -0.4*tiq;                              // d/q, kein MTPA
+if (rpm > 5000) tid -= …                         // Eckdrehzahl
+```
+
+Das **Feldbild** der Vorschau nutzte die gezeichnete Geometrie, das dq-Modell
+darüber nicht. Gemessen an der Probemaschine `20260913_201143_saettigungsprobe`:
+
+| | Festwert | wirklich | Faktor |
+|---|---:|---:|---:|
+| `Ld` | 0,3 mH | 0,0167 mH | **18** |
+| `psi_pm` | 0,09 Wb | 0,0248 Wb | 3,6 |
+| Eckdrehzahl | 5000 1/min | 35.529 1/min | 7,1 |
+| ξ | (implizit 2,67) | 2,14 | — |
+
+Folge: Moment, Ströme und Feldschwächung der Vorschau gehörten einer anderen
+Maschine, und die neue Umrichterkarte war dort **wirkungslos** — wer 200 A
+einstellte, sah weiter 800 A.
+
+**Behoben** (`9975973`): `psi`, `Ld`, `Lq`, Grenzen und Eckdrehzahl kommen über
+`POST /umrichter` aus `compute_advanced_em` und `umrichter()`. Die MTPA-Formel
+steht notgedrungen zweimal — die Vorschau rechnet 60 Mal je Sekunde und kann
+nicht fragen — und ist deshalb per **Spiegeltest** an die Python-Fassung
+genagelt (`test_livesim.py`, acht Fälle, größte Abweichung 1,14·10⁻¹³), wie
+`magnetLegs` es seit jeher ist.
+
+**(b) `K_LEAK_STEG` ist eine Konstante, wo die Physik eine Schranke gibt.**
+`_analytical_Bgap` nimmt die Stegstreuung fest mit `K_LEAK_STEG = 0,924` an
+(7,6 %). Ein **gesättigter** Steg lässt aber höchstens `B_sat·w·L` durch, und
+das wandert mit Stegbreite, Baulänge und Polfluss:
+
+| | Probemaschine |
+|---|---:|
+| Steg 1,30 mm, zwei je Pol, gesättigt bei 1,70 T | ≤ 0,663 mWb |
+| Polfluss | 2,171 mWb |
+| Streuanteil höchstens | 23,4 % |
+| daraus `k_leak_steg` mindestens | 0,766 |
+| angenommen | 0,924 |
+
+Hier liegt die Annahme **innerhalb** der Schranke — kein Widerspruch. Gemessen
+wird sie **unmöglich ab rund 0,35 mm Stegbreite** (bei 0,30 mm: k_min 0,933
+gegen angenommene 0,924). Das ist dünn, aber real — Stanzgrenzen liegen bei
+0,3–0,5 mm, und `BRIDGE_MM` wurde erst kürzlich von 2,0 auf 1,3 gesenkt. Dort
+setzt das Werkzeug dann **mehr Streuung an, als durch den Steg passt**, und
+`B_gap` und `Kt` fallen zu niedrig aus.
+
+**Nicht repariert, gemeldet:** `ema_saettigung.rotorsteg()` rechnet die Schranke,
+`sicherheit` führt das Kriterium `stegstreuung` **nur im unmöglichen Fall**, und
+jede Sättigungsausgabe nennt den Steg als *planmäßig gesättigt* samt Schranke.
+Eine geänderte Streukonstante verschöbe rückwirkend jede abgelegte Rechnung.
+
+**Bewusst KEIN Sättigungskriterium für den Steg selbst:** er ist planmäßig
+gesättigt, das ist sein Zweck. Ihn neben Zahn und Joch bei 100 % zu führen
+ließe jede Maschine verletzt aussehen und machte die Liste wertlos.
+
+---
+
 ## 2026-09-13 — Die Sättigungszahl ist um Faktor 1,8 unsicher: die Feld-EICHUNG nagelt eine Spitze auf einen Flachdachwert
 
 **Anlass.** Auf die Frage „bist du dir sicher, dass die Sättigungsprobe richtig

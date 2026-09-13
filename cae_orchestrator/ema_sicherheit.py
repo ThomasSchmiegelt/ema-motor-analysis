@@ -217,6 +217,23 @@ def pruefen(results: dict, meta: dict | None = None) -> dict:
                     rpm_base=float(payload.get("rpm_from") or rpm))
             _lam = payload.get("stator_lam") or "m270_35a"
             sa = ema_saettigung.bewerten(geom, axial, float(b_gap), iq, id_, _lam)
+            # Der Rotorsteg bekommt KEIN eigenes Saettigungskriterium -- er ist
+            # planmaessig gesaettigt, das ist sein Zweck. Gemeldet wird nur der
+            # eine Fall, in dem die angenommene Stegstreuung physikalisch NICHT
+            # durch ihn passt: dann sind B_gap und Kt zu niedrig, und das ist
+            # eine Aussage ueber das MODELL, nicht ueber die Auslegung.
+            _st = sa.get("steg") or {}
+            if _st.get("ok") and _st.get("annahme_unmoeglich"):
+                krit.append(_k(
+                    "stegstreuung", False,
+                    f"Der Steg ({_st['steg_mm']:.2f} mm) laesst hoechstens "
+                    f"{_st['streuanteil_hoechstens'] * 100:.1f} % Streuung durch, "
+                    f"das Modell nimmt "
+                    f"{(1 - _st['k_leak_steg_angenommen']) * 100:.1f} % an — "
+                    f"B_gap und Kt sind damit ZU NIEDRIG (s. BEFUNDE.md)",
+                    _st["k_leak_steg_angenommen"], _st["k_leak_steg_mindestens"],
+                    "", schwere="hinweis",
+                    quelle="ema_saettigung.rotorsteg (Flusserhaltung)"))
             krit.append(_k(
                 "saettigung", not sa["gesaettigt"],
                 f"{sa['engstelle'].upper()} bei {sa['wert_T']:.2f} T gegen "

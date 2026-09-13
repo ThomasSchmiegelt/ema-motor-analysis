@@ -182,7 +182,18 @@ def bewerten(geom: dict, axial_mm: float, b_gap_magnet: float,
     """Ein Aufruf vom Betriebspunkt zur Saettigungsaussage."""
     g = gap_resultierend(geom, b_gap_magnet, i_q, i_d)
     e = eisenwege(geom, axial_mm, g["B_gap_T"], blech)
-    return {**e, "anker": g}
+    # Der Steg kommt als EIGENE Aussage mit, NICHT als dritte Zeile der
+    # Ausnutzungsliste: er ist planmaessig gesaettigt: das ist sein Zweck, nicht
+    # sein Mangel. Ihn neben Zahn und Joch bei 100 % zu fuehren liesse jede
+    # Maschine verletzt aussehen und machte die Liste wertlos.
+    #
+    # Gerechnet wird er am LEERLAUFfeld: der Steg kurzschliesst den MAGNETEN,
+    # und die Ankerrueckwirkung geht daran vorbei.
+    try:
+        steg = rotorsteg(geom, axial_mm, b_gap_magnet, blech)
+    except Exception:                                            # noqa: BLE001
+        steg = {"ok": False, "grund": "nicht gerechnet"}
+    return {**e, "anker": g, "steg": steg}
 
 
 def als_text(e: dict) -> str:
@@ -199,6 +210,28 @@ def als_text(e: dict) -> str:
       f"{e['stapelfaktor']:.2f}")
     a(f"  -> Engstelle {e['engstelle'].upper()}, Ausnutzung "
       f"{e['ausnutzung'] * 100:.0f} %")
+    st = e.get("steg") or {}
+    if st.get("ok"):
+        a("")
+        a(f"  Rotorsteg {st['steg_mm']:.2f} mm ({st['n_steg_je_pol']} je Pol) — "
+          f"planmaessig GESAETTIGT, das ist sein Zweck:")
+        a(f"    er begrenzt die Streuung auf hoechstens "
+          f"{st['streuanteil_hoechstens'] * 100:.1f} % "
+          f"({st['phi_steg_mWb']:.3f} von {st['phi_steg_mWb'] + st['phi_pol_mWb']:.3f} mWb)")
+        a(f"    daraus k_leak_steg >= {st['k_leak_steg_mindestens']:.3f}; das "
+          f"Werkzeug nimmt {st['k_leak_steg_angenommen']:.3f} an")
+        if st.get("annahme_unmoeglich"):
+            for zeile in _umbrechen(
+                    "⚠ Die Annahme ist fuer DIESE Geometrie unmoeglich: es wird "
+                    "mehr Streuung angesetzt, als durch den Steg passt. B_gap "
+                    "und damit Kt sind dann zu niedrig. Gemeldet, nicht "
+                    "repariert — eine geaenderte Streukonstante verschoebe "
+                    "rueckwirkend jede abgelegte Rechnung.", 72):
+                a("    " + zeile)
+    elif st.get("grund"):
+        a("")
+        a(f"  Rotorsteg: {st['grund']}")
+
     a("")
     a("  ⚠ SPANNE: gegen die gerechnete Luftspaltkurve integriert kommt ein um")
     a("    rund Faktor 1,8 KLEINERER Zahnfluss heraus. Ursache ist die Eichung")
@@ -501,3 +534,88 @@ def gegenprobe_fdm(geom: dict, axial_mm: float, N: int = 700,
         }
     except Exception as exc:                                     # noqa: BLE001
         return {"ok": False, "grund": f"{type(exc).__name__}: {exc}"}
+
+
+# ── Der Rotor: der Steg ueber der Magnettasche ───────────────────────────────
+
+def rotorsteg(geom: dict, axial_mm: float, b_gap_t: float,
+              blech="m270_35a") -> dict:
+    """Der Steg ueber der Magnettasche -- beim IPM die ERSTE Engstelle.
+
+    Er haelt den Polschuh gegen die Fliehkraft und kurzschliesst den Magneten
+    zugleich; dass er saettigt, ist kein Mangel, sondern der Zweck: **ein
+    gesaettigter Steg begrenzt die Streuung**. Genau das macht ihn rechenbar,
+    ohne dass ein Feld noetig waere -- er laesst hoechstens ``B_sat * w * L``
+    durch, und das ist eine Schranke, keine Schaetzung.
+
+    Was das Werkzeug bisher statt dessen tat: ``_analytical_Bgap`` nimmt die
+    Stegstreuung als **Konstante** ``K_LEAK_STEG = 0,924`` an (7,6 % Verlust).
+    Die Schranke dagegen wandert mit Stegbreite, Baulaenge und Polfluss --
+    gemessen am Probeprojekt (Steg 1,30 mm, zwei je Pol, L = 150 mm):
+
+        Streufluss hoechstens   0,663 mWb
+        Polfluss                2,171 mWb
+        Streuanteil hoechstens  23,4 %   ->  k_leak_steg >= 0,766
+
+    Die 7,6 % liegen hier **innerhalb** der Schranke, also kein Widerspruch. Bei
+    einem breiteren Steg oder kleinerem Polfluss kann die Konstante sie aber
+    ueberschreiten -- dann nimmt das Werkzeug mehr Streuung an, als durch den
+    Steg ueberhaupt passt, und das geht direkt in ``B_gap`` und damit in ``Kt``.
+    Genau dieser Fall wird gemeldet.
+
+    **Nicht repariert.** ``K_LEAK_STEG`` bleibt, wie es ist: eine geaenderte
+    Streukonstante verschoebe rueckwirkend jede abgelegte Rechnung, und welche
+    Seite danebenliegt, entscheidet diese Schranke nicht -- sie sagt nur, wann
+    die Annahme unmoeglich wird.
+    """
+    import ema_analysis
+    import ema_topology
+
+    g = geom or {}
+    p = max(int(g.get("p") or 1), 1)
+    L = max(float(axial_mm) / 1000.0, 1e-9)
+    b_sat, label = _blech_bsat(blech)
+
+    # Die Stegbreite kommt aus der EINEN Quelle, nicht aus BRIDGE_MM: bei einer
+    # ausdruecklich offenen Tasche (`magTascheOffen`) gibt es gar keinen Steg,
+    # und `stegbreite_mm` weiss das.
+    try:
+        stege = ema_topology.stegbreite_mm(g)
+        w_mm = float(min(x for x in stege if x is not None and x > 0))
+        n_steg = len([x for x in stege if x is not None and x > 0])
+    except Exception:                                            # noqa: BLE001
+        w_mm, n_steg = float(getattr(ema_topology, "BRIDGE_MM", 1.3)), 2
+    if w_mm <= 0 or n_steg <= 0:
+        return {"ok": False, "grund": "kein Steg (offene Tasche?)",
+                "B_sat_T": b_sat, "blech": label}
+
+    r_gap = float(g.get("statorID", 0.0)) / 2000.0
+    tau_pol = math.pi * 2.0 * r_gap / (2.0 * p)
+    phi_pol = (2.0 / math.pi) * abs(float(b_gap_t)) * tau_pol * L
+    phi_steg = b_sat * (w_mm / 1000.0) * L * n_steg
+    anteil = phi_steg / max(phi_steg + phi_pol, 1e-15)
+    k_min = 1.0 - anteil
+
+    k_ist = float(getattr(ema_analysis, "K_LEAK_STEG", 1.0))
+    unmoeglich = bool(k_ist < k_min - 1e-9)
+
+    return {
+        "ok": True,
+        "steg_mm": round(w_mm, 3), "n_steg_je_pol": n_steg,
+        "B_sat_T": b_sat, "blech": label,
+        "phi_steg_mWb": round(phi_steg * 1000.0, 4),
+        "phi_pol_mWb": round(phi_pol * 1000.0, 4),
+        "streuanteil_hoechstens": round(anteil, 4),
+        "k_leak_steg_mindestens": round(k_min, 4),
+        "k_leak_steg_angenommen": round(k_ist, 4),
+        "annahme_unmoeglich": unmoeglich,
+        "text": (
+            f"Steg {w_mm:.2f} mm ({n_steg} je Pol), gesaettigt bei {b_sat:.2f} T: "
+            f"laesst hoechstens {phi_steg * 1000:.3f} mWb durch gegen "
+            f"{phi_pol * 1000:.3f} mWb Nutzfluss — Streuung also hoechstens "
+            f"{anteil * 100:.1f} %, k_leak_steg mindestens {k_min:.3f}. "
+            + (f"⚠ Das Werkzeug nimmt {k_ist:.3f} an, also MEHR Streuung als "
+               f"durch den Steg passt — B_gap und Kt sind damit zu niedrig."
+               if unmoeglich else
+               f"Angenommen sind {k_ist:.3f}, das liegt innerhalb der Schranke.")),
+    }

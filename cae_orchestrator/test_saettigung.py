@@ -18,6 +18,14 @@ import ema_wicklung as W
 FEHLER = []
 
 
+def L_ausn(e):
+    """Die Lastkriterien-Liste zu einer Bewertung."""
+    import ema_leistung
+    return ema_leistung.ausnutzung(
+        {"T_magnet": 40.0, "T_winding": 90.0, "B_eisen": e["wert_T"]},
+        ema_leistung.grenzwerte({"magnet": "ndfeb_n35"}))
+
+
 def pruefe(name, bed, zusatz=""):
     print(f"  {'✓' if bed else '✗'} {name}" + (f"  {zusatz}" if zusatz else ""))
     if not bed:
@@ -215,6 +223,45 @@ with _tf.TemporaryDirectory() as _t:
     pruefe("die Kennwerttabelle zeigt B_Zahn", "1.29 T" in _tab)
     pruefe("und die Ausnutzung mit der Engstelle",
            "Engstelle zahn" in _tab and "76 %" in _tab)
+
+# ── 7c. Der Rotorsteg ──────────────────────────────────────────────────────
+print("\n[7c] Rotorsteg")
+_st = S.rotorsteg(GEOM, AXIAL, 0.5, "m270_35a")
+pruefe("die Stegbreite kommt aus ema_topology", _st["ok"] and _st["steg_mm"] > 0,
+       f"{_st['steg_mm']} mm, {_st['n_steg_je_pol']} je Pol")
+# Die Schranke ist eine Handrechnung: B_sat * w * L * n.
+_soll = _st["B_sat_T"] * (_st["steg_mm"] / 1000.0) * (AXIAL / 1000.0) * _st["n_steg_je_pol"]
+pruefe("die Streuschranke ist B_sat*w*L*n",
+       abs(_st["phi_steg_mWb"] / 1000.0 - _soll) < 1e-9,
+       f"{_st['phi_steg_mWb']:.4f} mWb")
+pruefe("k_leak_steg_mindestens = 1 - Streuanteil",
+       abs(_st["k_leak_steg_mindestens"]
+           - (1 - _st["streuanteil_hoechstens"])) < 1e-9)
+pruefe("bei 1,3 mm Steg ist die Annahme MOEGLICH",
+       _st["annahme_unmoeglich"] is False)
+# Der Fall, um den es geht: ein duenner Steg macht die Annahme unmoeglich.
+# Gemessen liegt die Schwelle bei rund 0,35 mm -- duenn, aber real (Stanzgrenze).
+import ema_topology as _TOP                                       # noqa: E402
+_alt = _TOP.BRIDGE_MM
+try:
+    _TOP.BRIDGE_MM = 0.3
+    _duenn = S.rotorsteg(GEOM, AXIAL, 0.5, "m270_35a")
+    pruefe("bei 0,3 mm Steg wird sie UNMOEGLICH",
+           _duenn["annahme_unmoeglich"] is True,
+           f"k_min {_duenn['k_leak_steg_mindestens']:.3f} > "
+           f"{_duenn['k_leak_steg_angenommen']:.3f}")
+    pruefe("und der Text sagt, in welche Richtung es falsch liegt",
+           "ZU NIEDRIG" in _duenn["text"] or "zu niedrig" in _duenn["text"])
+finally:
+    _TOP.BRIDGE_MM = _alt
+# Er darf NICHT als dritte Zeile in der Ausnutzungsliste stehen -- er ist
+# planmaessig gesaettigt, und 100 % dort liessen jede Maschine verletzt aussehen.
+_be = S.bewerten(GEOM, AXIAL, 0.5, 0.0, 0.0, "m270_35a")
+pruefe("bewerten() fuehrt den Steg mit", (_be.get("steg") or {}).get("ok") is True)
+pruefe("aber NICHT in der Ausnutzungsliste",
+       "steg" not in {x["name"] for x in L_ausn(_be)})
+pruefe("der Text nennt ihn als planmaessig gesaettigt",
+       "planmaessig GESAETTIGT" in S.als_text(_be))
 
 # ── 8. Die Bilder ──────────────────────────────────────────────────────────
 print("\n[8] Bilder")
