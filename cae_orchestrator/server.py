@@ -5517,6 +5517,12 @@ def agent_auswahl():
     return jsonify({"projekte": ema_agent.projekte(),
                     "sitzungen": k.sitzungen(),
                     "modell": DEFAULT_MODEL,
+                    # Die Denkstufen kommen aus EINER Tabelle in ``ema_agent``
+                    # -- eine zweite Liste in der Maske waere die naechste
+                    # Abschrift, die auseinanderlaeuft.
+                    "denkstufen": [{"wert": k2, "text": v["text"]}
+                                   for k2, v in ema_agent.DENKSTUFEN.items()],
+                    "denken": ema_agent.DENK_VORGABE,
                     "modelle": mm.get("modelle") or [],
                     "modelle_grund": mm.get("grund", ""),
                     "kopf": k.NAME, "kopf_label": k.LABEL,
@@ -5576,7 +5582,12 @@ def agent_start():
     erg = k.starten(str(d.get("modell") or DEFAULT_MODEL),
                                  projekt=projekt,
                                  sitzung=str(d.get("sitzung", "")),
-                                 system_zusatz=zusatz)
+                                 system_zusatz=zusatz,
+                                 # Denkstufe des Laufs. Unbekanntes faellt in
+                                 # ``ema_agent.denkstufe`` auf „Standard"
+                                 # zurueck -- eine aeltere Seite schickt gar
+                                 # nichts, und das soll kein Fehler sein.
+                                 denken=str(d.get("denken", "")))
     if erg.get("ok") and str(d.get("prompt", "")).strip():
         k.fragen(str(d["prompt"]).strip())
     return jsonify(erg)

@@ -202,6 +202,12 @@
 
     <div class="zeile">
       <div>
+        <label for="f_denken">Denkprozess</label>
+        <select id="f_denken" onchange="denkenHinweis()"></select>
+        <div class="hint" id="f_denken_hinweis"
+             style="margin:5px 0 0;font-size:11.5px;color:var(--tx2)"></div>
+      </div>
+      <div>
         <label for="f_modell">Modell</label>
         <select id="f_modell" onchange="modellHinweis()"></select>
         <div class="hint" id="f_modell_hinweis"
@@ -397,6 +403,7 @@ async function auswahlLaden(){
     const d = await (await fetch(K('/agent/auswahl'))).json();
     kopfBeschriften(d);
     modellFuellen(d);
+    denkenFuellen(d);
     const p = $('f_projekt');
     p.innerHTML = (PROJEKTPFLICHT ? '<option value="">— Projekt wählen —</option>'
                                   : '<option value="">— kein Projekt binden —</option>') +
@@ -453,6 +460,39 @@ function kopfBeschriften(d){
 // des Anbieters gemessen und nicht an seinem Namen: ob Eingaben die Maschine
 // verlassen, entscheidet der Host, nicht die Beschriftung.
 let MODELLE = [];
+// Denkstufe: wie viel das Modell vor der Antwort nachdenkt. Die Liste kommt
+// vom Server (ema_agent.DENKSTUFEN) — eine zweite hier wäre die nächste
+// Abschrift, die ausei­nanderläuft.
+let DENK_TEXT = {};
+function denkenFuellen(d){
+  const sel = $('f_denken'), stufen = d.denkstufen || [];
+  if(!stufen.length){ sel.parentElement.style.display = 'none'; return; }
+  sel.innerHTML = stufen.map(x =>
+    `<option value="${esc(x.wert)}"${x.wert === (d.denken||'std') ? ' selected' : ''}>` +
+    `${esc(x.text)}</option>`).join('');
+  // Die Zahlen sind GEMESSEN, und zwar durch PIs rpc-Strom — also genau den Weg,
+  // den der Kopf geht. Eine Messung an der rohen Ollama-API stand hier zuerst
+  // und war irreführend: dort schaltet `think:false` das Denken wirklich auf
+  // null, über PI tut „aus" das nicht.
+  DENK_TEXT = {
+    std: 'Vorgabe des Werkzeugs — bei PI bleibt die Flagge weg, bei Hermes die '
+       + 'gemeinsame config.yaml unangetastet.',
+    aus: 'Die KLEINSTE Stufe, keine Abschaltung: über PI blieben gemessen 2173 '
+       + 'Denkzeichen (26,6 s). Am schnellsten, und das Antwortbudget bleibt '
+       + 'weitgehend der Antwort.',
+    niedrig: 'Etwas mehr Nachdenken: gemessen 3620 Denkzeichen (29,9 s) — kaum '
+       + 'langsamer als „aus".',
+    hoch: 'Deutlich mehr: gemessen 13443 Denkzeichen und 99,7 s statt 26,6 s — '
+        + '6× Denken, 4× Zeit. Bei knappem Antwortbudget kann das Modell es im '
+        + 'Denken aufbrauchen und die Antwort fällt kurz aus.'
+  };
+  denkenHinweis();
+}
+function denkenHinweis(){
+  const v = $('f_denken').value;
+  $('f_denken_hinweis').textContent = DENK_TEXT[v] || '';
+}
+
 function modellFuellen(d){
   MODELLE = d.modelle || [];
   const sel = $('f_modell');
@@ -673,7 +713,9 @@ async function starten(){
     // Der Mensch gibt die Zahl vor, nicht der Agent. Ohne sie fällt er in eines
     // von zwei Extremen: EIN Detaillauf von Stunden, an dem sich nichts mehr
     // entscheiden lässt — oder endloses Herumprobieren.
-    schleifen: parseInt($('f_schleifen').value, 10)
+    schleifen: parseInt($('f_schleifen').value, 10),
+    // Denkstufe des Laufs (aus/niedrig/hoch/Standard).
+    denken: ($('f_denken') || {}).value || 'std'
   };
   try{
     const a = await (await fetch(K('/agent/start'), {method:'POST',

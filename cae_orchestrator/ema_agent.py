@@ -74,6 +74,97 @@ PI_PFADE = (os.path.expanduser("~/.npm-global/bin"),
 HERMES_PFADE = (os.path.expanduser("~/.local/bin"),
                 os.path.expanduser("~/.npm-global/bin"))
 
+# ── Denkstufe ────────────────────────────────────────────────────────────────
+# Wie viel das Modell vor der Antwort nachdenken soll. Beide Koepfe koennen das,
+# aber auf VERSCHIEDENEN Wegen -- und der Unterschied ist keine Kleinigkeit:
+#
+#   * **PI** nimmt ``--thinking <stufe>`` auf der Kommandozeile (gemessen an
+#     ``pi --help``: off, minimal, low, medium, high, xhigh, max). Das gilt nur
+#     fuer diesen Lauf und laesst nichts zurueck.
+#   * **Hermes** nimmt ``--reasoning`` **nur am Hauptbefehl, NICHT an
+#     ``hermes acp``** (gemessen an ``hermes acp --help``) -- und genau ``acp``
+#     ist der Browserpfad. Die Stufe steht dort in ``agent.reasoning_effort``
+#     der ``config.yaml``, die ``HERMES_HOME`` meint
+#     (``hermes_constants.resolve_reasoning_config`` liest ausschliesslich
+#     ``cfg["agent"]``, kein Schluessel auf oberster Ebene).
+#
+# Die Namen sind bewusst die des Menschen und nicht die der Werkzeuge: „aus,
+# niedrig, hoch, Standard". Was ein Werkzeug daraus macht, steht hier an EINER
+# Stelle -- zwei Leitern nebeneinander waeren die naechste Abschrift, die
+# auseinanderlaeuft.
+DENKSTUFEN = {
+    # Schluessel      Anzeige            PI            Hermes
+    "std":     {"text": "Standard",  "pi": None,   "hermes": None},
+    "aus":     {"text": "aus",       "pi": "off",  "hermes": "none"},
+    "niedrig": {"text": "niedrig",   "pi": "low",  "hermes": "low"},
+    "hoch":    {"text": "hoch",      "pi": "high", "hermes": "high"},
+}
+DENK_VORGABE = "std"
+
+
+def yaml_agent_setzen(text: str, schluessel: str, wert: str) -> str:
+    """Einen Schluessel im ``agent:``-Block einer Hermes-``config.yaml`` setzen.
+
+    **Ohne PyYAML** — das liegt nicht im venv des Orchestrators, und eine
+    Abhaengigkeit nur fuer eine Zeile waere der falsche Preis. Textuell ist das
+    hier vertretbar, weil die Aufgabe eng ist: EIN Schluessel in EINEM
+    Block oberster Ebene, und der Block sieht in der ausgelieferten Datei
+    gemessen so aus::
+
+        agent:
+          max_turns: 500
+          reasoning_effort: medium
+
+    Drei Faelle, alle abgedeckt: der Schluessel steht schon im Block (Wert
+    ersetzen, Einrueckung behalten), der Block gibt es ohne ihn (einfuegen,
+    Einrueckung vom ersten Kind uebernehmen), oder es gibt den Block nicht
+    (anhaengen). Ein auskommentierter Schluessel zaehlt NICHT als vorhanden.
+
+    Was hier bewusst NICHT versucht wird: allgemeines YAML zu bearbeiten.
+    Kommt eine Datei mit Ankern, Flow-Mappings (``agent: {…}``) oder
+    Tabulatoren, faellt die Funktion auf „anhaengen" zurueck — dann steht der
+    Schluessel doppelt, und der letzte gewinnt in YAML.
+    """
+    zeilen = text.splitlines()
+    kopf = next((i for i, z in enumerate(zeilen)
+                 if z.strip() == "agent:" or z.startswith("agent:")), None)
+    # Flow-Mapping (``agent: {…}``) fassen wir nicht an.
+    if kopf is not None and zeilen[kopf].split(":", 1)[1].strip():
+        kopf = None
+    if kopf is None:
+        return text.rstrip("\n") + f"\nagent:\n  {schluessel}: {wert}\n"
+
+    # Blockende: die naechste Zeile ohne Einrueckung, die kein Kommentar ist.
+    ende = len(zeilen)
+    for i in range(kopf + 1, len(zeilen)):
+        z = zeilen[i]
+        if z.strip() and not z[0].isspace():
+            ende = i
+            break
+
+    einzug = "  "
+    for i in range(kopf + 1, ende):
+        z = zeilen[i]
+        if not z.strip() or z.lstrip().startswith("#"):
+            continue
+        einzug = z[:len(z) - len(z.lstrip())]
+        if z.lstrip().startswith(schluessel + ":"):
+            zeilen[i] = f"{einzug}{schluessel}: {wert}"
+            return "\n".join(zeilen) + "\n"
+    zeilen.insert(kopf + 1, f"{einzug}{schluessel}: {wert}")
+    return "\n".join(zeilen) + "\n"
+
+
+def denkstufe(wert) -> str:
+    """Eine gueltige Stufe -- unbekanntes faellt auf die Vorgabe zurueck.
+
+    Kein Abweisen: eine aeltere Seite schickt gar nichts, und ein Tippfehler
+    soll den Start nicht verhindern, sondern den Standard bedeuten.
+    """
+    w = str(wert or "").strip().lower()
+    return w if w in DENKSTUFEN else DENK_VORGABE
+
+
 # Ringpuffer: damit ein spaet geoeffneter oder neu geladener Browser den Verlauf
 # nachbekommt, statt mitten im Satz einzusteigen.
 RINGGROESSE = 4000
@@ -548,6 +639,9 @@ class Kopf:
         self.beschaeftigt = False         # zwischen Prompt und agent_settled
         self.projekt = ""
         self.modell = ""
+        # Die Denkstufe des LAUFS (Einstellung) -- nicht zu verwechseln mit dem
+        # Ereignis "denken", das den Denk-STROM traegt.
+        self.denk_stufe = DENK_VORGABE
         self.anbieter = "ollama"
         self.lokal = True
         self.sitzung = ""
@@ -783,7 +877,7 @@ class Kopf:
     # ── Der Lesefaden ───────────────────────────────────────────────────────
     # ── Steuerung ───────────────────────────────────────────────────────────
     def starten(self, modell: str, projekt: str = "", sitzung: str = "",
-                system_zusatz: str = "") -> dict:
+                system_zusatz: str = "", denken: str = DENK_VORGABE) -> dict:
         if self.laeuft:
             return {"ok": False, "grund": f"Es laeuft bereits ein {self.LABEL}."}
         prog = self.programm()
@@ -796,6 +890,9 @@ class Kopf:
         self.fehler = ""
         self.projekt = projekt
         self.modell = modell
+        # Die Denkstufe steht VOR `_befehl` und `_umfeld` fest: PI haengt sie an
+        # die Kommandozeile, Hermes braucht sie schon beim Aufbau seines Heims.
+        self.denk_stufe = denkstufe(denken)
         # Womit gerechnet wurde, gehoert zum Ergebnis. Ein Lauf gegen ein
         # API-Modell ist nicht derselbe Lauf wie einer gegen das lokale -- und
         # ein blosser Modellname sagt nicht, ob dabei Daten das Haus verlassen
@@ -831,6 +928,7 @@ class Kopf:
         threading.Thread(target=self._lesen, daemon=True).start()
         self._sende("start", modell=modell, anbieter=self.anbieter,
                     lokal=self.lokal, projekt=projekt, kopf=self.NAME,
+                    denken=self.denk_stufe,
                     befehl=" ".join(befehl), ordner=ordner, akte=akte,
                     werkzeug=ema_werkzeugstand.kurz(self._werkzeug0))
         bereit = self._nach_start(modell, sitzung, system_zusatz)
@@ -1514,6 +1612,13 @@ class PiKopf(Kopf):
         # vorher.
         befehl = [prog, "--provider", anbieter_fuer(modell), "--model", modell,
                   "--mode", "rpc"]
+        # Denkstufe: NUR wenn ausdruecklich gewaehlt. Bei „Standard" bleibt die
+        # Flagge weg, damit PIs eigene Vorgabe (bzw. ein `:stufe` am Modellnamen)
+        # gilt -- eine hier hingeschriebene „medium" waere eine Entscheidung,
+        # die wir gar nicht treffen wollen.
+        _stufe = DENKSTUFEN.get(getattr(self, "denk_stufe", DENK_VORGABE), {}).get("pi")
+        if _stufe:
+            befehl += ["--thinking", _stufe]
         if sitzung == "weiter":
             befehl.append("--continue")
         elif sitzung:
@@ -1698,10 +1803,47 @@ class HermesKopf(Kopf):
         try:
             os.makedirs(os.path.join(heim, "memories"), exist_ok=True)
             os.makedirs(os.path.join(heim, "sessions"), exist_ok=True)
+            stufe = DENKSTUFEN.get(
+                getattr(self, "denk_stufe", DENK_VORGABE), {}).get("hermes")
             for teil in ("config.yaml", ".env", "skills"):
                 quelle = os.path.expanduser(f"~/.hermes/{teil}")
                 ziel = os.path.join(heim, teil)
                 if not os.path.exists(quelle):
+                    continue
+                # ── Die Denkstufe ist der EINE Grund, aus dem die config.yaml
+                # keine Verknuepfung sein darf.
+                #
+                # `hermes acp` nimmt kein `--reasoning` (gemessen an seinem
+                # --help); die Stufe steht nur in `agent.reasoning_effort` der
+                # config.yaml, die HERMES_HOME meint. Die ist hier aber auf die
+                # GEMEINSAME verlinkt -- hineinzuschreiben verstellte den
+                # Terminalkopf mit und bliebe nach dem Lauf stehen.
+                #
+                # Also eine echte Datei, aber **bei jedem Start neu aus der
+                # gemeinsamen erzeugt**. Genau die Disziplin, mit der
+                # `AGENTS.projekt.md` gegen Drift gebaut ist: eine Kopie, die
+                # nie altert, weil sie nie alt wird. Ohne gewaehlte Stufe bleibt
+                # es bei der Verknuepfung, und dann gibt es nichts zu trennen.
+                if teil == "config.yaml" and stufe:
+                    try:
+                        with open(quelle, encoding="utf-8") as f:
+                            roh = f.read()
+                    except OSError:
+                        continue
+                    kopf_txt = (
+                        "# ERZEUGT von ema_agent.HermesKopf — bei JEDEM Start neu.\n"
+                        "# Von Hand geaenderte Fassungen werden ueberschrieben.\n"
+                        f"# Quelle: {quelle}\n"
+                        f"# Einzige Abweichung: agent.reasoning_effort = {stufe}\n"
+                        "# (Denkstufe des Laufs; `hermes acp` nimmt dafuer keine Flagge.)\n")
+                    neu_txt = kopf_txt + yaml_agent_setzen(
+                        roh, "reasoning_effort", stufe)
+                    if os.path.islink(ziel):
+                        os.remove(ziel)
+                    tmp = ziel + ".tmp"
+                    with open(tmp, "w", encoding="utf-8") as f:
+                        f.write(neu_txt)
+                    os.replace(tmp, ziel)
                     continue
                 if os.path.islink(ziel) and os.readlink(ziel) == quelle:
                     continue

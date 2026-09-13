@@ -513,8 +513,12 @@ try:
     import server as _srv
     _gefangen = {}
 
-    def _fang(modell, projekt="", sitzung="", system_zusatz=""):
+    # **kwargs mit Absicht: dieses Doppel soll den Zusatz pruefen, nicht die
+    # Signatur nachbauen. Ohne das bricht es bei jedem neuen Startparameter —
+    # gemessen beim Einbau der Denkstufe.
+    def _fang(modell, projekt="", sitzung="", system_zusatz="", **rest):
         _gefangen["zusatz"] = system_zusatz
+        _gefangen.update(rest)
         return {"ok": False, "grund": "Test"}
 
     _echt = A.LAUF.starten
@@ -722,6 +726,104 @@ try:
            "auch der Zustand ist je Kopf abfragbar — sonst zeigte der Hermes-Reiter PIs Uhr")
 except ImportError as e:
     print(f"  (server nicht importierbar: {e} — Kopfroutentests uebersprungen)")
+
+
+# ── Denkstufe: aus / niedrig / hoch / Standard ───────────────────────────────
+# Beide Koepfe koennen es, auf VERSCHIEDENEN Wegen — und der Unterschied ist
+# gemessen, nicht vermutet: `pi --help` kennt `--thinking`, `hermes acp --help`
+# kennt KEIN `--reasoning` (nur der Hauptbefehl), dort steht die Stufe in
+# `agent.reasoning_effort` der config.yaml, die HERMES_HOME meint.
+print("\n— Denkstufe —")
+
+pruefe(A.denkstufe("hoch") == "hoch" and A.denkstufe("HOCH") == "hoch",
+       "Denkstufe: Grossschreibung faellt nicht durch")
+pruefe(A.denkstufe("quatsch") == "std" and A.denkstufe("") == "std"
+       and A.denkstufe(None) == "std",
+       "Unbekanntes bedeutet Standard — ein Tippfehler verhindert keinen Start")
+
+# ── PI: Kommandozeile ───────────────────────────────────────────────────────
+_pi = A.PiKopf()
+_pi.denk_stufe = "std"
+_b = _pi._befehl("pi", "m", "", "")
+pruefe("--thinking" not in _b,
+       "PI, Standard: KEINE Flagge — sonst entschiede das Werkzeug etwas, "
+       "das es nicht entscheiden will")
+for _stufe, _erw in (("aus", "off"), ("niedrig", "low"), ("hoch", "high")):
+    _pi.denk_stufe = _stufe
+    _b = _pi._befehl("pi", "m", "", "")
+    pruefe("--thinking" in _b and _b[_b.index("--thinking") + 1] == _erw,
+           f"PI, {_stufe}: --thinking {_erw}")
+
+# ── Hermes: config.yaml, textuell (PyYAML liegt nicht im venv) ──────────────
+_YAML = ("model:\n  default: x\nagent:\n  max_turns: 500\n"
+         "  reasoning_effort: medium\n  verbose: false\ntools:\n  a: 1\n")
+_r = A.yaml_agent_setzen(_YAML, "reasoning_effort", "high")
+pruefe(_r.count("reasoning_effort:") == 1
+       and "  reasoning_effort: high" in _r
+       and "max_turns: 500" in _r and "tools:" in _r and "  a: 1" in _r,
+       "config.yaml: vorhandener Schluessel wird ERSETZT, der Rest bleibt stehen")
+
+_r = A.yaml_agent_setzen("agent:\n  max_turns: 5\ntools:\n  a: 1\n",
+                         "reasoning_effort", "low")
+pruefe(_r.count("reasoning_effort:") == 1 and "tools:" in _r,
+       "config.yaml: fehlender Schluessel wird in den agent-Block EINGEFUEGT")
+
+_r = A.yaml_agent_setzen("agent:\n    max_turns: 5\n", "reasoning_effort", "low")
+pruefe("    reasoning_effort: low" in _r,
+       "config.yaml: die Einrueckung des Blocks wird uebernommen (vier Leerzeichen)")
+
+_r = A.yaml_agent_setzen("agent:\n  # reasoning_effort: max\n  max_turns: 5\n",
+                         "reasoning_effort", "low")
+pruefe(len([z for z in _r.splitlines()
+            if z.strip().startswith("reasoning_effort:")]) == 1
+       and "# reasoning_effort: max" in _r,
+       "config.yaml: ein auskommentierter Schluessel zaehlt NICHT als vorhanden")
+
+_r = A.yaml_agent_setzen("model:\n  default: x\n", "reasoning_effort", "high")
+pruefe("agent:" in _r and "reasoning_effort: high" in _r,
+       "config.yaml: ohne agent-Block wird einer angehaengt")
+
+pruefe(A.yaml_agent_setzen(_YAML, "reasoning_effort", "medium") == _YAML,
+       "config.yaml: gleicher Wert laesst die Datei Zeichen fuer Zeichen gleich")
+
+# ── Hermes-Heim: Verknuepfung bei Standard, erzeugte Datei bei Stufe ────────
+import tempfile as _tf
+_alt_proj = A.PROJEKTE
+try:
+    _wurzel = _tf.mkdtemp()
+    A.PROJEKTE = _wurzel
+    os.makedirs(os.path.join(_wurzel, "p1"), exist_ok=True)
+    _geteilt = os.path.expanduser("~/.hermes/config.yaml")
+    if os.path.exists(_geteilt):
+        _h = A.HermesKopf()
+        _h.projekt = "p1"
+
+        _h.denk_stufe = "std"
+        _heim = _h._hermes_heim()
+        _cfg = os.path.join(_heim, "config.yaml")
+        pruefe(os.path.islink(_cfg) and os.readlink(_cfg) == _geteilt,
+               "Hermes, Standard: config.yaml bleibt VERKNUEPFT — eine Kopie liefe auseinander")
+
+        _h.denk_stufe = "hoch"
+        _h._hermes_heim()
+        pruefe(not os.path.islink(_cfg) and os.path.isfile(_cfg),
+               "Hermes, mit Stufe: echte Datei statt Verknuepfung")
+        _txt = open(_cfg, encoding="utf-8").read()
+        pruefe("reasoning_effort: high" in _txt and "ERZEUGT" in _txt
+               and _geteilt in _txt,
+               "die erzeugte config traegt die Stufe, den Erzeugt-Hinweis und die Quelle")
+        pruefe(open(_geteilt, encoding="utf-8").read()
+               == open(_geteilt, encoding="utf-8").read(),
+               "die GEMEINSAME config.yaml wird dabei nicht angefasst")
+
+        _h.denk_stufe = "std"
+        _h._hermes_heim()
+        pruefe(os.path.islink(_cfg) and os.readlink(_cfg) == _geteilt,
+               "zurueck auf Standard: die Verknuepfung wird wiederhergestellt")
+    else:
+        print("  (~/.hermes/config.yaml fehlt — Heim-Tests uebersprungen)")
+finally:
+    A.PROJEKTE = _alt_proj
 
 
 print("\n" + "=" * 60)
