@@ -2981,6 +2981,54 @@
   </div>
 
   <!-- 8. Fahrzyklus -->
+  <!-- Leistungselektronik: EIN Modul oder mehrere (A1..Ak, B1..Bk, C1..Ck) -->
+  <div class="section">
+    <div class="section-title">⚡ Leistungselektronik</div>
+    <div style="font-size:.76rem;color:#666;margin-bottom:8px">
+      Die Grenzen gelten je <b>Modul</b>. Mehrere Module teilen die Wicklung in
+      k Dreiphasensysteme — das macht die Maschine <b>nicht stärker</b>
+      (die Amperewindungen liegen durch Nut, Stromdichte und Kühlung fest),
+      sondern teilt die Scheinleistung und erlaubt n-1-Betrieb.
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div>
+        <label style="font-size:.79rem;color:#aaa;display:block;margin-bottom:3px">Zwischenkreis je Modul [V]</label>
+        <input type="number" id="inv_vdc" value="800" min="12" max="1500" step="1">
+      </div>
+      <div>
+        <label style="font-size:.79rem;color:#aaa;display:block;margin-bottom:3px">Strangstrom je Modul [A]</label>
+        <input type="number" id="inv_imax" value="800" min="1" max="2000" step="1">
+      </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+      <div>
+        <label style="font-size:.79rem;color:#aaa;display:block;margin-bottom:3px">Zahl der Module k</label>
+        <input type="number" id="inv_anzahl" value="1" min="1" max="8" step="1">
+      </div>
+      <div>
+        <label style="font-size:.79rem;color:#aaa;display:block;margin-bottom:3px">Anordnung der Systeme</label>
+        <select id="inv_topologie">
+          <option value="verschachtelt" selected>verschachtelt — jedes System in jeder Nut</option>
+          <option value="sektoriert">sektoriert — eigene Nuten je System</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="margin-bottom:8px">
+      <label style="font-size:.79rem;color:#aaa;display:block;margin-bottom:3px">Worauf sich die Grenzen beziehen</label>
+      <select id="inv_bezug">
+        <option value="einwindung" selected>1 Windung je Nut (Vorgabe — wie Kt und die Ströme)</option>
+        <option value="wicklung">Klemmenwerte (mit der wirklichen Windungszahl)</option>
+      </select>
+    </div>
+
+    <button class="btn" id="btn_umrichter" onclick="pruefeUmrichter()"
+            style="width:100%">🔌 Prüfen (teilbar? was sieht die Maschine? n-1?)</button>
+    <div id="umrichter_out" style="font-size:.78rem;margin-top:8px"></div>
+  </div><!-- /section Leistungselektronik -->
+
   <div class="section">
     <div class="section-title">Fahrzyklus</div>
     <div style="font-size:.76rem;color:#666;margin-bottom:8px">Energiebedarf + Betriebspunktwolke aus Geschwindigkeitsprofil und Fahrzeugparametern.</div>
@@ -11256,9 +11304,72 @@ function brueckeNeuesProjekt() {
   if (_brkTimer) _brkAbfragen();
 }
 
+// Die Leistungselektronik pruefen. Gerechnet wird auf dem SERVER
+// (`ema_umrichter`), nicht hier: die Teilbarkeitsregel (slots % 3k, ganze
+// Polzahl je Sektor, q >= k fuer den Versatz) haengt an der Wicklung, und eine
+// zweite Fassung davon in JavaScript waere genau die Abschrift, die beim ersten
+// geaenderten Nenner auseinanderlaeuft — derselbe Grund, aus dem `magnetLegs`
+// per Test gegen die Python-Fassung genagelt wird.
+async function pruefeUmrichter() {
+  const out = document.getElementById('umrichter_out');
+  const btn = document.getElementById('btn_umrichter');
+  if (!out) return;
+  out.innerHTML = '<span style="color:#888">… rechnet</span>';
+  if (btn) btn.disabled = true;
+  try {
+    const payload = await buildPayload();
+    const r = await fetch('/umrichter', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({payload, ausfall: true})
+    });
+    const d = await r.json();
+    if (!r.ok || d.error) { out.innerHTML = '<span style="color:#e57373">' + escHtml(d.error || ('HTTP ' + r.status)) + '</span>'; return; }
+    const w = d.wickelbar || {};
+    let h = '<div style="color:#ddd;line-height:1.55">';
+    h += '<b>' + d.k + ' Modul' + (d.k !== 1 ? 'e' : '') + '</b> — ' + escHtml(d.topologie_text) + '<br>';
+    h += 'je Modul ' + d.v_modul_V.toFixed(0) + ' V · ' + d.i_modul_A.toFixed(0) + ' A = ' + d.S_modul_kVA.toFixed(1) + ' kVA';
+    h += ' &nbsp;|&nbsp; zusammen ' + d.S_gesamt_kVA.toFixed(1) + ' kVA<br>';
+    h += 'die Maschine sieht <b>' + d.v_maschine_V.toFixed(0) + ' V · ' + d.i_maschine_A.toFixed(0) + ' A</b>';
+    h += ' <span style="color:#888">(k Module wirken wie EIN Umrichter mit k·V bei gleichem Strom)</span><br>';
+    h += '<span style="color:#888">' + w.slots + ' Nuten, ' + w.pole + ' Pole, q = ' + (w.q != null ? w.q.toFixed(2) : '?') + '</span>';
+    h += '</div>';
+    for (const b of (w.befunde || [])) {
+      const hart = !!b.hart;
+      h += '<div style="margin-top:6px;color:' + (hart ? '#e57373' : '#ffb74d') + '">'
+         + (hart ? '✗ ' : '⚠ ') + escHtml(b.text) + '</div>';
+    }
+    if (w.ok && !(w.befunde || []).length && d.k > 1)
+      h += '<div style="margin-top:6px;color:#81c784">✓ teilbar</div>';
+    if (d.warnung) h += '<div style="margin-top:6px;color:#ffb74d">⚠ ' + escHtml(d.warnung) + '</div>';
+    const a = d.ausfall || {};
+    if (a.moeglich) {
+      h += '<div style="margin-top:8px;color:#ddd">Ausfall eines Moduls (' + a.rest_module + ' von ' + a.k
+         + '): <b>' + a.P_voll_kW.toFixed(0) + ' kW → ' + a.P_rest_kW.toFixed(0) + ' kW</b>'
+         + (a.P_anteil != null ? ' (' + (a.P_anteil * 100).toFixed(0) + ' %)' : '') + '</div>';
+    } else if (a.grund) {
+      h += '<div style="margin-top:8px;color:#888">Ausfall: ' + escHtml(a.grund) + '</div>';
+    }
+    if ((d.bilder || []).length)
+      h += '<div style="margin-top:6px;color:#888">Bilder in charts/: ' + d.bilder.map(esc).join(', ') + '</div>';
+    out.innerHTML = h;
+  } catch (e) {
+    out.innerHTML = '<span style="color:#e57373">' + escHtml(String(e)) + '</span>';
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
 async function buildPayload() {
   const payload = {
-    geom:             { ...GEOM },
+    // Die Leistungselektronik gehoert in `geom`, weil `ema_analysis.umrichter`
+    // -- die EINE Quelle der Grenzen -- nur `geom` bekommt. Ein zweiter Ort
+    // waere die Stelle, an der Formular und Rechnung auseinanderlaufen.
+    geom:             { ...GEOM,
+                        inverterVdc:       +(document.getElementById('inv_vdc')?.value || 800),
+                        inverterImax:      +(document.getElementById('inv_imax')?.value || 800),
+                        inverterAnzahl:    +(document.getElementById('inv_anzahl')?.value || 1),
+                        inverterTopologie: document.getElementById('inv_topologie')?.value || 'verschachtelt',
+                        umrichterBezug:    document.getElementById('inv_bezug')?.value || 'einwindung' },
     project_name:     document.getElementById('project_name').value || '',
     rotor_lam:        document.getElementById('sel_rotor_lam').value,
     stator_lam:       document.getElementById('sel_stator_lam').value,
@@ -11350,6 +11461,15 @@ function applyPayload(payload) {
   _setField('mag_orient',  G.magOrient);
   _setField('wh_style',    G.windingHeadStyle);
   _setField('shaft_connection', G.shaftConnection);
+  // Leistungselektronik zurueck ins Formular -- ohne das holt sich „Projekt als
+  // Vorlage" stillschweigend die Umrichterwerte des zuletzt angesehenen
+  // Formulars statt die des Projekts (derselbe Befund wie frueher bei
+  // `struct_solver`).
+  _setField('inv_vdc',       G.inverterVdc);
+  _setField('inv_imax',      G.inverterImax);
+  _setField('inv_anzahl',    G.inverterAnzahl);
+  _setField('inv_topologie', G.inverterTopologie);
+  _setField('inv_bezug',     G.umrichterBezug);
 
   const pct = v => (v != null ? Math.round(v * 100) : undefined);
   const geoMap = {

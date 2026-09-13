@@ -1638,6 +1638,65 @@ def text2ema():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/umrichter", methods=["POST"])
+def umrichter_pruefen():
+    """Die Leistungselektronik pruefen — dieselbe Rechnung wie das Verb.
+
+    Die Karte im Betrieb-Reiter rechnet ausdruecklich NICHT selbst: die
+    Teilbarkeitsregel (``slots % 3k``, ganze Polzahl je Sektor, ``q >= k`` fuer
+    den Versatz) haengt an der Wicklung, und eine zweite Fassung davon in
+    JavaScript waere die Abschrift, die beim ersten geaenderten Nenner
+    auseinanderlaeuft — derselbe Grund, aus dem ``magnetLegs`` per Test gegen
+    die Python-Fassung genagelt wird.
+    """
+    import ema_umrichter
+    data = request.get_json(force=True, silent=True) or {}
+    payload = data.get("payload") or {}
+    geom = payload.get("geom") or {}
+    if not geom:
+        return jsonify({"error": "Keine Geometrie im Payload"}), 400
+    rpm = float(payload.get("rpm_to") or payload.get("rpm_from") or 0.0)
+    try:
+        z = ema_umrichter.zerlegung(geom, rpm)
+    except Exception as exc:                                     # noqa: BLE001
+        return jsonify({"error": f"{type(exc).__name__}: {exc}"}), 500
+
+    aus, bilder = {}, []
+    if data.get("ausfall") and z["k"] > 1:
+        try:
+            import ema_analysis
+            import ema_thermal
+            axial = float(payload.get("axial_len") or geom.get("axialLen") or 80.0)
+            em = ema_analysis.run_em_analysis(geom, N=140, rotor_angle=0.0,
+                                              axial_mm=axial)
+            adv = ema_analysis.compute_advanced_em(
+                geom, em["performance"], axial,
+                float(payload.get("rpm_from") or rpm), rpm,
+                float(payload.get("load_nm") or 0.0))
+            aus = ema_umrichter.ausfall(
+                geom, adv, rpm,
+                ema_thermal.rated_torque(geom, axial,
+                                         payload.get("cooling", "water")))
+        except Exception as exc:                                 # noqa: BLE001
+            aus = {"moeglich": False,
+                   "grund": f"nicht gerechnet: {type(exc).__name__}: {exc}"}
+
+    # Bilder nur, wenn ein Projekt gebunden ist -- sie gehoeren neben die
+    # Rechnung, nicht in einen Sammelordner.
+    pdir = _state.get("project_dir")
+    if data.get("bilder") and pdir and os.path.isdir(pdir):
+        try:
+            bilder = [os.path.basename(b) for b in ema_umrichter.bilder(
+                geom, os.path.join(pdir, "charts"), aus or None)]
+        except Exception:                                        # noqa: BLE001
+            bilder = []
+
+    # Die Huellkurven selbst sind zwei Listen zu je 80 Punkten und werden hier
+    # nicht gebraucht -- die Karte zeigt Zahlen, das Bild zeigt die Kurve.
+    schlank = {k: v for k, v in (aus or {}).items() if k not in ("voll", "rest")}
+    return jsonify({**z, "ausfall": schlank, "bilder": bilder})
+
+
 @app.route("/optimize/meta")
 def optimize_meta():
     """Available free parameters + metrics for the optimiser UI."""

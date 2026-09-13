@@ -923,6 +923,30 @@ def umrichter(geom: dict, rpm_max: float = 0.0) -> dict:
     v_dc = float(g.get("inverterVdc") or 0.0) or INVERTER_V_DC
     i_max = float(g.get("inverterImax") or 0.0) or INVERTER_I_MAX
 
+    # ── Mehrere Leistungselektroniken (A1..Ak, B1..Bk, C1..Ck) ───────────────
+    #
+    # `inverterVdc`/`inverterImax` sind die Werte EINES Moduls. Bei k Systemen
+    # bekommt jedes 1/k der Leiter, also N/k Windungen; daraus folgt zwingend:
+    # Flussverkettung je System psi/k -> Spannung je Modul E/k, waehrend die
+    # Durchflutung sum(N_j*I_j) = k*(N/k)*I = N*I unveraendert bleibt. Von der
+    # Maschine aus gesehen wirken k Module zu je V_Modul also wie EIN Umrichter
+    # mit k*V_Modul bei demselben Strom.
+    #
+    # Mehr Module kaufen damit SPANNUNGSRESERVE (und Eckdrehzahl), nicht Strom
+    # -- oder andersherum gelesen: billigere Niedervolt-Halbleiter fuer dieselbe
+    # Maschine. Sie machen die Maschine NICHT staerker; die Amperewindungen
+    # liegen durch Nut, Stromdichte und Kuehlung fest (s. ema_umrichter).
+    #
+    # Hier und nicht in einer zweiten Rechnung daneben: diese Funktion ist die
+    # eine Quelle der Umrichtergrenzen, und die neun Module, die durch sie
+    # hindurchlesen, erben die Aufteilung, ohne angefasst zu werden. k = 1 laesst
+    # jede Altrechnung Ziffer fuer Ziffer gleich.
+    try:
+        _k = max(1, min(8, int(float(g.get("inverterAnzahl") or 1))))
+    except (TypeError, ValueError):
+        _k = 1
+    v_dc *= _k
+
     # WORAUF sich die beiden Grenzen beziehen, wird gesagt und nicht aus ihrem Wert
     # erraten. Der erste Entwurf schloss aus „weicht von der Vorgabe ab" auf „ist
     # eine wirkliche Klemme" -- das brach in der Paarvergleichs-Stromachse sichtbar
@@ -944,7 +968,9 @@ def umrichter(geom: dict, rpm_max: float = 0.0) -> dict:
         quelle = "bezugswicklung"
 
     return {"v_dc_V": v_dc, "i_max_A": i_max, "n_wdg": int(n_wdg),
-            "n_quelle": quelle,
+            "n_quelle": quelle, "n_module": _k,
+            # Was am EINZELNEN Modul steht -- die Zahl, die jemand einkauft.
+            "v_modul_V": v_dc / float(_k),
             "v_dc_1t": v_dc / float(n_wdg),
             "i_max_1t": i_max * float(n_wdg)}
 

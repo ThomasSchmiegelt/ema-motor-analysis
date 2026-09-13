@@ -112,6 +112,20 @@ SCHEMA = {
     #    Rastmoment, den dieses Werkzeug wirklich rechnen kann: eine Schraegung um
     #    genau eine Nutteilung loescht dessen Grundwelle exakt aus. Derselbe
     #    Schluessel, kein zweiter -- 2-D-Rastmoment und 3-D-Netz lesen denselben Wert.
+    # Mehrere Leistungselektroniken: A1..Ak, B1..Bk, C1..Ck statt A, B, C.
+    # `inverterVdc`/`inverterImax` sind dann die Werte EINES Moduls -- so kauft
+    # man ein ("vier 400-V-Stufen"), und k = 1 laesst jede Altrechnung gleich.
+    "inverterAnzahl": {"kind": "num", "lo": 1, "hi": 8, "def": 1, "geom": True,
+                       "int": True, "adv": True,
+                       "desc": "Zahl der Leistungselektroniken (1 = ueblich; "
+                               "mehr teilt die Wicklung in k Dreiphasensysteme)"},
+    "inverterTopologie": {"kind": "enum",
+                          "opts": ("verschachtelt", "sektoriert"),
+                          "def": "verschachtelt", "geom": True, "adv": True,
+                          "desc": "wie die k Systeme liegen: verschachtelt (jedes "
+                                  "in jeder Nut, Ausfall symmetrisch) oder "
+                                  "sektoriert (eigene Nuten, einseitiger "
+                                  "Magnetzug im Fehlerfall)"},
     "skew_deg":      {"kind": "num", "lo": 0, "hi": 30, "def": 0, "adv": True, "geom": True,
                       "desc": "Schraegung ueber die Paketlaenge [Grad mech]"},
     "skew_segments": {"kind": "num", "lo": 1, "hi": 12, "def": 1, "int": True,

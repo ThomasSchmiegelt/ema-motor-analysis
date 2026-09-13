@@ -2379,6 +2379,92 @@ def cmd_ausreizen(args) -> int:
     return EXIT_OK if besser else 1
 
 
+def cmd_umrichter(args) -> int:
+    """Mehrere Leistungselektroniken: was jedes Modul liefern muss, ob die
+    Wicklung sich teilen laesst, und was bei einem Ausfall bleibt.
+
+    Aufteilen macht die Maschine NICHT staerker -- die Amperewindungen liegen
+    durch Nut, Stromdichte und Kuehlung fest. Was man kauft, sind kleinere
+    Halbleiter (1/k der Scheinleistung je Modul) und der n-1-Betrieb.
+
+    Exit: 0 = Wicklung teilbar, 1 = nicht teilbar (mit Begruendung).
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    echo_sets(applied)
+    geom = payload.get("geom") or {}
+    if not geom:
+        return _die("Keine Geometrie im Payload — umrichter braucht geom.",
+                    EXIT_USAGE)
+    if getattr(args, "anzahl", None):
+        geom["inverterAnzahl"] = int(args.anzahl)
+    if getattr(args, "topologie", None):
+        geom["inverterTopologie"] = args.topologie
+
+    import ema_umrichter
+    rpm = float(payload.get("rpm_to") or payload.get("rpm_from") or 0.0)
+    z = ema_umrichter.zerlegung(geom, rpm)
+
+    # Der Ausfall braucht die Huellkurve, also einen Feldlauf. Nur wenn es mehr
+    # als ein Modul gibt -- bei k = 1 ist ein Ausfall der Totalausfall, und eine
+    # Kurve darueber waere eine Behauptung ueber nichts.
+    aus = None
+    if z["k"] > 1 and not getattr(args, "ohne_ausfall", False):
+        try:
+            import ema_analysis as _EA
+            import ema_thermal as _TH
+            axial = float(payload.get("axial_len") or geom.get("axialLen") or 80.0)
+            em = _EA.run_em_analysis(geom, N=int(args.n), rotor_angle=0.0,
+                                     axial_mm=axial)
+            adv = _EA.compute_advanced_em(
+                geom, em["performance"], axial,
+                float(payload.get("rpm_from") or rpm), rpm,
+                float(payload.get("load_nm") or 0.0))
+            aus = ema_umrichter.ausfall(
+                geom, adv, rpm,
+                _TH.rated_torque(geom, axial, payload.get("cooling", "water")))
+        except Exception as exc:                                 # noqa: BLE001
+            print(f"  ⚠ n-1 nicht gerechnet: {type(exc).__name__}: {exc}",
+                  file=sys.stderr)
+
+    bilder = []
+    if getattr(args, "bilder", False):
+        pid = (getattr(args, "projekt", "") or getattr(args, "_pid", "") or "")
+        pdir = _projekt_pfad(pid) if pid else ""
+        if not pdir:
+            print("  ⚠ --bilder braucht ein Projekt (--from-project/--projekt)",
+                  file=sys.stderr)
+        else:
+            try:
+                bilder = ema_umrichter.bilder(
+                    geom, os.path.join(pdir, "charts"), aus)
+            except Exception as exc:                             # noqa: BLE001
+                print(f"  ⚠ Bilder: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+    text = ema_umrichter.als_text(z, aus)
+    if bilder:
+        text += "\n\nBilder:\n  " + "\n  ".join(
+            os.path.basename(b) for b in bilder)
+    if getattr(args, "json", False):
+        emit({**z, "ausfall": (aus or {}),
+              "bilder": [os.path.basename(b) for b in bilder]}, args)
+    else:
+        print(text)
+    ok = bool(z["wickelbar"]["ok"])
+    _ablegen(args, "umrichter", text,
+             daten={k: v for k, v in z.items() if k != "wickelbar"} |
+                   {"wickelbar": z["wickelbar"],
+                    "ausfall": {k: v for k, v in (aus or {}).items()
+                                if k not in ("voll", "rest")}},
+             ok=ok)
+    return EXIT_OK if ok else 1
+
+
 def cmd_rotor_check(args) -> int:
     """2D-Layoutgate lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
     Exit: 0 = Layout OK, 1 = Check abgelehnt (defekte Geometrie)."""
@@ -3762,6 +3848,40 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_ausreizen)
+
+    s = sub.add_parser("umrichter",
+                       help="Mehrere Leistungselektroniken (A1..Ak, B1..Bk, "
+                            "C1..Ck): was jedes Modul liefern muss, ob die "
+                            "Wicklung sich teilen laesst, was ein Ausfall kostet")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--anzahl", type=int, metavar="K",
+                   help="Zahl der Leistungselektroniken (1-8); ohne Angabe die "
+                        "aus dem Payload")
+    s.add_argument("--topologie", choices=("verschachtelt", "sektoriert"),
+                   help="verschachtelt = jedes System in jeder Nut (Ausfall "
+                        "symmetrisch) | sektoriert = eigene Nuten (einseitiger "
+                        "Magnetzug im Fehlerfall)")
+    s.add_argument("--bilder", action="store_true",
+                   help="Bilder nach <projekt>/charts: Querschnitt mit den "
+                        "Systemen und die n-1-Kennlinie")
+    s.add_argument("--ohne-ausfall", action="store_true", dest="ohne_ausfall",
+                   help="die n-1-Rechnung weglassen (spart den Feldlauf)")
+    s.add_argument("--n", type=int, default=140,
+                   help="Rasterweite des Feldlaufs fuer die Huellkurve (140)")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--projekt", help="Zielprojekt fuer die Ablage")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_umrichter)
 
     s = sub.add_parser("welle",
                        help="Vollwelle oder Hohlwelle? Misst am Feld, ob durch die "
