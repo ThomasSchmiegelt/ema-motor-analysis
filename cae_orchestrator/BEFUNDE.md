@@ -82,6 +82,69 @@ Beziehung dort eintragen — es gibt keinen Mechanismus, der ihn daran erinnert.
 
 ---
 
+## 2026-09-13 — Die Sättigungszahl ist um Faktor 1,8 unsicher: die Feld-EICHUNG nagelt eine Spitze auf einen Flachdachwert
+
+**Anlass.** Auf die Frage „bist du dir sicher, dass die Sättigungsprobe richtig
+ist?" habe ich die Formel gegen die gerechnete Luftspaltkurve gehalten — also
+gegen die eine Größe, die dieses Werkzeug für den Luftspalt als belastbar
+ausweist (`_sample_airgap`: `B_r = (1/r)·∂A/∂θ`, „robust at any N"). **Sie
+stimmen nicht überein.**
+
+**Messung** (Projekt `20260913_153549_super_auto_52`, Leerlauf, N = 700,
+36 Nuten / 12 Pole, `slotWidthRatio` 0,5):
+
+| | Zahnflussdichte |
+|---|---:|
+| Formel `B_gap·τ_nut/(b_zahn·k_fe)` | **1,054 T** |
+| aus `Br(θ)` integriert, über die Nutteilung mit dem **größten** Fluss | **0,588 T** |
+| Verhältnis | **1,79** |
+
+Ebenso beim Polfluss: analytisch `(2/π)·B·τ_pol·L` = 2,171 mWb gegen 1,498 mWb
+gemessen, Faktor 1,45.
+
+**Ursache, und sie liegt nicht in der Sättigungsformel.**
+`run_em_analysis` eicht das Feld mit `sf = _analytical_Bgap / max|Br_fdm|`
+(`ema_analysis.py:1831`, `pk_mag = float(np.max(np.abs(Br_m)))`). Es nagelt also
+die **Spitze** der gerechneten Kurve auf einen Wert, der seiner Herleitung nach
+ein **Flachdach** ist: `_analytical_Bgap` ist Magnet-Arbeitsgerade × Polbedeckung
+und hat keinen Eisenterm — eine mittlere Flussdichte unter dem Pol, keine Spitze.
+
+Ist die Kurve spitz, skaliert das ganze Feld dadurch systematisch zu klein. Und
+sie **ist** spitz: gemessen Mittel/Spitze = **0,354** gegen 0,637 beim Sinus.
+Das ist bei dieser Zeichnung zu erwarten — das Werkzeug zieht **offene** Nuten
+(4,03 mm Öffnung über 0,70 mm Luftspalt, s. den Rastmoment-Nebenbefund), und die
+halbe Bohrung ist Nutöffnung.
+
+**Was daraus NICHT folgt.** Es folgt nicht, dass die Formel falsch ist. Sie ist
+mit der Art, wie dieses Werkzeug `B_gap` definiert und `psi_pm`/`Kt` daraus
+bildet, in sich stimmig — beide ruhen auf derselben analytischen Größe. Es folgt
+auch nicht, dass die Messung recht hat: ihr Maßstab kommt aus genau der Eichung,
+die hier in Frage steht. **Beide können nicht zugleich stimmen, und ohne ein
+konvergiertes Feld oder eine echte Messung ist das hier nicht zu entscheiden.**
+
+Bemerkenswert ist die Richtung: die Formel liegt **höher**, meldet also eher
+Sättigung als zu wenig. Für ein Tor ist das die richtige Seite — für eine Zahl,
+die im Steckbrief und im Bericht steht, ist es trotzdem eine Unsicherheit von
+80 %, und die gehört danebengeschrieben.
+
+**Nicht repariert — gemeldet und sichtbar gemacht:**
+* `ema_saettigung.gegenprobe_fdm()` rechnet den Vergleich auf Zuruf und nennt
+  Formel, Messung, Verhältnis und den Formfaktor der Kurve.
+* Unter **jeder** Sättigungsausgabe steht jetzt die Spanne mit Ursache und
+  Verweis hierher, statt einer Zahl, die wie eine Messung aussieht.
+* Die Eichung selbst bleibt unangetastet: sie trägt `B_gap`, `Kt`, `psi_pm` und
+  jede Animation. Sie zu ändern verschöbe rückwirkend den gesamten Bestand, und
+  welche Seite danebenliegt, ist nicht geklärt.
+
+**Was es klären würde:** eine Luftspaltkurve aus einem körperangepassten Netz
+(`ema_em2d_harm` rechnet bereits harmonisch in Elmer 2-D) gegen dieselbe
+Geometrie — dort ist die Nutöffnung wirklich aufgelöst, und der Formfaktor wäre
+gemessen statt gerastert.
+
+**Status: offen, gemeldet, Spanne sichtbar.**
+
+---
+
 ## 2026-09-13 — |B| im STATOREISEN konvergiert auch nicht (und was statt dessen geht)
 
 **Beobachtung.** Für die Sättigungsgrenze lag es nahe, |B| im Statoreisen aus dem

@@ -199,6 +199,12 @@ def als_text(e: dict) -> str:
       f"{e['stapelfaktor']:.2f}")
     a(f"  -> Engstelle {e['engstelle'].upper()}, Ausnutzung "
       f"{e['ausnutzung'] * 100:.0f} %")
+    a("")
+    a("  ⚠ SPANNE: gegen die gerechnete Luftspaltkurve integriert kommt ein um")
+    a("    rund Faktor 1,8 KLEINERER Zahnfluss heraus. Ursache ist die Eichung")
+    a("    (max|Br_fdm| wird auf _analytical_Bgap gesetzt, einen Flachdachwert);")
+    a("    welche Zahl stimmt, ist nicht entschieden — s. BEFUNDE.md 13.09.2026")
+    a("    und `ema_saettigung.gegenprobe_fdm`.")
     if e["gesaettigt"]:
         a("")
         a("  ⚠ Das lineare Modell verlangt vom Eisen mehr, als es hergibt.")
@@ -417,3 +423,81 @@ def bilder(geom: dict, axial_mm: float, b_gap_magnet: float, ziel_dir: str,
         p2 = os.path.join(ziel_dir, "saettigung_kennlinie.png")
         aus.append(diagramm(geom, axial_mm, b_gap_magnet, p2, rpm, blech=blech))
     return aus
+
+
+# ── Die Gegenprobe, und warum sie dazugehoert ────────────────────────────────
+
+def gegenprobe_fdm(geom: dict, axial_mm: float, N: int = 700,
+                   i_q: float = 0.0, i_d: float = 0.0) -> dict:
+    """Den Zahnfluss AUS der Luftspaltkurve messen -- und mit der Formel vergleichen.
+
+    **Das ist der Test, den man an eine Formel anlegt, und er faellt nicht
+    eindeutig aus.** Gemessen am 13.09.2026 (305-mm-Maschine, Leerlauf, N=700):
+
+        Formel  B_gap * tau_nut / (b_zahn * k_fe)        1,054 T
+        aus Br(theta) integriert, groesste Nutteilung    0,588 T
+        Verhaeltnis                                      1,79
+
+    Die Ursache ist benannt und liegt nicht in dieser Formel, sondern in der
+    **Eichung** des Feldes: ``run_em_analysis`` setzt
+    ``sf = _analytical_Bgap / max|Br_fdm|`` (``ema_analysis.py:1831``), nagelt
+    also die SPITZE der gerechneten Kurve auf einen Wert, der seiner Herleitung
+    nach ein **Flachdach** ist (Magnet-Arbeitsgerade x Polbedeckung, ohne
+    Eisenterm). Ist die Kurve spitz -- hier gemessen Mittel/Spitze = 0,354
+    gegen 0,637 beim Sinus, was bei 4,03 mm offenen Nuten ueber 0,70 mm
+    Luftspalt zu erwarten ist --, wird das ganze Feld damit systematisch zu
+    klein skaliert, und der daraus integrierte Fluss ist zu niedrig.
+
+    **Welche der beiden Zahlen stimmt, ist damit NICHT entschieden.** Die Formel
+    ist mit der Art, wie dieses Werkzeug ``B_gap`` definiert und ``psi_pm``/``Kt``
+    daraus bildet, in sich stimmig; die Messung ist mit der gerechneten Kurve
+    stimmig. Beide koennen nicht zugleich recht haben, und ohne ein konvergiertes
+    Feld oder eine echte Messung laesst sich das hier nicht aufloesen -- der
+    Faktor 1,8 ist die ehrliche Spanne, und er gehoert an jede Zahl.
+    """
+    import math as _m
+
+    import numpy as np
+
+    import ema_analysis
+    import ema_wicklung
+
+    try:
+        em = ema_analysis.run_em_analysis(geom, N=int(N), rotor_angle=0.0,
+                                          iq=i_q, id_=i_d,
+                                          axial_mm=float(axial_mm))
+        br = np.asarray(em["Br_gap"])
+        th = np.asarray(em["theta"])
+        ng = ema_wicklung.nutgeometrie(geom)
+        r = ng["r_si_m"]
+        L = float(axial_mm) / 1000.0
+        n = len(br)
+        w = max(2, int(round(n / max(int(geom["slots"]), 1))))
+        # Ueber ALLE Lagen, nicht nur am Wellenberg: den Zahn bemisst die
+        # Nutteilung mit dem GROESSTEN Fluss, und die liegt nicht zwangslaeufig
+        # dort, wo die Grundwelle ihr Maximum hat.
+        flux = max(abs(float(np.trapezoid(br[i:i + w], th[i:i + w]))) * r * L
+                   for i in range(n - w))
+        b_zahn_mess = flux / max(ng["zahn_breite_m"] * L * STAPELFAKTOR, 1e-12)
+        formfaktor = float(np.mean(np.abs(br)) / max(np.max(np.abs(br)), 1e-12))
+        e = bewerten(geom, axial_mm, float(em["performance"]["B_gap_T"]),
+                     i_q, i_d)
+        return {
+            "ok": True,
+            "B_zahn_formel_T": e["B_zahn_T"],
+            "B_zahn_gemessen_T": round(b_zahn_mess, 3),
+            "verhaeltnis": round(e["B_zahn_T"] / max(b_zahn_mess, 1e-9), 2),
+            "formfaktor": round(formfaktor, 3),
+            "formfaktor_sinus": 0.637,
+            "N": int(N),
+            "text": (f"Formel {e['B_zahn_T']:.2f} T gegen "
+                     f"{b_zahn_mess:.2f} T aus der Luftspaltkurve "
+                     f"(Faktor {e['B_zahn_T'] / max(b_zahn_mess, 1e-9):.2f}). "
+                     f"Ursache ist die EICHUNG: max|Br_fdm| wird auf "
+                     f"_analytical_Bgap gesetzt, das ein Flachdachwert ist — "
+                     f"bei spitzer Kurve (Mittel/Spitze {formfaktor:.2f} gegen "
+                     f"0,64 beim Sinus) skaliert das ganze Feld zu klein. "
+                     f"Welche Zahl stimmt, ist NICHT entschieden."),
+        }
+    except Exception as exc:                                     # noqa: BLE001
+        return {"ok": False, "grund": f"{type(exc).__name__}: {exc}"}
