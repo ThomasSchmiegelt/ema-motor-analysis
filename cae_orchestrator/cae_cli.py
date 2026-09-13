@@ -2225,6 +2225,51 @@ def cmd_welle(args) -> int:
     return EXIT_OK if b["empfehlung"] == "hohlwelle" else 1
 
 
+def cmd_leistung(args) -> int:
+    """Wieviel Leistung gibt diese Geometrie her -- und WAS begrenzt sie?
+
+    Die umgekehrte Frage zu der, die die Pipeline beantwortet. Dort wird eine
+    Last vorgegeben und gerechnet, was herauskommt; ``sicherheit`` sagt hinterher,
+    ob das zulaessig war. Hier wird die Last GESUCHT: je Drehzahl das groesste
+    Moment, bei dem keine Grenze ueber 100 % geht, und dazu die Ausnutzung jeder
+    einzelnen Grenze -- eine bei 40 % ist verschenktes Material.
+
+    Gerechnet wird auf dem schnellen Bewerter (kein FreeCAD, keine FEM), gemessen
+    rund zwei Sekunden fuer eine ganze Kennlinie. Was dieser Pfad NICHT sieht --
+    allen voran die Saettigung -- steht unter jeder Ausgabe.
+
+    Exit: 0 = es gibt einen zulaessigen Betriebspunkt, 1 = keiner.
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    echo_sets(applied)
+    if not (payload.get("geom") or {}):
+        return _die("Keine Geometrie im Payload — leistung braucht geom.", EXIT_USAGE)
+
+    import ema_leistung
+    rpms = None
+    if getattr(args, "rpm", None):
+        rpms = [float(x) for x in args.rpm]
+    erg = ema_leistung.kennlinie(payload, rpms=rpms, N=int(args.n),
+                                 melde=(None if getattr(args, "json", False)
+                                        else lambda m, p=None: print(f"  … {m}")))
+    if erg.get("error"):
+        return _die(str(erg["error"]), EXIT_USAGE)
+    text = ema_leistung.als_text(erg)
+    if getattr(args, "json", False):
+        emit(erg, args)
+    else:
+        print(text)
+    ok = bool(erg.get("P_max_kW"))
+    _ablegen(args, "leistung", text, daten=erg, ok=ok)
+    return EXIT_OK if ok else 1
+
+
 def cmd_rotor_check(args) -> int:
     """2D-Layoutgate lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
     Exit: 0 = Layout OK, 1 = Check abgelehnt (defekte Geometrie)."""
@@ -3539,6 +3584,32 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_sicherheit)
+
+    s = sub.add_parser("leistung",
+                       help="Wieviel Leistung gibt diese Geometrie her? Sucht je "
+                            "Drehzahl das groesste zulaessige Moment und nennt die "
+                            "bindende Grenze samt Ausnutzung aller uebrigen")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--n", type=int, default=140,
+                   help="Rasterweite des Feldlaufs (Vorgabe 140 — der schnelle "
+                        "Bewerter; B_gap und Kt kommen ohnehin aus der Formel)")
+    s.add_argument("--rpm", action="append", type=float, metavar="N",
+                   help="Drehzahl von Hand, mehrfach angebbar (Vorgabe: zehn "
+                        "Stuetzstellen bis zur SICHEREN Drehzahl)")
+    s.add_argument("--projekt", help="Zielprojekt fuer die Ablage")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_leistung)
 
     s = sub.add_parser("welle",
                        help="Vollwelle oder Hohlwelle? Misst am Feld, ob durch die "

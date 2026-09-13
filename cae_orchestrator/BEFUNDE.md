@@ -17,6 +17,65 @@ kann.
 
 ---
 
+## 2026-09-13 — Das „Dauermoment" ist eine Bemessungsformel, keine Thermikrechnung
+
+**Beobachtung.** Beim Bau der Leistungsermittlung (`ema_leistung.py`) stellte sich
+heraus, dass das Werkzeug **zwei einander widersprechende Aussagen über dieselbe
+Größe** führt: `results["power"]["P_cont_max_kW"] = 223,4 kW` für eine Maschine,
+deren Magnete nach dem eigenen Thermikmodell bei einem Bruchteil dieser Last
+schon über 250 °C liegen. Beide Zahlen stehen in derselben `results.json`.
+
+**Messung** (Projekt `20260913_153549_super_auto_52`, Rotor-Ø 188,6, L = 150 mm,
+Kühlung `forced`, NdFeB N35 mit 80 °C Dauergrenze):
+
+| Quelle | Dauermoment | was daraus folgt |
+|---|---:|---|
+| `ema_thermal.rated_torque` (2·σ·V_rotor, σ aus `COOLING_RATING`) | **122,6 Nm** | Kurve „Dauer" im Kennfeld, `P_cont_max_kW = 223,4`, `cont_limited_by = "kuehlung"` |
+| dasselbe LPTN-Netz, stationär, bei genau 122,6 Nm und 4440 1/min | — | Magnet **277,6 °C**, Wicklung **293,6 °C**, P_verlust 2832 W |
+| Bisektion gegen die Grenzen aus `ema_sicherheit` | **30,0 Nm** | 13,9 kW bei 4440 1/min |
+
+Das sind **Faktor 4,1 im Moment und Faktor 16 in der Leistung**. Der Magnet steht
+am Bemessungsmoment auf **347 %** seiner Grenze.
+
+Ab 7400 1/min ist die Maschine nach dem LPTN **im Leerlauf** unzulässig (Magnet
+110 % bei 0,05 Nm, steigend auf 175 % bei 14.800 1/min) — dort binden allein die
+drehzahlabhängigen Verluste. Das Kennfeld weist für dieselben Drehzahlen
+ungebrochen 204,0 Nm Spitzenmoment aus.
+
+**Fundstelle.** `ema_thermal.rated_torque` (`ema_thermal.py:72`) rechnet
+`T = 2·σ·V_rotor` — die klassische Bemessungsbeziehung über die
+Luftspaltschubspannung. Das ist als Auslegungs*schätzung* richtig und auch so
+dokumentiert („standard electromagnetic sizing relation"). Zum Mangel wird es
+durch die **Beschriftung**: `ema_analysis.power_envelope` nimmt den Wert als
+`T_rated_Nm`, nennt die damit gedeckelte Kurve „continuous" und setzt
+`cont_limited_by = "kuehlung"` — eine ausdrückliche Aussage darüber, dass die
+Kühlung binde. Geprüft hat das gegen das Thermikmodell nie jemand; die beiden
+Pfade berühren sich an keiner Stelle.
+
+**Warum das zählt.** σ kommt aus einem Preset je Kühlungsart und kennt weder die
+Verlustleistung dieser Maschine noch ihre Wärmewiderstände noch die Drehzahl. Bei
+einer schnelldrehenden Maschine mit hohen Eisen- und Magnetverlusten liegt es
+deshalb systematisch zu hoch — und zwar genau dort, wo die Magnete ohnehin das
+bindende Bauteil sind. Eine Zahl, die „Dauerleistung" heißt und das Sechzehnfache
+des thermisch Zulässigen nennt, ist schlechter als keine.
+
+**Was NICHT entschieden ist.** Welche der beiden Seiten danebenliegt, ist hier
+nicht geklärt und gehört in die Thermik, nicht in die Leistungsermittlung: es
+kann ebenso gut sein, dass die LPTN-Wärmewiderstände für diese Baugröße zu
+pessimistisch sind. Beides zusammen zu messen hieße, das Thermikmodell gegen eine
+Messung zu halten, und die gibt es hier nicht.
+
+**Status: offen, gemeldet.** Nicht repariert — nach der Hausregel bekommt ein
+Werkzeug, das man für falsch hält, einen Befund und keine stille Reparatur; eine
+geänderte `rated_torque` verschöbe rückwirkend jede abgelegte Dauerleistung.
+`ema_leistung.kennlinie` **rechnet die Gegenprobe bei jedem Lauf** (Feld
+`widerspruch`) und druckt sie als „⚠ WIDERSPRUCH im Werkzeug" über die Kennlinie,
+sobald das Bemessungsmoment eine Grenze um mehr als 5 % reißt. Damit steht der
+Widerspruch neben beiden Zahlen, statt dass jemand sie für zwei Meinungen über
+dieselbe Maschine hält.
+
+---
+
 ## 2026-09-13 — Parameterstudie und Zielwertsuche fragen das Layouttor NICHT
 
 **Beobachtung (vom Nutzer gemeldet).** Eine Polpaar-Studie über p = 1…8 lieferte
