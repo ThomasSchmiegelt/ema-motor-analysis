@@ -1420,6 +1420,7 @@ abgelegten Rechnungen des Projekts; kopiert und gepostet wird von Hand.
 
 - FreeCAD-1.1-Quellbuild + CalculiX → `/opt/cae-tools/freecad_1.1_quellcode` (Symlink `~/freecad_1.1_quellcode`). `ccx` 2.23 wird von dort auch **ohne** FreeCAD aufgerufen
 - **Z88Aurora®** V5 → `/opt/z88aurora` (2,8 GB, nur die Stapel-Löser werden benutzt) — Freeware des Lehrstuhls für Konstruktionslehre und CAD (LCAD), Universität Bayreuth, von Prof. Dr.-Ing. Frank Rieg; Lizenz und ein Hinweis zur Herleitung der Dateiformate in `THIRD-PARTY-NOTICES.md`. `z88r` findet sein eigenes MKL nicht — `LD_LIBRARY_PATH` auf `/opt/z88aurora/bin/ubuntu64` ist der ganze Trick. **Z88Arion gibt es nicht für Linux**
+- **Code Aster 17.4.0** (EDF) → `~/aster-build`, aus einem ausgepackten Salome-Meca-SIF-Abbild — der dritte Struktur-Löser neben CalculiX und Z88. **GPL-3.0-or-later**; kein Aster-Quellcode in diesem Repo, gerufen wird ein eigener Prozess mit Asters eigenem Python (`env_aster.sh` → `$ASTER_PYTHON`). S. `THIRD-PARTY-NOTICES.md`
 - Gmsh — das benutzte ist das **Python-Modul im venv** (4.15.2, aus `requirements.txt`); `/usr/bin/gmsh` (4.12.1) liegt daneben und wird nicht gebraucht
 - Portables Blender → `/opt/cae-tools/blender_portable` (Symlink `~/blender_portable`)
 - OpenFOAM v2406 (`/usr/lib/openfoam`), Elmer, CUDA, pandoc/pdflatex — systemweit

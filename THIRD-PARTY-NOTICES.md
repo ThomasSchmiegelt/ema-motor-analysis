@@ -55,7 +55,9 @@ baut sie selbst (s. `pikogk/EXPERIENCE_REPORT.md` und die `install.sh`-Skripte).
 | Blender | Mantaflow-FLIP-Fluidsimulation | GPL-3.0 |
 | Ollama + verwendete Modelle | lokale LLM-Dienste | Ollama MIT; Modelle mit je eigenen Bedingungen (das Standardmodell `qwen-gross`/`qwen3.8` = Qwen3.5 27B weist in seinen GGUF-Metadaten `general.license = apache-2.0` aus) |
 | **FluidX3D** — [ProjectPhysX](https://github.com/ProjectPhysX/FluidX3D) | Lattice-Boltzmann mit freier Oberfläche auf der GPU (`ema_fluidx3d.py`) | **eigene Lizenz — schränkt die NUTZUNG ein, s. eigenen Abschnitt unten** |
+| **Code Aster 17.4.0** — [EDF](https://code-aster.org) | dritter Struktur-Löser (`cae_orchestrator/ema_aster.py`), aus einem entpackten Salome-Meca-Abbild unter `~/aster-build` | **GPL-3.0-or-later**, s. eigenen Abschnitt unten |
 | PI — [`@earendil-works/pi-coding-agent`](https://github.com/earendil-works/pi) | Agenten-Harness für die Bedienung per lokalem Modell (`start_agent.sh`) | MIT |
+| Hermes Agent 0.20.5 — [Nous Research](https://github.com/NousResearch/hermes-agent) | zweiter Agentenkopf (`start_hermes.sh`, `hermes acp`) | MIT (c) 2025 Nous Research |
 | .NET 9 Runtime/SDK | Laufzeit des `pikogk`-Dienstes | MIT |
 
 **Zu PicoGK im Besonderen:** Die Unterverzeichnisse `pikogk/PicoGK/`,
@@ -112,12 +114,45 @@ diesem Repo.
 
 **Z88Arion** (Topologieoptimierung) wird **nicht** benutzt — es gibt keinen Linux-Bau.
 
+### Code Aster 17.4.0 (EDF)
+
+**Vorausgesetzt, nicht mitverbreitet.** Liegt lokal unter `~/aster-build` (aus
+einem entpackten Salome-Meca-SIF-Abbild) und wird als **dritter Struktur-Löser**
+neben CalculiX und Z88 benutzt. Dieses Repo enthält **keinen Aster-Quellcode**;
+mitverbreitet sind allein `cae_orchestrator/ema_aster.py` und `test_aster.py`,
+die Asters eigenes `.mail`-Format schreiben und die Ergebnisse zurücklesen.
+
+Lizenz: **GPL-3.0-or-later**, gemessen an `~/aster-build/src/src/LICENSE` (GNU
+GPL Version 3) und am Kopf jeder Quelldatei: *„Copyright (C) 1991 - 2026 - EDF -
+www.code-aster.org … either version 3 of the License, or (at your option) any
+later version."*
+
+**Wie Aster gerufen wird, ist hier lizenzrelevant und deshalb ausgeschrieben:**
+Aster 17 läuft als **Bibliothek** (`import code_aster`), aber **nicht in diesem
+Prozess** — `ema_aster.loese` startet
+`bash -lc 'source env_aster.sh; exec "$ASTER_PYTHON" rechnung.py'`, also einen
+eigenen Prozess mit Asters eigenem Python. Der Orchestrator importiert
+`code_aster` an keiner Stelle; ausgetauscht werden Dateien. Das ist derselbe
+Abstand wie zu CalculiX, OpenFOAM, Blender und Z88 — und ein anderer als zu
+**Gmsh**, das im selben Prozess importiert wird (s. nächster Abschnitt).
+
 ### Gmsh
 
 **Vorausgesetzt, nicht mitverbreitet.** Benutzt wird das Python-Modul `gmsh` (4.15.2)
 im venv des Orchestrators, installiert ueber `requirements.txt`; `/usr/bin/gmsh` (4.12.1)
 liegt daneben und wird nicht gebraucht. Gmsh steht unter der GNU GPL v2+
-mit Ausnahmen; siehe <https://gmsh.info/>.
+mit Ausnahmen; siehe <https://gmsh.info/>. Gemessen am installierten Paket:
+`gmsh-4.15.2.dist-info/METADATA` weist `License: GPLv2+` aus.
+
+**Das ist die engste Kopplung dieser Liste** und der Grund, warum der Abschnitt
+mehr als eine Zeile bekommt: Gmsh wird **im selben Python-Prozess importiert**
+(`import gmsh` in `ema_deck.py`, `ema_em3d.py`, `ema_em2d_harm.py`,
+`ema_em3d_harm.py`) — nicht als Unterprozess wie CalculiX, Aster, OpenFOAM,
+Blender und Z88. Wer die Lizenz dieses Repositories ändern will, fängt hier an
+zu prüfen: die GPL untersagt in **§6 (v2)** bzw. **§10 (v3)** ausdrücklich,
+Empfängern *weitere* Beschränkungen aufzuerlegen. Solange dieses Repo unter MIT
+steht, stellt sich die Frage nicht; eine Klausel „nicht kommerziell" oder „nicht
+militärisch" über dem eigenen Code stellt sie sofort.
 
 ### FluidX3D (Dr. Moritz Lehmann / ProjectPhysX)
 
