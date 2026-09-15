@@ -28,7 +28,7 @@
 set -euo pipefail
 
 MODEL="qwen-gross:latest"
-MODEL_ID="ca8ec377441f"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
+MODEL_ID="1bb3a46c5021"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
 # 02.09.2026 nachgezogen: qwen-gross wurde auf qwen3.8:27b-mtp-q4_K_M neu gebaut
 # (identische Blobs, nur num_ctx 65536 ergaenzt). Der Wechsel ist geprueft und
 # gewollt: MTP-Spekulativdekodierung, warm gemessen 93,1 statt 86,7 tok/s bei

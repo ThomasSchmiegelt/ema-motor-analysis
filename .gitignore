@@ -107,3 +107,24 @@ magnetvergleich_warteschlange.log
 # Dieses Repo fuehrt einen Trainingsdatensatz und eine Wissensbasis — der
 # Quelltext darf also weder dorthin noch hier hinein.
 /FluidX3D/
+
+# ai_framework — EIGENES Repo auf der Platte (hat sein eigenes .git), kein
+# Teil dieses Monorepos. 1,1 GB, davon 870 MB venv und 142 MB Modellgewichte;
+# ein `git add -A` haette sie mitgenommen und der Push waere an GitHubs
+# Dateigrenze gescheitert. Dieselbe Behandlung wie die pikogk-Unterbaeume und
+# FluidX3D: auf der Platte daneben, hier ausgeschlossen statt als gitlink.
+/ai_framework/
+
+# Laufzeitartefakte, die beim Arbeiten anfallen und nichts aussagen:
+# das Serverprotokoll waechst je Lauf, `fort.8`/`fort.9` sind Fortran-
+# Kratzdateien eines Loesers (meist leer), und `fehlermeldung` ist ein von Hand
+# hineinkopierter Fehlertext. Keines davon ist Quelle oder Ergebnis.
+server.log
+fort.[0-9]
+fort.[0-9][0-9]
+fehlermeldung
+
+# Persoenliche Wiederaufnahme-Skripte wie `restart.sh` oben: sie tragen eine
+# Sitzungskennung bzw. den eigenen FluidX3D-Fall des Menschen (Laval-Duese).
+restartlaval.sh
+restopen.sh
