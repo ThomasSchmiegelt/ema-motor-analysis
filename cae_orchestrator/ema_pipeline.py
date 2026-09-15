@@ -1138,8 +1138,13 @@ def render_preview_frame(data: dict) -> dict:
         # expensive high-N factorisation for the single displayed frame.
         em0   = ema_analysis.run_em_analysis(geom, N=min(N, 250), rotor_angle=0.0)
         b_gap = em0["performance"]["B_gap_T"]
+        # ``rpm_base=rpm`` hiesse: dieser Punkt liegt per Definition an der
+        # Eckdrehzahl, also NIE Feldschwaechung -- ein Vorschaubild bei
+        # 20.000 min-1 saehe dann anders aus als derselbe Frame im Lauf.
+        # ``rpm_base=None`` laesst ``estimate_dq_currents`` die Eckdrehzahl
+        # selbst rechnen (dieselbe Formel, ``ema_analysis.eckdrehzahl``).
         iq, id_ = ema_analysis.estimate_dq_currents(
-            geom, rpm, load_nm, b_gap_t=b_gap, rpm_base=rpm)
+            geom, rpm, load_nm, b_gap_t=b_gap, rpm_base=None)
         # No sf_ref needed: run_em_analysis now calibrates the magnet and stator
         # fields separately (magnet → analytical B_gap, armature → analytical
         # B_arm), so both are physically scaled here and the magnets stay visible
@@ -2312,7 +2317,20 @@ def run_pipeline(data: dict, state: dict, frames: list,
         n_rpms     = len(sweep_rpms)
         poles      = int(geom["p"]) * 2
         pole_pitch = 2 * math.pi / poles
-        rpm_base   = float(sweep_rpms[0])
+        # Die ECKDREHZAHL, nicht die erste Zeile der Bilderliste. Hier stand
+        # ``float(sweep_rpms[0])`` -- der vom Menschen gewaehlte Anfang des
+        # Drehzahlbands der Feldanimation. Sie geht an JEDEN
+        # ``estimate_dq_currents``-Aufruf dieses Laufs und an
+        # ``cycle_loss_series``, und dort stellt sie die Feldschwaechung:
+        # ``fw = clip((rpm - rpm_base)/rpm_base, 0, 1.5)``. Gemessen an einem
+        # WLTP-Lauf mit Bandanfang 600 min-1 stand ``fw`` ueber den ganzen
+        # Zyklus am Anschlag: Eisenverlust x0,20 und 98,9 % des ausgewiesenen
+        # Kupferverlusts waren ein Feldschwaechstrom, den es nicht gibt --
+        # die wirkliche Eckdrehzahl dieser Maschine liegt ueber 40.000 min-1.
+        # Siehe BEFUNDE.md, 15.09.2026.
+        rpm_base   = ema_analysis.eckdrehzahl(geom, float(perf["B_gap_T"]))
+        _log(state, f"   Eckdrehzahl {rpm_base:.0f} U/min "
+                    f"(darueber Feldschwaechung)", 38)
         # Always include rotate (the main viewer depends on its RPM machinery).
         # Field animation is a slow, selectively re-runnable stage: when not chosen
         # in a partial re-run, leave field_modes empty so every per-mode loop below
@@ -2327,8 +2345,11 @@ def run_pipeline(data: dict, state: dict, frames: list,
         videos = {}
         if field_modes:   # skip the extra reference solve entirely when no field work
             # vmax for a consistent colormap across all frames (from loaded base field)
+            # Erste Drehzahl des Bandes als Betriebspunkt (das ist der Frame,
+            # gegen den der Farbdeckel gesetzt wird), Eckdrehzahl als Eckdrehzahl.
             _iq0, _id0 = ema_analysis.estimate_dq_currents(
-                geom, rpm_base, load_nm, b_gap_t=perf["B_gap_T"], rpm_base=rpm_base)
+                geom, float(sweep_rpms[0]), load_nm,
+                b_gap_t=perf["B_gap_T"], rpm_base=rpm_base)
             # saturate=True like the frames themselves — sonst leitet der Farbdeckel
             # aus einem LINEAREN Feld ab, das im Rotor 3…18 T zeigt (µr=500 ohne
             # Sättigungsknie), und die Frames werden gegen eine Skala normiert, die
@@ -2470,7 +2491,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
             import ema_saettigung
             _iqs, _ids = ema_analysis.estimate_dq_currents(
                 geom, rpm_to, load_nm, b_gap_t=float(perf["B_gap_T"]),
-                rpm_base=rpm_from) if (rpm_to > 0 and load_nm > 0) else (0.0, 0.0)
+                rpm_base=rpm_base) if (rpm_to > 0 and load_nm > 0) else (0.0, 0.0)
             # Die GEMESSENE Luftspaltkurve mitgeben: die Grundwelle kennt bei
             # q = 1 nur drei verschiedene Zahnwerte (Spreizung 2,0), die
             # gerechnete Kurve streut gemessen um Faktor 7,5. Fuer ein Bild, das
@@ -2946,7 +2967,12 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 series = ema_thermal.cycle_loss_series(
                     drv, geom, axial, perf, mat, st_mat, hp_mat, mag,
                     cooling=cooling, rpm_base=rpm_base)
-                res = ema_drivecycle.cycle_energy(drv, series, veh)
+                res = ema_drivecycle.cycle_energy(drv, series, veh,
+                                                  rpm_max_zul=max_safe_rpm)
+                for _w in ([res.get("overload_warning"), res.get("speed_warning")]
+                           + list(res.get("fahrzeug_warnungen") or [])):
+                    if _w:
+                        _log(state, f"   {_w}", 96)
                 b64 = _drivecycle_chart(cyc_obj, drv, res)
                 _save_png_b64(b64, os.path.join(proj, "charts", f"{chart_key}.png"))
                 res["chart_b64"]  = b64
@@ -3109,7 +3135,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
             # Bericht (_single_md_tables), der Ergebnisreiter und ema_db. Ein
             # Kennwert, der nur im Bewerter steht, ist fuer sie alle nicht da.
             **_saettigung_summary(geom, axial, perf, st_mat,
-                                  rpm_to, load_nm, rpm_from),
+                                  rpm_to, load_nm, rpm_base),
             "structural_ok":   structural_ok,
             # WORAUF die Festigkeitsaussage beruht. Ohne das steht ein gruenes
             # structural_ok auch dann da, wenn die FEM gar nicht gelaufen ist —

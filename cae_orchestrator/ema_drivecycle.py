@@ -97,14 +97,97 @@ def _build_wltp3b() -> np.ndarray:
 
         t_prev = t_end
 
-    # Smooth slightly (acceleration limit) — 3-point moving average twice
-    v = np.convolve(v, np.ones(3) / 3, mode="same")
-    v = np.convolve(v, np.ones(3) / 3, mode="same")
-    np.clip(v, 0, None, out=v)
-    return v
+    return _profil_abschluss(v, "wltp3")
 
 
 _WLTP_CACHE: dict = {}
+
+
+# Beschleunigungsbaender je Zyklus [m/s^2], (vorwaerts, bremsend).
+# Sie sind KEIN Fahrzeugmodell, sondern die Eigenschaft des FAHRPROFILS: was ein
+# Zyklus verlangt, unabhaengig davon, wer ihn faehrt. WLTP Class 3b liegt real
+# bei +1,67 / -1,50; die synthetischen Segmentrampen dieses Moduls liefen ohne
+# Begrenzung auf +3,0 / -8,1 (3,8 % der 1801 Sekunden ausserhalb des Bandes),
+# und daraus kam gemessen die Momentenspitze einer ganzen Auslegung.
+# Siehe BEFUNDE.md, 15.09.2026.
+BESCHLEUNIGUNG_BAND = {
+    "wltp3":     (1.67, 1.50),   # Class 3b, Normwerte
+    "vollast":   (2.50, 3.50),   # Autobahnsprint, sportlicher Pkw
+    "stadtland": (2.00, 2.50),   # Stadt mit Anfahren/Halten
+    "anhaenger": (1.00, 1.50),   # 3,5-t-Gespann am Berg
+}
+
+
+def _ausrollen(v: np.ndarray, a_brems: float) -> np.ndarray:
+    """Den Zyklus im STAND enden lassen, mit zulaessiger Verzoegerung.
+
+    Alle drei synthetischen Profile legen ``np.zeros(TOTAL_T + 1)`` an und
+    fuellen die Phasen ueber ``[t_start, t_end)`` -- der **letzte** Abtastwert
+    wird dabei nie beschrieben und bleibt 0. Gemessen am WLTP-3b-Profil steht
+    dort 0 km/h neben 131,3 km/h, also ``a = -36 m/s^2`` in einer Sekunde; die
+    anschliessende Glaettung verteilt den Sprung auf die letzten Punkte und
+    macht ihn dadurch unauffaellig, nicht kleiner.
+    """
+    v = np.asarray(v, dtype=float).copy()
+    v[-1] = v[-2]
+    n = len(v)
+    for k in range(1, n):
+        i = n - 1 - k
+        if v[i] / 3.6 / a_brems <= k:          # Rest reicht zum Anhalten
+            v[i + 1:] = np.linspace(v[i], 0.0, k + 1)[1:]
+            break
+    return v
+
+
+def _rate_begrenzen(v: np.ndarray, a_plus: float, a_minus: float) -> np.ndarray:
+    """v(t) auf das Beschleunigungsband des Zyklus klemmen (1 Hz, km/h)."""
+    v = np.asarray(v, dtype=float).copy()
+    for i in range(1, len(v)):
+        v[i] = min(max(v[i], max(0.0, v[i - 1] - a_minus * 3.6)),
+                   v[i - 1] + a_plus * 3.6)
+    return v
+
+
+def _profil_abschluss(v: np.ndarray, band: str, fenster: int = 3,
+                      mal: int = 2) -> np.ndarray:
+    """Letzter Abtastwert, Ausrollen, Beschleunigungsband, Glaettung.
+
+    Die EINE Stelle, an der ein synthetisches Profil fertig gemacht wird --
+    vorher stand in jedem Bauer ein eigener Schluss, und in zweien fehlte er.
+    """
+    a_plus, a_minus = BESCHLEUNIGUNG_BAND[band]
+    # Reihenfolge: erst den nie gefuellten letzten Wert setzen, dann glaetten,
+    # DANN ausrollen und begrenzen. Andersherum verschmiert die Glaettung die
+    # Ausrollrampe und ein anschliessendes ``v[-1] = 0`` reisst genau den
+    # Sprung wieder auf, der hier verschwinden soll (gemessen -2,14 m/s^2 im
+    # WLTP, wo das Band -1,50 erlaubt).
+    v = np.asarray(v, dtype=float).copy()
+    v[-1] = v[-2]
+    v = _glaetten(v, fenster, mal)
+    v = _rate_begrenzen(_ausrollen(v, a_minus), a_plus, a_minus)
+    np.clip(v, 0.0, None, out=v)
+    return v
+
+
+def _glaetten(v: np.ndarray, fenster: int = 3, mal: int = 2) -> np.ndarray:
+    """Gleitender Mittelwert, an den RAENDERN fortgesetzt statt nullgepolstert.
+
+    ``np.convolve(..., mode="same")`` polstert mit Nullen. Der letzte Abtastwert
+    wird dadurch zum Nachbarn einer gedachten 0 und nach unten gezogen — zweimal
+    angewandt umso mehr. Gemessen am WLTP-3b-Profil (Endgeschwindigkeit
+    43,8 km/h): ``a = -12,1 m/s^2`` im letzten Punkt, und weil das Spitzenmoment
+    eines Zyklus ueber ``max|T|`` gesucht wird, kam die **Momentenspitze der
+    ganzen Auslegung** aus diesem Randeffekt — 153,1 Nm bei t = 1800 s gegen
+    134,6 Nm im eigentlichen Profil. Siehe BEFUNDE.md, 15.09.2026.
+
+    Mit ``mode="edge"`` vorgepolstert bleibt der Randwert der Randwert; das
+    Verfahren ist im Inneren unveraendert (dort polstert niemand).
+    """
+    k = np.ones(fenster) / fenster
+    rand = fenster // 2
+    for _ in range(mal):
+        v = np.convolve(np.pad(v, rand, mode="edge"), k, mode="valid")
+    return v
 
 
 def wltp_class3() -> dict:
@@ -197,10 +280,7 @@ def _build_vollast() -> np.ndarray:
         np.clip(v[t_start:t_end], 0, v_peak, out=v[t_start:t_end])
         t_prev = t_end
 
-    v = np.convolve(v, np.ones(3) / 3, mode="same")
-    v = np.convolve(v, np.ones(3) / 3, mode="same")
-    np.clip(v, 0, None, out=v)
-    return v
+    return _profil_abschluss(v, "vollast")
 
 
 _VOLLAST_CACHE: dict = {}
@@ -294,9 +374,7 @@ def _build_stadtland() -> np.ndarray:
             i = seg_end
         t_prev = t_end
 
-    v = np.clip(v, 0.0, None)
-    v[-1] = 0.0                       # der Zyklus endet im Stand
-    return v
+    return _profil_abschluss(v, "stadtland")
 
 
 _STADTLAND_CACHE: dict = {}
@@ -444,8 +522,11 @@ def _build_anhaenger(max_grade_pct: float = DEFAULT_TRAILER_GRADE_PCT
         t_prev = t_end
 
     # Smooth both profiles
-    v   = np.convolve(v,   np.ones(5) / 5, mode="same")
-    slp = np.convolve(slp, np.ones(9) / 9, mode="same")
+    # Die Steigung wird mit RANDFORTSETZUNG geglaettet: nullgepolstert liefe der
+    # Pass an beiden Enden gegen die Ebene, also genau dort, wo der Zyklus mit
+    # dem hoechsten bzw. tiefsten Moment anfaengt und aufhoert.
+    slp = _glaetten(slp, fenster=9, mal=1)
+    v   = _profil_abschluss(v, "anhaenger", fenster=5, mal=1)
     np.clip(v, 0, ANHAENGER_V_CAP, out=v)   # trailer speed limit (Tempo 100)
     return v, slp, phases
 
@@ -546,6 +627,49 @@ DEFAULT_VEHICLE = {
     "regen_frac":  0.55,    # fraction of braking energy recuperated
     "slope_deg":   0.0,
 }
+
+
+# Die Grenzen des Fahrzeugblocks -- EINE Quelle fuer Oberflaeche und Pruefung.
+# Die Felder in ``ema.html`` trugen ihre eigenen ``min``/``max``, und ein
+# ``max`` an einem ``<input type="number">`` faerbt das Feld nur ungueltig:
+# gelesen wird ``+el.value``, und der Server prueft den ``vehicle``-Block gar
+# nicht. Gemessen ging so eine Uebersetzung von 80 durch ein Feld, das selbst
+# ``max="20"`` sagt. Siehe BEFUNDE.md, 15.09.2026.
+#   (unten, oben, Einheit, Bezeichnung)
+FAHRZEUG_GRENZEN = {
+    "mass_kg":    (40.0, 40000.0, "kg",  "Fahrzeugmasse"),
+    "cwA_m2":     (0.2,  12.0,    "m^2", "Luftwiderstandsflaeche c_w*A"),
+    "cr":         (0.003, 0.05,   "",    "Rollwiderstandsbeiwert"),
+    # HALBMESSER, nicht Durchmesser: ``compute_drivetrain`` rechnet
+    # ``omega_w = v / r_wheel_m``. 0,10 m ist ein Rollerrad, 0,80 m ein Lkw-Rad.
+    "r_wheel_m":  (0.10, 0.80,    "m",   "Radhalbmesser"),
+    # 100 ist die Obergrenze dessen, was ``ema_getriebe`` zweistufig planetar
+    # auslegen kann -- NICHT eine Aussage darueber, ob sie zur Maschine passt.
+    # Das entscheidet die Drehzahlpruefung in ``cycle_energy``.
+    "gear_ratio": (0.5,  100.0,   "",    "Getriebeuebersetzung"),
+    "eta_drive":  (0.5,  1.0,     "",    "Antriebsstrangwirkungsgrad"),
+    "regen_frac": (0.0,  1.0,     "",    "Rekuperationsanteil"),
+    "slope_deg":  (-20.0, 20.0,   "Grad","Steigung"),
+}
+
+
+def fahrzeug_pruefen(vehicle: dict) -> list:
+    """Werte ausserhalb ``FAHRZEUG_GRENZEN`` benennen -- nicht klemmen.
+
+    Geklemmt saehe der Wert fuer den Aufrufer wie ein angenommener aus (dieselbe
+    Haltung wie ``cae_cli --set``, das Grenzverletzungen abweist statt zu
+    klemmen). Abgewiesen wuerde ein bestehendes Projekt unrechenbar. Also
+    gerechnet **und** gesagt.
+    """
+    aus = []
+    for k, (lo, hi, einheit, name) in FAHRZEUG_GRENZEN.items():
+        w = (vehicle or {}).get(k)
+        if not isinstance(w, (int, float)):
+            continue
+        if w < lo or w > hi:
+            aus.append(f"⚠ {name} ({k}) = {w:g} {einheit}".rstrip() +
+                       f" liegt ausserhalb von {lo:g}…{hi:g}")
+    return aus
 
 
 def _eta_getriebe(getr: dict, P_ab_W, rpm_ein) -> "np.ndarray":
@@ -692,6 +816,7 @@ def compute_drivetrain(cycle: dict, vehicle: dict) -> dict:
     )
 
     return {
+        "fahrzeug_warnungen": fahrzeug_pruefen(vehicle),
         "t":         t,
         "v_kmh":     v_kmh,
         "v_ms":      v,
@@ -706,13 +831,23 @@ def compute_drivetrain(cycle: dict, vehicle: dict) -> dict:
 
 # ── Energy + loss budget ─────────────────────────────────────────────────────
 
-def cycle_energy(drv: dict, loss_series: dict, vehicle: dict) -> dict:
+def cycle_energy(drv: dict, loss_series: dict, vehicle: dict,
+                 rpm_max_zul: float = 0.0) -> dict:
     """Integrate energy over the cycle and break down losses.
 
     loss_series: per-timestep loss arrays from ``ema_thermal.cycle_loss_series``
     (current-density copper + Bertotti iron + rpm² magnet + rpm bearing). This is
     the single source of truth shared with the thermal model — no scaling from a
     free reference torque.
+
+    ``rpm_max_zul``: die zulaessige Hoechstdrehzahl (aus der Strukturkennlinie,
+    ``results["max_safe_rpm"]``). Die Ueberlastpruefung sah bis zum 15.09.2026
+    **nur** das Moment — ein Zyklus, der die Maschine mit dem 2,94-fachen der
+    FEM-Grenze dreht, lief ohne ein Wort durch, obwohl die Grenze im selben
+    ``results.json`` stand. Bei einem Fahrzeug ist die Uebersetzung der Hebel
+    (``rpm_motor = v/(2*pi*r_rad) * i``), deshalb nennt die Meldung die noch
+    zulaessige Uebersetzung. 0 = nicht geprueft (dann steht ``None`` da, nicht
+    „bestanden" — siehe BEFUNDE.md, 15.09.2026.)
     """
     t     = drv["t"]
     dt    = float(np.mean(np.diff(t)))               # 1 s typically
@@ -781,6 +916,18 @@ def cycle_energy(drv: dict, loss_series: dict, vehicle: dict) -> dict:
         f"— thermisch dauerhaft überlastet"
     ) if T_rated > 0 and T_rms > T_rated else None
 
+    # Drehzahl gegen die Festigkeit. Die zweite Haelfte der Ueberlastpruefung.
+    rpm_max = float(np.max(rpm))
+    speed_warning = None
+    if rpm_max_zul and rpm_max_zul > 0 and rpm_max > rpm_max_zul:
+        _t = (f"⚠ Zyklus-n_max={rpm_max:.0f} U/min > zulässig "
+              f"{rpm_max_zul:.0f} U/min (Faktor {rpm_max / rpm_max_zul:.2f})")
+        i_ist = float((vehicle or {}).get("gear_ratio") or 0.0)
+        if not lastspiel and i_ist > 0:
+            _t += (f" — bei dieser Fahrt trägt die Übersetzung: {i_ist:.1f} "
+                   f"statt höchstens {i_ist * rpm_max_zul / rpm_max:.1f}")
+        speed_warning = _t
+
     # Operating-point cloud (sub-sample 1:5 to keep response size sane)
     sub = slice(None, None, 5)
     op_points = {
@@ -817,5 +964,9 @@ def cycle_energy(drv: dict, loss_series: dict, vehicle: dict) -> dict:
         "T_rms":          round(T_rms, 1),
         "T_rated_Nm":     round(T_rated, 1),
         "overload_warning": overload_warning,
+        "fahrzeug_warnungen": list(drv.get("fahrzeug_warnungen") or []),
+        # None = nicht geprueft (keine Drehzahlgrenze uebergeben), nicht „ok".
+        "speed_warning":  speed_warning,
+        "rpm_max_zul":    round(rpm_max_zul, 0) if rpm_max_zul else None,
         "op_points":      op_points,
     }

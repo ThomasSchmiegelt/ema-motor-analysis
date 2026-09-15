@@ -1639,15 +1639,13 @@ def text2ema():
 
 
 def _rpm_base_von(ema_analysis, geom, perf, v_dc_1t):
-    """Eckdrehzahl wie in ``estimate_dq_currents`` -- eine Formel, zwei Nutzer."""
-    import math as _m
-    try:
-        emf_1 = ema_analysis.compute_performance(
-            geom, float(perf["B_gap_T"]), 1000.0)["emf_peak_V"]
-        v_max = float(v_dc_1t) / _m.sqrt(3.0)
-        return 1000.0 * 0.4 * v_max / emf_1 if emf_1 > 0 else 5000.0
-    except Exception:                                            # noqa: BLE001
-        return 5000.0
+    """Eckdrehzahl -- die Rechnung steht in ``ema_analysis.eckdrehzahl``.
+
+    Hier stand bis zum 15.09.2026 eine Abschrift der Formel. Sie war richtig,
+    aber eine zweite Fassung derselben Zahl ist genau das, woran die Pipeline
+    gescheitert ist (``BEFUNDE.md``, 15.09.2026).
+    """
+    return ema_analysis.eckdrehzahl(geom, float(perf["B_gap_T"]), v_dc_1t)
 
 
 @app.route("/umrichter", methods=["POST"])

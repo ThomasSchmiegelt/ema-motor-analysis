@@ -84,6 +84,28 @@ def _zyklus_temperaturen(results: dict) -> list:
     return aus
 
 
+def _zyklus_drehzahlen(results: dict) -> list:
+    """Je Fahrzyklus die geforderte Hoechstdrehzahl samt Uebersetzung.
+
+    Das Kriterium ``drehzahl`` prueft die vom Menschen EINGETRAGENE Betriebs-
+    hoechstdrehzahl (``payload.rpm_to``). Was ein Fahrzyklus wirklich verlangt,
+    stand dort nie: ``rpm_motor = v/(2*pi*r_rad) * i``, und die Uebersetzung ist
+    ein freies Zahlenfeld ohne jede Pruefung (gemessen 80 bei einer Maske, die
+    selbst ``max="20"`` sagt). Siehe BEFUNDE.md, 15.09.2026.
+    """
+    aus = []
+    for key, res in (results or {}).items():
+        if not key.startswith("drivecycle") or not isinstance(res, dict):
+            continue
+        n = res.get("rpm_max")
+        if not isinstance(n, (int, float)) or n <= 0:
+            continue
+        veh = res.get("vehicle") or {}
+        aus.append({"zyklus": res.get("cycle_name") or key, "rpm_max": float(n),
+                    "i": veh.get("gear_ratio"), "r_rad": veh.get("r_wheel_m")})
+    return aus
+
+
 def _groesstes(werte):
     """Groesster Wert samt seiner Herkunft — ``(wert, woher)``, sonst (None, '')."""
     gefiltert = [(v, w) for v, w in werte if isinstance(v, (int, float))]
@@ -158,6 +180,21 @@ def pruefen(results: dict, meta: dict | None = None) -> dict:
                        f"sichere Drehzahl {msr:.0f} 1/min gegen Betriebsmaximum "
                        f"{rpm_to:.0f} 1/min", msr, rpm_to, "1/min",
                        quelle="summary.max_safe_rpm"))
+
+    # ── Drehzahl, die der Fahrzyklus WIRKLICH verlangt ───────────────────────
+    if isinstance(msr, (int, float)) and msr > 0:
+        zdn = _zyklus_drehzahlen(results)
+        if zdn:
+            schlimmster = max(zdn, key=lambda z: z["rpm_max"])
+            n_ist = schlimmster["rpm_max"]
+            txt = (f"{schlimmster['zyklus']} verlangt {n_ist:.0f} 1/min gegen "
+                   f"sichere {msr:.0f} 1/min")
+            if n_ist > msr and isinstance(schlimmster.get("i"), (int, float)) \
+                    and schlimmster["i"] > 0:
+                txt += (f" — Uebersetzung {schlimmster['i']:.1f}, zulaessig waere "
+                        f"hoechstens {schlimmster['i'] * msr / n_ist:.1f}")
+            krit.append(_k("zyklusdrehzahl", n_ist <= msr, txt, n_ist, msr, "1/min",
+                           quelle="drivecycle*.rpm_max / summary.max_safe_rpm"))
 
     # ── Temperaturen: stationaer UND in jedem gerechneten Zyklus ─────────────
     grenze, label = _magnetgrenze(payload.get("magnet") or "")

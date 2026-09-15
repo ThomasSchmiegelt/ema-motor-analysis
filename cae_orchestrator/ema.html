@@ -3088,12 +3088,21 @@
       <input type="number" id="veh_cr" value="0.012" min="0.005" max="0.04" step="0.001"/><span>-</span>
     </div>
     <div class="input-group">
-      <label>Raddurchmesser</label>
-      <input type="number" id="veh_rwheel" value="0.32" min="0.15" max="0.55" step="0.01"/><span>m</span>
+      <!-- HALBMESSER, nicht Durchmesser: compute_drivetrain rechnet omega = v/r.
+           Das Feld hiess bis zum 15.09.2026 "Raddurchmesser" und lieferte damit
+           bei woertlicher Eingabe die doppelte Drehzahl. Grenzen aus
+           ema_drivecycle.FAHRZEUG_GRENZEN. -->
+      <label>Radhalbmesser</label>
+      <input type="number" id="veh_rwheel" value="0.32" min="0.10" max="0.80" step="0.01"
+             title="Halbmesser des Rades, nicht Durchmesser (0,32 m = 205/55R16)"/><span>m</span>
     </div>
     <div class="input-group">
       <label>Getriebeübersetzung</label>
-      <input type="number" id="veh_gear" value="9.5" min="1" max="20" step="0.5"/><span>-</span>
+      <input type="number" id="veh_gear" value="9.5" min="0.5" max="100" step="0.5"
+             title="Motordrehzahl je Raddrehzahl. Ob sie zur Maschine passt, prüft der Lauf gegen die sichere Höchstdrehzahl."/><span>-</span>
+      <div id="veh_getriebe_note" style="font-size:11px;opacity:.75;margin-top:4px">
+        skalare Übersetzung, festes η — im Reiter <b>⚙ Getriebe</b> auslegen und
+        übernehmen, dann rechnet der Zyklus mit η(T,&nbsp;n).</div>
     </div>
     <div class="input-group">
       <label>Drivetrain η</label>
@@ -7059,6 +7068,26 @@ async function _pollGetriebe() {
   setTimeout(_pollGetriebe, 800);
 }
 
+// Die ausgelegte Verzahnung, solange die Seite offen ist. Sie gehoert in den
+// Payload, hat aber kein Formularfeld: eine Verzahnung ist kein Zahlenfeld.
+let _vehGetriebe = null;
+
+function _vehGetriebeAnzeigen() {
+  const el = document.getElementById('veh_getriebe_note');
+  if (!el) return;
+  if (_vehGetriebe) {
+    const g = _vehGetriebe;
+    el.innerHTML = '<span style="color:#6c6">⚙ ausgelegte Verzahnung aktiv</span> — ' +
+      'η(T,&nbsp;n) statt fester 0,95' +
+      (g.art ? ' · ' + escHtml(String(g.art)) : '') +
+      (g.n_stufen ? ' · ' + escHtml(String(g.n_stufen)) + ' Stufen' : '') +
+      (g.i_ist ? ' · i = ' + escHtml(Number(g.i_ist).toFixed(2)) : '');
+  } else {
+    el.innerHTML = 'skalare Übersetzung, festes η — im Reiter <b>⚙ Getriebe</b> ' +
+      'auslegen und übernehmen, dann rechnet der Zyklus mit η(T,&nbsp;n).';
+  }
+}
+
 function _renderGetriebe(res) {
   const msg = document.getElementById('gt_msg');
   const wrap = document.getElementById('gt_ergebnis_wrap');
@@ -7102,6 +7131,15 @@ function _renderGetriebe(res) {
     zeilen.push('<span style="color:#ca8">Die Festigkeitskennwerte sind eine ' +
                 'ANNAHME</span> (Größenordnung der Werkstoffklasse), keine ' +
                 'zitierte Messung — jede Sicherheit oben ist eine Größenordnung.');
+  if (res.uebernommen === 'ja') {
+    // Genau das, was cae_cli._getriebe_uebernehmen nach meta.json schreibt: das
+    // Ergebnis selbst, ohne die drei reinen Anzeigeschluessel.
+    const g = Object.assign({}, res);
+    delete g.text; delete g.bestanden; delete g.uebernommen;
+    _vehGetriebe = g;
+    if (res.i_ist) _setField('veh_gear', Math.round(res.i_ist * 1e4) / 1e4);
+    _vehGetriebeAnzeigen();
+  }
   if (res.uebernommen)
     zeilen.push(res.uebernommen === 'ja'
       ? '<span style="color:#6c6">✓ Übernommen</span> — der nächste Analyselauf ' +
@@ -11422,6 +11460,9 @@ async function buildPayload() {
       gear_ratio: +document.getElementById('veh_gear').value,
       eta_drive:  +document.getElementById('veh_eta').value,
       regen_frac: +document.getElementById('veh_regen').value,
+      // Nur wenn eine ausgelegte Verzahnung uebernommen wurde; ohne sie rechnet
+      // compute_drivetrain mit gear_ratio + eta_drive wie bisher.
+      ...(_vehGetriebe ? { getriebe: _vehGetriebe } : {}),
     },
     trailer: {
       mass_kg:   +document.getElementById('trailer_mass').value,
@@ -11529,6 +11570,14 @@ function applyPayload(payload) {
   if (payload.cycle) _setField('sel_cycle', payload.cycle);
 
   const veh = payload.vehicle || {};
+  // Die AUSGELEGTE Verzahnung (aus Tab ⚙ Getriebe, `--uebernehmen`). Sie steht
+  // in keinem Formularfeld, und `buildPayload` baute `vehicle` bis zum
+  // 15.09.2026 ausschliesslich aus den sieben Feldern — der naechste Lauf aus
+  // dem Browser warf sie also still weg und fiel auf die skalare Uebersetzung
+  // samt festem eta = 0,95 zurueck, genau die beiden Konstanten, gegen die
+  // ema_getriebe gebaut wurde. Siehe BEFUNDE.md, 15.09.2026.
+  _vehGetriebe = veh.getriebe || null;
+  _vehGetriebeAnzeigen();
   _setField('veh_mass', veh.mass_kg);   _setField('veh_cwA', veh.cwA_m2);  _setField('veh_cr', veh.cr);
   _setField('veh_rwheel', veh.r_wheel_m); _setField('veh_gear', veh.gear_ratio);
   _setField('veh_eta', veh.eta_drive);  _setField('veh_regen', veh.regen_frac);

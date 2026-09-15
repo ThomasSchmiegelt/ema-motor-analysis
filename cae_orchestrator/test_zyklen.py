@@ -578,6 +578,136 @@ pruefe(_r["T_moeglich_Nm"] > _nur_magnet,
        f"reinen Magnetmoment am Stromanschlag ({_nur_magnet:.0f} Nm) — die "
        f"Reluktanz zaehlt mit")
 
+# ───────────────────────────────────────────────────────────────────────────────
+# Die drei Befunde vom 15.09.2026 (BEFUNDE.md): die Eckdrehzahl, das
+# Beschleunigungsband der synthetischen Profile, und die Drehzahl, die ein
+# Fahrzyklus WIRKLICH verlangt.
+# ───────────────────────────────────────────────────────────────────────────────
+
+print("\nA. Die Eckdrehzahl kommt aus EINER Formel")
+import ema_analysis as _AN
+import ema_mobil as _MB
+_ge = _MB.basis_geom()
+_n_eck = _AN.eckdrehzahl(_ge, 0.9)
+pruefe(_n_eck > 1000.0, f"sie ist eine Drehzahl und kein Ersatzwert ({_n_eck:.0f} 1/min)")
+# Die Abschrift in server._rpm_base_von muss dieselbe Zahl liefern.
+import server as _SV
+pruefe(abs(_SV._rpm_base_von(_AN, _ge, {"B_gap_T": 0.9},
+                             _AN.umrichter(_ge, 0.0)["v_dc_1t"]) - _n_eck) < 1e-9,
+       "server._rpm_base_von liefert Ziffer fuer Ziffer dieselbe")
+# Und estimate_dq_currents rechnet sie ohne Angabe selbst — mit dem GLEICHEN
+# Ergebnis, wie wenn man sie ausdruecklich uebergibt.
+_a1 = _AN.estimate_dq_currents(_ge, 9000.0, 20.0, b_gap_t=0.9)
+_a2 = _AN.estimate_dq_currents(_ge, 9000.0, 20.0, b_gap_t=0.9, rpm_base=_n_eck)
+pruefe(abs(_a1[0] - _a2[0]) < 1e-9 and abs(_a1[1] - _a2[1]) < 1e-9,
+       "estimate_dq_currents ohne rpm_base rechnet sie selbst")
+# Der eigentliche Befund: eine ZU KLEINE Eckdrehzahl treibt die Feldschwaechung
+# an den Anschlag und verstellt beide Verlustanteile gegenlaeufig.
+_rpm = np.linspace(5000.0, 50000.0, 200)
+_fw_falsch = np.clip((_rpm - 600.0) / 600.0, 0.0, 1.5)
+_fw_echt = np.clip((_rpm - _n_eck) / _n_eck, 0.0, 1.5) if _n_eck > 0 else _rpm * 0
+pruefe(float(np.mean((1.0 / (1.0 + _fw_falsch)) ** 2)) < 0.30,
+       "mit rpm_base=600 steht fw am Anschlag: Eisenverlust unter 30 % "
+       "(gemessen 0,20 am gemeldeten Lauf)")
+pruefe(float(np.mean(_fw_echt)) < float(np.mean(_fw_falsch)),
+       "mit der echten Eckdrehzahl faellt die Feldschwaechung deutlich kleiner aus")
+
+print("\nB. Jedes synthetische Profil endet im STAND und bleibt in seinem Band")
+for _name, _zyk, _band in (("WLTP 3b", ema_drivecycle.wltp_class3(), "wltp3"),
+                           ("Vollast", ema_drivecycle.fullload_cycle(), "vollast"),
+                           ("Stadt/Land", ema_drivecycle.stadtland_cycle(), "stadtland"),
+                           ("Anhaenger", ema_drivecycle.trailer_mountain_cycle(), "anhaenger")):
+    _v = np.asarray(_zyk["v_kmh"], dtype=float)
+    _a = np.gradient(_v / 3.6, 1.0)
+    _ap, _am = ema_drivecycle.BESCHLEUNIGUNG_BAND[_band]
+    pruefe(_v[-1] == 0.0 and _v[-2] > 0.0,
+           f"{_name}: endet im Stand, und der letzte Wert ist gefuellt "
+           f"(vorletzter {_v[-2]:.1f} km/h)")
+    pruefe(_a.max() <= _ap + 1e-6 and _a.min() >= -_am - 1e-6,
+           f"{_name}: a = {_a.min():.2f}…{_a.max():.2f} im Band "
+           f"-{_am:g}…+{_ap:g} m/s^2")
+# Die Gegenprobe zum ALTEN Verhalten: nullgepolstert zieht die Glaettung den
+# letzten Wert nach unten, randfortgesetzt nicht.
+_probe = np.full(50, 100.0)
+_null = np.convolve(np.convolve(_probe, np.ones(3) / 3, mode="same"),
+                    np.ones(3) / 3, mode="same")
+pruefe(_null[-1] < 90.0 and abs(ema_drivecycle._glaetten(_probe)[-1] - 100.0) < 1e-9,
+       f"nullgepolstert faellt der Randwert auf {_null[-1]:.1f}, "
+       f"randfortgesetzt bleibt er stehen")
+
+print("\nC. Die Drehzahl, die der Zyklus verlangt — gegen die Festigkeit")
+_veh = {**ema_drivecycle.DEFAULT_VEHICLE, "gear_ratio": 80.0, "r_wheel_m": 0.55,
+        "mass_kg": 3000.0}
+_drv = ema_drivecycle.compute_drivetrain(ema_drivecycle.wltp_class3(), _veh)
+_n = len(_drv["t"])
+_ls = {"P_Cu": np.full(_n, 500.0), "P_Fe_stator": np.full(_n, 40.0),
+       "P_Fe_rotor": np.full(_n, 15.0), "P_Mag_eddy": np.full(_n, 1.0),
+       "P_Bearing": np.full(_n, 4.0), "T_rated": 180.0}
+_ohne = ema_drivecycle.cycle_energy(_drv, _ls, _veh)
+_mit = ema_drivecycle.cycle_energy(_drv, _ls, _veh, rpm_max_zul=17018.0)
+pruefe(_ohne["speed_warning"] is None and _ohne["rpm_max_zul"] is None,
+       "ohne uebergebene Grenze steht None da — nicht „bestanden\"")
+pruefe(_mit["speed_warning"] and "80.0" in _mit["speed_warning"],
+       "mit Grenze wird gewarnt UND die Uebersetzung als Hebel benannt")
+pruefe("bersetzung" in (_mit["speed_warning"] or ""),
+       f"   {_mit['speed_warning']}")
+# Die Bilanz selbst muss dabei Ziffer fuer Ziffer dieselbe bleiben.
+pruefe(all(_ohne[k] == _mit[k] for k in ("E_elec_net_Wh", "E_mech_drv_Wh",
+                                         "E_regen_Wh", "eta_drive")),
+       "die Energiebilanz aendert sich durch die Pruefung um keine Ziffer")
+# Und die Buchhaltung selbst: rein - raus ist die Verlustsumme der MOTORISCHEN
+# Schritte; der Rest steckt in der Rekuperation. Das war der scheinbare
+# Fehlbetrag von 58 Wh in der gemeldeten Bilanz.
+_P = (_ls["P_Cu"] + _ls["P_Fe_stator"] + _ls["P_Fe_rotor"]
+      + _ls["P_Mag_eddy"] + _ls["P_Bearing"])
+_om = np.abs(_drv["rpm_motor"]) * 2 * np.pi / 60
+_Pm = _drv["T_motor"] * _om
+_Pe = np.where(_Pm >= 0, _Pm + _P, _Pm * _veh.get("regen_frac", 0.55) + _P)
+_regen = float(_veh.get("regen_frac", 0.55))
+_L_mot = float(np.sum(_P[_Pe > 0])) / 3600
+# Die Schritte werden nach dem Vorzeichen von P_elek getrennt, nicht nach dem
+# von P_mech: bremst die Maschine und uebersteigt der Verlust die rueckgespeiste
+# Leistung, zaehlt der Schritt zu „rein". Deshalb traegt „rein - raus" ausser den
+# Fahrverlusten noch die rueckgespeiste Leistung genau dieser Schritte.
+_rueck = float(np.sum(_Pm[(_Pm < 0) & (_Pe > 0)])) * _regen / 3600
+_L_ges = float(np.sum(_P)) / 3600
+pruefe(abs((_mit["E_elec_drv_Wh"] - _mit["E_mech_drv_Wh"])
+           - (_L_mot + _rueck)) < 0.2,
+       f"rein - raus ({_mit['E_elec_drv_Wh'] - _mit['E_mech_drv_Wh']:.1f} Wh) "
+       f"= Fahrverluste ({_L_mot:.1f}) + Rueckspeisung verlustdominierter "
+       f"Bremsschritte ({_rueck:.1f} Wh) — exakt, keine Naeherung")
+pruefe(_L_ges > _mit["E_elec_drv_Wh"] - _mit["E_mech_drv_Wh"],
+       f"die ausgewiesene Verlustsumme ({_L_ges:.0f} Wh) ist deshalb GROESSER "
+       f"als rein - raus; die Differenz steckt im Rekuperationspfad und "
+       f"faellt in der Tabelle als Fehlbetrag auf")
+
+print("\nD. Werte ausserhalb des Fahrzeugblocks werden BENANNT, nicht geklemmt")
+_w = ema_drivecycle.fahrzeug_pruefen({"gear_ratio": 80.0, "r_wheel_m": 0.55})
+pruefe(_w == [], "80 und 0,55 m liegen INNERHALB der Grenzen — "
+                 "falsch ist erst die Paarung, und die prueft die Drehzahl")
+_w2 = ema_drivecycle.fahrzeug_pruefen({"gear_ratio": 400.0, "r_wheel_m": 2.0,
+                                       "mass_kg": 3000.0})
+pruefe(len(_w2) == 2 and all("ausserhalb" in x for x in _w2),
+       f"zwei Verletzungen benannt, die gueltige Masse nicht: {_w2}")
+pruefe(_drv.get("fahrzeug_warnungen") == [],
+       "compute_drivetrain traegt die Liste mit (hier leer)")
+
+print("\nE. Die Sicherheitspruefung kennt die Zyklusdrehzahl")
+_res = {"summary": {"max_safe_rpm": 17018.0, "safety_factor_fem": 2.0,
+                    "structural_basis": "fem"},
+        "drivecycle": {"cycle_name": "WLTP", "rpm_max": 49958.0,
+                       "vehicle": {"gear_ratio": 80.0}}}
+_urteil = ema_sicherheit.pruefen(_res, {"payload": {"magnet": "ndfeb_n35"}})
+_zd = [k for k in _urteil["kriterien"] if k["name"] == "zyklusdrehzahl"]
+pruefe(len(_zd) == 1 and _zd[0]["ok"] is False,
+       "das Kriterium gibt es und es faellt durch")
+pruefe("27" in _zd[0]["text"],
+       f"und nennt die noch zulaessige Uebersetzung: {_zd[0]['text']}")
+_res["drivecycle"]["rpm_max"] = 9000.0
+pruefe([k for k in ema_sicherheit.pruefen(_res, {})["kriterien"]
+        if k["name"] == "zyklusdrehzahl"][0]["ok"] is True,
+       "und besteht, wenn der Zyklus unter der Grenze bleibt")
+
 print("\n" + "=" * 60)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

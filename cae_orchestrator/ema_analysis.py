@@ -874,6 +874,11 @@ def luftspalt_im_netz(geom: dict, N: int) -> dict:
     }
 
 
+# Ersatzwert, wenn die EMK nicht bestimmbar ist. Bewusst eine Zahl mit Namen:
+# eine nackte 5000.0 an drei Stellen liest sich wie ein gerechneter Wert.
+ECKDREHZAHL_ERSATZ = 5000.0
+
+
 def umrichter(geom: dict, rpm_max: float = 0.0) -> dict:
     """Die Umrichtergrenzen dieser Maschine -- klemmenseitig UND auf eine Windung.
 
@@ -1333,6 +1338,34 @@ def estimate_saliency(geom: dict) -> float:
     return float(np.clip(xi, 1.5, hi))
 
 
+def eckdrehzahl(geom: dict, b_gap_t: float, v_dc: float | None = None) -> float:
+    """Die Eckdrehzahl [min-1] -- EINE Quelle fuer alle, die sie brauchen.
+
+    Oberhalb davon reicht die Umrichterspannung nicht mehr fuer die Gegen-EMK,
+    und es muss feldgeschwaecht werden. Gerechnet wird ueber die EMK bei
+    1000 min-1: ``rpm_base = 1000 * 0.4 * (v_dc/sqrt(3)) / emf_1``. Der Faktor
+    0,4 ist die Spannungsreserve, mit der ``estimate_dq_currents`` seit jeher
+    rechnet -- er steht hier, damit er nur an EINER Stelle steht.
+
+    Diese Funktion gibt es, weil die Zahl vorher an vier Stellen anders
+    entstand: ``estimate_dq_currents`` rechnete sie inline, ``server`` hatte
+    eine Abschrift (``_rpm_base_von``), und ``ema_pipeline`` ERBTE sie aus der
+    ersten Zeile der Bilder-Drehzahlliste -- siehe ``BEFUNDE.md``,
+    15.09.2026. Die letzte Fassung verstellte auf einem WLTP-Lauf den
+    Eisenverlust um Faktor 0,20 und machte 98,9 % des ausgewiesenen
+    Kupferverlusts zu einem Feldschwaechstrom, den es nicht gibt.
+    """
+    try:
+        if v_dc is None:
+            v_dc = float(umrichter(geom, 0.0)["v_dc_1t"])
+        emf_1 = float(compute_performance(geom, float(b_gap_t), 1000.0)["emf_peak_V"])
+        if emf_1 <= 0:
+            return ECKDREHZAHL_ERSATZ
+        return 1000.0 * 0.4 * (float(v_dc) / math.sqrt(3.0)) / emf_1
+    except Exception:                                            # noqa: BLE001
+        return ECKDREHZAHL_ERSATZ
+
+
 # ── main entry point ──────────────────────────────────────────────────────────
 
 def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
@@ -1366,9 +1399,7 @@ def estimate_dq_currents(geom: dict, rpm: float, load_nm: float,
     iq_pure = max(min(T_req / Kt, i_lim), i_min)  # pure-q current for this torque
 
     if rpm_base is None or rpm_base <= 0:
-        v_max = v_dc / math.sqrt(3)
-        emf_1 = compute_performance(geom, b_gap_t, 1000.0)["emf_peak_V"]
-        rpm_base = 1000.0 * 0.4 * v_max / emf_1 if emf_1 > 0 else 5000.0
+        rpm_base = eckdrehzahl(geom, b_gap_t, v_dc)
 
     # ── MTPA operating point (reluctance torque for salient rotors) ──────────────
     xi = estimate_saliency(geom)

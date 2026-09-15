@@ -17,6 +17,214 @@ kann.
 
 ---
 
+## 2026-09-15 — Die Übersetzung 80 ist das Vierfache der eigenen Feldgrenze, und niemand hält sie auf
+
+**Beobachtung.** Im selben Zyklusergebnis (`20260915_091253_Pescord`) steht
+`vehicle.gear_ratio = 80` bei `r_wheel_m = 0,55`. Daraus kommen die
+49.958 min⁻¹. Das Eingabefeld der Oberfläche sagt selbst etwas anderes:
+
+    ema.html:3096  <input id="veh_gear" value="9.5" min="1" max="20" step="0.5">
+    ema.html:3092  <input id="veh_rwheel" value="0.32" min="0.15" max="0.55">
+
+`max="20"` markiert das Feld nur als `:invalid` — gelesen wird
+`+document.getElementById('veh_gear').value` (`ema.html:11422`), und **der Server
+prüft den `vehicle`-Block überhaupt nicht** (`server.py` kennt `vehicle` nur in
+zwei Kommentaren). Die 80 läuft also ungebremst durch die ganze Kette. Der
+Radhalbmesser 0,55 m liegt genau auf dem `max` desselben Formulars.
+
+**Messung.** Die Antriebsstrangrechnung selbst ist richtig — mit dem
+gespeicherten `vehicle` nachgerechnet kommen `rpm_max 49958`, `rpm_rms 22418`,
+`T_max 153,1`, `T_rms 16,0` **ziffernidentisch** heraus. Falsch ist nicht die
+Formel, sondern was hineingeht:
+
+| | Wert | Grenze im selben `results.json` |
+|---|---|---|
+| Übersetzung | **80** | zulässig ≤ **27,2** (aus `max_safe_rpm_fem` 17.018) |
+| Motordrehzahl | 49.958 min⁻¹ | 17.018 min⁻¹ |
+
+Und die Übersetzung lässt sich nicht einfach zurücknehmen: bei i = 27,2 stiege
+`T_max` auf **450 Nm** gegen ein Spitzenmoment der Maschine von 279,3 Nm — Faktor
+1,61 zu wenig. Die Maschine passt an keinem Punkt zu diesem Fahrzeug.
+
+**`ema_getriebe` lief hier nie — und der Browser hätte es ohnehin weggeworfen.**
+`vehicle.getriebe` fehlt, also greift in `ema_drivecycle.compute_drivetrain:673`
+der `else`-Zweig: die skalare Übersetzung **und** das feste `eta_drive = 0,95`,
+genau die beiden Konstanten, gegen die `ema_getriebe` gebaut wurde.
+
+Eine erste Fassung dieses Befundes schrieb, die Oberfläche habe keinen Weg zur
+Getriebeauslegung. **Das war falsch** — den Reiter ⚙ Getriebe samt Häkchen
+„Übernehmen" gibt es, und er schreibt `vehicle.getriebe` nach `meta.json`.
+Nachgemessen ist der Mangel ein anderer und schlimmer: **`buildPayload` baut
+`vehicle` ausschließlich aus seinen sieben Formularfeldern**
+(`ema.html:11423-11431`), und `applyPayload` stellt den Schlüssel auch nicht
+wieder her. Wer im ⚙-Reiter übernimmt und dann im Browser „⚙ Echte Berechnung"
+drückt, verliert die ausgelegte Verzahnung also still und rechnet wieder mit
+skalarer Übersetzung und festem η. Über `cae_cli.py run --from-project` bleibt
+sie erhalten, weil dort der ganze Payload geerbt wird — der Fehler trifft genau
+den Weg, auf dem die Auslegung bedient wird.
+
+**Und das Feld war falsch beschriftet.** `veh_rwheel` trug das Etikett
+**„Raddurchmesser"**, während `compute_drivetrain` mit `omega_w = v / r_wheel_m`
+den **Halbmesser** meint. Wer den Durchmesser einträgt, bekommt die doppelte
+Drehzahl — bei einem Vorgabewert von 0,32 m (Halbmesser eines 205/55R16) fällt
+das niemandem auf, weil beide Lesarten eine plausible Zahl ergeben.
+
+**Was das für die Bilanz heißt.** Die Traktionsenergie hängt nicht an der
+Übersetzung — 8148 Wh am Rad und 31,2 kWh/100 km bleiben. Die Übersetzung
+entscheidet allein über die **Aufteilung** in Drehzahl und Moment und damit über
+die 327 Wh Verlustspalte und die 96,8 %.
+
+**Nebenbefund am Zyklus selbst — und die Ursache lag noch eine Stufe tiefer.**
+`T_max = 153,1 Nm` steht bei **t = 1800 s**, dem letzten Abtastwert. Die
+naheliegende Erklärung war die zweimalige Glättung mit
+`np.convolve(v, ones(3)/3, mode="same")`, die an den Rändern **nullgepolstert**
+ist. Randfortsetzung allein brachte aber nur −12,1 → −8,1 m/s²; gemessen am
+**ungeglätteten** Profil steht dort `[… 129,8 131,3 131,3 **0,0**]`. Alle drei
+synthetischen Bauer legen `np.zeros(TOTAL_T + 1)` an und füllen die Phasen über
+`[t_start, t_end)` — der **letzte Abtastwert wird nie beschrieben** und bleibt
+0. Das sind −36 m/s² in einer Sekunde; die Glättung hat den Sprung nur verteilt
+und dadurch unauffällig gemacht, nicht kleiner. `_build_stadtland` setzte
+`v[-1] = 0.0` sogar ausdrücklich, ohne Rampe.
+
+Davon unabhängig liegen **3,8 %** der 1801 Sekunden außerhalb des echten
+WLTP-Beschleunigungsbandes (+1,67 / −1,50 m/s²); die Spitzen der Näherung
+erreichen +3,0 m/s². Der Name sagt „approximiert" — die **Momentenspitze** einer
+Auslegung sollte trotzdem nicht aus einem Randeffekt kommen.
+
+**Fundstelle.** `ema.html:3092,3096` (Felder), `ema.html:11423-11431`
+(`buildPayload` ohne `getriebe`), `ema_drivecycle.compute_drivetrain`
+(Antriebsstrang), `_build_wltp3b`/`_build_vollast`/`_build_stadtland`/
+`_build_anhaenger` (Profilabschluss), `cae_cli.py:2622` `_getriebe_uebernehmen`
+(der einzige Weg, der `gear_ratio` aus einer Rechnung setzt).
+
+**Status: behoben** (15.09.2026), in vier getrennten Stücken.
+
+1. **Die Prüfung Übersetzung × Rad** sitzt dort, wo sie hingehört — an der
+   Drehzahl, die daraus folgt (siehe den Befund zu `rpm_base` oben): 
+   `cycle_energy(..., rpm_max_zul=max_safe_rpm)` → `speed_warning`, plus das
+   Kriterium `zyklusdrehzahl` in `ema_sicherheit`. Der Wert 80 selbst wird
+   **nicht** abgewiesen: `ema_getriebe` kann zweistufig planetar bis i = 100
+   auslegen, falsch ist nicht die Zahl, sondern ihre Paarung mit dieser
+   Maschine — und die sagt jetzt die Drehzahl.
+2. **`ema_drivecycle.FAHRZEUG_GRENZEN`** ist die eine Quelle für die Grenzen des
+   Fahrzeugblocks; `fahrzeug_pruefen` **benennt** Überschreitungen, klemmt sie
+   aber nicht (geklemmt sähe der Wert für den Aufrufer wie ein angenommener aus)
+   und weist sie nicht ab (abgewiesen wäre ein bestehendes Projekt unrechenbar).
+   Die Felder in `ema.html` tragen dieselben Zahlen, und das Radfeld heißt jetzt
+   **Radhalbmesser**.
+3. **Die ausgelegte Verzahnung überlebt den Browser.** `_vehGetriebe` hält sie,
+   `applyPayload` liest sie aus dem Payload, der ⚙-Reiter setzt sie nach einer
+   erfolgreichen Übernahme, `buildPayload` hängt sie wieder an — und unter dem
+   Übersetzungsfeld steht, ob gerade mit η(T, n) oder mit festem η gerechnet
+   wird. Vorher war „übernommen" eine Aussage, die der nächste Knopfdruck
+   zurücknahm, ohne es zu sagen.
+4. **Der Profilabschluss ist eine Funktion** (`_profil_abschluss`) statt in
+   jedem Bauer ein eigener — und in zweien gar keiner: letzter Abtastwert
+   füllen, randfortgesetzt glätten, mit zulässiger Verzögerung **ausrollen**
+   (ein Zyklus endet im Stand) und auf `BESCHLEUNIGUNG_BAND` klemmen. Die
+   Reihenfolge ist nicht beliebig — glättet man nach dem Ausrollen und setzt
+   danach `v[-1] = 0`, reißt genau der Sprung wieder auf (gemessen −2,14 m/s²).
+
+**Gemessen am WLTP-3b-Profil**, alle vier Zyklen nun innerhalb ihres Bandes:
+
+| | vorher | nachher | Sollwert |
+|---|---:|---:|---:|
+| Strecke | 23,25 km | **23,33 km** | 23,26 km |
+| v_max | 129,5 km/h | **129,1 km/h** | 131,3 km/h |
+| a | −8,06 … +3,00 m/s² | **−1,50 … +1,67** | −1,50 / +1,67 |
+| `T_max` (gemeldete Auslegung) | 153,1 Nm bei t = 1800 s | **45,3 Nm** | — |
+
+Die Rate­begrenzung trifft die Sollstrecke sogar besser als vorher (+0,3 %
+statt −0,1 % bei einem Profil, dessen letzter Wert nicht definiert war).
+**Das bewegt Altbestand:** `T_max`, `T_rms` und damit jede Kupferzahl eines
+Zyklusergebnisses ändern sich. Test: `test_zyklen.py` B, C, D.
+
+---
+
+## 2026-09-15 — `rpm_base` im Zyklus ist die erste Zeile der Bilderliste, nicht die Eckdrehzahl
+
+**Beobachtung.** Eine Energiebilanz (WLTP 3b, Projekt
+`20260915_091253_Pescord`) weist **Cu 316 Wh gegen Fe 8,6 Wh** aus. Bei
+`rpm_RMS = 22.418 min⁻¹` und `p = 3` sind das **1121 Hz** Grundfrequenz — dort
+kann der Eisenverlust nicht 2,7 % des Kupferverlusts sein, erst recht nicht bei
+**8,7 % Momentauslastung** (`T_RMS` 16,0 Nm gegen `T_Nenn` 183,9 Nm).
+
+**Messung.** `ema_pipeline.py:2315` setzt
+
+    rpm_base = float(sweep_rpms[0])
+
+— das ist der **erste Eintrag der Drehzahlliste der Feldanimation** (hier
+`[600, 2000, … 18500]`, also **600**), gewählt vom Menschen als Anfang des
+Bilderlaufs. Dieselbe Zahl geht bei `ema_pipeline.py:2948` als `rpm_base` in
+`ema_thermal.cycle_loss_series`, wo sie die Feldschwächung stellt:
+
+    fw = clip((rpm − rpm_base)/rpm_base, 0, 1.5)
+
+Über dem gemessenen Zyklus (aus `drivecycle.op_points`):
+
+| | mit `rpm_base = 600` | ohne Feldschwächung |
+|---|---|---|
+| `fw` im Mittel | **1,419** (Anschlag 1,5) | 0 |
+| `flux_fac²` im Mittel | **0,202** | 1,000 |
+| Anteil `J_d²` an `J²` | **98,9 %** | 0 % |
+
+Also: der Eisenverlust wird mit **0,20** multipliziert, und **98,9 % des
+ausgewiesenen Kupferverlusts** sind ein Feldschwächstrom, den allein diese Zahl
+erzeugt. Bereinigt stünden dort rund **3,5 Wh Kupfer gegen 43 Wh Eisen** — die
+Rangfolge dreht sich um.
+
+Die echte Eckdrehzahl dieser Maschine liegt bei `psi_pm = 0,0062 Wb` und p = 3
+über **40.000 min⁻¹**; auf diesem Zyklus fände Feldschwächung praktisch **gar
+nicht** statt.
+
+**Fundstelle.** `ema_pipeline.py:2315` (Zuweisung), `ema_pipeline.py:2948`
+(Übergabe), `ema_thermal.py:176-192` (Wirkung). `server._rpm_base_von` rechnet
+die Eckdrehzahl bereits richtig aus `emf_1` und `v_dc` — sie steht nur an dieser
+Stelle nicht zur Verfügung.
+
+**Nebenbefund derselben Bilanz.** `ema_drivecycle.cycle_energy` prüfte die
+Überlastung ausschließlich am **Moment** (`T_rms > T_rated`). Dieser Zyklus
+läuft mit `rpm_max = 49.958 min⁻¹` gegen eine FEM-Grenze von **17.018 min⁻¹**
+(`structural_ok: false`) — Faktor 2,94 — und die Zyklusauswertung sagte dazu
+nichts. Schlimmer: auch die **Momentwarnung** wurde nirgends ausgegeben —
+`overload_warning` kam in keiner Datei außer ihrer eigenen vor.
+
+**Status: behoben** (15.09.2026). `ema_analysis.eckdrehzahl(geom, b_gap_t, v_dc)`
+ist die eine Quelle: `estimate_dq_currents` rechnet intern damit,
+`server._rpm_base_von` delegiert (dort stand eine richtige, aber **zweite**
+Fassung derselben Formel), und `ema_pipeline` erbt sie nicht mehr, sondern
+rechnet sie — an **allen fünf** Stellen, nicht nur im Zyklus: Referenzframe,
+Rotationsframes, Sättigungsbilder, `summary` und Zyklus. Der Ersatzwert heißt
+jetzt `ECKDREHZAHL_ERSATZ` statt dreimal nackt `5000.0` dazustehen. Auch
+`render_preview_frame` gab `rpm_base=rpm` mit — „dieser Punkt liegt per
+Definition an der Eckdrehzahl", also nie Feldschwächung; es rechnet sie jetzt
+ebenfalls selbst.
+
+**Nachgemessen am gemeldeten Lauf** (gleiche Geometrie, gleicher Zyklus, nur
+`rpm_base` getauscht):
+
+| `rpm_base` | Cu | Fe | Mg | Lg | Summe | η |
+|---|---:|---:|---:|---:|---:|---:|
+| 600 (erste Zeile der Bilderliste) | **317,4** Wh | **8,7** Wh | 0,3 | 2,0 | 328,3 Wh | 96,6 % |
+| 583.428 (gerechnet) | **1,9** Wh | **54,0** Wh | 0,3 | 2,0 | 58,2 Wh | 99,4 % |
+
+Die Rangfolge dreht sich um, wie es bei 1119 Hz Grundfrequenz sein muss. Dass
+die Eckdrehzahl dieser Maschine so hoch liegt, ist kein Rechenfehler, sondern
+ihre Aussage: `psi_pm` = 0,0062 Wb (Ferrit, `B_gap` 0,169 T) — sie erreicht die
+Spannungsgrenze nie.
+
+Die Drehzahlprüfung ist mitgekommen: `cycle_energy` nimmt `rpm_max_zul`,
+liefert `speed_warning` und nennt bei einer Fahrt die **Übersetzung als Hebel**
+(„80,0 statt höchstens 27,3"); beide Warnungen stehen jetzt im Laufprotokoll,
+und `ema_sicherheit` hat das Kriterium `zyklusdrehzahl` (14 Kriterien). Eine
+nicht übergebene Grenze heißt `None` und nicht „bestanden".
+
+**Das bewegt Altbestand:** jede gespeicherte Kupfer- und Eisenzahl eines
+Zyklusergebnisses hängt an der gewählten Anfangsdrehzahl des Bilderlaufs und ist
+mit einem neuen Lauf nicht vergleichbar. Test: `test_zyklen.py` A, C, E.
+
+---
+
 ## 2026-09-13 — Negative Wellenmasse: `_clamp` kennt keine Beziehungen zwischen Parametern
 
 **Beobachtung.** Der erste Lauf des neuen Ausreiz-Optimierers (`ema_ausreizen`,
