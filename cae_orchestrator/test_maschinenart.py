@@ -93,10 +93,15 @@ pruefe(MA.pruefe_feldweg("pmsm", "fdm").code == "pmsm",
        "die PSM laeuft weiterhin durch die FDM")
 pruefe(MA.traegt("synrm", "analytisch") and MA.traegt("eesm", "analytisch"),
        "SynRM und EESM tragen die analytische Stufe (ema_synrm, ema_eesm)")
-pruefe(not any(MA.traegt(c, st) for c in ("synrm", "eesm")
-               for st in ("feld", "cad", "em3d")),
-       "aber keine der beiden traegt Feld, CAD oder 3D — und die Tabelle sagt es, "
-       "statt es einen Lauf herausfinden zu lassen")
+pruefe(MA.traegt("eesm", "cad") and not MA.traegt("eesm", "feld")
+       and not MA.traegt("eesm", "em3d"),
+       "die EESM traegt seit dem 18.09.2026 das CAD (Schenkelpol, Erregerspulen, "
+       "zwei Schleifringe) — aber weiterhin weder Feld noch 3-D: die 2-D-FDM ist "
+       "reell und magnetostatisch und kann eine Gleichstrom-Erregerwicklung so "
+       "wenig darstellen wie einen Kaefig")
+pruefe(not any(MA.traegt("synrm", st) for st in ("feld", "cad", "em3d")),
+       "die SynRM traegt weiterhin nur die analytische Stufe — und die Tabelle "
+       "sagt es, statt es einen Lauf herausfinden zu lassen")
 
 # Der Fehlertext einer NICHT getragenen Stufe muss weiterhin sagen, was statt
 # dessen geht — geprueft an der SynRM, seit die ASM das CAD traegt.

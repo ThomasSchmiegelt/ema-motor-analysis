@@ -105,10 +105,38 @@ def _gate_laeufer(data: dict, state: dict | None = None,
         art = _MA.art_code(geom)
     except Exception:                                        # noqa: BLE001
         return
+    if art == "eesm":
+        # Der Schenkelpol: Kern plus Erregerspule muessen auf die Polteilung
+        # passen, und zwischen zwei Spulen muss Luft bleiben. Gerechnet in
+        # ``ema_eesm_cad.koerper`` -- derselben Funktion, aus der gezeichnet
+        # wird, damit das Tor nicht gegen eine andere Geometrie prueft als die,
+        # die entsteht.
+        try:
+            import ema_eesm_cad
+            k = ema_eesm_cad.koerper(geom, float(data.get("axial_len") or 80.0))
+        except Exception as exc:                             # noqa: BLE001
+            if state is not None:
+                _log(state, f"\u26A0 Laeufertor (Schenkelpol) nicht gerechnet: "
+                            f"{type(exc).__name__}: {exc}", 5)
+            return
+        if state is not None:
+            _log(state, f"\U0001F6E1 Laeufertor (Schenkelpol): {k['poles']} Pole, "
+                        f"Kern {k['b_kern_mm']} mm + 2 x {k['d_spule_mm']} mm "
+                        f"Spule auf {k['tau_kern_mm']} mm Teilung, frei "
+                        f"{k['frei_mm']} mm — "
+                        f"{'OK' if k['passt'] else 'ABGELEHNT'}", 5)
+            # Was das Tor NICHT prueft, steht dabei -- Schweigen laese sich als
+            # „geprueft" lesen.
+            _log(state, "\u2139 " + k["ungeprueft"], 5)
+        if not k["passt"]:
+            if fatal:
+                raise RuntimeError("Laeufertor (Schenkelpol): " + k["grund"])
+            _log(state, "\u26A0 Laeufertor (Schenkelpol): " + k["grund"], 5)
+        return
     if art != "asm":
-        # SynRM, EESM und GSM haben eigene Enge (Flussbarrieren, Polfenster,
-        # Ankernut). Solange dafuer keine Pruefung steht, wird das GESAGT statt
-        # ein gruenes Urteil ueber Ungeprueftes abzugeben.
+        # SynRM und GSM haben eigene Enge (Flussbarrieren, Ankernut). Solange
+        # dafuer keine Pruefung steht, wird das GESAGT statt ein gruenes Urteil
+        # ueber Ungeprueftes abzugeben.
         if state is not None:
             _log(state, f"\u2139 Laeufertor: fuer die Art '{art}' gibt es noch "
                         f"keine eigene Engstellenpruefung — die Fliehkraft am "
@@ -1606,10 +1634,16 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
     ax.set_aspect('equal'); ax.axis('off')
     lim = R_so * 1.15; ax.set_xlim(-lim, lim); ax.set_ylim(-lim, lim)
 
+    import ema_maschinenart as _MAq0
     annulus(ax, R_bore, R_shaft, '#555555', ec='#888888', lw=1.2)
     if R_bore > 0:                                  # hollow shaft bore (air)
         ax.add_patch(Circle((0, 0), R_bore, fc='#0d1117', ec='#888888', lw=0.9))
-    annulus(ax, R_shaft, R_rot, '#2d3748', ec='#4a5568', lw=0.8)
+    # Beim Schenkelpollaeufer wird der Rotorring NICHT als Vollring gezeichnet
+    # — dort sitzt zwischen den Polen Luft, und die ist die Bauart.
+    if _MAq0.art_code(geom) != "eesm":
+        annulus(ax, R_shaft, R_rot, '#2d3748', ec='#4a5568', lw=0.8)
+    else:
+        annulus(ax, R_shaft, R_shaft + 0.1, '#2d3748', ec='none', lw=0.0)
     # Shaft–core connection profile outline (spline teeth / polygon lobes) so the
     # joint is visible in the 2D section too (plain circle for a press fit).
     _conn = str(geom.get("shaftConnection", "press"))
@@ -1738,6 +1772,44 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
     # zeichnet (``ema_asm.kaefig`` / ``laeuferwicklung``) -- eine zweite
     # Nutgeometrie waere die Stelle, an der Bild und Koerper auseinanderlaufen.
     _laeufer_leg = []
+    if _MAq.art_code(geom) == "eesm":
+        # Schenkelpole: Joch-Aussenring, Kern, Schuh, zwei Spulenschnitte.
+        # Die Masse kommen aus DERSELBEN Funktion wie das CAD.
+        try:
+            import ema_eesm_cad as _ECq
+            _kq = _ECq.koerper(geom, float(geom.get("axialLen") or 80.0))
+            _rj, _rk = _kq["r_joch_aussen_mm"], _kq["r_kern_aussen_mm"]
+            # Zwischen den Polen ist LUFT — der Vollring darueber waere genau
+            # der Reluktanzunterschied, der die Bauart ausmacht, zugemalt.
+            # RING, keine Scheibe: die Bohrung ist da, und eine Scheibe
+            # uebermalte die Welle, die eine Zeile vorher gezeichnet wurde.
+            annulus(ax, R_shaft, _rj, '#2d3748', ec='#4a5568', lw=0.8)
+            ax.add_patch(Circle((0, 0), R_rot, fill=False, ec='#4a5568',
+                                lw=0.6, ls=':'))
+            _hb = _m.degrees((_kq["b_schuh_mm"] / 2.0) / max(R_rot, 1e-9))
+            for _i in range(int(_kq["poles"])):
+                _g = 360.0 * _i / int(_kq["poles"])
+                # Etwas heller als das Joch: die POLFORM ist hier die Aussage,
+                # und in einer Farbe verschwindet sie im Rotorblech.
+                ax.add_patch(Wedge((0, 0), R_rot, _g - _hb, _g + _hb,
+                                   width=R_rot - _rk, fc='#3c4a60',
+                                   ec='#6b7c99', lw=0.9))
+                _a = _m.radians(_g)
+                _bk, _ds = _kq["b_kern_mm"], _kq["d_spule_mm"]
+                for _rechteck, _fc, _ec in (
+                        ((_rj, _rk, -_bk / 2, _bk / 2), '#3c4a60', '#6b7c99'),
+                        ((_rj, _rk, _bk / 2, _bk / 2 + _ds), '#b87333', '#e0a060'),
+                        ((_rj, _rk, -_bk / 2 - _ds, -_bk / 2), '#b87333', '#e0a060')):
+                    _r0, _r1, _y0, _y1 = _rechteck
+                    _loc = [(_r0, _y0), (_r1, _y0), (_r1, _y1), (_r0, _y1)]
+                    _pts = [(x * _m.cos(_a) - y * _m.sin(_a),
+                             x * _m.sin(_a) + y * _m.cos(_a)) for x, y in _loc]
+                    ax.add_patch(MplPoly(_pts, closed=True, fc=_fc, ec=_ec, lw=0.6))
+            _laeufer_leg = [Patch(fc='#b87333', ec='#e0a060',
+                                  label=f'Erregerspulen ({_kq["poles"]} Pole)')]
+        except Exception:                                    # noqa: BLE001
+            _laeufer_leg = []
+
     if _MAq.art_code(geom) == "asm":
         try:
             import ema_asm as _ASMq

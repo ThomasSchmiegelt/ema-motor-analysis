@@ -669,58 +669,20 @@ def anlasswiderstand(geom: dict, axial_mm: float, ziel_schlupf: float) -> dict:
 
 
 # ── Schleifringe ──────────────────────────────────────────────────────────────
+#
+# Die Geometrie steht in ``ema_schleifring`` und nicht hier: ein Schleifring
+# gehoert weder der Asynchron- noch der Synchronmaschine, beide brauchen ihn
+# (drei Ringe fuer die Drehstromwicklung, zwei fuer einen Erregerkreis). Zwei
+# Fassungen waeren zwei verschieden breite Ringe fuer denselben Strom.
 
-# Stromdichte am Buerstenkontakt [A/cm^2]. Kohlebuersten liegen bei 6-12 A/cm^2;
-# 10 ist der uebliche Auslegungswert. Der Wert entscheidet die Buerstenflaeche
-# und damit die Ringbreite -- ein Ring, der zu schmal ist, verbrennt seine
-# Buersten, und das sieht man einer Zeichnung nicht an.
-J_BUERSTE_APCM2 = 10.0
-
-# Umfangsgeschwindigkeit am Schleifring [m/s]. Darueber traegt der
-# Kohlekontakt nicht mehr zuverlaessig (Buerstenfeuer, Abbrand). Eine GRENZE,
-# kein Vorgabewert: ueberschritten wird sie gemeldet, nicht stillschweigend
-# unterschritten.
-V_RING_MAX_MPS = 45.0
-
-# Spannungsabfall je Buerstenpaar [V] -- dieselbe Groesse wie ``ema_eesm``
-# sie fuer den Erregerkreis fuehrt. Hier steht sie nicht noch einmal: sie wird
-# von dort gelesen.
 RING_ZAHL = 3          # Drehstrom: drei Ringe
 
 
 def schleifringe(geom: dict, i_ring_eff_A: float,
                  rpm_max: float | None = None) -> dict:
-    """Drei Schleifringe auf der Welle -- Masse und Grenzen.
-
-    Der Durchmesser folgt der Welle (der Ring sitzt darauf, mit etwas
-    Isolierhuelse), die Breite folgt der **Stromdichte am Buerstenkontakt**:
-    eine Buerste, die zu klein ist, verbrennt. Gemeldet wird beides samt der
-    Umfangsgeschwindigkeit, die der eigentliche Deckel dieser Bauform ist --
-    oberhalb ``V_RING_MAX_MPS`` traegt der Kohlekontakt nicht mehr, und dann ist
-    ein Schleifringlaeufer die falsche Wahl, egal wie gut er sonst passt.
-    """
-    r_wel = float(geom["shaftD"]) / 2.0
-    d_ring = 2.0 * (r_wel + max(2.0, 0.04 * r_wel))     # Isolierhuelse darunter
-    i_eff = max(float(i_ring_eff_A), 1e-6)
-    a_buerste_cm2 = i_eff / J_BUERSTE_APCM2
-    # Die Buerste liegt auf dem Ring auf: Flaeche = Ringbreite x Buerstenlaenge
-    # in Umfangsrichtung. Uebliches Seitenverhaeltnis 1:2 (laenger als breit).
-    b_ring_mm = max(6.0, math.sqrt(a_buerste_cm2 * 100.0 / 2.0))
-    n_max = float(rpm_max or geom.get("rpm_to") or 0.0)
-    v_ring = math.pi * (d_ring * 1e-3) * n_max / 60.0 if n_max > 0 else None
-    return {
-        "n_ringe": RING_ZAHL,
-        "d_ring_mm": round(d_ring, 2),
-        "b_ring_mm": round(b_ring_mm, 2),
-        "spalt_mm": round(0.4 * b_ring_mm, 2),          # Luft zwischen den Ringen
-        "A_buerste_cm2": round(a_buerste_cm2, 2),
-        "I_ring_eff_A": round(i_eff, 1),
-        "v_ring_mps": None if v_ring is None else round(v_ring, 1),
-        "v_grenze_mps": V_RING_MAX_MPS,
-        # None heisst NICHT GEPRUEFT (keine Hoechstdrehzahl bekannt), nicht "ok".
-        "v_ok": None if v_ring is None else bool(v_ring <= V_RING_MAX_MPS),
-    }
-
+    """Drei Schleifringe auf der Welle — s. ``ema_schleifring.geometrie``."""
+    import ema_schleifring
+    return ema_schleifring.geometrie(geom, i_ring_eff_A, RING_ZAHL, rpm_max)
 
 # ── Wann es diesen Betriebspunkt NICHT gibt ──────────────────────────────────
 #

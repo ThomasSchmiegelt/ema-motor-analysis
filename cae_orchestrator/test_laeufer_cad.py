@@ -540,7 +540,106 @@ pruefe(cage["n"] == int(kf["n_stab"]) and abs(cage["b"] - kf["stabbreite_mm"]) <
        "CAD und Querschnitt lesen dieselbe ema_asm.kaefig — Ziffer fuer Ziffer")
 
 
-print("\n9. Das Tor laesst die ASM jetzt ins CAD")
+print("\n9. Der Schenkelpollaeufer (EESM)")
+
+import ema_eesm
+import ema_eesm_cad
+import ema_schleifring
+
+ge = geom(machineType="eesm", p=3, slots=18)
+k = ema_eesm_cad.koerper(ge, 100.0)
+ze = lauf(skript(ge))
+pruefe(ze.fehler is None, f"das Skript laeuft ({ze.fehler or 'ok'})")
+pruefe("Magnets_N" not in ze.objekte and "Cage_Bars" not in ze.objekte,
+       "weder Magnete noch Kaefig — der Fluss kommt aus der Erregerwicklung")
+for name, soll in (("Field_Coils_N", k["poles"]), ("Field_Coils_S", k["poles"])):
+    o = ze.objekte.get(name)
+    # Je Pol ZWEI Spulenquerschnitte (links und rechts des Kerns), die Haelfte
+    # der Pole je Polaritaet.
+    pruefe(o is not None and len(o.Shape.teile) == k["poles"],
+           f"{name}: {len(o.Shape.teile) if o else 0} Spulenquerschnitte "
+           f"= {k['poles'] // 2} Pole x 2 Seiten")
+r = ze.objekte.get("Slip_Rings")
+pruefe(r is not None and len(r.Shape.teile) == 2,
+       "ZWEI Schleifringe — der Erregerkreis ist Gleichstrom, kein Drehstrom "
+       "(die ASM bekommt drei)")
+pruefe(len(ze.objekte["Brushes"].Shape.teile) == 2, "und zwei Buersten")
+
+print("\n10. Die Polmasse kommen aus dem MAGNETKREIS, nicht aus dem Platz")
+
+pg = ema_eesm.polgeometrie(ge, 100.0)
+er = ema_eesm.erregung(ge, 100.0)
+pruefe(abs(k["b_schuh_mm"] - pg["b_pol_mm"]) < 1e-9,
+       f"die Polschuhbreite {k['b_schuh_mm']} mm ist die der Polbedeckung "
+       f"({ema_eesm.POLBEDECKUNG}) aus ema_eesm.polgeometrie")
+pruefe(abs(k["A_cu_mm2"] - er["A_cu_mm2"]) < 1e-9,
+       f"der Kupferquerschnitt {k['A_cu_mm2']} mm² kommt aus erregung() — also "
+       f"aus der Stromdichte, nicht aus dem Fenster")
+# Mehr Strom durch dieselbe Wicklung -> dickere Spule. Dass die Zeichnung dem
+# folgt, ist der eigentliche Punkt: sonst zeigt sie eine andere Maschine.
+k_dicht = ema_eesm_cad.koerper(dict(ge, fieldCurrentDensity=2.5), 100.0)
+pruefe(k_dicht["d_spule_mm"] > k["d_spule_mm"],
+       f"halbe Stromdichte -> dickere Spule ({k_dicht['d_spule_mm']} gegen "
+       f"{k['d_spule_mm']} mm)")
+# Und ein Pol, der nicht mehr auf die Teilung passt, wird NICHT gezeichnet.
+ge_eng = geom(machineType="eesm", p=8, slots=48, rotorOD=120, statorID=121.4,
+              shaftD=90)
+k_eng = ema_eesm_cad.koerper(ge_eng, 60.0)
+if k_eng["passt"]:
+    print("     (Beispielgeometrie passt — Weigerung mit gestelltem Befund)")
+    import unittest.mock as _mk2
+    with _mk2.patch.object(ema_eesm_cad, "koerper",
+                           return_value=dict(k_eng, passt=False, grund="zu eng")):
+        try:
+            skript(ge_eng, 60.0)
+            pruefe(False, "ein nicht passender Pol wird abgewiesen")
+        except ValueError as e:
+            pruefe("nicht zeichenbar" in str(e),
+                   f"abgewiesen: {str(e)[:60]}…")
+else:
+    try:
+        skript(ge_eng, 60.0)
+        pruefe(False, "ein nicht passender Pol wird abgewiesen")
+    except ValueError as e:
+        pruefe("nicht zeichenbar" in str(e), f"abgewiesen: {str(e)[:60]}…")
+
+print("\n11. Die Schleifringe haben EINE Quelle")
+
+rg_asm = ema_asm.schleifringe(geom(machineType="asm"), 200.0, rpm_max=6000)
+rg_ees = ema_schleifring.geometrie(geom(machineType="eesm"), 200.0, 2,
+                                   rpm_max=6000)
+pruefe(rg_asm["n_ringe"] == 3 and rg_ees["n_ringe"] == 2,
+       "drei Ringe fuer den Drehstromlaeufer, zwei fuer den Erregerkreis")
+pruefe(rg_asm["b_ring_mm"] == rg_ees["b_ring_mm"],
+       f"bei gleichem Strom dieselbe Ringbreite ({rg_asm['b_ring_mm']} mm) — "
+       f"eine Quelle, nicht zwei Fassungen")
+pruefe(ema_schleifring.U_BUERSTE_V == ema_eesm.U_BUERSTE_V,
+       "und derselbe Buerstenspannungsabfall wie in ema_eesm")
+# Die Umfangsgeschwindigkeit ist die Grenze dieser Bauart — und ohne
+# Drehzahlangabe steht dort None, nicht „ok".
+schnell = ema_schleifring.geometrie(geom(), 200.0, 3, rpm_max=30000)
+pruefe(schnell["v_ok"] is False and schnell["v_ring_mps"] > 45,
+       f"bei 30.000 1/min reisst die Grenze ({schnell['v_ring_mps']} m/s gegen "
+       f"{ema_schleifring.V_RING_MAX_MPS})")
+ohne = ema_schleifring.geometrie({"shaftD": 60}, 200.0, 3)
+pruefe(ohne["v_ok"] is None,
+       "ohne Hoechstdrehzahl steht None da — nicht geprueft ist nicht bestanden")
+
+print("\n12. Der Schenkelpol im Querschnitt — und das Tor davor")
+
+import ema_pipeline as _P
+n_eesm = schnitt_zaehlen(ge)
+pruefe(n_eesm > 0, f"der Querschnitt zeichnet ihn ({n_eesm} Flaechen)")
+_st = {"log": [], "progress": 0}
+_P._gate_laeufer({"geom": ge, "axial_len": 100, "rpm_to": 6000}, _st)
+pruefe(any("Schenkelpol" in l and "OK" in l for l in _st["log"]),
+       "das Laeufertor prueft Kern + Spule gegen die Polteilung")
+pruefe(any("NICHT gerechnet" in l for l in _st["log"]),
+       "und sagt, was es NICHT prueft (Polbefestigung, Fliehkraft am Polfuss) — "
+       "Schweigen laese sich als „geprueft\" lesen")
+
+
+print("\n13. Das Tor laesst die ASM jetzt ins CAD")
 
 pruefe("cad" in ema_maschinenart.ARTEN["asm"].stufen,
        "ARTEN['asm'].stufen fuehrt 'cad'")
@@ -549,13 +648,18 @@ try:
     pruefe(True, "pruefe_stufe('asm','cad') laesst durch")
 except ema_maschinenart.ArtNichtUnterstuetzt:
     pruefe(False, "pruefe_stufe('asm','cad') laesst durch")
-for art in ("synrm", "eesm"):
-    try:
-        ema_maschinenart.pruefe_stufe(art, "cad")
-        pruefe(False, f"{art} wird von der CAD-Stufe noch abgewiesen")
-    except ema_maschinenart.ArtNichtUnterstuetzt:
-        pruefe(True, f"{art} wird von der CAD-Stufe noch abgewiesen "
-                     f"(ehrlich, statt PSM-Geometrie unter falschem Namen)")
+pruefe("cad" in ema_maschinenart.ARTEN["eesm"].stufen,
+       "und die EESM ebenfalls — Schenkelpol, Erregerspulen, zwei Schleifringe")
+pruefe("feld" not in ema_maschinenart.ARTEN["eesm"].stufen,
+       "aber NICHT die Feldstufe: die 2-D-FDM ist reell und magnetostatisch und "
+       "kann eine Gleichstrom-Erregerwicklung so wenig darstellen wie einen "
+       "Kaefig — das steht als Luecke da statt als stille Vollstaendigkeit")
+try:
+    ema_maschinenart.pruefe_stufe("synrm", "cad")
+    pruefe(False, "synrm wird von der CAD-Stufe noch abgewiesen")
+except ema_maschinenart.ArtNichtUnterstuetzt:
+    pruefe(True, "synrm wird von der CAD-Stufe noch abgewiesen "
+                 "(ehrlich, statt PSM-Geometrie unter falschem Namen)")
 
 
 print("\n" + "=" * 62)

@@ -93,6 +93,28 @@ Tore):
 | Schleifringläufer (18 Nuten) | Shaft · Rotor · **Rotor_Winding (18)** · **Slip_Rings (3)** · **Brushes (3)** · Stator · Coils — **kein Käfig daneben** |
 | Käfigläufer p = 1 (Ventilatorfall) | **abgewiesen**: „nicht auslegbar, also nicht zeichenbar … 1686 A gegen 800 A" |
 
+**Nachtrag gleichen Tags: die EESM ebenso, und zwei Dinge dabei gemessen.**
+`ema_eesm.polgeometrie`/`erregung` rechnen den Schenkelpol seit jeher —
+Polschuhbreite, Wickelfenster, Jochhöhe, Kupferquerschnitt je Pol — nur
+gezeichnet hatte ihn nie jemand. `ema_eesm_cad.koerper` leitet daraus die Teile
+ab, `ARTEN["eesm"].stufen` führt `"cad"` (Feld weiterhin **nicht**: die 2-D-FDM
+ist reell und magnetostatisch und kann eine Gleichstrom-Erregerwicklung so wenig
+darstellen wie einen Käfig). Zwei Befunde beim Bauen:
+
+* **Der Läufer kam als sieben getrennte Körper heraus.** Joch und Pole berühren
+  einander nur an einer Fläche, und OCCs `fuse` macht daraus einen Verbund aus
+  mehreren Solids statt eines. Gemessen: `Rotor Solids=7` bei 6 Polen — und die
+  Struktur-FEM vernetzt genau diesen `Rotor`, hätte also einen zerfallenen
+  Läufer gerechnet. `POL_UEBERLAPP_MM` = 0,5 ist deshalb kein Schönheitsmaß,
+  sondern der Unterschied zwischen einem Bauteil und sieben (danach `Solids=1`,
+  `gueltig=True`).
+* **Die Stromdichte der Erregerwicklung war über `geom` nicht erreichbar.**
+  `erregung` nahm `J_F_VORGABE_APMM2` als Modulvorgabe und einen Funktions-
+  parameter, den kein Aufrufer setzte — in einer Parameterstudie oder einer
+  Zielwertsuche war sie damit unsichtbar, obwohl sie die Wicklung bemisst.
+  Jetzt `geom.fieldCurrentDensity`, dasselbe Muster wie `barCurrentDensity`
+  (Käfig) und `rotorCurrentDensity` (Schleifringläufer).
+
 Dazu neu: die **zweite Läuferbauform** (`rotorType="schleifring"` — Drehstrom-
 wicklung mit Anlasswiderstand, `ema_asm.laeuferwicklung`/`anlasswiderstand`/
 `schleifringe`) und die **Schrägung der Läufernuten** (`rotorSkewSlots`, in

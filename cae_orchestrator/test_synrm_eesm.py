@@ -268,7 +268,13 @@ for code in ("synrm", "eesm"):
     art = MA.hole(code)
     pruefe(MA.traegt(code, "analytisch"),
            f"'{code}' traegt die analytische Stufe")
-    for stufe in ("feld", "cad", "em3d"):
+    # Was eine Art traegt, ist je Art verschieden — und genau das ist der
+    # Sinn der Tabelle. Die EESM traegt seit dem 18.09.2026 das CAD
+    # (Schenkelpol samt Erregerspulen), die SynRM weiterhin nichts davon.
+    _traegt_cad = {"synrm": False, "eesm": True}[code]
+    pruefe(MA.traegt(code, "cad") is _traegt_cad,
+           f"'{code}' traegt 'cad' {'' if _traegt_cad else 'NICHT '}— und sagt es")
+    for stufe in ("feld", "em3d"):
         pruefe(not MA.traegt(code, stufe),
                f"'{code}' traegt '{stufe}' NICHT — und sagt es")
     pruefe(not art.hat_magnete,

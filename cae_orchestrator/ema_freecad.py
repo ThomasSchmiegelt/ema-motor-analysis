@@ -245,12 +245,34 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
         # (``v_ok``) ist ein Befund und gehoert ins Protokoll, nicht in ein
         # Zeichenskript -- und als JSON-``true``/``null`` waere es dort ohnehin
         # ein NameError, weil das erzeugte Skript Python ist und kein JSON.
+        import ema_schleifring as _SR
         _rg = _ASM.schleifringe(geom, float(_lw["I2_eff_A"]))
         _w = json.loads(wick_json)
-        _w["ringe"] = {k: float(_rg[k]) for k in
-                       ("d_ring_mm", "b_ring_mm", "spalt_mm")}
-        _w["ringe"]["n_ringe"] = int(_rg["n_ringe"])
+        _w["ringe"] = _SR.zeichenmasse(_rg)
         wick_json = json.dumps(_w)
+
+    # ── Schenkelpollaeufer (EESM) ───────────────────────────────────────────
+    # Die Masse kommen aus ``ema_eesm_cad.koerper`` -- derselben Funktion, aus
+    # der auch das Querschnittsbild zeichnet. Sie wiederum liest
+    # ``ema_eesm.polgeometrie``/``erregung``, also den Magnetkreis, der die
+    # Maschine rechnet: der Polschuh ist so breit, wie die Polbedeckung sagt,
+    # und die Spule so dick, wie der Kupferquerschnitt aus der Stromdichte es
+    # verlangt -- nicht so dick, wie das Fenster hergibt.
+    pol_json = "None"
+    if _MA.art_code(geom) == "eesm":
+        import ema_eesm_cad as _ECAD
+        import ema_eesm as _EESM
+        import ema_schleifring as _SR2
+        _pk = _ECAD.koerper(geom, axial_len)
+        if not _pk["passt"] and not geom.get("polFreigabe"):
+            raise ValueError("Schenkelpollaeufer nicht zeichenbar: "
+                             + _pk["grund"]
+                             + " — mit geom.polFreigabe=true trotzdem zeichnen.")
+        _pd = _ECAD.zeichenmasse(_pk)
+        # ZWEI Ringe: der Erregerkreis ist ein Gleichstromkreis, kein Drehstrom.
+        _pd["ringe"] = _SR2.zeichenmasse(
+            _SR2.geometrie(geom, float(_pk["I_f_A"]), 2))
+        pol_json = json.dumps(_pd)
 
     _wk_dat   = ema_wicklung.wicklung(geom, axial_len)
     wind_art  = _wk_dat["art"]
@@ -352,6 +374,7 @@ GEN_STATOR = {gen_stator!r}; GEN_HAIRPIN = {gen_hairpin!r}; GEN_WHEAD = {gen_whe
 WINDING_TYPE = {wind_art!r}; RD_FUELL = {rd_fuell}; RD_WK_AXIAL = {rd_wk_axial:.3f}
 CAGE = {cage_json}   # Kaefiglaeufer (ASM) aus ema_asm.kaefig — sonst None
 ROTORWICKLUNG = {wick_json}   # Schleifringlaeufer (ASM) aus ema_asm.laeuferwicklung
+POLLAEUFER = {pol_json}   # Schenkelpollaeufer (EESM) aus ema_eesm_cad.koerper
 HAT_MAGNETE = {hat_magnete!r}   # Bauart-Tatsache, nicht Anzeigewahl
 GEN_BEAR_A = {gen_bear_a!r}; GEN_BEAR_B = {gen_bear_b!r}; GEN_INSUL = {gen_insul!r}
 bearing_od = {bearing_od}; bearing_w = {bearing_w}; bearing_gap = {bearing_gap}
@@ -500,9 +523,70 @@ def _laeufernuten(LN, hoehe, z0):
     return aus
 
 
+# Ein Schenkelpol: Schuh (Kreisbogensegment am Rand) + Kern (Rechteck darunter).
+# Beides in der Polmitte gebaut und dann um `grad` gedreht -- dieselbe Ordnung
+# wie bei den Magneten, damit Bild und Koerper dieselbe Polfolge zeigen.
+# Die Teile muessen einander UEBERLAPPEN, nicht nur beruehren: OCCs `fuse`
+# verschmilzt zwei Koerper, die sich nur eine Flaeche teilen, zu einem Verbund
+# aus mehreren Solids statt zu einem. Gemessen kam der Laeufer so als 7 getrennte
+# Koerper heraus (Joch + 6 Pole) -- und die Struktur-FEM vernetzt genau diesen
+# `Rotor`, haette also einen zerfallenen Laeufer gerechnet. POL_UEBERLAPP_MM
+# ist deshalb kein Schoenheitsmass, sondern der Unterschied zwischen einem
+# Bauteil und sechs.
+POL_UEBERLAPP_MM = 0.5
+
+
+def _pol_koerper(PL, grad, hoehe, z0):
+    _rr, _rk = PL["r_rotor_mm"], PL["r_kern_aussen_mm"]
+    _rj = PL["r_joch_aussen_mm"]
+    _halb = math.degrees((PL["b_schuh_mm"] / 2.0) / max(_rr, 1e-9))
+    _schuh = Part.makeCylinder(_rr, hoehe, App.Vector(0, 0, z0),
+                               App.Vector(0, 0, 1), 2 * _halb)
+    _innen = Part.makeCylinder(max(_rk - POL_UEBERLAPP_MM, 0.1), hoehe + 2,
+                               App.Vector(0, 0, z0 - 1))
+    _schuh = _schuh.cut(_innen)
+    _m = App.Matrix(); _m.rotateZ(math.radians(grad - _halb))
+    _schuh = _schuh.transformGeometry(_m)
+    _bk = PL["b_kern_mm"]
+    _r0 = max(_rj - POL_UEBERLAPP_MM, 0.1)
+    _hk = max(_rk - _r0, 0.5)
+    _kern = Part.makeBox(_hk, _bk, hoehe, App.Vector(_r0, -_bk / 2.0, z0))
+    _kern.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), grad)
+    return _schuh, _kern
+
+
+# Die Erregerspule: zwei Querschnitte links und rechts des Kerns, radial ueber
+# die Kernhoehe. Der Polschuh haengt darueber und haelt sie gegen die Fliehkraft
+# -- gerechnet wird das hier NICHT (s. ema_eesm_cad."ungeprueft").
+def _pol_spule(PL, grad, hoehe, z0):
+    _rk, _rj = PL["r_kern_aussen_mm"], PL["r_joch_aussen_mm"]
+    _bk, _ds = PL["b_kern_mm"], PL["d_spule_mm"]
+    _hk = max(_rk - _rj, 0.5)
+    aus = []
+    for _vz in (-1.0, 1.0):
+        _y = _vz * (_bk / 2.0 + _ds / 2.0)
+        _b = Part.makeBox(_hk, _ds, hoehe, App.Vector(_rj, _y - _ds / 2.0, z0))
+        _b.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), grad)
+        aus.append(_b)
+    return aus
+
+
 # ── 2. ROTOR IRON (with magnet pockets; bore = connection type) ───────────
 if GEN_ROTOR:
-    rotor_ring  = Part.makeCylinder(R_rot,   axial,     App.Vector(0, 0, -axial / 2))
+    if POLLAEUFER:
+        # Schenkelpollaeufer: der Rotor ist Joch PLUS Pole, nicht der volle
+        # Ring. Waere er ein Vollzylinder, saesse zwischen den Polen Eisen, und
+        # der ganze Reluktanzunterschied -- die Bauart -- waere weggezeichnet.
+        rotor_ring = Part.makeCylinder(POLLAEUFER["r_joch_aussen_mm"], axial,
+                                       App.Vector(0, 0, -axial / 2))
+        _pol_teile = []
+        for _i in range(int(POLLAEUFER["poles"])):
+            _g = 360.0 * _i / int(POLLAEUFER["poles"])
+            _sh, _kn = _pol_koerper(POLLAEUFER, _g, axial, -axial / 2)
+            _pol_teile += [_sh, _kn]
+        rotor_ring = rotor_ring.fuse(_pol_teile)
+    else:
+        rotor_ring  = Part.makeCylinder(R_rot,   axial,     App.Vector(0, 0, -axial / 2))
     bore_cut    = _bore_cutter(R_shaft, -axial / 2 - 2, axial + 4)
     rotor_solid = rotor_ring.cut(bore_cut)
 
@@ -628,6 +712,36 @@ if GEN_ROTOR:
             _rings.append(_ro.cut(_ri))
         _add("Cage_Bars", Part.makeCompound(_stab), (0.75, 0.75, 0.78))
         _add("Cage_Rings", Part.makeCompound(_rings), (0.70, 0.70, 0.74))
+
+    # Der Schenkelpollaeufer: Erregerspulen + zwei Schleifringe.
+    if POLLAEUFER:
+        _sp_n, _sp_s = [], []
+        for _i in range(int(POLLAEUFER["poles"])):
+            _g = 360.0 * _i / int(POLLAEUFER["poles"])
+            _ziel = _sp_n if _i % 2 == 0 else _sp_s
+            _ziel += _pol_spule(POLLAEUFER, _g, axial, -axial / 2)
+        # Nach der Polfolge eingefaerbt wie die Magnete: benachbarte Pole
+        # tragen entgegengesetzte Erregung, und das ist die einzige Stelle, an
+        # der man die Polfolge nachsieht.
+        _add("Field_Coils_N", Part.makeCompound(_sp_n), (0.80, 0.42, 0.18))
+        _add("Field_Coils_S", Part.makeCompound(_sp_s), (0.35, 0.55, 0.85))
+        _rg2 = POLLAEUFER.get("ringe") or {{}}
+        if _rg2:
+            _rd2 = float(_rg2["d_ring_mm"]) / 2.0
+            _rb2 = float(_rg2["b_ring_mm"]); _sp2 = float(_rg2["spalt_mm"])
+            _r2, _b2 = [], []
+            _z2 = axial / 2 + 12.0
+            for _i in range(int(_rg2["n_ringe"])):
+                _ro = Part.makeCylinder(_rd2, _rb2, App.Vector(0, 0, _z2))
+                _ri = Part.makeCylinder(R_shaft, _rb2 + 2, App.Vector(0, 0, _z2 - 1))
+                _r2.append(_ro.cut(_ri))
+                _bl = 0.5 * _rb2
+                _bu = Part.makeBox(_bl, _bl, _rb2, App.Vector(_rd2, -_bl / 2.0, _z2))
+                _bu.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), 180.0 * _i)
+                _b2.append(_bu)
+                _z2 += _rb2 + _sp2
+            _add("Slip_Rings", Part.makeCompound(_r2), (0.80, 0.55, 0.25))
+            _add("Brushes", Part.makeCompound(_b2), (0.15, 0.15, 0.17))
 
     # Der Schleifringlaeufer: Wicklungsbuendel in denselben Nuten, dazu die drei
     # Ringe auf der Welle. Gezeichnet wird das Buendel und nicht jede Windung --

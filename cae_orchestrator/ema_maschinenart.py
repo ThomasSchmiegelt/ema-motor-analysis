@@ -164,7 +164,14 @@ ARTEN = {
         hat_laeuferwicklung=True,
         hat_schlupf=False,
         stellbarer_fluss=True,
-        stufen=("analytisch",),
+        # "cad" traegt seit dem 18.09.2026: Schenkelpollaeufer mit Erreger-
+        # spulen und zwei Schleifringen, gezeichnet aus ``ema_eesm_cad``,
+        # das seinerseits ``polgeometrie``/``erregung`` liest — also den
+        # Magnetkreis, der die Maschine rechnet. "feld" fehlt weiter mit
+        # Absicht: die 2-D-FDM ist reell und magnetostatisch und kann
+        # eine Gleichstrom-Erregerwicklung so wenig darstellen wie einen
+        # Kaefig.
+        stufen=("analytisch", "cad"),
         ohne_bedeutung=_PM_KENNZAHLEN,
         hinweis=("Die einzige Art, bei der der Fluss EINGESTELLT wird -- "
                  "zweiter Freiheitsgrad im Betriebspunkt (Erregerstrom), dafuer "

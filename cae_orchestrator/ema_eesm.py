@@ -214,7 +214,13 @@ def erregung(geom: dict, axial_mm: float, i_f_A: float = 0.0,
     # Die Wicklung wird ueber die STROMDICHTE bemessen, das Fenster ist die
     # Schranke (s. J_F_VORGABE_APMM2). Der noetige Kupferquerschnitt je Pol:
     #   A_cu = F_pol / J          [A / (A/mm^2)]
-    j_f = float(j_f_Apmm2) if j_f_Apmm2 and j_f_Apmm2 > 0 else J_F_VORGABE_APMM2
+    # Die Stromdichte ist eine AUSLEGUNGSentscheidung (4-6 fluessigkeits-,
+    # 2-3 luftgekuehlt) und stand bisher nur als Modulvorgabe da -- ueber
+    # ``geom`` war sie nicht erreichbar, also weder in einer Parameterstudie
+    # noch in einer Zielwertsuche. Dasselbe Muster wie ``barCurrentDensity``
+    # (Kaefig) und ``rotorCurrentDensity`` (Schleifringlaeufer).
+    j_f = (float(j_f_Apmm2) if j_f_Apmm2 and j_f_Apmm2 > 0
+           else float(geom.get("fieldCurrentDensity") or J_F_VORGABE_APMM2))
     j_f = min(max(j_f, 0.5), 20.0)
     a_cu = f_pol / (j_f * 1e6)                                  # m^2 je Pol
     a_cu_max = kf * a_fenster

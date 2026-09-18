@@ -70,6 +70,8 @@ SCHEMA = {
                    "desc": "Schrägung der Läufernuten in LÄUFERnutteilungen; -1 = automatisch nach Bauform (Käfig 1,0, Schleifring 0), 0 = ausdrücklich ohne Schrägung"},
     "rotorTurnsPerSlot": {"kind": "num", "lo": 2, "hi": 24, "def": 2, "geom": True, "adv": True, "int": True,
                    "desc": "Leiter je Läufernut beim Schleifringläufer"},
+    "fieldCurrentDensity": {"kind": "num", "lo": 0.5, "hi": 20, "def": 5, "geom": True, "adv": True,
+                   "desc": "Stromdichte der Erregerwicklung [A/mm²] (EESM) — bestimmt den Kupferquerschnitt je Pol und damit die Spulendicke; 4–6 flüssigkeits-, 2–3 luftgekühlt"},
     "rotorCurrentDensity": {"kind": "num", "lo": 1, "hi": 20, "def": 5, "geom": True, "adv": True,
                    "desc": "Stromdichte der Läuferwicklung [A/mm²] — bestimmt den Leiterquerschnitt und damit die Nuttiefe"},
     "bZielT":     {"kind": "num", "lo": 0.55, "hi": 0.95, "def": 0.80, "geom": True, "adv": True,
