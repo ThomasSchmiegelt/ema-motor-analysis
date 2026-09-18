@@ -17,6 +17,53 @@ kann.
 
 ---
 
+## 2026-09-18 — Die GSM wog wie die PSM, und ihr Staender hatte Zaehne, die es nicht gibt
+
+**Beobachtung.** Der Paarvergleich über die Achse `maschinenart` stellt seit
+Stufe 3 fünf Bauarten nebeneinander. Beim Nachsehen der Zahlen — der Schritt, den
+§9 des Plans ausdrücklich verlangt („zu prüfen ist nur, ob die Kennzahlvergleiche
+tragen") — trugen zwei Spalten nicht.
+
+**Messung, erster Fall.** Die GSM stand mit **Ziffer für Ziffer derselben Masse
+und denselben Kosten wie die PSM** da (40,53 kg / 197 EUR), während ASM, SynRM
+und EESM darunter lagen. Ursache: `ema_gsm.massen_und_kosten` übernahm die Basis
+aus `ema_screen` — und die rechnet eine Drehfeldmaschine: Magnete im Läufer, einen
+GENUTETEN Ständerring (Faktor 0,78) und Strangkupfer darin (0,30 × 0,55 des
+Ringvolumens). Keines davon hat die GSM. Gesetzt wurde nur `magnet_kg = 0`;
+`gesamt_kg` und `kosten` trugen die Magnete weiter. `erreger_cu_kg` stand
+obendrein immer auf `None`, weil `ema_eesm.erregung` gar keinen Schlüssel
+`m_cu_kg` führt und der Code ihn abfragte. Neu gerechnet aus den eigenen Teilen:
+60,78 kg / 270 EUR gegen 48,78 kg / 166 EUR der PSM — und die Summe der Posten
+ist die Gesamtmasse, im Test nachgerechnet.
+
+**Messung, zweiter Fall.** In der Spalte `B_Zahn` stand für die GSM **8,885 T** —
+exakt derselbe Wert wie für ASM und EESM. `ema_saettigung` rechnet die
+Zahnflussdichte über die **Nutteilung**; weil sich die Teilung dabei herauskürzt,
+hängt die Zahl nur an `B_gap` und `slotWidthRatio` und weiß von der Maschine
+nichts. Der GSM-Ständer trägt Schenkelpole und hat überhaupt keine Nuten — das
+war eine Formel auf eine Geometrie, die es nicht gibt. Dazu: der Hinweis am
+Umrichter-Limit las „800 A **bei 1 Wdg/Nut**", die Normierung der
+Drehfeldmaschinen; `ema_gsm.klemmenstrom` liest `i_max_A` und nicht `i_max_1t`,
+dort ist der Zusatz schlicht falsch.
+
+**Dritter Befund, derselbe Griff.** `ema_maschinenart.ohne_bedeutung` sagt seit
+jeher, welche Kennzahl für welche Art nichts bedeutet — **`ema_paarvergleich` hat
+sie nie gelesen.** Damit ist ausgerechnet die Tabelle, in der eine
+bedeutungslose Zahl neben gerechneten steht und genauso aussieht, der eine Ort,
+an dem die Registrierung nicht galt.
+
+**Fundstelle.** `ema_gsm.massen_und_kosten`; `ema_paarvergleich`, Zusatzspalten-
+Block (`ema_saettigung`) und die Umrichter-Warnung; `ema_maschinenart.ARTEN["gsm"]`.
+
+**Status.** Behoben. Die Massen entstehen aus den eigenen Teilen (Ankereisen
+abzüglich der Ankernuten, Ständerjoch + Schenkelpole ohne Nutfaktor, Anker- und
+Erregerkupfer), neu `_STAENDERNUT_KENNZAHLEN` in der Registrierung, und der
+Sättigungsblock fragt `gilt()` — die Spalte bleibt leer statt eine Zahl zu
+erfinden. `test_gsm.py` Abschnitte 13 und 14 nageln beides fest, samt der
+Gegenprobe, dass PSM und ASM die Sättigungsspalte behalten.
+
+---
+
 ## 2026-09-18 — Der frische Payload ist kein Gleichstrom-Payload, und die Legende deckte den Titel zu
 
 **Beobachtung.** Der erste End-zu-End-Lauf der neuen Gleichstrommaschine durch

@@ -556,28 +556,98 @@ def dauermoment(geom: dict, axial_mm: float, kuehlung: str, bp: dict) -> dict:
 
 
 def massen_und_kosten(payload: dict) -> dict:
-    """Massen und Kosten — Anker- und Erregerkupfer statt Magneten."""
+    """Massen und Kosten — Anker- und Erregerkupfer statt Magneten.
+
+    ``ema_screen.massen_und_kosten`` rechnet eine Drehfeldmaschine: Magnete im
+    Laeufer, ein GENUTETER Staenderring (Faktor 0,78) und Strangkupfer darin
+    (0,30 x 0,55 des Ringvolumens). **Keines davon hat die GSM.** Die Basiswerte
+    nur zu uebernehmen und ``magnet_kg`` auf 0 zu setzen reicht deshalb nicht:
+    ``gesamt_kg`` und ``kosten`` truegen die Magnete weiter mit. Gemessen kam die
+    GSM dabei auf **Ziffer fuer Ziffer dieselbe Masse und dieselben Kosten wie
+    die PSM** (40,53 kg / 197 EUR), waehrend ASM, SynRM und EESM darunter lagen —
+    eine Zahl, die genau dann falsch ist, wenn man sie vergleichen will.
+
+    Gerechnet wird daher aus den eigenen Teilen, jedes aus der Funktion, die es
+    schon beschreibt:
+
+        Welle        aus der Basis (dieselbe Welle)
+        Ankereisen   Laeuferscheibe abzueglich der ANKERNUTEN (``ankerwicklung``)
+        Ankerkupfer  Leiterzahl x Leiterlaenge x Leiterquerschnitt
+        Staendereisen Joch + Schenkelpole (``staenderpole``) — KEIN Nutfaktor,
+                     dieser Staender hat keine Nuten
+        Erregerkupfer Polzahl x Kupferquerschnitt x mittlere Windungslaenge
+
+    Nicht bilanziert und ausdruecklich gesagt: Kommutator (Lamellen, Ring,
+    Isolation), Buersten und Buerstenhalter.
+    """
+    import math
     import ema_screen
+    from ema_pipeline import HAIRPIN_MATS, LAMINATES
+
     geom = payload["geom"]
     axial = float(payload.get("axial_len") or geom.get("axialLen") or 80.0)
     basis = ema_screen.massen_und_kosten(payload)
 
-    aw = ankerwicklung(geom, axial)
-    from ema_pipeline import HAIRPIN_MATS
+    lam_rot = LAMINATES.get(payload.get("rotor_lam", "m270_35a"),
+                            LAMINATES["m270_35a"])
+    lam_st = LAMINATES.get(payload.get("stator_lam", "m270_35a"),
+                           LAMINATES["m270_35a"])
     mat = HAIRPIN_MATS.get(geom.get("armatureMat") or ANKER_MAT,
                            HAIRPIN_MATS[ANKER_MAT])
-    m_anker = (aw["z_leiter"] * aw["l_leiter_m"] * aw["A_leiter_mm2"] * 1e-6
-               * float(mat["density"]))
+    rho_cu = float(mat["density"])
+
+    # ── Laeufer: Ankereisen abzueglich der Nuten, plus Ankerkupfer ────────────
+    aw = ankerwicklung(geom, axial)
+    m_anker_cu = (aw["z_leiter"] * aw["l_leiter_m"] * aw["A_leiter_mm2"] * 1e-6
+                  * rho_cu)
+    v_nuten_mm3 = (float(aw["n_nut"]) * float(aw["nut_breite_mm"])
+                   * float(aw["nut_tiefe_mm"]) * axial)
+    m_anker_fe = max(0.0, float(basis["rotoreisen_kg"])
+                     - v_nuten_mm3 * 1e-9 * float(lam_rot["density"]))
+
+    # ── Staender: Joch + Schenkelpole, ohne Nutabzug ──────────────────────────
+    sp = staenderpole(geom, axial)
+    r_so = float(geom["statorOD"]) / 2.0
+    r_si = float(geom["statorID"]) / 2.0
+    r_joch_i = max(r_so - float(sp["h_joch_mm"]), r_si)
+    v_joch = math.pi * (r_so ** 2 - r_joch_i ** 2) * axial
+    h_pol = max(r_joch_i - r_si, 0.0)
+    v_pole = float(sp["poles"]) * float(sp["b_pol_mm"]) * h_pol * axial
+    m_st_fe = (v_joch + v_pole) * 1e-9 * float(lam_st["density"])
+
+    # ── Erregerkupfer an denselben Polen ──────────────────────────────────────
     er = __import__("ema_eesm").erregung(geom, axial)
+    v_err = (float(sp["poles"]) * float(er["A_cu_mm2"])
+             * float(sp["l_windung_mm"]))
+    m_err_cu = v_err * 1e-9 * rho_cu
+
+    m_welle = float(basis["welle_kg"])
+    m_cu = m_anker_cu + m_err_cu
+    gesamt = m_welle + m_anker_fe + m_st_fe + m_cu
+
+    kosten = {
+        "magnet_EUR": 0.0,
+        "kupfer_EUR": round(m_cu * ema_screen.PREISE_EUR_KG["kupfer"], 0),
+        "stahl_EUR": round((m_anker_fe + m_st_fe + m_welle)
+                           * ema_screen.PREISE_EUR_KG["stahl"], 0),
+    }
+    kosten["gesamt_EUR"] = round(sum(kosten.values()), 0)
+
     aus = dict(basis)
     aus.update({
         "magnet_kg": 0.0,
-        "anker_cu_kg": round(m_anker, 3),
-        "erreger_cu_kg": round(float(er.get("m_cu_kg", 0.0)), 3)
-        if "m_cu_kg" in er else None,
-        "hinweis_gsm": ("Kein Magnet, dafuer zwei Kupferkreise: Anker und "
-                        "Erregung. Der Kommutator selbst (Lamellen, Ring, "
-                        "Isolation) ist NICHT bilanziert."),
+        "rotoreisen_kg": round(m_anker_fe, 2),
+        "statoreisen_kg": round(m_st_fe, 2),
+        "kupfer_kg": round(m_cu, 2),
+        "anker_cu_kg": round(m_anker_cu, 3),
+        "erreger_cu_kg": round(m_err_cu, 3),
+        "gesamt_kg": round(gesamt, 2),
+        "kosten": kosten,
+        "hinweis": basis["hinweis"] + (" Kein Magnet und kein Staenderstrang, "
+                                       "dafuer zwei Kupferkreise: Anker und "
+                                       "Erregung. Der Kommutator (Lamellen, "
+                                       "Ring, Isolation) und die Buersten sind "
+                                       "NICHT bilanziert."),
     })
     return aus
 

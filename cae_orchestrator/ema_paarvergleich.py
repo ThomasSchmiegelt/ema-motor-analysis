@@ -637,7 +637,14 @@ def _bewerte(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
             _geom = payload.get("geom") or payload
             _ax = float(payload.get("axial_len") or _geom.get("axialLen") or 0.0)
             _bg = float(erg.get("B_gap_T") or 0.0)
-            if _ax > 0 and _bg > 0:
+            # Die Registrierung entscheidet, ob die Zahl hier ueberhaupt etwas
+            # bedeutet -- ``ema_saettigung`` rechnet die Zahnflussdichte ueber
+            # die NUTTEILUNG, und ein Staender aus Schenkelpolen hat keine. Ohne
+            # diese Frage stand an der GSM dieselbe 8,885 T wie an ASM und EESM,
+            # weil die Formel nur an B_gap und slotWidthRatio haengt.
+            import ema_maschinenart as _MAs
+            _gilt_zahn = _MAs.gilt(_MAs.art_code(_geom), "B_zahn_T")
+            if _ax > 0 and _bg > 0 and _gilt_zahn:
                 _rpm = float(payload.get("rpm_to") or payload.get("rpm_from") or 0.0)
                 _iq = _id = 0.0
                 if _rpm > 0 and float(last_nm or 0) > 0:
@@ -881,7 +888,8 @@ def _bewerte_gsm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dic
                        "komm_bindend": komm["bindend"],
                        "komm_ok": bool(komm["ok"]),
                        "P_buerste_W": float(verl.get("P_buerste_W") or 0.0),
-                       "P_Laeufer_W": float(verl.get("P_anker_Cu_W") or 0.0)})
+                       "P_Laeufer_W": float(verl.get("P_anker_Cu_W") or 0.0),
+                       "strom_klemme": True})
 
 
 def _bewerte_asm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
@@ -1397,9 +1405,15 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
                          f"{o['T_dauer_Nm']:.1f} Nm statt {o['T_dauer_therm_Nm']:.1f} Nm "
                          f"kuehlbar — mehr Kuehlung bringt hier nichts")
             if o.get("strom_limit"):
+                # „bei n Wdg/Nut" ist die Normierung der Drehfeldmaschinen. Die
+                # GSM rechnet mit dem KLEMMENstrom (``ema_gsm.klemmenstrom``
+                # liest ``i_max_A``, nicht ``i_max_1t``) -- dort waere der
+                # Zusatz schlicht falsch.
+                _bez = ("am Anker" if o.get("strom_klemme")
+                        else f"bei {o.get('n_wdg') or 1} Wdg/Nut")
                 z.append(f"        ⚠ Strom am Umrichter-Limit "
                          f"({o.get('i_grenze_1t_A') or ema_analysis.INVERTER_I_MAX:.0f} A "
-                         f"bei {o.get('n_wdg') or 1} Wdg/Nut) — "
+                         f"{_bez}) — "
                          f"diese Option erreicht {erg['last_nm']:.0f} Nm dort NICHT; "
                          f"I_s ist gedeckelt und nicht vergleichbar")
             if o.get("tasche_offen"):

@@ -351,6 +351,65 @@ pruefe(nah(bp["U_buerste_V"], 2.0 * ema_schleifring.U_BUERSTE_V, rel=1e-9),
        f"({bp['U_buerste_V']} V)")
 
 
+print("\n13. Massen und Kosten kommen aus den EIGENEN Teilen")
+
+# Der Fehler, gegen den das hier steht: ``massen_und_kosten`` uebernahm die
+# Basis von ``ema_screen`` (eine Drehfeldmaschine: Magnete, genuteter Staender,
+# Strangkupfer) und setzte nur ``magnet_kg`` auf 0 — ``gesamt_kg`` und
+# ``kosten`` trugen die Magnete weiter. Gemessen stand die GSM im Paarvergleich
+# mit Ziffer fuer Ziffer derselben Masse und denselben Kosten wie die PSM.
+import ema_screen as _SC
+_mk_gsm = G.massen_und_kosten(copy.deepcopy(_pl))
+_mk_psm = _SC.massen_und_kosten(copy.deepcopy(_pl))
+pruefe(_mk_gsm["magnet_kg"] == 0.0 and _mk_gsm["kosten"]["magnet_EUR"] == 0.0,
+       "kein Magnet — weder in der Masse noch in den Kosten")
+pruefe(abs(_mk_gsm["gesamt_kg"] - _mk_psm["gesamt_kg"]) > 0.5
+       and abs(_mk_gsm["kosten"]["gesamt_EUR"]
+               - _mk_psm["kosten"]["gesamt_EUR"]) > 1.0,
+       f"und die Gesamtsumme ist eine ANDERE als die der PSM "
+       f"({_mk_gsm['gesamt_kg']} kg / {_mk_gsm['kosten']['gesamt_EUR']} EUR "
+       f"gegen {_mk_psm['gesamt_kg']} kg / "
+       f"{_mk_psm['kosten']['gesamt_EUR']} EUR)")
+_summe = (_mk_gsm["welle_kg"] + _mk_gsm["rotoreisen_kg"]
+          + _mk_gsm["statoreisen_kg"] + _mk_gsm["kupfer_kg"])
+pruefe(nah(_summe, _mk_gsm["gesamt_kg"], rel=2e-3),
+       f"die Summe der Teile IST die Gesamtmasse ({_summe:.2f} gegen "
+       f"{_mk_gsm['gesamt_kg']} kg) — kein Posten faellt unter den Tisch")
+pruefe(nah(_mk_gsm["anker_cu_kg"] + _mk_gsm["erreger_cu_kg"],
+           _mk_gsm["kupfer_kg"], rel=2e-3)
+       and _mk_gsm["erreger_cu_kg"] > 0.0,
+       f"das Kupfer sind ZWEI Kreise, Anker {_mk_gsm['anker_cu_kg']} kg + "
+       f"Erregung {_mk_gsm['erreger_cu_kg']} kg (frueher stand dort None, "
+       f"weil ema_eesm.erregung gar kein 'm_cu_kg' fuehrt)")
+_aw = G.ankerwicklung(G0, L)
+pruefe(_mk_gsm["rotoreisen_kg"] < _mk_psm["rotoreisen_kg"],
+       f"die {_aw['n_nut']} Ankernuten nehmen Laeufereisen weg "
+       f"({_mk_gsm['rotoreisen_kg']} gegen {_mk_psm['rotoreisen_kg']} kg)")
+pruefe("NICHT bilanziert" in _mk_gsm["hinweis"],
+       "und was NICHT gezaehlt ist, steht dabei (Kommutator, Buersten)")
+
+
+print("\n14. Was diese Bauart nicht hat, bekommt keine Zahl")
+
+# ``ema_saettigung`` rechnet die Zahnflussdichte ueber die NUTTEILUNG. Der
+# GSM-Staender traegt Schenkelpole und hat gar keine Nuten — gemessen kam dort
+# dieselbe 8,885 T heraus wie an ASM und EESM, weil die Formel nur an B_gap und
+# slotWidthRatio haengt und von der Maschine nichts weiss.
+for _kz in ("B_zahn_T", "saett_pct"):
+    pruefe(not MA.gilt("gsm", _kz),
+           f"'{_kz}' hat fuer die GSM keine Bedeutung — der Staender hat "
+           f"keine Nuten")
+    pruefe(MA.gilt("pmsm", _kz)
+           and MA.gilt("asm", _kz),
+           f"fuer PSM und ASM dagegen schon ('{_kz}')")
+pruefe(r_gsm.get("B_zahn_T") is None and r_gsm.get("saett_pct") is None,
+       "und der Paarvergleich laesst die Spalten leer, statt eine Zahl "
+       "hinzuschreiben, die neben gerechneten Zahlen wie eine aussieht")
+pruefe(r_gsm.get("strom_klemme") is True,
+       "der Stromhinweis sagt 'am Anker' statt 'bei n Wdg/Nut' — die "
+       "Drehfeld-Normierung gilt hier nicht")
+
+
 print("\n" + "=" * 62)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

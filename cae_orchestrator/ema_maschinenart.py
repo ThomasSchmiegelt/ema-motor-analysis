@@ -97,6 +97,17 @@ _DREHFELD_KENNZAHLEN = (
     "i_d_A", "i_q_A", "mag_anteil",
 )
 
+# Kennzahlen, die eine GENUTETE Staenderbohrung voraussetzen. ``ema_saettigung``
+# rechnet die Zahnflussdichte ueber die Nutteilung -- wo der Staender Schenkel-
+# pole traegt und gar keine Nuten hat, ist das eine Formel auf eine Geometrie,
+# die es nicht gibt. Gemessen kam an der GSM ``B_zahn = 8,885 T`` heraus, exakt
+# derselbe Wert wie an ASM und EESM: die Zahl haengt nur an ``B_gap`` und
+# ``slotWidthRatio`` und weiss von der Maschine nichts. Eine Zahl, die neben
+# gerechneten Zahlen steht und wie eine aussieht, ist schlimmer als eine Luecke.
+_STAENDERNUT_KENNZAHLEN = (
+    "B_zahn_T", "saett_pct", "saett_engstelle",
+)
+
 _PM_KENNZAHLEN = (
     "Isc_A", "I_sc_A", "T_kurzschluss_Nm",
     "entmag_reserve", "entmag_T_C", "demag_margin",
@@ -205,7 +216,8 @@ ARTEN = {
         # auszugeben und „GSM" darueberzuschreiben.
         stufen=("analytisch", "cad"),
         feldweg="keiner",
-        ohne_bedeutung=_PM_KENNZAHLEN + _DREHFELD_KENNZAHLEN,
+        ohne_bedeutung=(_PM_KENNZAHLEN + _DREHFELD_KENNZAHLEN
+                        + _STAENDERNUT_KENNZAHLEN),
         hinweis=("Das Feld steht STILL (Schenkelpole am Staender), der "
                  "Kommutator haelt die Ankerdurchflutung im Raum fest. "
                  "E = k*Phi*omega und T = k*Phi*I_a mit DERSELBEN Konstante "
