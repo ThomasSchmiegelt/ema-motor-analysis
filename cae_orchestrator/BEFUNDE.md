@@ -17,6 +17,71 @@ kann.
 
 ---
 
+## 2026-09-18 — Der frische Payload ist kein Gleichstrom-Payload, und die Legende deckte den Titel zu
+
+**Beobachtung.** Der erste End-zu-End-Lauf der neuen Gleichstrommaschine durch
+`build_cad_preview` wurde vom Kommutierungstor abgewiesen — zu Recht, aber aus
+einem Grund, der nichts mit der Auslegung zu tun hatte: `cae_cli.frischer_payload`
+trägt `rpm_to = 20000`, die Vorgabe eines Traktions-PSM. Am Kommutator sind das
+**128,4 m/s gegen 40 m/s Grenze** (Ausnutzung 321 %), dazu 43,3 V Lamellenspitze
+gegen 35. Das Tor tut genau, was es soll; falsch ist die Erwartung, `--frisch`
+liefere einen Startpunkt für *jede* Maschinenart. Bei 3000 1/min läuft derselbe
+Payload durch (19,3 m/s, 48 % Ausnutzung, bindend `umfang`).
+
+**Messung.** Derselbe Lauf bei 3000 1/min baut in FreeCAD: `Rotor` **ein** gültiger
+Solid (1.903.685 mm³), 24 Ankerbündel, 48 Kommutatorlamellen, 4 Bürsten, `Stator`
+ein Solid (Joch + vier einwärts gerichtete Pole verschmolzen), 4+4 Erregerspulen,
+**keine** Magnete, keine Statornuten, keine Hairpins.
+
+**Zweiter Befund aus demselben Bild.** Im erzeugten Querschnitt überdeckte die
+Legende den Titel. Ursache ist nicht die Legende, sondern der **längere Titel**:
+`render_cross_section` zeichnet ihn als `ax.text` in Datenkoordinaten mittig oben,
+die Legende sitzt auf `loc='upper right'` derselben Achse — solange „PSM —
+Querschnitt (XY)" 204 px breit war, ging das gut; „ASM — Asynchronmaschine
+(Kaefiglaeufer) — Querschnitt (XY)" ist **338 px** breit und stößt an. Gemessen
+(Figur 10x10, dpi 130): ASM überdeckt um 3 px, GSM im gespeicherten Bild sichtbar
+um rund 20. Eine erste Messung meldete fälschlich „keine Überdeckung" — sie
+verglich gegen `ax.title`, und der ist hier leer.
+
+**Fundstelle.** `cae_cli.frischer_payload` (`rpm_to`); `ema_pipeline.render_cross_section`,
+Legende am Ende der Funktion.
+
+**Status.** Die Legende bekommt `bbox_to_anchor=(1.0, 0.94)` und sitzt damit unter
+dem Titelband — für alle fünf Bauarten nachgemessen. Der Payload bleibt, wie er
+ist: eine Vorgabe je Maschinenart wäre eine zweite Quelle neben dem Schema, und
+das Tor sagt bereits mit Zahl und Grund, was nicht geht. Ein begründetes Nein ist
+ein Ergebnis.
+
+---
+
+## 2026-09-18 — Die Lamellenspannung hängt nicht an der Leiterzahl
+
+**Beobachtung.** Eine Prüfung in `test_gsm.py` sollte die Lamellenspannung über
+**viele Leiter** zum Reißen bringen (12 Leiter/Nut, 48 Nuten, 3000 1/min) und kam
+mit `befunde: []` zurück. Der erste Verdacht war ein Fehler im Tor.
+
+**Messung.** Es ist Algebra, kein Fehler: mit `U_l = 2a·E/k`, `E ∝ z` und `k ∝ z`
+kürzt sich die Leiterzahl heraus, übrig bleibt `U_l ≈ 2·r·B·α·L·ω`. Nachgemessen
+ändern **288 statt 48 Lamellen** die mittlere Lamellenspannung nicht (1,62 V in
+beiden Fällen), während die doppelte **Baulänge** sie verdoppelt (3,25 V) und die
+Umfangsgeschwindigkeit dabei stehen lässt. Welche der drei Grenzen bindet, hängt
+deshalb an der Bauform, und der Übergang ist scharf — bei 6000 1/min:
+
+| Paket | U_l (Spitze) | v_komm | bindend | |
+|---:|---:|---:|---|---|
+| 100 mm | 6,49 V (12,99) | 38,5 m/s | `umfang` 0,96 | hält |
+| 300 mm | 19,48 V (38,96) | 38,5 m/s | `lamelle_spitze` 1,11 | **reißt** |
+
+**Fundstelle.** `ema_gsm.kommutierung`; `test_gsm.py` Abschnitt 5.
+
+**Status.** Die Prüfung ist umgeschrieben: sie nagelt jetzt fest, dass die
+Leiterzahl sich herauskürzt und die Baulänge es nicht tut, und treibt die
+Lamellengrenze über ein **langes Paket** statt über die Leiterzahl. Für den, der
+einen Kommutator entlasten will, ist das die eigentliche Auskunft — mehr Lamellen
+helfen nicht.
+
+---
+
 ## 2026-09-18 — Der Käfig war gezeichnet und unerreichbar, und der Läufer ohne Magnete bekam welche
 
 **Beobachtung.** Auf die Bitte, eine Asynchronmaschine mit n Polen in CAD

@@ -274,6 +274,23 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
             _SR2.geometrie(geom, float(_pk["I_f_A"]), 2))
         pol_json = json.dumps(_pd)
 
+    # ── Gleichstrommaschine: Schenkelpole am STAENDER, Anker am Laeufer ────
+    # Die einzige Bauart hier, bei der der Staender KEINE Nuten hat und der
+    # Laeufer sie traegt. ``GEN_STATOR``/``GEN_HAIRPIN`` werden deshalb
+    # abgeschaltet: die Drehstromnutung und die Hairpin-Kronen gehoeren zu
+    # einer Maschine, die es hier nicht gibt.
+    gsm_json = "None"
+    if _MA.art_code(geom) == "gsm":
+        import ema_gsm as _GSM
+        import ema_schleifring as _SR3
+        _gd = _GSM.zeichenmasse(geom, axial_len)
+        _aw = _GSM.ankerwicklung(geom, axial_len)
+        if not _aw["passt"] and not geom.get("ankerFreigabe"):
+            raise ValueError(
+                "Ankerwicklung passt nicht in ihre Nut — mit geom.ankerFreigabe"
+                "=true trotzdem zeichnen.")
+        gsm_json = json.dumps(_gd)
+
     _wk_dat   = ema_wicklung.wicklung(geom, axial_len)
     wind_art  = _wk_dat["art"]
     rd_fuell  = ema_wicklung.FUELL_RUNDDRAHT
@@ -306,9 +323,15 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
     gen_shaft   = bool(geom.get("genShaft",        True))
     gen_rotor   = bool(geom.get("genRotorIron",    True))
     gen_magnets = bool(geom.get("genMagnets",      True)) and hat_magnete
-    gen_stator  = bool(geom.get("genStatorIron",   True))
-    gen_hairpin = bool(geom.get("genHairpins",     True))   # straight slot bars + tabs
-    gen_whead   = bool(geom.get("genWindingHeads", True))   # U-crowns (need hairpins)
+    # Die Gleichstrommaschine ist die einzige Bauart hier, bei der der STAENDER
+    # keine Nuten hat und der LAEUFER sie traegt. Die Drehstromnutung und die
+    # Hairpin-Kronen gehoeren zu einer Maschine, die es dort nicht gibt — beides
+    # wird abgeschaltet, und zwar HIER (nach den Haekchen), nicht davor: die
+    # Zuweisung unten haette es sonst still wieder eingeschaltet.
+    _ist_gsm    = gsm_json != "None"
+    gen_stator  = bool(geom.get("genStatorIron",   True)) and not _ist_gsm
+    gen_hairpin = bool(geom.get("genHairpins",     True)) and not _ist_gsm
+    gen_whead   = bool(geom.get("genWindingHeads", True)) and not _ist_gsm
     gen_bear_a  = bool(geom.get("genBearingA",     False))  # A-side bearing (−z)
     gen_bear_b  = bool(geom.get("genBearingB",     False))  # B-side bearing (+z)
     gen_insul   = bool(geom.get("genInsulation",   False))  # winding-head paper
@@ -375,6 +398,7 @@ WINDING_TYPE = {wind_art!r}; RD_FUELL = {rd_fuell}; RD_WK_AXIAL = {rd_wk_axial:.
 CAGE = {cage_json}   # Kaefiglaeufer (ASM) aus ema_asm.kaefig — sonst None
 ROTORWICKLUNG = {wick_json}   # Schleifringlaeufer (ASM) aus ema_asm.laeuferwicklung
 POLLAEUFER = {pol_json}   # Schenkelpollaeufer (EESM) aus ema_eesm_cad.koerper
+GSM = {gsm_json}   # Gleichstrommaschine aus ema_gsm.zeichenmasse
 HAT_MAGNETE = {hat_magnete!r}   # Bauart-Tatsache, nicht Anzeigewahl
 GEN_BEAR_A = {gen_bear_a!r}; GEN_BEAR_B = {gen_bear_b!r}; GEN_INSUL = {gen_insul!r}
 bearing_od = {bearing_od}; bearing_w = {bearing_w}; bearing_gap = {bearing_gap}
@@ -626,6 +650,15 @@ if GEN_ROTOR:
         _LN = CAGE or ROTORWICKLUNG
         for _nut in _laeufernuten(_LN, axial + 4, -axial / 2 - 2):
             pocket_shapes.append(_nut)
+    if GSM:
+        # Die Ankernuten. Dieselbe Nutform wie beim Laeufer der ASM -- eine Nut
+        # ist eine Nut; was darin liegt, entscheidet spaeter.
+        _AN = {{"n": GSM["n_ankernuten"], "b": GSM["nut_breite_mm"],
+               "t": GSM["nut_tiefe_mm"],
+               "r_i": GSM["r_anker_mm"] - GSM["nut_tiefe_mm"],
+               "skew_deg": 0.0, "skew_segs": 1}}
+        for _nut in _laeufernuten(_AN, axial + 4, -axial / 2 - 2):
+            pocket_shapes.append(_nut)
 
     rotor_base = rotor_solid                          # valid disc (ring − bore) — ultimate fallback
     if pocket_shapes:
@@ -712,6 +745,48 @@ if GEN_ROTOR:
             _rings.append(_ro.cut(_ri))
         _add("Cage_Bars", Part.makeCompound(_stab), (0.75, 0.75, 0.78))
         _add("Cage_Rings", Part.makeCompound(_rings), (0.70, 0.70, 0.74))
+
+    # Die Gleichstrommaschine: Ankerwicklung, Kommutator, Buersten.
+    if GSM:
+        _ab = []
+        _AN2 = {{"n": GSM["n_ankernuten"], "b": max(GSM["nut_breite_mm"] - 1.6, 0.5),
+                "t": max(GSM["nut_tiefe_mm"] - 2.0, 0.5),
+                "r_i": GSM["r_anker_mm"] - GSM["nut_tiefe_mm"] + 1.0,
+                "skew_deg": 0.0, "skew_segs": 1}}
+        _lw2 = axial + 2 * max(4.0, 0.12 * axial)
+        _ab = _laeufernuten(_AN2, _lw2, -_lw2 / 2)
+        _add("Armature_Winding", Part.makeCompound(_ab), (0.72, 0.45, 0.20))
+
+        # Der Kommutator: k Lamellen auf der Welle, durch Glimmer getrennt.
+        # Gezeichnet werden sie EINZELN -- ein glatter Ring saehe aus wie ein
+        # Schleifring, und der Unterschied zwischen beiden ist der ganze Punkt.
+        _kd = GSM["d_kommutator_mm"] / 2.0
+        _kl = GSM["l_kommutator_mm"]
+        _kz = axial / 2 + 10.0
+        _nl = int(GSM["k_lamellen"])
+        _dw = 360.0 / max(_nl, 1)
+        _spalt_w = math.degrees(GSM["lamellenspalt_mm"] / max(_kd, 1e-9))
+        _lam = []
+        for _i in range(_nl):
+            _w = max(_dw - _spalt_w, 0.05)
+            _seg = Part.makeCylinder(_kd, _kl, App.Vector(0, 0, _kz),
+                                     App.Vector(0, 0, 1), _w)
+            _in = Part.makeCylinder(R_shaft, _kl + 2, App.Vector(0, 0, _kz - 1))
+            _seg = _seg.cut(_in)
+            _m = App.Matrix(); _m.rotateZ(math.radians(_dw * _i))
+            _lam.append(_seg.transformGeometry(_m))
+        _add("Commutator", Part.makeCompound(_lam), (0.80, 0.52, 0.22))
+
+        # Die Buersten: 2p Stueck, in der neutralen Zone zwischen den Polen.
+        _bu2 = []
+        _bb = max(0.35 * _kl, 3.0)
+        for _i in range(int(GSM["poles"])):
+            _g = 360.0 * (_i + 0.5) / int(GSM["poles"])
+            _b = Part.makeBox(_bb, _bb, _kl * 0.7,
+                              App.Vector(_kd, -_bb / 2.0, _kz + 0.15 * _kl))
+            _b.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), _g)
+            _bu2.append(_b)
+        _add("Brushes", Part.makeCompound(_bu2), (0.15, 0.15, 0.17))
 
     # Der Schenkelpollaeufer: Erregerspulen + zwei Schleifringe.
     if POLLAEUFER:
@@ -849,6 +924,50 @@ if GEN_MAGNETS:
         if shapes:
             compound = Part.makeCompound(shapes) if len(shapes) > 1 else shapes[0]
             _add(name, compound, rgb)
+
+# ── 4b. STAENDER der Gleichstrommaschine: Joch + Schenkelpole nach INNEN ──
+# Kein genuteter Ring: die Nuten sitzen bei dieser Bauart am Anker. Zwischen den
+# Polen ist LUFT, und die ist so wenig Beiwerk wie beim Schenkelpollaeufer.
+if GSM:
+    _js = Part.makeCylinder(GSM["r_stator_aussen_mm"], axial,
+                            App.Vector(0, 0, -axial / 2))
+    _jl = Part.makeCylinder(GSM["r_joch_innen_mm"], axial + 4,
+                            App.Vector(0, 0, -axial / 2 - 2))
+    _staender = _js.cut(_jl)
+    _sp_teile, _spu_a, _spu_b = [], [], []
+    _rsi, _rki = GSM["r_stator_bohrung_mm"], GSM["r_kern_innen_mm"]
+    _rji = GSM["r_joch_innen_mm"]
+    _hb2 = math.degrees((GSM["b_schuh_mm"] / 2.0) / max(_rsi, 1e-9))
+    for _i in range(int(GSM["poles"])):
+        _g = 360.0 * _i / int(GSM["poles"])
+        # Polschuh: Bogensegment an der Bohrung, nach innen zeigend.
+        _sh = Part.makeCylinder(_rki + POL_UEBERLAPP_MM, axial,
+                                App.Vector(0, 0, -axial / 2),
+                                App.Vector(0, 0, 1), 2 * _hb2)
+        _sh = _sh.cut(Part.makeCylinder(_rsi, axial + 2,
+                                        App.Vector(0, 0, -axial / 2 - 1)))
+        _m = App.Matrix(); _m.rotateZ(math.radians(_g - _hb2))
+        _sp_teile.append(_sh.transformGeometry(_m))
+        # Polkern: vom Schuh bis ins Joch (mit Ueberlappung, s. dort).
+        _bk2 = GSM["b_kern_mm"]
+        _hk2 = max(_rji - _rki + POL_UEBERLAPP_MM, 0.5)
+        _kn = Part.makeBox(_hk2, _bk2, axial,
+                           App.Vector(_rki, -_bk2 / 2.0, -axial / 2))
+        _kn.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), _g)
+        _sp_teile.append(_kn)
+        # Erregerspule: zwei Querschnitte neben dem Kern.
+        _ds2 = GSM["d_spule_mm"]
+        for _vz in (-1.0, 1.0):
+            _y = _vz * (_bk2 / 2.0 + _ds2 / 2.0)
+            _sb = Part.makeBox(max(_rji - _rki, 0.5), _ds2, axial,
+                               App.Vector(_rki, _y - _ds2 / 2.0, -axial / 2))
+            _sb.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), _g)
+            (_spu_a if _i % 2 == 0 else _spu_b).append(_sb)
+    _staender = _staender.fuse(_sp_teile)
+    _add("Stator", _staender, (0.30, 0.38, 0.52))
+    _add("Field_Coils_N", Part.makeCompound(_spu_a), (0.80, 0.42, 0.18))
+    _add("Field_Coils_S", Part.makeCompound(_spu_b), (0.35, 0.55, 0.85))
+
 
 # ── 4. STATOR IRON (with slots) ──────────────────────────────────────────
 if GEN_STATOR:

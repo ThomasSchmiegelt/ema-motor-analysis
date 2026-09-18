@@ -604,6 +604,8 @@ def _bewerte(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
         erg = _bewerte_synrm(payload, n_max, rpm, last_nm)
     elif art == "eesm":
         erg = _bewerte_eesm(payload, n_max, rpm, last_nm)
+    elif art == "gsm":
+        erg = _bewerte_gsm(payload, n_max, rpm, last_nm)
     else:
         erg = _bewerte_pmsm(payload, n_max, rpm, last_nm)
     if erg.get("ok"):
@@ -684,6 +686,11 @@ def _bandwerte(art: str, payload: dict, erg: dict) -> dict:
                                          / max(kf["stabbreite_mm"], 1e-9))
         except Exception:
             pass
+    elif art == "gsm":
+        # Was bei dieser Art wirklich bindet, ist die Kommutierung — und die
+        # steht als AUSNUTZUNG da, nicht als bestandenes Ja.
+        w["komm_ausnutzung"] = erg.get("komm_ausnutzung")
+        w["U_lamelle_V"] = erg.get("U_lamelle_V")
     elif art == "eesm":
         w["I_f_A"] = erg.get("I_f_A")
         t = float(erg.get("T_dauer_Nm") or 0.0)
@@ -832,6 +839,49 @@ def _bewerte_eesm(payload: dict, n_max: float, rpm: float, last_nm: float) -> di
                        "P_Erreger_W": float(bp["P_erreger_W"]),
                        "P_Schleifring_W": float(bp["P_schleifring_W"]),
                        "P_Laeufer_W": float(bp["P_laeufer_W"])})
+
+
+def _bewerte_gsm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
+    """Kennzahlen einer GSM-Option -- Kommutatormaschine (``ema_gsm``).
+
+    Sie steht mit denselben Kennzahlen in derselben Tabelle wie die anderen
+    vier -- ``Kt``, ``I_s``, Verluste, Masse -- und das ist der Sinn der Achse.
+    Zwei Dinge sind dabei ausdruecklich anders und stehen deshalb daneben:
+
+    * ``I_s`` ist der ANKERstrom, also ein Gleichstrom an den Klemmen, kein
+      Strangeffektivwert. Die Zahlen sind vergleichbar (beide sind das, was
+      durch die Zuleitung muss), die Groessen nicht dieselben.
+    * Die bindende Grenze ist die **Kommutierung** und nicht das Eisen. Sie
+      begrenzt die DREHZAHL, nicht das Moment -- deshalb steht sie als
+      Ausnutzung daneben und nicht in ``T_dauer``.
+    """
+    import ema_gsm
+    ctx, fehler = _grundlast(payload, n_max)
+    if fehler:
+        return fehler
+    geom, axial = ctx["geom"], ctx["axial"]
+
+    bp = ema_gsm.betriebspunkt(geom, axial, rpm, last_nm)
+    if not bp.get("ok"):
+        return {"ok": False, "grund": bp.get("grund", "GSM nicht rechenbar")}
+    verl = ema_gsm.verluste(geom, axial, rpm, last_nm, bp, ctx["mat"], ctx["st"],
+                            ctx["hp"], ctx["kuehl"])
+    t_dauer = ema_gsm.dauermoment(geom, axial, ctx["kuehl"], bp)
+    mk = ema_gsm.massen_und_kosten(payload)
+    komm = bp["kommutierung"]
+    return _gemeinsam(payload, ctx, bp, verl, t_dauer, mk,
+                      float(bp["Kt_Nm_per_A"]),
+                      {"xi_LqLd": None,
+                       "B_gap_T": float(bp["B_gap_T"]),
+                       "mag_anteil": None,
+                       "I_a_A": float(bp["I_a_A"]),
+                       "U_klemme_V": float(bp["U_klemme_V"]),
+                       "U_lamelle_V": float(komm["U_lamelle_mittel_V"]),
+                       "komm_ausnutzung": float(max(komm["ausnutzung"].values())),
+                       "komm_bindend": komm["bindend"],
+                       "komm_ok": bool(komm["ok"]),
+                       "P_buerste_W": float(verl.get("P_buerste_W") or 0.0),
+                       "P_Laeufer_W": float(verl.get("P_anker_Cu_W") or 0.0)})
 
 
 def _bewerte_asm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:

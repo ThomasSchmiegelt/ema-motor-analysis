@@ -136,27 +136,32 @@ def ziel_feld(geom: dict) -> float:
     return min(b, B_ZAHN_MAX_T / 2.0)
 
 
-def polgeometrie(geom: dict, axial_mm: float) -> dict:
-    """Polschuh und Wickelfenster des Schenkelpollaeufers. Alles in mm/mm^2."""
-    import ema_radien
-    r = ema_radien.radien(geom)
-    p = max(int(geom["p"]), 1)
-    poles = 2 * p
-    r_rot = r["r_rotor_gap_mm"]
-    r_wel = max(r["r_welle_mm"], 1.0)
-    b_m = ziel_feld(geom)
-    L = float(axial_mm)
+def polmasse(poles: int, r_gap_mm: float, spanne_mm: float, b_m_T: float,
+             axial_mm: float) -> dict:
+    """Schenkelpol aus vier Zahlen — EINE Formel, zwei Bauarten.
 
-    tau_pol = 2.0 * math.pi * r_rot / poles                  # Polteilung [mm]
+    ``r_gap_mm``  Radius der POLFLAECHE (dort wird die Polteilung gemessen)
+    ``spanne_mm`` radialer Platz fuer Joch UND Pol, positiv gerechnet
+
+    Warum das herausgeloest ist: die **Gleichstrommaschine ist die EESM von
+    innen nach aussen** — dort sitzen dieselben Schenkelpole am STAENDER und
+    zeigen nach innen, der gewickelte Anker dreht darin. Die Formel ist Zeichen
+    fuer Zeichen dieselbe, nur die Radien sind andere; sie ein zweites Mal
+    hinzuschreiben waere die Stelle, an der zwei Bauarten verschiedene Pole
+    bekommen, ohne dass es jemand merkt.
+    """
+    poles = max(int(poles), 2)
+    L = float(axial_mm)
+    tau_pol = 2.0 * math.pi * float(r_gap_mm) / poles        # Polteilung [mm]
     b_pol = POLBEDECKUNG * tau_pol                           # Polschuhbreite
     fenster_b = max(tau_pol - b_pol, 1.0)                    # Breite zwischen den Polen
 
-    # Laeuferjoch aus dem Fluss je Pol, wie bei der ASM (``ema_asm.kaefig``):
+    # Joch aus dem Fluss je Pol, wie bei der ASM (``ema_asm.kaefig``):
     #   Phi_pol = (2/pi)*B*tau*L , h_joch = Phi/(2*B_joch*L)
-    phi_pol = (2.0 / math.pi) * b_m * tau_pol * L * 1e-6      # Wb
+    phi_pol = (2.0 / math.pi) * float(b_m_T) * tau_pol * L * 1e-6   # Wb
     h_joch = max(phi_pol / (2.0 * 1.5 * (L * 1e-3)) * 1e3, 3.0)
 
-    h_fenster = max(r_rot - r_wel - h_joch - 2.0, 2.0)        # radiale Fensterhoehe
+    h_fenster = max(float(spanne_mm) - h_joch - 2.0, 2.0)    # radiale Fensterhoehe
     a_fenster = fenster_b * h_fenster                          # mm^2, je Pol
     # Mittlere Windungslaenge: einmal um den Polkoerper (Laenge + Breite).
     l_windung = 2.0 * (L + b_pol) + 2.0 * fenster_b
@@ -166,6 +171,16 @@ def polgeometrie(geom: dict, axial_mm: float) -> dict:
             "fenster_h_mm": round(h_fenster, 2), "A_fenster_mm2": round(a_fenster, 1),
             "h_joch_mm": round(h_joch, 2), "l_windung_mm": round(l_windung, 1),
             "eng": a_fenster < 50.0}
+
+
+def polgeometrie(geom: dict, axial_mm: float) -> dict:
+    """Polschuh und Wickelfenster des Schenkelpollaeufers. Alles in mm/mm^2."""
+    import ema_radien
+    r = ema_radien.radien(geom)
+    p = max(int(geom["p"]), 1)
+    r_rot = r["r_rotor_gap_mm"]
+    r_wel = max(r["r_welle_mm"], 1.0)
+    return polmasse(2 * p, r_rot, r_rot - r_wel, ziel_feld(geom), axial_mm)
 
 
 def erregung(geom: dict, axial_mm: float, i_f_A: float = 0.0,

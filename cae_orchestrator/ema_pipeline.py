@@ -133,10 +133,49 @@ def _gate_laeufer(data: dict, state: dict | None = None,
                 raise RuntimeError("Laeufertor (Schenkelpol): " + k["grund"])
             _log(state, "\u26A0 Laeufertor (Schenkelpol): " + k["grund"], 5)
         return
+    if art == "gsm":
+        # Die Gleichstrommaschine wird nicht vom Eisen begrenzt, sondern vom
+        # KOMMUTATOR. Das ist die eine Pruefung, die ihr eigen ist -- und sie
+        # begrenzt die Drehzahl, nicht das Moment.
+        try:
+            import ema_gsm
+            aw = ema_gsm.ankerwicklung(geom, float(data.get("axial_len") or 80.0))
+            n_max = float(data.get("rpm_to") or data.get("rpm_from") or 0.0)
+            komm = ema_gsm.kommutierung(
+                geom, float(data.get("axial_len") or 80.0), n_max) if n_max > 0 else None
+        except Exception as exc:                             # noqa: BLE001
+            if state is not None:
+                _log(state, f"\u26A0 Laeufertor (Anker) nicht gerechnet: "
+                            f"{type(exc).__name__}: {exc}", 5)
+            return
+        if state is not None:
+            _log(state, f"\U0001F6E1 Laeufertor (Anker): {aw['n_nut']} Nuten, "
+                        f"{aw['z_leiter']} Leiter, {aw['k_lamellen']} Lamellen, "
+                        f"Nut {aw['nut_tiefe_mm']} von {aw['nutraum_mm']} mm "
+                        f"({aw['bemessung']}) — "
+                        f"{'OK' if aw['passt'] else 'ABGELEHNT'}", 5)
+            if komm:
+                _log(state, f"\U0001F6E1 Kommutierung bei {n_max:.0f} 1/min: "
+                            f"U_lamelle {komm['U_lamelle_mittel_V']} V (Spitze "
+                            f"{komm['U_lamelle_spitze_V']}), v "
+                            f"{komm['v_kommutator_mps']} m/s — bindend "
+                            f"'{komm['bindend']}' bei "
+                            f"{max(komm['ausnutzung'].values()) * 100:.0f} % — "
+                            f"{'OK' if komm['ok'] else 'ABGELEHNT'}", 5)
+                _log(state, "\u2139 " + komm["hinweis"], 5)
+        if not aw["passt"] and fatal:
+            raise RuntimeError("Laeufertor (Anker): die Ankerwicklung passt "
+                               "nicht in ihre Nut")
+        if komm and not komm["ok"]:
+            msg = "Kommutierung: " + "; ".join(komm["befunde"])
+            if fatal:
+                raise RuntimeError(msg)
+            _log(state, "\u26A0 " + msg, 5)
+        return
     if art != "asm":
-        # SynRM und GSM haben eigene Enge (Flussbarrieren, Ankernut). Solange
-        # dafuer keine Pruefung steht, wird das GESAGT statt ein gruenes Urteil
-        # ueber Ungeprueftes abzugeben.
+        # Die SynRM hat eigene Enge (Flussbarrieren). Solange dafuer keine
+        # Pruefung steht, wird das GESAGT statt ein gruenes Urteil ueber
+        # Ungeprueftes abzugeben.
         if state is not None:
             _log(state, f"\u2139 Laeufertor: fuer die Art '{art}' gibt es noch "
                         f"keine eigene Engstellenpruefung — die Fliehkraft am "
@@ -1708,11 +1747,43 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
                 ax.plot(xs_, ys_, color='#9aa', lw=1.5, solid_capstyle='round',
                         solid_joinstyle='round')
 
-    annulus(ax, R_si, R_so,  '#1e3a5f', ec='#2e5f8a', lw=0.8)
+    _ist_gsm = _MAq0.art_code(geom) == "gsm"
+    if _ist_gsm:
+        # Die Gleichstrommaschine ist die einzige Bauart hier, deren STAENDER
+        # keine Nuten hat: Joch aussen, Schenkelpole nach innen, dazwischen
+        # Luft. Ein genuteter Ring darueber waere die Nutung einer Maschine,
+        # die es nicht gibt.
+        try:
+            import ema_gsm as _Gq
+            _gq = _Gq.zeichenmasse(geom, float(geom.get("axialLen") or 80.0))
+            annulus(ax, _gq["r_joch_innen_mm"], R_so, '#1e3a5f',
+                    ec='#2e5f8a', lw=0.8)
+            _hbq = _m.degrees((_gq["b_schuh_mm"] / 2.0) / max(R_si, 1e-9))
+            _rki, _rji = _gq["r_kern_innen_mm"], _gq["r_joch_innen_mm"]
+            for _i in range(int(_gq["poles"])):
+                _g = 360.0 * _i / int(_gq["poles"])
+                ax.add_patch(Wedge((0, 0), _rki, _g - _hbq, _g + _hbq,
+                                   width=_rki - R_si, fc='#254a73',
+                                   ec='#4a86c0', lw=0.9))
+                _a = _m.radians(_g)
+                _bk, _ds = _gq["b_kern_mm"], _gq["d_spule_mm"]
+                for _rect, _fc, _ec in (
+                        ((_rki, _rji, -_bk / 2, _bk / 2), '#254a73', '#4a86c0'),
+                        ((_rki, _rji, _bk / 2, _bk / 2 + _ds), '#b87333', '#e0a060'),
+                        ((_rki, _rji, -_bk / 2 - _ds, -_bk / 2), '#b87333', '#e0a060')):
+                    _r0, _r1, _y0, _y1 = _rect
+                    _loc = [(_r0, _y0), (_r1, _y0), (_r1, _y1), (_r0, _y1)]
+                    _pts = [(x * _m.cos(_a) - y * _m.sin(_a),
+                             x * _m.sin(_a) + y * _m.cos(_a)) for x, y in _loc]
+                    ax.add_patch(MplPoly(_pts, closed=True, fc=_fc, ec=_ec, lw=0.6))
+        except Exception:                                    # noqa: BLE001
+            annulus(ax, R_si, R_so, '#1e3a5f', ec='#2e5f8a', lw=0.8)
+    else:
+        annulus(ax, R_si, R_so,  '#1e3a5f', ec='#2e5f8a', lw=0.8)
     ax.add_patch(Circle((0, 0), R_si, fill=False, ec='#333', lw=0.4, ls='--'))
 
     ph_colors = ['#e67e22', '#27ae60', '#3498db']
-    for s in range(n_slots):
+    for s in (() if _ist_gsm else range(n_slots)):
         ang = s * dtheta_s
         ha  = _m.atan2(slot_w / 2, R_si)
         ax.add_patch(Wedge((0,0), R_si+slot_dep, _m.degrees(ang-ha), _m.degrees(ang+ha),
@@ -1772,6 +1843,30 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
     # zeichnet (``ema_asm.kaefig`` / ``laeuferwicklung``) -- eine zweite
     # Nutgeometrie waere die Stelle, an der Bild und Koerper auseinanderlaufen.
     _laeufer_leg = []
+    if _ist_gsm:
+        # Der ANKER traegt die Nuten — die einzige Bauart hier, bei der das so
+        # ist. Die Masse kommen aus ema_gsm.ankerwicklung, derselben Funktion,
+        # aus der das CAD zeichnet.
+        try:
+            import ema_gsm as _Gq2
+            _aq = _Gq2.ankerwicklung(geom, float(geom.get("axialLen") or 80.0))
+            _nq, _bq = int(_aq["n_nut"]), float(_aq["nut_breite_mm"])
+            _tq = float(_aq["nut_tiefe_mm"])
+            _riq = R_rot - _tq
+            for _j in range(_nq):
+                _aa = 2 * _m.pi * _j / max(_nq, 1)
+                _loc = [(_riq, -_bq / 2), (_riq + _tq, -_bq / 2),
+                        (_riq + _tq, _bq / 2), (_riq, _bq / 2)]
+                _pts = [(x * _m.cos(_aa) - y * _m.sin(_aa),
+                         x * _m.sin(_aa) + y * _m.cos(_aa)) for x, y in _loc]
+                _mp = MplPoly(_pts, closed=True, fc='#b87333', ec='#e0a060',
+                              lw=0.6, alpha=0.95)
+                ax.add_patch(_mp); _mp.set_clip_path(_rotor_clip)
+            _laeufer_leg = [Patch(fc='#b87333', ec='#e0a060',
+                                  label=f'Ankerwicklung ({_nq} Nuten)')]
+        except Exception:                                    # noqa: BLE001
+            _laeufer_leg = []
+
     if _MAq.art_code(geom) == "eesm":
         # Schenkelpole: Joch-Aussenring, Kern, Schuh, zwei Spulenschnitte.
         # Die Masse kommen aus DERSELBEN Funktion wie das CAD.
@@ -1860,9 +1955,12 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
             Patch(fc='#2d3748', ec='#4a5568', label='Rotorblech'),
             *_mag_leg,
             Patch(fc='#1e3a5f', ec='#2e5f8a', label='Statorblech'),
-            Patch(fc='#e67e22', label='Phase A'), Patch(fc='#27ae60', label='Phase B'),
-            Patch(fc='#3498db', label='Phase C'),
-        ], loc='upper right', facecolor='#1a1a2e', labelcolor='white',
+            *([] if _ist_gsm else
+              [Patch(fc='#e67e22', label='Phase A'),
+               Patch(fc='#27ae60', label='Phase B'),
+               Patch(fc='#3498db', label='Phase C')]),
+        ], loc='upper right', bbox_to_anchor=(1.0, 0.94),
+           facecolor='#1a1a2e', labelcolor='white',
            fontsize=7.5, framealpha=0.9, ncol=2)
 
 

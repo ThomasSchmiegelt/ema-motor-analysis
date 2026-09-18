@@ -87,6 +87,16 @@ class Art:
 #   Entmagnetisierung     -> nicht vorhanden, es gibt nichts zu entmagnetisieren.
 #   T_rel_pct             -> gegen ``psi_pm`` definiert (Anteil AM MAGNETMOMENT);
 #                            ohne psi_pm ist der Bruch nicht gebildet, nicht null.
+# Kennzahlen, die ein DREHFELD voraussetzen. Die Gleichstrommaschine hat keins:
+# ihr Feld steht still, der Kommutator haelt die Ankerdurchflutung im Raum fest.
+# Eine d- und eine q-Achse gibt es dort nicht — und eine 0 in ``xi_LqLd`` laese
+# sich als „gemessen, nicht salient" lesen, was etwas ganz anderes ist als
+# „diese Groesse ist hier nicht gebildet".
+_DREHFELD_KENNZAHLEN = (
+    "xi_LqLd", "saliency", "T_rel_pct", "schlupf", "schlupf_pct",
+    "i_d_A", "i_q_A", "mag_anteil",
+)
+
 _PM_KENNZAHLEN = (
     "Isc_A", "I_sc_A", "T_kurzschluss_Nm",
     "entmag_reserve", "entmag_T_C", "demag_margin",
@@ -176,6 +186,34 @@ ARTEN = {
         hinweis=("Die einzige Art, bei der der Fluss EINGESTELLT wird -- "
                  "zweiter Freiheitsgrad im Betriebspunkt (Erregerstrom), dafuer "
                  "Schleifring- und Erregerverluste."),
+    ),
+    "gsm": Art(
+        code="gsm",
+        label="GSM — fremderregte Gleichstrommaschine (Kommutator)",
+        erregung="fremderregt",
+        hat_magnete=False,
+        # Die Wicklung sitzt im LAEUFER (Anker) -- wie bei ASM und EESM faellt
+        # der Hauptverlust dort an, an der thermisch schlechtesten Stelle.
+        hat_laeuferwicklung=True,
+        hat_schlupf=False,
+        stellbarer_fluss=True,
+        # "analytisch" und "cad" -- und ausdruecklich KEINE Feldstufe. Die
+        # 2-D-FDM ist reell, linear und magnetostatisch; ein kommutierter Anker,
+        # dessen Durchflutung im Raum stehenbleibt, waehrend das Blech sich
+        # dreht, ist darin so wenig darstellbar wie ein Kaefig. Sie hier zu
+        # fuehren hiesse, ein magnetostatisches Feld ohne Kommutierung
+        # auszugeben und „GSM" darueberzuschreiben.
+        stufen=("analytisch", "cad"),
+        feldweg="keiner",
+        ohne_bedeutung=_PM_KENNZAHLEN + _DREHFELD_KENNZAHLEN,
+        hinweis=("Das Feld steht STILL (Schenkelpole am Staender), der "
+                 "Kommutator haelt die Ankerdurchflutung im Raum fest. "
+                 "E = k*Phi*omega und T = k*Phi*I_a mit DERSELBEN Konstante "
+                 "k = p*z/(2*pi*a) -- daraus folgt E*I_a = T*omega exakt. "
+                 "Begrenzt wird sie nicht vom Eisen, sondern vom Kommutator: "
+                 "Lamellenspannung (Mittel und Spitze) und Umfangs"
+                 "geschwindigkeit. Wendepole und Kompensationswicklung sind "
+                 "NICHT modelliert."),
     ),
 }
 

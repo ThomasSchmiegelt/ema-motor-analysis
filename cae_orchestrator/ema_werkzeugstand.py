@@ -63,6 +63,7 @@ import time
 PHYSIK: tuple[str, ...] = (
     "ema_analysis.py",      # Feld, Kt, Umrichtergrenze, Auslegungspunkt
     "ema_asm.py",           # Asynchronmaschine: Magnetisierung, Kaefig, Betriebspunkt
+    "ema_gsm.py",           # Gleichstrommaschine: Anker, Erregung, Kommutierung
     "ema_thermal.py",       # LPTN, Verluste am Betriebspunkt
     "ema_em2d_harm.py",     # 2-D-Feldstufe (Elmer, harmonisch)
     "ema_em3d.py",          # 3-D-Feldstufe
