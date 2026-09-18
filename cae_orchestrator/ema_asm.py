@@ -114,6 +114,56 @@ KAEFIG_STEG_MM = 2.0
 
 KAEFIG_VORGABE = "al_1350"   # Aludruckguss; "cu_etp" = Kupferkaefig
 
+# ── Laeuferbauform ────────────────────────────────────────────────────────────
+#
+# Die ASM hat ZWEI Laeufer, und sie unterscheiden sich nicht in der Physik des
+# Stators, sondern darin, was in den Laeufernuten liegt und ob man von aussen
+# daran kommt:
+#
+#   kaefig       Aludruckguss- oder Kupferstaebe, an beiden Stirnseiten
+#                kurzgeschlossen. Nichts nach aussen gefuehrt, nichts
+#                einstellbar, nichts zu warten. Der Normalfall.
+#   schleifring  Eine Drehstromwicklung im Laeufer, ueber drei Schleifringe
+#                nach aussen gefuehrt. Der Zweck ist der ANLASSWIDERSTAND: ein
+#                Widerstand im Laeuferkreis verschiebt das Kippmoment zu
+#                groesserem Schlupf hin, also zum Anlauf. Die Maschine faehrt
+#                mit vollem Moment an, ohne den Anlaufstrom eines Kaefiglaeufers.
+#
+# Warum das eine EIGENE Bauform ist und kein Schalter am Kaefig: die Nutzahl
+# folgt einer anderen Regel (Drehstrom braucht ``slots % 3 == 0`` und ein ganzes
+# q, der Kaefig braucht ausdruecklich das Gegenteil von Symmetrie), der
+# Laeuferwiderstand kommt aus einer Wicklung statt aus Stab und Ring, und es
+# gibt ein Uebersetzungsverhaeltnis Staender:Laeufer, das der Kaefig nicht hat.
+LAEUFER_ARTEN = ("kaefig", "schleifring")
+LAEUFER_VORGABE = "kaefig"
+
+# Anteil der Laeufernutteilung, der beim gewickelten Laeufer Nut ist. Kleiner als
+# beim Kaefig (0,50): eine Wicklung braucht Nutisolation und einen Nutverschluss,
+# ein Druckguss fuellt die Nut. Gemessen wird das ueber ``ema_wicklung``, hier
+# steht nur die Teilung.
+WICKEL_NUT_ANTEIL = 0.42
+
+# Stromdichte der Laeuferwicklung [A/mm^2]. Kupfer in einer gewickelten Nut,
+# also derselbe Bereich wie der Stator und NICHT der des Aludruckguss-Stabs
+# (``J_STAB_APMM2`` = 6): der Stab sitzt satt im Blech und gibt seine Waerme
+# direkt ans Eisen ab, die Wicklung liegt in Isolation.
+J_LAEUFER_APMM2 = 5.0
+
+# Schraegung der Laeufernuten, in LAEUFERNUTTEILUNGEN. Eine Nutteilung loescht
+# die Nutungsoberwelle der Ordnung der Laeufernutzahl exakt aus -- das ist ein
+# Integral ueber eine volle Periode und keine Faustregel, derselbe Zusammenhang
+# wie ``ema_rastmoment.schraegungsfaktor``. Beim Kaefiglaeufer ist sie die Regel
+# (sonst „klebt" die Maschine beim Anlauf), beim Schleifringlaeufer unueblich,
+# weil die Schraegung die Wicklung verlaengert und die Streuung erhoeht.
+SCHRAEGUNG_VORGABE = {"kaefig": 1.0, "schleifring": 0.0}
+
+# In wieviele gerade Stuecke eine Schraegung beim ZEICHNEN zerlegt wird. Gerade
+# Segmente um die Wellenachse statt eines um die eigene Achse tordierten
+# Prismas -- dieselbe Entscheidung wie in ``ema_em3d`` (dort gemessen: die
+# tordierte duenne Schale bringt ``mesh.generate`` zum Scheitern), und
+# physikalisch ist die gestufte Schraegung ohnehin die gebaute.
+SCHRAEG_SEGMENTE = 6
+
 # Wicklungskonvention -- identisch zu ``_analytical_Barm`` und
 # ``estimate_dq_currents``: 1 Windung je Nut, k_w = 0,95, Carter 1,15.
 K_W = 0.95
@@ -390,6 +440,288 @@ def stabstrom(geom: dict, i_q_haus: float, n_stab: int) -> float:
     return 2.0 * math.pi * p * f_stator / max(int(n_stab), 1)
 
 
+
+# ── Laeuferbauform: Kaefig oder gewickelt ─────────────────────────────────────
+
+def laeufer_art(geom: dict) -> str:
+    """``"kaefig"`` (Vorgabe) oder ``"schleifring"`` -- eine Quelle."""
+    a = str(geom.get("rotorType") or LAEUFER_VORGABE).strip().lower()
+    return a if a in LAEUFER_ARTEN else LAEUFER_VORGABE
+
+
+def schraegung_nutteilungen(geom: dict) -> float:
+    """Schraegung der Laeufernuten in LAEUFERnutteilungen.
+
+    In Nutteilungen und nicht in Grad, weil Grad ohne die Nutzahl nichts sagen
+    -- dieselbe Entscheidung wie bei der Paarvergleichsachse ``schraegung``.
+    Eine volle Nutteilung loescht die Nutungsoberwelle exakt aus.
+    """
+    # -1 heisst „automatisch" und nicht „keine". Der Unterschied ist noetig,
+    # weil 0 eine gueltige und sinnvolle Wahl ist (ein Schleifringlaeufer wird
+    # ueblich NICHT geschraegt) -- ohne eigenen Merkwert waere „ausdruecklich
+    # ohne Schraegung" von „nichts angegeben" nicht zu unterscheiden, und der
+    # frische Payload traegt den Schluessel ohnehin immer.
+    gesetzt = geom.get("rotorSkewSlots")
+    if gesetzt is not None and float(gesetzt) >= 0.0:
+        return max(0.0, min(2.0, float(gesetzt)))
+    return SCHRAEGUNG_VORGABE[laeufer_art(geom)]
+
+
+def schraegung_grad(geom: dict) -> float:
+    """Dieselbe Schraegung, in mechanischen Grad ueber die Paketlaenge."""
+    n = laeufernuten(geom)
+    return schraegung_nutteilungen(geom) * 360.0 / max(n, 1)
+
+
+def laeufernuten(geom: dict) -> int:
+    """Zahl der Laeufernuten -- je nach Bauform nach VERSCHIEDENEN Regeln.
+
+    Der **Kaefig** braucht ausdruecklich Unsymmetrie zum Stator (``stabzahl``:
+    nicht gleich der Statornutzahl, nicht um 0, +-p, +-2p, +-3p daneben), sonst
+    entstehen synchrone Oberwellenmomente und die Maschine klebt beim Anlauf.
+
+    Die **Drehstromwicklung** des Schleifringlaeufers braucht dagegen zuerst
+    Symmetrie IN SICH: drei gleiche Straenge, also ``n % 3 == 0``. Ein ganzes
+    ``q = n/(6p)`` ist die einfachste und robusteste Wahl und wird bevorzugt,
+    aber nicht erzwungen -- gebaut werden auch Bruchlochwicklungen, und ein
+    ``q``, das sich nicht ganzzahlig treffen laesst, waere sonst ein Nein ohne
+    physikalischen Grund.
+    """
+    if laeufer_art(geom) == "kaefig":
+        return stabzahl(geom)
+    gesetzt = geom.get("rotorBars")
+    if gesetzt:
+        n = max(6, int(gesetzt))
+        return n - (n % 3)                     # auf Dreiteilbarkeit abrunden
+    n_s = int(geom["slots"])
+    p = max(int(geom["p"]), 1)
+    ziel = max(6, int(round(0.85 * n_s)))
+    bester, beste_note = None, None
+    for kand in range(6, 4 * n_s + 1, 3):
+        if kand == n_s:
+            continue                            # gleiche Nutzahl: Kleben
+        q = kand / (6.0 * p)
+        if q < 0.5:
+            continue                            # weniger als eine halbe Spule je Pol
+        # Note: Abstand vom Ziel, plus ein Aufschlag fuer gebrochenes q.
+        note = abs(kand - ziel) + (0.0 if abs(q - round(q)) < 1e-9 else 0.75 * n_s)
+        if beste_note is None or note < beste_note:
+            bester, beste_note = kand, note
+    return bester or max(6, 3 * (n_s // 3))
+
+
+def laeuferwicklung(geom: dict, axial_mm: float) -> dict:
+    """Drehstromwicklung des Schleifringlaeufers -- Nut, Windungen, Widerstand.
+
+    **Die Nutformel wird nicht neu geschrieben.** ``ema_wicklung.nutgeometrie``
+    rechnet Nutbreite, Zahn, Leiterquerschnitt und Isolation aus Bohrungsradius,
+    Nutzahl, Nuttiefe und Nutbreitenanteil -- alles Groessen, die es am Laeufer
+    genauso gibt. Sie bekommt deshalb eine **Schattengeometrie**: dieselbe
+    Funktion, gefuettert mit den Zahlen des Laeufers. Eine zweite Nutformel
+    daneben waere genau die Vervielfaeltigung, gegen die ``ema_wicklung``
+    angetreten ist.
+
+    Der Laeufer ist ein **Innenlaeufer mit nach aussen offenen Nuten**: die
+    Nutteilung wird am Radius ``r_rot - KAEFIG_STEG_MM`` genommen (unter dem
+    Steg), die Tiefe geht nach innen bis ans Joch.
+    """
+    import ema_wicklung
+    p = max(int(geom["p"]), 1)
+    L = float(axial_mm)
+    r_rot = float(geom["rotorOD"]) / 2.0
+    r_wel = float(geom["shaftD"]) / 2.0
+    n_l = laeufernuten(geom)
+
+    # Jochhoehe aus dem Fluss je Pol -- dieselbe Rechnung wie beim Kaefig.
+    b_m = ziel_feld(geom)
+    tau_pol = math.pi * float(geom["statorID"]) / (2 * p)
+    phi_pol = (2.0 / math.pi) * b_m * tau_pol * L * 1e-6
+    h_joch = max(phi_pol / (2.0 * B_JOCH_MAX_T * (L * 1e-3)) * 1e3, 3.0)
+    nutraum = r_rot - KAEFIG_STEG_MM - h_joch - r_wel
+
+    if nutraum < 2.0:
+        return {"n_nut": n_l, "auslegbar": False,
+                "grund": (f"Zwischen Steg ({KAEFIG_STEG_MM:.1f} mm), Joch "
+                          f"({h_joch:.1f} mm) und Welle bleiben nur "
+                          f"{nutraum:.1f} mm -- darin ist keine Laeuferwicklung "
+                          f"unterzubringen"),
+                "h_joch_mm": round(h_joch, 2), "nutraum_mm": round(nutraum, 2)}
+
+    w_nut = max(2, int(geom.get("rotorTurnsPerSlot") or 2))
+    # Windungen je Strang in Reihe: n*w Leiter gesamt, davon 1/3 je Strang, und
+    # zwei Leiter bilden eine Windung.
+    n2 = n_l * w_nut / 6.0
+    n1 = max(int(geom["slots"]) / 3.0, 1.0)
+    ue = (n1 * K_W) / max(n2 * K_W, 1e-9)
+
+    # ── Die Nuttiefe folgt aus dem STROM, nicht aus dem Platz ───────────────
+    # Genau der Fehler, den ``kaefig`` schon einmal gemacht hat: dort fuellte
+    # der Stab den Laeuferraum bis zum Deckel und kam auf 1,14 A/mm^2, wo 4-8
+    # gebaut werden -- der Widerstand lag um den Faktor 5 daneben und mit ihm
+    # der Schlupf. Die Laeuferwicklung bekommt darum dieselbe Behandlung:
+    # groesster ueberhaupt moeglicher Laeuferstrom, daraus der Querschnitt.
+    aus = auslegungsstrom_stab(geom)
+    i_q_phys = aus["i_q_max_A"] / max(k_norm(geom), 1e-12)
+    i2_amp = ue * i_q_phys
+    i2_eff = i2_amp / math.sqrt(2.0)
+    j_soll = min(max(float(geom.get("rotorCurrentDensity")
+                           or J_LAEUFER_APMM2), 1.0), 20.0)
+    a_soll = i2_eff / j_soll                                       # mm^2 je Leiter
+
+    breite_nut = 2.0 * math.pi * (r_rot - KAEFIG_STEG_MM) / max(n_l, 1) * WICKEL_NUT_ANTEIL
+    # w_nut Leiter uebereinander, jeder a_soll gross; dazu die Isolation.
+    t_strom = (w_nut * a_soll / max(breite_nut - 2 * 0.8, 0.1)
+               + (w_nut + 1) * 0.8 + 2.0)
+    t_deckel = KAEFIG_TIEFE_ZU_BREITE * breite_nut
+    tiefe = max(min(t_strom, nutraum, t_deckel), 2.0)
+    if not aus["erreichbar"]:
+        bemessung = "nicht auslegbar"
+    elif tiefe >= nutraum - 1e-9 and t_strom > nutraum:
+        bemessung = "Blechraum"
+    elif tiefe >= t_deckel - 1e-9 and t_strom > t_deckel:
+        bemessung = "Tiefe/Breite"
+    else:
+        bemessung = "Stromdichte"
+
+    # Schattengeometrie fuer ``nutgeometrie``: Bohrung = Nutteilungsradius x2,
+    # Aussendurchmesser irgendetwas Groesseres (geht nur in ``r_so_m`` ein, das
+    # hier niemand liest), Tiefe = die eben bestimmte, Anteil WICKEL_NUT_ANTEIL.
+    schatten = {"slots": n_l,
+                "statorID": 2.0 * (r_rot - KAEFIG_STEG_MM),
+                "statorOD": 2.0 * r_rot + 10.0,
+                "slotDepth": tiefe,
+                "slotWidthRatio": WICKEL_NUT_ANTEIL,
+                "conductorsPerSlot": w_nut,
+                "windingType": "rundraht"}
+    ng = ema_wicklung.nutgeometrie(schatten)
+    k_w2 = K_W
+    # Windungslaenge: zweimal das Paket plus zweimal die Spulenweite im Wickelkopf.
+    tau_nut_l = 2.0 * math.pi * (r_rot - KAEFIG_STEG_MM) / max(n_l, 1)
+    spulenweite = tau_nut_l * (n_l / (2.0 * p))
+    l_windung = 2.0 * (L + 1.2 * spulenweite) * 1e-3               # [m]
+
+    mat = HAIRPIN_MATS.get(geom.get("rotorWireMat") or "cu_etp",
+                           HAIRPIN_MATS["cu_etp"])
+    a_leiter = max(ng["A_leiter_m2"], 1e-12)
+    r2 = float(mat["rho_el"]) * n2 * l_windung / a_leiter          # [Ohm je Strang]
+
+    return {
+        "n_nut": n_l, "auslegbar": True, "grund": "",
+        "w_je_nut": w_nut,
+        "N2_je_strang": round(n2, 2),
+        "k_w2": k_w2,
+        "ue": round(ue, 3),
+        "nut_breite_mm": round(ng["nut_breite_mm"], 3),
+        "nut_tiefe_mm": round(tiefe, 2),
+        "bemessung": bemessung,
+        "erreichbar": bool(aus["erreichbar"]),
+        "grund_strom": aus["grund"],
+        "I2_A": round(i2_amp, 1),
+        "I2_eff_A": round(i2_eff, 1),
+        "J2_Apmm2": round(i2_eff / max(ng["A_leiter_m2"] * 1e6, 1e-9), 2),
+        "leiter_breite_mm": round(ng["leiter_breite_mm"], 3),
+        "lage_hoehe_mm": round(ng["lage_hoehe_mm"], 3),
+        "A_leiter_mm2": round(a_leiter * 1e6, 3),
+        "passt": bool(ng["passt"]),
+        "passt_grund": "" if ng["passt"] else (
+            f"ueberfuellt um {ng['ueberfuellt_mm']:.2f} mm"
+            if ng["ueberfuellt_mm"] > 0 else
+            f"zu schmal um {ng['zu_schmal_mm']:.2f} mm"),
+        "l_windung_m": round(l_windung, 4),
+        "R2_Ohm": round(r2, 6),
+        "h_joch_mm": round(h_joch, 2),
+        "nutraum_mm": round(nutraum, 2),
+        "r_nut_aussen_mm": round(r_rot - KAEFIG_STEG_MM, 3),
+        "material": mat["label"],
+        "q": round(n_l / (6.0 * p), 4),
+    }
+
+
+def anlasswiderstand(geom: dict, axial_mm: float, ziel_schlupf: float) -> dict:
+    """Zusatzwiderstand je Laeuferstrang fuer einen gewuenschten Kippschlupf.
+
+    Der ganze Zweck des Schleifringlaeufers. Der Kippschlupf waechst linear mit
+    dem Laeuferwiderstand (``s_kipp ~ R2/X``), also:
+
+        R_zusatz = R2 * (s_ziel/s_natuerlich - 1)
+
+    **Wo die Waerme bleibt, ist der Punkt.** Der Zusatzwiderstand steht
+    ausserhalb der Maschine; seine Verlustleistung faellt dort an und belastet
+    die Laeuferwicklung NICHT. Genau deshalb kann ein Schleifringlaeufer mit
+    vollem Moment anfahren, wo ein Kaefiglaeufer thermisch an seinem Anlaufstrom
+    scheitert. ``betriebspunkt`` fuehrt beide Anteile darum getrennt.
+    """
+    lw = laeuferwicklung(geom, axial_mm)
+    if not lw["auslegbar"]:
+        return {"moeglich": False, "grund": lw["grund"], "R_zusatz_Ohm": None}
+    s_ziel = max(1e-4, min(1.0, float(ziel_schlupf)))
+    return {"moeglich": True, "grund": "",
+            "R2_Ohm": lw["R2_Ohm"],
+            "s_ziel": round(s_ziel, 5),
+            # Ohne gerechneten natuerlichen Schlupf ist nur das VERHAELTNIS
+            # bestimmt; der Aufrufer setzt es mit seinem Betriebspunkt in
+            # Beziehung. Eine hier erfundene Nenngroesse waere eine zweite
+            # Wahrheit neben ``betriebspunkt``.
+            "faktor_je_schlupf": round(1.0 / s_ziel, 4),
+            "hinweis": ("R_zusatz = R2 * (s_ziel/s_natuerlich - 1); "
+                        "s_natuerlich kommt aus betriebspunkt()")}
+
+
+
+# ── Schleifringe ──────────────────────────────────────────────────────────────
+
+# Stromdichte am Buerstenkontakt [A/cm^2]. Kohlebuersten liegen bei 6-12 A/cm^2;
+# 10 ist der uebliche Auslegungswert. Der Wert entscheidet die Buerstenflaeche
+# und damit die Ringbreite -- ein Ring, der zu schmal ist, verbrennt seine
+# Buersten, und das sieht man einer Zeichnung nicht an.
+J_BUERSTE_APCM2 = 10.0
+
+# Umfangsgeschwindigkeit am Schleifring [m/s]. Darueber traegt der
+# Kohlekontakt nicht mehr zuverlaessig (Buerstenfeuer, Abbrand). Eine GRENZE,
+# kein Vorgabewert: ueberschritten wird sie gemeldet, nicht stillschweigend
+# unterschritten.
+V_RING_MAX_MPS = 45.0
+
+# Spannungsabfall je Buerstenpaar [V] -- dieselbe Groesse wie ``ema_eesm``
+# sie fuer den Erregerkreis fuehrt. Hier steht sie nicht noch einmal: sie wird
+# von dort gelesen.
+RING_ZAHL = 3          # Drehstrom: drei Ringe
+
+
+def schleifringe(geom: dict, i_ring_eff_A: float,
+                 rpm_max: float | None = None) -> dict:
+    """Drei Schleifringe auf der Welle -- Masse und Grenzen.
+
+    Der Durchmesser folgt der Welle (der Ring sitzt darauf, mit etwas
+    Isolierhuelse), die Breite folgt der **Stromdichte am Buerstenkontakt**:
+    eine Buerste, die zu klein ist, verbrennt. Gemeldet wird beides samt der
+    Umfangsgeschwindigkeit, die der eigentliche Deckel dieser Bauform ist --
+    oberhalb ``V_RING_MAX_MPS`` traegt der Kohlekontakt nicht mehr, und dann ist
+    ein Schleifringlaeufer die falsche Wahl, egal wie gut er sonst passt.
+    """
+    r_wel = float(geom["shaftD"]) / 2.0
+    d_ring = 2.0 * (r_wel + max(2.0, 0.04 * r_wel))     # Isolierhuelse darunter
+    i_eff = max(float(i_ring_eff_A), 1e-6)
+    a_buerste_cm2 = i_eff / J_BUERSTE_APCM2
+    # Die Buerste liegt auf dem Ring auf: Flaeche = Ringbreite x Buerstenlaenge
+    # in Umfangsrichtung. Uebliches Seitenverhaeltnis 1:2 (laenger als breit).
+    b_ring_mm = max(6.0, math.sqrt(a_buerste_cm2 * 100.0 / 2.0))
+    n_max = float(rpm_max or geom.get("rpm_to") or 0.0)
+    v_ring = math.pi * (d_ring * 1e-3) * n_max / 60.0 if n_max > 0 else None
+    return {
+        "n_ringe": RING_ZAHL,
+        "d_ring_mm": round(d_ring, 2),
+        "b_ring_mm": round(b_ring_mm, 2),
+        "spalt_mm": round(0.4 * b_ring_mm, 2),          # Luft zwischen den Ringen
+        "A_buerste_cm2": round(a_buerste_cm2, 2),
+        "I_ring_eff_A": round(i_eff, 1),
+        "v_ring_mps": None if v_ring is None else round(v_ring, 1),
+        "v_grenze_mps": V_RING_MAX_MPS,
+        # None heisst NICHT GEPRUEFT (keine Hoechstdrehzahl bekannt), nicht "ok".
+        "v_ok": None if v_ring is None else bool(v_ring <= V_RING_MAX_MPS),
+    }
+
+
 # ── Wann es diesen Betriebspunkt NICHT gibt ──────────────────────────────────
 #
 # Bleibt nach dem Magnetisierungsstrom kein momentbildender Strom uebrig, dann
@@ -466,7 +798,8 @@ def auslegungsstrom_stab(geom: dict) -> dict:
 
 
 def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
-                  stabmaterial: str | None = None) -> dict:
+                  stabmaterial: str | None = None,
+                  r_zusatz_ohm: float = 0.0) -> dict:
     """Stationaerer Nennpunkt: Stroeme, Schlupf, Laeuferverlust, Moment.
 
     Der Momentaufschlag ``DQ_TORQUE_MARGIN_NM`` wird uebernommen, damit der
@@ -511,6 +844,9 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
             "P_stab_W": None, "P_kaefig_W": None, "schlupf": None,
             "schlupf_pct": None, "n_laeufer_1pmin": None,
             "strom_limit": True,
+            "laeufer_art": laeufer_art(geom),
+            "laeuferwicklung": None,
+            "P_zusatz_W": None,
             "Kt_Nm_per_A": round(kt, 5),
             "psi_Wb": float(perf["psi_pm_Wb"]),
             "n_syn_1pmin": round(float(rpm), 1),
@@ -539,6 +875,30 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
     p_stab = kf["n_stab"] * 0.5 * i_stab ** 2 * r_stab           # Amplitude -> eff^2
     zuschlag = kurzschlussring_zuschlag(kf, p)
     p_kaefig = p_stab * (1.0 + zuschlag)
+
+    # ── Schleifringlaeufer: derselbe Weg, andere Laeuferimpedanz ────────────
+    # Der Schlupf ist bei BEIDEN Bauformen exakt der Anteil der
+    # Luftspaltleistung, der im Laeuferkreis verheizt wird -- das ist keine
+    # Naeherung, sondern die Definition. Nur WAS dort liegt, unterscheidet sich:
+    # n Staebe plus zwei Ringe, oder drei Wicklungsstraenge plus ein
+    # Anlasswiderstand ausserhalb der Maschine.
+    art_l = laeufer_art(geom)
+    lw = p_ext = None
+    if art_l == "schleifring":
+        lw = laeuferwicklung(geom, L)
+        if lw["auslegbar"]:
+            i2_amp = lw["ue"] * (i_q / max(k_norm(geom), 1e-12))
+            r_zus = max(0.0, float(r_zusatz_ohm or 0.0))
+            p_wick = 3.0 * 0.5 * i2_amp ** 2 * lw["R2_Ohm"]      # IN der Maschine
+            p_ext  = 3.0 * 0.5 * i2_amp ** 2 * r_zus             # im Widerstand
+            lw = dict(lw, I2_betrieb_A=round(i2_amp, 1),
+                      P_wicklung_W=round(p_wick, 1),
+                      R_zusatz_Ohm=round(r_zus, 6),
+                      P_zusatz_W=round(p_ext, 1))
+            p_kaefig = p_wick + p_ext          # der SCHLUPF sieht beide
+            p_stab = p_wick                    # thermisch zaehlt nur die Wicklung
+            i_stab = i2_amp
+            zuschlag = 0.0                     # kein Kurzschlussring
 
     omega_syn = 2.0 * math.pi * float(rpm) / 60.0
     t_ist = min(t_soll, kt * i_q)
@@ -569,6 +929,13 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
         "n_syn_1pmin":  round(float(rpm), 1),
         "n_laeufer_1pmin": round(float(rpm) * (1.0 - schlupf), 1),
         "kaefig":       kf,
+        "laeufer_art":  art_l,
+        # Beim Schleifringlaeufer: die Wicklung samt Betriebsstrom und die
+        # getrennt gefuehrte Verlustleistung des Anlasswiderstands. Sie zaehlt
+        # in den Schlupf, aber NICHT in die Laeufererwaermung -- das ist der
+        # ganze Sinn der Bauform, und eine Summe haette ihn verwischt.
+        "laeuferwicklung": lw,
+        "P_zusatz_W":   None if p_ext is None else round(p_ext, 1),
         "stabmaterial": mat["label"],
         "perf":         perf,
     }

@@ -4697,16 +4697,29 @@ def _art_optionen():
     aus = []
     for c, a in MA.ARTEN.items():
         if not a.stufen:
-            zusatz = " — noch nicht getragen"
-        elif len(a.stufen) == len(MA.STUFEN):
-            zusatz = ""
-        else:
-            zusatz = " — getragen: " + ", ".join(a.stufen)
-            if a.feldweg != "fdm" and "feld" in a.stufen:
-                # Der Feldlauf dieser Art laeuft NICHT ueber die Pipeline. Wer
-                # sie hier waehlt und auf „Rechnen" drueckt, wird abgewiesen --
-                # also steht das Werkzeug gleich dabei.
-                zusatz += f" (Feld nur ueber {MA.FELDWEG_WERKZEUG.get(a.feldweg, a.feldweg)})"
+            aus.append({"value": c, "label": a.label + " — noch nicht getragen"})
+            continue
+        zusatz = ("" if len(a.stufen) == len(MA.STUFEN)
+                  else " — getragen: " + ", ".join(a.stufen))
+        # Der Hinweis auf den Feldweg haengt am WEG, nicht an der Vollstaendigkeit.
+        # Bis zum 18.09.2026 stand er im `else`-Zweig: sobald die ASM mit dem CAD
+        # alle vier Stufen trug, fiel er weg -- ausgerechnet fuer die eine Art,
+        # bei der er noetig ist. Sie traegt „feld" und „em3d", geht dort aber
+        # ueber Elmers harmonischen Loeser (``feld2d``/``feld3d``) und wird von
+        # `_gate_maschinenart` auf dem Pipelineweg weiterhin abgewiesen. „Traegt
+        # die Stufe" und „geht DIESEN Weg" sind zwei Fragen, und die Auswahlliste
+        # muss die zweite beantworten -- sie soll nicht zu einer Wahl einladen,
+        # die der Lauf danach abweist.
+        wege = []
+        if a.feldweg != "fdm" and "feld" in a.stufen:
+            wege.append("Feld nur ueber "
+                        + MA.FELDWEG_WERKZEUG.get(a.feldweg, a.feldweg))
+        _e3 = MA.EM3D_WEG.get(c, "elmer3d_stat")
+        if _e3 != "elmer3d_stat" and "em3d" in a.stufen:
+            wege.append("3-D nur ueber "
+                        + MA.EM3D_WERKZEUG.get(_e3, _e3))
+        if wege:
+            zusatz += " (" + ", ".join(wege) + ")"
         aus.append({"value": c, "label": a.label + zusatz})
     return aus
 

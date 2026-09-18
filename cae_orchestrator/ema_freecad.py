@@ -96,6 +96,12 @@ print("CAD_SUCCESS")
 """
 
 
+def _ASM_kaefig_gewuenscht(geom: dict) -> bool:
+    """Kaefig- oder Schleifringlaeufer? Die Entscheidung steht in ``ema_asm``."""
+    import ema_asm as _ASM
+    return _ASM.laeufer_art(geom) == "kaefig"
+
+
 def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
                             winding_debug: bool = False,
                             hairpin_slot_limit: int = 0) -> str:
@@ -116,6 +122,17 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
     slot_dep  = float(geom["slotDepth"])
     sw_ratio  = float(geom.get("slotWidthRatio", 0.5))
     axial     = axial_len
+
+    # Die MASCHINENART entscheidet, was ueberhaupt im Laeufer liegt -- nicht ein
+    # Haekchen. ``genMagnets`` ist eine Anzeigewahl des Menschen ("zeig den
+    # Rotor ohne Magnete"), ``hat_magnete`` eine Tatsache ueber die Bauart. Wer
+    # die beiden zusammenwirft, zeichnet einer Asynchronmaschine Magnete in den
+    # Kaefig: bis zum 18.09.2026 fragte dieser Erzeuger die Art gar nicht, und
+    # ein ASM-Laeufer haette Magnettaschen UND Magnete UND einen Kaefig
+    # bekommen -- ein Laeufer, den es nicht gibt.
+    import ema_maschinenart as _MA
+    _art = _MA.hole(_MA.art_code(geom))
+    hat_magnete = bool(_art.hat_magnete)
 
     import math as _m
     import ema_wicklung
@@ -159,10 +176,22 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
     # ``ema_asm.kaefig`` -- derselben Funktion, die den analytischen Widerstand
     # und das Feldnetz speist.
     cage_json = "None"
-    import ema_maschinenart as _MA
-    if _MA.art_code(geom) == "asm":
+    wick_json = "None"
+    if _MA.art_code(geom) == "asm" and _ASM_kaefig_gewuenscht(geom):
         import ema_asm as _ASM
         _kf = _ASM.kaefig(geom, axial_len)
+        # Ein nicht auslegbarer Kaefig wird NICHT gezeichnet. ``kaefig`` faellt
+        # in dem Fall auf den 2-mm-Fertigungsboden zurueck und liefert eine
+        # breite, flache Nut -- gemessen misst der 2-D-Lauf daran ein Carter von
+        # 3,2 statt 1,15 und ein Leerlauffeld von 0,29 statt 0,80 T. Eine
+        # Zeichnung davon saehe aus wie eine Auslegung und waere keine;
+        # ``ema_em2d_harm`` weigert sich aus demselben Grund zu vernetzen.
+        if not _kf.get("erreichbar", True) and not geom.get("kaefigFreigabe"):
+            raise ValueError(
+                "Kaefiglaeufer nicht auslegbar, also nicht zeichenbar: "
+                + str(_kf.get("grund") or "kein momentbildender Strom")
+                + " — die Nuttiefe faellt sonst still auf den 2-mm-Fertigungs"
+                  "boden zurueck. Mit geom.kaefigFreigabe=true trotzdem zeichnen.")
         _r_a = R_rot - _ASM.KAEFIG_STEG_MM               # Aussenkante der Nut
         cage_json = json.dumps({
             "n": int(_kf["n_stab"]),
@@ -170,6 +199,14 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
             "t": float(_kf["nuttiefe_mm"]),
             "r_i": round(_r_a - float(_kf["nuttiefe_mm"]), 4),
             "l_stab": float(_kf["l_stab_mm"]),
+            # Schraegung: in GERADE Segmente um die Wellenachse zerlegt, nicht
+            # als um die eigene Achse tordiertes Prisma. Dieselbe Entscheidung
+            # wie in ``ema_em3d`` -- dort gemessen, dass die tordierte Schale
+            # ``mesh.generate`` zum Scheitern bringt -- und ueberdies ist die
+            # gestufte Schraegung die gebaute.
+            "skew_deg": round(_ASM.schraegung_grad(geom), 4),
+            "skew_segs": (int(_ASM.SCHRAEG_SEGMENTE)
+                          if _ASM.schraegung_nutteilungen(geom) > 1e-9 else 1),
             # Ringquerschnitt A_ring als Rechteck: radiale Hoehe x axiale Breite,
             # Seitenverhaeltnis wie der Stab.
             "ring_h": round(math.sqrt(float(_kf["A_ring_mm2"])
@@ -179,6 +216,41 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
                                       * float(_kf["stabbreite_mm"])
                                       / max(float(_kf["nuttiefe_mm"]), 0.1)), 3),
         })
+
+    if _MA.art_code(geom) == "asm" and not _ASM_kaefig_gewuenscht(geom):
+        import ema_asm as _ASM
+        _lw = _ASM.laeuferwicklung(geom, axial_len)
+        if not _lw["auslegbar"] and not geom.get("kaefigFreigabe"):
+            raise ValueError("Laeuferwicklung nicht auslegbar: " + _lw["grund"])
+        if not _lw.get("erreichbar", True) and not geom.get("kaefigFreigabe"):
+            raise ValueError(
+                "Schleifringlaeufer nicht auslegbar, also nicht zeichenbar: "
+                + str(_lw.get("grund_strom") or "kein momentbildender Strom"))
+        wick_json = json.dumps({
+            "n": int(_lw["n_nut"]),
+            "b": float(_lw["nut_breite_mm"]),
+            "t": float(_lw["nut_tiefe_mm"]),
+            "r_i": round(float(_lw["r_nut_aussen_mm"]) - float(_lw["nut_tiefe_mm"]), 4),
+            "w": int(_lw["w_je_nut"]),
+            "lage_h": float(_lw["lage_hoehe_mm"]),
+            "leiter_b": float(_lw["leiter_breite_mm"]),
+            "skew_deg": round(_ASM.schraegung_grad(geom), 4),
+            "skew_segs": (int(_ASM.SCHRAEG_SEGMENTE)
+                          if _ASM.schraegung_nutteilungen(geom) > 1e-9 else 1),
+        })
+        # Drei Schleifringe (Drehstrom), ausserhalb des Pakets auf der Welle.
+        # Breite aus der Stromdichte am Buerstenkontakt, Durchmesser aus der
+        # Welle -- beides in ``ema_asm.schleifringe``. Eingebettet werden NUR
+        # die Zeichenmasse: das Urteil ueber die Umfangsgeschwindigkeit
+        # (``v_ok``) ist ein Befund und gehoert ins Protokoll, nicht in ein
+        # Zeichenskript -- und als JSON-``true``/``null`` waere es dort ohnehin
+        # ein NameError, weil das erzeugte Skript Python ist und kein JSON.
+        _rg = _ASM.schleifringe(geom, float(_lw["I2_eff_A"]))
+        _w = json.loads(wick_json)
+        _w["ringe"] = {k: float(_rg[k]) for k in
+                       ("d_ring_mm", "b_ring_mm", "spalt_mm")}
+        _w["ringe"]["n_ringe"] = int(_rg["n_ringe"])
+        wick_json = json.dumps(_w)
 
     _wk_dat   = ema_wicklung.wicklung(geom, axial_len)
     wind_art  = _wk_dat["art"]
@@ -211,7 +283,7 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
     # winding-head insulation as new optional extras (off by default).
     gen_shaft   = bool(geom.get("genShaft",        True))
     gen_rotor   = bool(geom.get("genRotorIron",    True))
-    gen_magnets = bool(geom.get("genMagnets",      True))
+    gen_magnets = bool(geom.get("genMagnets",      True)) and hat_magnete
     gen_stator  = bool(geom.get("genStatorIron",   True))
     gen_hairpin = bool(geom.get("genHairpins",     True))   # straight slot bars + tabs
     gen_whead   = bool(geom.get("genWindingHeads", True))   # U-crowns (need hairpins)
@@ -279,6 +351,8 @@ GEN_SHAFT = {gen_shaft!r}; GEN_ROTOR = {gen_rotor!r}; GEN_MAGNETS = {gen_magnets
 GEN_STATOR = {gen_stator!r}; GEN_HAIRPIN = {gen_hairpin!r}; GEN_WHEAD = {gen_whead!r}
 WINDING_TYPE = {wind_art!r}; RD_FUELL = {rd_fuell}; RD_WK_AXIAL = {rd_wk_axial:.3f}
 CAGE = {cage_json}   # Kaefiglaeufer (ASM) aus ema_asm.kaefig — sonst None
+ROTORWICKLUNG = {wick_json}   # Schleifringlaeufer (ASM) aus ema_asm.laeuferwicklung
+HAT_MAGNETE = {hat_magnete!r}   # Bauart-Tatsache, nicht Anzeigewahl
 GEN_BEAR_A = {gen_bear_a!r}; GEN_BEAR_B = {gen_bear_b!r}; GEN_INSUL = {gen_insul!r}
 bearing_od = {bearing_od}; bearing_w = {bearing_w}; bearing_gap = {bearing_gap}
 insul_thk  = {insul_thk}
@@ -401,6 +475,31 @@ if GEN_SHAFT:
         shaft = shaft.cut(Part.makeCylinder(R_bore, shaft_len + 4, App.Vector(0, 0, -shaft_len / 2 - 2)))
     _add("Shaft", shaft, (0.75, 0.75, 0.75))
 
+# Die Laeufernuten als Koerper -- geschraegt in GERADE Segmenten. Eine
+# Schraegung um die eigene Achse zu tordieren waere in OCC moeglich und in Gmsh
+# nicht robust vernetzbar (in ema_em3d gemessen); gebaut wird sie ohnehin
+# gestuft. BEIDE Laeuferbauformen teilen sich diesen Bauer, weil eine Nut eine
+# Nut ist -- was darin liegt, entscheidet spaeter.
+def _laeufernuten(LN, hoehe, z0):
+    n = int(LN["n"])
+    segs = max(1, int(LN.get("skew_segs", 1)))
+    skew = float(LN.get("skew_deg", 0.0))
+    aus = []
+    dz = hoehe / segs
+    for _j in range(n):
+        _a0 = 360.0 * _j / n
+        for _k in range(segs):
+            # Segmentmitte: die Schraegung laeuft linear ueber die Laenge, der
+            # Mittelwert ist damit 0 -- die Nut sitzt im Mittel dort, wo sie
+            # ohne Schraegung saesse.
+            _f = (_k + 0.5) / segs - 0.5
+            _nut = Part.makeBox(LN["t"], LN["b"], dz + (0.02 if segs > 1 else 0.0),
+                                App.Vector(LN["r_i"], -LN["b"] / 2.0, z0 + _k * dz))
+            _nut.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), _a0 + _f * skew)
+            aus.append(_nut)
+    return aus
+
+
 # ── 2. ROTOR IRON (with magnet pockets; bore = connection type) ───────────
 if GEN_ROTOR:
     rotor_ring  = Part.makeCylinder(R_rot,   axial,     App.Vector(0, 0, -axial / 2))
@@ -408,7 +507,11 @@ if GEN_ROTOR:
     rotor_solid = rotor_ring.cut(bore_cut)
 
     pocket_shapes = []
-    for i in range(poles):
+    # Nur eine Bauart MIT Magneten bekommt Magnettaschen. Das haengt an
+    # HAT_MAGNETE und nicht an GEN_MAGNETS: wer die Magnete nur ausblendet,
+    # will den Laeufer trotzdem mit seinen Taschen sehen (das ist der Sinn des
+    # stufenweisen Aufbaus); eine Asynchronmaschine hat dagegen gar keine.
+    for i in (range(poles) if HAT_MAGNETE else ()):
         pole_ang = i * (2 * math.pi / poles)
         cos_p = math.cos(pole_ang); sin_p = math.sin(pole_ang)
         for rec in [lg for lg in legs if lg["placement"] == "interior"]:
@@ -435,13 +538,9 @@ if GEN_ROTOR:
     # ``ema_asm.kaefig`` gezeichnet, aus dem auch der analytische Widerstand und
     # das 2-D-Feldnetz kommen -- eine zweite Nutgeometrie waere genau die
     # Vervielfaeltigung, gegen die ``ema_wicklung`` gerade angetreten ist.
-    if CAGE:
-        for _j in range(int(CAGE["n"])):
-            _a = 2 * math.pi * _j / int(CAGE["n"])
-            _nut = Part.makeBox(CAGE["t"], CAGE["b"], axial + 4,
-                                App.Vector(CAGE["r_i"], -CAGE["b"] / 2.0,
-                                           -axial / 2 - 2))
-            _nut.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), math.degrees(_a))
+    if CAGE or ROTORWICKLUNG:
+        _LN = CAGE or ROTORWICKLUNG
+        for _nut in _laeufernuten(_LN, axial + 4, -axial / 2 - 2):
             pocket_shapes.append(_nut)
 
     rotor_base = rotor_solid                          # valid disc (ring − bore) — ultimate fallback
@@ -517,13 +616,8 @@ if GEN_ROTOR:
     # und das 2-D-Feld nicht -- ein Querschnitt hat keine Stirnseite. Hier ist
     # er zu sehen, und zwar mit dem Querschnitt, den ``ema_asm`` ansetzt.
     if CAGE:
-        _stab, _l_st = [], CAGE["l_stab"]
-        for _j in range(int(CAGE["n"])):
-            _a = 2 * math.pi * _j / int(CAGE["n"])
-            _bar = Part.makeBox(CAGE["t"], CAGE["b"], _l_st,
-                                App.Vector(CAGE["r_i"], -CAGE["b"] / 2.0, -_l_st / 2))
-            _bar.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), math.degrees(_a))
-            _stab.append(_bar)
+        _l_st = CAGE["l_stab"]
+        _stab = _laeufernuten(CAGE, _l_st, -_l_st / 2)
         _rings = []
         _rh = CAGE["ring_h"]; _rw = CAGE["ring_w"]
         for _sd in (-1.0, 1.0):
@@ -534,6 +628,56 @@ if GEN_ROTOR:
             _rings.append(_ro.cut(_ri))
         _add("Cage_Bars", Part.makeCompound(_stab), (0.75, 0.75, 0.78))
         _add("Cage_Rings", Part.makeCompound(_rings), (0.70, 0.70, 0.74))
+
+    # Der Schleifringlaeufer: Wicklungsbuendel in denselben Nuten, dazu die drei
+    # Ringe auf der Welle. Gezeichnet wird das Buendel und nicht jede Windung --
+    # was zaehlt, ist der Kupferquerschnitt, und den fuehrt ema_asm.
+    if ROTORWICKLUNG:
+        _RW = ROTORWICKLUNG
+        _lw_len = axial + 2 * max(4.0, 0.12 * axial)     # Wickelkopf beidseits
+        _buendel = []
+        _n = int(_RW["n"]); _segs = max(1, int(_RW.get("skew_segs", 1)))
+        _skew = float(_RW.get("skew_deg", 0.0))
+        _dz = _lw_len / _segs
+        _bb = max(_RW["b"] - 1.6, 0.5)                   # Nutisolation je Seite
+        _tt = max(_RW["t"] - 2.0, 0.5)                   # Nutgrund
+        for _j in range(_n):
+            _a0 = 360.0 * _j / _n
+            for _k in range(_segs):
+                _f = (_k + 0.5) / _segs - 0.5
+                _bx = Part.makeBox(_tt, _bb, _dz + (0.02 if _segs > 1 else 0.0),
+                                   App.Vector(_RW["r_i"] + 1.0, -_bb / 2.0,
+                                              -_lw_len / 2 + _k * _dz))
+                _bx.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1),
+                           _a0 + _f * _skew)
+                _buendel.append(_bx)
+        _add("Rotor_Winding", Part.makeCompound(_buendel), (0.72, 0.45, 0.20))
+
+        _rg = _RW.get("ringe") or {{}}
+        if _rg:
+            _rd = float(_rg["d_ring_mm"]) / 2.0
+            _rb = float(_rg["b_ring_mm"]); _sp = float(_rg["spalt_mm"])
+            _ringe, _buersten = [], []
+            # Ausserhalb des Pakets, auf der B-Seite (+z), hinter dem Wickelkopf.
+            _z = _lw_len / 2 + 8.0
+            for _i in range(int(_rg["n_ringe"])):
+                _ro = Part.makeCylinder(_rd, _rb, App.Vector(0, 0, _z))
+                _ri = Part.makeCylinder(R_shaft, _rb + 2, App.Vector(0, 0, _z - 1))
+                _ringe.append(_ro.cut(_ri))
+                # Eine Kohlebuerste je Ring, radial aufliegend, um 120 Grad
+                # versetzt -- so sieht man, dass jeder Ring seinen eigenen hat.
+                # Die KONTAKTflaeche ist gerechnet (Ringbreite x Umfangslaenge,
+                # aus der Stromdichte); wie hoch der Kohleklotz darueber steht,
+                # ist eine Zeichenwahl und traegt nichts.
+                _bl = 0.5 * _rb                          # radiale Hoehe
+                _bt = 0.5 * _rb                          # in Umfangsrichtung
+                _bu = Part.makeBox(_bl, _bt, _rb,
+                                   App.Vector(_rd, -_bt / 2.0, _z))
+                _bu.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), 120.0 * _i)
+                _buersten.append(_bu)
+                _z += _rb + _sp
+            _add("Slip_Rings", Part.makeCompound(_ringe), (0.80, 0.55, 0.25))
+            _add("Brushes", Part.makeCompound(_buersten), (0.15, 0.15, 0.17))
 
 # ── 2b. BALANCE-DISC BOLTS (optional; through the whole stack) ─────────────
 if GEN_BALANCE and bal_nom > 0:

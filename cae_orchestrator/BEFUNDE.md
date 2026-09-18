@@ -17,6 +17,93 @@ kann.
 
 ---
 
+## 2026-09-18 — Der Käfig war gezeichnet und unerreichbar, und der Läufer ohne Magnete bekam welche
+
+**Beobachtung.** Auf die Bitte, eine Asynchronmaschine mit n Polen in CAD
+darzustellen, war die erste Vermutung „das muss gebaut werden". Nachgesehen:
+`ema_freecad.build_full_motor_script` zeichnet den Käfig **seit jeher** —
+Läufernuten, Stäbe und **beide** Kurzschlussringe, gespeist aus
+`ema_asm.kaefig`, derselben Funktion, aus der auch der analytische Widerstand
+und das 2-D-Feldnetz kommen. Drei Dinge machten ihn unerreichbar bzw. falsch,
+und jedes für sich sah harmlos aus.
+
+**Messung.**
+
+1. **Das Tor ließ den eigenen Erzeuger nicht durch.** `ARTEN["asm"].stufen`
+   führte `("analytisch", "feld", "em3d")`; `_gate_maschinenart(data, state,
+   "cad")` (`ema_pipeline.py:1887`) wies die ASM deshalb ab. Der Kommentar
+   daneben sagte sogar, das sei „keine Lücke im Sinne von noch nicht gemacht,
+   sondern eine ehrliche: `ema_freecad` zeichnet Magnete und Hairpins, keinen
+   Druckguss-Käfig mit Kurzschlussringen" — und genau das stimmte nicht.
+
+2. **`GEN_MAGNETS` fragte die Maschinenart nicht** (`ema_freecad.py:214`,
+   `gen_magnets = bool(geom.get("genMagnets", True))`). Gemessen am erzeugten
+   Skript hätte ein ASM-Läufer Magnettaschen **und** Magnete **und** einen Käfig
+   bekommen — einen Läufer, den es nicht gibt. Der Taschenschnitt hing dabei
+   nicht einmal an `GEN_MAGNETS`, sondern lief unbedingt.
+
+3. **Ein nicht auslegbarer Käfig wäre still gezeichnet worden.** `kaefig` fällt
+   dann auf den 2-mm-Fertigungsboden zurück und meldet
+   `bemessung: "nicht auslegbar"` — `ema_em2d_harm` weigert sich daraufhin zu
+   vernetzen, der Zeichner fragte es nicht. Gemessen am Ventilatorfall (p = 1,
+   24 Nuten): die Magnetisierung braucht 1686 A gegen eine Grenze von 800 A, es
+   bleibt kein momentbildender Strom — und heraus käme eine breite, flache Nut,
+   an der der 2-D-Lauf ein Carter von 3,2 statt 1,15 misst.
+
+**Und dieselbe Blindheit steckte im Querschnittsbild.**
+`ema_pipeline.render_cross_section` ist die EINE Zeichnung für CAD-Bild,
+Bilddatensatz und Sättigungsbild — sie zeichnete Magnete aus `magnet_legs` ohne
+jede Verzweigung. Jedes dieser Bilder hätte für eine ASM einen PM-Läufer
+gezeigt.
+
+**Fundstelle.** `ema_maschinenart.ARTEN["asm"].stufen`; `ema_freecad.py:214`
+(`gen_magnets`), `ema_freecad.py` Block „2. ROTOR IRON" (Taschenschleife) und
+der `CAGE`-Block; `ema_pipeline.render_cross_section`.
+
+**Status: behoben** (18.09.2026), mit vier Stücken.
+
+1. `stufen` führt `"cad"`. Das Tor lässt die ASM durch — Feld und 3-D weist es
+   weiterhin ab, weil sie dort über `feld2d`/`feld3d` (Elmer, harmonisch) und
+   nicht über die magnetostatische Kette dieser Pipeline gehen. **„Trägt die
+   Stufe" und „geht DIESEN Weg" sind zwei Fragen**, und `server._art_optionen`
+   hatte sie vermischt: der Hinweis auf den Feldweg stand im `else`-Zweig „nicht
+   alle Stufen getragen" und wäre mit dem CAD genau für die eine Art
+   verschwunden, die ihn braucht. Er hängt jetzt am Weg.
+2. `gen_magnets &= ema_maschinenart.hole(...).hat_magnete`, und die
+   Taschenschleife hängt an einem eigenen `HAT_MAGNETE` — wer die Magnete nur
+   ausblendet (`genMagnets=False`, der stufenweise Aufbau), soll den Läufer
+   weiterhin mit seinen Taschen sehen; eine Asynchronmaschine hat dagegen gar
+   keine. Ebenso `_gate_rotor_layout`: ein Läufer ohne Magnettaschen bekommt
+   statt der Taschenprüfung `_gate_laeufer` (Steg über der Nut, über
+   `ema_asm.steg_check`). Ein grünes Urteil über etwas Nichtvorhandenes ist
+   schlechter als keines.
+3. Ein nicht auslegbarer Käfig wird **abgewiesen**, mit der Begründung aus
+   `ema_asm.nicht_erreichbar_text` — ausdrücklich überstimmbar über
+   `geom.kaefigFreigabe` (Muster `luftspaltFreigabe`), dann steht die
+   Überschreitung als ⚠ im Protokoll.
+4. `render_cross_section` verzweigt nach `art_code` und zeichnet die
+   Läufernuten aus **denselben** Funktionen wie das CAD.
+
+**Nachgemessen am echten Bau** (FreeCADCmd 1.1.1, `build_cad_preview` durch alle
+Tore):
+
+| | Körper |
+|---|---|
+| Käfigläufer (31 Nuten, Schrägung 1 Nutteilung) | Shaft · Rotor · **Cage_Bars (186 = 31 × 6 Segmente)** · Cage_Rings (2) · Stator · Coils_A/B/C — **keine Magnete** |
+| Schleifringläufer (18 Nuten) | Shaft · Rotor · **Rotor_Winding (18)** · **Slip_Rings (3)** · **Brushes (3)** · Stator · Coils — **kein Käfig daneben** |
+| Käfigläufer p = 1 (Ventilatorfall) | **abgewiesen**: „nicht auslegbar, also nicht zeichenbar … 1686 A gegen 800 A" |
+
+Dazu neu: die **zweite Läuferbauform** (`rotorType="schleifring"` — Drehstrom-
+wicklung mit Anlasswiderstand, `ema_asm.laeuferwicklung`/`anlasswiderstand`/
+`schleifringe`) und die **Schrägung der Läufernuten** (`rotorSkewSlots`, in
+Läufernutteilungen, gestuft gezeichnet wie `ema_em3d` es staffelt — ein um die
+eigene Achse tordiertes Prisma ist nicht robust vernetzbar). Test:
+`test_laeufer_cad.py` — es führt das **erzeugte Skript** mit einem
+Stellvertreter-FreeCAD wirklich aus und zählt, was dabei entsteht, statt eine
+Zuweisung zu prüfen.
+
+---
+
 ## 2026-09-15 — Die Übersetzung 80 ist das Vierfache der eigenen Feldgrenze, und niemand hält sie auf
 
 **Beobachtung.** Im selben Zyklusergebnis (`20260915_091253_Pescord`) steht

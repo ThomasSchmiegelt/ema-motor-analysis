@@ -108,7 +108,7 @@ ARTEN = {
     ),
     "asm": Art(
         code="asm",
-        label="ASM — Asynchronmaschine (Kaefiglaeufer)",
+        label="ASM — Asynchronmaschine (Kaefig oder Schleifring)",
         erregung="kaefig",
         hat_magnete=False,
         hat_laeuferwicklung=True,
@@ -123,17 +123,24 @@ ARTEN = {
         # 0,2870 T in 2-D am selben Betriebspunkt, bei einem Spalt, der im
         # 3-D-Netz gar nicht aufgeloest ist.
         #
-        # "cad" fehlt mit Absicht und ist keine Luecke im Sinne von „noch nicht
-        # gemacht", sondern eine ehrliche: ``ema_freecad`` zeichnet Magnete und
-        # Hairpins, keinen Druckguss-Kaefig mit Kurzschlussringen.
-        stufen=("analytisch", "feld", "em3d"),
+        # "cad" traegt seit dem 18.09.2026. Der Kaefig war im Zeichner schon
+        # da (Nuten, Staebe, beide Kurzschlussringe aus ``ema_asm.kaefig`` --
+        # derselben Quelle wie Widerstand und Feldnetz), nur nie erreichbar:
+        # dieses Tor liess ihn nicht durch, ``GEN_MAGNETS`` fragte die Art gar
+        # nicht (ein ASM-Laeufer haette Magnettaschen UND Magnete UND einen
+        # Kaefig bekommen), und ein nicht auslegbarer Kaefig waere still auf
+        # den 2-mm-Fertigungsboden gezeichnet worden. Alle drei sind behoben.
+        # Dazu die zweite Laeuferbauform: ``rotorType="schleifring"`` zeichnet
+        # eine Drehstromwicklung mit drei Schleifringen und Buersten.
+        stufen=("analytisch", "feld", "cad", "em3d"),
         feldweg="elmer2d_harm",
         ohne_bedeutung=_PM_KENNZAHLEN,
         hinweis=("Der Magnetisierungsstrom liegt DAUERND im Stator, und der "
                  "Schlupfverlust faellt im Laeufer an -- der thermisch "
                  "schlechtesten Stelle. Dafuer keine Magnete: keine Masse, "
                  "keine Magnetkosten, keine Entmagnetisierung, kein "
-                 "Kurzschlussmoment."),
+                 "Kurzschlussmoment. Zwei Laeuferbauformen: Kaefig (Vorgabe) "
+                 "und Schleifringlaeufer mit Anlasswiderstand."),
     ),
     "synrm": Art(
         code="synrm",

@@ -87,6 +87,62 @@ def _gate_maschinenart(data: dict, state: dict | None = None,
         ema_maschinenart.pruefe_stufe(code, stufe)
 
 
+def _gate_laeufer(data: dict, state: dict | None = None,
+                  fatal: bool = True) -> None:
+    """Das Tor fuer Laeufer OHNE Magnete -- je Bauform die eigene Enge.
+
+    ``rotor_layout_check`` prueft Magnettaschen; ein Kaefig- oder
+    Schleifringlaeufer hat keine. Seine enge Stelle ist der **Steg ueber der
+    Nut** (er haelt den Stab bzw. die Wicklung gegen die Fliehkraft), und die
+    rechnet ``ema_asm.steg_check`` als beidseitig eingespannten Balken. Die
+    Ringspannung an der Wellenbohrung gilt unveraendert weiter und wird vom
+    naechsten Tor (``_gate_rotor_stress``) geprueft.
+    """
+    geom = (data or {}).get("geom") or {}
+    art = None
+    try:
+        import ema_maschinenart as _MA
+        art = _MA.art_code(geom)
+    except Exception:                                        # noqa: BLE001
+        return
+    if art != "asm":
+        # SynRM, EESM und GSM haben eigene Enge (Flussbarrieren, Polfenster,
+        # Ankernut). Solange dafuer keine Pruefung steht, wird das GESAGT statt
+        # ein gruenes Urteil ueber Ungeprueftes abzugeben.
+        if state is not None:
+            _log(state, f"\u2139 Laeufertor: fuer die Art '{art}' gibt es noch "
+                        f"keine eigene Engstellenpruefung — die Fliehkraft am "
+                        f"Wellensitz wird geprueft, die Laeufergeometrie NICHT", 5)
+        return
+    import ema_asm
+    mat = LAMINATES.get(data.get("rotor_lam") or "m270_35a",
+                        LAMINATES["m270_35a"])
+    n_max = float(data.get("rpm_to") or data.get("rpm_from") or 0.0)
+    if n_max <= 0:
+        return
+    axial = float(data.get("axial_len") or 80.0)
+    try:
+        chk = ema_asm.steg_check(geom, axial, mat, n_max)
+    except Exception as exc:                                 # noqa: BLE001
+        if state is not None:
+            _log(state, f"\u26A0 Laeufertor nicht gerechnet: "
+                        f"{type(exc).__name__}: {exc}", 5)
+        return
+    if state is not None:
+        _log(state, f"\U0001F6E1 Laeufertor ({ema_asm.laeufer_art(geom)}): "
+                    f"Steg ueber der Nut {chk.get('steg_mm', '?')} mm, "
+                    f"Sicherheit {chk.get('safety_factor', '?')} "
+                    f"bei {n_max:.0f} 1/min — "
+                    f"{'OK' if chk.get('ok') else 'ABGELEHNT'}", 5)
+    if not chk.get("ok", True):
+        msg = ("Laeufertor: der Steg ueber der Nut traegt die Fliehkraft nicht "
+               f"(Sicherheit {chk.get('safety_factor', '?')} bei "
+               f"{n_max:.0f} 1/min)")
+        if fatal:
+            raise RuntimeError(msg)
+        _log(state, "\u26A0 " + msg, 5)
+
+
 def _gate_rotor_layout(data: dict, state: dict | None = None,
                        fatal: bool = True) -> None:
     """Hard pre-CAD gate: reject rotor layouts whose magnet pockets collide,
@@ -101,6 +157,14 @@ def _gate_rotor_layout(data: dict, state: dict | None = None,
     that is otherwise perfectly loadable."""
     geom = (data or {}).get("geom") or {}
     if not geom:
+        return
+    # Ein Laeufer OHNE Magnete hat keine Magnettaschen -- dann prueft dieses Tor
+    # eine Geometrie, die gar nicht gebaut wird, und das ist schlimmer als keine
+    # Pruefung: es gaebe ein gruenes Urteil ueber etwas Nichtvorhandenes. An
+    # seine Stelle tritt die Pruefung der jeweiligen Laeuferbauform.
+    import ema_maschinenart as _MA
+    if not _MA.hole(_MA.art_code(geom)).hat_magnete:
+        _gate_laeufer(data, state, fatal)
         return
     chk = rotor_layout_check(geom)
     if state is not None:
@@ -1630,7 +1694,13 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
     _rotor_clip = Circle((0, 0), R_rot, fc='none', ec='none', lw=0)
     ax.add_patch(_rotor_clip)
 
-    for pole in range(n_poles):
+    # Ohne Magnete keine Magnete. Diese Zeichnung ist die EINE Quelle fuer
+    # CAD-Bild, Bilddatensatz und Saettigungsbild -- zeichnete sie einer
+    # Asynchronmaschine einen Magnetlaeufer, saehe jeder dieser Wege eine
+    # Maschine, die nicht gerechnet wurde.
+    import ema_maschinenart as _MAq
+    _art_q = _MAq.hole(_MAq.art_code(geom))
+    for pole in (range(n_poles) if _art_q.hat_magnete else ()):
         pa = pole * 2 * _m.pi / n_poles
         is_n = (pole % 2 == 0)
         fc = '#c0392b' if is_n else '#2980b9'
@@ -1663,19 +1733,60 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
             mp = MplPoly(rect, closed=True, fc=fc, ec=ec, lw=0.8, alpha=0.95)
             ax.add_patch(mp); mp.set_clip_path(_rotor_clip)
 
+    # ── Laeufernuten der Asynchronmaschine ───────────────────────────────────
+    # Die Masse kommen aus DENSELBEN Funktionen, aus denen ``ema_freecad``
+    # zeichnet (``ema_asm.kaefig`` / ``laeuferwicklung``) -- eine zweite
+    # Nutgeometrie waere die Stelle, an der Bild und Koerper auseinanderlaufen.
+    _laeufer_leg = []
+    if _MAq.art_code(geom) == "asm":
+        try:
+            import ema_asm as _ASMq
+            _Lq = float(geom.get("axialLen") or 80.0)
+            if _ASMq.laeufer_art(geom) == "kaefig":
+                _kq = _ASMq.kaefig(geom, _Lq)
+                _nq, _bq, _tq = int(_kq["n_stab"]), _kq["stabbreite_mm"], _kq["nuttiefe_mm"]
+                _riq = R_rot - _ASMq.KAEFIG_STEG_MM - _tq
+                _fcq, _ecq, _lblq = '#b0b4bb', '#dfe3e8', f'Kaefigstaebe ({_nq})'
+            else:
+                _wq = _ASMq.laeuferwicklung(geom, _Lq)
+                _nq, _bq, _tq = int(_wq["n_nut"]), _wq["nut_breite_mm"], _wq["nut_tiefe_mm"]
+                _riq = float(_wq["r_nut_aussen_mm"]) - _tq
+                _fcq, _ecq = '#b87333', '#e0a060'
+                _lblq = f'Laeuferwicklung ({_nq} Nuten)'
+            for _j in range(_nq):
+                _aq = 2 * _m.pi * _j / max(_nq, 1)
+                _loc = [(_riq, -_bq / 2), (_riq + _tq, -_bq / 2),
+                        (_riq + _tq, _bq / 2), (_riq, _bq / 2)]
+                _pq = [(x * _m.cos(_aq) - y * _m.sin(_aq),
+                        x * _m.sin(_aq) + y * _m.cos(_aq)) for x, y in _loc]
+                _mp = MplPoly(_pq, closed=True, fc=_fcq, ec=_ecq, lw=0.6, alpha=0.95)
+                ax.add_patch(_mp); _mp.set_clip_path(_rotor_clip)
+            _laeufer_leg = [Patch(fc=_fcq, ec=_ecq, label=_lblq)]
+        except Exception:                                    # noqa: BLE001
+            # Zeichnen darf nie der Grund sein, warum ein Lauf scheitert. Bleibt
+            # die Nut aus, fehlt sie sichtbar -- besser als ein Abbruch.
+            _laeufer_leg = []
+
     if beschriftung:
-        ax.text(0, lim*0.95, "IPM-Motor — Querschnitt (XY)",
+        _titel = _art_q.label.split("—")[0].strip() if _art_q else "IPM-Motor"
+        if _MAq.art_code(geom) == "asm":
+            import ema_asm as _ASMt
+            _titel += (" (Kaefiglaeufer)" if _ASMt.laeufer_art(geom) == "kaefig"
+                       else " (Schleifringlaeufer)")
+        ax.text(0, lim*0.95, f"{_titel} — Querschnitt (XY)",
                 color='white', fontsize=11, ha='center', va='top', fontweight='bold')
         ax.text(0, -lim*0.96,
                 f"D_a={geom['statorOD']:.0f} mm  |  D_i={geom['statorID']:.0f} mm  |  "
                 f"D_r={geom['rotorOD']:.0f} mm  |  d_w={geom['shaftD']:.0f} mm  |  "
                 f"2p={n_poles}  |  Q={n_slots}",
                 color='#888', fontsize=8, ha='center', va='top')
+        _mag_leg = ([Patch(fc='#c0392b', ec='#ff6b6b', label='Magnet N'),
+                     Patch(fc='#2980b9', ec='#74b9ff', label='Magnet S')]
+                    if _art_q.hat_magnete else _laeufer_leg)
         ax.legend(handles=[
             Patch(fc='#555',    ec='#888',    label='Welle'),
             Patch(fc='#2d3748', ec='#4a5568', label='Rotorblech'),
-            Patch(fc='#c0392b', ec='#ff6b6b', label='Magnet N'),
-            Patch(fc='#2980b9', ec='#74b9ff', label='Magnet S'),
+            *_mag_leg,
             Patch(fc='#1e3a5f', ec='#2e5f8a', label='Statorblech'),
             Patch(fc='#e67e22', label='Phase A'), Patch(fc='#27ae60', label='Phase B'),
             Patch(fc='#3498db', label='Phase C'),

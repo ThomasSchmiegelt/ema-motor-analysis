@@ -69,9 +69,9 @@ except MA.ArtNichtUnterstuetzt:
 
 pruefe(MA.traegt("pmsm", "em3d") and MA.traegt("asm", "analytisch"),
        "PSM traegt alle vier Stufen, die ASM die analytische")
-pruefe(MA.traegt("asm", "em3d") and not MA.traegt("asm", "cad"),
-       "die ASM traegt seit ema_em3d_harm auch die 3-D-Stufe — aber nicht CAD, "
-       "und die Luecke steht als Luecke da statt als stille Vollstaendigkeit")
+pruefe(MA.traegt("asm", "em3d") and MA.traegt("asm", "cad"),
+       "die ASM traegt seit ema_em3d_harm die 3-D-Stufe und seit dem 18.09.2026 "
+       "auch CAD — Kaefig- UND Schleifringlaeufer, aus ema_asm gezeichnet")
 try:
     MA.pruefe_em3d_weg("asm", "elmer3d_stat")
     pruefe(False, "und sie laeuft NICHT ueber die magnetostatische 3-D-Stufe")
@@ -98,14 +98,19 @@ pruefe(not any(MA.traegt(c, st) for c in ("synrm", "eesm")
        "aber keine der beiden traegt Feld, CAD oder 3D — und die Tabelle sagt es, "
        "statt es einen Lauf herausfinden zu lassen")
 
+# Der Fehlertext einer NICHT getragenen Stufe muss weiterhin sagen, was statt
+# dessen geht — geprueft an der SynRM, seit die ASM das CAD traegt.
 try:
-    MA.pruefe_stufe("asm", "cad")
-    pruefe(False, "pruefe_stufe wirft")
+    MA.pruefe_stufe("synrm", "cad")
+    pruefe(False, "pruefe_stufe wirft fuer eine nicht getragene Stufe")
 except MA.ArtNichtUnterstuetzt as e:
     txt = str(e)
     pruefe("analytisch" in txt and "NICHT ersatzweise" in txt,
            "der Fehlertext sagt, was statt dessen geht, und dass NICHT ersatzweise "
            "mit PSM-Physik gerechnet wird")
+pruefe(MA.pruefe_stufe("asm", "cad").code == "asm",
+       "die ASM kommt durch — der Kaefig war im Zeichner immer schon da, nur "
+       "hielt dieses Tor ihn zurueck")
 
 pruefe(not MA.gilt("asm", "Isc_A") and not MA.gilt("asm", "T_rel_pct"),
        "Kurzschlussstrom und Reluktanzanteil gelten fuer die ASM nicht")
@@ -129,13 +134,23 @@ print("\n2. Die Tore vor der Physik")
 ema_pipeline._gate_maschinenart({"geom": {"machineType": "pmsm"}}, None, "feld")
 pruefe(True, "die PSM passiert das Pipeline-Tor unveraendert")
 
-for stufe in ("feld", "cad", "em3d"):
+# „Traegt die Art diese Stufe" und „geht sie DIESEN Weg" sind zwei Fragen.
+# Die ASM traegt Feld und 3-D — aber ueber ``feld2d``/``feld3d`` (Elmer,
+# harmonisch), nicht ueber die magnetostatische Kette dieser Pipeline; das Tor
+# weist sie dort weiterhin ab und nennt das richtige Werkzeug. Beim CAD gibt es
+# diesen Unterschied nicht: gezeichnet wird mit demselben Erzeuger.
+for stufe in ("feld", "em3d"):
     try:
         ema_pipeline._gate_maschinenart({"geom": {"machineType": "asm"}}, None, stufe)
         pruefe(False, f"das Pipeline-Tor weist die ASM auf Stufe {stufe} ab")
     except MA.ArtNichtUnterstuetzt:
         pruefe(True, f"das Pipeline-Tor weist die ASM auf Stufe {stufe} ab — "
                      f"kein stiller PSM-Ersatz")
+try:
+    ema_pipeline._gate_maschinenart({"geom": {"machineType": "asm"}}, None, "cad")
+    pruefe(True, "auf Stufe cad laesst es sie durch — der Kaefig wird gezeichnet")
+except MA.ArtNichtUnterstuetzt:
+    pruefe(False, "auf Stufe cad laesst es sie durch")
 
 try:
     ema_screen.screene(_basis("asm"))
@@ -387,11 +402,15 @@ _opt = {o["value"]: o["label"] for o in _srv._art_optionen()}
 pruefe(set(_opt) == set(MA.ARTEN), "alle vier Arten stehen zur Wahl")
 pruefe("noch nicht getragen" not in _opt["asm"],
        f"die ASM steht NICHT mehr als 'noch nicht getragen' da")
-pruefe("analytisch, feld" in _opt["asm"],
-       "sondern mit den Stufen, die sie wirklich traegt")
-pruefe("feld2d" in _opt["asm"],
-       "und mit dem Werkzeug, ueber das ihr Feldlauf geht — wer sie waehlt und "
-       "auf Rechnen drueckt, wird sonst vom Tor abgewiesen, ohne zu wissen wohin")
+pruefe("feld2d" in _opt["asm"] and "feld3d" in _opt["asm"],
+       "sondern mit den Werkzeugen, ueber die Feld und 3-D laufen — wer sie "
+       "waehlt und auf Rechnen drueckt, wird sonst vom Tor abgewiesen, ohne zu "
+       "wissen wohin")
+# Der Hinweis haengt am WEG, nicht daran, wieviele Stufen fehlen: seit dem CAD
+# traegt die ASM alle vier, und genau dann waere er in der alten Fassung
+# verschwunden — fuer die einzige Art, die ihn braucht.
+pruefe(len(MA.ARTEN["asm"].stufen) == len(MA.STUFEN),
+       "und das, OBWOHL sie inzwischen alle vier Stufen traegt")
 pruefe(_opt["pmsm"] == MA.ARTEN["pmsm"].label,
        "die PSM traegt alle Stufen und bekommt darum keinen Zusatz")
 for _c in ("synrm", "eesm"):
