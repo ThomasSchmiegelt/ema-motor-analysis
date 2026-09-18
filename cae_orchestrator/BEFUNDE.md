@@ -17,6 +17,35 @@ kann.
 
 ---
 
+## 2026-09-18 — Der Browser rechnete immer eine PSM
+
+**Beobachtung.** `machineType` steht seit der Einfuehrung von
+`ema_maschinenart` im Schema und ist ueber die Parameter-Tabelle und
+`cae_cli --set` erreichbar. In `ema.html` kam der Schluessel **gar nicht vor**.
+
+**Messung.** `grep -c machineType ema.html` -> **0**. `buildPayload` baut `geom`
+aus `{...GEOM, …}`, und `GEOM` fuehrte den Schluessel nicht; die Pipeline liest
+`geom.get("machineType", "pmsm")`. Der Browser hat also **jede** Auslegung als
+permanenterregte Synchronmaschine gerechnet — auch nach Stufe 1 bis 3, die ASM,
+EESM und GSM zeichenbar gemacht haben. Wer die neuen Bauarten benutzen wollte,
+musste ueber die CLI oder die Parameter-Tabelle gehen; ein Knopf, den nur die
+CLI hat, ist fuer den, der vor der Oberflaeche sitzt, nicht vorhanden — dasselbe
+Argument, aus dem `studie` und `zielwert` Verben bekommen haben.
+
+**Fundstelle.** `ema.html`, `buildPayload`/`applyPayload` und der Geometrie-Reiter;
+`ema_text2ema.SCHEMA["machineType"]` (dessen `desc` ausserdem noch von vier Arten
+sprach und die Feldstufen falsch beschrieb).
+
+**Status.** Behoben (§10 des Plans). Abschnitt „Maschinenart" im Geometrie-Reiter
+vor der Magnet-Topologie, Auswahl aus `/param_schema` geladen statt im HTML
+abgeschrieben, `GEOM.machineType` als der eine Ort, `buildPayload` schickt sie
+ausdruecklich mit, `applyPayload` und `T2E_APPLY` stellen sie wieder her, und bei
+einer Art ohne Magnete entfaellt die Magnet-Topologie. `test_maschinenart.py`
+nagelt alles sechs fest, samt der Gegenprobe, dass **keine** Art als fester
+`<option>` im HTML steht.
+
+---
+
 ## 2026-09-18 — Die GSM wog wie die PSM, und ihr Staender hatte Zaehne, die es nicht gibt
 
 **Beobachtung.** Der Paarvergleich über die Achse `maschinenart` stellt seit

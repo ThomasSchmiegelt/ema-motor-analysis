@@ -742,8 +742,29 @@
     </div>
   </div>
 
-  <!-- 3. Magnet-Topologie -->
+  <!-- 3. Maschinenart -->
+  <!-- Die Entscheidung VOR der Magnet-Topologie: woher der Luftspaltfluss
+       kommt. Sie stand bisher nur im Schema (`machineType`, adv) und war ueber
+       die Parameter-Tabelle und `cae_cli --set` erreichbar, nicht aber hier —
+       der Browser schickte den Schluessel gar nicht mit und rechnete damit
+       IMMER eine PSM, auch nachdem ASM, EESM und GSM zeichenbar geworden sind.
+       Die Auswahl wird aus `/param_schema` geladen (`_artLaden`) und nicht hier
+       ein zweites Mal geschrieben: die Beschriftung nennt, wie weit eine Art
+       getragen ist, und kommt aus `ema_maschinenart` selbst. -->
   <div class="section">
+    <div class="section-title">Maschinenart</div>
+    <div class="input-group">
+      <label style="grid-column:1/-1;margin-bottom:3px">Woher der Luftspaltfluss kommt</label>
+      <select id="machine_art" style="grid-column:1/-1">
+        <option value="pmsm" selected>PSM — permanenterregt</option>
+      </select>
+    </div>
+    <div id="art_hinweis" class="hint"
+         style="grid-column:1/-1;font-size:11px;color:#9aa;margin-top:2px"></div>
+  </div>
+
+  <!-- 4. Magnet-Topologie -->
+  <div class="section" id="grp_magnet_topo">
     <div class="section-title">Magnet-Topologie</div>
     <div class="input-group">
       <label>Polpaare (p)</label>
@@ -5911,6 +5932,7 @@ const T2E_APPLY = {  // param key → {id, [to]} ; selects + sliders fire input/
   statorOD:'dim_stator_out', statorID:'dim_stator_in', rotorOD:'dim_rotor_out',
   shaftD:'dim_shaft', shaftBoreD:'dim_shaft_bore', axialLen:'dim_axial',
   slots:'stator_slots', slotDepth:'slot_depth', p:'p_pairs', magShape:'mag_shape',
+  machineType:'machine_art',
   magAngle:'mag_angle', magWidth:'mag_width', magThick:'mag_thick', magDist:'mag_dist',
   nAx:'n_ax', nCirc:'n_circ', rotor_lam:'sel_rotor_lam', stator_lam:'sel_stator_lam',
   hairpin_mat:'sel_hairpin', magnet:'sel_magnet', cooling:'sel_cooling',
@@ -11428,7 +11450,11 @@ async function buildPayload() {
                         inverterImax:      +(document.getElementById('inv_imax')?.value || 800),
                         inverterAnzahl:    +(document.getElementById('inv_anzahl')?.value || 1),
                         inverterTopologie: document.getElementById('inv_topologie')?.value || 'verschachtelt',
-                        umrichterBezug:    document.getElementById('inv_bezug')?.value || 'einwindung' },
+                        umrichterBezug:    document.getElementById('inv_bezug')?.value || 'einwindung',
+                        // Ohne diese Zeile rechnete der Browser IMMER eine PSM:
+                        // `machineType` stand nur im Schema und kam nie mit.
+                        machineType:       document.getElementById('machine_art')?.value
+                                           || GEOM.machineType || 'pmsm' },
     project_name:     document.getElementById('project_name').value || '',
     rotor_lam:        document.getElementById('sel_rotor_lam').value,
     stator_lam:       document.getElementById('sel_stator_lam').value,
@@ -11518,6 +11544,9 @@ function applyPayload(payload) {
   for (const [k, v] of Object.entries(G)) GEOM[k] = v;   // incl. input-less keys
 
   // geometry selects first (drive topology/pocket/connection visibility via handlers)
+  // Die Maschinenart zuerst: sie blendet die Magnet-Topologie ein oder aus.
+  _setField('machine_art', G.machineType);
+  if (window._updateArtVis) window._updateArtVis();
   _setField('mag_shape',   G.magShape);
   _setField('pocket_mode', G.pocketMode);
   _setField('mag_orient',  G.magOrient);
@@ -12972,6 +13001,7 @@ function escHtml(s) {
   let cvsW, cvsH, CX, CY, SCALE;
 
   const GEOM = {
+    machineType: "pmsm",
     statorOD: 280, statorID: 190, rotorOD: 188.6, shaftD: 60,
     slots: 54, slotDepth: 25, slotWidthRatio: 0.5,
     p: 3, magShape: "v", magAngle: 120, magDepthRel: 0.7,
@@ -13042,6 +13072,57 @@ function escHtml(s) {
       document.getElementById("poles_display").innerText = v * 2;
       resetField();
     });
+
+    // Maschinenart -- die Entscheidung VOR der Topologie. Die Auswahl kommt aus
+    // `/param_schema` (dort baut `_art_optionen` die Beschriftung aus
+    // `ema_maschinenart` und nennt gleich, wie weit eine Art getragen ist); eine
+    // zweite Liste im HTML waere die naechste Stelle, an der Formular und
+    // Rechnung auseinanderlaufen. Bis sie geladen ist, steht genau ein Eintrag
+    // da -- die Vorgabe, mit der bisher ohnehin gerechnet wurde.
+    async function _artLaden() {
+      const sel = document.getElementById("machine_art");
+      if (!sel) return;
+      try {
+        if (!_ptabSchema) {
+          const r = await fetch("/param_schema").then(x => x.json());
+          _ptabSchema = r.params || [];
+        }
+        const spec = _ptabSchema.find(sp => sp.key === "machineType");
+        if (!spec || !spec.options || !spec.options.length) return;
+        const cur = GEOM.machineType || spec.def || "pmsm";
+        sel.innerHTML = spec.options.map(o =>
+          `<option value="${o.value}"${o.value === cur ? " selected" : ""}>` +
+          `${o.label}</option>`).join("");
+        sel.value = cur;
+      } catch (e) { /* ohne Server bleibt die Vorgabe stehen */ }
+      _updateArtVis();
+    }
+
+    // Was eine Bauart NICHT hat, wird ausgeblendet statt als wirkungsloses Feld
+    // stehen zu lassen: eine Asynchronmaschine hat keine Magnetanordnung, und
+    // ein Regler, der nichts bewegt, liest sich wie einer, der nicht wirkt.
+    function _updateArtVis() {
+      const sel = document.getElementById("machine_art");
+      const art = (sel && sel.value) || GEOM.machineType || "pmsm";
+      const mitMagneten = (art === "pmsm");
+      const topo = document.getElementById("grp_magnet_topo");
+      if (topo) topo.style.display = mitMagneten ? "" : "none";
+      const hin = document.getElementById("art_hinweis");
+      if (hin) {
+        const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+        hin.textContent = mitMagneten ? ""
+          : ((opt ? opt.textContent : art) +
+             " — ohne Magnete; die Magnet-Topologie entfaellt. Welche Stufen " +
+             "diese Art traegt, steht in der Auswahl; der Lauf weist ab, was " +
+             "sie nicht traegt.");
+      }
+    }
+    window._updateArtVis = _updateArtVis;
+
+    document.getElementById("machine_art").onchange = e => {
+      GEOM.machineType = e.target.value; resetField(); _updateArtVis();
+    };
+    _artLaden();
 
     document.getElementById("mag_shape").onchange = e => {
       GEOM.magShape = e.target.value; resetField();

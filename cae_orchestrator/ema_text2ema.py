@@ -60,7 +60,7 @@ SCHEMA = {
     "slotDepth":  {"kind": "num", "lo": 8,   "hi": 60,  "def": 25, "geom": True,  "desc": "Nuttiefe [mm]"},
     "p":          {"kind": "num", "lo": 1,   "hi": 12,  "def": 3, "geom": True,   "desc": "Polpaarzahl", "int": True},
     "machineType":{"kind": "enum", "opts": _ART, "def": "pmsm", "geom": True, "adv": True,
-                   "desc": "Maschinenart: pmsm=permanenterregt, asm=Asynchron (Käfig), synrm=Reluktanz, eesm=fremderregt (analytisch alle vier; Feldstufe pmsm und asm)"},
+                   "desc": "Maschinenart: pmsm=permanenterregt, asm=Asynchron (Käfig oder Schleifring), synrm=Reluktanz, eesm=fremderregt mit Schenkelpolen, gsm=Gleichstrom mit Kommutator. Analytisch alle fünf; CAD pmsm/asm/eesm/gsm; Feldstufe der Pipeline nur pmsm (ASM über cae_cli feld2d/feld3d)"},
     "rotorBars":  {"kind": "num", "lo": 0, "hi": 120, "def": 0, "geom": True, "adv": True, "int": True,
                    "desc": "Läufernutzahl (ASM); 0 = automatisch — beim Käfig nach der Unsymmetrieregel, beim Schleifringläufer dreiteilbar"},
     "rotorType":  {"kind": "enum", "opts": ["kaefig", "schleifring"], "def": "kaefig",

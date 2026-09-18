@@ -435,5 +435,48 @@ finally:
     MA.ARTEN.pop("_leer", None)
 
 
+print("\nDie Maschinenart erreicht den Browser")
+
+# Der Befund, gegen den das hier steht: `machineType` stand im Schema (`adv`)
+# und war ueber Parameter-Tabelle und `cae_cli --set` erreichbar -- aber
+# `ema.html` kannte den Schluessel ueberhaupt nicht (gemessen: null Treffer).
+# `buildPayload` schickte ihn nicht mit, also rechnete der Browser IMMER eine
+# PSM, auch nachdem ASM, EESM und GSM zeichenbar geworden sind. Ein Knopf, den
+# nur die CLI hat, ist fuer den, der vor der Oberflaeche sitzt, nicht vorhanden.
+_html = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ema.html"),
+             encoding="utf-8").read()
+
+pruefe('id="machine_art"' in _html,
+       "der Geometrie-Reiter hat ein Auswahlfeld 'Maschinenart'")
+pruefe("machineType:       document.getElementById('machine_art')" in _html,
+       "buildPayload schickt geom.machineType mit — ohne das rechnet der "
+       "Browser weiter immer pmsm")
+pruefe("_setField('machine_art', G.machineType)" in _html,
+       "applyPayload stellt sie wieder her ('Projekt als Vorlage' holte sonst "
+       "die Art des zuletzt angesehenen Formulars)")
+
+# Die Auswahl darf KEINE zweite Liste sein: sie wird aus /param_schema geladen,
+# wo `_art_optionen` die Beschriftung aus dieser Registrierung baut.
+_sel_start = _html.index('<select id="machine_art"')
+_sel_ende = _html.index("</select>", _sel_start)
+_fest = _html[_sel_start:_sel_ende].count("<option")
+pruefe(_fest <= 1,
+       f"im HTML steht hoechstens der Vorgabe-Eintrag ({_fest} <option>) — "
+       f"die Liste kommt aus /param_schema, nicht aus einer Abschrift")
+pruefe('_ptabSchema.find(sp => sp.key === "machineType")' in _html,
+       "und genau von dort wird sie geholt")
+for _c in MA.ARTEN:
+    pruefe(f'>{_c}<' not in _html.replace(" ", ""),
+           f"'{_c}' steht nirgends fest im HTML")
+
+# Was eine Bauart nicht hat, wird ausgeblendet statt wirkungslos stehenzulassen.
+pruefe('id="grp_magnet_topo"' in _html
+       and 'topo.style.display = mitMagneten ? "" : "none"' in _html,
+       "die Magnet-Topologie entfaellt bei einer Art ohne Magnete — ein Regler, "
+       "der nichts bewegt, liest sich wie einer, der nicht wirkt")
+pruefe('machineType:\'machine_art\'' in _html,
+       "und 'Text -> Auslegung' trifft dasselbe Feld (T2E_APPLY)")
+
+
 print(f"\n{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)
