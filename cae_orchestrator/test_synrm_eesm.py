@@ -327,5 +327,139 @@ pruefe("maschinenart" in P.ACHSEN
        "die Achse 'maschinenart' fuehrt alle vier Bauarten")
 
 
+# ── Der Wickelraum: was die ZEICHNUNG hergibt ───────────────────────────────
+#
+# Geprueft wird gegen INVARIANTEN, nicht gegen festgenagelte Zahlen: ein roter
+# Test soll sagen, welche Regel gebrochen ist, und nicht bloss, dass sich etwas
+# geaendert hat.
+import ema_eesm_cad as EC                                    # noqa: E402
+import cae_cli as _CLI                                       # noqa: E402
+
+_pw = _CLI.frischer_payload()
+_LW = float(_pw["axial_len"])
+
+
+def _geom_w(**kw):
+    g = dict(_pw["geom"], machineType="eesm", shaftD=38.0,
+             polbedeckung=0.55, axialLen=_LW)
+    g.update(kw)
+    return g
+
+
+_w = EC.wickelraum(_geom_w(), _LW)
+_poles = int(E.polgeometrie(_geom_w(), _LW)["poles"])
+
+
+def _frei(r, b_kern):
+    # Halbe freie Breite neben dem Kern bei Radius r -- die Polteilung waechst
+    # nach aussen, also der Platz auch.
+    return (2.0 * math.pi * r / _poles - EC.SPULENLUFT_MM) / 2.0 - b_kern / 2.0
+
+
+pruefe(_w["passt"] and _w["d_aussen_mm"] > 0 and _w["h_mm"] > 0,
+       f"Wickelraum: {_w['A_wickelraum_mm2']:.0f} mm^2 zwischen r "
+       f"{_w['r_innen_mm']:.1f} und {_w['r_aussen_mm']:.1f} mm, "
+       f"{_w['d_innen_mm']:.2f}…{_w['d_aussen_mm']:.2f} mm dick")
+
+# Die Huellkurve ist konkav (Teilung linear, Schuh konstant) -- die SEHNE
+# zwischen den Endpunkten liegt deshalb ueberall darunter. Genau das wird
+# gezeichnet, und genau deshalb kann das Trapez nicht kollidieren.
+_rein = True
+for _i in range(21):
+    _r = _w["r_innen_mm"] + (_w["r_aussen_mm"] - _w["r_innen_mm"]) * _i / 20.0
+    _t = (_w["d_innen_mm"] + (_w["d_aussen_mm"] - _w["d_innen_mm"])
+          * (_r - _w["r_innen_mm"]) / max(_w["r_aussen_mm"] - _w["r_innen_mm"], 1e-9))
+    # 5e-3 und nicht 1e-6: die Masse kommen auf drei Stellen gerundet heraus,
+    # und am ANFANGSPUNKT liegt die Sehne per Konstruktion genau auf der
+    # Huellkurve -- dort entscheidet sonst die Rundung.
+    if _t > _frei(_r, _w["b_kern_mm"]) + 5e-3:
+        _rein = False
+        break
+pruefe(_rein,
+       "das Spulentrapez liegt ueberall unter dem, was die Polteilung hergibt")
+
+# Unterhalb der Nabe ist ueberhaupt kein Platz -- dort ueberdecken sich die
+# Polkoerper. Eine Spule, die dort anfinge, saesse im Nachbarpol.
+_r_null = _poles * (2.0 * (EC.SPULE_MIN_MM + _w["b_kern_mm"] / 2.0)
+                    + EC.SPULENLUFT_MM) / (2.0 * math.pi)
+pruefe(_w["r_innen_mm"] >= _r_null - 1e-6,
+       f"die Spule faengt erst da an, wo Platz ist (r {_w['r_innen_mm']:.2f} "
+       f">= {_r_null:.2f} mm)")
+
+# Und die AEUSSERE Ecke bleibt im Laeufer: die Spule ist ein Rechteck im Kreis.
+_ecke = math.hypot(_w["r_aussen_mm"], _w["b_kern_mm"] / 2.0 + _w["d_aussen_mm"])
+pruefe(_ecke <= float(_pw["geom"]["rotorOD"]) / 2.0 + 1e-6,
+       f"die aeussere Spulenecke bleibt im Laeufer ({_ecke:.2f} <= "
+       f"{float(_pw['geom']['rotorOD']) / 2.0:.2f} mm)")
+
+# ── `vorgabe` aendert NICHTS ────────────────────────────────────────────────
+_a = E.erregung(_geom_w(), _LW)
+_b = E.erregung(_geom_w(erregerSpuleFuellung="vorgabe"), _LW)
+pruefe(all(_a[k] == _b[k] for k in ("A_cu_mm2", "J_f_Apmm2", "P_erreger_W")),
+       "Fuellung 'vorgabe' rechnet Ziffer fuer Ziffer wie bisher")
+
+# ── `max` bemisst aus dem Bauraum, und die Kette folgt ──────────────────────
+_gm = _geom_w(erregerSpuleFuellung="max", erregerSpuleForm="kegel")
+_m = E.erregung(_gm, _LW)
+pruefe(_m["A_cu_mm2"] > _a["A_cu_mm2"] and _m["J_f_Apmm2"] < _a["J_f_Apmm2"],
+       f"'max' legt Kupfer nach: {_a['A_cu_mm2']:.0f} -> {_m['A_cu_mm2']:.0f} mm^2, "
+       f"J {_a['J_f_Apmm2']:.2f} -> {_m['J_f_Apmm2']:.2f} A/mm^2")
+
+# P_f = F_pol^2 * rho * l_w / A_cu -- also exakt umgekehrt proportional zu
+# A_cu. Das prueft die FORMEL, nicht einen Zahlenwert.
+_pa1 = _a["P_erreger_W"] * _a["A_cu_mm2"]
+_pa2 = _m["P_erreger_W"] * _m["A_cu_mm2"]
+pruefe(abs(_pa2 - _pa1) / max(_pa1, 1e-9) < 2e-3,
+       f"und der Erregerverlust faellt exakt mit 1/A_cu "
+       f"({_a['P_erreger_W']:.1f} -> {_m['P_erreger_W']:.1f} W)")
+
+# Die Durchflutung ist eine Aussage ueber den Magnetkreis und darf sich durch
+# eine Wickelentscheidung NICHT aendern.
+pruefe(abs(_m["F_pol_A"] - _a["F_pol_A"]) < 1e-6
+       or _m["pol"]["polbedeckung"] != _a["pol"]["polbedeckung"],
+       "F_pol aendert sich nur, wenn sich die Polbedeckung aendert")
+
+# Und die Zeichnung traegt es weiter: mehr Kupfer heisst mehr Masse.
+_mk_v = E.massen_und_kosten(dict(_pw, geom=_geom_w()))
+_mk_m = E.massen_und_kosten(dict(_pw, geom=_gm))
+pruefe(_mk_m["erreger_kg"] > _mk_v["erreger_kg"]
+       and _mk_m["gesamt_kg"] > _mk_v["gesamt_kg"],
+       f"mehr Kupfer kostet Masse ({_mk_v['erreger_kg']:.2f} -> "
+       f"{_mk_m['erreger_kg']:.2f} kg Erregerwicklung)")
+
+# ── Das „Dach" darf nur FOLGEN, nie schrumpfen ──────────────────────────────
+for _a0 in (0.55, 0.68, 0.85):
+    _wm = EC.wickelraum_max(_geom_w(polbedeckung=_a0), _LW)
+    pruefe(_wm["bedeckung"] >= _a0 - 1e-9
+           and _wm["bedeckung"] <= EC.BEDECKUNG_MAX + 1e-9,
+           f"Polbedeckung {_a0} waechst hoechstens (auf {_wm['bedeckung']}), "
+           f"nie darunter")
+    pruefe(_wm["A_wickelraum_mm2"]
+           >= EC.wickelraum(_geom_w(polbedeckung=_a0), _LW,
+                            _a0)["A_wickelraum_mm2"] - 1e-6,
+           "und sie waechst nur, wenn es GEMESSEN mehr Wickelraum bringt")
+
+# ── Wo es nicht geht, wird zurueckgefallen und das gesagt ───────────────────
+_k2 = EC.koerper(_geom_w(p=1, erregerSpuleFuellung="max",
+                         erregerSpuleForm="kegel"), _LW)
+pruefe(_k2["passt"] and _k2["fuellung_hinweis"],
+       "bei zwei sehr breiten Polen bleibt kein wickelbarer Raum — dann wird "
+       "ueber die Stromdichte bemessen UND es steht da")
+
+# ── Die Nabe wird gerechnet, nicht angenommen ───────────────────────────────
+for _p in (1, 2, 4, 6):
+    _kn = EC.koerper(_geom_w(p=_p), _LW)
+    _soll = ((_kn["b_kern_innen_mm"] / 2.0)
+             / math.sin(math.pi / int(_kn["poles"])))
+    # 5e-3: beide Groessen kommen auf drei Stellen gerundet heraus, und der
+    # Sinus im Nenner vergroessert die Rundung.
+    pruefe(abs(_kn["r_nabe_mm"] - _soll) < 5e-3
+           and _kn["nabe_reicht"] == (_kn["h_nabe_mm"]
+                                      >= _kn["h_joch_fluss_mm"] - 1e-6),
+           f"2p={_kn['poles']}: Nabe bis r {_kn['r_nabe_mm']:.2f} mm, "
+           f"{_kn['h_nabe_mm']:.2f} von {_kn['h_joch_fluss_mm']:.2f} mm "
+           f"noetig -> reicht {_kn['nabe_reicht']}")
+
+
 print(f"\n{_ok} bestanden, {_fehl} fehlgeschlagen")
 sys.exit(1 if _fehl else 0)

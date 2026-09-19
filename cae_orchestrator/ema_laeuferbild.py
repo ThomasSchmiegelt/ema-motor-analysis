@@ -232,9 +232,15 @@ def _eesm(geom: dict, axial: float) -> dict:
     b_k, d_s = float(k["b_kern_mm"]), float(k["d_spule_mm"])
     poles = int(k["poles"])
     # Zwischen den Polen ist LUFT. Der Vollring darueber waere genau der
-    # Reluktanzunterschied zugemalt, der die Bauart ausmacht -- deshalb traegt
-    # der Laeufer hier NUR das Joch als Eisen, und die Pole stehen darauf.
-    teile = [_ring(float(k["r_welle_mm"]), r_j, "eisen")]
+    # Reluktanzunterschied zugemalt, der die Bauart ausmacht.
+    #
+    # Einen JOCHRING gibt es nur noch fuer gespeicherte Masssaetze aus der Zeit
+    # davor: der Polkoerper laeuft bis auf die Wellenbohrung durch, und die
+    # Nabe entsteht dort, wo sich zwei Koerper ueberdecken (`r_nabe_mm`) --
+    # gezeichnet wird sie von den Koerpern selbst.
+    teile = []
+    if r_j > float(k["r_welle_mm"]) + 0.05:
+        teile.append(_ring(float(k["r_welle_mm"]), r_j, "eisen"))
     halb = math.degrees((float(k["b_schuh_mm"]) / 2.0) / max(r_rot, 1e-9))
     # ZWISCHEN den Polen ist Luft, und die gehoert nicht nur ins Bild, sondern
     # auch ins Feldraster: die Reluktanz des Schenkelpollaeufers IST die
@@ -246,8 +252,8 @@ def _eesm(geom: dict, axial: float) -> dict:
         _g0 = 360.0 * i / max(poles, 1) + halb
         _luecke = _schritt - 2.0 * halb
         if _luecke > 0.1:
-            teile.append(_segment(r_rot, r_rot - r_j, _g0 + _luecke / 2.0,
-                                  _luecke / 2.0, "luft"))
+            teile.append(_segment(r_rot, r_rot - float(k.get("r_fuss_mm", r_j)),
+                                  _g0 + _luecke / 2.0, _luecke / 2.0, "luft"))
     # Zwei Breiten: beim Rechteck gleich (dann ist das Trapez ein Rechteck und
     # die Zeichnung Ziffer fuer Ziffer die alte), beim Kegel zur Jochseite hin
     # breiter -- und die Spule folgt der Neigung.
@@ -261,23 +267,44 @@ def _eesm(geom: dict, axial: float) -> dict:
     # gelesen.
     r_sp = float(k.get("r_spule_aussen_mm", r_k))
     b_e = float(k.get("b_kern_spulenende_mm", k.get("b_kern_aussen_mm", b_k)))
+    # Die Spule ist ein BUENDEL unter dem Polschuh: eigener Anfang, eigene
+    # Breite dort -- nicht mehr der ganze Kern von unten bis oben.
+    r_si = float(k.get("r_spule_innen_mm", k.get("r_fuss_mm", r_j)))
+    b_si = float(k.get("b_kern_spuleanfang_mm", b_i))
+    # ZWEI Dicken: bei der Rechteckspule gleich, bei der ausgefuellten innen
+    # duenner -- die Polteilung schrumpft nach innen.
+    d_si = float(k.get("d_spule_innen_mm", d_s))
+    d_sa = float(k.get("d_spule_aussen_mm", d_s))
     # Die Erregung ist GLEICHSTROM und damit magnetostatisch darstellbar --
     # anders als der Kaefig. Je Pol traegt die eine Spulenseite +F, die andere
     # -F Amperewindungen (das ist die Windung um den Kern), und die Polfolge
     # wechselt das Vorzeichen.
     f_pol = float(k.get("F_pol_A") or 0.0)
+    # Der POLFUSS wird NICHT gezeichnet: er liegt UNTER `r_fuss_mm`, also im
+    # Joch (Schwalbenschwanz in einer Nut, `ema_schenkelpol.befestigung`) --
+    # und Joch und Pol sind dasselbe Eisen, eine Nut darin waere im Schnitt
+    # unsichtbar. Frueher oeffnete er sich OBERHALB des Jochrings von der
+    # Kernbreite auf die halbe Polteilung und stand damit als Keil im
+    # Zwischenpolraum. Der Zweig bleibt fuer aeltere Masssaetze stehen, in
+    # denen `r_fuss_mm` noch ueber dem Joch lag.
+    r_f = float(k.get("r_fuss_mm", r_j))
+    b_f = float(k.get("b_fuss_mm", b_i))
+    hat_fuss = r_f > r_j + 0.2
     for i in range(poles):
         g = 360.0 * i / max(poles, 1)
         s = 1.0 if i % 2 == 0 else -1.0
         teile.append(_segment(r_rot, r_rot - r_k, g, halb, "pol"))
-        teile.append(_trapez(r_j, r_k, -b_i / 2.0, b_i / 2.0,
+        if hat_fuss:
+            teile.append(_trapez(r_j, r_f, -b_f / 2.0, b_f / 2.0,
+                                 -b_i / 2.0, b_i / 2.0, g, "pol"))
+        teile.append(_trapez(r_f, r_k, -b_i / 2.0, b_i / 2.0,
                              -b_a / 2.0, b_a / 2.0, g, "pol"))
-        _p = _trapez(r_j, r_sp, b_i / 2.0, b_i / 2.0 + d_s,
-                     b_e / 2.0, b_e / 2.0 + d_s, g, "kupfer")
+        _p = _trapez(r_si, r_sp, b_si / 2.0, b_si / 2.0 + d_si,
+                     b_e / 2.0, b_e / 2.0 + d_sa, g, "kupfer")
         _p["durchflutung_A"] = round(s * f_pol, 2)
         teile.append(_p)
-        _m = _trapez(r_j, r_sp, -b_i / 2.0 - d_s, -b_i / 2.0,
-                     -b_e / 2.0 - d_s, -b_e / 2.0, g, "kupfer")
+        _m = _trapez(r_si, r_sp, -b_si / 2.0 - d_si, -b_si / 2.0,
+                     -b_e / 2.0 - d_sa, -b_e / 2.0, g, "kupfer")
         _m["durchflutung_A"] = round(-s * f_pol, 2)
         teile.append(_m)
     # Der DAEMPFERKAEFIG sitzt im Polschuh — Rundstaebe, quer zur Polflaeche.

@@ -125,6 +125,37 @@ def _gate_laeufer(data: dict, state: dict | None = None,
                         f"Spule auf {k['tau_kern_mm']} mm Teilung, frei "
                         f"{k['frei_mm']} mm — "
                         f"{'OK' if k['passt'] else 'ABGELEHNT'}", 5)
+        # Die NABE: seit der Polkoerper bis auf die Wellenbohrung durchlaeuft,
+        # gibt es keinen Jochring mehr -- das Joch ist das, was die Polkoerper
+        # nahe der Bohrung MITEINANDER bilden. Ob es den Fluss traegt, ist eine
+        # Aussage ueber die Auslegung und kein Zeichenfehler: gemeldet wird sie,
+        # abgewiesen wird deswegen nichts (ein zu duennes Joch saettigt, es
+        # bricht nicht).
+        if state is not None and k.get("r_nabe_mm") is not None:
+            if not k.get("nabe_zusammen", True):
+                _log(state, f"\u26A0 Nabe: die Polkoerper beruehren sich an der "
+                            f"Bohrung NICHT (r_nabe {k['r_nabe_mm']} mm gegen "
+                            f"Welle {k['r_welle_mm']} mm) — der Laeufer "
+                            f"zerfaellt in Einzelarme", 5)
+            elif not k.get("nabe_reicht", True):
+                _log(state, f"\u26A0 Nabe: {k['h_nabe_mm']} mm hoch, der Fluss "
+                            f"verlangt {k['h_joch_fluss_mm']} mm — B = "
+                            f"{k.get('B_nabe_T')} T gegen "
+                            f"{k['B_kern_grenze_T']} T. Das Joch saettigt; "
+                            f"mehr Pole, breiterer Kern oder ein "
+                            f"ausdrueckliches polHoeheAnteil helfen", 5)
+            else:
+                _log(state, f"\U0001F6E1 Nabe: {k['h_nabe_mm']} mm hoch, der "
+                            f"Fluss verlangt {k['h_joch_fluss_mm']} mm — "
+                            f"B = {k.get('B_nabe_T')} T — OK", 5)
+        if state is not None and k.get("fuellung_hinweis"):
+            _log(state, "\u2139 " + k["fuellung_hinweis"], 5)
+        if state is not None and k.get("fuellung") == "max":
+            _log(state, f"\U0001F6E1 Erregerspule aus dem BAURAUM bemessen: "
+                        f"Wickelraum {k['A_wickelraum_mm2']} mm\u00b2, "
+                        f"Polbedeckung wirksam {k.get('bedeckung_eff')} — "
+                        f"Stromdichte und Erregerverlust folgen daraus", 5)
+
         # Die POLBEFESTIGUNG -- bis zum 19.09.2026 stand hier nur, dass sie
         # NICHT gerechnet wird. Ein Schenkelpol ist das einzige Bauteil dieses
         # Werkzeugs, das nicht aus dem Vollen kommt: er sitzt auf dem Joch und
@@ -2065,7 +2096,12 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
             # der Reluktanzunterschied, der die Bauart ausmacht, zugemalt.
             # RING, keine Scheibe: die Bohrung ist da, und eine Scheibe
             # uebermalte die Welle, die eine Zeile vorher gezeichnet wurde.
-            annulus(ax, R_shaft, _rj, '#2d3748', ec='#4a5568', lw=0.8)
+            #
+            # Einen JOCHRING gibt es nur noch fuer gespeicherte Masssaetze aus
+            # der Zeit davor: der Polkoerper laeuft bis auf die Bohrung durch,
+            # die Nabe entsteht dort, wo sich zwei Koerper ueberdecken.
+            if _rj > R_shaft + 0.05:
+                annulus(ax, R_shaft, _rj, '#2d3748', ec='#4a5568', lw=0.8)
             ax.add_patch(Circle((0, 0), R_rot, fill=False, ec='#4a5568',
                                 lw=0.6, ls=':'))
             _hb = _m.degrees((_kq["b_schuh_mm"] / 2.0) / max(R_rot, 1e-9))
@@ -2090,16 +2126,35 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
                 # ausserhalb des Laeufers (s. ema_eesm_cad.RAND_LUFT_MM).
                 _rs = _kq.get("r_spule_aussen_mm", _rk)
                 _be = _kq.get("b_kern_spulenende_mm", _ba)
-                for _ecken, _fc, _ec in (
-                        # Kern
-                        (((_rj, -_bi / 2), (_rk, -_ba / 2),
-                          (_rk, _ba / 2), (_rj, _bi / 2)), '#3c4a60', '#6b7c99'),
-                        # Spule links und rechts, jeweils am Kern anliegend
-                        (((_rj, _bi / 2), (_rs, _be / 2),
-                          (_rs, _be / 2 + _ds), (_rj, _bi / 2 + _ds)),
+                # Der POLFUSS wird NICHT gezeichnet: er liegt UNTER
+                # `r_fuss_mm`, also im Joch (Schwalbenschwanz in einer Nut,
+                # `ema_schenkelpol.befestigung`), und Joch und Pol sind
+                # dasselbe Eisen. Frueher oeffnete er sich OBERHALB des
+                # Jochrings von der Kernbreite auf die halbe Polteilung und
+                # stand als Keil im Zwischenpolraum. Der Fall bleibt fuer
+                # aeltere Masssaetze stehen, in denen `r_fuss_mm` ueber dem
+                # Joch lag.
+                _rf = _kq.get("r_fuss_mm", _rj)
+                _bf = _kq.get("b_fuss_mm", _bi)
+                _rsi = _kq.get("r_spule_innen_mm", _rf)
+                _bsi = _kq.get("b_kern_spuleanfang_mm", _bi)
+                # Zwei Dicken: bei der ausgefuellten Spule innen duenner.
+                _dsi = _kq.get("d_spule_innen_mm", _ds)
+                _dsa = _kq.get("d_spule_aussen_mm", _ds)
+                _fuss = ((((_rj, -_bf / 2), (_rf, -_bi / 2),
+                           (_rf, _bi / 2), (_rj, _bf / 2)),
+                          '#3c4a60', '#6b7c99'),) if _rf > _rj + 0.2 else ()
+                for _ecken, _fc, _ec in _fuss + (
+                        # Kern (Joch -> unter den Schuh)
+                        (((_rf, -_bi / 2), (_rk, -_ba / 2),
+                          (_rk, _ba / 2), (_rf, _bi / 2)), '#3c4a60', '#6b7c99'),
+                        # Spule links und rechts: ein BUENDEL unter dem
+                        # Polschuh, kein Film ueber den ganzen Kern.
+                        (((_rsi, _bsi / 2), (_rs, _be / 2),
+                          (_rs, _be / 2 + _dsa), (_rsi, _bsi / 2 + _dsi)),
                          '#b87333', '#e0a060'),
-                        (((_rj, -_bi / 2 - _ds), (_rs, -_be / 2 - _ds),
-                          (_rs, -_be / 2), (_rj, -_bi / 2)),
+                        (((_rsi, -_bsi / 2 - _dsi), (_rs, -_be / 2 - _dsa),
+                          (_rs, -_be / 2), (_rsi, -_bsi / 2)),
                          '#b87333', '#e0a060')):
                     _pts = [(x * _m.cos(_a) - y * _m.sin(_a),
                              x * _m.sin(_a) + y * _m.cos(_a)) for x, y in _ecken]

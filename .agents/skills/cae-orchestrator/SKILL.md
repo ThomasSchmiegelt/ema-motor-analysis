@@ -677,6 +677,34 @@ Druckguss-Käfig mit Kurzschlussringen.
 
 ### Der Schenkelpol: was ihn hält und was ihn dämpft (EESM)
 
+**Seit dem 19.09.2026 gibt es keinen Jochring mehr.** Der Polkörper läuft mit
+seiner Breite bis auf die Wellenbohrung durch, die Bohrung wird zuletzt
+abgezogen — die Kernhöhe stieg damit von 26,5 auf **66,0 mm**. Das Joch ist das,
+was die Polkörper nahe der Bohrung **miteinander** bilden: zwei Körper der
+halben Breite `w`, deren Achsen `2π/2p` auseinanderliegen, überdecken sich bis
+`r_nabe = w/sin(π/2p)`. Ob diese **Nabe** den Fluss trägt, wird gerechnet und
+**benannt**, nicht geheilt — bei 2p = 8 stehen 9,36 mm gegen 12,57 mm Bedarf,
+also B = 1,81 T gegen eine Blechgrenze von 1,70 T. `rotor-check` und der Lauf
+schreiben das ins Protokoll; **abgewiesen wird deswegen nichts**, ein zu dünnes
+Joch sättigt, es bricht nicht. Wer es tragfähig will, hat drei gerechnete
+Hebel: mehr Pole, breiterer Kern (`bZielT` runter), oder ein ausdrückliches
+`polHoeheAnteil`, das den alten Ring zurückholt.
+
+**Was die Erregerspule bemisst** (`--set erregerSpuleFuellung=…`):
+
+* `vorgabe` (Standard) — die Stromdichte (`fieldCurrentDensity`), der Platz
+  zwischen den Polen bleibt frei; gemessen zu 87 %.
+* `max` — der **gezeichnete** Bauraum. Die Spule wird kegelig in den
+  Zwischenpolraum gelegt (die Polteilung wächst nach außen, also der Platz
+  auch), und Kupfer, Stromdichte, Erregerverlust und Masse folgen daraus:
+  gemessen 106 → 184 mm², 5,00 → 2,87 A/mm², 154 → 89 W, 2,32 → 4,04 kg.
+  Der Polschuh darf dabei mitwachsen — aber nur, soweit eine **Messung** sagt,
+  dass es mehr Wickelraum bringt (0,55 → 0,58 bringt 0,6 %; ein breiterer Schuh
+  zwingt einen breiteren Kern und frisst den Gewinn fast auf). Preis: der
+  kegelige Kern ist an der Bohrung schmaler, die Nabe wird kleiner
+  (9,36 → 4,92 mm). Wo `max` nicht geht, wird auf die Stromdichte
+  zurückgefallen und das gesagt.
+
 Ein Schenkelpol ist das einzige Bauteil dieser Kette, das **nicht aus dem Vollen
 kommt** — er sitzt auf dem Joch und wird dort gehalten. Bei 12.000 1/min zieht
 ein 1,5-kg-Pol mit **169 kN** an einem Querschnitt von wenigen

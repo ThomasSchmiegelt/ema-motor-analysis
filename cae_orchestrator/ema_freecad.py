@@ -570,6 +570,42 @@ def _laeufernuten(LN, hoehe, z0):
 # Bauteil und sechs.
 POL_UEBERLAPP_MM = 0.5
 
+# Wo die Innenkante des Polkoerpers liegt [mm] -- ein Stueck JENSEITS der
+# Achse. Davor bleibt zwischen zwei gegenueberliegenden Koerpern ein Schlitz
+# ueber die ganze Bauhoehe stehen; bei ZWEI Polen liegen die Arme auf einer
+# Geraden und er zerschneidet den Laeufer (gemessen 6 Festkoerper statt einem).
+# Die Ueberlappung kostet nichts: innerhalb der Bohrung wird ohnehin abgezogen.
+POL_ACHSE_MM = -0.5
+
+# Luft zwischen Erregerspule und Polkern [mm]. Um diesen Betrag wird die Spule
+# aufgeblasen, bevor sie aus dem Laeufer geschnitten wird -- dasselbe Muster
+# wie der Klebespalt `magGapMm` der Magnettasche.
+SPULE_ISOLIERLUFT_MM = 0.3
+
+# Wie weit die Spulentasche seitlich UEBER die Schuhkante hinaus schneidet
+# [mm]. Nur Luft -- sie sorgt dafuer, dass die flache Schuhunterseite wirklich
+# bis an die Kante reicht und dort kein Bogenrest stehenbleibt.
+TASCHE_UEBERSTAND_MM = 0.5
+
+# Wie viel Polschuh ueber der Taschendecke stehenbleiben MUSS [mm].
+TASCHE_STEG_MM = 1.0
+
+
+# KEIN Docstring (erzeugter Text, s. unten).
+# Die Kernbreite an einem beliebigen Radius -- die GERADE, nicht geklemmt.
+# Beide Innenschneider (Spule und Spulentasche) reichen um 1 mm ueber den Kern
+# hinaus, damit OCC sauber schneidet. Interpoliert man ihre Breite zwischen den
+# beiden Endradien, bekommt der Schneider beim KEGELIGEN Pol eine andere
+# Neigung als der Kern und schneidet in ihn hinein -- gemessen 0,03 mm3 Kupfer
+# im Blech. Hier wird dieselbe Gerade ausgewertet, aus der auch der Kern
+# gebaut ist.
+def _b_kern_bei(PL, r):
+    _rf = PL.get("r_fuss_mm", PL["r_joch_aussen_mm"])
+    _bi = PL.get("b_kern_innen_mm", PL["b_kern_mm"])
+    _ba = PL.get("b_kern_aussen_mm", PL["b_kern_mm"])
+    _u = (r - _rf) / max(PL["r_kern_aussen_mm"] - _rf, 1e-9)
+    return _bi + (_ba - _bi) * _u
+
 
 def _pol_koerper(PL, grad, hoehe, z0):
     _rr, _rk = PL["r_rotor_mm"], PL["r_kern_aussen_mm"]
@@ -582,12 +618,29 @@ def _pol_koerper(PL, grad, hoehe, z0):
     _schuh = _schuh.cut(_innen)
     _m = App.Matrix(); _m.rotateZ(math.radians(grad - _halb))
     _schuh = _schuh.transformGeometry(_m)
-    _r0 = max(_rj - POL_UEBERLAPP_MM, 0.1)
+    # Ohne Jochring laeuft der Koerper bis an die ACHSE; die Bohrung wird
+    # danach abgezogen. Kurz davor enden zu lassen genuegt nicht: die
+    # Stirnflaeche des Arms ist eine ebene Sehne und erreicht den
+    # Bohrungskreis nur innerhalb von acos(r0/r_welle) um die eigene Achse --
+    # bei r0 = 18,5 und r_welle = 19 sind das +-13,2 Grad gegen 22,5 Grad halbe
+    # Polteilung, und die Bohrung kam als VIELZAHN heraus statt als Kreis.
+    # Mit Jochring (gespeicherte Masssaetze) bleibt es beim Jochradius.
+    if _rj > PL.get("r_welle_mm", 0.0) + 0.05:
+        _r0 = max(_rj - POL_UEBERLAPP_MM, POL_ACHSE_MM)
+    else:
+        _r0 = POL_ACHSE_MM
     _hk = max(_rk - _r0, 0.5)
     # Innen- und Aussenbreite. Beim Rechteck sind sie gleich und es entsteht
     # genau der bisherige Quader -- Ziffer fuer Ziffer.
-    _bi = PL.get("b_kern_innen_mm", PL["b_kern_mm"])
+    #
+    # Innen wird die Breite AUF DER KERNGERADEN ausgewertet und nicht am
+    # Spulenanfang abgelesen: der Koerper beginnt an der WELLE, dort ist der
+    # Kegel am schmalsten. Mit der Spulenanfangsbreite an der Unterkante bekam
+    # er eine andere Neigung als `_b_kern_bei` -- gemessen 775 mm3 mehr Eisen
+    # als in `bau_eesm`, obwohl beide dieselbe Quelle lesen. Solange der
+    # Polfuss darueber lag, verdeckte er den Unterschied.
     _ba = PL.get("b_kern_aussen_mm", PL["b_kern_mm"])
+    _bi = _b_kern_bei(PL, _r0)
     if abs(_bi - _ba) < 1e-6:
         _kern = Part.makeBox(_hk, _ba, hoehe, App.Vector(_r0, -_ba / 2.0, z0))
     else:
@@ -595,7 +648,22 @@ def _pol_koerper(PL, grad, hoehe, z0):
         # den beiden Rechtecken -- ein Quader mit zwei Breiten geht nicht.
         _kern = _prisma_trapez(_r0, _rk, _bi, _ba, hoehe, z0)
     _kern.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), grad)
-    return _schuh, _kern
+    # Der POLFUSS wird NICHT gezeichnet: er liegt unter `r_fuss_mm`, also IM
+    # Joch (Schwalbenschwanz in einer Nut, `ema_schenkelpol.befestigung`), und
+    # Joch und Pol werden ohnehin zu EINEM Festkoerper -- eine Nut darin waere
+    # im Schnitt unsichtbar. Frueher oeffnete er sich OBERHALB des Jochrings
+    # von der Kernbreite auf die halbe Polteilung und stand damit als Keil im
+    # Zwischenpolraum; gemeldet als "unten ist dort eine Art Keil". Der Zweig
+    # bleibt fuer aeltere Masssaetze stehen, in denen `r_fuss_mm` noch ueber
+    # dem Joch lag.
+    _rf = PL.get("r_fuss_mm", _rj)
+    _bf = PL.get("b_fuss_mm", _bi)
+    _fuss = None
+    if _rf > _rj + 0.2:
+        _fuss = _prisma_trapez(_r0, _rf + POL_UEBERLAPP_MM, _bf, _bi,
+                               hoehe, z0)
+        _fuss.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), grad)
+    return _schuh, _kern, _fuss
 
 
 # Ein radial stehendes Trapez-Prisma: bei r0 die Breite b0, bei r1 die Breite
@@ -654,10 +722,77 @@ def _prisma_trapez(r0, r1, b0, b1, hoehe, z0):
 # geschrieben, und ein dreifaches Anfuehrungszeichen beendet dort die
 # umschliessende f-Zeichenkette. Derselbe Fehler stand schon einmal in dieser
 # Datei.
+# Die vier RADIALEN Kanten eines Spulenkoerpers -- an ihnen sitzt die Rundung.
+def _spulenkanten(s):
+    # `getattr`, nicht `s.Edges`: der Stellvertreter-FreeCAD in
+    # `test_laeufer_cad.py` fuehrt Formen ohne Kantenliste, und ein Zeichner
+    # darf an einer fehlenden Eigenschaft nicht abbrechen.
+    _aus = []
+    for _e in (getattr(s, "Edges", None) or []):
+        _v = _e.Vertexes
+        if len(_v) != 2:
+            continue
+        _dx = abs(_v[0].X - _v[1].X)
+        if _dx > abs(_v[0].Y - _v[1].Y) and _dx > abs(_v[0].Z - _v[1].Z):
+            _aus.append(_e)
+    return _aus
+
+
+def _spule_runden(s, r):
+    # Eine Spule ist GEWICKELT: an den Ecken laeuft der Draht im Bogen um den
+    # Kern, nicht auf Gehrung. Scheitert das Runden an einem Radius, den die
+    # Kante nicht hergibt, bleibt die scharfe Form stehen -- eine Spule ohne
+    # Rundung ist schlechter als keine, ein Abbruch waere aber schlimmer.
+    if r <= 0.05:
+        return s
+    _k = _spulenkanten(s)
+    if not _k:
+        return s
+    # Leiter statt EIN Versuch: OCC scheitert am gestreckten Trapez-Zugkoerper
+    # der ausgefuellten Spule mit grossem Radius, kommt mit einem kleineren
+    # aber zurecht -- und eine ungerundete Spule steckt mit ihren scharfen
+    # Ecken im Blech, weil die Tasche daneben gerundet ist.
+    for _f in (1.0, 0.6, 0.35, 0.2):
+        if r * _f <= 0.05:
+            break
+        try:
+            return s.makeFillet(r * _f, _k)
+        except Exception:
+            pass
+    return s
+
+
+# KEIN Docstring (erzeugter Text). Der Innenradius der Wicklung -- EINE Formel
+# fuer die Spule UND fuer die Tasche, die aus dem Laeufer geschnitten wird.
+# Zwei Abschriften liefen um Hundertstel auseinander und liessen Kupfer im
+# Blech stehen. 0,45 und NICHT 0,5: `0.5 * b` ist genau die halbe Breite, also
+# der Radius, bei dem die Verrundung entartet -- OCC meldet dann "BRep_API:
+# command not done" und die Ecke bleibt scharf.
+def _spulenradius(PL, hoehe):
+    _rk = PL["r_kern_aussen_mm"]
+    _r0 = PL.get("r_spule_innen_mm", PL.get("r_fuss_mm", _rk) + 0.05)
+    _r1 = max(min(PL.get("r_spule_aussen_mm", _rk), _rk - POL_UEBERLAPP_MM),
+              _r0 + 0.6)
+    _bi = PL.get("b_kern_spuleanfang_mm",
+                 PL.get("b_kern_innen_mm", PL["b_kern_mm"]))
+    _ba = PL.get("b_kern_spulenende_mm",
+                 PL.get("b_kern_aussen_mm", PL["b_kern_mm"]))
+    _r = min(0.45 * min(_bi, _ba), 0.45 * hoehe, 0.45 * (_r1 - _r0))
+    return max(_r, 0.0)
+
+
 def _pol_spule(PL, grad, hoehe, z0):
     _rk, _rj = PL["r_kern_aussen_mm"], PL["r_joch_aussen_mm"]
-    _ds = PL["d_spule_mm"]
-    _bi = PL.get("b_kern_innen_mm", PL["b_kern_mm"])
+    # ZWEI Dicken: bei der Rechteckspule gleich, bei der ausgefuellten innen
+    # duenner -- die Polteilung schrumpft nach innen. Axial zaehlt die
+    # groessere (das ist der Wickelkopf).
+    _ds_i = PL.get("d_spule_innen_mm", PL["d_spule_mm"])
+    _ds_a = PL.get("d_spule_aussen_mm", PL["d_spule_mm"])
+    _ds = max(_ds_i, _ds_a)
+    # Die Kernbreite AM SPULENANFANG, nicht am Joch: der Koerper laeuft bis
+    # auf die Bohrung durch, die Spule faengt aber viel weiter aussen an.
+    _bi = PL.get("b_kern_spuleanfang_mm",
+                 PL.get("b_kern_innen_mm", PL["b_kern_mm"]))
     # Die Spule endet weiter innen als der Kern -- sonst traete ihre ECKE aus
     # dem Laeufer (s. ema_eesm_cad.RAND_LUFT_MM). Am Spulenende ist der Kern
     # beim Kegel schmaler als an seiner Oberkante; beide Zahlen kommen aus
@@ -670,22 +805,31 @@ def _pol_spule(PL, grad, hoehe, z0):
     # Kernradius', damit sie nicht in das Band [rk-0.5, rk] ragt, in dem sich
     # die Pole zum EINEN Solid ueberdecken.
     _r1 = max(min(_rs, _rk - POL_UEBERLAPP_MM), _rj + 0.6)
-    _r0 = _rj + 0.05
+    # Die Spule ist ein BUENDEL unter dem Polschuh, kein Film am ganzen Kern.
+    _r0 = PL.get("r_spule_innen_mm", PL.get("r_fuss_mm", _rj) + 0.05)
     _hk = max(_r1 - _r0, 0.5)
     _sp = 0.05                                   # Spiel zum Kern, damit OCC sauber schneidet
 
     # Aussen: Kern + Spulendicke ringsum, axial um die Dicke laenger (das sind
     # die Wickelkoepfe an den Stirnseiten).
+    _aussen = _prisma_trapez(_r0, _r1, _bi + 2.0 * _ds_i, _ba + 2.0 * _ds_a,
+                             hoehe + 2.0 * _ds, z0 - _ds)
     if abs(_bi - _ba) < 1e-6:
-        _aussen = Part.makeBox(_hk, _ba + 2.0 * _ds, hoehe + 2.0 * _ds,
-                               App.Vector(_r0, -(_ba / 2.0 + _ds), z0 - _ds))
         _innen = Part.makeBox(_hk + 2.0, _ba + 2.0 * _sp, hoehe + 2.0 * _sp,
                               App.Vector(_r0 - 1.0, -(_ba / 2.0 + _sp), z0 - _sp))
     else:
-        _aussen = _prisma_trapez(_r0, _r1, _bi + 2.0 * _ds, _ba + 2.0 * _ds,
-                                 hoehe + 2.0 * _ds, z0 - _ds)
-        _innen = _prisma_trapez(_r0 - 1.0, _r1 + 1.0, _bi + 2.0 * _sp,
-                                _ba + 2.0 * _sp, hoehe + 2.0 * _sp, z0 - _sp)
+        _innen = _prisma_trapez(_r0 - 1.0, _r1 + 1.0,
+                                _b_kern_bei(PL, _r0 - 1.0) + 2.0 * _sp,
+                                _b_kern_bei(PL, _r1 + 1.0) + 2.0 * _sp,
+                                hoehe + 2.0 * _sp, z0 - _sp)
+    # Aussen- UND Innenkontur runden, sonst waere nur der Umriss oval und das
+    # Loch darin weiter eckig. Der AEUSSERE Radius ist nicht einfach
+    # `r_in + ds`: er muss auf den Aussenumriss passen.
+    _rr = _spulenradius(PL, hoehe)
+    _aussen = _spule_runden(_aussen, min(
+        _rr + min(_ds_i, _ds_a),
+        0.45 * min(_bi + 2.0 * _ds_i, _ba + 2.0 * _ds_a, _r1 - _r0)))
+    _innen = _spule_runden(_innen, _rr)
     _spule = _aussen.cut(_innen)
     _spule.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), grad)
     # EINE Liste, damit der Aufrufer unveraendert bleibt -- jetzt mit genau
@@ -693,20 +837,103 @@ def _pol_spule(PL, grad, hoehe, z0):
     return [_spule]
 
 
+# KEIN Docstring (erzeugter Text, s. oben).
+# Der Koerper, der aus dem LAEUFER geschnitten wird -- nicht die Spule selbst.
+#
+# Zwei Unterschiede, und beide sind gemessen:
+#
+#  * Er reicht radial bis unter den POLSCHUH (`r_kern_aussen`) und ist dort
+#    ECKIG. Der Schuh ist der Querbalken des T; darunter darf kein Eisen
+#    stehenbleiben, sonst sitzt die Wicklung in einer Nische statt unter ihrem
+#    Ueberstand. Eine gerundete Tasche liesse dort einen Eisenwulst stehen.
+#    Seitlich geht er dabei bis unter die SCHUHKANTE, nicht nur bis zur Spule:
+#    der Schuh ist unten ein Bogen, die Tasche oben eine Ebene, und am
+#    Taschenrand tauchte der Bogen gemessen 1,85 mm unter die Ebene und blieb
+#    als Keil aus Schuheisen stehen. Nach unten endet er dort, wo die Spule
+#    endet: der Zwischenpolraum darunter ist ohnehin leer, und bis zur Bohrung
+#    durchgezogen schnitte die Tasche die NACHBARPOLE weg -- dort ueberdecken
+#    sich die Koerper zur Nabe.
+#  * Sein LOCH ist dasselbe wie das der Spule, einschliesslich Rundung. Sonst
+#    blieb Eisen genau dort stehen, wo der Draht um die Ecke laeuft (der Draht
+#    kann nicht scharf knicken, der gestanzte Kern war eckig) -- gemessen
+#    4867 mm3 Kupfer im Blech je Polfolge. Mit demselben Loch schneidet die
+#    Tasche dem Polkern die Rundung an, die er ohnehin braucht.
+def _pol_spulentasche(PL, grad, hoehe, z0):
+    _rk, _rj = PL["r_kern_aussen_mm"], PL["r_joch_aussen_mm"]
+    _ds_i = PL.get("d_spule_innen_mm", PL["d_spule_mm"]) + SPULE_ISOLIERLUFT_MM
+    _ds_a = PL.get("d_spule_aussen_mm", PL["d_spule_mm"]) + SPULE_ISOLIERLUFT_MM
+    _ds = max(_ds_i, _ds_a)
+    _ba = PL.get("b_kern_aussen_mm", PL["b_kern_mm"])
+    _r0 = (PL.get("r_spule_innen_mm", PL.get("r_fuss_mm", _rj) + 0.05)
+           - SPULE_ISOLIERLUFT_MM)
+    _sp = 0.05
+    _hw = min((PL["b_schuh_mm"] / 2.0) / max(PL["r_rotor_mm"], 1e-9),
+              0.5 * math.pi - 1e-3)
+    # Wie hoch die Taschendecke liegen darf: sie ist eine EBENE, der
+    # Laeuferrand ein Kreis. Ueber der Breite, die die Spule braucht, muss
+    # oberhalb der Decke noch Eisen stehen -- sonst schneidet die Tasche den
+    # Polschuh in Stuecke (gemessen bei 2p = 2, halber Schuhwinkel 49,5 Grad:
+    # vier abgetrennte Spitzen zu je 23.347 mm3). Und niemals so tief, dass
+    # die Spule wieder im Eisen steckt (dort fehlten sonst 0,03 mm und es
+    # blieben 25,95 mm3 Kupfer im Blech). Bei acht Polen bindet keines von
+    # beidem, die Decke bleibt `r_kern_aussen`.
+    _ya0 = _ba / 2.0 + _ds_a
+    _r1 = min(_rk, math.sqrt(max(PL["r_rotor_mm"] ** 2 - _ya0 ** 2, 1.0))
+              - TASCHE_STEG_MM)
+    _r1 = max(_r1, min(_rk, PL.get("r_spule_aussen_mm", _rk)
+                       + SPULE_ISOLIERLUFT_MM), _r0 + 1.0)
+    _bi = _b_kern_bei(PL, _r0)
+    _hk = max(_r1 - _r0, 0.5)
+    # Halbe Taschenbreite an der Schuhunterseite: die Schuhflanke ist eine
+    # radiale Ebene, also y = r1 * tan(halber Schuhwinkel). `tan` waechst dabei
+    # ueber alle Grenzen (bei 2p = 2 auf 97 mm), deshalb derselbe Steg-Deckel
+    # noch einmal.
+    _ysmax = math.sqrt(
+        max(PL["r_rotor_mm"] ** 2 - (_r1 + TASCHE_STEG_MM) ** 2, 0.0))
+    _ya = max(_ya0, min(_r1 * math.tan(_hw) + TASCHE_UEBERSTAND_MM, _ysmax))
+    _yi = max(_bi / 2.0 + _ds_i, _ya - (_r1 - _r0) * math.tan(_hw))
+
+    _aussen = _prisma_trapez(_r0, _r1, 2.0 * _yi, 2.0 * _ya,
+                             hoehe + 2.0 * _ds, z0 - _ds)
+    if abs(_bi - _ba) < 1e-6:
+        _innen = Part.makeBox(_hk + 2.0, _ba + 2.0 * _sp, hoehe + 2.0 * _sp,
+                              App.Vector(_r0 - 1.0, -(_ba / 2.0 + _sp), z0 - _sp))
+    else:
+        _innen = _prisma_trapez(_r0 - 1.0, _r1 + 1.0,
+                                _b_kern_bei(PL, _r0 - 1.0) + 2.0 * _sp,
+                                _b_kern_bei(PL, _r1 + 1.0) + 2.0 * _sp,
+                                hoehe + 2.0 * _sp, z0 - _sp)
+    # NUR das Loch wird gerundet -- der Umriss bleibt eckig. Der Radius kommt
+    # aus DERSELBEN Formel wie der der Spule, sonst bleibt Kupfer im Blech.
+    _innen = _spule_runden(_innen, _spulenradius(PL, hoehe))
+    _t = _aussen.cut(_innen)
+    _t.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), grad)
+    return [_t]
+
+
 # ── 2. ROTOR IRON (with magnet pockets; bore = connection type) ───────────
 if GEN_ROTOR:
     if POLLAEUFER:
-        # Schenkelpollaeufer: der Rotor ist Joch PLUS Pole, nicht der volle
-        # Ring. Waere er ein Vollzylinder, saesse zwischen den Polen Eisen, und
-        # der ganze Reluktanzunterschied -- die Bauart -- waere weggezeichnet.
-        rotor_ring = Part.makeCylinder(POLLAEUFER["r_joch_aussen_mm"], axial,
-                                       App.Vector(0, 0, -axial / 2))
+        # Schenkelpollaeufer: der Rotor sind die POLE, nicht der volle Ring.
+        # Waere er ein Vollzylinder, saesse zwischen den Polen Eisen, und der
+        # ganze Reluktanzunterschied -- die Bauart -- waere weggezeichnet.
+        #
+        # Einen JOCHRING gibt es nur noch fuer gespeicherte Masssaetze aus der
+        # Zeit davor: der Polkoerper laeuft bis auf die Wellenbohrung durch,
+        # und zwei benachbarte Koerper ueberdecken sich nahe der Bohrung --
+        # sie BILDEN dort das Joch (die Nabe, `r_nabe_mm`). Die Bohrung wird
+        # deshalb erst nach dem Verschmelzen abgezogen.
         _pol_teile = []
         for _i in range(int(POLLAEUFER["poles"])):
             _g = 360.0 * _i / int(POLLAEUFER["poles"])
-            _sh, _kn = _pol_koerper(POLLAEUFER, _g, axial, -axial / 2)
-            _pol_teile += [_sh, _kn]
-        rotor_ring = rotor_ring.fuse(_pol_teile)
+            _sh, _kn, _fs = _pol_koerper(POLLAEUFER, _g, axial, -axial / 2)
+            _pol_teile += [_sh, _kn] + ([_fs] if _fs is not None else [])
+        if POLLAEUFER["r_joch_aussen_mm"] > POLLAEUFER["r_welle_mm"] + 0.05:
+            rotor_ring = Part.makeCylinder(POLLAEUFER["r_joch_aussen_mm"],
+                                           axial, App.Vector(0, 0, -axial / 2))
+            rotor_ring = rotor_ring.fuse(_pol_teile)
+        else:
+            rotor_ring = _pol_teile[0].fuse(_pol_teile[1:])
         # Die Daempferbohrungen: durch das ganze Paket, quer zur Polflaeche.
         _dk0 = POLLAEUFER.get("daempfer")
         if _dk0:
@@ -823,6 +1050,36 @@ if GEN_ROTOR:
                 rotor_solid = rotor_cut
             else:
                 print("WARN: custom barriers produced an invalid rotor — skipped")
+    # ── Die ERREGERSPULEN werden aus dem Laeufer herausgeschnitten ────────
+    #
+    # Vorher wurden Spule und Pol nebeneinander gebaut und mussten sich von
+    # selbst vertragen -- taten sie nicht: Trapezueberblendung, Rundung und
+    # POL_UEBERLAPP_MM treffen sich nicht auf den Mikrometer. Gemessen an
+    # einem 8-poligen Laeufer steckten **30.696 mm³** Kupfer im Eisen, also
+    # rund ein Siebtel der ganzen Wicklung. Gemeldet als "die Wicklung
+    # kollidiert mit dem Rotor".
+    #
+    # Jetzt entscheidet EIN Koerper, wie bei den Magnettaschen: der Laeufer
+    # bekommt die Spule samt Isolierluft abgezogen, und damit KANN es keine
+    # Durchdringung mehr geben.
+    if POLLAEUFER:
+        _sp_schnitt = []
+        for _i in range(int(POLLAEUFER["poles"])):
+            _sp_schnitt += _pol_spulentasche(
+                POLLAEUFER, 360.0 * _i / int(POLLAEUFER["poles"]),
+                axial, -axial / 2)
+        for _s in _sp_schnitt:
+            try:
+                _rc = rotor_solid.cut(_s)
+                if _rc.isValid() and _rc.Volume > 1e-6:
+                    rotor_solid = _rc
+            except Exception:
+                pass
+        try:
+            rotor_solid = rotor_solid.removeSplitter()
+        except Exception:
+            pass
+
     if not rotor_solid.isValid():
         try:    rotor_solid = rotor_solid.removeSplitter()
         except Exception: pass

@@ -68,9 +68,13 @@ b2 = SP.befestigung(g, L, 6000.0)
 pruefe(nah(b2["F_flieh_kN"], 4.0 * b1["F_flieh_kN"], rel=2e-3),
        f"doppelte Drehzahl = vierfache Kraft ({b1['F_flieh_kN']} -> "
        f"{b2['F_flieh_kN']} kN) — F = m*omega^2*r, nicht geschaetzt")
-pruefe(nah(b2["sigma_hals_MPa"], 4.0 * b1["sigma_hals_MPa"], rel=2e-3),
-       "und die Halsspannung ebenso — sie ist die Kraft durch einen festen "
-       "Querschnitt")
+# Gegen die GERUNDETE Ausgabe geprueft (eine Nachkommastelle), deshalb eine
+# absolute Zugabe: bei 8,3 gegen 33,1 MPa sind 0,05 MPa Rundung schon 1,2 Promille.
+pruefe(abs(b2["sigma_hals_MPa"] - 4.0 * b1["sigma_hals_MPa"])
+       <= 0.25 + 2e-3 * 4.0 * b1["sigma_hals_MPa"],
+       f"und die Halsspannung ebenso ({b1['sigma_hals_MPa']} -> "
+       f"{b2['sigma_hals_MPa']} MPa) — sie ist die Kraft durch einen festen "
+       f"Querschnitt")
 pruefe(nah(b1["n_zulaessig_1pmin"], b2["n_zulaessig_1pmin"], rel=2e-3),
        f"die ZULAESSIGE Drehzahl ist von der gerechneten unabhaengig "
        f"({b1['n_zulaessig_1pmin']:.0f} = {b2['n_zulaessig_1pmin']:.0f} 1/min) "

@@ -102,9 +102,36 @@ g, L = geom("eesm", p=2)
 kq = ema_eesm_cad.koerper(g, L)
 erg = LB.teile(g, L)
 r = rollen(erg)
+# ZWEI Stuecke je Pol: Schuh und KOERPER, der mit voller Breite bis auf den
+# Jochring durchlaeuft. Ein drittes -- der Polfuss -- wurde bis zum 19.09.2026
+# darueber gezeichnet und oeffnete sich von der Kernbreite auf die halbe
+# Polteilung; gemeldet als "unten ist dort eine Art Keil". Der wirkliche Fuss
+# liegt UNTER dem Jochring (Schwalbenschwanz in einer Nut) und ist im Schnitt
+# unsichtbar, weil Joch und Pol dasselbe Eisen sind.
 pruefe(r.get("pol") == 2 * int(kq["poles"]),
-       f"EESM: je Pol ein Schuh UND ein Kern ({r.get('pol')} bei "
+       f"EESM: je Pol ein Schuh und ein Kern, KEIN Keil ({r.get('pol')} bei "
        f"{kq['poles']} Polen)")
+# Und es gibt keinen JOCHRING mehr: der Kern laeuft bis auf die Wellenbohrung
+# durch, die Nabe entsteht dort, wo sich zwei Polkoerper ueberdecken.
+pruefe(abs(float(kq["r_joch_aussen_mm"]) - float(kq["r_welle_mm"])) < 1e-6
+       and abs(float(kq["r_fuss_mm"]) - float(kq["r_welle_mm"])) < 1e-6
+       and not [t for t in erg["teile"] if t["form"] == "ring"],
+       f"kein Jochring: der Kern beginnt an der Welle (r_fuss "
+       f"{kq['r_fuss_mm']} = r_welle {kq['r_welle_mm']} mm)")
+# Die Nabe wird GEMESSEN, nicht angenommen: zwei Koerper der halben Breite w,
+# deren Achsen 2*pi/poles auseinanderliegen, ueberdecken sich bis
+# w/sin(pi/poles). Liegt das unter dem Wellenradius, zerfaellt der Laeufer in
+# Einzelarme -- dann ist das ein Befund und keine Zeichnung.
+import math as _mm
+_rn = (float(kq["b_kern_innen_mm"]) / 2.0) / _mm.sin(_mm.pi / int(kq["poles"]))
+pruefe(abs(float(kq["r_nabe_mm"]) - _rn) < 1e-3 and bool(kq["nabe_zusammen"]),
+       f"die Nabe ist nachgerechnet: r_nabe {kq['r_nabe_mm']} mm gegen "
+       f"{_rn:.3f} mm, Welle {kq['r_welle_mm']} mm -> zusammenhaengend")
+# Und ob sie den Fluss traegt, wird BENANNT statt stillschweigend geheilt.
+pruefe(kq["nabe_reicht"] == (float(kq["h_nabe_mm"])
+                            >= float(kq["h_joch_fluss_mm"]) - 1e-6),
+       f"und sie sagt, ob der Fluss hindurchpasst ({kq['h_nabe_mm']} mm da, "
+       f"{kq['h_joch_fluss_mm']} mm verlangt -> {kq['nabe_reicht']})")
 pruefe(r.get("kupfer") == 2 * int(kq["poles"]),
        f"und zwei Spulenquerschnitte je Pol ({r.get('kupfer')})")
 _sp = [t for t in erg["teile"] if t["rolle"] == "kupfer"][0]
@@ -120,8 +147,14 @@ pruefe(kq["deckt_spule"] and kq["schuh_ueberstand_mm"] > 0.0,
        f"je Seite — sonst haelt sie nichts gegen die Fliehkraft")
 _g2, _L2 = geom("eesm", p=2, erregerSpuleForm="kegel")
 _k2 = ema_eesm_cad.koerper(_g2, _L2)
-pruefe(_k2["b_kern_innen_mm"] > _k2["b_kern_aussen_mm"] * 1.2,
-       f"kegelige Wicklung: der Pol ist an der JOCHseite breiter "
+# Der Kegel geht zum JOCH hin SCHMALER, und das ist keine Geschmacksfrage: die
+# Polteilung schrumpft nach innen (gemessen 48,97 mm am Joch gegen 87,80 mm
+# unter dem Schuh, 6 Pole). Ein Kern, der nach innen breiter wuerde, frisst
+# genau dort, wo der Platz am knappsten ist -- gemeldet als „der Kegel ist in
+# die falsche Richtung", und die Schranke `joch` band dadurch immer.
+pruefe(_k2["b_kern_innen_mm"] < _k2["b_kern_aussen_mm"] * 0.95,
+       f"kegelige Wicklung: der Pol ist an der JOCHseite SCHMALER — er folgt "
+       f"der Polteilung, die nach innen schrumpft "
        f"({_k2['b_kern_innen_mm']:.1f} gegen {_k2['b_kern_aussen_mm']:.1f} mm)")
 pruefe(_k2["deckt_spule"] and _k2["passt"],
        f"auch kegelig gedeckt und passend (bindend: {_k2['bindend']})")
@@ -549,8 +582,13 @@ pruefe(not _raus,
 # CLI-Payload (Laeufer 188,6 mm) tritt er nicht auf — der Ueberstand haengt am
 # Verhaeltnis Polbreite zu Radius, und ein Testfall, der ihn nicht zeigt,
 # prueft hier nichts.
+#
+# `p=1` statt `p=2` seit der Kern bis an die Welle laeuft: der groessere
+# Wickelraum macht die Spule anders, und bei 2p=4 liegt die Ecke seither von
+# selbst innen (82,50 gegen 85,00 mm). Bei 2p=2 greift die Gegenprobe weiter
+# (86,33 gegen 85,00) — gemessen, nicht gewaehlt.
 _g, _L = geom("eesm", rotorOD=170.0, statorID=171.6, statorOD=295.0,
-              shaftD=80.0, p=2, slots=36, axialLen=225.0)
+              shaftD=80.0, p=1, slots=36, axialLen=225.0)
 _L = 225.0
 _k = __import__("ema_eesm_cad").koerper(_g, _L)
 _y = max(_k["b_kern_aussen_mm"], _k["b_kern_innen_mm"]) / 2.0 + _k["d_spule_mm"]

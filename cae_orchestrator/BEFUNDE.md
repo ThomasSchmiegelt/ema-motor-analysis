@@ -17,6 +17,233 @@ kann.
 
 ---
 
+## 2026-09-19 — Der Wickelraum hatte zwei Quellen, und beide waren falsch
+
+**Beobachtung** (gemeldet): „versuche jetzt die Spulen kegelig zu machen und
+den Bauraum maximal auszunutzen. Das ‚Dach' oben bzw. außen muss ggf. in der
+Breite mitwandern."
+
+**Messung.** Der Zwischenpolraum war zu 12,5 % genutzt (`fenster_ausl`). Der
+Grund ist nicht die Zeichnung, sondern eine Auslegungsvorgabe: `A_cu =
+F_pol/J` mit J = 5 A/mm² — die Stromdichte bemisst die Wicklung, der Platz
+spielt keine Rolle. Nachgemessen am Polkörper (2p = 8, Rotor 188,6, Welle 38,
+Polbedeckung 0,55), halbe freie Breite neben dem Kern über dem Radius:
+
+| r [mm] | 19 | 30,2 | 40 | 49,3 | 60 | 85 |
+|---|---:|---:|---:|---:|---:|---:|
+| Polteilung erlaubt | −4,4 | 0,0 | 3,9 | 7,5 | 11,7 | 21,5 |
+| Polschuh deckt | 5,5 | 5,5 | 5,5 | 5,5 | 5,5 | 5,5 |
+
+Unter r = 30,2 mm ist **kein** Platz (dort überdecken sich die Polkörper —
+das ist die Nabe), von 30,2 bis 49,3 bindet die **Polteilung** (also ein
+Kegel), darüber der **Polschuh**, der die Spule gegen die Fliehkraft halten
+muss. Gezeichnet war eine Spule von r 65,0 bis 84,5.
+
+**Und die analytische Fensterformel wusste von alldem nichts.**
+`ema_eesm._pol_fenster` rechnet ein Rechteck (Fensterbreite × Fensterhöhe) und
+kennt weder den Polschuh noch das Schrumpfen der Polteilung: **2024 mm²
+analytisch gegen 443 mm² zeichenbar** — Faktor 4,6. Der Kupferquerschnitt hatte
+damit zwei Quellen, und die Zeichnung war die kleinere.
+
+**Status: behoben.** `ema_eesm_cad.wickelraum` ist die EINE Quelle; sie ruft
+`erregung` ausdrücklich nicht auf, damit `erregung` sie umgekehrt lesen kann.
+Neu `geom.erregerSpuleFuellung`:
+
+* `vorgabe` (Standard) — die Stromdichte bemisst, jede bestehende Auslegung
+  rechnet Ziffer für Ziffer weiter.
+* `max` — der gezeichnete Bauraum bemisst. Gemessen am selben Läufer: Kupfer je
+  Pol **106 → 184 mm²**, Stromdichte **5,00 → 2,87 A/mm²**, Erregerverlust
+  **154,1 → 88,6 W**, Läuferverlust **218,1 → 152,6 W**; die Spule wird von
+  19,45 auf **38,16 mm** hoch und leicht kegelig.
+
+**Das „Dach" wandert mit — aber nur, soweit es sich rechnet.**
+`wickelraum_max` fährt die Polbedeckung über ihre erlaubte Spanne und misst.
+Ein breiterer Schuh überdeckt eine dickere Spule, zwingt aber zugleich einen
+breiteren Kern (er nimmt mehr Fluss auf), und der frisst den Platz fast so
+schnell, wie der Überstand ihn gewinnt: 0,55 → **0,58** bringt 443 → 446 mm²,
+also 0,6 %. Nach unten wird nicht gesucht — die Polbedeckung ist eine
+magnetische Entscheidung des Menschen, hier darf sie nur folgen.
+
+**Vier Fehler kamen dabei heraus, jeder still:**
+
+1. **`0.5 * b` ist der Entartungsradius.** Der Verrundungsradius der Wicklung
+   war genau die halbe Kernbreite — der Wert, bei dem OCC mit „BRep_API:
+   command not done" aussteigt. Bei der kleinen Spule lag er weit darunter, bei
+   der ausgefüllten traf er ihn (b = 20,24 mm, Radius 10,12) und **beide**
+   Körper blieben eckig; die scharfen Ecken der Spule steckten dann im Blech,
+   weil die Tasche daneben sehr wohl gerundet war. Jetzt 0,45, dazu eine
+   Leiter 1,0/0,6/0,35/0,2 in beiden Verrundern.
+2. **Spule und Tasche rechneten ihren Radius getrennt** — dieselbe Formel, aber
+   die Tasche maß die Kernbreite 0,3 mm weiter innen. Gemessen blieben
+   **26,33 mm³** Kupfer im Blech. Jetzt EINE Funktion (`_spulenradius`).
+3. **Die Rand-Schranke klemmte die falsche Seite.** `schranken["rotorrand"] /
+   kegel` unterstellt, der Kern sei innen breiter; `KEGEL_VERJUENGUNG` = 0,80
+   macht ihn aber außen breiter. Gemessen bei 2p = 2 stand die Kernecke bei
+   **95,43 mm** gegen einen Rand von 94,30 mm.
+4. **`b_pol` ist eine Bogenlänge und wurde als Breite benutzt.** Bei 2p = 2 und
+   α = 0,85 sind das 251,8 mm an einem Läufer von 188,6 mm Durchmesser. Jetzt
+   als Sehne gedeckelt.
+
+Wo `max` nicht geht (sehr wenige, sehr breite Pole — 2p = 2), wird **nicht**
+abgewiesen, sondern auf die Stromdichte zurückgefallen und das gesagt
+(`fuellung_hinweis`).
+
+Gegenprobe: ein Festkörper und keine Durchdringung bei 2p = 2/4/8/12, jeweils
+`vorgabe`/`rechteck`, `vorgabe`/`kegel` und `max`/`kegel`; Werkbank und
+Pipeline Ziffer für Ziffer gleich (1.002.512,91 ↔ 1.002.513 · 1.112.690,99 ↔
+1.112.691 · 1.075.942,09 ↔ 1.075.942 · 1.176.503,52 ↔ 1.176.504).
+
+**Was dabei SCHLECHTER wird, und das steht so im Ergebnis:** der kegelige Kern
+ist am Bohrungsrand schmaler, also wird die Nabe kleiner — 9,36 → 4,92 mm,
+B_Nabe 1,81 → 3,64 T gegen 1,70 T Blechgrenze. Der Befund „die Nabe trägt den
+Fluss erst ab 2p = 12" verschärft sich damit; gerechnet und gemeldet wird er,
+geheilt nicht.
+
+---
+
+## 2026-09-19 — Der Polfuß war ein Keil, und er verdeckte eine Zeichnerdrift
+
+**Beobachtung** (gemeldet, am FreeCAD-Modell): „die muss noch etwas mehr
+überstehen. unten muss der Polschuh tiefer in den Rotor reichen, zur Zeit ist
+dort eine Art Keil."
+
+**Messung.** Am Schnitt des gebauten Läufers (EESM, 2p = 8, Rotor Ø 188,6,
+Welle Ø 38, Polbedeckung 0,55) nachgemessen, nicht am Parameter:
+
+1. **Der Keil.** `ema_eesm_cad.koerper` setzte den Polfuß **oberhalb** des
+   Jochrings an: über den unteren 5,834 mm der 26,517 mm Kernhöhe öffnete sich
+   der Kern von **21,70 auf 43,92 mm**, also auf die halbe Polteilung. Im
+   Zwischenpolraum stand dadurch je Pol eine messerförmige Eisenspitze, und der
+   Wickelraum musste in 19,45 statt 26,5 mm untergebracht werden.
+   Zwei Dinge sprachen dagegen, beide nachprüfbar: der Fuß stammte aus der
+   Zeit, als der Kern selbst noch ein nach innen schmaleres Trapez war und zum
+   Joch hin ein Dreieck klaffte — seit `b_kern_innen == b_kern_aussen` schloss
+   er eine Lücke, die es nicht mehr gab; und er widersprach der **daneben
+   gerechneten** Befestigung: `ema_schenkelpol.befestigung` legt den Hals mit
+   `HALS_ZU_KERN = 0,70` **schmaler** als den Kern (15,2 mm) und in eine Nut im
+   Joch, gezeichnet war das Gegenteil.
+
+2. **Der Rest des Polschuhs.** Die Spulentasche endete seitlich an der Spule
+   (halbe Breite 17,63 mm), der Polschuh reicht aber bis 20,4 mm. Seine
+   Unterseite ist ein **Bogen** (r = 84,48), die Taschendecke eine **Ebene**
+   (x = 84,98) — am Taschenrand taucht der Bogen um die Stichhöhe
+   `r − √(r² − y²)` = **1,85 mm** unter die Ebene und blieb als Keil aus
+   Schuheisen stehen.
+
+3. **Die Drift, die der Fuß verdeckte.** `ema_freecad._pol_koerper` baute den
+   kegeligen Polkörper mit `b_kern_spuleanfang_mm` an der Jochkante,
+   `bau_eesm.py` dagegen mit `b_kern_innen_mm` — zwei Neigungen aus derselben
+   Quelle. Gemessen am selben Payload (2p = 6, kegelig): **1.395.722 gegen
+   1.394.947 mm³**, 775 mm³ Unterschied. Solange der Fuß darüber lag, fiel das
+   nicht auf. Derselbe Fehler steckte in den Innenschneidern von Spule und
+   Tasche: sie reichen 1 mm über den Kern hinaus und interpolierten ihre Breite
+   zwischen den beiden Endradien, bekamen also beim Kegel eine andere Neigung
+   als der Kern — gemessen **102,45 mm³** Kupfer im Blech bei 2p = 6, nach der
+   ersten Korrektur noch 0,03 mm³.
+
+**Fundstelle.** `ema_eesm_cad.py` (`POLFUSS_ANTEIL`, Fußrechnung in `koerper`),
+`ema_freecad.py` (`_pol_koerper`, `_pol_spule`, `_pol_spulentasche`),
+`ema_laeuferbild._eesm`, `ema_pipeline.render_cross_section` (EESM-Zweig),
+`bau_eesm.py` (`_schuh`/`_trapez`-Schleife, `_spulentasche`).
+
+**Status: behoben.** Der Polkörper läuft jetzt mit voller Breite bis auf den
+Jochring durch; der Fuß liegt **unter** `r_fuss_mm`, also im Joch
+(`h_fuss_mm` tief, Hals `b_hals_mm`, unten `b_fuss_mm`), und wird **nicht**
+gezeichnet — Joch und Pol sind EIN Festkörper, eine Nut darin wäre im Schnitt
+unsichtbar; gerechnet wird sie weiter in `ema_schenkelpol.befestigung`. Die
+Spulentasche reicht seitlich bis `r · tan(halber Schuhwinkel)` plus
+`TASCHE_UEBERSTAND_MM` = 0,5 mm und nach unten bis auf den Jochring, der Schuh
+bekommt damit eine **flache** Unterseite über seinen ganzen Überstand. Beide
+Innenschneider werten mit `_b_kern_bei` dieselbe Kerngerade aus.
+Nachgemessen am gebauten Körper: keine Durchdringung (`common().Volume = 0`)
+bei 2p = 4/6/8/12, mit und ohne Dämpferkäfig, rechteckig und kegelig; der
+Taschenschnitt nimmt 37.869 statt 25.983 mm³ Eisen heraus, das Rotorvolumen
+fällt von 1.395.371 auf 1.334.898 mm³. **Werkbank und Pipeline bauen jetzt
+Ziffer für Ziffer denselben Läufer** — rechteckig 1.334.898,12 gegen 1.334.898,
+kegelig 1.394.946,8 gegen 1.394.947.
+
+Der Zweig für einen Fuß **über** dem Joch bleibt in allen vier Zeichnern
+stehen (`r_fuss_mm > r_joch_aussen_mm + 0,2`), damit ein gespeicherter
+Maßsatz aus der Zeit davor unverändert gezeichnet wird.
+
+**Nachtrag, gleicher Tag — der Jochring fällt ganz weg.** Gemeldet: „du musst
+den Kern, auf dem die Spule gewickelt ist, einfach bis zur Rotorachse
+verlängern. Am Ende den Wellendurchmesser abziehen." Umgesetzt: der Polkörper
+läuft mit seiner Breite bis auf die Wellenbohrung durch, die Bohrung wird nach
+dem Verschmelzen abgezogen, und ein Jochring wird nur noch für gespeicherte
+Maßsätze gezeichnet (`r_joch_aussen_mm > r_welle_mm + 0,05`). Die Kernhöhe
+steigt damit von 26,5 auf **66,0 mm**.
+
+**Das Joch ist dann das, was die Polkörper miteinander bilden**, und das wird
+gerechnet statt angenommen: zwei Körper der halben Breite `w`, deren Achsen
+`2π/2p` auseinanderliegen, überdecken sich bis `r_nabe = w/sin(π/2p)`.
+Gemessen am selben Läufer (Rotor Ø 188,6, Welle Ø 38, Polbedeckung 0,55):
+
+| 2p | b_kern | r_nabe | Nabenhöhe | Fluss verlangt | B_Nabe |
+|---:|---:|---:|---:|---:|---:|
+| 4 | 43,41 | 30,69 | 11,70 | 25,15 | 2,90 T |
+| 6 | 28,94 | 28,94 | 9,94 | 16,76 | 2,28 T |
+| 8 | 21,70 | 28,36 | 9,36 | 12,57 | 1,81 T |
+| 12 | 14,47 | 27,96 | 8,96 | 8,38 | 1,26 T |
+
+**Zusammen hängt der Läufer in allen vier Fällen** (`r_nabe > r_welle` = 19 mm,
+ein Solid, in FreeCAD nachgemessen) — **den Fluss trägt die Nabe erst ab
+2p = 12.** Darunter steht sie über der Sättigungsgrenze des Blechs (M270-35A,
+1,70 T), bei 2p = 4 um den Faktor 1,7. Das ist ein **Befund und keine stille
+Korrektur**: `nabe_reicht`, `h_nabe_mm` und `B_nabe_T` stehen im Ergebnis und
+in jeder Ausgabe von `bau_eesm.py`. Wer die Nabe tragfähig will, hat drei
+gerechnete Hebel — mehr Pole, breiterer Kern, oder ein ausdrücklich gesetztes
+`polHoeheAnteil`, das den alten Jochring zurückholt.
+
+**Was NICHT mitwächst, und warum:** die Spule bleibt 6,48 × 19,45 mm. Ihr
+Kupferquerschnitt kommt aus `A_cu = F_pol/J`, also aus Strom und Stromdichte —
+nicht aus dem Platz. Der gewonnene Wickelraum ist Reserve, kein Kupfer.
+
+Zwei Stellen mussten dabei mitgezogen werden, beide gemessen: die
+Kernbreitenschranke „Platz am Joch" hing an der Polteilung **am Wellenradius**,
+wo sich die Körper jetzt überdecken sollen — sie zählt jetzt am **Spulenfuß**
+(`teilung`), wo zwei Wicklungen sich wirklich nicht berühren dürfen; und die
+Spulentasche darf **nicht** bis zur Bohrung durchgezogen werden: ihre halbe
+Breite ist 17,6 mm, die halbe Polteilung an der Bohrung aber 7,9 mm — sie hätte
+die Nachbarpole weggeschnitten und genau die Nabe zerstört.
+
+**Zweiter Nachtrag — der Vielzahn an der Bohrung.** Gemeldet: „bitte bis zur
+Achse verlängern und dann den Wellendurchmesser abziehen, sonst entsteht ein
+merkwürdiger Vielzahn." Genau so war es, und es ist rechenbar: die Stirnfläche
+eines Arms ist eine **ebene Sehne**. Endet sie bei `r0`, erreicht der Arm den
+Bohrungskreis nur innerhalb von `acos(r0/r_welle)` um die eigene Achse — bei
+r0 = 18,5 und r_welle = 19 sind das **±13,2°**, während die halbe Polteilung
+bei acht Polen **22,5°** beträgt. Dazwischen blieb die Bohrung unbedeckt, und
+heraus kam ein Vielzahn statt eines Kreises. Ab der Achse gezeichnet deckt
+derselbe Arm ±89,7°, die Lücke kann nicht mehr entstehen. Gemessen an der
+fertigen Bohrungskontur: **r = 19,0000 … 19,0000 mm, Abweichung 0,0000 mm.**
+
+Drei Fälle mussten dabei mit, alle drei am Läufer nachgemessen:
+
+1. **Zwei Pole liegen auf einer Geraden.** Bei `ACHSE_MM = +0,1` blieb zwischen
+   zwei gegenüberliegenden Körpern ein 0,2 mm breiter Schlitz über die ganze
+   Bauhöhe; ab 2p = 4 deckt ihn ein anderer Arm zu, bei 2p = 2 zerschnitt er
+   den Läufer — **6 Festkörper statt einem**. `ACHSE_MM = −0,5` (ein Stück
+   *jenseits* der Achse) kostet nichts, weil die Bohrung ohnehin abgezogen wird.
+2. **`r1·tan(halber Schuhwinkel)` divergiert.** Bei 2p = 2 (halber Schuhwinkel
+   49,5°) stand die Taschenbreite bei 99,4 mm.
+3. **Die Taschendecke ist eine Ebene, der Läuferrand ein Kreis.** Über der
+   Breite, die die Spule braucht, muss oberhalb der Decke noch Eisen stehen —
+   sonst trennt die Tasche den Polschuh ab (gemessen bei 2p = 2: **vier
+   Schuhspitzen zu je 23.347 mm³**). Die Decke sinkt deshalb auf
+   `sqrt(r_rotor² − ya²) − TASCHE_STEG_MM`, aber nie unter die Spulenoberkante
+   plus Isolierluft — dort fehlten sonst 0,03 mm und es blieben 25,95 mm³
+   Kupfer im Blech. Bei acht Polen bindet keines von beidem, die Decke bleibt
+   `r_kern_aussen`.
+
+Gegenprobe nach dem Umbau: **ein Festkörper und keine Durchdringung bei
+2p = 2/4/6/8/12**, rechteckig und kegelig; Werkbank und Pipeline weiter Ziffer
+für Ziffer gleich (1.134.813,98 ↔ 1.134.814 · 1.099.772,24 ↔ 1.099.772 ·
+1.028.000,62 ↔ 1.028.001 · 1.111.818,64 ↔ 1.111.819 · 1.116.060,13 ↔
+1.116.060).
+
+---
+
 ## 2026-09-19 — Die Polzahl war bei drei von fünf Bauarten nicht einstellbar
 
 **Beobachtung** (gemeldet): „Wie stelle ich bei der EESM die Anzahl der Pole

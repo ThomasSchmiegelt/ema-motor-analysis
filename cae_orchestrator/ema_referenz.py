@@ -68,6 +68,23 @@ QUELLEN = {
         "url": "https://info.ornl.gov/sites/publications/files/Pub26762.pdf",
         "stelle": "Tab. 2.7 (2010 Prius, LS 600h, Camry, 2004 Prius)",
     },
+    "cui2025": {
+        "titel": ("Design of High-Speed, High-Efficiency Electrically Excited "
+                  "Synchronous Motor (Cui, Zhang, Song, Zhang, Zhu)"),
+        "kennung": "Energies 2025, 18, 3673 — doi:10.3390/en18143673",
+        "url": "https://www.mdpi.com/1996-1073/18/14/3673",
+        "stelle": ("Tab. 5 (optimierte Geometrie 6p36s) und Abb. 1 "
+                   "(Strukturskizze mit den Symbolen D_o/D_i/w_t/b_s0/h_s "
+                   "und h_s2/w_s2/h_bd/w_bd)"),
+    },
+    "mueller2023": {
+        "titel": ("Inductive Electrically Excited Synchronous Machine for "
+                  "Electrical Vehicles — Design, Optimization and Measurement "
+                  "(Mueller, Maier, Parspour)"),
+        "kennung": "Energies 2023, 16, 1657 — doi:10.3390/en16041657",
+        "url": "https://www.mdpi.com/1996-1073/16/4/1657",
+        "stelle": "Tab. 2 (Prototyp gegen BMW i3)",
+    },
     "sheffield": {
         "titel": ("Modelling and Design of Permanent-magnet Machines for Electric "
                   "Vehicle Traction (Xiao Chen, 2015)"),
@@ -253,6 +270,37 @@ BAUMUSTER = [
 # fuer den Paarvergleich brauchbar -- er tut dasselbe.
 
 MESSPUNKTE += [
+    # ── (6) Der SCHENKELPOL in Zahlen ──────────────────────────────────────
+    #
+    # Der Anlass war eine Beobachtung am Bild: „die Wicklung passt immer noch
+    # nicht". Sie passte wirklich nicht, und diese sechs Zahlen sagen warum --
+    # der Polkern dieses Werkzeugs war mehr als anderthalbmal so breit wie der
+    # einer gerechneten und gebauten Maschine, und was er zuviel nimmt, fehlt
+    # der Erregerwicklung.
+    {"groesse": "EESM_Polschuhbreite_w_s2", "wert": 31.5, "einheit": "mm",
+     "quelle": "cui2025", "zitat": "wse/hse (mm) 31.5/4.5 (Tab. 5)"},
+    {"groesse": "EESM_Polschuhhoehe_h_s2", "wert": 4.5, "einheit": "mm",
+     "quelle": "cui2025", "zitat": "wse/hse (mm) 31.5/4.5 (Tab. 5)"},
+    {"groesse": "EESM_Polkernbreite_w_bd", "wert": 11.5, "einheit": "mm",
+     "quelle": "cui2025", "zitat": "wbd/hbd (mm) 11.5/14.6 (Tab. 5)"},
+    {"groesse": "EESM_Polkernhoehe_h_bd", "wert": 14.6, "einheit": "mm",
+     "quelle": "cui2025", "zitat": "wbd/hbd (mm) 11.5/14.6 (Tab. 5)"},
+    {"groesse": "EESM_Statorbohrung_D_i", "wert": 76.0, "einheit": "mm",
+     "quelle": "cui2025", "zitat": "Do (mm) 110.5 / Di (mm) 76 (Tab. 5)"},
+    {"groesse": "EESM_Nutoeffnung_b_s0", "wert": 2.0, "einheit": "mm",
+     "quelle": "cui2025", "zitat": "bs0/hs0 (mm) 2/0.5, wt 3, hs 9 (Tab. 5)"},
+    {"groesse": "EESM_Erregerstrom", "wert": 3.35, "einheit": "A",
+     "quelle": "cui2025",
+     "zitat": "Field Current/A 3.35 bei 72 Reihenwindungen je Strang (Tab. 4)"},
+    # Ein zweiter Bau, damit es nicht an einer Maschine haengt: der iEESM-
+    # Prototyp der Uni Stuttgart gegen den BMW i3.
+    {"groesse": "EESM_Laeuferdurchmesser_Prototyp", "wert": 179.0, "einheit": "mm",
+     "quelle": "mueller2023",
+     "zitat": "Rotor outer diameter DR,o 179 mm (Prototyp UND BMW i3, Tab. 2)"},
+    {"groesse": "EESM_Luftspalt_Prototyp", "wert": 0.5, "einheit": "mm",
+     "quelle": "mueller2023",
+     "zitat": "Magnetic air-gap length delta 0.5 mm (Prototyp und i3, Tab. 2)"},
+
     # (5) ASM gegen IPM am gleichen Stator: 264 mm Aussen-Ø, 0,73 mm Luftspalt,
     #     48 Nuten, 8 Pole, M270-35. Der IPM ist der Prius 2010.
     {"groesse": "ASM_Statorbohrung", "wert": 195.0, "einheit": "mm",

@@ -263,6 +263,30 @@ def erregung(geom: dict, axial_mm: float, i_f_A: float = 0.0,
     j_f = min(max(j_f, 0.5), 20.0)
     a_cu = f_pol / (j_f * 1e6)                                  # m^2 je Pol
     a_cu_max = kf * a_fenster
+
+    # ── Wer bemisst die Wicklung: die Stromdichte oder der Bauraum? ───────
+    #
+    # `vorgabe` (Standard): die Stromdichte, das Fenster ist die Schranke --
+    # jede bestehende Auslegung rechnet Ziffer fuer Ziffer weiter.
+    # `max`: der GEZEICHNETE Wickelraum. Das ist kein Schoenheitsschalter,
+    # sondern eine Auslegungsentscheidung: `P_f = F_pol^2 * rho * l_w / A_cu`
+    # faellt mit 1/A_cu, dafuer steigt die Kupfermasse. Gemessen an der
+    # Beispielmaschine (2p = 8, Rotor 188,6, Polbedeckung 0,55): A_cu
+    # 106 -> 186 mm^2, J 5,00 -> 2,84 A/mm^2, P_erreger 154 -> 88 W.
+    #
+    # Die Flaeche kommt aus `ema_eesm_cad.wickelraum`, also aus derselben
+    # Zeichnung, die auch gebaut wird. Die analytische Fensterformel oben
+    # (`_pol_fenster`) rechnet ein RECHTECK und kennt weder den Polschuh, der
+    # die Spule halten muss, noch dass die Polteilung nach innen schrumpft --
+    # sie liefert an derselben Maschine 2024 mm^2 gegen 443 mm^2 zeichenbar.
+    if str(geom.get("erregerSpuleFuellung") or "vorgabe") == "max":
+        import ema_eesm_cad as _EC
+        _w = _EC.wickelraum_max(geom, axial_mm)
+        if _w["passt"] and _w["A_wickelraum_mm2"] > 0.0:
+            a_cu = kf * _w["A_wickelraum_mm2"] * 1e-6
+            j_f = f_pol / max(a_cu * 1e6, 1e-12)
+            a_cu_max = a_cu
+
     passt = a_cu <= a_cu_max
     if not passt:
         # Nicht still deckeln: es wird gerechnet, was hineinpasst, und die

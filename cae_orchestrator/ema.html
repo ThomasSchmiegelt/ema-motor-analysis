@@ -911,9 +911,21 @@
       <label style="grid-column:1/-1;margin-bottom:3px">Form der Erregerspule</label>
       <select id="spule_form" style="grid-column:1/-1"></select>
       <div class="hint" style="grid-column:1/-1;font-size:11px;color:#9aa">
-        Kegelig: der Pol ist an der Jochseite breiter, die Wicklung folgt seiner
-        Neigung. Der Polschuh überragt die Spule in beiden Fällen — er hält sie
-        gegen die Fliehkraft.
+        Kegelig: die Wicklung folgt der Neigung des Pols. Der Polschuh überragt
+        die Spule in beiden Fällen — er hält sie gegen die Fliehkraft.
+      </div>
+    </div>
+    <div class="input-group wick-mat" data-arten="eesm gsm" style="display:none">
+      <label style="grid-column:1/-1;margin-bottom:3px">Was die Erregerspule bemisst</label>
+      <select id="spule_fuellung" style="grid-column:1/-1"></select>
+      <div class="hint" style="grid-column:1/-1;font-size:11px;color:#9aa">
+        <b>vorgabe</b>: die Stromdichte (Feinparameter <code>fieldCurrentDensity</code>),
+        der Platz zwischen den Polen bleibt frei — an der Beispielmaschine zu 87 %.
+        <b>max</b>: der gezeichnete Bauraum. Die Spule wird kegelig in den
+        Zwischenpolraum gelegt; Kupfer, Stromdichte und Erregerverlust folgen
+        daraus (gemessen 106 → 184 mm², 5,00 → 2,87 A/mm², 154 → 89 W).
+        Der Polschuh darf dabei mitwachsen, wenn das gemessen mehr Wickelraum
+        bringt. Mehr Kupfer heißt auch mehr Masse und mehr Kosten.
       </div>
     </div>
     <div class="input-group wick-mat" data-arten="pmsm asm synrm eesm gsm">
@@ -13306,6 +13318,7 @@ function escHtml(s) {
     const _ART_FELDER = {mat_bar: "barMat", mat_rotorwire: "rotorWireMat",
                          mat_field: "fieldMat", mat_armature: "armatureMat",
                          spule_form: "erregerSpuleForm",
+                         spule_fuellung: "erregerSpuleFuellung",
                          b_ziel: "bZielT",
                          rotor_type: "rotorType", rotor_bars: "rotorBars",
                          rotor_skew: "rotorSkewSlots",
@@ -14383,7 +14396,8 @@ function escHtml(s) {
             // Server eine andere liefern wuerde -- und eine Marke, die eine
             // Aenderung nicht bemerkt, ist schlimmer als keine: sie friert
             // die alte Maschine ein und sieht dabei richtig aus.
-            g.erregerSpuleForm, g.daempferkaefig, g.daempferStaebeJePol,
+            g.erregerSpuleForm, g.erregerSpuleFuellung,
+            g.daempferkaefig, g.daempferStaebeJePol,
             g.daempferMat, g.bZielT, g.poleArcFrac, g.slotWidthRatio,
             g.slotDepth, g.rotorBars, g.armatureWinding
            ].join("|");
