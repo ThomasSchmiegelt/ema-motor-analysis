@@ -65,6 +65,75 @@ gesamte Polteilung; zwischen zwei benachbten Spulen liegt ein offener Spalt.
 
 ---
 
+## 2026-09-19 — Die Blechsorte erreichte Elmer nie, und der SynRM-Läufer war leer
+
+**Beobachtung.** Gemeldet als „die Materialien sollen auch durchgereicht werden,
+also in CalculiX und auch Elmer" — und als Schlussprobe „probiere alle Modelle
+durch, mach von ihnen ein Bild und prüfe es auf Schlüssigkeit".
+
+**Messung, Werkstoffe.** CalculiX bekommt das Blech (Dichte, E, ν, Fließgrenze
+über `_mat_fc` bzw. `ema_deck`). **Elmer nicht:** alle drei Stufen rechneten mit
+einer fest verdrahteten Permeabilität, und `LAMINATES` kam in den harmonischen
+Modulen mit **null** Treffern überhaupt nicht vor. Wer M250-35A gegen M800-65A
+stellte, bekam dasselbe Feld. Dazu kam, dass die Tabelle gar kein `mu_r` führte.
+
+Zwei verschiedene feste Werte, beide Betriebspunkte: `ema_em3d.MU_R_IRON = 500`
+(magnetostatisch, entspricht rund 2500 A/m) und `ema_em2d_harm.MU_R_EISEN =
+5000` (harmonisch, rund 160 A/m; von der 3-D-Stufe mitbenutzt).
+
+Aus der Lieferliste (thyssenkrupp powercore, DIN EN 10106) folgt µr = J/(µ₀·H)
+bei 2500 A/m:
+
+| Sorte | J@2500 | µr | Faktor |
+|---|---:|---:|---:|
+| M250-35A | 1,49 T | 474 | 1,000 |
+| M270-35A | 1,49 T | 474 | 1,000 |
+| M400-50A | 1,53 T | 487 | 1,027 |
+| M800-65A | 1,60 T | 509 | 1,074 |
+
+**Der Befund darin ist die Richtung:** die GROBEN Sorten haben die HÖHERE
+Polarisation (mehr Eisen, weniger Silizium). Niedriger Ummagnetisierungsverlust
+wird mit weniger Permeabilität bezahlt — und der Unterschied ist mit 7 % klein.
+Wer vom Blechwechsel ein deutlich anderes Feld erwartet, erwartet das Falsche.
+Nebenbei: die verdrahtete 500 liegt genau in diesem Band und war keine schlechte
+Zahl, nur eine blinde.
+
+**Was NICHT ableitbar ist, wird auch nicht behauptet:** die 5000 der harmonischen
+Stufen entspricht rund 160 A/m, und das Datenblatt misst erst ab 2500 A/m. Sie
+durch 474 zu ersetzen wäre kein besserer Wert, sondern ein anderer
+Betriebspunkt unter altem Namen — dazu hängt an diesen Zahlen die Validierung
+der ASM-Feldstufen (0,3 % / 0,14 %). Durchgereicht wird deshalb der
+**Sortenfaktor** (`mu_r_faktor`): jeder Löser behält seinen Betriebspunkt und
+multipliziert ihn. Die Vorgabesorte gibt exakt 1,000, also bleibt jede
+gerechnete Auslegung Ziffer für Ziffer dieselbe — und die Blechwahl wirkt
+trotzdem (M800-65A: 536,9 statt 500 bzw. 5369 statt 5000).
+
+**Messung, Bilder.** Alle sechs Bauarten nebeneinander gerendert. Fünf
+schlüssig; der **SynRM-Läufer war eine leere Scheibe** — 275 Formen gegen 311
+bei der PSM, genau die fehlenden Taschen. `render_cross_section` hatte Zweige
+für ASM, EESM und GSM, aber keinen für SynRM: `hat_magnete` ist False, also
+zeichnete die Magnetschleife nichts. Ausgerechnet die Bauart, deren ganzes
+Moment aus der Läufergeometrie kommt, zeigte gar keine Geometrie.
+
+**Ein eigener Irrtum, gemessen widerlegt:** am kleinen Bild sah es so aus, als
+ragten die Ständerpole der GSM über den Ständeraußendurchmesser hinaus. Über
+alle gezeichneten Formen nachgemessen ist der größte Radius bei JEDER Bauart
+exakt 140,0 mm = D_a/2. Nichts ragt hinaus; der Eindruck kam von der Kachelgröße.
+
+**Fundstelle.** `ema_pipeline.LAMINATES` / neu `mu_r_faktor`;
+`ema_em3d.write_sif`, `ema_em2d_harm.schreibe_sif`, `ema_em3d_harm.schreibe_sif`;
+`ema_pipeline.render_cross_section` (fehlender SynRM-Zweig).
+
+**Status.** Behoben. `LAMINATES` trägt `mu_r` und die drei Polarisationspunkte
+mit Herkunftsvermerk; die beiden Vollmaterialien sind ausdrücklich `"annahme"`.
+Die Dichte des M250-35A ist nach Datenblatt von 7650 auf 7600 kg/m³ berichtigt.
+Der SynRM-Querschnitt zeichnet dieselben leeren Taschen wie die Leinwand, aus
+derselben Quelle (`magnet_legs`). `test_laeuferbild.py` bekommt die Regel, die
+den Fall gefunden hätte: **keine Bauart darf einen Läufer ohne Formen zeichnen**
+(gemessen im Läuferring, Welle und Ständer zählen nicht).
+
+---
+
 ## 2026-09-19 — Jede Wicklung rechnete bei 20 °C, und der Kaefig aus Draht
 
 **Beobachtung.** Gemeldet als „die Materialangaben müssen angepasst werden,

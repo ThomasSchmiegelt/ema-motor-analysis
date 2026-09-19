@@ -4797,6 +4797,13 @@ def param_schema():
         "rotor_lam":   _opts(getattr(T2E, "_LAM", []),  table=LAMINATES),
         "stator_lam":  _opts(getattr(T2E, "_LAM", []),  table=LAMINATES),
         "hairpin_mat": _opts(getattr(T2E, "_HAIR", []), table=HAIRPIN_MATS),
+        # Die uebrigen Wicklungswerkstoffe aus DERSELBEN Tabelle -- sonst
+        # stuenden dort die nackten Schluessel, waehrend jede andere
+        # Aufzaehlung eine lesbare Beschriftung hat.
+        "barMat":       _opts(getattr(T2E, "_KAEFIG", []), table=HAIRPIN_MATS),
+        "rotorWireMat": _opts(getattr(T2E, "_HAIR", []), table=HAIRPIN_MATS),
+        "fieldMat":     _opts(getattr(T2E, "_HAIR", []), table=HAIRPIN_MATS),
+        "armatureMat":  _opts(getattr(T2E, "_HAIR", []), table=HAIRPIN_MATS),
         "magnet":      _opts(getattr(T2E, "_MAG", []),  table=MAGNETS),
         "cooling":     _opts(getattr(T2E, "_COOL", []), labelmap=cool_labels),
         "magOrient":   _opts(getattr(T2E, "_ORIENT", []), labelmap=orient_labels),

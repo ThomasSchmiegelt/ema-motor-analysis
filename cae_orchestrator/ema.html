@@ -761,6 +761,35 @@
     </div>
     <div id="art_hinweis" class="hint"
          style="grid-column:1/-1;font-size:11px;color:#9aa;margin-top:2px"></div>
+    <!-- Die Wicklungswerkstoffe der jeweiligen Bauart. Sie wurden im Code seit
+         jeher GELESEN (ema_asm/ema_eesm/ema_gsm) und hatten weder Schema noch
+         Bedienelement — fuer den, der davorsitzt, gab es sie nicht. Gefuellt
+         aus /param_schema, damit die Liste nicht hier ein zweites Mal steht. -->
+    <div class="input-group wick-mat" data-arten="asm" style="display:none">
+      <label style="grid-column:1/-1;margin-bottom:3px">Käfigwerkstoff (Druckguss)</label>
+      <select id="mat_bar" style="grid-column:1/-1"></select>
+    </div>
+    <div class="input-group wick-mat" data-arten="asm" style="display:none">
+      <label style="grid-column:1/-1;margin-bottom:3px">Läuferwicklung (Schleifringläufer)</label>
+      <select id="mat_rotorwire" style="grid-column:1/-1"></select>
+    </div>
+    <div class="input-group wick-mat" data-arten="eesm gsm" style="display:none">
+      <label style="grid-column:1/-1;margin-bottom:3px">Erregerwicklung (Spulenwerkstoff)</label>
+      <select id="mat_field" style="grid-column:1/-1"></select>
+    </div>
+    <div class="input-group wick-mat" data-arten="gsm" style="display:none">
+      <label style="grid-column:1/-1;margin-bottom:3px">Ankerwicklung</label>
+      <select id="mat_armature" style="grid-column:1/-1"></select>
+    </div>
+    <div class="input-group wick-mat" data-arten="pmsm asm synrm eesm gsm">
+      <label style="grid-column:1/-1;margin-bottom:3px">Leitertemperatur (alle Wicklungen)</label>
+      <input type="number" id="t_leiter" value="0" min="0" max="250" step="5"
+             style="grid-column:1/-1"/>
+      <div class="hint" style="grid-column:1/-1;font-size:11px;color:#9aa">
+        0 = Vorgabe 115 °C (Annahme: Klasse-F-Auslegungspunkt, kein Normwert).
+        Der Widerstand folgt IEC 60228 — bei 155 °C sind es 53 % mehr als bei 20 °C.
+      </div>
+    </div>
   </div>
 
   <!-- 4. Magnet-Topologie -->
@@ -11552,6 +11581,9 @@ function applyPayload(payload) {
   // geometry selects first (drive topology/pocket/connection visibility via handlers)
   // Die Maschinenart zuerst: sie blendet die Magnet-Topologie ein oder aus.
   _setField('machine_art', G.machineType);
+  _setField('mat_bar', G.barMat); _setField('mat_rotorwire', G.rotorWireMat);
+  _setField('mat_field', G.fieldMat); _setField('mat_armature', G.armatureMat);
+  _setField('t_leiter', G.tLeiterC);
   if (window._updateArtVis) window._updateArtVis();
   _setField('mag_shape',   G.magShape);
   _setField('pocket_mode', G.pocketMode);
@@ -13114,12 +13146,50 @@ function escHtml(s) {
     // Was eine Bauart NICHT hat, wird ausgeblendet statt als wirkungsloses Feld
     // stehen zu lassen: eine Asynchronmaschine hat keine Magnetanordnung, und
     // ein Regler, der nichts bewegt, liest sich wie einer, der nicht wirkt.
+    // Die vier Wicklungswerkstoffe + die Leitertemperatur. Dieselbe Quelle wie
+    // die Maschinenart: /param_schema, nicht eine zweite Liste im HTML.
+    const _MAT_FELDER = {mat_bar: "barMat", mat_rotorwire: "rotorWireMat",
+                         mat_field: "fieldMat", mat_armature: "armatureMat"};
+
+    async function _matLaden() {
+      try {
+        if (!_ptabSchema) {
+          const r = await fetch("/param_schema").then(x => x.json());
+          _ptabSchema = r.params || [];
+        }
+      } catch (e) { return; }
+      for (const id in _MAT_FELDER) {
+        const sel = document.getElementById(id);
+        const spec = _ptabSchema.find(sp => sp.key === _MAT_FELDER[id]);
+        if (!sel || !spec || !spec.options) continue;
+        const cur = GEOM[_MAT_FELDER[id]] || spec.def;
+        sel.innerHTML = spec.options.map(o =>
+          `<option value="${o.value}"${o.value === cur ? " selected" : ""}>` +
+          `${o.label}</option>`).join("");
+        sel.value = cur;
+        sel.onchange = e => { GEOM[_MAT_FELDER[id]] = e.target.value; resetField(); };
+      }
+      const tl = document.getElementById("t_leiter");
+      if (tl) tl.oninput = e => {
+        GEOM.tLeiterC = +e.target.value || 0; resetField();
+      };
+      _updateArtVis();
+    }
+    window._matLaden = _matLaden;
+
     function _updateArtVis() {
       const sel = document.getElementById("machine_art");
       const art = (sel && sel.value) || GEOM.machineType || "pmsm";
       const mitMagneten = (art === "pmsm");
       const topo = document.getElementById("grp_magnet_topo");
       if (topo) topo.style.display = mitMagneten ? "" : "none";
+      // Nur die Wicklungen zeigen, die diese Bauart WIRKLICH hat. Ein
+      // Ankerwerkstoff an einer Asynchronmaschine waere ein Feld ohne
+      // Wirkung, und ein wirkungsloses Feld liest sich wie ein defektes.
+      document.querySelectorAll(".wick-mat").forEach(el => {
+        const arten = (el.getAttribute("data-arten") || "").split(/\s+/);
+        el.style.display = arten.includes(art) ? "" : "none";
+      });
       const hin = document.getElementById("art_hinweis");
       if (hin) {
         const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
@@ -13136,6 +13206,7 @@ function escHtml(s) {
       GEOM.machineType = e.target.value; resetField(); _updateArtVis();
     };
     _artLaden();
+    _matLaden();
 
     document.getElementById("mag_shape").onchange = e => {
       GEOM.magShape = e.target.value; resetField();

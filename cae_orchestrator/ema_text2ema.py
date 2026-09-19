@@ -115,6 +115,17 @@ SCHEMA = {
     # Temperaturbeiwert (IEC 60228). 0 = Vorgabe aus ema_pipeline.
     "tLeiterC":   {"kind": "num", "lo": 0.0, "hi": 250.0, "def": 0.0, "geom": True, "adv": True,
                    "desc": "Leitertemperatur für alle Wicklungswiderstände [°C]; 0 = Vorgabe 115 °C"},
+    # Die uebrigen drei Wicklungswerkstoffe. Alle drei wurden im Code GELESEN
+    # (`ema_asm`, `ema_eesm`, `ema_gsm`) und standen in keinem Schema -- also
+    # weder ueber `cae_cli --set` noch in der Parametertabelle noch im Browser
+    # erreichbar. Gewickelt wird aus DRAHT, deshalb `_HAIR` und nicht `_KAEFIG`:
+    # ein Druckgusswerkstoff ist hier keine Wahl.
+    "rotorWireMat": {"kind": "enum", "opts": _HAIR, "def": "cu_etp", "geom": True, "adv": True,
+                     "desc": "Läuferwicklung der ASM (Schleifringläufer)"},
+    "fieldMat":     {"kind": "enum", "opts": _HAIR, "def": "cu_etp", "geom": True, "adv": True,
+                     "desc": "Erregerwicklung (EESM-Schenkelpole, GSM-Ständerpole)"},
+    "armatureMat":  {"kind": "enum", "opts": _HAIR, "def": "cu_etp", "geom": True, "adv": True,
+                     "desc": "Ankerwicklung der Gleichstrommaschine"},
     "magnet":     {"kind": "enum", "opts": _MAG,  "def": "ndfeb_n35","desc": "Magnetwerkstoff"},
     "cooling":    {"kind": "enum", "opts": _COOL, "def": "water",    "desc": "Kühlung"},
     "rpm_from":   {"kind": "num", "lo": 100, "hi": 25000, "def": 5000,  "desc": "Basisdrehzahl / Auslegungsdrehzahl [U/min]"},

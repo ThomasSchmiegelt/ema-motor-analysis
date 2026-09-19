@@ -375,6 +375,64 @@ pruefe(_m["asm"]["ohne_salienz"] is True
        "aus dem Magnetmodell zu uebernehmen (SynRM rechnet es selbst)")
 
 
+print("\n7. KEINE Bauart zeichnet einen leeren Laeufer")
+
+# Die Regel, die den SynRM-Fall gefunden haette. Er hatte in
+# `render_cross_section` gar keinen Zweig: `hat_magnete` ist False, also malte
+# die Magnetschleife nichts, und uebrig blieb eine leere Scheibe —
+# ausgerechnet bei der Bauart, deren ganzes Moment aus der Laeufergeometrie
+# kommt. Aufgefallen ist es erst beim Danebenlegen aller Bilder (275 Formen
+# gegen 311 bei der PSM).
+import matplotlib                                            # noqa: E402
+matplotlib.use("Agg")
+import matplotlib.pyplot as _plt                             # noqa: E402
+import numpy as _np                                          # noqa: E402
+import ema_pipeline as _PL                                   # noqa: E402
+
+for _art, _ex in (("pmsm", {}), ("asm", {}),
+                  ("asm", {"rotorType": "schleifring"}),
+                  ("synrm", {}), ("eesm", {"p": 2}),
+                  ("gsm", {"p": 2, "slots": 24})):
+    _g, _L = geom(_art, **_ex)
+    _fig, _ax = _plt.subplots()
+    _PL.render_cross_section(_g, _ax)
+    _rrot = float(_g["rotorOD"]) / 2.0
+    _rsh = float(_g["shaftD"]) / 2.0
+    # Formen, die WIRKLICH im Laeuferring liegen — die Welle und der Staender
+    # zaehlen nicht, sonst besteht jeder Laeufer die Pruefung.
+    _n = 0
+    for _pa in _ax.patches:
+        try:
+            _v = _pa.get_patch_transform().transform(_pa.get_path().vertices)
+        except Exception:                                    # noqa: BLE001
+            continue
+        if _v is None or not len(_v):
+            continue
+        _r = _np.hypot(_v[:, 0], _v[:, 1])
+        if _rsh * 1.05 < float(_np.mean(_r)) < _rrot * 0.995:
+            _n += 1
+    _plt.close(_fig)
+    _nm = _art + ("/" + _ex["rotorType"] if _ex.get("rotorType") else "")
+    pruefe(_n >= 4,
+           f"{_nm}: {_n} Formen im Laeuferring — kein nacktes Blech")
+
+# Und die Gegenprobe zur Quelle: der SynRM-Querschnitt zeichnet dieselbe
+# Taschenzahl, die `ema_laeuferbild` fuer die Leinwand liefert. Zwei Bilder
+# derselben Maschine muessen dieselbe Maschine zeigen.
+_g, _L = geom("synrm")
+_teile = LB.teile(_g, _L)["teile"]
+_fig, _ax = _plt.subplots()
+_PL.render_cross_section(_g, _ax)
+_leg = _ax.get_legend()
+_plt.close(_fig)
+pruefe(_leg is not None
+       and any("Flussbarrieren" in t.get_text() for t in _leg.get_texts()),
+       "der SynRM-Querschnitt nennt seine Flussbarrieren in der Legende")
+pruefe(len(_teile) > 0,
+       f"und die Leinwand zeichnet dieselben {len(_teile)} Taschen aus "
+       f"derselben Quelle (magnet_legs)")
+
+
 print("\n" + "=" * 62)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

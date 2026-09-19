@@ -507,7 +507,7 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
 
 def schreibe_sif(netz: dict, omega1: float, sigma_eff: float, j_nut: dict,
                  work_dir: str, mu_r_steg: float, mesh_name: str = "mesh",
-                 ring_leitet: bool = True) -> str:
+                 ring_leitet: bool = True, mu_fe: float | None = None) -> str:
     """``case.sif`` fuer ``WhitneyAVHarmonicSolver`` (3-D, komplex)."""
     os.makedirs(os.path.join(work_dir, "results"), exist_ok=True)
     n_nut = int(netz["n_nut"])
@@ -530,7 +530,11 @@ def schreibe_sif(netz: dict, omega1: float, sigma_eff: float, j_nut: dict,
                  f"  Material = {mat}\n"
                  + (f"  Body Force = {bf}\n" if bf else "") + "End\n")
 
-    S.append(f"Material 1\n  Relative Permeability = {H.MU_R_EISEN}\n"
+    # Diese Funktion bekommt kein `geom`; die Blechsorte kommt deshalb als
+    # fertiger Wert vom Aufrufer, der sie hat. Ohne Angabe der Betriebspunkt
+    # dieser Stufe -- also genau das bisherige Verhalten.
+    _mu_fe = float(mu_fe) if mu_fe else H.MU_R_EISEN
+    S.append(f"Material 1\n  Relative Permeability = {_mu_fe}\n"
              "  Electric Conductivity = 0.0\nEnd\n")
     S.append("Material 2\n  Relative Permeability = 1.0\n"
              "  Electric Conductivity = 0.0\nEnd\n")
@@ -696,8 +700,11 @@ def netzkosten(geom: dict, kaefig: dict, axial_mm: float, work_dir: str,
 
 def _loese(ctx: dict, ring_leitet: bool, timeout: int) -> dict:
     """EIN 3-D-Lauf auf dem vorhandenen Netz."""
+    from ema_pipeline import LAMINATES as _LAM, mu_r_faktor as _muf
+    _mu_fe3 = H.MU_R_EISEN * _muf(_LAM.get(H.blechsorte(ctx.get("geom") or {})))
     schreibe_sif(ctx["netz"], ctx["omega1"], ctx["sigma_eff"], ctx["j_nut"],
-                 ctx["work_dir"], ctx["mu_r_steg"], ring_leitet=ring_leitet)
+                 ctx["work_dir"], ctx["mu_r_steg"], ring_leitet=ring_leitet,
+                 mu_fe=_mu_fe3)
     rs = elmer_runner.run_elmersolver(os.path.join(ctx["work_dir"], "case.sif"),
                                       ctx["work_dir"], timeout=timeout)
     if not rs.get("ok"):

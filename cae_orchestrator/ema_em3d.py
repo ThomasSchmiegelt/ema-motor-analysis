@@ -1470,7 +1470,17 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
     S.append("Equation 1\n  Active Solvers(2) = 1 2\nEnd\n")
 
     # Materialien.
-    S.append(f"Material 1\n  Name = \"iron\"\n  Relative Permeability = {MU_R_IRON}\nEnd\n")
+    # Die BLECHSORTE wirkt -- ueber den Sortenfaktor, nicht ueber einen
+    # absoluten Wert: `MU_R_IRON` ist der Betriebspunkt dieser Stufe, und die
+    # Vorgabesorte gibt Faktor 1,0 (s. ema_pipeline.mu_r_faktor). Vorher kam
+    # `LAMINATES` in diesem Modul gar nicht vor.
+    try:
+        from ema_pipeline import LAMINATES as _LAM, mu_r_faktor as _muf
+        _mu_fe = MU_R_IRON * _muf(_LAM.get(
+            str(geom.get("_blech") or geom.get("stator_lam") or "m270_35a")))
+    except Exception:                                        # noqa: BLE001
+        _mu_fe = MU_R_IRON
+    S.append(f"Material 1\n  Name = \"iron\"\n  Relative Permeability = {_mu_fe}\nEnd\n")
     S.append("Material 2\n  Name = \"air\"\n  Relative Permeability = 1.0\nEnd\n")
     S.append(f"Material 3\n  Name = \"magnet\"\n  Relative Permeability = {MU_R_MAG}\nEnd\n")
 

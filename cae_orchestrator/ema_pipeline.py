@@ -459,13 +459,33 @@ def _make_video(frames_dir: str, fps: int = 15) -> str | None:
 
 # Electrical steel laminations for rotor and stator
 # specific_loss_Wkg: P [W/kg] at 1 T / 50 Hz (Bertotti reference)
+# Elektroblech. ``mu_r`` ist NEU und der Grund, warum die Blechwahl die
+# Feldloeser ueberhaupt erreicht: Elmer rechnete in allen drei Stufen mit einem
+# fest verdrahteten 500, ``LAMINATES`` kam dort gar nicht vor -- wer M250-35A
+# gegen M800-65A stellte, bekam dasselbe Feld.
+#
+# Gerechnet, nicht geschaetzt: ``mu_r = J/(mu0*H)`` bei H = 2500 A/m aus der
+# garantierten Mindestpolarisation der Lieferliste (thyssenkrupp powercore,
+# DIN EN 10106); die Punkte stehen als ``J_2500_T``/``J_5000_T``/``J_10000_T``
+# daneben, damit die Herkunft nachrechenbar ist.
+#
+# **Der Befund daran ist die Richtung:** die GROBEN Sorten haben die HOEHERE
+# Polarisation (mehr Eisen, weniger Silizium) -- M800-65A kommt auf 509, das
+# feine M250-35A auf 474. Niedriger Ummagnetisierungsverlust wird also mit
+# weniger Permeabilitaet bezahlt, und der Unterschied ist mit 7 % klein. Wer
+# vom Blechwechsel ein deutlich anderes Feld erwartet, erwartet das Falsche:
+# die Blechwahl bewegt den VERLUST. Nebenbei -- die frueher verdrahtete 500
+# liegt genau in diesem Band und war keine schlechte Zahl, nur eine blinde.
+#
+# Die beiden Vollmaterialien stehen nicht in dieser Lieferliste; ihr ``mu_r``
+# ist ausdruecklich ``"annahme"`` und nicht abgeleitet.
 LAMINATES = {
-    "m250_35a":     {"label": "M250-35A (Premium, 0.35 mm)",   "specific_loss_Wkg": 2.5,  "B_sat_T": 1.65, "density": 7650, "E": 200000, "nu": 0.30, "yield_mpa": 350},
-    "m270_35a":     {"label": "M270-35A (Standard, 0.35 mm)",  "specific_loss_Wkg": 2.7,  "B_sat_T": 1.70, "density": 7650, "E": 200000, "nu": 0.30, "yield_mpa": 340},
-    "m400_50a":     {"label": "M400-50A (Günstig, 0.50 mm)",   "specific_loss_Wkg": 4.0,  "B_sat_T": 1.80, "density": 7700, "E": 200000, "nu": 0.30, "yield_mpa": 380},
-    "m800_65a":     {"label": "M800-65A (Grob, 0.65 mm)",      "specific_loss_Wkg": 8.0,  "B_sat_T": 1.85, "density": 7800, "E": 210000, "nu": 0.30, "yield_mpa": 400},
-    "steel_s235":   {"label": "Stahl S235 (Vollmaterial)",      "specific_loss_Wkg": 15.0, "B_sat_T": 2.00, "density": 7850, "E": 210000, "nu": 0.30, "yield_mpa": 235},
-    "steel_42crmo4":{"label": "42CrMo4 vergütet (Vollmaterial)","specific_loss_Wkg": 12.0, "B_sat_T": 2.00, "density": 7850, "E": 210000, "nu": 0.30, "yield_mpa": 900},
+    "m250_35a":     {"label": "M250-35A (Premium, 0.35 mm)",   "specific_loss_Wkg": 2.5,  "B_sat_T": 1.65, "density": 7600, "E": 200000, "nu": 0.30, "yield_mpa": 350, "J_2500_T": 1.49, "J_5000_T": 1.6, "J_10000_T": 1.7, "mu_r": 474, "magnet_beleg": "thyssenkrupp powercore / DIN EN 10106"},
+    "m270_35a":     {"label": "M270-35A (Standard, 0.35 mm)",  "specific_loss_Wkg": 2.7,  "B_sat_T": 1.70, "density": 7650, "E": 200000, "nu": 0.30, "yield_mpa": 340, "J_2500_T": 1.49, "J_5000_T": 1.6, "J_10000_T": 1.7, "mu_r": 474, "magnet_beleg": "thyssenkrupp powercore / DIN EN 10106"},
+    "m400_50a":     {"label": "M400-50A (Günstig, 0.50 mm)",   "specific_loss_Wkg": 4.0,  "B_sat_T": 1.80, "density": 7700, "E": 200000, "nu": 0.30, "yield_mpa": 380, "J_2500_T": 1.53, "J_5000_T": 1.63, "J_10000_T": 1.73, "mu_r": 487, "magnet_beleg": "thyssenkrupp powercore / DIN EN 10106"},
+    "m800_65a":     {"label": "M800-65A (Grob, 0.65 mm)",      "specific_loss_Wkg": 8.0,  "B_sat_T": 1.85, "density": 7800, "E": 210000, "nu": 0.30, "yield_mpa": 400, "J_2500_T": 1.6, "J_5000_T": 1.7, "J_10000_T": 1.78, "mu_r": 509, "magnet_beleg": "thyssenkrupp powercore / DIN EN 10106"},
+    "steel_s235":   {"label": "Stahl S235 (Vollmaterial)",      "specific_loss_Wkg": 15.0, "B_sat_T": 2.00, "density": 7850, "E": 210000, "nu": 0.30, "yield_mpa": 235, "mu_r": 350, "magnet_beleg": "annahme"},
+    "steel_42crmo4":{"label": "42CrMo4 vergütet (Vollmaterial)","specific_loss_Wkg": 12.0, "B_sat_T": 2.00, "density": 7850, "E": 210000, "nu": 0.30, "yield_mpa": 900, "mu_r": 300, "magnet_beleg": "annahme"},
 }
 
 # Copper / aluminium conductors for hairpin windings
@@ -525,6 +545,41 @@ def leitertemperatur(geom: dict | None = None) -> float:
     except Exception:                                        # noqa: BLE001
         t = 0.0
     return t if t > 0.0 else T_LEITER_AUSLEGUNG_C
+
+
+# Die Blechsorte, auf die sich die bisher fest verdrahteten Permeabilitaeten
+# beziehen. Sie ist die Vorgabe des Werkzeugs, und daran haengt die ganze
+# Eichung der Feldstufen.
+BLECH_BEZUG = "m270_35a"
+
+
+def mu_r_faktor(mat: dict | None) -> float:
+    """Permeabilitaet dieser Blechsorte RELATIV zur Bezugssorte.
+
+    Warum relativ und nicht absolut: die Loeser tragen drei verschiedene fest
+    verdrahtete Werte -- ``ema_em3d.MU_R_IRON = 500`` (magnetostatisch) und
+    ``ema_em2d_harm.MU_R_EISEN = 5000`` (harmonisch, von der 3-D-Stufe
+    mitbenutzt). Beide sind Betriebspunkte: 500 entspricht rund 2500 A/m,
+    5000 entspricht rund 160 A/m. Das Datenblatt (thyssenkrupp powercore,
+    DIN EN 10106) misst erst ab 2500 A/m -- die 5000 laesst sich daraus also
+    **nicht** ableiten, und sie durch 474 zu ersetzen waere keine Verbesserung,
+    sondern ein anderer Betriebspunkt unter altem Namen. Dazu haengt an diesen
+    Zahlen die Validierung der ASM-Feldstufen (0,3 % / 0,14 %).
+
+    Deshalb wird nur der UNTERSCHIED der Sorten durchgereicht: jeder Loeser
+    behaelt seinen Betriebspunkt und multipliziert ihn mit diesem Faktor. Die
+    Bezugssorte gibt exakt 1,0, jede bisher gerechnete Auslegung bleibt also
+    Ziffer fuer Ziffer dieselbe -- und die Blechwahl wirkt trotzdem.
+
+    Gemessen faellt der Faktor klein aus (1,000 / 1,027 / 1,074 ueber
+    M270-35A / M400-50A / M800-65A), und das ist selbst die Aussage: die
+    Blechwahl bewegt den Verlust, nicht das Feld.
+    """
+    bez = LAMINATES.get(BLECH_BEZUG, {}).get("mu_r") or 0.0
+    hier = float((mat or {}).get("mu_r") or 0.0)
+    if bez <= 0.0 or hier <= 0.0:
+        return 1.0
+    return hier / float(bez)
 
 
 def rho_bei(mat: dict, t_c: float) -> float:
@@ -1965,6 +2020,45 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
                     ax.add_patch(MplPoly(_pts, closed=True, fc=_fc, ec=_ec, lw=0.6))
             _laeufer_leg = [Patch(fc='#b87333', ec='#e0a060',
                                   label=f'Erregerspulen ({_kq["poles"]} Pole)')]
+        except Exception:                                    # noqa: BLE001
+            _laeufer_leg = []
+
+    if _MAq.art_code(geom) == "synrm":
+        # Der Reluktanzlaeufer hatte hier gar keinen Zweig: `hat_magnete` ist
+        # False, also zeichnete die Magnetschleife nichts, und uebrig blieb
+        # eine LEERE Scheibe -- ausgerechnet fuer die Bauart, deren ganzes
+        # Moment aus der Laeufergeometrie kommt. Gefunden bei der Schlussprobe
+        # ueber alle Bauarten (275 Formen gegen 311 bei der PSM: genau die
+        # fehlenden Taschen).
+        #
+        # Gezeichnet werden dieselben gestanzten Taschen wie beim IPM, nur
+        # LEER. Die Lage kommt aus `magnet_legs` -- `ema_synrm` selbst kennt
+        # nur eine Ersatz-Barrierenhoehe und keine Geometrie; dieselbe Wahl
+        # trifft `ema_laeuferbild._synrm` fuer die Leinwand, damit Bild und
+        # Vorschau nicht zwei verschiedene Laeufer zeigen.
+        try:
+            _legs_s, _ = magnet_legs(geom)
+            _gap_s = float(geom.get("magGapMm", 0.1) or 0.1)
+            for _pole in range(n_poles):
+                _a = 2 * _m.pi * _pole / max(n_poles, 1)
+                for _lg in _legs_s:
+                    if getattr(_lg, "placement", "interior") != "interior":
+                        continue
+                    _h = float(_lg.thickness) + 2.0 * _gap_s
+                    _L = float(_lg.length)
+                    _ca, _sa = _m.cos(_a), _m.sin(_a)
+                    _tc, _ts = _m.cos(_lg.tilt), _m.sin(_lg.tilt)
+                    _pts = []
+                    for _lx, _ly in ((0.0, -_h / 2), (_L, -_h / 2),
+                                     (_L, _h / 2), (0.0, _h / 2)):
+                        _x = float(_lg.r_pos) + _lx * _tc - _ly * _ts
+                        _y = float(_lg.offset) + _lx * _ts + _ly * _tc
+                        _pts.append((_x * _ca - _y * _sa, _x * _sa + _y * _ca))
+                    _mp = MplPoly(_pts, closed=True, fc='#11131c',
+                                  ec='#2b3a55', lw=0.6)
+                    ax.add_patch(_mp); _mp.set_clip_path(_rotor_clip)
+            _laeufer_leg = [Patch(fc='#11131c', ec='#2b3a55',
+                                  label=f'Flussbarrieren ({len(_legs_s)} je Pol)')]
         except Exception:                                    # noqa: BLE001
             _laeufer_leg = []
 

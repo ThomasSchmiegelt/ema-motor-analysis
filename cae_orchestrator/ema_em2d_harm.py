@@ -485,6 +485,18 @@ def _ring(occ, r_i: float, r_a: float) -> int:
 
 # ── Fallbeschreibung ──────────────────────────────────────────────────────────
 
+def blechsorte(geom: dict) -> str:
+    """Schluessel der Staenderblechsorte -- aus `geom`, wohin die Stufen sie legen.
+
+    Sie steht im Payload auf der OBEREN Ebene (`stator_lam`); die Feldstufen
+    bekommen aber nur `geom`. Deshalb legt `vorbereiten` sie dort ab, und diese
+    Funktion ist die eine Stelle, die den Schluessel kennt -- eine zweite
+    Schreibweise waere genau der stille Faktor 1,0.
+    """
+    return str((geom or {}).get("_blech") or (geom or {}).get("stator_lam")
+               or "m270_35a")
+
+
 def schreibe_sif(netz: dict, geom: dict, omega1: float, sigma_eff: float,
                  j_nut: dict, work_dir: str, mesh_name: str = "mesh",
                  mu_r_steg: float = MU_R_STEG) -> str:
@@ -510,7 +522,12 @@ def schreibe_sif(netz: dict, geom: dict, omega1: float, sigma_eff: float,
                  f"  Material = {mat}\n"
                  + (f"  Body Force = {bf}\n" if bf else "") + "End\n")
 
-    S.append(f"Material 1\n  Relative Permeability = {MU_R_EISEN}\n"
+    # Sortenfaktor wie oben: der Betriebspunkt (5000, rund 160 A/m) bleibt,
+    # die Blechwahl wirkt relativ. Die Bezugssorte aendert nichts, also bleibt
+    # die Validierung dieser Stufe unberuehrt.
+    from ema_pipeline import LAMINATES as _LAM, mu_r_faktor as _muf
+    _mu_fe = MU_R_EISEN * _muf(_LAM.get(blechsorte(geom)))
+    S.append(f"Material 1\n  Relative Permeability = {_mu_fe}\n"
              "  Electric Conductivity = 0.0\nEnd\n")
     S.append("Material 2\n  Relative Permeability = 1.0\n"
              "  Electric Conductivity = 0.0\nEnd\n")
@@ -831,6 +848,11 @@ def vorbereiten(payload: dict, rpm: float, last_nm: float, work_dir: str,
     # normierten Hausskala (s. ``ema_asm.k_norm``); eingepraegt wird der
     # physikalische Strom, sonst waere das Feld um genau diesen Faktor daneben.
     from ema_pipeline import rho_bei as _rho_bei, leitertemperatur as _leitert
+    # Die Blechsorte steht im Payload auf der OBEREN Ebene; die Feldstufen
+    # bekommen nur `geom`. Hier einmal hineinlegen, statt sie unterwegs an
+    # drei Stellen zu suchen und still nicht zu finden.
+    geom = dict(geom)
+    geom.setdefault("_blech", str(payload.get("stator_lam") or "m270_35a"))
     i_pk_phys = float(bp["I_s_A"]) / max(ema_asm.k_norm(geom), 1e-12)
     j_nut = stator_stroeme(geom, i_pk_phys, netz["A_nut_m2"])
 
