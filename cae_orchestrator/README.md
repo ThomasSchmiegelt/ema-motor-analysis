@@ -1,6 +1,6 @@
 # E-Maschinen Analyse
 
-Browser-basiertes Werkzeug zur Auslegung und Analyse von Innenläufer-Permanentmagnetmotoren (IPM). Der Nutzer konfiguriert die Motor-Geometrie im Browser (parametrisch oder frei gezeichnet), dann läuft eine automatisierte Kette: FreeCAD-Geometrieerzeugung → 2D-FDM-Elektromagnetfeldberechnung → CalculiX-Strukturmechanik (Fliehkraft) → thermisches Netzwerk → Fahrzyklus-Verlustintegration. Optional ergänzen eine **echte 3D-Magnetfeldberechnung** (Elmer FEM) und ein PDF-Bericht über ein lokales LLM (Ollama) die Auslegung.
+Browser-basiertes Werkzeug zur Auslegung und Analyse elektrischer Maschinen — gewachsen als Innenläufer-Permanentmagnetmotor (IPM) und heute **fünf Maschinenarten**: PSM, ASM, SynRM, fremderregte Synchronmaschine (EESM, Schenkelpolläufer) und Gleichstrommaschine (GSM). Welche Rechenstufe eine Art wirklich trägt, steht in `ema_maschinenart` und wird als Tor geführt: eine nicht getragene Stufe wird **abgewiesen, nicht genähert**. Der Nutzer konfiguriert die Motor-Geometrie im Browser (parametrisch oder frei gezeichnet), dann läuft eine automatisierte Kette: FreeCAD-Geometrieerzeugung → 2D-FDM-Elektromagnetfeldberechnung → CalculiX-Strukturmechanik (Fliehkraft) → thermisches Netzwerk → Fahrzyklus-Verlustintegration. Optional ergänzen eine **echte 3D-Magnetfeldberechnung** (Elmer FEM) und ein PDF-Bericht über ein lokales LLM (Ollama) die Auslegung.
 
 > **Bedienung Schritt für Schritt:** siehe [NUTZUNGSANLEITUNG.md](NUTZUNGSANLEITUNG.md).
 > **Berechnungsmethodik:** siehe [EM_BERECHNUNG.md](EM_BERECHNUNG.md).
@@ -32,6 +32,7 @@ Die Oberfläche (`ema.html`) ist ein **Workflow mit Tabs**: ① Projekt · ② G
 
 Die Benutzeroberfläche (`ema.html`) erlaubt die vollständige parametrische Beschreibung des Motors — **oder** das freie Zeichnen im Designer-Tab:
 
+- **Maschinenart:** PSM (Vorgabe) · ASM (Käfig- oder Schleifringläufer) · SynRM · EESM (Schenkelpolläufer) · GSM (Gleichstrommaschine mit Anker, Kommutator und Erregerpolen am STÄNDER). Die Auswahl nennt gleich, **wie weit** eine Art getragen ist — eine nicht getragene Stufe wird abgewiesen, nicht genähert. Alle artspezifischen Parameter (Stabzahl, Läuferbauform, Schrägung, Polbedeckung, Polbefestigung, Dämpferkäfig, Ankerwicklung, Erregerspule …) sitzen in demselben Abschnitt.
 - **Stator:** Außen-/Innendurchmesser, Nutzahl, Nuttiefe, Blechpaketlänge
 - **Rotor:** Außendurchmesser, Wellendurchmesser, Polpaarzahl, optional Hohlwelle
 - **Magnettaschen:** Topologien V, asymmetrisches V, Doppel-V, U, Delta, PMa-SynRM, SPM, Halbach, Speiche, Balken, **oder frei gezeichnet** (Custom/Designer-Pfad) (Breite, Dicke, Öffnungswinkel, Position) — automatisch auf die geometrisch maximale Länge beschnitten. Für die V-Form wahlweise auch **per Durchmesser** (Außen-Ø / Innen-Ø der Tasche + Winkel) definierbar.
@@ -39,6 +40,7 @@ Die Benutzeroberfläche (`ema.html`) erlaubt die vollständige parametrische Bes
 - **Wicklung:** Wicklungsart (Hairpin / Rundleiter), **Leiter pro Nut** (geradzahlig 2…12) und **Spulenweite** (Nutschritte, gesehnt möglich). Die Hairpin-Wickelköpfe werden als kollisionsfreie, **durchgezogen-glatte Zugkörper-Sweeps** im CAD-Modell erzeugt — nahtloser Übergang in die Nutstäbe, und auf der Schweißseite mit dem realen Halb-Spulenweiten-Twist + geradem, achsparallelem Fahnen-Ende; die Leiterzahl je Nut geht auch in Kupfervolumen/Phasenwiderstand des Thermomodells ein.
 - **Wellenverbindung:** Presssitz (Querpressverband), Keilwelle oder Polygonprofil (P3G) — Welle und Rotorbohrung passen zueinander, analytisch bewertet (Fugenpressung/Flankenpressung, Drehmomentkapazität, Lösedrehzahl).
 - **Bauteil-Stufenbau:** einzelne Komponenten (Welle, Rotor-/Statoreisen, Magnete, Hairpins, Wickelköpfe, Lager, Isolationspapier, Wuchtscheiben-Bolzen, Flussbarrieren q-/d-Achse) unabhängig ein-/ausschaltbar für einen schrittweisen CAD-Aufbau.
+- **Schenkelpol (EESM/GSM):** Polbedeckung, Polhöhe, Schuh- und Kernanteil, Form der Erregerspule (rechteckig/kegelig) und **was sie bemisst** — die Stromdichte (`vorgabe`) oder der gezeichnete Bauraum zwischen den Polen (`max`; gemessen Kupfer 106 → 184 mm², J 5,00 → 2,87 A/mm², Erregerverlust 154 → 89 W). Der Polkörper läuft bis auf die Wellenbohrung durch; das Joch ist, was die Pole an der Bohrung miteinander bilden, und ob diese **Nabe** den Fluss trägt, steht als Befund im Protokoll statt still korrigiert zu werden.
 - **Kühlung:** Natürliche Konvektion / Zwangsluft / Wassermantel / Öl-Spray
 - **Nennpunkt:** Drehzahl, Drehmoment, Phasenstrom (d/q-Komponenten)
 - **Projektname, Tags, Notizen** für Archivierung und Nachvollziehbarkeit

@@ -12,7 +12,7 @@ carried by `cae_orchestrator`. The other folders are independent subprojects at
 different stages of maturity that are *not* wired to each other today — see the
 "Wiring" column.
 
-**Topics:** electric motor · IPM · PMSM · traction motor · motor design · CAE · FEA ·
+**Topics:** electric motor · IPM · PMSM · induction motor · SynRM · wound-field synchronous machine (EESM) · salient pole · DC machine · traction motor · motor design · CAE · FEA ·
 finite element analysis · CalculiX · Z88Aurora · Code Aster · FreeCAD · Gmsh · Elmer · OpenFOAM ·
 electromagnetics · 2D FDM field solver · topology optimisation (SKO/SIMP) · centrifugal
 rotor stress · lumped-parameter thermal network · drive cycle (WLTP) · design space
@@ -23,7 +23,7 @@ Ollama · agent skill · PI · Hermes Agent · provenance tracking · SQLite
 
 | Folder | What | Stack | Start |
 |---|---|---|---|
-| `cae_orchestrator/` | Browser CAE for IPM motors (geometry → EM field → FEM → thermal → drive cycle, PDF report) | Python/Flask + FreeCAD/CalculiX/Z88/Code Aster/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
+| `cae_orchestrator/` | Browser CAE for electric machines — PMSM · induction · SynRM · wound-field (salient pole) · DC (geometry → EM field → FEM → thermal → drive cycle, PDF report) | Python/Flask + FreeCAD/CalculiX/Z88/Code Aster/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
 | `connection_detection/` | FreeCAD workbench: geometric connection detection in STEP assemblies | Python FreeCAD add-on (`rtree`) | `FreeCADCmd cli.py -- input.step -o out.json` |
 | `pikogk/` | PicoGK geometry kernel with an HTTP API (voxel/implicit geometry, LLM-generated "skills") | .NET 9 + native `picogk.so` | `cd pikogk && ./start.sh` → http://localhost:5266 |
 | `physics_surrogate/` | ML surrogate for the 2D-FDM field stage (PhysicsNeMo/Torch) | Python + Torch/CUDA | `cd physics_surrogate && ./start.sh` → http://localhost:5300 |
@@ -104,6 +104,62 @@ Two sources, kept strictly apart:
 
 No model is trained here. "Learned" means: derived from the tool's own stock and
 available next time.
+
+## Five machine types — and how far each is actually carried
+
+The tool grew as a PMSM with hairpins, and that assumption sat in six modules rather
+than in one switch. `ema_maschinenart.ARTEN` is that switch now: **PMSM · ASM ·
+SynRM · EESM · GSM**, each with its excitation, its rotor features, and — the point —
+**which of the four stages it really carries**. Two questions that look like one and
+are not: *does the type carry this stage* and *does it go THIS way*. The induction
+machine carries `feld` and `em3d`, but over `feld2d`/`feld3d` (Elmer, harmonic), not
+over the pipeline's magnetostatic chain, which still refuses it. Handing an induction
+machine to the PMSM path produced **no error — it produced PMSM numbers under a
+foreign name**, and that is the same silent failure as a WLTP cycle on a bicycle.
+
+### The salient pole has no yoke ring
+
+Reported at the FreeCAD model, in four steps, and each one was measurable:
+
+**There was a wedge.** The pole foot opened *above* the yoke ring: over the lower
+5,8 mm of the 26,5 mm core height the core widened from 21,70 to 43,92 mm — half the
+pole pitch, standing in the interpolar space. It was a leftover from when the core
+itself was still a trapezium and a triangle gaped toward the yoke; and it contradicted
+the attachment computed right next to it, where `ema_schenkelpol` puts the dovetail
+neck **narrower** than the core (0,70 ×).
+
+**So the core runs to the shaft, and the bore is cut last.** Core height 26,5 →
+**66,0 mm**. The yoke is then what the pole bodies form *with each other* near the
+bore: two bodies of half-width `w`, their axes `2π/2p` apart, overlap out to
+`r_nabe = w/sin(π/2p)`. Whether that **hub** carries the flux is computed and *named*
+rather than healed — measured, it does so only from 2p = 12 upwards; at 2p = 8 there
+are 9,36 mm against 12,57 mm needed, so B = 1,81 T against a 1,70 T lamination limit.
+The gate writes the finding into the log and refuses nothing: a thin yoke saturates,
+it does not break.
+
+**Stopping just short of the bore is not enough.** The end face of an arm is a flat
+chord, so it reaches the bore circle only within `acos(r0/r_shaft)` of its own axis —
+at r0 = 18,5 and r_shaft = 19 that is ±13,2° against a half pole pitch of 22,5°. In
+between the bore stayed uncovered and came out as a **polygon**. Drawn to 0,5 mm past
+the axis it cannot happen; measured bore contour afterwards: r = 19,0000 … 19,0000 mm.
+
+**And the interpolar space was 87 % empty** — not because of the drawing but because
+of a design input: `A_cu = F_pol/J`. `erregerSpuleFuellung` makes that a choice.
+`vorgabe` (the default) keeps every existing design digit for digit; `max` lets the
+**drawn** space size the coil, which then becomes conical because the pole pitch grows
+outward. Measured on the example machine: copper per pole **106 → 184 mm²**, current
+density **5,00 → 2,87 A/mm²**, field loss **154,1 → 88,6 W**, field winding
+**2,32 → 4,04 kg**. The pole shoe may widen with it — but only as far as a
+*measurement* says it pays: 0,55 → 0,58 buys 0,6 %, because a wider shoe forces a
+wider core and the core eats the space almost as fast as the overhang wins it.
+
+Two independent drawers build this rotor from one source — the pipeline's generator
+and the bench `bau_eesm.py` — and they must agree **digit for digit**. That is how
+seven silent defects surfaced, among them a cone built from the wrong width (775 mm³),
+inner cutters interpolating instead of evaluating the core line (102,45 mm³ of copper
+left in the iron), and `0.5 · b` as a fillet radius, which is exactly the degenerate
+value: OCC left both bodies square and the coil corners sat in the steel. All of them
+are written up in `cae_orchestrator/BEFUNDE.md` with the measurement.
 
 ## Pairwise comparison: what is actually being decided
 

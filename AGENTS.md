@@ -6,7 +6,7 @@ Monorepo einer CAE-Toolchain für E-Maschinen. Drei eigenständige Teilprojekte,
 
 | Ordner | Was | Dienst |
 |---|---|---|
-| `cae_orchestrator/` | Browser-CAE für E-Maschinen (heute PSM/IPM, ASM analytisch): Geometrie → EM-Feld → Struktur-FEM → Thermik → Fahrzyklus → PDF | `:5000` |
+| `cae_orchestrator/` | Browser-CAE für E-Maschinen (PSM · ASM · SynRM · EESM · GSM — wie weit jede getragen ist, sagt `maschinenart`): Geometrie → EM-Feld → Struktur-FEM → Thermik → Fahrzyklus → PDF | `:5000` |
 | `pikogk/` | PicoGK-Geometriekern + HTTP-API (Voxel/implizit, LLM-erzeugte „Skills") | `:5266` |
 | `physics_surrogate/` | ML-Surrogat für die Löserstufen (PhysicsNeMo/Torch) | `:5300` |
 | `connection_detection/` | FreeCAD-Workbench: Verbindungserkennung in STEP-Baugruppen | — (CLI) |
@@ -150,8 +150,11 @@ verdrängt und diese Datei am Anfang jeder Sitzung neu gelesen wird.
 
 1. **Maschinenart** (`geom.machineType`) — `pmsm` ist die Vorgabe und damit eine
    *Annahme*, keine Wahl. `maschinenart` sagt, welche Art welche Rechenstufe heute
-   trägt: analytisch `pmsm` + `asm`, Feld/CAD/3D bisher nur `pmsm`. Eine nicht
-   getragene Art wird abgewiesen — es wird **nicht** ersatzweise PSM-Physik gerechnet.
+   trägt, und es sind **zwei** Fragen: *trägt sie die Stufe* und *geht sie DIESEN
+   Weg*. Analytisch und im CAD sind alle fünf (`pmsm`/`asm`/`synrm`/`eesm`/`gsm`); die
+   ASM trägt Feld und 3-D über `feld2d`/`feld3d` (Elmer, harmonisch), nicht über die
+   magnetostatische Kette der Pipeline. Eine nicht getragene Art wird abgewiesen — es
+   wird **nicht** ersatzweise PSM-Physik gerechnet.
 2. **Lastfall** (`zyklus`) — Fahrzyklus **und** Fahrzeug gehören zusammen. Ohne Wahl
    rechnet `--frisch` mit `cycle=off`. Nie einen Pkw-Zyklus auf etwas legen, das kein
    Pkw ist.

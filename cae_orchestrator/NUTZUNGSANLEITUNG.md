@@ -223,11 +223,39 @@ Fliehkraft-FEM ein.
   benachbarten Polpaaren.
 - **d-Achse**: Schlitz liegt in der Polmitte — trennt die beiden V-Arme eines Pols.
 
+#### Maschinenart
+
+Sie steht **vor** der Magnet-Topologie, weil sie die Entscheidung davor ist. Die Liste
+kommt aus `/param_schema` und nennt gleich, wie weit eine Art getragen ist — eine nicht
+getragene Rechenstufe wird abgewiesen, nicht genähert.
+
+| Parameter | Beschreibung |
+|---|---|
+| **Maschinenart** | PSM (Vorgabe) · ASM · SynRM · EESM · GSM. Bei einer Art ohne Magnete wird die Magnet-Topologie ausgeblendet — ein Regler, der nichts bewegt, liest sich wie einer, der nicht wirkt |
+| **Polpaare (p)** | 1–40; gehört JEDER Maschine, daneben steht die abgeleitete Polzahl 2p |
+| **Ziel-Luftspaltfeld** | ASM/EESM/GSM: bei der PSM steht das Feld durch den Magneten fest, bei jeder fremderregten Bauart wird es eingestellt |
+| **Läuferbauform, Läufernutzahl, Schrägung, Leiter je Läufernut** | nur ASM |
+| **Polbedeckung, Polbefestigung, Schrauben, Gewinde** | nur EESM — Schwalbenschwanz oder Bolzen, beide werden gerechnet, gewertet wird die gewählte |
+| **Dämpferkäfig, Stäbe je Pol, Werkstoff** | nur EESM. Sein NUTZEN geht in keine Kennzahl ein (asynchroner Anlauf und Pendeldämpfung brauchen einen zeitabhängigen Lauf); gerechnet wird, was er kostet |
+| **Ankerwicklungsart, Ankerwerkstoff** | nur GSM |
+| **Form der Erregerspule** | EESM/GSM: rechteckig oder kegelig |
+| **Was die Erregerspule bemisst** | `vorgabe` — die Stromdichte (`fieldCurrentDensity`), der Platz zwischen den Polen bleibt frei (gemessen zu 87 %). `max` — der **gezeichnete** Bauraum: die Spule wird kegelig in den Zwischenpolraum gelegt, Kupfer, Stromdichte, Erregerverlust und Masse folgen daraus (106 → 184 mm², 5,00 → 2,87 A/mm², 154 → 89 W, 2,32 → 4,04 kg). Der Polschuh darf mitwachsen, aber nur soweit eine Messung sagt, dass es mehr Wickelraum bringt |
+| **Leitertemperatur** | alle Arten: bei ihr wird der Leiterwiderstand gerechnet |
+
+> **Der Schenkelpol hat kein Joch mehr.** Sein Körper läuft mit voller Breite bis auf die
+> Wellenbohrung durch, die Bohrung wird zuletzt abgezogen. Das Joch ist das, was die
+> Polkörper nahe der Bohrung *miteinander* bilden. Ob diese **Nabe** den Fluss trägt,
+> steht als Befund im Protokoll (Höhe gegen Bedarf, B gegen Blechgrenze) — abgewiesen
+> wird deswegen nichts: ein dünnes Joch sättigt, es bricht nicht. Gemessen trägt sie ihn
+> erst ab 2p = 12. Wer sie tragfähig will, hat drei gerechnete Hebel: mehr Pole,
+> breiterer Kern (kleineres Ziel-Luftspaltfeld) oder ein ausdrückliches `polHoeheAnteil`,
+> das den alten Jochring zurückholt.
+
 #### Magnet-Topologie
 
 | Parameter | Beschreibung |
 |---|---|
-| **Polpaare (p)** | 1–40; bestimmt mit der Nutzahl die Wicklungsauslegung |
+| **Polpaare (p)** | s. oben — bestimmt mit der Nutzahl die Wicklungsauslegung |
 | **Magnet-Anordnung** | V-Form · asymmetrisches V · Doppel-V · U · Delta · PMa-SynRM · SPM · Halbach · Speiche · Balken |
 | **Magnet-Orientierung (Polung)** | „Lange Seite N/S" (quer, Standard) oder „Kurze Seite N/S" (90° gedreht, längs). Wirkt identisch in Live-Vorschau und FDM |
 | **Magnettasche (nur V-Form)** | Umschaltbar: „Position (Radius) + Länge" oder „Durchmesser (Außen-Ø / Innen-Ø) + Winkel" |

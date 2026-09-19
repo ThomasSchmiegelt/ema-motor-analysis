@@ -26,7 +26,7 @@ PI · Hermes Agent · Herkunftsnachweis · SQLite
 
 | Ordner | Was | Stack | Start |
 |---|---|---|---|
-| `cae_orchestrator/` | Browser-CAE für IPM-Motoren (Geometrie → EM-Feld → FEM → Thermik → Fahrzyklus, PDF-Bericht) | Python/Flask + FreeCAD/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
+| `cae_orchestrator/` | Browser-CAE für E-Maschinen — PSM · ASM · SynRM · EESM (Schenkelpol) · GSM (Geometrie → EM-Feld → FEM → Thermik → Fahrzyklus, PDF-Bericht) | Python/Flask + FreeCAD/Elmer/OpenFOAM/Blender | `cd cae_orchestrator && ./start.sh` → http://localhost:5000 |
 | `connection_detection/` | FreeCAD-Workbench: Verbindungserkennung in STEP-Baugruppen (Basis für Multi-Body-CalculiX) | Python-FreeCAD-Addon (`rtree`) | via `FreeCADCmd cli.py -- input.step -o out.json` |
 | `pikogk/` | PicoGK-Geometriekernel mit HTTP-API (Voxel-/Implicit-Geometrie, „Engine-Head"-Skills für Zylinderköpfe) | .NET 9 + native `picogk.so` | `cd pikogk && ./start.sh` → http://localhost:5266 |
 | `physics_surrogate/` | ML-Surrogat für die 2D-FDM-Feldstufe (PhysicsNeMo/Torch) | Python + Torch/CUDA | `cd physics_surrogate && ./start.sh` → http://localhost:5300 |
@@ -347,6 +347,66 @@ Fließtext geklaubt.
 
 **Gerechnet wird weiterhin ausschließlich lokal.** Es wird nichts hochgeladen und keine
 Rechenaufgabe ausgelagert.
+
+## Fünf Maschinenarten — und wie weit jede wirklich getragen ist
+
+Das Werkzeug ist als PSM mit Hairpins gewachsen, und diese Annahme stand in sechs
+Modulen statt in einem Schalter. `ema_maschinenart.ARTEN` ist dieser Schalter:
+**PSM · ASM · SynRM · EESM · GSM**, jede mit ihrer Erregungsart, ihren Läufermerkmalen
+und — darum geht es — **welche der vier Stufen sie wirklich trägt**. Zwei Fragen, die
+wie eine aussehen und keine sind: *trägt die Art diese Stufe* und *geht sie DIESEN
+Weg*. Die Asynchronmaschine trägt `feld` und `em3d`, aber über `feld2d`/`feld3d`
+(Elmer, harmonisch), nicht über die magnetostatische Kette der Pipeline, die sie
+weiterhin abweist. Eine Asynchronmaschine in den PSM-Pfad zu geben lieferte **keine
+Fehlermeldung, sondern PSM-Zahlen unter fremdem Namen** — derselbe stille Fehler wie
+ein WLTP-Zyklus am Fahrrad.
+
+### Der Schenkelpol hat kein Joch mehr
+
+Gemeldet am FreeCAD-Modell, in vier Schritten, und jeder davon war messbar:
+
+**Da war ein Keil.** Der Polfuß öffnete sich *oberhalb* des Jochrings: über den
+unteren 5,8 mm der 26,5 mm Kernhöhe wuchs der Kern von 21,70 auf 43,92 mm — die halbe
+Polteilung, mitten im Zwischenpolraum. Er war ein Rest aus der Zeit, als der Kern
+selbst noch ein Trapez war und zum Joch hin ein Dreieck klaffte; und er widersprach der
+daneben gerechneten Befestigung, in der `ema_schenkelpol` den Schwalbenschwanzhals
+**schmaler** als den Kern legt (0,70 ×).
+
+**Also läuft der Kern bis auf die Welle, und die Bohrung wird zuletzt abgezogen.**
+Kernhöhe 26,5 → **66,0 mm**. Das Joch ist dann das, was die Polkörper nahe der Bohrung
+*miteinander* bilden: zwei Körper der halben Breite `w`, deren Achsen `2π/2p`
+auseinanderliegen, überdecken sich bis `r_nabe = w/sin(π/2p)`. Ob diese **Nabe** den
+Fluss trägt, wird gerechnet und **benannt** statt geheilt — gemessen trägt sie ihn erst
+ab 2p = 12; bei 2p = 8 stehen 9,36 mm gegen 12,57 mm Bedarf, also B = 1,81 T gegen eine
+Blechgrenze von 1,70 T. Das Tor schreibt den Befund ins Protokoll und weist nichts ab:
+ein dünnes Joch sättigt, es bricht nicht.
+
+**Kurz vor der Bohrung zu enden genügt nicht.** Die Stirnfläche eines Arms ist eine
+ebene Sehne, sie erreicht den Bohrungskreis also nur innerhalb von
+`acos(r0/r_welle)` um die eigene Achse — bei r0 = 18,5 und r_welle = 19 sind das
+±13,2° gegen 22,5° halbe Polteilung. Dazwischen blieb die Bohrung unbedeckt und kam
+als **Vielzahn** heraus. Bis 0,5 mm jenseits der Achse gezeichnet kann das nicht mehr
+passieren; gemessene Bohrungskontur danach: r = 19,0000 … 19,0000 mm.
+
+**Und der Zwischenpolraum war zu 87 % leer** — nicht wegen der Zeichnung, sondern wegen
+einer Auslegungsvorgabe: `A_cu = F_pol/J`. `erregerSpuleFuellung` macht daraus eine
+Wahl. `vorgabe` (Standard) lässt jede bestehende Auslegung Ziffer für Ziffer stehen;
+`max` lässt den **gezeichneten** Raum die Spule bemessen, die dadurch kegelig wird,
+weil die Polteilung nach außen wächst. Gemessen an der Beispielmaschine: Kupfer je Pol
+**106 → 184 mm²**, Stromdichte **5,00 → 2,87 A/mm²**, Erregerverlust
+**154,1 → 88,6 W**, Erregerwicklung **2,32 → 4,04 kg**. Der Polschuh darf mitwachsen —
+aber nur so weit, wie eine **Messung** sagt, dass es sich lohnt: 0,55 → 0,58 bringt
+0,6 %, weil ein breiterer Schuh einen breiteren Kern erzwingt und der den Platz fast so
+schnell frisst, wie der Überstand ihn gewinnt.
+
+Zwei unabhängige Zeichner bauen diesen Läufer aus einer Quelle — der Erzeuger der
+Pipeline und die Werkbank `bau_eesm.py` — und sie müssen **Ziffer für Ziffer**
+übereinstimmen. Genau daran fielen sieben stille Fehler auf, darunter ein Kegel, der
+mit der falschen Breite gebaut wurde (775 mm³), Innenschneider, die ihre Breite
+interpolierten statt die Kerngerade auszuwerten (102,45 mm³ Kupfer im Eisen), und
+`0,5 · b` als Verrundungsradius — genau der Entartungswert: OCC ließ beide Körper eckig
+und die Spulenecken steckten im Blech. Alle stehen mit ihrer Messung in
+`cae_orchestrator/BEFUNDE.md`.
 
 ## Paarvergleich: worüber überhaupt entschieden wird
 
