@@ -98,6 +98,23 @@
       ctx.restore();
       return;
     }
+    if (t.form === "trapez") {
+      // Vier Ecken: innen (r0) und aussen (r1) verschieden breit -- der
+      // kegelige Schenkelpol und die Spule, die seiner Neigung folgt. Bei der
+      // Rechteckwicklung sind beide Kanten gleich und es entsteht dasselbe
+      // Rechteck wie zuvor.
+      ctx.save();
+      ctx.rotate(t.grad * GRAD);
+      ctx.beginPath();
+      ctx.moveTo(t.r0 * s, t.y0i * s);
+      ctx.lineTo(t.r1 * s, t.y0a * s);
+      ctx.lineTo(t.r1 * s, t.y1a * s);
+      ctx.lineTo(t.r0 * s, t.y1i * s);
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+      return;
+    }
     if (t.form === "tasche") {
       // Langloch im Schenkelrahmen -- dieselbe Form wie die IPM-Tasche in
       // `drawRotor`: Ursprung am inneren Ende, um `tilt` gedreht, zwei
@@ -170,6 +187,21 @@
       a = a0 + t.grad * GRAD; ca = Math.cos(a); sa = Math.sin(a);
       for (r = t.r0; r <= t.r1; r += schritt) {
         for (w = t.y0; w <= t.y1; w += schritt) {
+          _setz(gridMu, N, Math.floor(center + (r * ca - w * sa) * gs),
+                Math.floor(center + (r * sa + w * ca) * gs), wert);
+        }
+      }
+      return;
+    }
+    if (t.form === "trapez") {
+      a = a0 + t.grad * GRAD; ca = Math.cos(a); sa = Math.sin(a);
+      for (r = t.r0; r <= t.r1; r += schritt) {
+        // Die beiden Kanten linear ueber den Radius ueberblenden -- dieselbe
+        // Form, die `_teil` zeichnet, damit Bild und Feld uebereinstimmen.
+        var u = (r - t.r0) / Math.max(t.r1 - t.r0, 1e-9);
+        var wa = t.y0i + (t.y0a - t.y0i) * u;
+        var wb = t.y1i + (t.y1a - t.y1i) * u;
+        for (w = wa; w <= wb; w += schritt) {
           _setz(gridMu, N, Math.floor(center + (r * ca - w * sa) * gs),
                 Math.floor(center + (r * sa + w * ca) * gs), wert);
         }

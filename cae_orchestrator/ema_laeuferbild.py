@@ -94,6 +94,20 @@ def _kreis(cx: float, cy: float, r: float, rolle: str) -> dict:
             "cy": round(float(cy), 4), "r": round(float(r), 4), "rolle": rolle}
 
 
+def _trapez(r0: float, r1: float, y0i: float, y1i: float,
+            y0a: float, y1a: float, grad: float, rolle: str) -> dict:
+    """Vier Ecken statt zwei Breiten -- fuer den kegeligen Pol.
+
+    Sind Innen- und Aussenkante gleich breit, ist es ein Rechteck; die Seite
+    zeichnet dann dasselbe wie zuvor. Ein eigenes `form` statt eines
+    aufgebohrten `rechteck`, damit der Zeichner nicht raten muss.
+    """
+    return {"form": "trapez", "r0": round(float(r0), 4), "r1": round(float(r1), 4),
+            "y0i": round(float(y0i), 4), "y1i": round(float(y1i), 4),
+            "y0a": round(float(y0a), 4), "y1a": round(float(y1a), 4),
+            "grad": round(float(grad), 4), "rolle": rolle}
+
+
 def _nutkranz(n: int, r_innen: float, tiefe: float, breite: float,
               rolle: str) -> list:
     """``n`` gleiche Nuten ueber den Umfang — Kaefig, Laeuferwicklung, Anker.
@@ -173,12 +187,20 @@ def _eesm(geom: dict, axial: float) -> dict:
         if _luecke > 0.1:
             teile.append(_segment(r_rot, r_rot - r_j, _g0 + _luecke / 2.0,
                                   _luecke / 2.0, "luft"))
+    # Zwei Breiten: beim Rechteck gleich (dann ist das Trapez ein Rechteck und
+    # die Zeichnung Ziffer fuer Ziffer die alte), beim Kegel zur Jochseite hin
+    # breiter -- und die Spule folgt der Neigung.
+    b_i = float(k.get("b_kern_innen_mm", b_k))
+    b_a = float(k.get("b_kern_aussen_mm", b_k))
     for i in range(poles):
         g = 360.0 * i / max(poles, 1)
         teile.append(_segment(r_rot, r_rot - r_k, g, halb, "pol"))
-        teile.append(_rechteck(r_j, r_k, -b_k / 2.0, b_k / 2.0, g, "pol"))
-        teile.append(_rechteck(r_j, r_k, b_k / 2.0, b_k / 2.0 + d_s, g, "kupfer"))
-        teile.append(_rechteck(r_j, r_k, -b_k / 2.0 - d_s, -b_k / 2.0, g, "kupfer"))
+        teile.append(_trapez(r_j, r_k, -b_i / 2.0, b_i / 2.0,
+                             -b_a / 2.0, b_a / 2.0, g, "pol"))
+        teile.append(_trapez(r_j, r_k, b_i / 2.0, b_i / 2.0 + d_s,
+                             b_a / 2.0, b_a / 2.0 + d_s, g, "kupfer"))
+        teile.append(_trapez(r_j, r_k, -b_i / 2.0 - d_s, -b_i / 2.0,
+                             -b_a / 2.0 - d_s, -b_a / 2.0, g, "kupfer"))
     hin = (f"Schenkelpollaeufer, {poles} Pole, Erregerspule aus dem "
            f"Kupferquerschnitt ({k['A_cu_mm2']:.0f} mm² je Pol) statt aus dem "
            f"verfuegbaren Platz.")

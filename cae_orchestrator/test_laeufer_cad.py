@@ -471,7 +471,10 @@ print("\n6. Der Anlasswiderstand: Schlupf ja, Laeufererwaermung nein")
 bp0 = ema_asm.betriebspunkt(gs, 100.0, 3000.0, 80.0)
 bp1 = ema_asm.betriebspunkt(gs, 100.0, 3000.0, 80.0,
                             r_zusatz_ohm=lw["R2_Ohm"])
-pruefe(abs(bp1["schlupf"] - 2.0 * bp0["schlupf"]) < 1e-9,
+# Schranke relativ: der Schlupf haengt jetzt am Widerstand BEI
+# BETRIEBSTEMPERATUR, und `schlupf` kommt gerundet zurueck -- eine Gleichheit
+# auf 1e-9 pruefte die Rundung statt der Verdopplung.
+pruefe(abs(bp1["schlupf"] / max(bp0["schlupf"], 1e-12) - 2.0) < 1e-3,
        f"doppelter Laeuferwiderstand -> doppelter Schlupf "
        f"({bp0['schlupf_pct']:.3f} -> {bp1['schlupf_pct']:.3f} %) — das ist die "
        f"Aussage ueber den Anlauf, nicht eine Faustregel")
@@ -552,13 +555,16 @@ ze = lauf(skript(ge))
 pruefe(ze.fehler is None, f"das Skript laeuft ({ze.fehler or 'ok'})")
 pruefe("Magnets_N" not in ze.objekte and "Cage_Bars" not in ze.objekte,
        "weder Magnete noch Kaefig — der Fluss kommt aus der Erregerwicklung")
-for name, soll in (("Field_Coils_N", k["poles"]), ("Field_Coils_S", k["poles"])):
+for name in ("Field_Coils_N", "Field_Coils_S"):
     o = ze.objekte.get(name)
-    # Je Pol ZWEI Spulenquerschnitte (links und rechts des Kerns), die Haelfte
-    # der Pole je Polaritaet.
-    pruefe(o is not None and len(o.Shape.teile) == k["poles"],
-           f"{name}: {len(o.Shape.teile) if o else 0} Spulenquerschnitte "
-           f"= {k['poles'] // 2} Pole x 2 Seiten")
+    # EIN geschlossener Rahmen je Pol -- nicht mehr zwei lose Quader links und
+    # rechts des Kerns. Zwei Quader sind zwei Leiterstaebe und keine Wicklung:
+    # die Stuecke an den STIRNSEITEN fehlten ganz, und damit war die Spule im
+    # CAD nicht geschlossen. Gemeldet, gemessen (10 Flaechen, eine Schale,
+    # Fuellgrad 0,17 -- ein Rahmen mit Loch), behoben.
+    pruefe(o is not None and len(o.Shape.teile) == k["poles"] // 2,
+           f"{name}: {len(o.Shape.teile) if o else 0} Spulen = "
+           f"{k['poles'] // 2} Pole dieser Polaritaet, je EINE geschlossene")
 r = ze.objekte.get("Slip_Rings")
 pruefe(r is not None and len(r.Shape.teile) == 2,
        "ZWEI Schleifringe — der Erregerkreis ist Gleichstrom, kein Drehstrom "

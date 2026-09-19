@@ -65,6 +65,73 @@ gesamte Polteilung; zwischen zwei benachbten Spulen liegt ein offener Spalt.
 
 ---
 
+## 2026-09-19 — Die Erregerspule war keine Spule, und der Pol passte nicht ans Joch
+
+**Beobachtung.** Gemeldet als „die Spulen müssen komplett abgedeckt sein … im CAD
+muss die Spule geschlossen sein, das sind sie nicht … es sieht so aus, als würde
+der Rotor aus unterschiedlichen Bodies bestehen".
+
+**Messung, erster Fall: die Spule war keine.** `_pol_spule` baute **zwei
+getrennte Quader** links und rechts des Kerns. Das sind zwei Leiterstäbe. Eine
+Spule ist eine geschlossene Schleife um den Kern — die beiden Stücke an den
+**Stirnseiten** (z = ±L/2, die Wickelköpfe) fehlten ganz. Gebaut wird jetzt
+Außenkörper minus Innenkörper; nachgemessen in FreeCAD: **10 Flächen, eine
+Schale, Füllgrad 0,17** — ein Rahmen mit Loch, und **ein** Festkörper je Pol
+statt zweier loser Blöcke.
+
+**Damit erledigt sich auch der Eindruck „verschiedene Bodies":** `Rotor` war
+immer schon **ein** gültiger Solid (nachgemessen: `Solids=1, gueltig=True`) —
+die losen Körper waren die Spulen selbst.
+
+**Messung, zweiter Fall: die Deckung war Zufall.** Der Polschuh hat eine
+mechanische Aufgabe — er hält die Spule gegen die Fliehkraft („salient pole tips
+overhang the pole body to secure the field coil in place against the action of
+centrifugal force", US3089049A). Die Kernbreite kam aber aus einem festen
+Verhältnis (`0,72 · b_schuh`), und ob darunter noch Platz für die Spule blieb,
+ergab sich zufällig.
+
+**Messung, dritter Fall — der schwerste, und er fiel erst durch die neue
+Prüfung auf:** geprüft wurde die Polteilung nur am **Kernradius**, wo reichlich
+Platz ist. Die Polteilung ist aber am **Jochradius** am kleinsten, und der Kern
+ist über die ganze Höhe gleich breit. Gemessen am frischen Payload:
+
+| Pole | τ am Joch | Kern + Spule | frei |
+|---|---:|---:|---:|
+| 4 (p=2) | 86,6 mm | 73,1 mm | +13,6 |
+| 6 (p=3) | 49,0 mm | 48,9 mm | **+0,1** |
+| 8 (p=4) | 33,4 mm | 37,3 mm | **−3,9** |
+
+Ab acht Polen **durchdringen sich die Spulen benachbarter Pole am Joch** — und
+gezeichnet wurde es trotzdem.
+
+**Status.** Behoben. Der Kern gehorcht jetzt **drei** Schranken, und es gilt die
+engste: Deckung (Schuh über Spule plus `SCHUH_UEBERSTAND_MM`), Platz am Joch,
+und die alte obere Schranke. Welche bindet, steht als `bindend` im Ergebnis —
+gemessen bindet bis p=2 der Kernanteil, ab p=3 das Joch. Reicht es nicht, ist
+das ein begründetes Nein mit Abhilfe statt einer Zeichnung.
+
+**Und die kegelige Wicklung als Bauform** (`geom.erregerSpuleForm`): der Pol ist
+an der Jochseite breiter, die Wicklung folgt seiner Neigung („the base
+(rotor-side) … is wider than the top (stator-side) … the field windings will
+follow the taper", WO2006026200A1). `rechteck` bleibt Vorgabe und lässt jede
+bisherige Zeichnung Ziffer für Ziffer stehen. Gemessen bringt der Kegel +3,0 %
+Läufereisen (1.457.113 gegen 1.414.307 mm³) bei gleicher Deckung.
+
+**Fundstelle.** `ema_freecad._pol_spule` / `_pol_koerper`;
+`ema_eesm_cad.koerper`; `ema_pipeline.render_cross_section` (EESM-Zweig);
+`ema_laeuferbild._eesm`.
+
+**Ein eigener Fehlgriff, zum zweiten Mal in derselben Sitzung:** ich habe
+`_pol_spule` einen `"""`-Docstring gegeben. Dieser Block wird als **Text** in
+das FreeCAD-Skript geschrieben, und das dreifache Anführungszeichen beendet
+dort die umschließende f-Zeichenkette. Steht jetzt als Warnung über der
+Funktion. Ebenso zum zweiten Mal: ein gescheitertes `assert` **nach** einem
+gelungenen `replace` verwirft die ganze Datei, weil erst am Ende geschrieben
+wird — die Zeichenverzweigung fehlte danach stillschweigend, und erst der Test
+(9 statt 21 Füllungen) hat es gezeigt.
+
+---
+
 ## 2026-09-19 — Die Blechsorte erreichte Elmer nie, und der SynRM-Läufer war leer
 
 **Beobachtung.** Gemeldet als „die Materialien sollen auch durchgereicht werden,

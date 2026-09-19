@@ -4803,6 +4803,9 @@ def param_schema():
         "barMat":       _opts(getattr(T2E, "_KAEFIG", []), table=HAIRPIN_MATS),
         "rotorWireMat": _opts(getattr(T2E, "_HAIR", []), table=HAIRPIN_MATS),
         "fieldMat":     _opts(getattr(T2E, "_HAIR", []), table=HAIRPIN_MATS),
+        "erregerSpuleForm": _opts(["rechteck", "kegel"], labelmap={
+            "rechteck": "Rechteckspule (Kern durchgehend gleich breit)",
+            "kegel": "Kegelig gewickelt (Pol zur Jochseite breiter)"}),
         "armatureMat":  _opts(getattr(T2E, "_HAIR", []), table=HAIRPIN_MATS),
         "magnet":      _opts(getattr(T2E, "_MAG", []),  table=MAGNETS),
         "cooling":     _opts(getattr(T2E, "_COOL", []), labelmap=cool_labels),

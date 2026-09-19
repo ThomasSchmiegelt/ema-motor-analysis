@@ -108,9 +108,23 @@ pruefe(r.get("pol") == 2 * int(kq["poles"]),
 pruefe(r.get("kupfer") == 2 * int(kq["poles"]),
        f"und zwei Spulenquerschnitte je Pol ({r.get('kupfer')})")
 _sp = [t for t in erg["teile"] if t["rolle"] == "kupfer"][0]
-pruefe(abs(abs(_sp["y1"] - _sp["y0"]) - float(kq["d_spule_mm"])) < 1e-6,
+# Die Spule ist ein TRAPEZ (vier Ecken), damit sie beim kegeligen Pol dessen
+# Neigung folgt; beim Rechteck sind Innen- und Aussenkante gleich breit.
+pruefe(_sp["form"] == "trapez"
+       and abs(abs(_sp["y1i"] - _sp["y0i"]) - float(kq["d_spule_mm"])) < 1e-6,
        f"die Spulendicke ist die GERECHNETE ({kq['d_spule_mm']} mm aus dem "
        f"Kupferquerschnitt), nicht der freie Platz")
+# Der Polschuh muss die Spule UEBERRAGEN -- seine mechanische Aufgabe.
+pruefe(kq["deckt_spule"] and kq["schuh_ueberstand_mm"] > 0.0,
+       f"und der Polschuh ueberragt sie um {kq['schuh_ueberstand_mm']:.2f} mm "
+       f"je Seite — sonst haelt sie nichts gegen die Fliehkraft")
+_g2, _L2 = geom("eesm", p=2, erregerSpuleForm="kegel")
+_k2 = ema_eesm_cad.koerper(_g2, _L2)
+pruefe(_k2["b_kern_innen_mm"] > _k2["b_kern_aussen_mm"] * 1.2,
+       f"kegelige Wicklung: der Pol ist an der JOCHseite breiter "
+       f"({_k2['b_kern_innen_mm']:.1f} gegen {_k2['b_kern_aussen_mm']:.1f} mm)")
+pruefe(_k2["deckt_spule"] and _k2["passt"],
+       f"auch kegelig gedeckt und passend (bindend: {_k2['bindend']})")
 _luft = [t for t in erg["teile"] if t["rolle"] == "luft"]
 pruefe(len(_luft) == int(kq["poles"]),
        f"und ZWISCHEN den Polen ist Luft ({len(_luft)} Luecken) — sonst "
@@ -193,11 +207,14 @@ const teile = JSON.parse(fs.readFileSync(process.argv[3], 'utf8'));
 
 // Ein gestellter Zeichenkontext, der nur mitzaehlt -- wie der
 // Stellvertreter-FreeCAD in test_laeufer_cad.py.
-let z = {rect:0, arc:0, fill:0, farben:{}};
+let z = {rect:0, arc:0, fill:0, pfad:0, farben:{}};
 const ctx = {
   set fillStyle(v){ z.farben[v] = (z.farben[v]||0)+1; },
   set strokeStyle(v){}, set lineWidth(v){},
   beginPath(){}, closePath(){}, stroke(){},
+  // Der Stellvertreter muss koennen, was der Zeichner WIRKLICH aufruft --
+  // fehlten diese beiden, zaehlte das Trapez still nicht mit.
+  moveTo(){ z.pfad++; }, lineTo(){ z.pfad++; },
   fill(){ z.fill++; },
   arc(){ z.arc++; },
   fillRect(){ z.rect++; z.fill++; }, strokeRect(){},

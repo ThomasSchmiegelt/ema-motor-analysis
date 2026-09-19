@@ -2008,15 +2008,27 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
                                    width=R_rot - _rk, fc='#3c4a60',
                                    ec='#6b7c99', lw=0.9))
                 _a = _m.radians(_g)
-                _bk, _ds = _kq["b_kern_mm"], _kq["d_spule_mm"]
-                for _rechteck, _fc, _ec in (
-                        ((_rj, _rk, -_bk / 2, _bk / 2), '#3c4a60', '#6b7c99'),
-                        ((_rj, _rk, _bk / 2, _bk / 2 + _ds), '#b87333', '#e0a060'),
-                        ((_rj, _rk, -_bk / 2 - _ds, -_bk / 2), '#b87333', '#e0a060')):
-                    _r0, _r1, _y0, _y1 = _rechteck
-                    _loc = [(_r0, _y0), (_r1, _y0), (_r1, _y1), (_r0, _y1)]
+                _ds = _kq["d_spule_mm"]
+                # Zwei Breiten: innen (Joch) und aussen (unter dem Schuh). Bei
+                # der Rechteckwicklung sind sie gleich und es entsteht genau
+                # die bisherige Zeichnung. Beim Kegel folgt die SPULE der
+                # Neigung des Kerns -- so steht es in WO2006026200A1, und so
+                # baut es auch `ema_freecad`.
+                _bi = _kq.get("b_kern_innen_mm", _kq["b_kern_mm"])
+                _ba = _kq.get("b_kern_aussen_mm", _kq["b_kern_mm"])
+                for _ecken, _fc, _ec in (
+                        # Kern
+                        (((_rj, -_bi / 2), (_rk, -_ba / 2),
+                          (_rk, _ba / 2), (_rj, _bi / 2)), '#3c4a60', '#6b7c99'),
+                        # Spule links und rechts, jeweils am Kern anliegend
+                        (((_rj, _bi / 2), (_rk, _ba / 2),
+                          (_rk, _ba / 2 + _ds), (_rj, _bi / 2 + _ds)),
+                         '#b87333', '#e0a060'),
+                        (((_rj, -_bi / 2 - _ds), (_rk, -_ba / 2 - _ds),
+                          (_rk, -_ba / 2), (_rj, -_bi / 2)),
+                         '#b87333', '#e0a060')):
                     _pts = [(x * _m.cos(_a) - y * _m.sin(_a),
-                             x * _m.sin(_a) + y * _m.cos(_a)) for x, y in _loc]
+                             x * _m.sin(_a) + y * _m.cos(_a)) for x, y in _ecken]
                     ax.add_patch(MplPoly(_pts, closed=True, fc=_fc, ec=_ec, lw=0.6))
             _laeufer_leg = [Patch(fc='#b87333', ec='#e0a060',
                                   label=f'Erregerspulen ({_kq["poles"]} Pole)')]

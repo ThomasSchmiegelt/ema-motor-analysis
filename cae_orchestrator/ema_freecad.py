@@ -571,41 +571,86 @@ def _pol_koerper(PL, grad, hoehe, z0):
     _schuh = _schuh.cut(_innen)
     _m = App.Matrix(); _m.rotateZ(math.radians(grad - _halb))
     _schuh = _schuh.transformGeometry(_m)
-    _bk = PL["b_kern_mm"]
     _r0 = max(_rj - POL_UEBERLAPP_MM, 0.1)
     _hk = max(_rk - _r0, 0.5)
-    _kern = Part.makeBox(_hk, _bk, hoehe, App.Vector(_r0, -_bk / 2.0, z0))
+    # Innen- und Aussenbreite. Beim Rechteck sind sie gleich und es entsteht
+    # genau der bisherige Quader -- Ziffer fuer Ziffer.
+    _bi = PL.get("b_kern_innen_mm", PL["b_kern_mm"])
+    _ba = PL.get("b_kern_aussen_mm", PL["b_kern_mm"])
+    if abs(_bi - _ba) < 1e-6:
+        _kern = Part.makeBox(_hk, _ba, hoehe, App.Vector(_r0, -_ba / 2.0, z0))
+    else:
+        # Kegeliger Pol: zur JOCHseite breiter. Gebaut als Zugkoerper zwischen
+        # den beiden Rechtecken -- ein Quader mit zwei Breiten geht nicht.
+        _kern = _prisma_trapez(_r0, _rk, _bi, _ba, hoehe, z0)
     _kern.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), grad)
     return _schuh, _kern
+
+
+# Ein radial stehendes Trapez-Prisma: bei r0 die Breite b0, bei r1 die Breite
+# b1, axial ueber `hoehe`. Vier Ecken je Stirnflaeche, dazwischen ein Loft.
+def _prisma_trapez(r0, r1, b0, b1, hoehe, z0):
+    def _wire(z):
+        _p = [App.Vector(r0, -b0 / 2.0, z), App.Vector(r1, -b1 / 2.0, z),
+              App.Vector(r1, b1 / 2.0, z), App.Vector(r0, b0 / 2.0, z)]
+        return Part.makePolygon(_p + [_p[0]])
+    return Part.makeLoft([_wire(z0), _wire(z0 + hoehe)], True)
 
 
 # Die Erregerspule: zwei Querschnitte links und rechts des Kerns, radial ueber
 # die Kernhoehe. Der Polschuh haengt darueber und haelt sie gegen die Fliehkraft
 # -- gerechnet wird das hier NICHT (s. ema_eesm_cad."ungeprueft").
+# Die Erregerspule als GESCHLOSSENER Rahmen um den Polkern.
+#
+# Vorher waren es zwei getrennte Quader links und rechts des Kerns -- also zwei
+# Leiterstaebe und keine Wicklung. Eine Spule ist eine geschlossene Schleife:
+# sie laeuft um den Kern herum, und die beiden Stuecke an den STIRNSEITEN
+# (z = z0 und z = z0+hoehe) fehlten ganz. Gemeldet als "im CAD muss die Spule
+# geschlossen sein, das sind sie nicht".
+#
+# Gebaut als Aussenkoerper MINUS Innenkoerper -- ein Rahmen, ein EINZIGER
+# Festkoerper je Pol statt zweier loser Bloecke; das war zugleich der Eindruck,
+# der Rotor bestehe aus verschiedenen Bodies.
+#
+# Der Kern bleibt unberuehrt: geschnitten wird gegen einen eigenen Innenquader
+# mit Spiel, nicht gegen den Rotor. Ein boolescher Schnitt an beruehrenden,
+# kongruenten Flaechen erzeugt in OCC defekte Festkoerper (gemessen
+# 18.09.2026, s. BEFUNDE.md).
+#
+# KEIN Docstring hier: dieser Block wird als TEXT in das FreeCAD-Skript
+# geschrieben, und ein dreifaches Anfuehrungszeichen beendet dort die
+# umschliessende f-Zeichenkette. Derselbe Fehler stand schon einmal in dieser
+# Datei.
 def _pol_spule(PL, grad, hoehe, z0):
     _rk, _rj = PL["r_kern_aussen_mm"], PL["r_joch_aussen_mm"]
-    _bk, _ds = PL["b_kern_mm"], PL["d_spule_mm"]
-    # Die Spule endet radial POL_UEBERLAPP_MM INNENHALT des Kernradius' und
-    # taucht so nirgends in das Schuhsband ([rk-0.5, rk]) auf, in das die
-    # Pole zum Fused-als-ein-Solid einander ueberdecken muessen. Ein
-    # boolesches Herauswaechsen (Shape.cut(Rotor)) ist hier NICHT der Weg:
-    # gemessen an 2026-09-18 erzeugt OCC an beruehrenden, kongruenten Flaechen
-    # defekte Festkoerper (eine Spule enthielt danach einen Punkt in der
-    # Nachbarspule). Hier bleibt die Spule ein reiner Block: sie beruehrt
-    # Joch und Kern nur, ohne Material zu teilen, und es gibt kein Boolesch
-    # (Beobachtung BEFUNDE.md 2026-09-18). 0.05mm Spiel zu Joch, Kern und
-    # Schuh, damit die Spule nirgends an einem Eisensolid benuhrt: boolesche
-    # Tests (Shape.common) liefern sonst an kongruenten Flaechen Ghost-Volumina.
-    _hk = max(_rk - POL_UEBERLAPP_MM - _rj - 0.10, 0.5)
-    _yoff = 0.05
-    _ds_vis = _ds - _yoff  # Spiel zum Kern, auere Flaeche bleibt identisch
-    aus = []
-    for _vz in (-1.0, 1.0):
-        _y = _vz * (_bk / 2.0 + _yoff + _ds_vis / 2.0)
-        _b = Part.makeBox(_hk, _ds_vis, hoehe, App.Vector(_rj + _yoff, _y - _ds_vis / 2.0, z0))
-        _b.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), grad)
-        aus.append(_b)
-    return aus
+    _ds = PL["d_spule_mm"]
+    _bi = PL.get("b_kern_innen_mm", PL["b_kern_mm"])
+    _ba = PL.get("b_kern_aussen_mm", PL["b_kern_mm"])
+    # Radial endet die Spule POL_UEBERLAPP_MM innerhalb des Kernradius', damit
+    # sie nicht in das Band [rk-0.5, rk] ragt, in dem sich die Pole zum EINEN
+    # Solid ueberdecken.
+    _r1 = max(_rk - POL_UEBERLAPP_MM, _rj + 0.6)
+    _r0 = _rj + 0.05
+    _hk = max(_r1 - _r0, 0.5)
+    _sp = 0.05                                   # Spiel zum Kern, damit OCC sauber schneidet
+
+    # Aussen: Kern + Spulendicke ringsum, axial um die Dicke laenger (das sind
+    # die Wickelkoepfe an den Stirnseiten).
+    if abs(_bi - _ba) < 1e-6:
+        _aussen = Part.makeBox(_hk, _ba + 2.0 * _ds, hoehe + 2.0 * _ds,
+                               App.Vector(_r0, -(_ba / 2.0 + _ds), z0 - _ds))
+        _innen = Part.makeBox(_hk + 2.0, _ba + 2.0 * _sp, hoehe + 2.0 * _sp,
+                              App.Vector(_r0 - 1.0, -(_ba / 2.0 + _sp), z0 - _sp))
+    else:
+        _aussen = _prisma_trapez(_r0, _r1, _bi + 2.0 * _ds, _ba + 2.0 * _ds,
+                                 hoehe + 2.0 * _ds, z0 - _ds)
+        _innen = _prisma_trapez(_r0 - 1.0, _r1 + 1.0, _bi + 2.0 * _sp,
+                                _ba + 2.0 * _sp, hoehe + 2.0 * _sp, z0 - _sp)
+    _spule = _aussen.cut(_innen)
+    _spule.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), grad)
+    # EINE Liste, damit der Aufrufer unveraendert bleibt -- jetzt mit genau
+    # einem Koerper je Pol statt zweien.
+    return [_spule]
 
 
 # ── 2. ROTOR IRON (with magnet pockets; bore = connection type) ───────────

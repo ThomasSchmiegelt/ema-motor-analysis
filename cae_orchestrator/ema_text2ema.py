@@ -124,6 +124,12 @@ SCHEMA = {
                      "desc": "Läuferwicklung der ASM (Schleifringläufer)"},
     "fieldMat":     {"kind": "enum", "opts": _HAIR, "def": "cu_etp", "geom": True, "adv": True,
                      "desc": "Erregerwicklung (EESM-Schenkelpole, GSM-Ständerpole)"},
+    # Rechteck- oder kegelige Erregerspule. Beim Kegel ist der Pol an der
+    # JOCHseite breiter und die Wicklung folgt seiner Neigung — so beschrieben
+    # in WO2006026200A1. `rechteck` laesst jede bisherige Zeichnung stehen.
+    "erregerSpuleForm": {"kind": "enum", "opts": ["rechteck", "kegel"],
+                         "def": "rechteck", "geom": True, "adv": True,
+                         "desc": "Form der Erregerspule: rechteckig oder kegelig gewickelt"},
     "armatureMat":  {"kind": "enum", "opts": _HAIR, "def": "cu_etp", "geom": True, "adv": True,
                      "desc": "Ankerwicklung der Gleichstrommaschine"},
     "magnet":     {"kind": "enum", "opts": _MAG,  "def": "ndfeb_n35","desc": "Magnetwerkstoff"},

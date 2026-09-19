@@ -781,6 +781,15 @@
       <label style="grid-column:1/-1;margin-bottom:3px">Ankerwicklung</label>
       <select id="mat_armature" style="grid-column:1/-1"></select>
     </div>
+    <div class="input-group wick-mat" data-arten="eesm gsm" style="display:none">
+      <label style="grid-column:1/-1;margin-bottom:3px">Form der Erregerspule</label>
+      <select id="spule_form" style="grid-column:1/-1"></select>
+      <div class="hint" style="grid-column:1/-1;font-size:11px;color:#9aa">
+        Kegelig: der Pol ist an der Jochseite breiter, die Wicklung folgt seiner
+        Neigung. Der Polschuh überragt die Spule in beiden Fällen — er hält sie
+        gegen die Fliehkraft.
+      </div>
+    </div>
     <div class="input-group wick-mat" data-arten="pmsm asm synrm eesm gsm">
       <label style="grid-column:1/-1;margin-bottom:3px">Leitertemperatur (alle Wicklungen)</label>
       <input type="number" id="t_leiter" value="0" min="0" max="250" step="5"
@@ -11583,7 +11592,7 @@ function applyPayload(payload) {
   _setField('machine_art', G.machineType);
   _setField('mat_bar', G.barMat); _setField('mat_rotorwire', G.rotorWireMat);
   _setField('mat_field', G.fieldMat); _setField('mat_armature', G.armatureMat);
-  _setField('t_leiter', G.tLeiterC);
+  _setField('t_leiter', G.tLeiterC); _setField('spule_form', G.erregerSpuleForm);
   if (window._updateArtVis) window._updateArtVis();
   _setField('mag_shape',   G.magShape);
   _setField('pocket_mode', G.pocketMode);
@@ -13149,7 +13158,8 @@ function escHtml(s) {
     // Die vier Wicklungswerkstoffe + die Leitertemperatur. Dieselbe Quelle wie
     // die Maschinenart: /param_schema, nicht eine zweite Liste im HTML.
     const _MAT_FELDER = {mat_bar: "barMat", mat_rotorwire: "rotorWireMat",
-                         mat_field: "fieldMat", mat_armature: "armatureMat"};
+                         mat_field: "fieldMat", mat_armature: "armatureMat",
+                         spule_form: "erregerSpuleForm"};
 
     async function _matLaden() {
       try {
