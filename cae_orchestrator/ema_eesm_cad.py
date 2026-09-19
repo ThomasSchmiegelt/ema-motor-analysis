@@ -84,6 +84,69 @@ SPULENLUFT_MM = 2.0
 # Mindestdicke einer gezeichneten Spulenseite [mm].
 SPULE_MIN_MM = 2.0
 
+# Wie weit Kern und Spule vom Laeuferrand wegbleiben muessen [mm].
+#
+# Das ist die Wand, die gefehlt hat. Kern und Spule sind RECHTECKE, der Laeufer
+# ist ein KREIS: ein Rechteck der halben Breite ``y``, dessen Oberkante bei
+# ``r`` liegt, hat seine Ecken bei ``sqrt(r^2 + y^2)`` -- also WEITER aussen als
+# seine Oberkante. Geprueft wurde bisher nur die Oberkante, und deshalb stand
+# die Erregerspule einer 170-mm-Maschine gemessen mit ihren Ecken bei
+# r = 88,63 mm, waehrend die Statorbohrung bei 85,8 mm anfaengt: die Spule lag
+# IM Staender. Gemeldet als „in der fremderregten Maschine kollidieren Rotor
+# und Stator", und genau so war es.
+RAND_LUFT_MM = 1.0
+
+
+def _spule_einpassen(a_wick_mm2: float, r_joch: float, y_kern: float,
+                     r_max: float) -> tuple:
+    """Dicke und Aussenradius der Erregerspule, so dass ihre ECKEN drinbleiben.
+
+    Gesucht ist das Paar ``(d, r_top)`` mit
+
+        d * (r_top - r_joch) = a_wick/2            (Wickelraum je Spulenseite)
+        sqrt(r_top^2 + (y_kern + d)^2) = r_max     (die Ecke liegt auf dem Rand)
+
+    Eingesetzt bleibt EINE Gleichung in ``d``; sie ist nicht monoton (eine
+    dickere Spule muss tiefer sitzen und wird dadurch kuerzer), hat also ein
+    Maximum. Genommen wird die KLEINERE Wurzel -- die duennere, hoehere Spule:
+    sie sitzt naeher am Polschuh und wird von ihm gehalten.
+
+    Gibt es keine Wurzel, passt die Wicklung nicht unter den Rand. Dann kommt
+    ``ok=False`` heraus und das beste erreichbare Paar dazu -- gezeichnet wird
+    etwas, das im Laeufer bleibt, und der Befund steht daneben.
+    """
+    ziel = max(a_wick_mm2, 0.0) / 2.0
+    d_max = math.sqrt(max(r_max ** 2 - r_joch ** 2, 0.0)) - y_kern
+    if d_max <= SPULE_MIN_MM:
+        return SPULE_MIN_MM, max(r_joch + 1.0, 0.0), False
+
+    def hoehe(d: float) -> float:
+        return math.sqrt(max(r_max ** 2 - (y_kern + d) ** 2, 0.0)) - r_joch
+
+    n = 400
+    bestes = (SPULE_MIN_MM, hoehe(SPULE_MIN_MM))
+    vorher = SPULE_MIN_MM * hoehe(SPULE_MIN_MM) - ziel
+    if vorher >= 0.0:
+        return SPULE_MIN_MM, r_joch + hoehe(SPULE_MIN_MM), True
+    for i in range(1, n + 1):
+        d = SPULE_MIN_MM + (d_max - SPULE_MIN_MM) * i / n
+        f = d * hoehe(d) - ziel
+        if d * hoehe(d) > bestes[0] * bestes[1]:
+            bestes = (d, hoehe(d))
+        if f >= 0.0:                      # Vorzeichenwechsel -> einschachteln
+            lo, hi = d - (d_max - SPULE_MIN_MM) / n, d
+            for _ in range(60):
+                m = 0.5 * (lo + hi)
+                if m * hoehe(m) - ziel < 0.0:
+                    lo = m
+                else:
+                    hi = m
+            return hi, r_joch + hoehe(hi), True
+        vorher = f
+    # Keine Wurzel: der Wickelraum passt nicht unter den Rand. Gezeichnet wird
+    # die groesstmoegliche Spule, damit das Bild nicht leer bleibt.
+    return bestes[0], r_joch + bestes[1], False
+
 
 def koerper(geom: dict, axial_mm: float) -> dict:
     """Alle Masse des Schenkelpollaeufers in Millimetern.
@@ -121,51 +184,132 @@ def koerper(geom: dict, axial_mm: float) -> dict:
     kf = ema_eesm._fuellfaktor()
     a_cu = float(er["A_cu_mm2"])
     a_wick = a_cu / max(kf, 1e-6)                       # mm^2, Wickelraum je Pol
-    d_spule = max(SPULE_MIN_MM, a_wick / (2.0 * max(h_kern, 1e-9)))
 
-    # ── Der Kern folgt der DECKUNG, nicht einem festen Verhaeltnis ────────
-    # Vorher war `b_kern = 0.72 * b_schuh_k`, und ob der Schuh die Spule
-    # ueberdeckte, ergab sich zufaellig. Der Polschuh hat aber genau diese
-    # Aufgabe: er haelt die Spule gegen die Fliehkraft. Also wird der Kern so
-    # schmal gemacht, dass Spule PLUS Ueberstand darunter passen -- und wenn
-    # das den Kern unter `KERN_MIN_ANTEIL` druecken wuerde, ist die Spule zu
-    # dick fuer diesen Pol, und das steht als Befund da.
     form = str(geom.get("erregerSpuleForm") or "rechteck")
     if form not in SPULENFORMEN:
         form = "rechteck"
     # Verhaeltnis innen:aussen des Kerns -- beim Rechteck 1,0.
     kegel = (1.0 / max(KEGEL_VERJUENGUNG, 1e-6)) if form == "kegel" else 1.0
 
-    # ── Drei Schranken, und es gilt die engste ────────────────────────────
-    # (1) DECKUNG: der Polschuh muss die Spule ueberragen, sonst haelt sie
-    #     nichts gegen die Fliehkraft (US3089049A).
-    # (2) PLATZ AM JOCH: die Polteilung ist am Jochradius am KLEINSTEN, der
-    #     Kern aber ueber die ganze Hoehe gleich breit (beim Kegel dort sogar
-    #     am breitesten). Geprueft wurde bisher nur am KERNradius, wo reichlich
-    #     Platz ist -- gemessen durchdringen sich dadurch ab acht Polen die
-    #     Spulen benachbarter Pole am Joch um 3,9 mm, und gezeichnet wurde es
-    #     trotzdem.
-    # (3) die alte obere Schranke: ein Kern fast so breit wie sein Schuh
-    #     liesse keinen Platz fuer die Wicklung.
     tau_joch = 2.0 * math.pi * r_joch / poles
-    schranken = {
-        "deckung": b_schuh_k - 2.0 * (d_spule + SCHUH_UEBERSTAND_MM),
-        "joch":    (tau_joch - SPULENLUFT_MM - 2.0 * d_spule) / kegel,
-        "kernanteil": KERN_ZU_SCHUH * b_schuh_k,
-    }
-    bindend = min(schranken, key=lambda k: schranken[k])
-    b_kern_aussen = schranken[bindend]
-    b_kern_min = KERN_MIN_ANTEIL * b_schuh_k
-    passt = b_kern_aussen >= b_kern_min
-    b_kern_aussen = max(b_kern_aussen, b_kern_min)
-    b_kern_innen = b_kern_aussen * kegel
-    b_kern = b_kern_aussen                       # was ein Zeichner liest, der nur EINE Breite kennt
+    r_max = max(r_rot - RAND_LUFT_MM, r_joch + 1.0)
 
-    # Nachgerechnet statt angenommen: beides sind ERGEBNISSE, keine Vorgaben.
+    # ── Kern und Spule haengen voneinander ab, also wird gekoppelt geloest ──
+    #
+    # Die Kernbreite folgt der Spulendicke (Deckung, Platz am Joch), die
+    # Spulendicke aber der verbleibenden Hoehe -- und die haengt wieder an der
+    # Kernbreite, weil die Spulenecke auf dem Laeuferrand landen muss. Vier
+    # Durchgaenge genuegen (gemessen: der zweite bewegt noch 0,3 mm, der
+    # vierte 1e-4 mm); der Startwert ist der alte, aus der vollen Kernhoehe
+    # gerechnete -- damit bleibt eine Auslegung, bei der die Ecke nie stoerte,
+    # Ziffer fuer Ziffer dieselbe.
+    d_spule = max(SPULE_MIN_MM, a_wick / (2.0 * max(h_kern, 1e-9)))
+    r_spule = r_kern_aussen
+    spule_passt = True
+    for _durchgang in range(4):
+        # ── Vier Schranken, und es gilt die engste ────────────────────────
+        # (1) DECKUNG: der Polschuh muss die Spule ueberragen, sonst haelt sie
+        #     nichts gegen die Fliehkraft (US3089049A).
+        # (2) PLATZ AM JOCH: die Polteilung ist am Jochradius am KLEINSTEN, der
+        #     Kern aber ueber die ganze Hoehe gleich breit (beim Kegel dort
+        #     sogar am breitesten). Geprueft wurde bisher nur am KERNradius, wo
+        #     reichlich Platz ist -- gemessen durchdringen sich dadurch ab acht
+        #     Polen die Spulen benachbarter Pole am Joch um 3,9 mm.
+        # (3) LAEUFERRAND: der Kern ist ein Rechteck im Kreis, seine ECKEN
+        #     liegen weiter aussen als seine Oberkante (s. RAND_LUFT_MM).
+        # (4) die alte obere Schranke: ein Kern fast so breit wie sein Schuh
+        #     liesse keinen Platz fuer die Wicklung.
+        schranken = {
+            "deckung": b_schuh_k - 2.0 * (d_spule + SCHUH_UEBERSTAND_MM),
+            "joch":    (tau_joch - SPULENLUFT_MM - 2.0 * d_spule) / kegel,
+            "rotorrand": 2.0 * math.sqrt(
+                max(r_max ** 2 - r_kern_aussen ** 2, 0.0)),
+            "kernanteil": KERN_ZU_SCHUH * b_schuh_k,
+        }
+        bindend = min(schranken, key=lambda k: schranken[k])
+        b_kern_aussen = schranken[bindend]
+        b_kern_min = KERN_MIN_ANTEIL * b_schuh_k
+        passt = b_kern_aussen >= b_kern_min
+        b_kern_aussen = max(b_kern_aussen, b_kern_min)
+        # Der Laeuferrand ist die EINE Schranke, die das Mindestmass nicht
+        # ueberstimmen darf: ein zu schmaler Kern ist ein Befund, ein Kern
+        # ausserhalb des Laeufers ist eine falsche Zeichnung. Passt es nicht,
+        # steht `passt=False` schon oben -- gezeichnet wird trotzdem etwas,
+        # das im Blech bleibt.
+        b_kern_aussen = min(b_kern_aussen, schranken["rotorrand"] / kegel)
+        b_kern_innen = b_kern_aussen * kegel
+        # Die Spule sitzt NEBEN dem Kern: massgeblich ist die breiteste Stelle
+        # (beim Kegel die Jochseite), sonst waere gerade dort die Ecke draussen.
+        y_kern = max(b_kern_aussen, b_kern_innen) / 2.0
+        d_neu, r_spule, spule_passt = _spule_einpassen(
+            a_wick, r_joch, y_kern, r_max)
+        if abs(d_neu - d_spule) < 1e-4:
+            d_spule = d_neu
+            break
+        d_spule = d_neu
+    d_spule = max(d_spule, SPULE_MIN_MM)
+    r_spule = min(max(r_spule, r_joch + 1.0), r_kern_aussen)
+    # Letzter Riegel: auch im Fehlerfall bleibt die gezeichnete Ecke drin.
+    _y_aussen = max(b_kern_aussen, b_kern_innen) / 2.0 + d_spule
+    r_spule = min(r_spule, math.sqrt(max(r_max ** 2 - _y_aussen ** 2, 1.0)))
+    h_spule = r_spule - r_joch
+    b_kern = b_kern_aussen                   # was ein Zeichner liest, der nur EINE Breite kennt
+
+    # Nachgerechnet statt angenommen: alles drei sind ERGEBNISSE, keine Vorgaben.
     ueberstand = (b_schuh_k - (b_kern_aussen + 2.0 * d_spule)) / 2.0
     deckt = ueberstand >= 0.0
     belegt = b_kern_innen + 2.0 * d_spule
     frei = tau_joch - belegt
+    # Die Kernbreite AM SPULENENDE -- eine Zahl, drei Zeichner.
+    #
+    # Die Spule liegt am Kern an, endet aber weiter innen als er. Beim Kegel
+    # ist der Kern dort schmaler als an seiner Oberkante; ohne diesen Wert
+    # muesste jeder Zeichner die Verjuengung selbst ausmultiplizieren, und beim
+    # dritten stuende eine andere Spule im Bild als im CAD.
+    _u = (r_spule - r_joch) / max(r_kern_aussen - r_joch, 1e-9)
+    b_kern_spulenende = b_kern_innen + (b_kern_aussen - b_kern_innen) * min(max(_u, 0.0), 1.0)
+
+    # Die Ecke, an der es frueher hinauslief -- jetzt gemessen statt angenommen.
+    r_ecke_kern = math.hypot(r_kern_aussen, max(b_kern_aussen, b_kern_innen) / 2.0)
+    r_ecke_spule = math.hypot(r_spule, max(b_kern_aussen, b_kern_innen) / 2.0
+                              + d_spule)
+    im_laeufer = max(r_ecke_kern, r_ecke_spule) <= r_rot + 1e-6
+    if not spule_passt:
+        passt = False
+
+    if passt:
+        grund = ""
+    elif not spule_passt:
+        grund = (f"Der Wickelraum ({a_wick:.0f} mm² je Pol) passt nicht unter "
+                 f"den Laeuferrand: mehr als {d_spule * h_spule * 2:.0f} mm² "
+                 f"sind zwischen Joch (r = {r_joch:.1f} mm) und Rand "
+                 f"(r = {r_max:.1f} mm) nicht unterzubringen, ohne dass die "
+                 f"Spulenecke aus dem Laeufer tritt. Groesserer Laeufer, "
+                 f"hoehere Stromdichte oder weniger Pole")
+    elif bindend == "rotorrand":
+        grund = (f"Der Polkern bleibt mit seinen Ecken nicht im Laeufer: bei "
+                 f"r = {r_kern_aussen:.1f} mm duerfte er hoechstens "
+                 f"{schranken['rotorrand']:.1f} mm breit sein, das Mindestmass "
+                 f"sind aber {b_kern_min:.1f} mm. Ein dickerer Polschuh "
+                 f"(kleinerer Kernradius) oder weniger Polbedeckung")
+    elif not deckt:
+        grund = (f"Der Polschuh ueberdeckt die Spule NICHT: er ist am "
+                 f"Kernradius {b_schuh_k:.1f} mm breit, Kern ({b_kern:.1f}) "
+                 f"und Spule (2 x {d_spule:.1f} mm) brauchen aber "
+                 f"{b_kern + 2 * d_spule:.1f} mm. Die Spule haengt dann ueber "
+                 f"und wird von nichts gegen die Fliehkraft gehalten — mehr "
+                 f"Polbedeckung oder eine duennere Spule (hoehere Stromdichte)")
+    elif frei < SPULENLUFT_MM:
+        grund = (f"Kern ({b_kern_innen:.1f} mm an der engsten Stelle) und "
+                 f"Spule (2 x {d_spule:.1f} mm) belegen {belegt:.1f} mm — es "
+                 f"bleiben {frei:.1f} mm statt der geforderten "
+                 f"{SPULENLUFT_MM:.1f} mm Luft zum Nachbarpol")
+    else:
+        grund = (f"Die Spule ist zu dick fuer diesen Pol: die engste Schranke "
+                 f"ist '{bindend}' und liesse nur {schranken[bindend]:.1f} mm "
+                 f"Kern, unter dem Mindestmass von {b_kern_min:.1f} mm. "
+                 f"Mehr Polbedeckung, weniger Pole oder eine hoehere "
+                 f"Stromdichte")
 
     return {
         "poles": poles,
@@ -187,28 +331,21 @@ def koerper(geom: dict, axial_mm: float) -> dict:
         "schuh_ueberstand_mm": round(ueberstand, 3),
         "deckt_spule": bool(deckt),
         "d_spule_mm": round(d_spule, 3),
+        # Der Aussenradius der SPULE ist nicht der des Kerns: die Spule sitzt
+        # neben ihm und muesste mit ihrer Ecke sonst aus dem Laeufer treten.
+        "r_spule_aussen_mm": round(r_spule, 3),
+        "b_kern_spulenende_mm": round(b_kern_spulenende, 3),
+        "h_spule_mm": round(h_spule, 3),
+        "r_ecke_kern_mm": round(r_ecke_kern, 3),
+        "r_ecke_spule_mm": round(r_ecke_spule, 3),
+        "im_laeufer": bool(im_laeufer),
         "tau_pol_mm": round(tau_pol, 3),
         "tau_kern_mm": round(tau_kern, 3),
         "belegt_mm": round(belegt, 3),
         "frei_mm": round(frei, 3),
         "passt": bool(passt),
         "bindend": bindend,
-        "grund": "" if passt else (
-            (f"Die Spule ist zu dick fuer diesen Pol: die engste Schranke ist "
-             f"'{bindend}' und liesse nur {schranken[bindend]:.1f} mm Kern, "
-             f"unter dem Mindestmass von {b_kern_min:.1f} mm. "
-             f"Mehr Polbedeckung, weniger Pole oder eine hoehere Stromdichte") +
-            "" if True else (f"Der Polschuh ueberdeckt die Spule NICHT: er ist am Kernradius "
-             f"{b_schuh_k:.1f} mm breit, Kern ({b_kern:.1f}) und Spule "
-             f"(2 x {d_spule:.1f} mm) brauchen aber "
-             f"{b_kern + 2*d_spule:.1f} mm. Die Spule haengt dann ueber und "
-             f"wird von nichts gegen die Fliehkraft gehalten — mehr Polbedeckung "
-             f"oder eine duennere Spule (hoehere Stromdichte)")
-            if not deckt else
-            (f"Kern ({b_kern_innen:.1f} mm an der engsten Stelle) und Spule "
-             f"(2 x {d_spule:.1f} mm) belegen {belegt:.1f} mm — es bleiben "
-             f"{frei:.1f} mm statt der geforderten {SPULENLUFT_MM:.1f} mm Luft "
-             f"zum Nachbarpol")),
+        "grund": grund,
         "A_cu_mm2": round(a_cu, 2),
         "A_wickelraum_mm2": round(a_wick, 2),
         "fuellfaktor": round(kf, 3),
@@ -234,5 +371,6 @@ def zeichenmasse(k: dict) -> dict:
     return {n: float(k[n]) for n in (
         "r_welle_mm", "r_joch_aussen_mm", "r_kern_aussen_mm", "r_rotor_mm",
         "h_schuh_mm", "h_kern_mm", "b_schuh_mm", "b_kern_mm", "d_spule_mm",
-        "b_kern_aussen_mm", "b_kern_innen_mm",
+        "b_kern_aussen_mm", "b_kern_innen_mm", "r_spule_aussen_mm",
+        "b_kern_spulenende_mm",
     )} | {"poles": int(k["poles"])}

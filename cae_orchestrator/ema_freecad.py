@@ -625,11 +625,18 @@ def _pol_spule(PL, grad, hoehe, z0):
     _rk, _rj = PL["r_kern_aussen_mm"], PL["r_joch_aussen_mm"]
     _ds = PL["d_spule_mm"]
     _bi = PL.get("b_kern_innen_mm", PL["b_kern_mm"])
-    _ba = PL.get("b_kern_aussen_mm", PL["b_kern_mm"])
-    # Radial endet die Spule POL_UEBERLAPP_MM innerhalb des Kernradius', damit
-    # sie nicht in das Band [rk-0.5, rk] ragt, in dem sich die Pole zum EINEN
-    # Solid ueberdecken.
-    _r1 = max(_rk - POL_UEBERLAPP_MM, _rj + 0.6)
+    # Die Spule endet weiter innen als der Kern -- sonst traete ihre ECKE aus
+    # dem Laeufer (s. ema_eesm_cad.RAND_LUFT_MM). Am Spulenende ist der Kern
+    # beim Kegel schmaler als an seiner Oberkante; beide Zahlen kommen aus
+    # derselben Funktion, damit CAD, Querschnitt und Leinwand dieselbe Spule
+    # zeigen.
+    _rs = PL.get("r_spule_aussen_mm", _rk)
+    _ba = PL.get("b_kern_spulenende_mm",
+                 PL.get("b_kern_aussen_mm", PL["b_kern_mm"]))
+    # Radial endet die Spule ausserdem POL_UEBERLAPP_MM innerhalb des
+    # Kernradius', damit sie nicht in das Band [rk-0.5, rk] ragt, in dem sich
+    # die Pole zum EINEN Solid ueberdecken.
+    _r1 = max(min(_rs, _rk - POL_UEBERLAPP_MM), _rj + 0.6)
     _r0 = _rj + 0.05
     _hk = max(_r1 - _r0, 0.5)
     _sp = 0.05                                   # Spiel zum Kern, damit OCC sauber schneidet

@@ -35,12 +35,14 @@
  * nicht. Ohne das zeigte die Leinwand Kaefignuten und das Feld verhielte sich,
  * als waere der Laeufer eine Vollscheibe.
  *
- * NICHT eingetragen wird der STROM darin, und das ist die Grenze dieser
- * Vorschau: der kleine JS-Loeser ist **magnetostatisch** — kein sigma, kein
- * dA/dt. Ein Kaefigstab fuehrt darin keinen Strom, ein Anker keine
- * kommutierte Durchflutung, eine Erregerspule ist nicht eingepraegt. Genau
- * das meldet `feld_darstellbar: false`, und die Seite schreibt es hin, statt
- * ein Staenderfeld als Maschinenfeld auszugeben.
+ * Der STROM wird eingetragen, wo er GLEICHSTROM ist: ein Teil mit
+ * `durchflutung_A` (Erregerspule der EESM, Feldspule der GSM) landet als
+ * Quelle im `gridJ`. Das ist keine Erweiterung des Modells, sondern sein
+ * eigentlicher Fall — ein magnetostatischer Loeser kann eine eingepraegte
+ * GLEICHdurchflutung exakt. Nicht darstellbar bleibt, was zeitabhaengig
+ * ist: der Kaefigstab (kein sigma, kein dA/dt) und die kommutierte
+ * Ankerdurchflutung, die der Kommutator im Raum festhaelt. Genau das
+ * meldet `feld_darstellbar: false`, und die Seite schreibt es hin.
  */
 
 (function (global) {
@@ -142,9 +144,21 @@
 
   /* --- Feldraster -------------------------------------------------------- */
 
+  /* Waehrend eines Stempels: hier werden die getroffenen Zellen gesammelt.
+   *
+   * Eine Karte (kein Feld), weil dieselbe Zelle mehrfach getroffen wird -- die
+   * Abtastung laeuft in halben Zellen, und eine doppelt gezaehlte Zelle machte
+   * die Stromdichte darin falsch. Modulweit statt als Parameter, damit die
+   * `_setz`-Aufrufe in `_stempel` unveraendert bleiben. */
+  var _SAMMLER = null;
+
   /* Eine Gitterzelle setzen, wenn sie im Gitter liegt. */
   function _setz(gridMu, N, ix, iy, wert) {
-    if (ix >= 0 && ix < N && iy >= 0 && iy < N) gridMu[iy * N + ix] = wert;
+    if (ix >= 0 && ix < N && iy >= 0 && iy < N) {
+      var k = iy * N + ix;
+      gridMu[k] = wert;
+      if (_SAMMLER) _SAMMLER[k] = 1;
+    }
   }
 
   /* Ein Teil in das mu-Gitter stempeln.
@@ -240,12 +254,27 @@
    * Gibt die Zahl der eingetragenen Teile zurueck, damit die Seite sagen kann,
    * ob ueberhaupt etwas gewirkt hat.
    */
-  function rastere(gridMu, N, center, gs, teile, a0) {
+  function rastere(gridMu, N, center, gs, teile, a0, gridJ, jNut) {
     if (!gridMu || !teile || !teile.length) return 0;
     var n = 0;
     for (var i = 0; i < teile.length; i++) {
-      if (!UNMAGNETISCH[teile[i].rolle]) continue;
-      _stempel(gridMu, N, center, gs, teile[i], a0 || 0, 1);
+      var t = teile[i];
+      if (!UNMAGNETISCH[t.rolle]) continue;
+      var f = gridJ ? +(t.durchflutung_A || 0) : 0;
+      _SAMMLER = f ? {} : null;
+      _stempel(gridMu, N, center, gs, t, a0 || 0, 1);
+      if (f) {
+        var ks = Object.keys(_SAMMLER), nk = ks.length;
+        // Dieselbe Rechnung wie die Staendernut in `ema.html`: dort steht je
+        // Zelle der NUTstrom, die Durchflutung der Nut ist also
+        // `I * Zellen_je_Nut`. Damit eine Spule mit F Amperewindungen im
+        // selben Bild dasselbe Gewicht bekommt, traegt jede ihrer Zellen
+        // `F / Zellen_der_Spule * Zellen_je_Nut`. Das Verhaeltnis Spule:Nut
+        // ist dann genau F:I -- physikalisch, nicht geschaetzt.
+        var wert = nk ? (f / nk) * (jNut || 0) : 0;
+        for (var q = 0; q < nk; q++) gridJ[ks[q] | 0] = wert;
+      }
+      _SAMMLER = null;
       n++;
     }
     return n;

@@ -13191,8 +13191,17 @@ function escHtml(s) {
       const sel = document.getElementById("machine_art");
       const art = (sel && sel.value) || GEOM.machineType || "pmsm";
       const mitMagneten = (art === "pmsm");
+      // Beim RELUKTANZlaeufer bleibt die Topologie sichtbar: dort ist sie die
+      // Lage der Flussbarrieren und damit das Einzige, was die Maschine
+      // ausmacht -- sie auszublenden hiess, den Laeufer als „IPM ohne
+      // Magnete" stehenzulassen, ohne Griff daran. Gemeldet als „in der
+      // Reluktanzmaschine hast du einfach die Magnete entfernt".
+      const barrieren = (art === "synrm");
       const topo = document.getElementById("grp_magnet_topo");
-      if (topo) topo.style.display = mitMagneten ? "" : "none";
+      if (topo) topo.style.display = (mitMagneten || barrieren) ? "" : "none";
+      const topoTitel = topo && topo.querySelector(".grp-titel, h4, legend, .section-title");
+      if (topoTitel) topoTitel.textContent = barrieren
+        ? "Flussbarrieren (Anordnung)" : "Magnet-Topologie";
       // Nur die Wicklungen zeigen, die diese Bauart WIRKLICH hat. Ein
       // Ankerwerkstoff an einer Asynchronmaschine waere ein Feld ohne
       // Wirkung, und ein wirkungsloses Feld liest sich wie ein defektes.
@@ -13203,11 +13212,18 @@ function escHtml(s) {
       const hin = document.getElementById("art_hinweis");
       if (hin) {
         const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
+        const lbl = (opt ? opt.textContent : art);
         hin.textContent = mitMagneten ? ""
-          : ((opt ? opt.textContent : art) +
-             " — ohne Magnete; die Magnet-Topologie entfaellt. Welche Stufen " +
-             "diese Art traegt, steht in der Auswahl; der Lauf weist ab, was " +
-             "sie nicht traegt.");
+          : barrieren
+            ? (lbl + " — ohne Magnete: dieselben gestanzten Taschen bleiben " +
+               "LEER und sind die Flussbarrieren. Ihre Lage kommt weiter aus " +
+               "der Anordnung darunter (magShape/Lagen) — ein mehrlagiger " +
+               "Reluktanzlaeufer entsteht ueber 'pmasynrm' oder 'vv'. Die " +
+               "analytische Rechnung kennt davon nur die Barrierenhoehe.")
+            : (lbl +
+               " — ohne Magnete; die Magnet-Topologie entfaellt. Welche Stufen " +
+               "diese Art traegt, steht in der Auswahl; der Lauf weist ab, was " +
+               "sie nicht traegt.");
       }
     }
     window._updateArtVis = _updateArtVis;
@@ -13790,8 +13806,23 @@ function escHtml(s) {
       // das sagt `feld_darstellbar` und die Zeile unter der Leinwand.
       const _ltR = (typeof _laeuferTeileAktiv === "function")
                      ? _laeuferTeileAktiv() : null;
-      if (_ltR && typeof LAEUFER !== "undefined") {
-        LAEUFER.rastere(gridMu, N, center, gs, _ltR, a0);
+      const _stR = (typeof _staenderTeileAktiv === "function")
+                     ? _staenderTeileAktiv() : null;
+      // Womit eine eingepraegte GLEICHdurchflutung gewichtet wird.
+      //
+      // Die Staendernut unten schreibt je Zelle den NUTstrom; die Durchflutung
+      // einer Nut ist also `I * Zellen_je_Nut`. Damit eine Erregerspule mit F
+      // Amperewindungen im selben Bild dasselbe Gewicht hat wie eine Nut mit
+      // I Ampere, bekommt `rastere` diesen Umrechner -- dann steht das
+      // Verhaeltnis Spule:Nut genau auf F:I. Geraten wird daran nichts.
+      const _zellenJeNut = Math.max(1, Math.ceil(slotD))
+        * Math.max(1, Math.ceil(rSI * (2*Math.PI/Math.max(GEOM.slots,1))
+                                * GEOM.slotWidthRatio));
+      const _jNut = _zellenJeNut * (5 / N);
+      if (typeof LAEUFER !== "undefined") {
+        // Der Laeufer dreht mit (`a0`), der Staender steht.
+        if (_ltR) LAEUFER.rastere(gridMu, N, center, gs, _ltR, a0, gridJ, _jNut);
+        if (_stR) LAEUFER.rastere(gridMu, N, center, gs, _stR, 0, gridJ, _jNut);
       }
       if (GEOM.genBalanceBolts) {
         const TH={M4:4,M5:5,M6:6,M8:8,M10:10,M12:12,M16:16,M20:20};
@@ -13843,7 +13874,15 @@ function escHtml(s) {
       }
     }
     const slots = GEOM.slots, step = 2*Math.PI/slots, sw = step * GEOM.slotWidthRatio;
-    for (let s = 0; s < slots; s++) {
+    // Eine Bauart mit EIGENEM Staender bekommt keine Drehstromnuten.
+    //
+    // Die Gleichstrommaschine traegt Schenkelpole mit Gleicherregung; das
+    // dreiphasige Nutfeld darueberzulegen ergab ein Drehfeld auf einer
+    // Maschine, die keines hat -- gemeldet als „die Magnetfelder in der
+    // fremderregten Gleichstrommaschine sind auch falsch". Ihre Erregung steht
+    // schon im Raster (oben, ueber `durchflutung_A`).
+    const _dreiphasig = _staenderfeldAktiv();
+    for (let s = 0; _dreiphasig && s < slots; s++) {
       const ang = s*step, elAng = ang*GEOM.p;
       // FELDwinkel, nicht Laeuferwinkel: bei der ASM laeuft das Drehfeld dem
       // Kaefig um den Schlupf voraus, und das ist das Sichtbare an der Bauart.
@@ -13878,7 +13917,7 @@ function escHtml(s) {
     // PSM noch enthalten", und genau so war es: das Feldbild einer
     // Asynchronmaschine war ein PM-Feld. Dieselbe Frage wie in `drawRotor`,
     // damit Bild und Feld nicht auseinanderfallen.
-    const legs   = _laeuferTeileAktiv() ? [] : magnetLegs(GEOM);
+    const legs   = _hatMagnete() ? magnetLegs(GEOM) : [];
     // ×4 restores the amplitude lost when the magnet rasterisation switched from
     // sub-pixel accumulation (the old l+=0.5/t+=0.5 loops hit each pixel ~2×2 times)
     // to a clean one-contribution-per-pixel mask — without it the magnet flux is ~4×
@@ -14160,6 +14199,32 @@ function escHtml(s) {
 
   function _laeuferArt() { return (GEOM.machineType || "pmsm"); }
 
+  // Zeichnet DIESE Bauart Magnete aus `magnetLegs`?
+  //
+  // Die Frage haing frueher daran, ob TEILE angekommen sind -- und das ist
+  // etwas anderes: eine leere Teileliste heisst „nichts zu zeichnen", nicht
+  // „zeichne Magnete". Blieb sie leer (nicht auslegbarer Kaefig, Abruf noch
+  // unterwegs, Serverfehler), bekam eine Asynchronmaschine die Magnete einer
+  // PSM ins Bild UND ins Raster. Genau so gemeldet. Die Antwort kommt aus
+  // `ema_maschinenart` ueber `/laeuferbild`; solange sie fehlt, gilt die eine
+  // Bauart, die ihre Magnete selbst zeichnet.
+  function _hatMagnete() {
+    const b = _laeuferBild;
+    if (b && _laeuferMarke === _laeuferMarkeBauen()
+        && typeof b.hat_magnete === "boolean") return b.hat_magnete;
+    return _laeuferArt() === "pmsm";
+  }
+
+  // Bedeutet der dreiphasige Nutstrom der Vorschau fuer diese Bauart etwas?
+  // Bei der Gleichstrommaschine nicht: ihr Staender traegt Schenkelpole mit
+  // Gleicherregung, kein Drehfeld.
+  function _staenderfeldAktiv() {
+    const b = _laeuferBild;
+    if (b && _laeuferMarke === _laeuferMarkeBauen()
+        && typeof b.staenderfeld === "boolean") return b.staenderfeld;
+    return true;
+  }
+
   // Die Teile, die JETZT gelten -- oder null. Die Marke wird mitgeprueft:
   // waehrend der Abruf laeuft, gehoeren die alten Teile zu einer anderen
   // Maschine, und die zu zeichnen waere schlimmer als sie wegzulassen.
@@ -14259,7 +14324,7 @@ function escHtml(s) {
     // Umbau, bei der der PSM-Pfad still kaputtgeht.
     const _lt = _laeuferTeileAktiv();
     if (_lt) LAEUFER.zeichne(ctx, _lt, SCALE);
-    const legs = _lt ? [] : magnetLegs(GEOM);
+    const legs = _hatMagnete() ? magnetLegs(GEOM) : [];
     const rRO = (GEOM.rotorOD/2)*SCALE;
     for (let i=0;i<poles;i++) {
       ctx.save(); ctx.rotate(i*step);

@@ -288,13 +288,31 @@ pruefe('src="/ema_laeufer.js"' in html,
 pruefe('fetch("/laeuferbild"' in html,
        "und holt die Teile vom Server, statt die Geometrie nachzubauen")
 pruefe("const _lt = _laeuferTeileAktiv();" in html
-       and "const legs = _lt ? [] : magnetLegs(GEOM);" in html,
-       "drawRotor zeichnet die Teile UND laesst dann die Magnetschleife leer "
-       "laufen — kein PSM-Magnet auf einem Kaefiglaeufer")
+       and "const legs = _hatMagnete() ? magnetLegs(GEOM) : [];" in html,
+       "drawRotor zeichnet die Teile UND fragt fuer die Magnete die BAUART "
+       "— kein PSM-Magnet auf einem Kaefiglaeufer")
+# Der Unterschied ist kein Feinschliff, sondern der gemeldete Fehler: die
+# Frage haing frueher daran, ob TEILE ankamen. Eine leere Liste heisst aber
+# „nichts zu zeichnen", niemals „zeichne Magnete" — und leer war sie genau
+# dann, wenn es interessant wurde (nicht auslegbarer Kaefig, Abruf unterwegs,
+# Serverfehler). Dann stand die PSM-Magnetanordnung auf einer ASM.
+pruefe("_lt ? [] : magnetLegs(GEOM)" not in html
+       and "_laeuferTeileAktiv() ? [] : magnetLegs(GEOM)" not in html,
+       "und die Magnete haengen NICHT mehr daran, ob Teile angekommen sind")
+pruefe("function _hatMagnete()" in html and "b.hat_magnete" in html,
+       "die Antwort kommt aus ema_maschinenart ueber /laeuferbild, nicht aus "
+       "einer Liste im HTML")
 pruefe("const _st = _staenderTeileAktiv();" in html,
        "drawStator kennt den Schenkelpol-Staender der GSM")
-pruefe("LAEUFER.rastere(gridMu, N, center, gs, _ltR, a0)" in html,
+pruefe("LAEUFER.rastere(gridMu, N, center, gs, _ltR, a0, gridJ, _jNut)" in html,
        "und das FELDRASTER liest dieselbe Teileliste wie die Zeichnung")
+pruefe("LAEUFER.rastere(gridMu, N, center, gs, _stR, 0, gridJ, _jNut)" in html,
+       "auch den STAENDER der GSM — sonst fuehrte das Feld so, als waere er "
+       "ein Vollring, und die gezeichneten Schenkelpole waeren bloss Farbe")
+pruefe("const _dreiphasig = _staenderfeldAktiv();" in html
+       and "for (let s = 0; _dreiphasig && s < slots; s++)" in html,
+       "und eine Bauart mit EIGENEM Staender bekommt keine Drehstromnuten — "
+       "ein Drehfeld auf einer Gleichstrommaschine ist ein falsches Bild")
 pruefe('id="ov_laeufer"' in html and "_laeuferHinweisZeigen" in html,
        "die Leinwand sagt, was sie bei dieser Bauart NICHT zeigt")
 # Die Marke ist der Grund, warum nicht bei jedem Tastendruck geholt wird --
@@ -324,7 +342,7 @@ print("\n6. Die SIMULATION zeigt dieselbe Maschine wie die Zeichnung")
 # die Magnete der PSM noch enthalten" — sie waren es: der Rasterer
 # magnetisierte weiter aus `magnetLegs`, und psi/Ld/Lq kamen aus
 # `compute_advanced_em`, also aus Br und Magnetdicke.
-pruefe("const legs   = _laeuferTeileAktiv() ? [] : magnetLegs(GEOM);" in html,
+pruefe("const legs   = _hatMagnete() ? magnetLegs(GEOM) : [];" in html,
        "das FELDRASTER magnetisiert nicht mehr, wo es keine Magnete gibt")
 
 # „Bei der ASM hat man das Gefuehl, Feld und Welle laufen synchron" — sie
@@ -448,6 +466,191 @@ pruefe(_leg is not None
 pruefe(len(_teile) > 0,
        f"und die Leinwand zeichnet dieselben {len(_teile)} Taschen aus "
        f"derselben Quelle (magnet_legs)")
+
+
+print("\n8. Nichts verlaesst die Maschine")
+
+# Der gemeldete Fehler war ein Bild: „in der fremderregten Maschine
+# kollidieren Rotor und Stator". Die Ursache ist eine Rechenregel, die man
+# nicht sieht — Kern, Spule und Nut sind RECHTECKE, Laeufer und Staender sind
+# KREISE: ein Rechteck der halben Breite y mit der Oberkante bei r hat seine
+# Ecken bei sqrt(r^2 + y^2). Geprueft wurde die Oberkante, gezeichnet wurden
+# die Ecken. Gemessen stand die Erregerspule bei r = 88,63 mm, waehrend die
+# Statorbohrung bei 85,8 mm anfaengt.
+#
+# Geprueft wird deshalb an der ECKE und ueber die ganze Polzahlspanne: der
+# Einzelfall sagt hier nichts, der Fehler haengt am Verhaeltnis Polbreite zu
+# Radius und trat bei vier Polen auf, nicht bei sechs.
+import math as _m                                            # noqa: E402
+
+
+def _ecke(t):
+    f = t["form"]
+    if f in ("ring", "segment"):
+        return t["r_a"]
+    if f == "kreis":
+        return _m.hypot(t["cx"], t["cy"]) + t["r"]
+    if f == "rechteck":
+        return max(_m.hypot(t["r1"], t["y0"]), _m.hypot(t["r1"], t["y1"]),
+                   _m.hypot(t["r0"], t["y0"]), _m.hypot(t["r0"], t["y1"]))
+    if f == "trapez":
+        return max(_m.hypot(t["r1"], t["y0a"]), _m.hypot(t["r1"], t["y1a"]),
+                   _m.hypot(t["r0"], t["y0i"]), _m.hypot(t["r0"], t["y1i"]))
+    if f == "tasche":
+        h = t["hoehe"] / 2.0
+        a = _m.radians(t["tilt_grad"])
+        return max(_m.hypot(t["r_pos"] + t["laenge"] * _m.cos(a),
+                            t["offset"] + t["laenge"] * _m.sin(a)) + h,
+                   _m.hypot(t["r_pos"], t["offset"]) + h)
+    return 0.0
+
+
+_raus = []
+_faelle = 0
+for _art in ("asm", "synrm", "eesm", "gsm"):
+    for _p in (1, 2, 3, 4, 6, 8, 12):
+        for _form in ("rechteck", "kegel"):
+            _g, _L = geom(_art, p=_p, erregerSpuleForm=_form)
+            _e = LB.teile(_g, _L)
+            _faelle += 1
+            _rl = _g["rotorOD"] / 2.0
+            _rs = _g["statorOD"] / 2.0
+            for _t in _e["teile"]:
+                if _ecke(_t) > _rl + 1e-3:
+                    _raus.append(f"{_art} p={_p} {_form} Laeufer "
+                                 f"{_ecke(_t):.2f}>{_rl:.2f}")
+            for _t in _e["staender"]:
+                if _ecke(_t) > _rs + 1e-3:
+                    _raus.append(f"{_art} p={_p} {_form} Staender "
+                                 f"{_ecke(_t):.2f}>{_rs:.2f}")
+pruefe(not _raus,
+       f"{_faelle} Faelle: kein Teil tritt mit seiner ECKE aus Laeufer oder "
+       f"Staender" + (" — " + "; ".join(_raus[:3]) if _raus else ""))
+
+# Und die Gegenprobe, dass die Pruefung ueberhaupt etwas findet: mit der
+# frueheren Regel (Oberkante statt Ecke) waere genau dieser Fall durchgegangen.
+# Die GEMESSENE Geometrie, nicht irgendeine: das ist der Startzustand der
+# Leinwand (ema.html GEOM), an dem der Fehler gemeldet wurde. Am frischen
+# CLI-Payload (Laeufer 188,6 mm) tritt er nicht auf — der Ueberstand haengt am
+# Verhaeltnis Polbreite zu Radius, und ein Testfall, der ihn nicht zeigt,
+# prueft hier nichts.
+_g, _L = geom("eesm", rotorOD=170.0, statorID=171.6, statorOD=295.0,
+              shaftD=80.0, p=2, slots=36, axialLen=225.0)
+_L = 225.0
+_k = __import__("ema_eesm_cad").koerper(_g, _L)
+_y = max(_k["b_kern_aussen_mm"], _k["b_kern_innen_mm"]) / 2.0 + _k["d_spule_mm"]
+pruefe(_m.hypot(_k["r_kern_aussen_mm"], _y) > _k["r_rotor_mm"],
+       f"die Gegenprobe greift: mit der Kernoberkante als Spulenoberkante laege "
+       f"die Ecke bei {_m.hypot(_k['r_kern_aussen_mm'], _y):.2f} mm statt "
+       f"{_k['r_rotor_mm']:.2f} mm")
+pruefe(_k["im_laeufer"] and _k["r_spule_aussen_mm"] < _k["r_kern_aussen_mm"],
+       f"deshalb endet die Spule weiter innen als der Kern "
+       f"({_k['r_spule_aussen_mm']:.2f} gegen {_k['r_kern_aussen_mm']:.2f} mm)")
+pruefe(_k["deckt_spule"],
+       "und der Polschuh ueberdeckt sie weiterhin — er haelt sie gegen die "
+       "Fliehkraft (US3089049A)")
+
+
+print("\n9. Ein nicht bemessbarer Kaefig wird GEZEICHNET, nicht durch Magnete ersetzt")
+
+# Der gemeldete Fehler: „in der Asynchronmaschine werden keine Staebe sondern
+# Magnete angezeigt". So war es — `_asm` gab bei einem nicht auslegbaren Kaefig
+# eine leere Liste heraus, und die Leinwand fiel daraufhin auf `magnetLegs`
+# zurueck. Von allen moeglichen Bildern ist das das einzige, das eine ANDERE
+# Maschine zeigt.
+_g, _L = geom("asm", rotorOD=170.0, statorID=171.6, statorOD=295.0,
+              shaftD=80.0, p=2, slots=36, axialLen=225.0)
+_e = LB.teile(_g, 225.0)
+_k = __import__("ema_asm").kaefig(_g, 225.0)
+pruefe(_k["bemessung"] == "nicht auslegbar",
+       "die Beispielgeometrie ist wirklich nicht bemessbar (963 A "
+       "Magnetisierung gegen 800 A Grenze) — sonst prueft dieser Block nichts")
+pruefe(len(_e["teile"]) == _k["n_stab"] and not _e["fehler"],
+       f"trotzdem kommen {len(_e['teile'])} Staebe heraus, kein Fehler")
+pruefe("NICHT auslegbar" in _e["hinweis"]
+       and "Fertigungsboden" in _e["hinweis"],
+       "und der Hinweis sagt, dass das der Fertigungsboden ist und keine "
+       "Auslegung — verschwiegen waere es schlimmer als gar nicht gezeichnet")
+pruefe(_e["hat_magnete"] is False,
+       "`hat_magnete` sagt der Leinwand unabhaengig davon, dass diese Bauart "
+       "keine Magnete hat — die Antwort haengt an der ART, nicht daran, ob "
+       "Teile ankamen")
+
+# Ohne Maschine kein Bild: seit der Kaefig auch am Boden gezeichnet wird, kaeme
+# sonst aus jeder Geometrie etwas heraus — auch aus einer, die es nicht gibt.
+_g2, _L2 = geom("asm")
+_g2["rotorOD"] = 0.0
+pruefe(LB.teile(_g2, _L2)["teile"] == [] and LB.teile(_g2, _L2)["fehler"],
+       "eine Geometrie ohne Laeufer liefert weiterhin nichts — samt Grund")
+
+
+print("\n10. Die Gleichstrommaschine bekommt kein Drehfeld")
+
+# „Die Magnetfelder in der fremderregten Gleichstrommaschine sind auch falsch."
+# Waren sie: der Staender der Vorschau ist eine Drehstromwicklung in Nuten, und
+# die wurde ueber die Schenkelpole gelegt. Eine Gleichstrommaschine hat kein
+# Drehfeld — ihre Erregung steht im Raum fest.
+_g, _L = geom("gsm", p=2)
+_e = LB.teile(_g, _L)
+pruefe(_e["staenderfeld"] is False,
+       "die GSM meldet `staenderfeld: False` — die Seite laesst die "
+       "Drehstromnuten daraufhin weg")
+_luft = [t for t in _e["staender"] if t["rolle"] == "luft"]
+pruefe(len(_luft) == 2 * _g["p"],
+       f"zwischen den {2 * _g['p']} Schenkelpolen steht LUFT im Raster "
+       f"({len(_luft)} Teile) — sonst fuehrte das Feld, als waere der Staender "
+       f"ein Vollring, und die gezeichneten Pole waeren bloss Farbe")
+_strom = [t for t in _e["staender"] if t.get("durchflutung_A")]
+pruefe(len(_strom) == 4 * _g["p"],
+       f"die {len(_strom)} Erregerspulenseiten tragen eine Durchflutung — "
+       f"Gleichstrom ist magnetostatisch darstellbar, anders als der Kaefig")
+pruefe(abs(sum(t["durchflutung_A"] for t in _strom)) < 1e-6,
+       "und sie summiert sich zu null: je Pol +F und -F, Polfolge wechselnd")
+_f = abs(_strom[0]["durchflutung_A"])
+_soll = __import__("ema_eesm").erregung(_g, _L)["F_pol_A"]
+pruefe(abs(_f - _soll) < 0.02,
+       f"ihr Wert kommt aus ema_eesm.erregung ({_f:.1f} A je Pol), nicht aus "
+       f"einer Zahl im Zeichner")
+
+# Dasselbe beim Schenkelpollaeufer der EESM -- gleiche Regel, anderer Ort.
+_g, _L = geom("eesm", p=2)
+_e = LB.teile(_g, _L)
+_strom = [t for t in _e["teile"] if t.get("durchflutung_A")]
+pruefe(len(_strom) == 4 * _g["p"] and _e["feld_darstellbar"],
+       f"die EESM praegt ihre Erregung ebenso ein ({len(_strom)} "
+       f"Spulenseiten) und meldet das Feld damit als darstellbar")
+
+
+print("\n11. Der Zeichner traegt die Durchflutung wirklich ins gridJ")
+
+# Gezaehlt wird, was `rastere` SCHREIBT -- nicht, dass die Funktion existiert.
+_g, _L = geom("gsm", p=2)
+_e = LB.teile(_g, _L)
+_js = open(os.path.join(HIER, "ema_laeufer.js"), encoding="utf-8").read()
+_prog = _js + """
+var N = 200, gridMu = new Float32Array(N*N), gridJ = new Float32Array(N*N);
+for (var i = 0; i < N*N; i++) gridMu[i] = 500;
+var teile = TEILE;
+var n = LAEUFER.rastere(gridMu, N, N/2, N/(2*140), teile, 0, gridJ, 12);
+var pos = 0, neg = 0, summe = 0;
+for (var i = 0; i < N*N; i++) {
+  if (gridJ[i] > 0) pos++; else if (gridJ[i] < 0) neg++;
+  summe += gridJ[i];
+}
+console.log(JSON.stringify({n: n, pos: pos, neg: neg, summe: summe}));
+"""
+with tempfile.TemporaryDirectory() as _d:
+    _pf = os.path.join(_d, "p.js")
+    with open(_pf, "w", encoding="utf-8") as _fh:
+        _fh.write(_prog.replace("TEILE", json.dumps(_e["staender"])))
+    _out = subprocess.run(["node", _pf], capture_output=True, text=True)
+_r = json.loads(_out.stdout.strip().splitlines()[-1]) if _out.returncode == 0 else {}
+pruefe(_r.get("pos", 0) > 50 and _r.get("neg", 0) > 50,
+       f"beide Vorzeichen stehen im Raster ({_r.get('pos')} positive, "
+       f"{_r.get('neg')} negative Zellen) — eine Windung um den Kern")
+pruefe(abs(_r.get("summe", 1.0)) < 1e-3 * max(_r.get("pos", 1), 1),
+       f"und sie heben sich auf (Summe {_r.get('summe', 0):.3e}) — was in die "
+       f"eine Spulenseite hineinlaeuft, kommt aus der anderen zurueck")
 
 
 print("\n" + "=" * 62)

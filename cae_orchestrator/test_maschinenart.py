@@ -471,9 +471,19 @@ for _c in MA.ARTEN:
 
 # Was eine Bauart nicht hat, wird ausgeblendet statt wirkungslos stehenzulassen.
 pruefe('id="grp_magnet_topo"' in _html
-       and 'topo.style.display = mitMagneten ? "" : "none"' in _html,
+       and 'topo.style.display = (mitMagneten || barrieren) ? "" : "none"' in _html,
        "die Magnet-Topologie entfaellt bei einer Art ohne Magnete — ein Regler, "
        "der nichts bewegt, liest sich wie einer, der nicht wirkt")
+# Mit EINER Ausnahme, und sie ist keine Nachlaessigkeit: beim Reluktanzlaeufer
+# IST diese Anordnung die Maschine. Die Taschen bleiben leer, ihre Lage
+# entscheidet ueber das Salienzverhaeltnis — sie auszublenden liess den Laeufer
+# als „IPM ohne Magnete" stehen, ohne jeden Griff daran. Genau so gemeldet.
+pruefe('const barrieren = (art === "synrm");' in _html,
+       "beim Reluktanzlaeufer bleibt sie sichtbar — dort sind es die "
+       "Flussbarrieren und nicht die Magnete")
+pruefe('"Flussbarrieren (Anordnung)"' in _html,
+       "und sie heisst dort auch so, statt 'Magnet-Topologie' an einer "
+       "Maschine ohne Magnete")
 pruefe('machineType:\'machine_art\'' in _html,
        "und 'Text -> Auslegung' trifft dasselbe Feld (T2E_APPLY)")
 

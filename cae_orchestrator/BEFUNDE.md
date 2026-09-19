@@ -17,6 +17,105 @@ kann.
 
 ---
 
+## 2026-09-19 — Die Leinwand zeigte vier verschiedene Maschinen falsch
+
+**Beobachtung** (gemeldet): „die geometrische Darstellung ist im html canvas
+falsch. in der Asynchronmaschine werden keine Stäbe sondern Magnete angezeigt.
+in der Reluktanzmaschine hast du einfach die Magnete entfernt, und in der
+fremderregten Maschine kollidieren Rotor und Stator. die Magnetfelder in der
+fremderregten Gleichstrommaschine sind auch falsch."
+
+Alle vier Punkte sind im Browser nachgestellt worden (Chromium 153 headless über
+das DevTools-Protokoll, `http://localhost:5000/#geo`, Bildschirmaufnahme der
+`#simCanvas`-Fläche je Maschinenart). Die Vorschau war vorher **nie in einem
+Browser** geprüft worden — nur über `node` mit gestelltem Kontext und über ein
+aus dem JS-Raster gerendertes PNG. Genau die vier Fehler liegen zwischen diesen
+beiden Prüfungen.
+
+**Messung.** Startgeometrie der Seite (`ema.html` `GEOM`): Rotor Ø 170, Bohrung
+Ø 171,6, Stator Ø 295, Welle Ø 80, p = 2, 36 Nuten, L = 225 mm.
+
+1. **ASM: Magnete statt Stäbe.** `ema_asm.kaefig` meldet für diese Geometrie
+   `bemessung = "nicht auslegbar"` (Magnetisierung auf 0,80 T braucht 963 A,
+   die Umrichtergrenze liegt bei 800 A). `ema_laeuferbild._asm` gab daraufhin
+   eine **leere Teileliste** heraus — und `drawRotor` las genau daran ab, ob
+   Magnete zu zeichnen sind (`const legs = _lt ? [] : magnetLegs(GEOM)`). Eine
+   leere Liste heißt aber „nichts zu zeichnen“, niemals „zeichne Magnete“, und
+   leer war sie ausgerechnet in den interessanten Fällen: nicht auslegbarer
+   Käfig, Abruf noch unterwegs, Serverfehler. Im Bild stand die V-Anordnung
+   einer PSM auf einem Asynchronläufer.
+2. **EESM: Rotor und Stator kollidieren.** Gemessen an den Zeichenteilen: die
+   Erregerspule reichte mit ihrer **Ecke** bis r = 88,63 mm, der Polkern bis
+   85,80 mm — bei einem Läuferhalbmesser von 85,00 mm und einer Statorbohrung
+   ab 85,80 mm. Im gerenderten Bild (3,36 px/mm) liegt die Polfarbe bis
+   r = 86,5 mm, also 0,7 mm im Ständer. Ursache ist eine Rechenregel, die man
+   nicht sieht: Kern und Spule sind **Rechtecke**, der Läufer ist ein **Kreis**
+   — ein Rechteck der halben Breite `y` mit der Oberkante bei `r` hat seine
+   Ecken bei `sqrt(r² + y²)`. Geprüft wurde die Oberkante, gezeichnet wurden
+   die Ecken. Derselbe Fehler steckte in `render_cross_section` und in
+   `ema_freecad._pol_spule`, weil alle drei dieselbe Zahl (`r_kern_aussen_mm`)
+   lasen.
+3. **GSM: ein Drehfeld auf einer Gleichstrommaschine.** Der Ständer der
+   Vorschau ist eine Drehstromwicklung in Nuten (`rasterizeGeometry`,
+   Nutschleife mit `PHYS.id/iq` über `feldWinkel`). Für die GSM wurden die
+   Schenkelpole zwar GEZEICHNET (`staender`-Teile seit dem 18.09.), aber
+   **nicht gerastert** — `LAEUFER.rastere` bekam nur die Läuferteile. Das
+   Feldbild zeigte also ein rotierendes Dreiphasenfeld auf einem Ständer, der
+   keines hat, und der Wickelraum zwischen den Polen war magnetisch Eisen.
+4. **SynRM: „die Magnete einfach entfernt“.** Hier war die Zeichnung richtig
+   (8 leere Taschen, Ziffer für Ziffer dieselbe Quelle wie das
+   Querschnittsbild), der **Griff** fehlte: `_updateArtVis` blendete die
+   Magnet-Topologie für jede Art ohne Magnete aus — auch für den
+   Reluktanzläufer, bei dem diese Anordnung die Lage der Flussbarrieren ist und
+   damit das Einzige, was die Maschine ausmacht. Übrig blieb ein IPM ohne
+   Magnete, ohne jede Möglichkeit, daran zu drehen.
+
+**Fundstelle.** `ema_laeuferbild._asm`/`_eesm`/`_gsm`/`teile`,
+`ema_eesm_cad.koerper`, `ema.html` `drawRotor`/`rasterizeGeometry`/
+`_updateArtVis`, `ema_pipeline.render_cross_section` (EESM-Zweig),
+`ema_freecad._pol_spule`, `ema_laeufer.js` `rastere`.
+
+**Stand: behoben.**
+
+- Die Magnete hängen an der **Bauart** (`hat_magnete` aus `ema_maschinenart`,
+  über `/laeuferbild`), nicht mehr daran, ob Teile ankamen.
+- Ein nicht bemessbarer Käfig wird **gezeichnet** — `ema_asm.kaefig` gibt die
+  Geometrie ausdrücklich auch dann heraus („der Zeichner und das Netz brauchen
+  etwas“) — und der Hinweis sagt, dass es der Fertigungsboden ist. Das harte
+  Nein bleibt beim Vernetzen (`ema_em2d_harm`) und beim CAD.
+- `ema_eesm_cad` rechnet den zulässigen Spulenradius aus
+  (`_spule_einpassen`, `RAND_LUFT_MM = 1,0`): Dicke und Höhe der Spule werden
+  **gekoppelt** gelöst, so dass `d·h` den Wickelraum trägt UND die Ecke auf dem
+  Läuferrand liegt. Neu heraus kommen `r_spule_aussen_mm` und
+  `b_kern_spulenende_mm`, die alle drei Zeichner lesen. Gemessen an der
+  gemeldeten Geometrie: Ecke 88,63 → **84,00 mm** bei r_Läufer 85,00.
+  Zusätzlich eine vierte Schranke `rotorrand` für den Kern und, als letzter
+  Riegel, `ema_laeuferbild._im_kreis` über **jedes** Teil jeder Bauart —
+  56 Fälle (4 Arten × 7 Polzahlen × 2 Spulenformen) ohne Überstand.
+- Die GSM meldet `staenderfeld: False`; die Seite lässt die Drehstromnuten dann
+  weg, rastert die Ständerteile mit (Luft zwischen den Polen) und prägt die
+  **Erregerspulen als Gleichstrom** ein (`durchflutung_A` je Spulenseite, Wert
+  aus `ema_eesm.erregung`). Dasselbe bei der EESM. Das ist keine Erweiterung des
+  Modells, sondern sein eigentlicher Fall: eine eingeprägte Gleichdurchflutung
+  kann ein magnetostatischer Löser exakt. Im Bild steht danach ein stehendes
+  Vierpolfeld, das aus jedem Ständerpol austritt und über den Nachbarpol
+  zurückkehrt.
+- Beim Reluktanzläufer bleibt die Anordnung sichtbar und heißt dort
+  „Flussbarrieren (Anordnung)“; der Hinweis nennt `pmasynrm`/`vv` für einen
+  mehrlagigen Läufer (gemessen 6 Barrieren je Pol in 3 Lagen gegen 2 in 1).
+
+**Was bewusst offen bleibt.** Unter dem Polschuh-Überstand, neben der Spule,
+zeichnet die Leinwand weiterhin Läufereisen statt Luft — Zeichnung und Raster
+sind dort einig, also widerspricht sich das Bild nicht; richtig wäre trotzdem
+Luft. Das braucht eine Eisen-Rolle im Rasterer (`rastere` trägt heute nur
+Unmagnetisches ein) und ist deshalb ein eigener Schritt. Ebenso: die Feldspule
+der GSM ist ein Rechteck bis an den Jochinnenradius, ihre Ecken liegen damit im
+Jocheisen (gemessen 141,7 mm gegen einen Jochinnenradius von 124,6 mm bei
+Stator-r 147,5) — innerhalb der Maschine und innerhalb ihres eigenen
+Polfensters, also keine Kollision, aber eine Vereinfachung.
+
+---
+
 ## 2026-09-18 — Die EESM-Schulenspulen liegen im eigenen Eisen
 
 **Beobachtung.** Die CAD-Vorschau der fremderregten Synchronmaschine (Projekt

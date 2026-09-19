@@ -2016,16 +2016,21 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
                 # baut es auch `ema_freecad`.
                 _bi = _kq.get("b_kern_innen_mm", _kq["b_kern_mm"])
                 _ba = _kq.get("b_kern_aussen_mm", _kq["b_kern_mm"])
+                # Die SPULE endet weiter innen als der Kern: sie sitzt neben
+                # ihm, und mit der Kernoberkante als Oberkante laege ihre Ecke
+                # ausserhalb des Laeufers (s. ema_eesm_cad.RAND_LUFT_MM).
+                _rs = _kq.get("r_spule_aussen_mm", _rk)
+                _be = _kq.get("b_kern_spulenende_mm", _ba)
                 for _ecken, _fc, _ec in (
                         # Kern
                         (((_rj, -_bi / 2), (_rk, -_ba / 2),
                           (_rk, _ba / 2), (_rj, _bi / 2)), '#3c4a60', '#6b7c99'),
                         # Spule links und rechts, jeweils am Kern anliegend
-                        (((_rj, _bi / 2), (_rk, _ba / 2),
-                          (_rk, _ba / 2 + _ds), (_rj, _bi / 2 + _ds)),
+                        (((_rj, _bi / 2), (_rs, _be / 2),
+                          (_rs, _be / 2 + _ds), (_rj, _bi / 2 + _ds)),
                          '#b87333', '#e0a060'),
-                        (((_rj, -_bi / 2 - _ds), (_rk, -_ba / 2 - _ds),
-                          (_rk, -_ba / 2), (_rj, -_bi / 2)),
+                        (((_rj, -_bi / 2 - _ds), (_rs, -_be / 2 - _ds),
+                          (_rs, -_be / 2), (_rj, -_bi / 2)),
                          '#b87333', '#e0a060')):
                     _pts = [(x * _m.cos(_a) - y * _m.sin(_a),
                              x * _m.sin(_a) + y * _m.cos(_a)) for x, y in _ecken]
