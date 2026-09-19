@@ -510,6 +510,89 @@ pruefe("import ema_getriebe_cad" not in _quelle_g.split("def lauf(")[0],
        "bleibt ohne FreeCAD pruefbar")
 
 
+# ── Der Planetensatz ist eine BAUGRUPPE, nicht drei lose Raeder ────────────
+#
+# Geprueft wird am ERZEUGTEN Skript, ohne FreeCAD -- dasselbe Verfahren wie bei
+# `test_laeufer_cad.py`. Was hier steht, ist gemessen worden (Versatzlaeufe in
+# FreeCAD, s. BEFUNDE.md); der Test nagelt fest, dass es auch emittiert wird.
+_satz = {"ok": True, "art": "planeten", "einbau": "koaxial", "stufen": [{
+    "m_mm": 2.0, "b_mm": 20.0, "z_sonne": 25, "z_planet": 20,
+    "z_hohlrad": 65, "n_planeten": 3, "d_sonne_mm": 50.0,
+    "a_sonne_planet_mm": 45.0, "d_aussen_mm": 142.0}]}
+
+_alt_da = GC.fcgear_da
+GC.fcgear_da = lambda: True                    # den Text erzeugen, nicht bauen
+# `ema_getriebe_cad` importiert `freecad_runner` erst IM Aufruf -- damit die
+# Auslegung ohne FreeCAD ladbar bleibt. Gestellt wird deshalb das Modul in
+# `sys.modules`, nicht ein Attribut am Zeichner.
+import freecad_runner as _FR                                  # noqa: E402
+_alt_run = _FR.run_freecad_script
+_gefangen = {}
+
+
+def _fang(quelle, timeout=300):
+    _gefangen["quelle"] = quelle
+    return {"success": False, "stdout": ""}
+
+
+_FR.run_freecad_script = _fang
+try:
+    GC.bauen(_satz, "/tmp", name="t", mit_welle=False)
+finally:
+    GC.fcgear_da = _alt_da
+    _FR.run_freecad_script = _alt_run
+_q = _gefangen.get("quelle", "")
+
+# FCGear setzt auf JEDES Rad einen Zahn auf die +x-Achse. Ein kaemmendes Paar
+# braucht deshalb den halben Zahnschritt SEINES EIGENEN Rades -- gemessen ueber
+# einen Versatzlauf: 0 Grad -> 336,7 mm3 Durchdringung, 9,00 Grad = genau eine
+# halbe Teilung -> 0,000 mm3, und zwar am Planeten bei 0 Grad WIE bei 120 Grad.
+pruefe(_q.count("_s.rotate(Vector(0, 0, 0), Vector(0, 0, 1), 9.0)") == 3,
+       "jeder der drei Planeten wird um eine halbe Zahnteilung gedreht "
+       "(9,00 Grad bei z=20)")
+pruefe("Vector(0, 0, 1), %r)" % (180.0 / 65) in _q,
+       "und das Hohlrad um eine halbe Hohlradteilung (%.4f Grad bei z=65)"
+       % (180.0 / 65))
+# Der naheliegende Zusatzterm waere falsch und stand vorher drin.
+pruefe("z_sonne\"] / float(st[\"z_planet\"]" not in _q
+       and "* st[\"z_sonne\"]" not in _q,
+       "und NICHT um `Stellwinkel * z_Sonne/z_Planet` -- damit blieben "
+       "gemessen 262,9 mm3 stehen")
+
+pruefe(_q.count("doc.removeObject(") >= 5,
+       "jedes FCGear-Objekt wird nach dem Kopieren entfernt — es stand sonst "
+       "am Ursprung mitten in der Baugruppe (jedes Rad zweimal im Dokument)")
+# `!r` schreibt einfache Anfuehrungszeichen -- geprueft wird der Name, nicht
+# die Schreibweise der Zeile.
+pruefe(_q.count("_koerper.append(('Bolzen") == 3, "drei Planetenbolzen")
+pruefe(_q.count("_koerper.append(('Stegwange") == 2, "zwei Stegwangen")
+# Die Wange traegt die Sonnenwelle UND jeden Bolzen als Bohrung: ohne sie
+# steckt der Bolzen im Vollmaterial.
+_wange = _q.split("_koerper.append(('Stegwange0_v'")[0].split(
+    "_s = Part.makeCylinder")[-1]
+pruefe(_wange.count("_s.cut(Part.makeCylinder") == 4,
+       "und jede Wange hat vier Bohrungen: Sonnenwelle plus drei Bolzen")
+pruefe("_koerper.append(('Sonnenwelle'" in _q
+       and "_koerper.append(('Stegwelle'" in _q,
+       "Sonnenwelle und Stegwelle sind gezeichnet")
+pruefe(_q.count("_s = _s.cut(Part.makeCylinder") >= 4,
+       "Sonne und Planeten bekommen ihre Wellen-/Bolzenbohrung — ohne sie "
+       "steckte die Welle zu 27 % im Rad und jeder Bolzen zu 59 %")
+pruefe("CAD_DURCHDRINGUNG:" in _q and "isInside" in _q,
+       "und der Satz wird am GEBAUTEN Koerper nachgemessen, mit Punktproben "
+       "als Schiedsrichter gegen entartete Boolesche")
+
+# `in_motor_bauen` weist ab, was es nicht kann -- statt es zu naehern.
+_r = GC.in_motor_bauen({"ok": True, "art": "stirnrad", "stufen": [{}]},
+                       "/tmp/gibtsnicht.FCStd", "/tmp")
+pruefe(not _r["ok"] and "achsparallel" in _r["grund"],
+       "in_motor_bauen: ein Stirnradsatz sitzt nicht in der Welle und wird "
+       "abgewiesen")
+_r = GC.in_motor_bauen(_satz, "/tmp/gibtsnicht.FCStd", "/tmp")
+pruefe(not _r["ok"] and "Motordokument fehlt" in _r["grund"],
+       "und ohne Motordokument wird nichts gezeichnet")
+
+
 print("\n" + "=" * 62)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

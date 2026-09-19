@@ -2785,6 +2785,7 @@ def cmd_getriebe(args) -> int:
         "T_motor_Nm": T_mot, "n_motor_1pmin": n_mot,
         "werkstoff": args.werkstoff, "geom": geom,
         "n_planeten": args.planeten, "beta_grad": args.schraegung,
+        "verzahnung": getattr(args, "verzahnung", "gerade"),
         "laenge_verfuegbar_mm": args.bauraum_axial,
     }
     if args.i:
@@ -4140,8 +4141,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Schluessel aus ema_referenz.GETRIEBE_WERKSTOFF")
     s.add_argument("--planeten", type=int, default=3,
                    help="Zahl der Planeten (Vorgabe 3)")
+    s.add_argument("--verzahnung", default="gerade",
+                   choices=["gerade", "schraeg", "pfeil"],
+                   help="Verzahnungsart. Die Schraegung ist im Fahrzeuggetriebe "
+                        "der Normalfall (mehr Ueberdeckung, leiser) und kostet "
+                        "eine Axialkraft; die Pfeilverzahnung hebt sie durch "
+                        "ihre zweite, gegenlaeufige Haelfte wieder auf")
     s.add_argument("--schraegung", type=float, default=0.0,
-                   help="Schraegungswinkel Grad (0 = geradverzahnt)")
+                   help="Schraegungswinkel Grad. 0 heisst: der Vorgabewert der "
+                        "gewaehlten Verzahnungsart (gerade 0, sonst 15)")
     s.add_argument("--bauraum-axial", dest="bauraum_axial", type=float, default=0.0,
                    help="verfuegbare Baulaenge mm (nur fuer --einbau in_welle)")
     s.add_argument("--ohne-feld", dest="ohne_feld", action="store_true",

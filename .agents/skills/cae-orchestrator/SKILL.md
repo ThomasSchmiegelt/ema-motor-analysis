@@ -393,7 +393,35 @@ python3 cae_cli.py getriebe --from-project last --art planeten --einbau in_welle
 # ZWEI Planetenstufen koaxial hintereinander in der Welle (i = 9…100)
 python3 cae_cli.py getriebe --from-project last --art planeten --einbau in_welle \
         --stufen 2 --i 25 --bauraum-axial 160
+
+# schrägverzahnt und gezeichnet (FCGear); 'pfeil' hebt die Axialkraft wieder auf
+python3 cae_cli.py getriebe --from-project last --art planeten --i 5 \
+        --verzahnung schraeg --cad
 ```
+
+**Der gezeichnete Planetensatz ist eine Baugruppe**, nicht drei lose Räder:
+Steg mit Bohrungen, Planetenbolzen, Sonnen- und Stegwelle, Bohrungen in Sonne
+und Planeten — und er wird **am gebauten Körper nachgemessen** (paarweise
+`common().Volume`, wie der EESM-Läufer). Drei Dinge dazu, alle gemessen:
+
+* Jedes Rad wird um **eine halbe Zahnteilung seines eigenen Rades** gedreht.
+  FCGear setzt auf jedes Rad einen Zahn auf die +x-Achse; ohne die Drehung
+  fressen sich die Räder ineinander (336,7 mm³ Sonne↔Planet, 437,0 mm³
+  Planet↔Hohlrad). Der naheliegende Term `Stellwinkel · z_S/z_P` ist die
+  Kinematik eines abrollenden Planeten und hier **falsch**.
+* Der Fehler blieb jahrelang unsichtbar, weil er genau dann verschwindet, wenn
+  `z_Sonne/n_Planeten` aufgeht — und der von der eigenen Auslegung erzeugte
+  Satz trifft das zufällig. Verlass dich nicht darauf, dass „sieht richtig aus"
+  heißt „greift ineinander": **lies `durchdringung_pct` im Ergebnis.**
+* Meldet die Boolesche 100 %, steht es unter `durchdringung_unklar` statt unter
+  `durchdringung_paare`, wenn eine Punktprobe widerspricht — OCCs `common()`
+  gibt bei einem gescheiterten Schnitt bitgleich das Volumen eines Operanden
+  zurück, und das sieht aus wie „steckt ganz drin".
+
+**Der Satz kann in den gebauten Motor gelegt werden** (`in_motor_bauen`): das
+Motordokument wird geöffnet, der Satz mittig ins **Blechpaket** gelegt (nicht
+in die Mitte von allem — die Wickelköpfe ragen hinaus), der Bohrungsdurchmesser
+am Läuferkörper **abgelesen** und Getriebe gegen Motor nachgemessen.
 
 Bis dahin war das Getriebe zwei Konstanten im Fahrzeugmodell (`gear_ratio` 9,5
 und `eta_drive` 0,95) — dieselben für einen Fahrrad-Nabenmotor wie für einen

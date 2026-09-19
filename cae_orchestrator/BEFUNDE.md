@@ -17,6 +17,103 @@ kann.
 
 ---
 
+## 2026-09-19 — Der Planetensatz waren drei lose Räder, und niemand maß nach
+
+**Beobachtung** (gemeldet): „hier `/home/cae/t2g/TextToGeometry` gibt es noch ein
+Planetengetriebe bzw. Skripte zum Bau anderer Getriebe. Die möchte ich bei uns
+integriert haben, in die Getriebeauslegung."
+
+Beim Portieren fiel auf, dass unsere eigene Zeichnung vier Fehler hatte — alle
+still, weil der gezeichnete Satz **nie nachgemessen** wurde. `ema_getriebe`
+rechnet den Planetensatz seit jeher vollständig (Montage- und
+Nachbarbedingung, Tragfähigkeit, zwei Stufen, Einbau in der Welle); gezeichnet
+wurden davon Sonne, Planeten und Hohlrad — und sonst nichts.
+
+**Messung** (2p-Satz z = 25/20/65, m = 2, b = 20, drei Planeten; alle Zahlen
+über paarweises `common().Volume` am gebauten Körper):
+
+1. **Die Zahnphase fehlte.** FCGear setzt auf *jedes* Rad einen Zahn auf die
+   +x-Achse; zwei so erzeugte Räder stehen Zahn auf Zahn. Gemessen über einen
+   Versatzlauf in zwölf Schritten: 0° → **336,7 mm³** Durchdringung Sonne ↔
+   Planet, **9,00° = genau eine halbe Zahnteilung → 0,000 mm³** — und zwar am
+   Planeten bei 0° *wie* bei 120°. Das Hohlrad ebenso: 0° → 437,0 mm³, Minimum
+   bei 2,77° = einer halben Hohlradteilung.
+   **Der naheliegende Term ist falsch.** `Stellwinkel · z_Sonne/z_Planet` ist
+   die Verdrehung, die ein *abrollender* Planet erfährt — Kinematik, nicht
+   Zeichnung. Mit ihm blieben 262,9 mm³ stehen, ohne ihn 0,0.
+   **Warum das jahrelang niemandem auffiel:** der Phasenfehler verschwindet in
+   Zähnen gerechnet genau dann, wenn `z_Sonne/n_Planeten` aufgeht. Der von
+   unserer eigenen Auslegung erzeugte Satz (z_Sonne 24, drei Planeten) trifft
+   das zufällig — 8,000 Zähne. Bei 25/3 sind es 8,333, und dann frisst sich
+   jeder Planet durch die Sonne.
+
+2. **Die Räder hatten keine Bohrung.** FCGear zeichnet eine volle Scheibe.
+   Gemessen steckte die Sonnenwelle zu **27,0 %** im Sonnenrad und jeder
+   Planetenbolzen zu **58,8 %** im Planetenrad.
+
+3. **Die FCGear-Quellobjekte blieben im Dokument stehen** — an ihrem Ursprung,
+   also mitten in der Baugruppe. Ein gespeicherter Planetensatz enthielt jedes
+   Rad **zweimal**, einmal richtig platziert und einmal in der Mitte. Der
+   STEP-Export war davon nicht betroffen (er exportiert nur den Verbund), die
+   `.FCStd` sehr wohl — und wer sie öffnet, sieht den Salat.
+
+4. **Es gab keinen Steg.** Kein Planetenträger, keine Bolzen, keine Wellen —
+   drei Räder, die im Raum stehen. Das ist keine Baugruppe, und die Frage
+   „passt der Satz in die Hohlwelle?" lässt sich daran nicht beantworten.
+
+**Status: behoben.** Jeder Planet und das Hohlrad werden um eine halbe
+Zahnteilung *ihres eigenen* Rades gedreht; Sonne und Planeten bekommen ihre
+Bohrung; das FCGear-Objekt wird nach dem Kopieren entfernt; dazu Planetenbolzen,
+zwei Stegwangen mit Bohrungen für Sonnenwelle und Bolzen, Sonnen- und Stegwelle.
+Neu auch die **Verzahnungsart** (gerade · schräg · Pfeil, `erg["verzahnung"]` /
+`beta_grad`) — `ema_getriebe.zahnform` rechnet `beta` längst mit, gezeichnet
+wurde es nur bei der Stirnradstufe.
+
+**Und der Satz wird nachgemessen**, wie der EESM-Läufer in `bau_eesm.py`:
+paarweise `common().Volume`, Ergebnis in `durchdringung_pct` /
+`durchdringung_paare`. Nach der Korrektur **0,0 %**.
+
+### Der Schiedsrichter darf keine zweite Boolesche sein
+
+Dabei kam ein eigener Befund heraus: **OCCs `common()` liefert bei einem
+gescheiterten Schnitt bitgleich das Volumen eines Operanden.** Gemessen an
+Planet 0 gegen das Hohlrad: 22.364,90 mm³ = exakt das Planetenvolumen, also
+„der Planet steckt vollständig im Hohlrad" — während die beiden baugleichen
+Nachbarn 0,0 % zeigten und der Planet sichtbar im *Loch* des Rings saß.
+
+Zwei naheliegende Gegenproben versagen: der **Hüllquader** entscheidet nichts
+(der eines Planeten liegt sehr wohl in dem des Hohlrads), und ein zweites
+`cut()` scheitert an derselben Stelle und *bestätigt* den Fehler. Der
+Schiedsrichter ist deshalb eine **Punktprobe**: 600 Würfe in den Hüllquader des
+kleineren Körpers, gezählt wird, wie viele in beiden liegen. Ergebnis
+**0,0 % aus 346 Proben** — die Boolesche irrt. Der Fund wird als *nicht
+nachweisbar* gemeldet und nicht als Durchdringung: eine 100-%-Meldung, die in
+Wirklichkeit ein Fehlschlag ist, schickt die Suche ans falsche Ende.
+
+### Und der Satz landet im Motor
+
+`ema_getriebe_cad.in_motor_bauen` öffnet das **gebaute** Motordokument und legt
+den Planetensatz mittig auf die Achse. Ein dritter Erzeuger wäre die dritte
+Abschrift derselben Geometrie gewesen — dieselbe Stelle, an der in diesem Repo
+schon zweimal etwas auseinanderlief. Der Bohrungsdurchmesser wird dabei am
+Läuferkörper **abgelesen** (kleinster Zylinder um die Drehachse), nicht aus dem
+Payload geglaubt, und Getriebe gegen Motor wird paarweise nachgemessen. Passt
+es nicht, ist das ein Befund mit zwei Zahlen: gemessen braucht der i = 5-Satz
+**100,6 mm** Bohrung, gezeichnet waren **100,0 mm**.
+
+**Zur Herkunft.** Die Bauteile (Steg mit Bohrungen, Bolzen, Wellen, das
+Nachmessen) stammen als Vorbild aus `Tools/planetengetriebe.py` in
+`/home/cae/t2g/TextToGeometry`, die Verzahnungsarten aus
+`Tools/getriebe_fcgear.py`. **Portiert, nicht kopiert**, und dafür gibt es zwei
+harte Gründe: T2G steht unter PolyForm-Noncommercial-1.0.0-NoMilitary, dieses
+Repo unter MIT und öffentlich auf GitHub — beide gehören demselben Urheber, er
+darf das also entscheiden, aber eine wörtliche Übernahme wäre eine stille
+Umlizenzierung und keine Nebenwirkung. Und technisch: T2Gs Module importieren
+FreeCAD auf Modulebene und laufen *in* FreeCAD, während `ema_getriebe_cad` Text
+für einen fremden Prozess schreibt — eine wörtliche Kopie liefe hier gar nicht.
+
+---
+
 ## 2026-09-19 — Der Wickelraum hatte zwei Quellen, und beide waren falsch
 
 **Beobachtung** (gemeldet): „versuche jetzt die Spulen kegelig zu machen und

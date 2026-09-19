@@ -1867,6 +1867,7 @@ def getriebe_start():
             "geom": geom,
             "n_planeten": int(data.get("planeten") or 3),
             "beta_grad": float(data.get("schraegung") or 0.0),
+            "verzahnung": str(data.get("verzahnung") or "gerade"),
             "laenge_verfuegbar_mm": float(data.get("bauraum_axial") or 0.0)}
     if data.get("i"):
         spec["i"] = float(data["i"])

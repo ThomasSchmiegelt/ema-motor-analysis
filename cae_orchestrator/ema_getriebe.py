@@ -124,6 +124,12 @@ BEIWERTE_VORGABE = {
 # Annahme; sie ist der Grund, warum der Wirkungsgrad mit der Last STEIGT.
 LEERLAUF_ANTEIL = 0.005
 
+# Verzahnungsarten. Die Schraegung ist im Fahrzeuggetriebe der Normalfall
+# (mehr Ueberdeckung, leiser) und kostet eine Axialkraft; die Pfeilverzahnung
+# hebt sie durch die zweite, gegenlaeufige Haelfte wieder auf.
+VERZAHNUNG_ARTEN = ("gerade", "schraeg", "pfeil")
+BETA_VORGABE_GRAD = 15.0
+
 EINBAU_ARTEN = {
     "achsparallel": "Stirnradstufen neben der Maschine",
     "koaxial":      "Planetensatz vor der Stirnseite, auf derselben Achse",
@@ -1177,7 +1183,20 @@ def auslegen(spec: dict) -> dict:
     stufen_n = int(spec.get("stufen", 1) or 1)
     beiwerte = spec.get("beiwerte") or {}
     psi_m = float(spec.get("psi_m", 20.0 if art == "stirnrad" else 18.0))
-    beta = float(spec.get("beta_grad", 0.0))
+    # Verzahnungsart und Schraegungswinkel. `beta` geht seit jeher in Zahnform,
+    # Ueberdeckung, Zonen- und Breitenfaktor ein -- nur GEZEICHNET wurde es
+    # bisher allein bei der Stirnradstufe. `verzahnung` benennt die Absicht und
+    # setzt den Winkel, wenn keiner angegeben ist: gerade 0 Grad, schraeg und
+    # Pfeil die uebliche Vorgabe. Die Pfeilverzahnung ist zwei gegenlaeufige
+    # Haelften -- sie hebt die Axialkraft der Schraegung wieder auf, und genau
+    # dafuer gibt es sie.
+    art_verz = str(spec.get("verzahnung", "gerade")).lower().strip()
+    if art_verz not in VERZAHNUNG_ARTEN:
+        return {"ok": False,
+                "grund": (f"Verzahnung '{art_verz}' gibt es nicht. Bekannt: "
+                          + ", ".join(VERZAHNUNG_ARTEN))}
+    beta = float(spec.get("beta_grad", 0.0)
+                 or (0.0 if art_verz == "gerade" else BETA_VORGABE_GRAD))
 
     # Zwei Planetenstufen IN der Welle teilen sich dieselbe Bohrung. Dann ist
     # nicht das Bauvolumen die Frage, sondern der groesste Durchmesser -- und
@@ -1234,6 +1253,7 @@ def auslegen(spec: dict) -> dict:
 
     erg = {
         "ok": True, "art": art, "einbau": einbau,
+        "verzahnung": art_verz, "beta_grad": round(beta, 2),
         "einbau_text": EINBAU_ARTEN[einbau],
         "i_soll": round(i_ges, 4), "i_ist": round(i_kum, 4),
         "i_fehler_pct": round(100.0 * abs(i_kum - i_ges) / i_ges, 2),

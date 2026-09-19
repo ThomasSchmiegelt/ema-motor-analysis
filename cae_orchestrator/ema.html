@@ -1686,12 +1686,27 @@
           es <b>kein Modul</b> statt eines Ersatzwerts.</p></details>
       </div>
       <div class="e3-field">
-        <div class="row"><label>Schrägung</label>
+        <div class="row"><label>Verzahnung</label>
+          <select id="gt_verzahnung">
+            <option value="gerade">gerade</option>
+            <option value="schraeg">schräg</option>
+            <option value="pfeil">Pfeil</option>
+          </select></div>
+        <details class="e3-help"><summary>Erklärung</summary>
+          <p>Die <b>Schrägung</b> ist im Fahrzeuggetriebe der Normalfall: mehrere Zähne
+          im Eingriff, ruhigerer Lauf — erkauft mit einer <b>Axialkraft</b>, die die
+          Lager tragen müssen (hier nicht ausgelegt). Die <b>Pfeilverzahnung</b> sind
+          zwei gegenläufige Hälften; sie hebt genau diese Axialkraft wieder auf.
+          Gezeichnet wird beides über FCGear (<code>helix_angle</code>,
+          <code>double_helix</code>); gerechnet geht <code>beta</code> längst in
+          Zahnform, Überdeckung, Zonen- und Breitenfaktor ein.</p></details>
+      </div>
+      <div class="e3-field">
+        <div class="row"><label>Schrägungswinkel</label>
           <input type="number" id="gt_schraegung" value="0" min="0" max="30" step="1"><span class="unit">°</span></div>
         <details class="e3-help"><summary>Erklärung</summary>
-          <p>0 = geradverzahnt. Die Schrägung bringt Sprungüberdeckung — mehrere Zähne
-          im Eingriff, ruhigerer Lauf — und erkauft sie mit einer <b>Axialkraft</b>,
-          die die Lager tragen müssen (hier nicht ausgelegt).</p></details>
+          <p>0 heißt: der Vorgabewert der gewählten Verzahnungsart — gerade 0°,
+          schräg und Pfeil 15°.</p></details>
       </div>
       <div class="e3-field" id="gt_axial_wrap" style="display:none">
         <div class="row"><label>Bauraum axial</label>
@@ -7206,6 +7221,7 @@ async function startGetriebe() {
     i: num('gt_i'), n_ab: num('gt_nab'),
     moment: num('gt_moment'), drehzahl: num('gt_drehzahl'),
     werkstoff: document.getElementById('gt_werkstoff').value,
+    verzahnung: document.getElementById('gt_verzahnung').value,
     schraegung: num('gt_schraegung') || 0,
     bauraum_axial: num('gt_axial') || 0,
     ohne_feld: !document.getElementById('gt_feld').checked,
