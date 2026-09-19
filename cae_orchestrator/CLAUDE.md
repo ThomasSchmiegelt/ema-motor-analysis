@@ -240,7 +240,15 @@ milliseconds instead of a 40 s FreeCAD run. **In partial recompute mode they war
 instead of refusing** (`fatal=not partial`) — the geometry of a saved project is
 already on disk and is never rebuilt there, so a hard gate would make an otherwise
 loadable old project impossible to recompute. The same check is reachable
-standalone as `cae_cli.py rotor-check`. **Not covered yet:** balance-bolt holes and
+standalone as `cae_cli.py rotor-check` — and **since 19.09.2026 that is actually
+true for BOTH**: the verb ran only the layout gate plus `ema_grenzen`, so it
+answered „Layout OK“ with exit 0 for the fresh payload while the run refused the
+very same payload with SF 0.87 and „Rotor fliesst sicher“ (identically for every
+machine type, PM included). It now calls `_gate_rotor_stress` **itself** rather
+than a second copy — same speed rule (`target.n_max` before `rpm_to`), same
+material lookup, same wording, and the same computed relief paths from
+`ema_rotorcheck.entlastung`, which had never reached the agent through this verb.
+Exit 1 when it tears. See `BEFUNDE.md`. **Not covered yet:** balance-bolt holes and
 flux barriers — a passing gate does not rule out a breakthrough from those.
 
 **Selective re-run** (`run_pipeline(…, stages=<set>)`): when `stages` is a subset of

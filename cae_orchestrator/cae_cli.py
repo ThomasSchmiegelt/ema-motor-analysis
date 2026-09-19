@@ -2466,8 +2466,12 @@ def cmd_umrichter(args) -> int:
 
 
 def cmd_rotor_check(args) -> int:
-    """2D-Layoutgate lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
-    Exit: 0 = Layout OK, 1 = Check abgelehnt (defekte Geometrie)."""
+    """Die Stufe-0-Tore lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
+
+    Geprueft wird, was die Pipeline vor jedem Geometriebau prueft: die Grenzen
+    (Luftspalt, Wickelkopf, Nuttiefe, Hairpin), das **Layout** (Taschen-
+    kollision, Mindeststeg, Lage im Ring) und die **Fliehkraft** an der Bohrung
+    bei n_max. Exit: 0 = alle drei bestanden, 1 = mindestens eines abgelehnt."""
     payload = _load_payload(args)
 
     applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
@@ -2512,8 +2516,54 @@ def cmd_rotor_check(args) -> int:
         zeilen.append("Zeichnet das CAD dieselbe Maschine, die das Feld rechnet?")
         zeilen.append(ema_grenzen.cad_gegen_feld_text(vgl))
 
+    # Die FLIEHKRAFT gehoert dazu, und sie fehlte. Die Pipeline fuehrt vor jedem
+    # Geometriebau ZWEI harte Tore -- Layout und Fliehkraft --, dieses Verb nur
+    # das erste. Gemessen am frischen Payload (Rotor 188,6 / Welle 60, 20.000
+    # 1/min): `rotor-check` meldete "Layout OK" mit Exit 0, und derselbe Payload
+    # wurde vom Lauf mit SF 0,87 und "Rotor fliesst sicher" abgewiesen -- fuer
+    # JEDE Maschinenart gleich, die PSM eingeschlossen. Ein Verb, das es einem
+    # ersparen soll, vierzig Sekunden FreeCAD zu starten, und dabei genau das
+    # Tor auslaesst, an dem der Lauf scheitert, kehrt seinen Zweck um.
+    #
+    # Gerufen wird das Tor der Pipeline SELBST und keine zweite Fassung: dort
+    # sitzen die Drehzahlregel (`target.n_max` vor `rpm_to`), der Werkstoff aus
+    # LAMINATES, der Wortlaut und -- der eigentliche Gewinn -- die gerechneten
+    # Entlastungswege, die `ema_rotorcheck.entlastung` gegen DASSELBE Tor
+    # nachprueft, bevor es sie vorschlaegt.
+    fliehkraft_ok = True
+    try:
+        import ema_pipeline as _PL
+        _st = {"log": [], "progress": 0}
+        try:
+            _PL._gate_rotor_stress(payload, _st)
+        except _PL.AuslegungReisst as e:
+            fliehkraft_ok = False
+            chk["fliehkraft"] = {"ok": False, "grund": str(e),
+                                 "wege": getattr(e, "wege", []) or []}
+        else:
+            chk["fliehkraft"] = {"ok": True, "wege": []}
+        # Das Protokoll des Tores wird UNVERAENDERT uebernommen -- es traegt die
+        # Messung, den Tier-1/Tier-2-Vorbehalt und die Entlastungswege bereits.
+        # Eingefuegt wird nur das Urteil, und zwar VOR den Vorschlaegen: erst
+        # was nicht geht, dann was helfen wuerde.
+        _log_z = ["  " + z for z in _st["log"]]
+        if not fliehkraft_ok:
+            _urteil = "  ✗ " + chk["fliehkraft"]["grund"]
+            _i = next((i for i, z in enumerate(_log_z) if "Was helfen wuerde" in z),
+                      len(_log_z))
+            _log_z.insert(_i, _urteil)
+        zeilen.append("")
+        zeilen.append("Fliehkraft an der Bohrung:")
+        zeilen += _log_z
+    except Exception as e:                                   # noqa: BLE001
+        # Ein fehlendes schweres Modul ist kein Befund ueber die Auslegung.
+        chk["fliehkraft"] = {"ok": None, "grund": f"nicht geprueft: {e}"}
+        zeilen.append("")
+        zeilen.append(f"Fliehkraft: NICHT geprueft ({e}) — das ist keine Aussage "
+                      f"ueber die Festigkeit.")
+
     chk["grenzen"] = gr
-    ok = bool(chk["ok"]) and bool(gr["ok"])
+    ok = bool(chk["ok"]) and bool(gr["ok"]) and fliehkraft_ok
     emit(chk, args)
     text = "\n".join(zeilen)
     print("ERGEBNIS:")

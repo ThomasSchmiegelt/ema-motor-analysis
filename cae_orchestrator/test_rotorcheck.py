@@ -414,13 +414,62 @@ def test_tor_wirft_die_wege_mit():
           any("nicht bestanden" in z for z in st2["log"]))
 
 
+def test_verb_fuehrt_BEIDE_tore():
+    """`rotor-check` muss dasselbe pruefen wie die Pipeline vor dem CAD-Bau.
+
+    Der Befund, gegen den das steht (19.09.2026): das Verb fuehrte nur das
+    LAYOUT-Tor und die Grenzen. Am frischen Payload meldete es "Layout OK" mit
+    Exit 0, waehrend derselbe Payload vom Lauf mit SF 0,87 und "Rotor fliesst
+    sicher" abgewiesen wurde -- fuer jede Maschinenart gleich. Ein Verb, das
+    einem den FreeCAD-Lauf ersparen soll und dabei das Tor auslaesst, an dem der
+    Lauf scheitert, kehrt seinen Zweck um.
+    """
+    import subprocess
+    import sys as _sys
+    hier = os.path.dirname(os.path.abspath(__file__))
+
+    def lauf(*mehr):
+        return subprocess.run(
+            [_sys.executable, os.path.join(hier, "cae_cli.py"), "rotor-check",
+             "--frisch", "--ohne-ablage", *mehr],
+            cwd=hier, capture_output=True, text=True, timeout=300)
+
+    r = lauf()
+    check("Verb: der frische Payload REISST am Fliehkrafttor (Exit 1)",
+          r.returncode == 1)
+    check("Verb: und sagt, welches Tor es war",
+          "Fliehkraft" in r.stdout and "fliesst sicher" in r.stdout)
+    check("Verb: das Layout selbst bleibt dabei in Ordnung",
+          "Layout OK" in r.stdout)
+    check("Verb: die gerechneten Entlastungswege erreichen den Aufrufer",
+          "Was helfen wuerde" in r.stdout
+          and "Hoechstdrehzahl" in r.stdout)
+    # Der Wortlaut kommt aus dem Tor der Pipeline und nicht aus einer zweiten
+    # Fassung -- sonst liefe der Text hier gegen den im Lauf.
+    check("Verb: es ist das Protokoll des Tores, nicht ein nachgebautes",
+          "Tier-1 = Machbarkeits-Screen" in r.stdout)
+
+    # Und die Gegenprobe: der eigene Vorschlag muss tragen. Das Tor behauptet
+    # von sich, jeden Weg vor dem Vorschlagen nachzurechnen.
+    import re as _re
+    m = _re.search(r"Hoechstdrehzahl auf (\d+) min", r.stdout)
+    check("Verb: der Vorschlag nennt eine Drehzahl", bool(m))
+    if m:
+        r2 = lauf("--set", f"rpm_to={m.group(1)}")
+        check("Verb: bei der vorgeschlagenen Drehzahl haelt es (Exit 0)",
+              r2.returncode == 0)
+        check("Verb: und meldet dort PASS statt FAIL",
+              "PASS" in r2.stdout and "FAIL" not in r2.stdout)
+
+
 if __name__ == "__main__":
     for t in (test_bore_hoop, test_struct_sweep, test_layout_gate,
               test_stress_gate, test_purge_paritaet,
               test_purge_volcut_ohne_nachwirkung, test_purge_riegel,
               test_steg_zur_welle,
               test_entlastung_schlaegt_vor_statt_abzusagen,
-              test_tor_wirft_die_wege_mit):
+              test_tor_wirft_die_wege_mit,
+              test_verb_fuehrt_BEIDE_tore):
         t()
     print()
     if _fails:

@@ -11,6 +11,8 @@ Monorepo einer CAE-Toolchain für E-Maschinen. Drei eigenständige Teilprojekte,
 | `physics_surrogate/` | ML-Surrogat für die Löserstufen (PhysicsNeMo/Torch) | `:5300` |
 | `connection_detection/` | FreeCAD-Workbench: Verbindungserkennung in STEP-Baugruppen | — (CLI) |
 | `lego/` | LEGO-Technic-Mechaniken per LLM | — |
+| `ai_framework/` | Lokaler, deutschsprachiger Ollama-Assistent (sieben Branchenmodi, offline) | — |
+| `FluidX3D/` | Lattice-Boltzmann-CFD (OpenCL, ProjektPhysX) — **Fremdrepo, `gitignore`d**, nur Referenz | — |
 
 Ollama läuft auf `:11434`.
 

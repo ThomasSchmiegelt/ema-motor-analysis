@@ -17,6 +17,106 @@ kann.
 
 ---
 
+## 2026-09-18 — Die EESM-Schulenspulen liegen im eigenen Eisen
+
+**Beobachtung.** Die CAD-Vorschau der fremderregten Synchronmaschine (Projekt
+`20260918_203052_cad_vorschau`) zeigt Erregerspulen, die von den Polen des
+eigenen Rotors durchschnitten werden, und einen Modellbaum, in dem sich das
+Rotor-Eisen, die Erregerspulen, die Schleifringe und die Bürsten als vier
+getrennte Objekte neben dem Rotor stehen. Die Spulen überdecken nicht die
+gesamte Polteilung; zwischen zwei benachbten Spulen liegt ein offener Spalt.
+
+**Messung** (FreeCAD-1.1.1-`FreeCADCmd` über `motor.FCStd`, Pair-Kollision über
+`Shape.common`):
+
+- 24 Paare `Rotor` × `Field_Coils_*` mit gemeinsamem Volumen, je
+  **533,3 mm³**. Summe ≈ 12,8 cm³ Kupfer, die in 205 cm³ Rotor-Eisen liegen
+  — die Spulen sind etwa zu 9 % im Eisen begraben.
+- Ursache: `ema_freecad.py:_pol_spule` baut die Spule radial bis zu
+  `r_kern_aussen`; `POL_UEBERLAPP_MM = 0.5` zwingt den Polschuh
+  (`_pol_koerper`) auf den Band `r_kern_aussen − 0.5 … r_kern_aussen`
+  radial zu überdecken, damit der Rotor als EINES Solid fused bleibt.
+  Die Spule fällt exakt in dieses Überdeckungsband.
+- `ema_eesm_cad.koerper` rechnet `d_spule = a_wick / (2·h_kern)` — die Spule
+  hat also die Breite des Kupferquerschnitts, nicht die des freien
+  Polraums. Bei `p=8, Teilung 19,91 mm`: belegt
+  `b_kern 9,744 + 2·3,983 = 17,71 mm`, frei 2,20 mm (1,10 mm je Seite).
+- **Nicht** betroffen: `Rotor` selbst ist in der FCStd genau 1 Solid
+  (fuse erfolgreich, `POL_UEBERLAPP_MM` wirkt); die Trennung von Kupfer
+  und Eisen ist als Materialtrennung korrekt, gehört aber visuell in einen
+  Rotor-Gruppe, nicht neben ihn.
+
+**Fundstelle.** `ema_freecad.py:550–620` (`POL_UEBERLAPP_MM`, `_pol_koerper`,
+`_pol_spule`), `ema_eesm_cad.py:67–130` (`koerper`, `d_spule`, `SPULENLUFT_MM = 2.0`).
+
+**Status.** **Teil 1 geschlossen, dann neu bewertet** (21. September, gleiche Sitzung).
+
+*Treffer 1 — behoben.* Der boolesche Weg (`.cut(Rotor)`) wurde verworfen: OCC erzeugt an beruehrenden/kongruenten Flaechen defekte Festkoerper (gemessen: danach enthielt eine Spule einen Punkt in der Nachbar-Spule). Statt dessen geometrisch in `_pol_spule`: die Spule endet jetzt 0,55 mm innerhalb des Kernradius' und haelt je 0,05 mm zu Joch, Kernseite und Poleschuh. Die urspruengliche Meldung (Spule in der eigenen Schuhbahn, 533,3 mm³) ist damit konstruktiv weg; die Spule liegt voll in der Polzwischenlucke.
+
+*Neue, schärfere Messung.* Die verbliebenen Kollisionen sind **keine** Boolesch-Artefakte — sie verkleinern monoton mit jeder Verkleinerung der Spule (Rotor×Spule 533,3 → 403,9 → 388,3 → 376,2 mm³) und die Analytikgeometrie bestaetigt sie: **die 16 Spulenquerschnitte (je Pol zwei, ~248 mm²) sind zu groß für die 45°-Polteilung dieser Auslegung.** Schon auf der äusseren Polebene (r=25,35) beträgt die Teilung 2·r·sin(11,25°) = 19,31 mm, waehrend Kern + 2 Spulenquerschnitte + 2,0 mm Luft 19,71 mm fordern; bei mittlerem Radius ist der Lueckenquerschnitt nur ~28 mm² gegen ~248 mm² Spule. Kein radialer Versatz, keine Verkleinerung und kein Boolescher kann die rechteckigen Querschnitte in die Luecke bringen — die Auslegung ist ueberschrieben (Spulenquerschnitt gegen Polteilung). Die Ueberlappung benachbarter Spulen (2546,1 mm³) ist derselbe Befund in der Nachbarluücke.
+
+*Dazukommender Werkzeugbefund.* Die `koerper.passt`-Pruefung (`b_kern + 2·d_spule + 2,0 < Teilung`, `ema_eesm_cad.koerper`) ist eine Linienprüfung bei einem Radius; sie sagt nichts ueber die Eckpunkte der Spule in der gekruemmten Lücke. Die Auslegung hat sie getragen, das CAD nicht — der Mangel ist der der Pruefung, nicht des CAD.
+
+*Entscheidung liegt beim Auslegenden* (CAD-Ebene, EM-Modell bleibt ueberall identisch — die Spulengeometrie fliesst weder in das Feld noch in Massen ein):
+
+1. Spulen als Keile in die Lücke zeichnen — die wahrere Form (ein Spulenquerschnitt pro Lücke), aber sichtbar duedner als das EM-`a_wick`; Vorschau-Ehrlichkeit gegen EM-Bild.
+2. Rechteckig beibehalten und die Ueberlappung als Vorschauernaherung akzeptieren — dann steht hier, dass der CAD-Wert ein Bild, kein Bauplan ist.
+3. Auslegung neu optimieren (Radius, Polzahl oder Kupferquerschnitt), bis SpULEN UND POLE passen — das verändert `erregung` und damit Kennzahlen; das ist ein neuer Auftrag, keine CAD-Fix.
+
+---
+
+## 2026-09-19 — `rotor-check` liess genau das Tor aus, an dem der Lauf scheitert
+
+**Beobachtung.** Beim Abarbeiten der Abnahme aus §12 des Plans (`run cad --frisch
+--set machineType=…`) wurde jede Bauart von Stufe 0 abgewiesen. Der Verdacht fiel
+zuerst auf die neuen Laeufer — falsch: es war das allgemeine Fliehkrafttor, und es
+weist die **PSM am selben Payload Ziffer fuer Ziffer genauso ab**.
+
+**Messung.** `--frisch` (Rotor 188,6 / Welle 60 mm, `rpm_to` = 20.000) gibt an der
+Bohrung 390,1 MPa Spitzenspannung gegen 340 MPa Fliessgrenze, **SF 0,87** — der
+Laeufer fliesst. Fuer `pmsm`, `asm`, `eesm` identisch, weil das Tor die
+Maschinenart gar nicht fragt (Ringspannung aus Radien, Dichte und Drehzahl).
+Belegt als *nicht von dieser Arbeit verursacht*: `ema_rotorcheck.py` und
+`cae_cli.py` sind seit `c1148e8` — dem Stand **vor** Stufe 1 — unveraendert.
+
+**Der eigentliche Fund steht daneben.** `cae_cli.py rotor-check --frisch` meldete
+fuer genau diesen Payload:
+
+    Layout OK — keine Kollision, Stege ueber Grenze, Taschen im Ring.
+
+mit **Exit 0**. Die Pipeline fuehrt vor jedem Geometriebau **zwei** harte Tore —
+`_gate_rotor_layout` und `_gate_rotor_stress` —, das Verb fuehrte nur das erste
+(plus `ema_grenzen`). Ein Verb, das es einem ersparen soll, vierzig Sekunden
+FreeCAD zu starten, und dabei ausgerechnet das Tor auslaesst, an dem der Lauf
+dann scheitert, kehrt seinen Zweck um: es sagt „geht" und der Lauf sagt „Rotor
+fliesst sicher". `cae_orchestrator/CLAUDE.md` behauptete die Deckung sogar
+ausdruecklich („Die gleiche Pruefung ist eigenstaendig erreichbar als
+`cae_cli.py rotor-check`"), und zwar fuer **beide** Tore.
+
+Mitgenommen wurde dabei auch `ema_rotorcheck.entlastung` — die gerechneten Wege
+aus einem gerissenen Tor, jeder vor dem Vorschlagen gegen dasselbe Tor
+nachgeprueft. Sie existieren seit dem 12.09.2026 und erreichten den Agenten auf
+diesem Weg nie.
+
+**Fundstelle.** `cae_cli.cmd_rotor_check`; `ema_pipeline._gate_rotor_stress`.
+
+**Status.** Behoben. `rotor-check` ruft jetzt **das Tor der Pipeline selbst** —
+keine zweite Fassung, also dieselbe Drehzahlregel (`target.n_max` vor `rpm_to`),
+derselbe Werkstoff aus `LAMINATES`, derselbe Wortlaut und dieselben
+Entlastungswege — und gibt Exit 1, wenn es reisst. Am frischen Payload nennt es
+jetzt: Hoechstdrehzahl auf 16.350 min-1, oder ein Blech ab 507 MPa, oder Rotor-Ø
+153,7 mm. Gegenprobe: bei 16.350 min-1 steht SF **1,30** und das Verb gibt Exit 0
+— der Vorschlag traegt, was das Tor von sich behauptet.
+
+**Offen und ausdruecklich NICHT geaendert:** der frische Payload bleibt, wie er
+ist. Dass seine 20.000 min-1 an diesem Laeufer nicht gehen, ist eine Aussage
+ueber die Auslegung und kein Fehler des Payloads; das Tor sagt sie jetzt an der
+Stelle, an der man sie braucht, mit Zahl, Grund und Ausweg. Eine Vorgabe
+stillschweigend zu senken hiesse, die Frage zu verstecken statt sie zu
+beantworten.
+
+---
+
 ## 2026-09-18 — Der Browser rechnete immer eine PSM
 
 **Beobachtung.** `machineType` steht seit der Einfuehrung von

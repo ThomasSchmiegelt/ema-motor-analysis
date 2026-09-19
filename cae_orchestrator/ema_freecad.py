@@ -585,11 +585,24 @@ def _pol_koerper(PL, grad, hoehe, z0):
 def _pol_spule(PL, grad, hoehe, z0):
     _rk, _rj = PL["r_kern_aussen_mm"], PL["r_joch_aussen_mm"]
     _bk, _ds = PL["b_kern_mm"], PL["d_spule_mm"]
-    _hk = max(_rk - _rj, 0.5)
+    # Die Spule endet radial POL_UEBERLAPP_MM INNENHALT des Kernradius' und
+    # taucht so nirgends in das Schuhsband ([rk-0.5, rk]) auf, in das die
+    # Pole zum Fused-als-ein-Solid einander ueberdecken muessen. Ein
+    # boolesches Herauswaechsen (Shape.cut(Rotor)) ist hier NICHT der Weg:
+    # gemessen an 2026-09-18 erzeugt OCC an beruehrenden, kongruenten Flaechen
+    # defekte Festkoerper (eine Spule enthielt danach einen Punkt in der
+    # Nachbarspule). Hier bleibt die Spule ein reiner Block: sie beruehrt
+    # Joch und Kern nur, ohne Material zu teilen, und es gibt kein Boolesch
+    # (Beobachtung BEFUNDE.md 2026-09-18). 0.05mm Spiel zu Joch, Kern und
+    # Schuh, damit die Spule nirgends an einem Eisensolid benuhrt: boolesche
+    # Tests (Shape.common) liefern sonst an kongruenten Flaechen Ghost-Volumina.
+    _hk = max(_rk - POL_UEBERLAPP_MM - _rj - 0.10, 0.5)
+    _yoff = 0.05
+    _ds_vis = _ds - _yoff  # Spiel zum Kern, auere Flaeche bleibt identisch
     aus = []
     for _vz in (-1.0, 1.0):
-        _y = _vz * (_bk / 2.0 + _ds / 2.0)
-        _b = Part.makeBox(_hk, _ds, hoehe, App.Vector(_rj, _y - _ds / 2.0, z0))
+        _y = _vz * (_bk / 2.0 + _yoff + _ds_vis / 2.0)
+        _b = Part.makeBox(_hk, _ds_vis, hoehe, App.Vector(_rj + _yoff, _y - _ds_vis / 2.0, z0))
         _b.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), grad)
         aus.append(_b)
     return aus
