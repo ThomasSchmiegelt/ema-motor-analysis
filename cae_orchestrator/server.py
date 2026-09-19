@@ -6187,6 +6187,46 @@ def studio_gemein():
     return antwort
 
 
+@app.route("/ema_laeufer.js")
+def laeufer_js():
+    """Der Zeichner fuer die Laeufer OHNE Magnete (ASM/EESM/GSM/SynRM).
+
+    Eine eigene Datei und nicht in ``ema.html``: die Seite ist 816 kB, und was
+    dazukommt, soll sie nicht weiter aufblaehen. Vor allem aber steht darin
+    KEINE Geometrie -- die kommt aus ``/laeuferbild``.
+    """
+    antwort = send_from_directory(os.path.dirname(__file__), "ema_laeufer.js")
+    antwort.headers["Cache-Control"] = "no-cache"
+    return antwort
+
+
+@app.route("/laeuferbild", methods=["POST"])
+def laeuferbild():
+    """Zeichenteile des Laeufers fuer die Live-Leinwand.
+
+    POST und nicht GET, weil die Geometrie ein ganzes Dict ist und nicht in
+    eine Abfragezeichenkette gehoert. Gerechnet wird hier **nichts**:
+    ``ema_laeuferbild`` wandelt nur um, was ``ema_asm``/``ema_eesm_cad``/
+    ``ema_gsm``/``ema_topology`` ohnehin liefern.
+
+    Die PSM bekommt eine leere Liste — ihre Magnete zeichnet die Seite weiter
+    aus ihrer eigenen, mit ``test_topology.py`` festgenagelten Fassung.
+    """
+    try:
+        import ema_laeuferbild
+        data = request.get_json(force=True, silent=True) or {}
+        geom = data.get("geom") or {}
+        if not geom:
+            return jsonify({"error": "kein geom"}), 400
+        axial = data.get("axial_len") or geom.get("axialLen") or 80.0
+        return jsonify(ema_laeuferbild.teile(geom, float(axial)))
+    except Exception as e:                                   # noqa: BLE001
+        # Ein Zeichner darf die Oberflaeche nicht anhalten: die Leinwand
+        # zeichnet ohne Teile den nackten Laeufer weiter.
+        return jsonify({"error": f"{type(e).__name__}: {e}", "teile": [],
+                        "staender": [], "n_teile": 0}), 200
+
+
 @app.route("/studio/zugang")
 def studio_zugang():
     """Einstiegsadresse, Token und QR -- NUR von diesem Rechner aus.

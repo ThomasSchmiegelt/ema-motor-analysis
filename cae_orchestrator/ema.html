@@ -3837,6 +3837,9 @@
 <!-- ── Persistent live preview pane (visible on the input tabs) ── -->
 <div id="preview-pane">
   <canvas id="simCanvas"></canvas>
+  <!-- Der Zeichner fuer Laeufer ohne Magnete. Eigene Datei: die Seite ist
+       gross genug, und ihr Inhalt ist reines Malen ohne Geometrie. -->
+  <script src="/ema_laeufer.js"></script>
   <div class="loading-bar" id="load_bar"></div>
   <div class="overlay">
     <button id="ov_play" onclick="toggleSim()"
@@ -3851,6 +3854,9 @@
     <div class="data-row"><span>Leistung:</span><span class="val" id="val_power">0</span></div>
     <div class="data-row"><span>Grid:</span><span class="val" id="val_grid">100px</span></div>
     <div style="margin-top:8px;font-size:.73rem;color:#888">FDM Physikmodell<br>2p = <span id="poles_display">6</span></div>
+    <!-- Was die Leinwand bei dieser Bauart NICHT zeigt. Leer bei der PSM. -->
+    <div id="ov_laeufer" style="margin-top:8px;font-size:.70rem;color:#c8a45a;
+         line-height:1.35;display:none"></div>
   </div>
 </div><!-- /preview-pane -->
 
@@ -13060,7 +13066,7 @@ function escHtml(s) {
     window.addEventListener("resize", resize);
     window.addEventListener("load", () => requestAnimationFrame(resize));
 
-    const resetField = () => { isSolverInit = false; };
+    const resetField = () => { isSolverInit = false; _laeuferAnfordern(); };
     bindInput("dim_stator_out", v => { GEOM.statorOD = v; resetField(); });
     bindInput("dim_stator_in",  v => { GEOM.statorID  = v; resetField(); });
     bindInput("dim_rotor_out",  v => { GEOM.rotorOD   = v; resetField(); });
@@ -13689,6 +13695,16 @@ function escHtml(s) {
     // default (gridMu initialised to 1).
     {
       const P2 = GEOM.p*2, a0 = PHYS.angle;
+      // Die Laeuferteile der magnetlosen Bauarten: Nuten, Wickelfenster und
+      // die Luft zwischen den Schenkelpolen sind magnetisch Luft und gehoeren
+      // ins Raster -- sonst zeigte die Leinwand Pole und die Feldlinien eine
+      // Vollscheibe. Der Strom darin ist NICHT eingepraegt (magnetostatisch);
+      // das sagt `feld_darstellbar` und die Zeile unter der Leinwand.
+      const _ltR = (typeof _laeuferTeileAktiv === "function")
+                     ? _laeuferTeileAktiv() : null;
+      if (_ltR && typeof LAEUFER !== "undefined") {
+        LAEUFER.rastere(gridMu, N, center, gs, _ltR, a0);
+      }
       if (GEOM.genBalanceBolts) {
         const TH={M4:4,M5:5,M6:6,M8:8,M10:10,M12:12,M16:16,M20:20};
         const nom=TH[GEOM.balanceBoltThread||'M6']||6, hr=((nom+0.4)/2)*gs;
@@ -13997,7 +14013,90 @@ function escHtml(s) {
     updateUI();
   }
 
+  // ── Laeufer ohne Magnete: die Teile kommen aus Python ───────────────────
+  //
+  // ASM (Kaefig/Schleifring), EESM (Schenkelpole), GSM (Anker + Staenderpole)
+  // und SynRM (Flussbarrieren) werden NICHT hier gerechnet. `POST /laeuferbild`
+  // liefert fertige Zeichenteile aus genau den Funktionen, die die Maschine
+  // rechnen -- eine zweite Geometriefassung im Browser waere die naechste
+  // `magnetLegs`-Drift, und die ist in CLAUDE.md als gefaehrlichste Stelle des
+  // Werkzeugs vermerkt. Die PSM bleibt unberuehrt auf ihrem alten Weg.
+  let _laeuferBild = null;      // Antwort von /laeuferbild
+  let _laeuferMarke = "";       // wofuer sie gilt
+  let _laeuferTimer = null;
+
+  // Die Marke entscheidet, WANN neu geholt wird. Sie traegt nur, was die
+  // Laeufergeometrie wirklich bewegt -- eine Marke ueber das ganze GEOM liesse
+  // bei jedem Tastendruck am Fahrzeuggewicht einen Serveraufruf los.
+  function _laeuferMarkeBauen() {
+    const g = GEOM;
+    return [g.machineType || "pmsm", g.rotorType || "", g.p, g.slots,
+            g.rotorOD, g.statorID, g.statorOD, g.shaftD, g.shaftBoreD,
+            g.axialLen, g.magShape, g.magWidth, g.magThick, g.magDist,
+            g.magDepthRel, g.magAngle, g.magLayers, g.conductorsPerSlot
+           ].join("|");
+  }
+
+  function _laeuferArt() { return (GEOM.machineType || "pmsm"); }
+
+  // Die Teile, die JETZT gelten -- oder null. Die Marke wird mitgeprueft:
+  // waehrend der Abruf laeuft, gehoeren die alten Teile zu einer anderen
+  // Maschine, und die zu zeichnen waere schlimmer als sie wegzulassen.
+  function _laeuferTeileAktiv() {
+    if (!_laeuferBild || _laeuferMarke !== _laeuferMarkeBauen()) return null;
+    const t = _laeuferBild.teile;
+    return (t && t.length) ? t : null;
+  }
+  function _staenderTeileAktiv() {
+    if (!_laeuferBild || _laeuferMarke !== _laeuferMarkeBauen()) return null;
+    const t = _laeuferBild.staender;
+    return (t && t.length) ? t : null;
+  }
+
+  function _laeuferHinweisZeigen() {
+    const el = document.getElementById("ov_laeufer");
+    if (!el) return;
+    const b = _laeuferBild;
+    if (!b || _laeuferMarke !== _laeuferMarkeBauen() || _laeuferArt() === "pmsm") {
+      el.style.display = "none"; el.textContent = ""; return;
+    }
+    let txt = b.hinweis || "";
+    if (b.fehler) txt = "Laeufer nicht zeichenbar: " + b.fehler;
+    el.textContent = txt;
+    el.style.display = txt ? "" : "none";
+  }
+
+  // Entprellt: `resetField` feuert bei JEDEM Tastendruck im Geometrie-Reiter.
+  function _laeuferAnfordern() {
+    const marke = _laeuferMarkeBauen();
+    if (marke === _laeuferMarke) return;
+    if (_laeuferArt() === "pmsm") {          // die Seite kann es selbst
+      _laeuferBild = null; _laeuferMarke = marke; _laeuferHinweisZeigen(); return;
+    }
+    if (_laeuferTimer) clearTimeout(_laeuferTimer);
+    _laeuferTimer = setTimeout(async () => {
+      try {
+        const r = await fetch("/laeuferbild", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ geom: GEOM, axial_len: GEOM.axialLen || 80 })
+        });
+        _laeuferBild = await r.json();
+        _laeuferMarke = marke;
+      } catch (e) {
+        // Ohne Antwort bleibt der nackte Laeufer stehen -- besser als eine
+        // Zeichnung, die zu einer anderen Geometrie gehoert.
+        _laeuferBild = null; _laeuferMarke = marke;
+      }
+      _laeuferHinweisZeigen();
+      isSolverInit = false;                  // das Raster muss neu entstehen
+    }, 250);
+  }
+
   function drawStator() {
+    // Die GSM ist die einzige Bauart mit einem ANDEREN Staender: Schenkelpole
+    // nach innen, keine Nuten. Ihre Teile kommen aus derselben Quelle.
+    const _st = _staenderTeileAktiv();
+    if (_st) { LAEUFER.zeichne(ctx, _st, SCALE); return; }
     const rO=(GEOM.statorOD/2)*SCALE, rI=(GEOM.statorID/2)*SCALE;
     ctx.beginPath(); ctx.arc(0,0,rO,0,2*Math.PI); ctx.arc(0,0,rI,0,2*Math.PI,true);
     ctx.fillStyle="#3a3a3c"; ctx.fill();
@@ -14032,7 +14131,14 @@ function escHtml(s) {
       ctx.fillStyle="#0d0d14"; ctx.fill(); ctx.strokeStyle="#555"; ctx.stroke();
     }
     const poles=GEOM.p*2, step=2*Math.PI/poles;
-    const legs = magnetLegs(GEOM);
+    // Eine Bauart ohne Magnete zeichnet ihre eigenen Teile -- und dann bleibt
+    // `legs` leer, damit die Polschleife darunter nichts malt. Sie laeuft
+    // weiter durch (2p leere Durchgaenge): den Magnetblock auszuklammern
+    // haette denselben Code zweimal eingerueckt, und das ist die Sorte
+    // Umbau, bei der der PSM-Pfad still kaputtgeht.
+    const _lt = _laeuferTeileAktiv();
+    if (_lt) LAEUFER.zeichne(ctx, _lt, SCALE);
+    const legs = _lt ? [] : magnetLegs(GEOM);
     const rRO = (GEOM.rotorOD/2)*SCALE;
     for (let i=0;i<poles;i++) {
       ctx.save(); ctx.rotate(i*step);
