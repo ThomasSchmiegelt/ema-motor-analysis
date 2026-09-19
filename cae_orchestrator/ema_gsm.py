@@ -187,7 +187,8 @@ def staenderpole(geom: dict, axial_mm: float) -> dict:
     p = max(int(geom["p"]), 1)
     r_gap = r["r_stator_gap_mm"]
     spanne = max(r["r_stator_aussen_mm"] - r_gap, 5.0)
-    return ema_eesm.polmasse(2 * p, r_gap, spanne, ziel_feld(geom), axial_mm)
+    return ema_eesm.polmasse(2 * p, r_gap, spanne, ziel_feld(geom), axial_mm,
+                             ema_eesm.polbedeckung(geom))
 
 
 def ankerwicklung(geom: dict, axial_mm: float) -> dict:
@@ -474,7 +475,8 @@ def ankerrueckwirkung(geom: dict, axial_mm: float, i_a_A: float) -> dict:
 
     pg = staenderpole(geom, axial_mm)
     g_eff = ema_eesm.K_CARTER * (__import__("ema_analysis").luftspalt_mm(geom) / 1000.0)
-    formfaktor = (4.0 / math.pi) * math.sin(ema_eesm.POLBEDECKUNG * math.pi / 2.0)
+    formfaktor = (4.0 / math.pi) * math.sin(
+        ema_eesm.polbedeckung(geom) * math.pi / 2.0)
     f_erreger = (ziel_feld(geom) * g_eff / (4.0e-7 * math.pi)) / formfaktor
 
     verh = f_anker / max(f_erreger, 1e-9)

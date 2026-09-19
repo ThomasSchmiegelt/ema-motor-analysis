@@ -4807,6 +4807,24 @@ def param_schema():
             "rechteck": "Rechteckspule (Kern durchgehend gleich breit)",
             "kegel": "Kegelig gewickelt (Pol zur Jochseite breiter)"}),
         "armatureMat":  _opts(getattr(T2E, "_HAIR", []), table=HAIRPIN_MATS),
+        "daempferMat":  _opts(getattr(T2E, "_KAEFIG", []), table=HAIRPIN_MATS),
+        # Die uebrigen art-spezifischen Auswahlen. Nackte Codes in einer
+        # Auswahlliste sind fuer den, der davorsitzt, keine Auskunft -- und
+        # `kaefig`/`schleifring` oder `schleife`/`welle` sagen ohne ihren
+        # Unterschied gar nichts.
+        "rotorType":    _opts(["kaefig", "schleifring"], labelmap={
+            "kaefig": "Kaefiglaeufer (Kurzschlusslaeufer)",
+            "schleifring": "Schleifringlaeufer (gewickelt, Anlasswiderstand)"}),
+        "armatureWinding": _opts(["schleife", "welle"], labelmap={
+            "schleife": "Schleifenwicklung (a = p, viel Strom)",
+            "welle": "Wellenwicklung (a = 1, hohe Spannung)"}),
+        "polBefestigung": _opts(
+            list(__import__("ema_schenkelpol").BEFESTIGUNGEN), labelmap={
+                "schwalbenschwanz": "Schwalbenschwanz (Polfuss eingeschoben)",
+                "bolzen": "verschraubt (Bolzen durch den Polfuss)"}),
+        "daempferkaefig": _opts(["nein", "ja"], labelmap={
+            "nein": "ohne Daempferkaefig",
+            "ja": "mit Daempferkaefig (Staebe im Polschuh)"}),
         "magnet":      _opts(getattr(T2E, "_MAG", []),  table=MAGNETS),
         "cooling":     _opts(getattr(T2E, "_COOL", []), labelmap=cool_labels),
         "magOrient":   _opts(getattr(T2E, "_ORIENT", []), labelmap=orient_labels),

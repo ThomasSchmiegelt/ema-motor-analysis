@@ -315,6 +315,21 @@ pruefe("const _dreiphasig = _staenderfeldAktiv();" in html
        "ein Drehfeld auf einer Gleichstrommaschine ist ein falsches Bild")
 pruefe('id="ov_laeufer"' in html and "_laeuferHinweisZeigen" in html,
        "die Leinwand sagt, was sie bei dieser Bauart NICHT zeigt")
+# ... aber sie sagt es KURZ. Der volle Hinweis ist mehrere Saetze lang (bei
+# einem nicht auslegbaren Kaefig ueber 400 Zeichen), und der Kennwertkasten ist
+# schrumpfend breit -- er wuchs damit von 231 auf 425 px und nahm fast die
+# halbe Vorschau ein. Gemeldet als „bei den neuen Varianten nehmen die
+# Echtzeitdaten die Haelfte der Geometrieeinstellung ein".
+pruefe("_HINWEIS_KURZ" in html and "_hinweisMalen" in html,
+       "der Hinweis steht gekuerzt da und laesst sich aufklappen — ein Kasten, "
+       "der mit seinem Text waechst, verdeckt die Maschine, um die es geht")
+pruefe("max-width:250px" in html.replace(" ", ""),
+       "und der Kennwertkasten hat eine Hoechstbreite: er ist schrumpfend "
+       "breit, sein breitestes Kind bestimmt ihn")
+_i_kern = html.index("const i = v.indexOf")
+pruefe("u26A0" in html[_i_kern:_i_kern + 200],
+       "die Kurzfassung faengt beim ⚠ an — das ist der Grund, warum der "
+       "Hinweis ueberhaupt dasteht, nicht die Beschreibung der Bauart")
 # Die Marke ist der Grund, warum nicht bei jedem Tastendruck geholt wird --
 # und warum keine Teile einer FREMDEN Geometrie gezeichnet werden.
 pruefe("_laeuferMarke !== _laeuferMarkeBauen()" in html,

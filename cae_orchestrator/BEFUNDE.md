@@ -17,6 +17,78 @@ kann.
 
 ---
 
+## 2026-09-19 — Die Polzahl war bei drei von fünf Bauarten nicht einstellbar
+
+**Beobachtung** (gemeldet): „Wie stelle ich bei der EESM die Anzahl der Pole
+ein. eigentlich bräuchte ich auch immer die Einstellparameter des Stators im
+Geometrie-Tab. Die Anzahl der Stäbe und alle anderen maschinenartspezifischen
+Parameter müssen dann unter Maschinenart einstellbar sein."
+
+**Messung.** Das Feld `p_pairs` stand im Abschnitt **Magnet-Topologie**
+(`grp_magnet_topo`), und `_updateArtVis` blendet den bei jeder Bauart ohne
+Magnete aus. Im Browser nachgemessen (Sichtbarkeit über die ganze
+Elternkette): `p_pairs` war für **ASM, EESM und GSM „aus"** — die Polzahl, die
+jede dieser Maschinen hat, war über die Oberfläche nicht erreichbar. Sie
+existierte nur noch über `cae_cli --set p=…` und die Parameter-Tabelle.
+
+Dazu fehlten **zwölf weitere art-spezifische Parameter** vollständig, obwohl
+sie im Schema standen und gerechnet wurden: `rotorType`, `rotorBars`,
+`rotorSkewSlots`, `rotorTurnsPerSlot`, `bZielT`, `polBefestigung`,
+`polBolzen`, `polBolzenGewinde`, `daempferkaefig`, `daempferStaebeJePol`,
+`daempferMat`, `armatureWinding`. Für den, der davorsitzt, gab es sie nicht —
+dieselbe Lage wie bei den Wicklungswerkstoffen einen Tag zuvor.
+
+Und eine dreizehnte Größe gab es überhaupt nicht: die **Polbedeckung des
+Schenkelpols** war die Konstante `ema_eesm.POLBEDECKUNG = 0.68`. Sie
+entscheidet über Grundwelle, Erregerdurchflutung, Kupfermasse und den Platz
+für die Spule — gemessen senkt 0,80 statt 0,68 die nötige Durchflutung von
+459 auf 423 A je Pol und verbreitert den Polschuh von 67,2 auf 79,0 mm.
+
+**Fundstelle.** `ema.html` (Abschnitt Magnet-Topologie / Maschinenart,
+`_updateArtVis`, `_matLaden`, `applyPayload`), `ema_eesm.polmasse` /
+`erregung`, `ema_gsm.staenderpole` / `ankerrueckwirkung`.
+
+**Stand: behoben.**
+
+- Die Polzahl steht bei der **Maschinenart** — sie gehört jeder Bauart, nicht
+  den Magneten —, mit der abgeleiteten Polzahl daneben (in der Maschine zählt
+  2p). Hauptabmessungen und Stator/Wicklung waren und bleiben immer sichtbar.
+- Alles, was nur eine Bauart hat, sitzt unter der Maschinenart und wird über
+  `data-arten` ein- und ausgeblendet (`.art-feld`). **`_ART_FELDER` ist die
+  eine Tabelle** Elementkennung → Schemaschlüssel: gefüllt, gebunden und in
+  `applyPayload` zurückgeschrieben aus derselben Zuordnung. Grenzen,
+  Auswahllisten und Vorgaben kommen aus `/param_schema` — ein Wert, den die
+  Maske anbietet und `--set` abweist, wäre die nächste stille Lücke.
+- `ema_eesm.polbedeckung(geom)` ist die eine Quelle der Polbedeckung; ohne
+  Angabe bleibt es bei 0,68, also rechnet jede bestehende Auslegung Ziffer für
+  Ziffer weiter. Ein **eigener** Parameter und ausdrücklich nicht
+  `poleArcFrac`: das ist die Magnetbedeckung der PSM (0,83), ein Schenkelpol
+  liegt bei 0,65…0,75.
+
+**Und der Kennwertkasten der Vorschau nahm die halbe Spalte.** Gemeldet als
+„bei den neuen Varianten nehmen die Echtzeitdaten die Hälfte der
+Geometrieeinstellung ein". Gemessen: der Kasten ist schrumpfend breit
+(`position:absolute` ohne Breite), also bestimmt ihn sein **breitestes Kind**.
+Solange das die Kennwertzeilen waren, blieb er bei **231 px**; der
+Läuferhinweis — mehrere Sätze, bei einem nicht auslegbaren Käfig über 400
+Zeichen — zog ihn auf **425 px** und in der Höhe über die halbe Vorschau.
+Behoben zweifach: `max-width: 250px` auf dem Kasten (darunter bricht der Text
+um, statt zu ziehen) und ein **gekürzter** Hinweis mit Aufklappen
+(`_HINWEIS_KURZ`), der beim ⚠ anfängt — das ist der Grund, warum er dasteht,
+nicht die Beschreibung der Bauart. Nachgemessen: 250 px breit, drei Zeilen
+höher als bei der PSM statt doppelt so breit.
+
+**Nicht behoben, weil kein Fehler.** Die Meldung
+`Gtk-Message: Not loading module "atk-bridge"` kommt vom Browser, den
+`start.sh` öffnet, nicht vom Server — GTK sagt dort, dass es eine
+Barrierefreiheits-Brücke selbst mitbringt. Sie erscheint auch ohne dieses
+Werkzeug und hat keine Wirkung. Was in derselben Ausgabe eine echte Auskunft
+ist: `Address already in use` — dann läuft bereits ein Server auf `:5000`, und
+der neue beendet sich sofort, während der **alte** weiter bedient. Beim Testen
+ist das die Falle: die Seite lädt, zeigt aber den Stand vor der Änderung.
+
+---
+
 ## 2026-09-19 — Drei Bauteile, die nur als Lücke benannt waren
 
 **Beobachtung.** Drei Dinge standen im Werkzeug ausschließlich als Text darüber,

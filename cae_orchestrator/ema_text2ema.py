@@ -86,6 +86,9 @@ SCHEMA = {
                    "desc": "Schrägung der Läufernuten in LÄUFERnutteilungen; -1 = automatisch nach Bauform (Käfig 1,0, Schleifring 0), 0 = ausdrücklich ohne Schrägung"},
     "rotorTurnsPerSlot": {"kind": "num", "lo": 2, "hi": 24, "def": 2, "geom": True, "adv": True, "int": True,
                    "desc": "Leiter je Läufernut beim Schleifringläufer"},
+    "polbedeckung": {"kind": "num", "lo": 0.55, "hi": 0.85, "def": 0.68,
+                   "geom": True, "adv": True,
+                   "desc": "Polschuhbreite / Polteilung des SCHENKELPOLS (EESM, GSM). Nicht poleArcFrac — das ist die Magnetbedeckung der PSM (0,83); ein Schenkelpol liegt bei 0,65…0,75. Ein breiterer Schuh braucht für dieselbe Grundwelle weniger Erregerdurchflutung, lässt aber weniger Platz zwischen den Polen"},
     # ── Schenkelpol: was ihn HAELT und was ihn DAEMPFT (ema_schenkelpol) ──
     # Beides war bis zum 19.09.2026 nur als Luecke benannt ("ungeprueft" bzw.
     # "kennt dieses Modell nicht") und damit fuer CLI, Parametertabelle und

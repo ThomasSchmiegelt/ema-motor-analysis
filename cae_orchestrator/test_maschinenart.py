@@ -487,6 +487,68 @@ pruefe('"Flussbarrieren (Anordnung)"' in _html,
 pruefe('machineType:\'machine_art\'' in _html,
        "und 'Text -> Auslegung' trifft dasselbe Feld (T2E_APPLY)")
 
+# ── Die POLZAHL gehoert jeder Maschine, nicht den Magneten ────────────────────
+#
+# Sie stand im Abschnitt "Magnet-Topologie", und der wird bei einer Bauart ohne
+# Magnete ausgeblendet -- damit war die Polzahl fuer ASM, EESM und GSM
+# ueberhaupt nicht einstellbar. Gemeldet als "wie stelle ich bei der EESM die
+# Anzahl der Pole ein". Geprueft wird die LAGE im Dokument, nicht die blosse
+# Existenz: vorhanden war sie ja.
+_i_art = _html.index('<div class="section-title">Maschinenart</div>')
+_i_topo = _html.index('id="grp_magnet_topo"')
+_i_p = _html.index('id="p_pairs"')
+pruefe(_i_art < _i_p < _i_topo,
+       "das Feld 'Polpaare' steht im Abschnitt Maschinenart und NICHT in der "
+       "Magnet-Topologie — sonst ist es bei jeder magnetlosen Bauart "
+       "ausgeblendet")
+pruefe('id="disp_poles"' in _html,
+       "daneben steht, was daraus folgt (2p) — in der Maschine zaehlt die "
+       "Polzahl, nicht das Polpaar")
+
+# ── Was NUR EINE Bauart hat, ist auch einstellbar ────────────────────────────
+#
+# „Die Anzahl der Staebe und alle anderen maschinenartspezifischen Parameter
+# muessen unter Maschinenart einstellbar sein." Geprueft wird beides: dass es
+# das Bedienelement gibt UND dass der Schluessel dahinter im Schema steht --
+# ein Feld ohne Schema waere ein Wert, den `--set` und die Pipeline abweisen.
+import re as _re                                              # noqa: E402
+_m = _re.search(r"const _ART_FELDER = \{(.*?)\};", _html, _re.S)
+pruefe(_m is not None, "die Seite fuehrt EINE Tabelle Feld -> Schemaschluessel")
+_paare = dict(_re.findall(r'(\w+)\s*:\s*"(\w+)"', _m.group(1) if _m else ""))
+pruefe(len(_paare) >= 17,
+       f"sie deckt {len(_paare)} art-spezifische Felder ab (Kaefig, "
+       f"Laeuferwicklung, Schenkelpol, Daempfer, Anker)")
+_fehlt_html = [i for i in _paare if f'id="{i}"' not in _html]
+_fehlt_schema = [k for k in _paare.values() if k not in ema_text2ema.SCHEMA]
+pruefe(not _fehlt_html,
+       f"zu jedem Eintrag gibt es ein Bedienelement{'' if not _fehlt_html else ': fehlt ' + ', '.join(_fehlt_html)}")
+pruefe(not _fehlt_schema,
+       f"und zu jedem einen Schemaschluessel{'' if not _fehlt_schema else ': fehlt ' + ', '.join(_fehlt_schema)}")
+for _k in ("rotorBars", "daempferStaebeJePol", "polBefestigung", "bZielT",
+           "armatureWinding", "polbedeckung"):
+    pruefe(_k in _paare.values(),
+           f"'{_k}' ist ueber die Maske erreichbar")
+pruefe('class="art-feld"' in _html and '.wick-mat, .art-feld' in _html,
+       "und sie werden nach `data-arten` ein- und ausgeblendet — ein Regler, "
+       "der nichts bewegt, liest sich wie einer, der nicht wirkt")
+# Die Polbedeckung des SCHENKELPOLS ist eine andere Groesse als die
+# Magnetbedeckung der PSM -- gleiche Zahl fuer beide waere eine Gleichsetzung,
+# die es nicht gibt (0,83 gegen 0,65...0,75).
+pruefe(_paare.get("pol_bedeckung") == "polbedeckung"
+       and "poleArcFrac" not in _paare.values(),
+       "der Schenkelpol hat eine EIGENE Polbedeckung und teilt sie nicht mit "
+       "der Magnetbedeckung der PSM")
+import ema_eesm as _EE                                        # noqa: E402
+pruefe(_EE.polbedeckung({}) == _EE.POLBEDECKUNG
+       and _EE.polbedeckung({"polbedeckung": 0.75}) == 0.75,
+       f"ohne Angabe bleibt es bei {_EE.POLBEDECKUNG} — jede bestehende "
+       f"Auslegung rechnet Ziffer fuer Ziffer weiter")
+_pg0 = _EE.polgeometrie(_basis("eesm")["geom"], 80.0)
+_pg1 = _EE.polgeometrie(dict(_basis("eesm")["geom"], polbedeckung=0.80), 80.0)
+pruefe(_pg1["b_pol_mm"] > _pg0["b_pol_mm"],
+       f"und sie WIRKT: 0,80 statt {_EE.POLBEDECKUNG} macht den Polschuh von "
+       f"{_pg0['b_pol_mm']} auf {_pg1['b_pol_mm']} mm breit")
+
 
 print(f"\n{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

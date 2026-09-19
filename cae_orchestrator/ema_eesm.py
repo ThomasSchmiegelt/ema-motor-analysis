@@ -83,6 +83,26 @@ B_ZAHN_MAX_T = 1.8
 # ist Wickelfenster. 0,65-0,72 ist der uebliche Bereich; darunter wird der
 # Polschuh zu schmal fuer den Fluss, darueber bleibt kein Platz zum Wickeln.
 POLBEDECKUNG = 0.68
+POLBEDECKUNG_SPANNE = (0.55, 0.85)
+
+
+def polbedeckung(geom: dict | None = None) -> float:
+    """Polschuhbreite / Polteilung — die EINE Stelle dafuer.
+
+    Sie war eine Konstante, und das war ein Wert ohne Griff: der Schenkelpol
+    ist die Bauart, und wie breit sein Schuh ist, entscheidet ueber Grundwelle,
+    Erregerdurchflutung, Kupfermasse und den Platz fuer die Spule. Ein eigener
+    Parameter und NICHT ``poleArcFrac``: das ist die Magnetbedeckung der PSM
+    (Vorgabe 0,83), und ein Schenkelpol liegt ueblicherweise bei 0,65…0,75 —
+    dieselbe Zahl fuer beide waere eine Gleichsetzung, die es nicht gibt.
+
+    Ohne Angabe bleibt es bei ``POLBEDECKUNG``; jede bestehende Auslegung
+    rechnet damit Ziffer fuer Ziffer weiter.
+    """
+    b = float((geom or {}).get("polbedeckung") or 0.0)
+    if b <= 0.0:
+        return POLBEDECKUNG
+    return min(max(b, POLBEDECKUNG_SPANNE[0]), POLBEDECKUNG_SPANNE[1])
 
 # Nutfuellfaktor der Erregerwicklung: gewickelter Runddraht, wie in
 # ``ema_wicklung.FUELL_RUNDDRAHT``. Dieselbe Bauart, derselbe Wert -- eine
@@ -137,7 +157,7 @@ def ziel_feld(geom: dict) -> float:
 
 
 def polmasse(poles: int, r_gap_mm: float, spanne_mm: float, b_m_T: float,
-             axial_mm: float) -> dict:
+             axial_mm: float, bedeckung: float = 0.0) -> dict:
     """Schenkelpol aus vier Zahlen — EINE Formel, zwei Bauarten.
 
     ``r_gap_mm``  Radius der POLFLAECHE (dort wird die Polteilung gemessen)
@@ -153,7 +173,8 @@ def polmasse(poles: int, r_gap_mm: float, spanne_mm: float, b_m_T: float,
     poles = max(int(poles), 2)
     L = float(axial_mm)
     tau_pol = 2.0 * math.pi * float(r_gap_mm) / poles        # Polteilung [mm]
-    b_pol = POLBEDECKUNG * tau_pol                           # Polschuhbreite
+    alpha = float(bedeckung) if bedeckung > 0 else POLBEDECKUNG
+    b_pol = alpha * tau_pol                                  # Polschuhbreite
     fenster_b = max(tau_pol - b_pol, 1.0)                    # Breite zwischen den Polen
 
     # Joch aus dem Fluss je Pol, wie bei der ASM (``ema_asm.kaefig``):
@@ -166,7 +187,8 @@ def polmasse(poles: int, r_gap_mm: float, spanne_mm: float, b_m_T: float,
     # Mittlere Windungslaenge: einmal um den Polkoerper (Laenge + Breite).
     l_windung = 2.0 * (L + b_pol) + 2.0 * fenster_b
 
-    return {"poles": poles, "tau_pol_mm": round(tau_pol, 2),
+    return {"poles": poles, "polbedeckung": round(alpha, 4),
+            "tau_pol_mm": round(tau_pol, 2),
             "b_pol_mm": round(b_pol, 2), "fenster_b_mm": round(fenster_b, 2),
             "fenster_h_mm": round(h_fenster, 2), "A_fenster_mm2": round(a_fenster, 1),
             "h_joch_mm": round(h_joch, 2), "l_windung_mm": round(l_windung, 1),
@@ -180,7 +202,8 @@ def polgeometrie(geom: dict, axial_mm: float) -> dict:
     p = max(int(geom["p"]), 1)
     r_rot = r["r_rotor_gap_mm"]
     r_wel = max(r["r_welle_mm"], 1.0)
-    return polmasse(2 * p, r_rot, r_rot - r_wel, ziel_feld(geom), axial_mm)
+    return polmasse(2 * p, r_rot, r_rot - r_wel, ziel_feld(geom), axial_mm,
+                    polbedeckung(geom))
 
 
 def erregung(geom: dict, axial_mm: float, i_f_A: float = 0.0,
@@ -216,7 +239,7 @@ def erregung(geom: dict, axial_mm: float, i_f_A: float = 0.0,
     # abhing -- und der Kommentar daneben nannte 2/pi, also eine dritte Zahl.
     # Bei alpha = 0,68 liegt der richtige Faktor bei 0,896; pi/4 = 0,785 war
     # rund 12 % zu klein, und das ging linear in Erregerverlust und Kupfermasse.
-    formfaktor = (4.0 / math.pi) * math.sin(POLBEDECKUNG * math.pi / 2.0)
+    formfaktor = (4.0 / math.pi) * math.sin(polbedeckung(geom) * math.pi / 2.0)
     f_pol = (b_m * g_eff / MU0) / formfaktor                   # A je Pol (Amplitude)
 
     mat = HAIRPIN_MATS.get(geom.get("fieldMat") or ERREGER_MAT,

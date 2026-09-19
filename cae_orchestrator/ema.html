@@ -165,9 +165,16 @@
             font-size:.72rem;line-height:1.5}
 
     /* Live overlay */
+    /* Der Kasten ist schrumpfend breit (`position:absolute` ohne Breite), also
+       bestimmt ihn sein BREITESTES Kind. Solange das die Kennwertzeilen waren,
+       blieb er bei rund 230 px; der Laeuferhinweis liess ihn auf 425 px
+       wachsen und nahm damit fast die halbe Vorschau ein — gemeldet als „bei
+       den neuen Varianten nehmen die Echtzeitdaten die Haelfte der
+       Geometrieeinstellung ein". Eine Hoechstbreite deckelt ihn; darunter
+       bricht der Hinweis um, statt den Kasten zu ziehen. */
     .overlay{position:absolute;top:14px;right:14px;background:rgba(20,20,20,.88);
              padding:12px;border-radius:4px;border:1px solid var(--brd);
-             pointer-events:none;min-width:200px}
+             pointer-events:none;min-width:200px;max-width:250px}
     .overlay h3{margin:0 0 8px;font-size:.85rem;color:var(--acc)}
     .data-row{display:flex;justify-content:space-between;font-family:monospace;
               margin-bottom:3px;font-size:.85rem}
@@ -759,8 +766,127 @@
         <option value="pmsm" selected>PSM — permanenterregt</option>
       </select>
     </div>
+    <!-- Die Polzahl gehoert JEDER Maschine, nicht den Magneten.
+         Sie stand in der Magnet-Topologie, und die wird bei einer Bauart ohne
+         Magnete ausgeblendet -- damit war die Polzahl fuer ASM, EESM und GSM
+         ueberhaupt nicht einstellbar. Gemeldet als "wie stelle ich bei der
+         EESM die Anzahl der Pole ein". -->
+    <div class="input-group">
+      <label>Polpaare (p)</label>
+      <input type="number" id="p_pairs" value="3" min="1" max="40" step="1"/><span id="disp_poles" style="white-space:nowrap;font-size:.72rem">6 Pole</span>
+    </div>
     <div id="art_hinweis" class="hint"
          style="grid-column:1/-1;font-size:11px;color:#9aa;margin-top:2px"></div>
+
+    <!-- Alles, was NUR EINE Bauart hat. `data-arten` sagt, welche; gefuellt
+         wird aus /param_schema (`_ART_FELDER`), damit Grenzen, Auswahllisten
+         und Vorgaben nicht ein zweites Mal im HTML stehen. -->
+    <div class="art-feld" data-arten="asm eesm gsm">
+      <div class="input-group">
+        <label>Ziel-Luftspaltfeld</label>
+        <input type="number" id="b_ziel" step="0.01"/><span>T</span>
+      </div>
+      <div class="hint" style="font-size:11px;color:#9aa">
+        Bei der PSM steht das Feld durch den Magneten FEST; bei jeder
+        fremderregten Bauart wird es ueber den Erreger- bzw.
+        Magnetisierungsstrom EINGESTELLT. Der Deckel kommt vom Zahn.
+      </div>
+    </div>
+
+    <!-- ── Asynchronmaschine ─────────────────────────────────────────── -->
+    <div class="art-feld" data-arten="asm">
+      <div class="input-group">
+        <label style="grid-column:1/-1;margin-bottom:3px">Läuferbauform</label>
+        <select id="rotor_type" style="grid-column:1/-1"></select>
+      </div>
+      <div class="input-group">
+        <label>Läufernuten (0 = auto)</label>
+        <input type="number" id="rotor_bars" step="1"/><span>-</span>
+      </div>
+      <div class="input-group">
+        <label>Schrägung (Läufernutteilungen)</label>
+        <input type="number" id="rotor_skew" step="0.1"/><span>-</span>
+      </div>
+      <div class="input-group">
+        <label>Leiter je Läufernut</label>
+        <input type="number" id="rotor_turns" step="1"/><span>-</span>
+      </div>
+      <div class="hint" style="font-size:11px;color:#9aa">
+        Nutzahl 0 = automatisch: beim Käfig nach der Unsymmetrieregel (nie
+        gleich der Ständernutzahl, nicht um 0/p/2p/3p daneben), beim
+        Schleifringläufer dreiteilbar. Schrägung −1 = automatisch nach Bauart
+        (Käfig 1,0 · Schleifring 0), 0 = ausdrücklich ohne. Leiter je Läufernut
+        gilt nur für den Schleifringläufer.
+      </div>
+    </div>
+
+    <!-- ── Schenkelpol: EESM und GSM (dort am Ständer) ───────────────── -->
+    <div class="art-feld" data-arten="eesm gsm">
+      <div class="input-group">
+        <label>Polbedeckung (Schenkelpol)</label>
+        <input type="number" id="pol_bedeckung" step="0.01"/><span>-</span>
+      </div>
+      <div class="hint" style="font-size:11px;color:#9aa">
+        Polschuhbreite / Polteilung. NICHT die Magnetbedeckung der PSM (0,83):
+        ein Schenkelpol liegt bei 0,65…0,75. Breiter = weniger
+        Erregerdurchflutung für dieselbe Grundwelle, aber weniger Platz
+        zwischen den Polen.
+      </div>
+    </div>
+
+    <!-- ── Fremderregte Synchronmaschine ─────────────────────────────── -->
+    <div class="art-feld" data-arten="eesm">
+      <div class="input-group">
+        <label style="grid-column:1/-1;margin-bottom:3px">Polbefestigung am Joch</label>
+        <select id="pol_befestigung" style="grid-column:1/-1"></select>
+      </div>
+      <div class="input-group">
+        <label>Schrauben je Pol</label>
+        <input type="number" id="pol_bolzen" step="1"/><span>-</span>
+      </div>
+      <div class="input-group">
+        <label style="grid-column:1/-1;margin-bottom:3px">Gewinde der Polschrauben</label>
+        <select id="pol_gewinde" style="grid-column:1/-1"></select>
+      </div>
+      <div class="hint" style="font-size:11px;color:#9aa">
+        Der Schenkelpol ist das einzige Bauteil hier, das nicht aus dem Vollen
+        kommt — er sitzt auf dem Joch. Gerechnet werden beide Bauarten
+        (<code>rotor-check</code> zeigt sie samt zulässiger Drehzahl), gewertet
+        wird die gewählte.
+      </div>
+      <div class="input-group">
+        <label style="grid-column:1/-1;margin-bottom:3px">Dämpferkäfig im Polschuh</label>
+        <select id="daempfer" style="grid-column:1/-1"></select>
+      </div>
+      <div class="input-group">
+        <label>Dämpferstäbe je Pol (0 = auto)</label>
+        <input type="number" id="daempfer_staebe" step="1"/><span>-</span>
+      </div>
+      <div class="input-group">
+        <label style="grid-column:1/-1;margin-bottom:3px">Werkstoff der Dämpferstäbe</label>
+        <select id="daempfer_mat" style="grid-column:1/-1"></select>
+      </div>
+      <div class="hint" style="font-size:11px;color:#9aa">
+        Der Dämpfer ermöglicht den asynchronen Anlauf und dämpft
+        Lastpendelungen. <b>Beides geht in keine Kennzahl ein</b> — dafür
+        fehlt der zeitabhängige Lauf; gerechnet wird, was er kostet (Masse,
+        Platz im Polschuh). Stabteilung 0 = automatisch, bewusst verschieden
+        von der Ständernutteilung (Görges-Sattel).
+      </div>
+    </div>
+
+    <!-- ── Gleichstrommaschine ───────────────────────────────────────── -->
+    <div class="art-feld" data-arten="gsm">
+      <div class="input-group">
+        <label style="grid-column:1/-1;margin-bottom:3px">Ankerwicklungsart</label>
+        <select id="anker_wicklung" style="grid-column:1/-1"></select>
+      </div>
+      <div class="hint" style="font-size:11px;color:#9aa">
+        Schleifenwicklung: Zweigzahl a = p, viele parallele Zweige, hoher
+        Strom je Bürstenarm. Wellenwicklung: a = 1, hohe Spannung, zwei
+        Bürstenarme. Gleiche Leistung, anderer Strom/Spannungs-Teiler.
+      </div>
+    </div>
     <!-- Die Wicklungswerkstoffe der jeweiligen Bauart. Sie wurden im Code seit
          jeher GELESEN (ema_asm/ema_eesm/ema_gsm) und hatten weder Schema noch
          Bedienelement — fuer den, der davorsitzt, gab es sie nicht. Gefuellt
@@ -804,10 +930,6 @@
   <!-- 4. Magnet-Topologie -->
   <div class="section" id="grp_magnet_topo">
     <div class="section-title">Magnet-Topologie</div>
-    <div class="input-group">
-      <label>Polpaare (p)</label>
-      <input type="number" id="p_pairs" value="3" min="1" max="40" step="1"/><span>-</span>
-    </div>
     <div class="input-group">
       <label style="grid-column:1/-1;margin-bottom:3px">Magnet Anordnung</label>
       <select id="mag_shape" style="grid-column:1/-1">
@@ -3892,9 +4014,16 @@
     <div class="data-row"><span>Leistung:</span><span class="val" id="val_power">0</span></div>
     <div class="data-row"><span>Grid:</span><span class="val" id="val_grid">100px</span></div>
     <div style="margin-top:8px;font-size:.73rem;color:#888">FDM Physikmodell<br>2p = <span id="poles_display">6</span></div>
-    <!-- Was die Leinwand bei dieser Bauart NICHT zeigt. Leer bei der PSM. -->
+    <!-- Was die Leinwand bei dieser Bauart NICHT zeigt. Leer bei der PSM.
+         KURZ, mit Aufklappen: der volle Hinweis ist mehrere Saetze lang (bei
+         einem nicht auslegbaren Kaefig ueber 400 Zeichen) und nahm im
+         Vorschaufenster mehr Platz ein als die Echtzeitdaten selbst --
+         gemeldet als „bei den neuen Varianten nehmen die Echtzeitdaten die
+         Haelfte der Geometrieeinstellung ein". Der Kasten darf nicht mit dem
+         Text wachsen; klicken zeigt den Rest, `title` traegt ihn ohnehin. -->
     <div id="ov_laeufer" style="margin-top:8px;font-size:.70rem;color:#c8a45a;
-         line-height:1.35;display:none"></div>
+         line-height:1.35;display:none;pointer-events:auto;cursor:pointer;
+         overflow:hidden"></div>
   </div>
 </div><!-- /preview-pane -->
 
@@ -11590,9 +11719,16 @@ function applyPayload(payload) {
   // geometry selects first (drive topology/pocket/connection visibility via handlers)
   // Die Maschinenart zuerst: sie blendet die Magnet-Topologie ein oder aus.
   _setField('machine_art', G.machineType);
-  _setField('mat_bar', G.barMat); _setField('mat_rotorwire', G.rotorWireMat);
-  _setField('mat_field', G.fieldMat); _setField('mat_armature', G.armatureMat);
-  _setField('t_leiter', G.tLeiterC); _setField('spule_form', G.erregerSpuleForm);
+  _setField('t_leiter', G.tLeiterC);
+  // Alle art-spezifischen Felder aus EINER Tabelle zurueckschreiben -- dieselbe,
+  // aus der sie gefuellt und gebunden werden. Eine zweite Aufzaehlung hier war
+  // schon einmal die Stelle, an der ein neues Feld zwar gesetzt, aber nie
+  // wiederhergestellt wurde: „Projekt als Vorlage" holte dann stillschweigend
+  // den Wert des zuletzt angesehenen Formulars (derselbe Befund wie frueher
+  // bei `struct_solver`).
+  if (window._ART_FELDER) {
+    for (const id in window._ART_FELDER) _setField(id, G[window._ART_FELDER[id]]);
+  }
   if (window._updateArtVis) window._updateArtVis();
   _setField('mag_shape',   G.magShape);
   _setField('pocket_mode', G.pocketMode);
@@ -13124,6 +13260,11 @@ function escHtml(s) {
     bindInput("p_pairs", v => {
       GEOM.p = v;
       document.getElementById("poles_display").innerText = v * 2;
+      // Die Polzahl steht jetzt bei der Maschinenart und nicht mehr bei den
+      // Magneten -- sie gehoert jeder Bauart. Die Anzeige daneben sagt, was
+      // aus den Polpaaren folgt, weil in der Maschine 2p zaehlt.
+      const dp = document.getElementById("disp_poles");
+      if (dp) dp.textContent = (v * 2) + " Pole";
       resetField();
     });
 
@@ -13157,9 +13298,27 @@ function escHtml(s) {
     // ein Regler, der nichts bewegt, liest sich wie einer, der nicht wirkt.
     // Die vier Wicklungswerkstoffe + die Leitertemperatur. Dieselbe Quelle wie
     // die Maschinenart: /param_schema, nicht eine zweite Liste im HTML.
-    const _MAT_FELDER = {mat_bar: "barMat", mat_rotorwire: "rotorWireMat",
+    // JEDES Feld, das nur EINE (oder wenige) Bauarten haben: Elementkennung
+    // -> Schemaschluessel. Grenzen, Auswahllisten und Vorgaben kommen aus
+    // /param_schema und stehen NICHT ein zweites Mal im HTML -- sonst ist ein
+    // Wert waehlbar, den die Rechnung nicht kennt (derselbe Grund, aus dem die
+    // Maschinenart-Liste von dort kommt).
+    const _ART_FELDER = {mat_bar: "barMat", mat_rotorwire: "rotorWireMat",
                          mat_field: "fieldMat", mat_armature: "armatureMat",
-                         spule_form: "erregerSpuleForm"};
+                         spule_form: "erregerSpuleForm",
+                         b_ziel: "bZielT",
+                         rotor_type: "rotorType", rotor_bars: "rotorBars",
+                         rotor_skew: "rotorSkewSlots",
+                         rotor_turns: "rotorTurnsPerSlot",
+                         pol_bedeckung: "polbedeckung",
+                         pol_befestigung: "polBefestigung",
+                         pol_bolzen: "polBolzen",
+                         pol_gewinde: "polBolzenGewinde",
+                         daempfer: "daempferkaefig",
+                         daempfer_staebe: "daempferStaebeJePol",
+                         daempfer_mat: "daempferMat",
+                         anker_wicklung: "armatureWinding"};
+    const _MAT_FELDER = _ART_FELDER;          // alter Name, gleiche Tabelle
 
     async function _matLaden() {
       try {
@@ -13168,16 +13327,36 @@ function escHtml(s) {
           _ptabSchema = r.params || [];
         }
       } catch (e) { return; }
-      for (const id in _MAT_FELDER) {
-        const sel = document.getElementById(id);
-        const spec = _ptabSchema.find(sp => sp.key === _MAT_FELDER[id]);
-        if (!sel || !spec || !spec.options) continue;
-        const cur = GEOM[_MAT_FELDER[id]] || spec.def;
-        sel.innerHTML = spec.options.map(o =>
-          `<option value="${o.value}"${o.value === cur ? " selected" : ""}>` +
-          `${o.label}</option>`).join("");
-        sel.value = cur;
-        sel.onchange = e => { GEOM[_MAT_FELDER[id]] = e.target.value; resetField(); };
+      for (const id in _ART_FELDER) {
+        const el = document.getElementById(id);
+        const key = _ART_FELDER[id];
+        const spec = _ptabSchema.find(sp => sp.key === key);
+        if (!el || !spec) continue;
+        if (spec.options) {
+          const cur = GEOM[key] || spec.def;
+          el.innerHTML = spec.options.map(o =>
+            `<option value="${o.value}"${o.value === cur ? " selected" : ""}>` +
+            `${o.label}</option>`).join("");
+          el.value = cur;
+          GEOM[key] = el.value;
+          el.onchange = e => { GEOM[key] = e.target.value; resetField(); };
+        } else {
+          // Zahlenfeld: Grenzen aus dem Schema, damit die Maske keinen Wert
+          // annimmt, den `--set` und die Pipeline abweisen wuerden.
+          if (spec.lo !== undefined && spec.lo !== null) el.min = spec.lo;
+          if (spec.hi !== undefined && spec.hi !== null) el.max = spec.hi;
+          if (spec.int) el.step = 1;
+          const cur = (GEOM[key] === undefined || GEOM[key] === null)
+                        ? spec.def : GEOM[key];
+          el.value = cur;
+          GEOM[key] = spec.int ? Math.round(+cur) : +cur;
+          el.oninput = e => {
+            let v = +e.target.value;
+            if (!isFinite(v)) return;
+            GEOM[key] = spec.int ? Math.round(v) : v;
+            resetField();
+          };
+        }
       }
       const tl = document.getElementById("t_leiter");
       if (tl) tl.oninput = e => {
@@ -13186,6 +13365,7 @@ function escHtml(s) {
       _updateArtVis();
     }
     window._matLaden = _matLaden;
+    window._ART_FELDER = _ART_FELDER;
 
     function _updateArtVis() {
       const sel = document.getElementById("machine_art");
@@ -13205,10 +13385,14 @@ function escHtml(s) {
       // Nur die Wicklungen zeigen, die diese Bauart WIRKLICH hat. Ein
       // Ankerwerkstoff an einer Asynchronmaschine waere ein Feld ohne
       // Wirkung, und ein wirkungsloses Feld liest sich wie ein defektes.
-      document.querySelectorAll(".wick-mat").forEach(el => {
+      document.querySelectorAll(".wick-mat, .art-feld").forEach(el => {
         const arten = (el.getAttribute("data-arten") || "").split(/\s+/);
         el.style.display = arten.includes(art) ? "" : "none";
       });
+      // Die Polzahl bleibt IMMER stehen -- sie gehoert jeder Maschine. Nur
+      // die Beschriftung sagt, was daraus folgt.
+      const dp = document.getElementById("disp_poles");
+      if (dp) dp.textContent = (2 * (GEOM.p || 1)) + " Pole";
       const hin = document.getElementById("art_hinweis");
       if (hin) {
         const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
@@ -14247,6 +14431,31 @@ function escHtml(s) {
     return (t && t.length) ? t : null;
   }
 
+  // Wieviel vom Hinweis STEHT, bevor man klickt. Zwei Zeilen im schmalen
+  // Vorschaufenster; alles darueber waechst dem Kasten davon.
+  const _HINWEIS_KURZ = 85;
+
+  function _hinweisMalen(el) {
+    const v = el.dataset.voll || "";
+    // Ein ⚠ ist der Grund, warum der Hinweis ueberhaupt dasteht -- also faengt
+    // die Kurzfassung DORT an und nicht bei der Beschreibung der Bauart.
+    const i = v.indexOf("\u26A0");
+    const kern = i >= 0 ? v.slice(i) : v;
+    if (el.dataset.offen === "1") {
+      el.textContent = v + "   \u2303 weniger";
+      el.style.maxHeight = "11em";
+      el.style.overflowY = "auto";
+      return;
+    }
+    // Zugeklappt wird NICHT gescrollt: ein Rollbalken in einem 250 px breiten
+    // Kasten verdeckt gerade das „mehr", auf das er hinweist.
+    el.style.maxHeight = "none";
+    el.style.overflowY = "hidden";
+    el.textContent = kern.length > _HINWEIS_KURZ
+      ? kern.slice(0, _HINWEIS_KURZ).replace(/\s+\S*$/, "") + " \u2026  \u2304 mehr"
+      : kern;
+  }
+
   function _laeuferHinweisZeigen() {
     const el = document.getElementById("ov_laeufer");
     if (!el) return;
@@ -14256,7 +14465,14 @@ function escHtml(s) {
     }
     let txt = b.hinweis || "";
     if (b.fehler) txt = "Laeufer nicht zeichenbar: " + b.fehler;
-    el.textContent = txt;
+    el.dataset.voll = txt;
+    el.dataset.offen = "0";
+    el.title = txt;
+    el.onclick = () => {
+      el.dataset.offen = el.dataset.offen === "1" ? "0" : "1";
+      _hinweisMalen(el);
+    };
+    _hinweisMalen(el);
     el.style.display = txt ? "" : "none";
   }
 
