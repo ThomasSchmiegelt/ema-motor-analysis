@@ -1718,7 +1718,47 @@ def umrichter_pruefen():
                 "v_dc_V": float(u["v_dc_1t"]),
                 "n_module": int(u.get("n_module") or 1),
                 "quelle": "compute_advanced_em + umrichter",
+                "art": "pmsm", "schlupf": 0.0, "modell": "",
             }
+            # Bis hierher ist das der PM-Pfad: `_analytical_Bgap` aus Br und
+            # Magnetdicke. Fuer eine Bauart OHNE Magnete waeren das die Zahlen
+            # einer anderen Maschine -- gemeldet als „bei der Simulation der ASM
+            # sieht es so aus, als waeren die Magnete der PSM noch enthalten",
+            # und genau so war es: psi, Ld, Lq und die Eckdrehzahl kamen aus dem
+            # Magnetmodell. Jede Art rechnet ihren Betriebspunkt selbst; das
+            # Modul dazu kommt aus `ema_maschinenart.rechenmodul`, nicht aus
+            # einer zweiten Liste hier.
+            import ema_maschinenart as _MAu
+            _code = _MAu.art_code(geom)
+            _mod = _MAu.rechenmodul(_code)
+            if _mod is not None:
+                _bp = _mod.betriebspunkt(
+                    geom, axial, rpm or 5000.0,
+                    float(payload.get("load_nm") or 0.0) or 1.0)
+                _kt = float(_bp.get("Kt_Nm_per_A") or 0.0)
+                _p = max(int(geom.get("p") or 1), 1)
+                # psi aus dem eigenen Kt, wo die Art es nicht selbst nennt:
+                # Kt = 1,5*p*psi ist die Umkehrung derselben Gleichung, mit der
+                # `compute_performance` Kt bildet -- keine zweite Formel.
+                _psi = _bp.get("psi_Wb")
+                if _psi is None:
+                    _psi = _kt / max(1.5 * _p, 1e-9)
+                maschine.update({
+                    "art": _code,
+                    "psi_pm_Wb": float(_psi),
+                    "Kt_Nm_per_A": _kt,
+                    "B_gap_T": float(_bp.get("B_gap_T") or maschine["B_gap_T"]),
+                    "schlupf": float(_bp.get("schlupf") or 0.0),
+                    # Ld/Lq nur, wo die Art sie WIRKLICH rechnet (SynRM). Sonst
+                    # 0: eine aus dem Magnetmodell uebernommene Salienz waere
+                    # genau die stille Fremdzahl, gegen die das hier steht.
+                    "Ld_H": float(_bp["Ld_mH"]) / 1e3 if "Ld_mH" in _bp else 0.0,
+                    "Lq_H": float(_bp["Lq_mH"]) / 1e3 if "Lq_mH" in _bp else 0.0,
+                    "xi": float(_bp.get("xi") or 1.0),
+                    "quelle": f"{_mod.__name__}.betriebspunkt + umrichter",
+                    "modell": _MAu.hole(_code).label.split("—")[0].strip(),
+                    "ohne_salienz": "Ld_mH" not in _bp,
+                })
         except Exception as exc:                                 # noqa: BLE001
             maschine = {"fehler": f"{type(exc).__name__}: {exc}"}
 

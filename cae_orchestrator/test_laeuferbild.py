@@ -300,6 +300,81 @@ for verbot in ("magnet_legs", "n_stab", "stabbreite", "polgeometrie",
            f"ema_laeufer.js rechnet nichts: kein '{verbot}' im Code")
 
 
+print("\n6. Die SIMULATION zeigt dieselbe Maschine wie die Zeichnung")
+
+# Zwei Meldungen, ein Muster: die Zeichnung war umgestellt, das RECHENmodell
+# der Vorschau nicht. „Bei der Simulation der ASM sieht es so aus, als waeren
+# die Magnete der PSM noch enthalten" — sie waren es: der Rasterer
+# magnetisierte weiter aus `magnetLegs`, und psi/Ld/Lq kamen aus
+# `compute_advanced_em`, also aus Br und Magnetdicke.
+pruefe("const legs   = _laeuferTeileAktiv() ? [] : magnetLegs(GEOM);" in html,
+       "das FELDRASTER magnetisiert nicht mehr, wo es keine Magnete gibt")
+
+# „Bei der ASM hat man das Gefuehl, Feld und Welle laufen synchron" — sie
+# liefen es: das Staenderfeld hing am LAEUFERwinkel. Ohne Schlupf wird im
+# Kaefig nichts induziert, ein synchron mitlaufender Kaefig traegt kein Moment.
+pruefe("feldWinkel: 0, schlupf: 0," in html,
+       "die Vorschau fuehrt Feld- und Laeuferwinkel getrennt")
+pruefe("PHYS.feldWinkel += (PHYS.omega / (1 - PHYS.schlupf)) * dt;" in html,
+       "n_syn = n/(1-s): das Drehfeld laeuft dem Laeufer um den Schlupf voraus")
+pruefe("const _fw = PHYS.feldWinkel * GEOM.p;" in html
+       and "PHYS.id*Math.cos(elAng - _fw)" in html,
+       "und das Staenderfeld haengt an diesem Winkel, nicht am Laeuferwinkel")
+
+if _hat_node:
+    # Die Invarianz ist der eigentliche Punkt: bei s = 0 muss JEDE
+    # Synchronrechnung Ziffer fuer Ziffer dieselbe bleiben.
+    _w = r"""
+    function lauf(s, omega, dt, n){
+      let angle=0, feld=0;
+      for(let i=0;i<n;i++){
+        angle += omega*dt;
+        if (s>0) feld += (omega/(1-s))*dt; else feld = angle;
+      }
+      return [angle, feld];
+    }
+    const a = lauf(0.0, 100, 1e-3, 5000), b = lauf(0.03, 100, 1e-3, 5000);
+    console.log(JSON.stringify({sync_diff: a[1]-a[0],
+                                asm_voraus: b[1]/b[0]-1}));
+    """
+    _p = subprocess.run(["node", "-e", _w], capture_output=True, text=True,
+                        timeout=60)
+    _d = json.loads(_p.stdout.strip())
+    pruefe(_d["sync_diff"] == 0.0,
+           f"synchron: Feld- und Laeuferwinkel bleiben EXAKT gleich "
+           f"(Differenz {_d['sync_diff']}) — keine Drift ueber die Laufzeit")
+    pruefe(abs(_d["asm_voraus"] - (1 / (1 - 0.03) - 1)) < 1e-9,
+           f"ASM bei 3 % Schlupf: das Feld laeuft {_d['asm_voraus']*100:.2f} % "
+           f"voraus — 1/(1-s)-1, nicht geschaetzt")
+
+# Und die Kennwerte der Vorschau kommen aus dem Modul der jeweiligen Art.
+_m = {}
+for _art, _ex in (("pmsm", {}), ("asm", {}), ("synrm", {}), ("eesm", {"p": 2})):
+    _p2 = cae_cli.frischer_payload()
+    _p2["geom"]["machineType"] = _art
+    _p2["geom"].update(_ex)
+    _m[_art] = c.post("/umrichter",
+                      json={"payload": _p2, "maschine": True}).get_json()["maschine"]
+
+pruefe(_m["pmsm"]["quelle"].startswith("compute_advanced_em"),
+       "die PSM rechnet unveraendert ueber compute_advanced_em")
+for _art in ("asm", "synrm", "eesm"):
+    pruefe(_m[_art]["quelle"].startswith(f"ema_{_art}.betriebspunkt"),
+           f"{_art}: psi und Kt kommen aus ema_{_art}, nicht aus dem "
+           f"Magnetmodell")
+pruefe(abs(_m["asm"]["psi_pm_Wb"] - _m["pmsm"]["psi_pm_Wb"]) > 1e-4,
+       f"und sie sind ANDERE Zahlen (ASM {_m['asm']['psi_pm_Wb']:.5f} gegen "
+       f"PSM {_m['pmsm']['psi_pm_Wb']:.5f} Wb) — sonst haette der Umbau "
+       f"nichts bewirkt")
+pruefe(_m["asm"]["schlupf"] > 0 and _m["pmsm"]["schlupf"] == 0.0,
+       f"nur die ASM hat Schlupf ({_m['asm']['schlupf']:.4f}); eine "
+       f"Synchronmaschine hat per Definition keinen")
+pruefe(_m["asm"]["ohne_salienz"] is True
+       and _m["synrm"]["ohne_salienz"] is False,
+       "wo eine Art kein Ld/Lq rechnet, wird das GESAGT statt die Salienz "
+       "aus dem Magnetmodell zu uebernehmen (SynRM rechnet es selbst)")
+
+
 print("\n" + "=" * 62)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

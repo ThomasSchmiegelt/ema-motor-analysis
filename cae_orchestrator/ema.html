@@ -13041,6 +13041,13 @@ function escHtml(s) {
     omega: 0, angle: 0, iq: 0, id: 0, torque: 0,
     load: 5, voltage: 800, id_manual: 0, timeScale: 1.0, rpmSet: 0,
     Rs: 0.02, Ld: 0.0003, Lq: 0.0008, Psi: 0.09, J: 0.1,
+    // Der Winkel des DREHFELDS, getrennt vom Laeuferwinkel. Bei jeder
+    // Synchronmaschine sind die beiden dasselbe -- bei der ASM nicht, und
+    // genau darin besteht die Bauart: ohne Schlupf wird im Kaefig nichts
+    // induziert, also traegt ein synchron mitlaufender Kaefig kein Moment.
+    // Gemeldet als „bei der ASM hat man das Gefuehl, Feld und Welle laufen
+    // synchron" -- sie liefen es, weil das Staenderfeld am LAEUFERwinkel hing.
+    feldWinkel: 0, schlupf: 0,
     // ── Aus der WIRKLICHEN Maschine, sobald `livePhysikLaden()` lief ────────
     // Bis dahin gelten die Festwerte darueber. Sie sind ausdruecklich als
     // Startwerte stehengeblieben, damit die Vorschau ohne Serverantwort
@@ -13757,7 +13764,11 @@ function escHtml(s) {
     const slots = GEOM.slots, step = 2*Math.PI/slots, sw = step * GEOM.slotWidthRatio;
     for (let s = 0; s < slots; s++) {
       const ang = s*step, elAng = ang*GEOM.p;
-      let cur = PHYS.id*Math.cos(elAng - PHYS.angle*GEOM.p) - PHYS.iq*Math.sin(elAng - PHYS.angle*GEOM.p);
+      // FELDwinkel, nicht Laeuferwinkel: bei der ASM laeuft das Drehfeld dem
+      // Kaefig um den Schlupf voraus, und das ist das Sichtbare an der Bauart.
+      // Bei jeder Synchronmaschine ist `feldWinkel === angle` (s. stepPhysics).
+      const _fw = PHYS.feldWinkel * GEOM.p;
+      let cur = PHYS.id*Math.cos(elAng - _fw) - PHYS.iq*Math.sin(elAng - _fw);
       // Das ausgefallene System fuehrt KEINEN Strom. Damit zeigt das Feldbild
       // den Fehlerfall selbst: bei `sektoriert` fehlt ein ganzer
       // Umfangsabschnitt, und die Unsymmetrie ist zu sehen statt nur benannt.
@@ -13780,7 +13791,13 @@ function escHtml(s) {
     const Mx_acc = new Float32Array(N*N);
     const My_acc = new Float32Array(N*N);
     const poles  = GEOM.p*2;
-    const legs   = magnetLegs(GEOM);
+    // Eine Bauart OHNE Magnete bekommt auch keine magnetisierten Zellen. Die
+    // Zeichnung liess die Magnete schon weg, das RASTER nicht -- gemeldet als
+    // „bei der Simulation der ASM sieht es so aus, als waeren die Magnete der
+    // PSM noch enthalten", und genau so war es: das Feldbild einer
+    // Asynchronmaschine war ein PM-Feld. Dieselbe Frage wie in `drawRotor`,
+    // damit Bild und Feld nicht auseinanderfallen.
+    const legs   = _laeuferTeileAktiv() ? [] : magnetLegs(GEOM);
     // ×4 restores the amplitude lost when the magnet rasterisation switched from
     // sub-pixel accumulation (the old l+=0.5/t+=0.5 loops hit each pixel ~2×2 times)
     // to a clean one-contribution-per-pixel mask — without it the magnet flux is ~4×
@@ -13914,6 +13931,7 @@ function escHtml(s) {
       }
       PHYS.Psi = m.psi_pm_Wb;  PHYS.Ld = m.Ld_H;  PHYS.Lq = m.Lq_H;
       PHYS.xi = m.xi || 1;     PHYS.rpmBase = m.rpm_base || 5000;
+      PHYS.schlupf = Math.max(0, Math.min(0.9, m.schlupf || 0));
       PHYS.iMax = m.i_max_A;   PHYS.vDc = m.v_dc_V;
       PHYS.kModule = m.n_module || 1;
       PHYS.sysJeNut = (d.system_je_nut && d.system_je_nut.length) ? d.system_je_nut : null;
@@ -13927,7 +13945,20 @@ function escHtml(s) {
         Math.round(PHYS.rpmBase).toLocaleString() + ' 1/min · Grenzen ' +
         Math.round(PHYS.vDc) + ' V / ' + Math.round(PHYS.iMax) + ' A' +
         (PHYS.kModule > 1 ? ' (auf 1 Wdg/Nut, ' + PHYS.kModule + ' Module)' : '') +
-        '<br><span style="color:#81c784">aus der Geometrie</span>';
+        // Woher die Zahlen kommen, und was in ihnen NICHT steckt. Eine
+        // Vorschau, die fuer jede Bauart gleich aussieht, laedt dazu ein,
+        // sie fuer jede Bauart gleich zu lesen.
+        (PHYS.schlupf > 0
+          ? '<br>Schlupf ' + (PHYS.schlupf*100).toFixed(2) +
+            ' % — das Drehfeld laeuft dem Laeufer voraus'
+          : '') +
+        (m.ohne_salienz
+          ? '<br><span style="color:#c9a227">ohne Salienz: diese Bauart ' +
+            'rechnet hier kein L<sub>d</sub>/L<sub>q</sub></span>'
+          : '') +
+        '<br><span style="color:#81c784">' +
+        (m.modell ? m.modell + ' — ' + (m.quelle || '') : 'aus der Geometrie') +
+        '</span>';
       livePhysikAusfall();
     } catch (e) {
       if (info) info.innerHTML = '<span style="color:#e57373">' + escHtml(String(e)) + '</span>';
@@ -13980,6 +14011,15 @@ function escHtml(s) {
       PHYS.omega = Math.max(-mxW, Math.min(mxW, PHYS.omega));
     }
     PHYS.angle += PHYS.omega*dt;
+    // n_syn = n / (1 - s): der Laeufer laeuft dem Feld um den Schlupf nach.
+    // Bei s = 0 wird der Feldwinkel GLEICHGESETZT statt mit derselben Zahl
+    // fortgeschrieben -- so bleibt jede Synchronrechnung Ziffer fuer Ziffer
+    // dieselbe und kann nicht ueber die Laufzeit auseinanderdriften.
+    if (PHYS.schlupf > 0) {
+      PHYS.feldWinkel += (PHYS.omega / (1 - PHYS.schlupf)) * dt;
+    } else {
+      PHYS.feldWinkel = PHYS.angle;
+    }
   }
 
   function draw() {

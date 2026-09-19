@@ -340,6 +340,34 @@ def pruefe_feldweg(code: str, weg: str) -> Art:
     return art
 
 
+# Welches Modul eine Art wirklich RECHNET. Die Zuordnung steht hier, weil hier
+# die Arten stehen -- eine zweite Liste im Server oder im Paarvergleich waere
+# die Stelle, an der eine neue Art an einem von drei Orten vergessen wird.
+# ``pmsm`` hat keinen Eintrag: sie IST der Pfad, den ``ema_analysis`` rechnet.
+MODULNAME = {
+    "asm":   "ema_asm",
+    "synrm": "ema_synrm",
+    "eesm":  "ema_eesm",
+    "gsm":   "ema_gsm",
+}
+
+
+def rechenmodul(code: str):
+    """Das Modul, das diese Art rechnet -- oder ``None`` fuer die PSM.
+
+    Spaet importiert: ``ema_asm`` und die uebrigen ziehen ``ema_pipeline``
+    nach, und das zoege beim Import dieser Registrierung die halbe Kette mit.
+    """
+    name = MODULNAME.get(art_code({"machineType": code}) if isinstance(code, dict)
+                         else code)
+    if not name:
+        return None
+    try:
+        return __import__(name)
+    except Exception:                                        # noqa: BLE001
+        return None
+
+
 def gilt(code: str, kennzahl: str) -> bool:
     """Hat diese Kennzahl fuer diese Art ueberhaupt eine Bedeutung?"""
     return kennzahl not in hole(code).ohne_bedeutung
