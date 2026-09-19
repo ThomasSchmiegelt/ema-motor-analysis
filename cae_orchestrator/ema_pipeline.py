@@ -125,13 +125,56 @@ def _gate_laeufer(data: dict, state: dict | None = None,
                         f"Spule auf {k['tau_kern_mm']} mm Teilung, frei "
                         f"{k['frei_mm']} mm — "
                         f"{'OK' if k['passt'] else 'ABGELEHNT'}", 5)
-            # Was das Tor NICHT prueft, steht dabei -- Schweigen laese sich als
-            # „geprueft" lesen.
-            _log(state, "\u2139 " + k["ungeprueft"], 5)
+        # Die POLBEFESTIGUNG -- bis zum 19.09.2026 stand hier nur, dass sie
+        # NICHT gerechnet wird. Ein Schenkelpol ist das einzige Bauteil dieses
+        # Werkzeugs, das nicht aus dem Vollen kommt: er sitzt auf dem Joch und
+        # wird dort gehalten, und bei hoher Drehzahl entscheidet ein
+        # Querschnitt von wenigen Quadratzentimetern ueber den Laeufer.
+        bef = daem = None
+        try:
+            import ema_schenkelpol
+            n_max = float((data or {}).get("rpm_to")
+                          or (data or {}).get("rpm_from") or 0.0)
+            if n_max > 0:
+                bef = ema_schenkelpol.befestigung(
+                    geom, float(data.get("axial_len") or 80.0), n_max)
+            if str(geom.get("daempferkaefig") or "nein") == "ja":
+                daem = ema_schenkelpol.daempferkaefig(
+                    geom, float(data.get("axial_len") or 80.0))
+        except Exception as exc:                             # noqa: BLE001
+            if state is not None:
+                _log(state, f"\u26A0 Polbefestigung nicht gerechnet: "
+                            f"{type(exc).__name__}: {exc}", 5)
+        if bef is not None and state is not None:
+            _log(state, f"\U0001F6E1 Polbefestigung ({bef['art']}): "
+                        f"{bef['m_pol_kg']} kg je Pol ziehen bei "
+                        f"{bef['rpm']:.0f} 1/min mit {bef['F_flieh_kN']} kN, "
+                        f"Sicherheit {bef['SF']} (Ziel {bef['SF_ziel']}), "
+                        f"zulaessig bis {bef['n_zulaessig_1pmin']:.0f} 1/min — "
+                        f"{'OK' if bef['haelt'] else 'ABGELEHNT'}", 5)
+            _log(state, "\u2139 Nicht geprueft: " + bef["ungeprueft"], 5)
+        if daem is not None and state is not None:
+            _log(state, f"\U0001F6E1 Daempferkaefig: {daem['n_stab_je_pol']} x "
+                        f"{daem['d_stab_mm']} mm je Pol, Teilung "
+                        f"{daem['teilung_mm']} mm "
+                        f"({daem['teilungsverhaeltnis']} x Staendernut), "
+                        f"{daem['masse_kg']} kg — "
+                        f"{'OK' if daem['passt'] else 'ABGELEHNT'}", 5)
+            _log(state, "\u2139 " + daem["wirkung"], 5)
+            if daem["hinweis"]:
+                _log(state, "\u26A0 " + daem["hinweis"], 5)
         if not k["passt"]:
             if fatal:
                 raise RuntimeError("Laeufertor (Schenkelpol): " + k["grund"])
             _log(state, "\u26A0 Laeufertor (Schenkelpol): " + k["grund"], 5)
+        if bef is not None and not bef["haelt"]:
+            if fatal:
+                raise RuntimeError("Polbefestigung: " + bef["grund"])
+            _log(state, "\u26A0 Polbefestigung: " + bef["grund"], 5)
+        if daem is not None and not daem["passt"]:
+            if fatal:
+                raise RuntimeError("Daempferkaefig: " + daem["grund"])
+            _log(state, "\u26A0 Daempferkaefig: " + daem["grund"], 5)
         return
     if art == "gsm":
         # Die Gleichstrommaschine wird nicht vom Eisen begrenzt, sondern vom
@@ -163,9 +206,35 @@ def _gate_laeufer(data: dict, state: dict | None = None,
                             f"{max(komm['ausnutzung'].values()) * 100:.0f} % — "
                             f"{'OK' if komm['ok'] else 'ABGELEHNT'}", 5)
                 _log(state, "\u2139 " + komm["hinweis"], 5)
+        # Der KOMMUTATOR als Bauteil -- nicht nur als Grenze. Gemessen am
+        # frischen Payload braucht ein Ankerstrom von 800 A 80 cm^2
+        # Buerstenflaeche; der Kommutator ist dort 24 mm lang und traegt
+        # 149 mm Buerste nicht. `L_KOMM_ANTEIL` ist eine ZEICHENregel (ein
+        # Anteil der Paketlaenge), und bei grossen Stroemen ist sie die
+        # falsche: die Buerstenflaeche bemisst den Kommutator, nicht umgekehrt.
+        try:
+            kom_b = ema_gsm.kommutator(geom, float(data.get("axial_len") or 80.0),
+                                       n_max) if n_max > 0 else None
+        except Exception:                                    # noqa: BLE001
+            kom_b = None
+        if kom_b is not None and state is not None:
+            _log(state, f"\U0001F6E1 Kommutator: {kom_b['k_lamellen']} Lamellen "
+                        f"zu {kom_b['b_lamelle_mm']} mm, {kom_b['n_buerstenarme']} "
+                        f"Buerstenarme zu {kom_b['A_buerste_arm_cm2']} cm² "
+                        f"({kom_b['b_buerste_mm']} x {kom_b['l_buerste_mm']} mm, "
+                        f"{kom_b['lamellen_je_buerste']} Lamellen breit) auf "
+                        f"{kom_b['l_kommutator_mm']} mm Baulaenge — "
+                        f"{'OK' if kom_b['passt'] else 'ABGELEHNT'}", 5)
+            if kom_b.get("hinweis"):
+                _log(state, "\u26A0 " + kom_b["hinweis"], 5)
+            _log(state, "\u2139 " + kom_b["ungeprueft"], 5)
         if not aw["passt"] and fatal:
             raise RuntimeError("Laeufertor (Anker): die Ankerwicklung passt "
                                "nicht in ihre Nut")
+        if kom_b is not None and not kom_b["passt"]:
+            if fatal:
+                raise RuntimeError("Kommutator: " + kom_b["grund"])
+            _log(state, "\u26A0 Kommutator: " + kom_b["grund"], 5)
         if komm and not komm["ok"]:
             msg = "Kommutierung: " + "; ".join(komm["befunde"])
             if fatal:
@@ -2037,6 +2106,32 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
                     ax.add_patch(MplPoly(_pts, closed=True, fc=_fc, ec=_ec, lw=0.6))
             _laeufer_leg = [Patch(fc='#b87333', ec='#e0a060',
                                   label=f'Erregerspulen ({_kq["poles"]} Pole)')]
+            # Der Daempferkaefig — dieselbe Quelle wie Leinwand und Tor.
+            # Gezeichnet nur, wenn er auch PASST: Staebe zu zeigen, die das
+            # Tor gerade abgewiesen hat, waere schlimmer als keine.
+            try:
+                import ema_schenkelpol as _SPq
+                _dq = _SPq.daempferkaefig(geom, float(geom.get("axialLen") or 80.0))
+            except Exception:                                # noqa: BLE001
+                _dq = None
+            if _dq and _dq["aktiv"] and _dq["passt"]:
+                _rd, _nd = float(_dq["r_ring_mm"]), int(_dq["n_stab_je_pol"])
+                _dd = float(_dq["d_stab_mm"])
+                _hd = _m.degrees((float(_dq["teilung_mm"]) * (_nd - 1) / 2.0)
+                                 / max(_rd, 1e-9))
+                _fc = ('#b0b4bb' if "al" in str(_dq["werkstoff"]).lower()
+                       else '#b87333')
+                for _i in range(int(_kq["poles"])):
+                    _g0 = 360.0 * _i / int(_kq["poles"])
+                    for _j in range(_nd):
+                        _fr = 0.0 if _nd == 1 else (_j / (_nd - 1.0) - 0.5) * 2.0
+                        _aa = _m.radians(_g0 + _fr * _hd)
+                        ax.add_patch(Circle((_rd * _m.cos(_aa),
+                                             _rd * _m.sin(_aa)), _dd / 2.0,
+                                            fc=_fc, ec='#e0a060', lw=0.5))
+                _laeufer_leg.append(
+                    Patch(fc=_fc, ec='#e0a060',
+                          label=f'Daempferkaefig ({_dq["n_stab"]} Staebe)'))
         except Exception:                                    # noqa: BLE001
             _laeufer_leg = []
 

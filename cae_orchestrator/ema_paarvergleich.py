@@ -488,6 +488,23 @@ ACHSEN = {
         "beschriften": lambda w: ema_thermal.COOLING_PRESETS.get(w, {}).get("label", w),
         "setzen": _setz_oben("cooling"),
     },
+    "polbefestigung": {
+        "titel": ("Polbefestigung am Joch (EESM) — was den Schenkelpol gegen "
+                  "die Fliehkraft haelt"),
+        "werte": lambda b: ["schwalbenschwanz", "bolzen"],
+        "beschriften": lambda w: {
+            "schwalbenschwanz": "Schwalbenschwanz (Polfuss eingeschoben, Hals auf Zug)",
+            "bolzen": "verschraubt (2 x M10, ISO 898-1 8.8)"}.get(w, w),
+        "setzen": _setz_geom("polBefestigung"),
+    },
+    "daempferkaefig": {
+        "titel": ("Daempferkaefig im Polschuh (EESM) — asynchroner Anlauf und "
+                  "Pendeldaempfung"),
+        "werte": lambda b: ["nein", "ja"],
+        "beschriften": lambda w: ("ohne Daempfer" if w == "nein"
+                                  else "mit Daempferkaefig (Staebe im Polschuh)"),
+        "setzen": _setz_geom("daempferkaefig"),
+    },
     "wellenverbindung": {
         "titel": "Welle–Blechpaket-Verbindung",
         "werte": lambda b: ["press", "spline", "polygon"],
@@ -850,7 +867,31 @@ def _bewerte_eesm(payload: dict, n_max: float, rpm: float, last_nm: float) -> di
                              ctx["hp"], ctx["kuehl"])
     t_dauer = ema_eesm.dauermoment(geom, axial, ctx["kuehl"], bp)
     mk = ema_eesm.massen_und_kosten(payload)
-    return _gemeinsam(payload, ctx, bp, verl, t_dauer, mk,
+
+    # Was den Pol HAELT, ist keine Zahl in METRIKEN und trotzdem die
+    # Entscheidung: ein Polfuss, der die Fliehkraft nicht traegt, ist keine
+    # Variante, sondern ein Fehler. Deshalb derselbe Weg wie beim Platz im
+    # Blech (`zusatz_ok`) -- die Bilanz zaehlt ihn, ohne dass er eine
+    # Kennzahl vortaeuscht. Die Drehzahl, bis zu der er haelt, steht daneben.
+    zus_ok, zus_hin, n_pol = True, "", None
+    try:
+        import ema_schenkelpol
+        bef = ema_schenkelpol.befestigung(geom, axial,
+                                          float(ctx["stress"]["n_max_rpm"]))
+        zus_ok = bool(bef["haelt"])
+        n_pol = float(bef["n_zulaessig_1pmin"])
+        if not zus_ok:
+            zus_hin = bef["grund"][:160]
+        dae = ema_schenkelpol.daempferkaefig(geom, axial)
+        if dae["aktiv"] and not dae["passt"]:
+            zus_ok = False
+            zus_hin = (zus_hin + " | " if zus_hin else "") + dae["grund"][:120]
+        elif dae["aktiv"] and dae["hinweis"]:
+            zus_hin = (zus_hin + " | " if zus_hin else "") + dae["hinweis"][:120]
+    except Exception:                                        # noqa: BLE001
+        pass
+
+    erg = _gemeinsam(payload, ctx, bp, verl, t_dauer, mk,
                       float(bp["Kt_Nm_per_A"]),
                       {"xi_LqLd": 1.0,
                        "B_gap_T": float(bp["B_m_T"]),
@@ -860,6 +901,21 @@ def _bewerte_eesm(payload: dict, n_max: float, rpm: float, last_nm: float) -> di
                        "P_Erreger_W": float(bp["P_erreger_W"]),
                        "P_Schleifring_W": float(bp["P_schleifring_W"]),
                        "P_Laeufer_W": float(bp["P_laeufer_W"])})
+    erg["zusatz_ok"] = zus_ok
+    erg["zusatz_hinweis"] = zus_hin
+    erg["n_pol_zul_1pmin"] = n_pol
+    erg["daempfer_kg"] = float(mk.get("daempfer_kg") or 0.0)
+    if erg["daempfer_kg"] > 0:
+        erg["notiz"] = ("Der Daempfer kostet hier Masse und Kosten und BRINGT "
+                        "in dieser Tabelle nichts: asynchroner Anlauf und "
+                        "Pendeldaempfung brauchen einen zeitabhaengigen Lauf, "
+                        "den es analytisch nicht gibt. Die Bilanz ist deshalb "
+                        "ein Urteil ueber das Gezaehlte, nicht ueber den "
+                        "Daempfer.")
+    elif n_pol is not None:
+        erg["notiz"] = (f"Polbefestigung haelt bis {n_pol:.0f} 1/min "
+                        f"(Fliehkraft am Polfuss, ema_schenkelpol)")
+    return erg
 
 
 def _bewerte_gsm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dict:
@@ -1442,6 +1498,16 @@ def als_text(erg: dict, paare: bool = True, max_paare: int = 10) -> str:
                          f"{o['band_hinweis']} [recherchiert, kein Tor]")
             for b in o.get("band_art", []):
                 z.append(f"        ⓘ {b} [recherchiert, kein Tor — s. ema_referenz]")
+            # Was eine Option BRINGT, ohne dass es eine Kennzahl waere.
+            #
+            # Die Bilanz zaehlt nur, was in METRIKEN steht -- und der
+            # Daempferkaefig kostet dort Masse und Kosten, waehrend sein Nutzen
+            # (asynchroner Anlauf, Pendeldaempfung) einen zeitabhaengigen Lauf
+            # braucht, den es hier nicht gibt. Ohne diese Zeile laese sich
+            # "2:0 fuer ohne Daempfer" als Urteil ueber den Daempfer, und das
+            # waere es nicht: es ist ein Urteil ueber das, was gezaehlt wird.
+            if o.get("notiz"):
+                z.append(f"        ⓘ {o['notiz']}")
         if a["spannweite"]:
             unbewegt = [METRIKEN[m][0] for m, s in a["spannweite"].items()
                         if METRIKEN[m][3] and s["spanne_pct"] < 100 * GLEICH_UNTER]

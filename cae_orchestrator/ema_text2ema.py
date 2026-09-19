@@ -32,6 +32,14 @@ from ema_pipeline import HAIRPIN_MATS as _HM
 _HAIR   = [k for k, v in _HM.items() if not v.get("guss")]
 _KAEFIG = [k for k, v in _HM.items()
            if v.get("guss") or k in ("al_1350", "cu_etp")]
+
+# Wie ein Schenkelpol am Joch haengt, und mit welchem Gewinde. Beide Listen
+# kommen aus `ema_schenkelpol`, damit Schema und Rechnung nicht driften --
+# eine abgeschriebene Gewindeliste waere die naechste Stelle, an der ein Wert
+# waehlbar ist, den die Rechnung nicht kennt.
+import ema_schenkelpol as _SP
+_POLBEF = list(_SP.BEFESTIGUNGEN)
+_POLGEW = list(_SP.BOLZEN_AS_MM2)
 _MAG   = ["ndfeb_n35", "ndfeb_n42", "ndfeb_n50", "ferrite"]
 _COOL  = ["natural", "forced", "water", "oil"]
 _SHAPE = ["v", "vasym", "vv", "u", "delta", "pmasynrm", "spm", "halbach", "spoke", "bar"]
@@ -78,6 +86,25 @@ SCHEMA = {
                    "desc": "Schrägung der Läufernuten in LÄUFERnutteilungen; -1 = automatisch nach Bauform (Käfig 1,0, Schleifring 0), 0 = ausdrücklich ohne Schrägung"},
     "rotorTurnsPerSlot": {"kind": "num", "lo": 2, "hi": 24, "def": 2, "geom": True, "adv": True, "int": True,
                    "desc": "Leiter je Läufernut beim Schleifringläufer"},
+    # ── Schenkelpol: was ihn HAELT und was ihn DAEMPFT (ema_schenkelpol) ──
+    # Beides war bis zum 19.09.2026 nur als Luecke benannt ("ungeprueft" bzw.
+    # "kennt dieses Modell nicht") und damit fuer CLI, Parametertabelle und
+    # Agent ueberhaupt nicht vorhanden.
+    "polBefestigung": {"kind": "enum", "opts": _POLBEF, "def": "schwalbenschwanz",
+                   "geom": True, "adv": True,
+                   "desc": "Wie der Schenkelpol am Joch haengt (EESM): schwalbenschwanz=eingeschobener Polfuß (Hals auf Zug), bolzen=verschraubt. Gerechnet wird beides, gewählt wird hier"},
+    "polBolzen":  {"kind": "num", "lo": 1, "hi": 8, "def": 2, "geom": True, "adv": True, "int": True,
+                   "desc": "Schrauben je Pol bei polBefestigung=bolzen"},
+    "polBolzenGewinde": {"kind": "enum", "opts": _POLGEW, "def": "M10",
+                   "geom": True, "adv": True,
+                   "desc": "Gewinde der Polschrauben; Spannungsquerschnitt nach ISO 898-1, Festigkeitsklasse 8.8"},
+    "daempferkaefig": {"kind": "enum", "opts": ["nein", "ja"], "def": "nein",
+                   "geom": True, "adv": True,
+                   "desc": "Dämpferkäfig im Polschuh (EESM): ermöglicht den asynchronen Anlauf und dämpft Lastpendelungen. Kostet Masse und Platz im Schuh; die NUTZUNG geht in keine Kennzahl ein (dafür fehlt der zeitabhängige Lauf)"},
+    "daempferStaebeJePol": {"kind": "num", "lo": 0, "hi": 9, "def": 0, "geom": True, "adv": True, "int": True,
+                   "desc": "Dämpferstäbe je Pol; 0 = automatisch aus der Stabteilung (0,8 x Ständernutteilung — bewusst verschieden, sonst Görges-Sattel)"},
+    "daempferMat": {"kind": "enum", "opts": _KAEFIG, "def": "cu_etp", "geom": True, "adv": True,
+                   "desc": "Werkstoff der Dämpferstäbe"},
     "armatureWinding": {"kind": "enum", "opts": ["schleife", "welle"], "def": "schleife",
                    "geom": True, "adv": True,
                    "desc": "Ankerwicklung der GSM: schleife (2p Zweige, viel Strom) oder welle (2 Zweige, viel Spannung) — beide liefern dieselbe Leistung, nur anders aufgeteilt"},

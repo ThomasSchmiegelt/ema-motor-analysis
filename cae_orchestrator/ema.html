@@ -14193,7 +14193,15 @@ function escHtml(s) {
     return [g.machineType || "pmsm", g.rotorType || "", g.p, g.slots,
             g.rotorOD, g.statorID, g.statorOD, g.shaftD, g.shaftBoreD,
             g.axialLen, g.magShape, g.magWidth, g.magThick, g.magDist,
-            g.magDepthRel, g.magAngle, g.magLayers, g.conductorsPerSlot
+            g.magDepthRel, g.magAngle, g.magLayers, g.conductorsPerSlot,
+            // Alles, was den LAEUFER der magnetlosen Bauarten bewegt. Ohne
+            // diese Felder aenderte sich die Zeichnung nicht, obwohl der
+            // Server eine andere liefern wuerde -- und eine Marke, die eine
+            // Aenderung nicht bemerkt, ist schlimmer als keine: sie friert
+            // die alte Maschine ein und sieht dabei richtig aus.
+            g.erregerSpuleForm, g.daempferkaefig, g.daempferStaebeJePol,
+            g.daempferMat, g.bZielT, g.poleArcFrac, g.slotWidthRatio,
+            g.slotDepth, g.rotorBars, g.armatureWinding
            ].join("|");
   }
 

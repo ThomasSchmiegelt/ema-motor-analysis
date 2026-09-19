@@ -272,6 +272,17 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
         # ZWEI Ringe: der Erregerkreis ist ein Gleichstromkreis, kein Drehstrom.
         _pd["ringe"] = _SR2.zeichenmasse(
             _SR2.geometrie(geom, float(_pk["I_f_A"]), 2))
+        # Der Daempferkaefig -- nur wenn er gerechnet UND baubar ist. Staebe zu
+        # zeichnen, die das Tor abgewiesen hat, waere eine Zeichnung, die der
+        # Rechnung widerspricht.
+        try:
+            import ema_schenkelpol as _SP2
+            _dk = _SP2.daempferkaefig(geom, axial_len)
+            if _dk["aktiv"] and _dk["passt"]:
+                _pd["daempfer"] = _SP2.zeichenmasse(_dk)
+                _pd["daempfer"]["A_ring_mm2"] = float(_dk["A_ring_mm2"])
+        except Exception:                                    # noqa: BLE001
+            pass
         pol_json = json.dumps(_pd)
 
     # ── Gleichstrommaschine: Schenkelpole am STAENDER, Anker am Laeufer ────
@@ -589,6 +600,28 @@ def _pol_koerper(PL, grad, hoehe, z0):
 
 # Ein radial stehendes Trapez-Prisma: bei r0 die Breite b0, bei r1 die Breite
 # b1, axial ueber `hoehe`. Vier Ecken je Stirnflaeche, dazwischen ein Loft.
+# Wo die Daempferstaebe sitzen -- EINE Stelle fuer Bohrung UND Stab.
+#
+# KEIN Docstring: dieser Block wird als TEXT in das FreeCAD-Skript geschrieben,
+# und ein dreifaches Anfuehrungszeichen beendet dort die umschliessende
+# f-Zeichenkette (zweimal passiert, s. BEFUNDE.md).
+def _daempfer_lagen(PL):
+    _dk = PL.get("daempfer") or None
+    if not _dk:
+        return []
+    _rd = float(_dk["r_ring_mm"]); _nd = int(_dk["n_stab_je_pol"])
+    _tl = float(_dk["teilung_mm"])
+    _hd = math.degrees((_tl * (_nd - 1) / 2.0) / max(_rd, 1e-9))
+    _aus = []
+    for _i in range(int(PL["poles"])):
+        _g0 = 360.0 * _i / int(PL["poles"])
+        for _j in range(_nd):
+            _fr = 0.0 if _nd == 1 else (_j / (_nd - 1.0) - 0.5) * 2.0
+            _aa = math.radians(_g0 + _fr * _hd)
+            _aus.append((_rd * math.cos(_aa), _rd * math.sin(_aa)))
+    return _aus
+
+
 def _prisma_trapez(r0, r1, b0, b1, hoehe, z0):
     def _wire(z):
         _p = [App.Vector(r0, -b0 / 2.0, z), App.Vector(r1, -b1 / 2.0, z),
@@ -674,6 +707,14 @@ if GEN_ROTOR:
             _sh, _kn = _pol_koerper(POLLAEUFER, _g, axial, -axial / 2)
             _pol_teile += [_sh, _kn]
         rotor_ring = rotor_ring.fuse(_pol_teile)
+        # Die Daempferbohrungen: durch das ganze Paket, quer zur Polflaeche.
+        _dk0 = POLLAEUFER.get("daempfer")
+        if _dk0:
+            _rb = float(_dk0["d_stab_mm"]) / 2.0
+            for _cx, _cy in _daempfer_lagen(POLLAEUFER):
+                _loch = Part.makeCylinder(_rb, axial + 4,
+                                          App.Vector(_cx, _cy, -axial / 2 - 2))
+                rotor_ring = rotor_ring.cut(_loch)
     else:
         rotor_ring  = Part.makeCylinder(R_rot,   axial,     App.Vector(0, 0, -axial / 2))
     bore_cut    = _bore_cutter(R_shaft, -axial / 2 - 2, axial + 4)
@@ -865,6 +906,30 @@ if GEN_ROTOR:
         # der man die Polfolge nachsieht.
         _add("Field_Coils_N", Part.makeCompound(_sp_n), (0.80, 0.42, 0.18))
         _add("Field_Coils_S", Part.makeCompound(_sp_s), (0.35, 0.55, 0.85))
+        # Daempferkaefig: Staebe durch die Polschuhe, an beiden Stirnseiten
+        # kurzgeschlossen. Ein Kaefig ohne seine Ringe waere kein Kaefig --
+        # dieselbe Entscheidung wie beim Laeuferkaefig der ASM.
+        _dk1 = POLLAEUFER.get("daempfer")
+        if _dk1:
+            _rb1 = float(_dk1["d_stab_mm"]) / 2.0
+            _ue = 0.05 * axial
+            _teile_d = []
+            for _cx, _cy in _daempfer_lagen(POLLAEUFER):
+                _teile_d.append(Part.makeCylinder(
+                    _rb1, axial + 2 * _ue,
+                    App.Vector(_cx, _cy, -axial / 2 - _ue)))
+            _ar = float(_dk1.get("A_ring_mm2") or 0.0)
+            if _ar > 0:
+                _tax = 3.0 * _rb1
+                _wr = max(_ar / max(_tax, 1e-9), 1.0)
+                _rra = float(_dk1["r_ring_mm"]) + _wr / 2.0
+                _rri = max(float(_dk1["r_ring_mm"]) - _wr / 2.0, 0.5)
+                for _zz in (-axial / 2 - _ue - _tax, axial / 2 + _ue):
+                    _ro1 = Part.makeCylinder(_rra, _tax, App.Vector(0, 0, _zz))
+                    _ri1 = Part.makeCylinder(_rri, _tax + 2,
+                                             App.Vector(0, 0, _zz - 1))
+                    _teile_d.append(_ro1.cut(_ri1))
+            _add("Damper_Cage", Part.makeCompound(_teile_d), (0.72, 0.45, 0.20))
         _rg2 = POLLAEUFER.get("ringe") or {{}}
         if _rg2:
             _rd2 = float(_rg2["d_ring_mm"]) / 2.0

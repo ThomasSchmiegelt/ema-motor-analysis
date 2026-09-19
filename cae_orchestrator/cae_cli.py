@@ -2562,8 +2562,45 @@ def cmd_rotor_check(args) -> int:
         zeilen.append(f"Fliehkraft: NICHT geprueft ({e}) — das ist keine Aussage "
                       f"ueber die Festigkeit.")
 
+    # Und das Tor der BAUART. `rotor_layout_check` prueft Magnettaschen -- ein
+    # Kaefig-, Schenkelpol- oder Ankerlaeufer hat keine, und seine enge Stelle
+    # ist eine andere: der Steg ueber der Kaefignut, der Polfuss samt seiner
+    # Fliehkraft, die Ankernut, der Kommutator. Die Pipeline fuehrt sie seit
+    # jeher (`_gate_laeufer`), dieses Verb nicht -- also meldete es einer
+    # fremderregten Maschine "Layout OK", waehrend der Lauf sie an der
+    # Polbefestigung abwies. Derselbe Fehler wie beim Fliehkrafttor, und die
+    # Abhilfe ist dieselbe: das Tor der Pipeline SELBST rufen, keine zweite
+    # Fassung. `fatal=False`, weil das Urteil hier aus dem Protokoll kommt und
+    # nicht aus einer Ausnahme.
+    laeufer_ok = True
+    try:
+        import ema_pipeline as _PL2
+        import ema_maschinenart as _MA2
+        if _MA2.art_code(geom) != "pmsm":
+            _st2 = {"log": [], "progress": 0}
+            _PL2._gate_laeufer(payload, _st2, fatal=False)
+            if _st2["log"]:
+                # Geurteilt wird an "ABGELEHNT" und NICHT am Warnzeichen:
+                # jede harte Pruefung des Tores schreibt ihr Urteil so hin,
+                # waehrend ein ⚠ auch ein BEFUND sein kann, der nichts
+                # verbietet (ein Kommutator laenger als das Blechpaket, eine
+                # Stabteilung nahe der Nutteilung). Die beiden zu vermengen
+                # hiesse, einen Hinweis wie ein Nein zu lesen — derselbe
+                # Fehler, den `ema_eesm_cad`s Befunde schon einmal gemacht
+                # haben.
+                laeufer_ok = not any("ABGELEHNT" in z for z in _st2["log"])
+                chk["laeufer"] = {"ok": laeufer_ok, "protokoll": _st2["log"]}
+                zeilen.append("")
+                zeilen.append(f"Laeufer ({_MA2.hole(_MA2.art_code(geom)).label}):")
+                zeilen += ["  " + z for z in _st2["log"]]
+    except Exception as e:                                   # noqa: BLE001
+        chk["laeufer"] = {"ok": None, "grund": f"nicht geprueft: {e}"}
+        zeilen.append("")
+        zeilen.append(f"Laeufertor: NICHT geprueft ({e}) — das ist keine "
+                      f"Aussage ueber die Bauart.")
+
     chk["grenzen"] = gr
-    ok = bool(chk["ok"]) and bool(gr["ok"]) and fliehkraft_ok
+    ok = bool(chk["ok"]) and bool(gr["ok"]) and fliehkraft_ok and laeufer_ok
     emit(chk, args)
     text = "\n".join(zeilen)
     print("ERGEBNIS:")

@@ -280,10 +280,45 @@ def _eesm(geom: dict, axial: float) -> dict:
                      -b_e / 2.0 - d_s, -b_e / 2.0, g, "kupfer")
         _m["durchflutung_A"] = round(-s * f_pol, 2)
         teile.append(_m)
+    # Der DAEMPFERKAEFIG sitzt im Polschuh — Rundstaebe, quer zur Polflaeche.
+    #
+    # Gezeichnet wird er nur, wenn er auch GERECHNET ist: die Zahlen kommen aus
+    # `ema_schenkelpol.daempferkaefig`, derselben Funktion, die das Tor prueft.
+    # Passt er nicht in den Schuh, wird er NICHT gezeichnet — ein Bild, das
+    # Staebe zeigt, die das Tor gerade abgewiesen hat, ist schlimmer als keines.
+    try:
+        import ema_schenkelpol
+        dae = ema_schenkelpol.daempferkaefig(geom, axial)
+    except Exception:                                        # noqa: BLE001
+        dae = None
+    if dae and dae["aktiv"] and dae["passt"]:
+        r_d = float(dae["r_ring_mm"])
+        n_d = int(dae["n_stab_je_pol"])
+        d_d = float(dae["d_stab_mm"])
+        # Der Stab ist magnetisch Luft (Kupfer/Alu, mu_r ~ 1) und gehoert
+        # deshalb ins Raster — genau wie die Kaefignut der ASM.
+        rolle = "alu" if "al" in str(dae["werkstoff"]).lower() else "kupfer"
+        halb_d = math.degrees((float(dae["teilung_mm"]) * (n_d - 1) / 2.0)
+                              / max(r_d, 1e-9))
+        for i in range(poles):
+            g0 = 360.0 * i / max(poles, 1)
+            for j in range(n_d):
+                frac = 0.0 if n_d == 1 else (j / (n_d - 1.0) - 0.5) * 2.0
+                a = math.radians(g0 + frac * halb_d)
+                teile.append(_kreis(r_d * math.cos(a), r_d * math.sin(a),
+                                    d_d / 2.0, rolle))
+
     hin = (f"Schenkelpollaeufer, {poles} Pole, Erregerspule aus dem "
            f"Kupferquerschnitt ({k['A_cu_mm2']:.0f} mm² je Pol) statt aus dem "
            f"verfuegbaren Platz. Die Erregung ist mit {f_pol:.0f} A je Pol "
            f"eingepraegt — Gleichstrom ist magnetostatisch darstellbar.")
+    if dae and dae["aktiv"]:
+        hin += (f" Daempferkaefig: {dae['n_stab_je_pol']} x "
+                f"{dae['d_stab_mm']} mm je Pol, {dae['masse_kg']} kg."
+                + ("" if dae["passt"] else
+                   " ⚠ NICHT gezeichnet — " + str(dae["grund"])))
+        if dae["passt"] and dae["hinweis"]:
+            hin += " ⚠ " + dae["hinweis"]
     if not k.get("passt", True):
         hin += " ⚠ " + str(k.get("grund", ""))
     return {"teile": teile, "poles": poles,

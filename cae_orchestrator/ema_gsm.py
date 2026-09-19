@@ -102,6 +102,16 @@ U_LAMELLE_FORMFAKTOR = 2.0
 # Kommutatordurchmesser als Anteil des Ankerdurchmessers (ueblich 0,6-0,75).
 D_KOMM_ANTEIL = 0.65
 
+# Wie viele Lamellen eine Buerste ueberdeckt. Klassisch 2...3: weniger, und der
+# Kommutierungsvorgang wird zu kurz; mehr, und zu viele Spulen liegen
+# gleichzeitig kurzgeschlossen.
+BUERSTE_LAMELLEN = 2.5
+
+# Wieviel der Kommutatorlaenge die Buerste belegen darf, und wieviel Rand an
+# jedem Ende frei bleibt [mm]. Der Rest ist Anlauf und Lamellenfuss.
+BUERSTE_ZU_KOMM = 0.80
+KOMM_RAND_MM = 3.0
+
 # ── Ankerrueckwirkung ─────────────────────────────────────────────────────────
 #
 # Die Ankerdurchflutung steht quer zum Erregerfeld und verzerrt es; unter der
@@ -345,6 +355,107 @@ def kommutierung(geom: dict, axial_mm: float, rpm: float,
         "hinweis": ("Der Kommutierungsvorgang selbst (Reaktanzspannung, "
                     "Buerstenbreite, Ueberdeckung) ist NICHT gerechnet — diese "
                     "drei Grenzen grenzen ihn nur ein."),
+    }
+
+
+def kommutator(geom: dict, axial_mm: float, rpm: float,
+               i_a_A: float = 0.0) -> dict:
+    """Der Kommutator als BAUTEIL — Lamellen, Buersten, Grenzen in einem.
+
+    ``kommutierung`` beantwortet die Frage „haelt er das aus"; hier steht, was
+    er IST. Beides getrennt zu lassen hiesse, dass die Bauart zwar begrenzt,
+    aber nie beschrieben wird — und dann taucht der Kommutator in keiner
+    Stueckliste, keinem Steckbrief und keinem Paarvergleich auf.
+
+    Die Buerstenflaeche kommt aus derselben Stromdichte wie der Schleifring
+    (``ema_schleifring.J_BUERSTE_APCM2``) und derselbe Kontaktabfall aus
+    ``U_BUERSTE_V``: ein Kohlekontakt ist ein Kohlekontakt, ob er auf einem Ring
+    oder auf Lamellen laeuft. Zwei Tabellen daneben waeren zwei verschieden
+    grosse Buersten fuer denselben Strom.
+    """
+    import ema_schleifring
+
+    aw = ankerwicklung(geom, axial_mm)
+    kom = kommutierung(geom, axial_mm, rpm, i_a_A)
+    i_a = float(i_a_A) if i_a_A else klemmenstrom(geom)
+    k_lam = int(aw["k_lamellen"])
+    d_komm = float(kom["d_kommutator_mm"])
+
+    teilung = math.pi * d_komm / max(k_lam, 1)
+    b_lamelle = max(teilung - LAMELLENSPALT_MM, 0.3)
+
+    # Buerstenarme: bei der SCHLEIFENwicklung einer je Pol, bei der
+    # WELLENwicklung genuegen zwei (jeder Zweig laeuft ueber alle Pole).
+    poles = 2 * max(int(geom["p"]), 1)
+    arme = poles if wicklungsart(geom) == "schleife" else 2
+    a_ges_cm2 = max(i_a, 1e-6) / ema_schleifring.J_BUERSTE_APCM2
+    a_arm_cm2 = a_ges_cm2 / max(arme, 1)
+    # Die Buerste ist in Umfangsrichtung so breit wie ein paar Lamellen; die
+    # Laenge folgt aus der Flaeche und ist durch die Kommutatorlaenge begrenzt.
+    b_buerste = max(BUERSTE_LAMELLEN * teilung, 4.0)
+    l_buerste = a_arm_cm2 * 100.0 / max(b_buerste, 1e-9)
+    lam_je_buerste = b_buerste / max(teilung, 1e-9)
+
+    # Die BAULAENGE folgt der Buerste, nicht umgekehrt.
+    #
+    # `L_KOMM_ANTEIL` ist eine ZEICHENregel (ein Anteil der Paketlaenge) und
+    # taugt als Boden; als Bemessung ist sie falsch. Gemessen am frischen
+    # Payload braucht ein Ankerstrom von 800 A 80 cm² Buerstenflaeche — auf
+    # einem 24-mm-Kommutator ist das nicht unterzubringen, und die Maschine
+    # waere daran gescheitert, obwohl nur eine Zeichenregel zu klein war. Ein
+    # Kommutator wird also so lang, wie seine Buersten es verlangen, und wenn
+    # das die Maschine spuerbar verlaengert, steht es als BEFUND da.
+    l_boden = max(L_KOMM_ANTEIL * float(axial_mm), 15.0)
+    l_komm = max(l_boden, l_buerste / BUERSTE_ZU_KOMM + 2.0 * KOMM_RAND_MM)
+    lang = l_komm > float(axial_mm)
+    passt = l_buerste <= BUERSTE_ZU_KOMM * (l_komm - 2.0 * KOMM_RAND_MM) + 1e-6
+
+    return {
+        "k_lamellen": k_lam,
+        "wicklungsart": wicklungsart(geom),
+        "d_kommutator_mm": round(d_komm, 2),
+        "l_kommutator_mm": round(l_komm, 2),
+        "lamellenteilung_mm": round(teilung, 3),
+        "b_lamelle_mm": round(b_lamelle, 3),
+        "lamellenspalt_mm": LAMELLENSPALT_MM,
+        "I_anker_A": round(i_a, 1),
+        "n_buerstenarme": arme,
+        "A_buerste_ges_cm2": round(a_ges_cm2, 2),
+        "A_buerste_arm_cm2": round(a_arm_cm2, 2),
+        "b_buerste_mm": round(b_buerste, 2),
+        "l_buerste_mm": round(l_buerste, 2),
+        "lamellen_je_buerste": round(lam_je_buerste, 2),
+        # Was der Kommutator lang sein MUESSTE, damit die Buerste darauf
+        # sitzt. `l_kommutator` folgt heute einem Anteil der Paketlaenge
+        # (`L_KOMM_ANTEIL`) -- das ist eine Zeichenregel, und bei grossen
+        # Ankerstroemen ist sie die falsche: die Buerstenflaeche bemisst den
+        # Kommutator, nicht umgekehrt. Ein Vorschlag ist besser als ein Nein.
+        "l_kommutator_boden_mm": round(l_boden, 2),
+        "lang": bool(lang),
+        "U_buerste_V": ema_schleifring.U_BUERSTE_V,
+        "P_buerste_W": round(2.0 * ema_schleifring.U_BUERSTE_V * i_a, 1),
+        "passt": bool(passt),
+        "grund": "" if passt else (
+            f"Die Buerste passt nicht auf den Kommutator: "
+            f"{a_arm_cm2:.2f} cm² je Arm bei {b_buerste:.1f} mm Breite "
+            f"brauchen {l_buerste:.1f} mm Laenge auf {l_komm:.1f} mm "
+            f"Baulaenge. Mehr Buerstenarme (heute {arme}) oder weniger "
+            f"Ankerstrom"),
+        "hinweis": ("" if not lang else
+                    f"Der Kommutator ist mit {l_komm:.0f} mm laenger als das "
+                    f"Blechpaket ({float(axial_mm):.0f} mm): bei "
+                    f"{i_a:.0f} A Ankerstrom braucht die Buerstenflaeche "
+                    f"({a_ges_cm2:.0f} cm² gesamt) diese Laenge. Das ist bei "
+                    f"Gleichstrommaschinen ueblich, verlaengert die Maschine "
+                    f"aber um genau diesen Betrag — weniger Ankerstrom (mehr "
+                    f"Windungen) oder mehr Buerstenarme verkuerzen ihn."),
+        # Die Grenzen bleiben, wo sie hingehoeren -- hier stehen sie nur mit,
+        # damit man den Kommutator EINMAL fragen muss und nicht zweimal.
+        "grenzen": kom,
+        "ungeprueft": ("Buerstenverschiebung, Wendepole und "
+                       "Kompensationswicklung sind NICHT modelliert; die "
+                       "Ankerrueckwirkung wird als Abschlag gerechnet "
+                       "(ankerrueckwirkung) und als solcher benannt."),
     }
 
 
@@ -696,7 +807,13 @@ def zeichenmasse(geom: dict, axial_mm: float) -> dict:
     a_wick = float(er["A_cu_mm2"]) / max(ema_eesm._fuellfaktor(), 1e-6)
     d_spule = max(2.0, a_wick / (2.0 * h_kern))
 
-    l_komm = max(L_KOMM_ANTEIL * float(axial_mm), 15.0)
+    # Die Laenge kommt aus `kommutator` -- derselben Funktion, die sie auch
+    # PRUEFT. Zwei Formeln waeren ein gezeichneter Kommutator, auf den die
+    # gerechnete Buerste nicht passt.
+    try:
+        l_komm = float(kommutator(geom, axial_mm, 0.0)["l_kommutator_mm"])
+    except Exception:                                        # noqa: BLE001
+        l_komm = max(L_KOMM_ANTEIL * float(axial_mm), 15.0)
     d_komm = max(D_KOMM_ANTEIL * 2.0 * r_a, 2.0 * r_wel + 20.0)
 
     return {

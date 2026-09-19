@@ -276,6 +276,39 @@ def erregung(geom: dict, axial_mm: float, i_f_A: float = 0.0,
     }
 
 
+# Die Erregung muss auf den drehenden Laeufer, und das ist ein eigenes
+# Bauteil: ZWEI Ringe (Hin- und Rueckleiter eines Gleichstromkreises), nicht
+# drei wie bei der Drehstromwicklung des Schleifringlaeufers. Die Geometrie
+# steht in ``ema_schleifring`` -- derselben Funktion, aus der die ASM ihre drei
+# holt; zwei Fassungen waeren zwei verschieden breite Ringe fuer denselben
+# Strom. Hier steht nur, WIEVIELE es sind und WELCHER Strom durchgeht.
+RING_ZAHL = 2
+
+
+def schleifringe(geom: dict, axial_mm: float,
+                 rpm_max: float | None = None) -> dict:
+    """Zwei Schleifringe fuer den Erregerkreis — s. ``ema_schleifring``.
+
+    Der Strom kommt aus ``erregung`` und wird nicht noch einmal geschaetzt: der
+    Erregerkreis fuehrt ``I_f``, und der haengt an der Wickelentscheidung
+    (``N_f``), nicht an einer Konstante. Ohne bekannte Hoechstdrehzahl bleibt
+    ``v_ok`` ausdruecklich ``None`` statt eines beruhigenden ``True``.
+    """
+    import ema_schleifring
+    er = erregung(geom, axial_mm)
+    n_max = float(rpm_max or geom.get("rpm_to") or 0.0)
+    rg = ema_schleifring.geometrie(geom, float(er["I_f_A"]), RING_ZAHL,
+                                   n_max or None)
+    rg["I_f_A"] = float(er["I_f_A"])
+    rg["N_f_windungen"] = float(er["N_f_windungen"])
+    rg["P_schleifring_W"] = float(er["P_schleifring_W"])
+    rg["hinweis"] = ("Zwei Ringe fuehren den Erregerkreis. Der Buerstenverlust "
+                     "haengt LINEAR am Erregerstrom und damit an der "
+                     "Windungszahl — dieselbe Durchflutung mit mehr Windungen "
+                     "und weniger Strom kostet hier weniger.")
+    return rg
+
+
 def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
                   i_f_A: float = 0.0, j_f_Apmm2: float = 0.0) -> dict:
     """Stationaerer Nennpunkt. Der Stator fuehrt NUR den Momentstrom.
@@ -388,22 +421,36 @@ def massen_und_kosten(payload: dict) -> dict:
     m_rot_fe = max(0.0, float(basis["rotoreisen_kg"])
                    - v_fenster_mm3 * 1e-9 * float(lam["density"]))
 
+    # Der DAEMPFERKAEFIG ist echtes Kupfer (oder Aluminium) auf dem Laeufer.
+    # Ohne ihn hier waere die Achse "Daempferkaefig" im Paarvergleich eine
+    # Achse, unter der "bewegt NICHT: alles" steht -- und das waere falsch:
+    # er kostet Masse und Geld, nur nuetzt er nichts, was dieses Werkzeug
+    # rechnet. Genau diese Asymmetrie IST die Auskunft.
+    m_daempfer = 0.0
+    if str(geom.get("daempferkaefig") or "nein") == "ja":
+        try:
+            import ema_schenkelpol
+            m_daempfer = float(ema_schenkelpol.daempferkaefig(geom, L)["masse_kg"])
+        except Exception:                                    # noqa: BLE001
+            m_daempfer = 0.0
+
     preis_cu = ema_screen.PREISE_EUR_KG["kupfer"]
     kosten = dict(basis["kosten"])
     kosten["magnet_EUR"] = 0.0
-    kosten["erreger_EUR"] = round(m_erreger * preis_cu, 0)
+    kosten["erreger_EUR"] = round((m_erreger + m_daempfer) * preis_cu, 0)
     kosten["stahl_EUR"] = round(
         (m_rot_fe + float(basis["statoreisen_kg"]) + float(basis["welle_kg"]))
         * ema_screen.PREISE_EUR_KG["stahl"], 0)
     kosten["gesamt_EUR"] = round(sum(v for k, v in kosten.items()
                                      if k != "gesamt_EUR"), 0)
 
-    gesamt = (m_erreger + m_rot_fe + float(basis["welle_kg"])
+    gesamt = (m_erreger + m_daempfer + m_rot_fe + float(basis["welle_kg"])
               + float(basis["statoreisen_kg"]) + float(basis["kupfer_kg"]))
     aus = dict(basis)
     aus.update({
         "magnet_kg": 0.0,
         "erreger_kg": round(m_erreger, 3),
+        "daempfer_kg": round(m_daempfer, 3),
         "rotoreisen_kg": round(m_rot_fe, 2),
         "gesamt_kg": round(gesamt, 2),
         "kosten": kosten,

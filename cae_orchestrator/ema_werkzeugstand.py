@@ -71,6 +71,8 @@ PHYSIK: tuple[str, ...] = (
     "ema_wicklung.py",      # Wicklung, Widerstand, Kupfermasse
     "ema_radien.py",        # Radien und Luftspalt
     "ema_grenzen.py",       # die Tore, die immer gelten
+    "ema_schenkelpol.py",   # Polbefestigung (Fliehkraft am Polfuss) + Daempferkaefig
+    "ema_eesm_cad.py",      # Schenkelpolgeometrie -- Quelle fuer CAD, Bild und Tor
     "ema_deck.py",          # eigener Strukturweg (Gmsh + CalculiX)
     "ema_z88.py",           # zweite Meinung zur Struktur
     "ema_aster.py",         # dritte Meinung zur Struktur (Code Aster)

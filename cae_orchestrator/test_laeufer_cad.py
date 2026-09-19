@@ -640,9 +640,25 @@ _st = {"log": [], "progress": 0}
 _P._gate_laeufer({"geom": ge, "axial_len": 100, "rpm_to": 6000}, _st)
 pruefe(any("Schenkelpol" in l and "OK" in l for l in _st["log"]),
        "das Laeufertor prueft Kern + Spule gegen die Polteilung")
-pruefe(any("NICHT gerechnet" in l for l in _st["log"]),
-       "und sagt, was es NICHT prueft (Polbefestigung, Fliehkraft am Polfuss) — "
-       "Schweigen laese sich als „geprueft\" lesen")
+# Die POLBEFESTIGUNG wird seit dem 19.09.2026 GERECHNET und nicht mehr nur als
+# Luecke benannt. Ein Schenkelpol ist das einzige Bauteil dieses Werkzeugs, das
+# nicht aus dem Vollen kommt -- er sitzt auf dem Joch, und bei hoher Drehzahl
+# entscheidet ein Querschnitt von wenigen Quadratzentimetern ueber den Laeufer.
+pruefe(any("Polbefestigung" in l and ("OK" in l or "ABGELEHNT" in l)
+           for l in _st["log"]),
+       "das Tor rechnet die Polbefestigung (Fliehkraft am Polfuss) und faellt "
+       "ein Urteil — frueher stand dort nur, dass sie NICHT gerechnet wird")
+pruefe(any("Nicht geprueft" in l and "Flankenpressung" in l
+           for l in _st["log"]),
+       "und sagt weiterhin, was darin NICHT steckt (Flankenpressung, "
+       "Dauerfestigkeit, Presssitz) — Schweigen laese sich als „geprueft\" lesen")
+# Und es reisst, wo es reissen muss: dieselbe Geometrie bei 20.000 1/min.
+_st2 = {"log": [], "progress": 0}
+_P._gate_laeufer({"geom": ge, "axial_len": 100, "rpm_to": 20000}, _st2,
+                 fatal=False)
+pruefe(any("Polbefestigung" in l and "ABGELEHNT" in l for l in _st2["log"]),
+       "bei 20.000 1/min weist dasselbe Tor denselben Pol ab — die Fliehkraft "
+       "waechst mit n^2, und das ist der ganze Punkt")
 
 
 print("\n13. Das Tor laesst die ASM jetzt ins CAD")

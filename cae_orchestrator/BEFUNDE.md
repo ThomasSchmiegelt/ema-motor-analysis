@@ -17,6 +17,92 @@ kann.
 
 ---
 
+## 2026-09-19 — Drei Bauteile, die nur als Lücke benannt waren
+
+**Beobachtung.** Drei Dinge standen im Werkzeug ausschließlich als Text darüber,
+dass es sie nicht gibt:
+
+* `ema_eesm_cad.koerper` gab seit jeher `ungeprueft: "Polbefestigung
+  (Schwalbenschwanz/Bolzen) und die Fliehkraft am Polfuss sind NICHT
+  gerechnet"` heraus — und das war alles.
+* Der Modulkopf von `ema_eesm` führte „keine Dämpferwicklung" unter dem, was
+  das Modell nicht kennt. Ein Dämpferkäfig kam sonst nirgends vor.
+* Schleifring und Kommutator wurden zwar gerechnet und gezeichnet, aber nur als
+  Nebenwirkung: `ema_freecad` rief `ema_schleifring` direkt, `ema_eesm` hatte
+  gar keine eigene Funktion dafür, und der Kommutator existierte nur als
+  **Grenze** (`ema_gsm.kommutierung`), nie als Bauteil. In keiner Stückliste,
+  keinem Steckbrief, keinem Paarvergleich.
+
+**Messung.**
+
+1. **Die Polbefestigung ist keine Formalie.** Am frischen Payload (6 Pole,
+   Läufer Ø 188,6, L = 80 mm) wiegt ein Pol samt Erregerspule **1,49 kg**, sein
+   Schwerpunkt liegt bei r = 71,8 mm. Bei 12.000 1/min zieht er mit
+   **169 kN**; über den Halsquerschnitt (0,70 × Kernbreite × Paketlänge) und
+   einen Kerbfaktor von 1,8 sind das 90 MPa gegen 340 MPa Fließgrenze
+   (SF 2,62) — es hält. Mit `polBefestigung=bolzen` und der Vorgabe 2 × M10
+   dagegen **1457 MPa gegen 640 MPa** (Klasse 8.8): SF 0,44, es hält nicht, und
+   nötig wären 17 × M10. Die Bauart entscheidet also, und zwar um mehr als eine
+   Größenordnung.
+2. **`n_zulaessig` ist drehzahlunabhängig, und das ist die Probe.** σ ~ n², also
+   ist `n_zul = n·sqrt(SF/SF_ziel)` unabhängig von dem n, mit dem gerechnet
+   wurde (gemessen 17052 1/min bei 3000, 6000 und 12000 1/min). Käme dort etwas
+   anderes heraus, wäre eine der beiden Formeln falsch — der Test prüft genau
+   das statt einer festgenagelten Zahl.
+3. **Die Kommutatorlänge war eine ZEICHENregel.** `L_KOMM_ANTEIL · axialLen`
+   (Vorgabe 24 mm bei L = 80). Gemessen braucht ein Ankerstrom von 800 A bei
+   10 A/cm² Bürstenstromdichte **80 cm²** Kontaktfläche; auf 6 Bürstenarmen à
+   8,9 mm Breite sind das 149,6 mm Bürstenlänge. Der gezeichnete Kommutator war
+   damit um den **Faktor 6 zu kurz**, ohne dass irgendetwas widersprochen hätte.
+   Die Bürstenfläche bemisst den Kommutator, nicht ein Anteil der Paketlänge.
+4. **Die Zeichenmarke der Leinwand sah den Dämpfer nicht.**
+   `_laeuferMarkeBauen` führte 18 Felder, darunter keines der neuen und auch
+   nicht `erregerSpuleForm`, `bZielT`, `poleArcFrac` oder `slotDepth`. Wer den
+   Dämpferkäfig einschaltete, bekam die alte Zeichnung — und die sah richtig
+   aus. Eine Marke, die eine Änderung nicht bemerkt, ist schlimmer als keine.
+
+**Fundstelle.** `ema_schenkelpol.py` (neu), `ema_eesm.schleifringe`,
+`ema_gsm.kommutator`, `ema_pipeline._gate_laeufer`, `cae_cli.cmd_rotor_check`,
+`ema_paarvergleich` (Achsen `polbefestigung`, `daempferkaefig`), `ema.html`
+`_laeuferMarkeBauen`.
+
+**Stand: behoben.**
+
+- `ema_schenkelpol.befestigung` rechnet die Fliehkraft des ganzen Pols (Schuh +
+  Kern + Spule, aus `ema_eesm_cad.koerper` — derselben Funktion, aus der
+  gezeichnet wird) gegen beide Bauarten und nennt die bindende. Das Nein trägt
+  den Weg mit (nötige Halsbreite bzw. Schraubenzahl, zulässige Drehzahl).
+- `ema_schenkelpol.daempferkaefig` bemisst die Stäbe nach einer **benannten
+  Auslegungsregel** (0,25 × Ständerkupfer je Pol; Stabteilung 0,8 ×
+  Ständernutteilung, Say / IEEE Std 115) und weist sie als Regel aus. Der
+  Görges-Sattel wird geprüft: läuft die Stabteilung in die Nähe der
+  Nutteilung, steht es da. Was der Dämpfer **nützt**, geht in keine Kennzahl
+  ein — dafür fehlt der zeitabhängige Lauf —, und genau das steht in `wirkung`
+  und als ⓘ unter der Paarvergleichsoption, damit „2:0 für ohne Dämpfer" nicht
+  als Urteil über den Dämpfer gelesen wird.
+- Die Kommutatorlänge folgt jetzt der Bürstenfläche (Boden bleibt die alte
+  Zeichenregel); wird er länger als das Blechpaket, ist das ein **Befund** und
+  keine Ablehnung — bei Gleichstrommaschinen üblich, aber es verlängert die
+  Maschine. `zeichenmasse` liest dieselbe Funktion, sonst säße die gerechnete
+  Bürste auf einem anderen Kommutator als der gezeichnete.
+- `rotor-check` führt jetzt auch `_gate_laeufer` — dasselbe Tor der Pipeline,
+  keine zweite Fassung. Geurteilt wird an „ABGELEHNT" und **nicht** am
+  Warnzeichen: ein ⚠ kann ein Befund sein, der nichts verbietet.
+- Der Dämpferkäfig wird gezeichnet (Leinwand, Querschnitt, CAD als
+  `Damper_Cage` samt Bohrungen im Läufer) — aber **nur, wenn er auch passt**.
+  Stäbe zu zeigen, die das Tor gerade abgewiesen hat, wäre eine Zeichnung, die
+  der Rechnung widerspricht.
+
+**Was bewusst offen bleibt.** Der Dämpfer ist im Feldmodell Luft und sonst
+nichts: asynchroner Anlauf und Pendeldämpfung brauchen einen zeitabhängigen
+Lauf. Die Flankenpressung der Schwalbenschwanzführung ist nicht gerechnet (der
+Flankenwinkel ist kein Parameter dieses Werkzeugs), ebenso Dauerfestigkeit,
+Presssitz und die Biegung des Pols aus einseitigem Magnetzug; das steht als
+`ungeprueft` im Ergebnis. Wendepole und Kompensationswicklung der
+Gleichstrommaschine bleiben wie bisher draußen.
+
+---
+
 ## 2026-09-19 — Die Leinwand zeigte vier verschiedene Maschinen falsch
 
 **Beobachtung** (gemeldet): „die geometrische Darstellung ist im html canvas

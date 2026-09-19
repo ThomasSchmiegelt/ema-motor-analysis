@@ -74,8 +74,8 @@ python3 cae_cli.py auftrag --projekt <id> --ergaenzen entscheidungen \
 | `umrichter` | **Mehrere Leistungselektroniken: A1..Ak, B1..Bk, C1..Ck statt A, B, C.** Das Erste, was dazu zu sagen ist: **Aufteilen macht die Maschine nicht stärker** — das Moment hängt an den Amperewindungen, und die liegen durch Nut, Stromdichte und Kühlung fest. Die gesamte Scheinleistung bleibt gleich und verteilt sich auf k Module zu je 1/k. Was man kauft: **kleinere Halbleiter**, **n-1-Betrieb** statt Totalausfall, verteilte Verlustwärme und — bei Winkelversatz — Auslöschung der 5. und 7. Harmonischen (die wird hier **nicht** gerechnet, der FDM ist magnetostatisch). `inverterVdc`/`inverterImax` sind die Werte **eines Moduls**; jedes System bekommt 1/k der Leiter, also N/k Windungen, woraus zwingend folgt: Spannung je Modul E/k, Strom unverändert. **Von der Maschine aus wirken k Module wie EIN Umrichter mit k·V_Modul bei gleichem Strom** — mehr Module kaufen Spannungsreserve (Eckdrehzahl), nicht Strom. Das steht in `ema_analysis.umrichter`, der einen Quelle der Grenzen, also erben es Kennfeld und die neun Module, die durch sie lesen; k=1 lässt jede Altrechnung Ziffer für Ziffer gleich. **Ein Wickeltor** sagt, ob k überhaupt darstellbar ist (`slots % 3k`; sektoriert zusätzlich ganze Polzahl je Sektor; für den Versatz `q ≥ k`) — und **was statt dessen ginge**. `verschachtelt` und `sektoriert` ergeben dieselben Modulkennwerte; sie unterscheiden sich im **Fehlerfall**: verschachtelt symmetrisch, sektoriert mit **einseitigem Magnetzug auf die Lager**, der hier nicht gerechnet ist und als Warnung dabeisteht. `--bilder` legt den Querschnitt mit den Systemen und die n-1-Kennlinie nach `<projekt>/charts/`. Im Browser: Karte **⚡ Leistungselektronik** im Betrieb-Reiter (sie rechnet nicht selbst, sie ruft `POST /umrichter` — die Wickelregel bleibt in Python). **Auch als Studienachse**: `studie --param inverterAnzahl` — nicht teilbare k fallen wie eine unbaubare Geometrie durch und werden rot hinterlegt, und die erwartete Antwort ist, dass **Kt, B_gap und Masse stillstehen**; bewegte sich Kt, wäre die Umrechnung falsch. **Und in der Live-Vorschau**: „🔌 Elektrik aus der Geometrie holen“ speist ψ, Ld, Lq, Grenzen und Eckdrehzahl aus der gezeichneten Maschine (sie rechnete bis 13.09.2026 mit Festwerten, Ld um Faktor 18 daneben), und der Schalter „ein Modul ausgefallen“ nimmt dessen Nuten den Strom — bei `sektoriert` sieht man die Unsymmetrie direkt im Feldbild. Exit 0 = teilbar, 1 = nicht teilbar |
 | `leistung` | **Wieviel gibt diese Geometrie her — und was begrenzt sie?** Die umgekehrte Frage zur Pipeline: statt eine Last vorzugeben und zu rechnen, was herauskommt, wird je Drehzahl das **größte Moment gesucht**, bei dem keine Grenze über 100 % geht (Magnet- und Wicklungstemperatur aus `ema_sicherheit`, Momentendeckel aus `power_envelope`, Drehzahl bis `max_safe_rpm`). Läuft auf dem schnellen Bewerter, gemessen **~2 s für eine ganze Kennlinie**. Der eigentliche Ertrag ist die **Ausnutzung jeder einzelnen Grenze**: eine bei 40 % ist verschenktes Material, und das ist die Angabe, aus der eine Auslegungsentscheidung folgt. Reißt schon der Leerlauf, sagt es das samt Grund — dann binden die drehzahlabhängigen Verluste und nicht das Moment. **Die Sättigung wird seit 13.09.2026 mitgerechnet** — über die Flusserhaltung aus `B_gap` (Zahn und Joch gegen `B_sat_T` des Blechs), nicht aus dem Feldbild: |B| im Statoreisen streut dort über N = 300…800 um 56…73 %. Eine Überschreitung ist **keine Wand** — die Maschine läuft weiter, liefert aber weniger Moment als gerechnet, und das steht so in der Ausgabe. **Was weiterhin NICHT geprüft wird, steht unter jeder Ausgabe** (Rotorstege, örtliche Überhöhung am Zahnfuß, Nutstreuung, FEM-Festigkeit, Welle). **Wo die Sättigung zu sehen ist:** `leistung` und `ausreizen` als Kriterium mit Ausnutzung · `sicherheit` als zehntes Kriterium (Schwere *hinweis* — die Maschine bleibt nicht stehen, sie liefert weniger Moment als gerechnet) · `steckbrief` als Kennzahl mit Herkunft · `paarvergleich` als mitgeführte Spalte `B_Zahn`/`Eisen [%]` plus die Achse `nutbreite` (der einzige Hebel, der sie bewegt — die Nutzahl tut es nicht) · jede `studie` als eigene Kurve · und als **Bilder** in `<projekt>/charts/`: `saettigung_eisen.png` (Querschnitt, Zahn- und Jochring nach Ausnutzung eingefärbt) und `saettigung_kennlinie.png` (B_Zahn/B_Joch über dem Moment mit der Blechgrenze und dem markierten Knie). Sie entstehen bei jedem Pipelinelauf und auf Zuruf über `leistung --bilder`; die rechte Spalte der Agentenseiten findet sie dort von selbst. Exit 0 = es gibt einen zulässigen Punkt, 1 = keinen |
 | `welle` | **Vollwelle oder Hohlwelle — gemessen.** Rechnet EIN Feld und sagt, ob durch die Welle Fluss läuft und wie groß die Bohrung höchstens sein darf. Exit 0 = Hohlwelle möglich, 1 = Vollwelle nötig |
-| `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket. Millisekunden, ohne CAD, ohne Server |
-| `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Sechzehn Achsen (**Maschinenart** PSM/ASM/SynRM/EESM, **Bauform** Innen-/Außenläufer, **Wicklungsart** Hairpin/Runddraht, Magnetanordnung, **V-Öffnungswinkel**, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge, **Wellendurchmesser**), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht** — beim Kt ist das inzwischen die Maschinenart. 0,7 s, rein analytisch. `--referenz` zeigt statt eines Vergleichs die **recherchierten Vergleichswerte** mit Quellen; die Achse `maschinenart` trägt zusätzlich einen Block **BAUART GEGEN BAUART**, der gerechnete Verhältnisse gegen recherchierte stellt |
+| `rotor-check` | Rotorlayout **lokal** prüfen: Taschenkollision, Stegbreite, Einschluss im Blechpaket — dazu die Grenzen (Luftspalt, Wickelkopf, Nuttiefe, Hairpin), die **Fliehkraft** an der Bohrung und seit dem 19.09.2026 das **Tor der Maschinenart**: Käfigsteg (ASM), Polfenster **und Polbefestigung** (EESM), Ankernut und Kommutator (GSM). Millisekunden, ohne CAD, ohne Server. Es ruft dieselben Tore, die auch der Lauf ruft — vorher meldete es einer fremderregten Maschine „Layout OK", während der Lauf sie an der Polbefestigung abwies. Exit 1, wenn eines **ABGELEHNT** meldet; ein ⚠ allein ist ein **Befund** und kein Nein (ein Kommutator länger als das Blechpaket etwa ist bei Gleichstrommaschinen üblich) |
+| `paarvergleich` | **Die Gestaltungsentscheidungen gegenüberstellen — VOR der Geometrie.** Achtzehn Achsen (seit 19.09.2026 dazu **Polbefestigung** und **Dämpferkäfig**, beides EESM) (**Maschinenart** PSM/ASM/SynRM/EESM, **Bauform** Innen-/Außenläufer, **Wicklungsart** Hairpin/Runddraht, Magnetanordnung, **V-Öffnungswinkel**, Leiter je Nut, Magnet-/Blech-/Leiterwerkstoff, Kühlung, Wellenverbindung, Wuchtverschraubung, Flussbarrieren, Durchmesser, Länge, **Wellendurchmesser**), je Achse jede Option gegen jede. Sagt auch, **welche Entscheidung zuerst ansteht** — beim Kt ist das inzwischen die Maschinenart. 0,7 s, rein analytisch. `--referenz` zeigt statt eines Vergleichs die **recherchierten Vergleichswerte** mit Quellen; die Achse `maschinenart` trägt zusätzlich einen Block **BAUART GEGEN BAUART**, der gerechnete Verhältnisse gegen recherchierte stellt |
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
 | `bilddaten <was>` | **Bilddatensatz zum optischen Bewerten**: `erzeugen` · `seite` · `einlesen` · `regel` · `stand`. Zieht zufaellige Rotorquerschnitte, behaelt nur die, die das Layouttor bestehen, und zeichnet sie. **Die Bewertung macht ein Mensch** — du kannst sie nur vorbereiten und hinterher auswerten |
 | `feldbild` | **Magnetfeldlinien zum Ansehen** in den Projektordner legen: `linien` (Durchsicht) · `schnitt` (Stator ueber einen Sektor weggenommen) · `pol` (ein Polsektor gross) · `laengs` (Achsschnitt, gerechnetes Feld nur mit 3-D-Lauf). Durchsichtige PNG, ein FDM-Lauf, Sekunden bis Minuten — **kein** Pipelinelauf |
@@ -674,6 +674,53 @@ Druckguss-Käfig mit Kurzschlussringen.
   `I_s` und die Warnung am Umrichter-Limit — sonst wäre das Feld geschenkt. Der Preis
   steht daneben: `I_s` trägt den Magnetisierungsstrom **dauernd** mit, und der
   Schlupfverlust fällt im **Läufer** an, also an der thermisch schlechtesten Stelle.
+
+### Der Schenkelpol: was ihn hält und was ihn dämpft (EESM)
+
+Ein Schenkelpol ist das einzige Bauteil dieser Kette, das **nicht aus dem Vollen
+kommt** — er sitzt auf dem Joch und wird dort gehalten. Bei 12.000 1/min zieht
+ein 1,5-kg-Pol mit **169 kN** an einem Querschnitt von wenigen
+Quadratzentimetern, und ob das hält, entscheidet die Bauart:
+
+* `--set polBefestigung=schwalbenschwanz` (Vorgabe) — der Polfuß ist
+  eingeschoben, der **Hals** trägt auf Zug. Gemessen SF 2,62.
+* `--set polBefestigung=bolzen --set polBolzen=2 --set polBolzenGewinde=M10` —
+  verschraubt, Spannungsquerschnitt nach ISO 898-1, Klasse 8.8. Dieselbe
+  Maschine: **SF 0,44**, hält nicht, und das Nein nennt „17 × M10".
+
+Gerechnet werden immer beide; gewertet wird die gewählte. Die **zulässige
+Drehzahl** steht daneben und ist von der gerechneten unabhängig (σ ~ n²).
+`rotor-check` führt das mit; was **nicht** geprüft wird, steht dabei
+(Flankenpressung der Schwalbenschwanzführung, Dauerfestigkeit, Presssitz,
+Biegung aus einseitigem Magnetzug).
+
+**Der Dämpferkäfig** (`--set daempferkaefig=ja`, dazu `daempferStaebeJePol`
+und `daempferMat`) sind Stäbe im Polschuh. Zwei Dinge dazu, und beide sind
+wichtig, bevor du ihn bewertest:
+
+1. Die Bemessung ist eine **Auslegungsregel** (Querschnitt je Pol = 0,25 ×
+   Ständerkupfer je Pol, Stabteilung = 0,80 × Ständernutteilung; Say / IEEE
+   Std 115) und weist sich als solche aus. Die Teilung weicht der Nutteilung
+   **bewusst aus** — gleiche Teilungen lassen den Läufer beim asynchronen
+   Anlauf in einer Oberwelle hängen (Görges-Sattel); läuft sie doch in die Nähe
+   von 1, steht es als Hinweis da.
+2. **Sein NUTZEN geht in keine Kennzahl ein.** Asynchroner Anlauf und
+   Pendeldämpfung brauchen einen zeitabhängigen Lauf, den es hier nicht gibt.
+   Gerechnet wird, was er **kostet** (Masse, Kosten, Platz im Polschuh).
+   `paarvergleich --achsen daempferkaefig` sagt deshalb „2:0 für ohne Dämpfer" —
+   das ist ein Urteil über das Gezählte und nicht über den Dämpfer, und genau
+   das steht als ⓘ unter der Option. Schreib es in einer Antwort mit, statt die
+   Bilanz allein sprechen zu lassen.
+
+**Schleifring und Kommutator** sind seit dem 19.09.2026 eigene Bauteile statt
+bloßer Nebenwirkungen: `ema_eesm.schleifringe` (zwei Ringe für den
+Erregerkreis, drei bei der ASM-Drehstromwicklung) und `ema_gsm.kommutator`
+(Lamellen, Bürstenarme, Kontaktfläche — und die **Baulänge, die der
+Bürstenfläche folgt**). Letzteres ist kein Detail: 800 A Ankerstrom brauchen
+80 cm² Kontaktfläche, der Kommutator war nach der alten Zeichenregel 24 mm
+lang und damit um den Faktor 6 zu kurz. Wird er länger als das Blechpaket, ist
+das ein Befund und keine Ablehnung.
+
 
 ### Ganz zuerst: WELCHER Lastfall? (Fahrzyklus + Fahrzeug)
 
