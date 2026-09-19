@@ -756,7 +756,12 @@ def _aufbau(payload: dict, rpm: float, last_nm: float, work_dir: str,
 
     mat = HAIRPIN_MATS.get(geom.get("barMat") or ema_asm.KAEFIG_VORGABE,
                            HAIRPIN_MATS[ema_asm.KAEFIG_VORGABE])
-    sigma_eff = s * (1.0 / float(mat["rho_el"]))
+    # Bei Betriebstemperatur -- dieselbe Quelle wie die 2-D-Stufe und die
+    # analytische Kette. Zwei Stufen, die denselben Kaefig bei verschiedenen
+    # Temperaturen rechnen, liessen sich nicht mehr gegeneinander pruefen, und
+    # genau dafuer gibt es die 3-D-Stufe.
+    from ema_pipeline import rho_bei as _rho_bei, leitertemperatur as _leitert
+    sigma_eff = s * (1.0 / max(_rho_bei(mat, _leitert(geom)), 1e-30))
     omega1 = 2.0 * math.pi * p * float(rpm) / 60.0
 
     netz = netzkosten(geom, kf, axial, work_dir, gap_lagen=gap_lagen,

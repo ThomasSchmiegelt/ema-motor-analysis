@@ -470,12 +470,75 @@ LAMINATES = {
 
 # Copper / aluminium conductors for hairpin windings
 # rho_el: electrical resistivity [Ω·m] at 20 °C
+# Leiterwerkstoffe. ``rho_el`` gilt bei ``T_REF_LEITER_C`` (20 °C);
+# ``alpha_20`` ist der Temperaturbeiwert des spezifischen Widerstands bei 20 °C
+# nach IEC 60228 (Kupfer 0,00393/K, Aluminium 0,00403/K).
+#
+# **Warum der Beiwert ueberhaupt hier steht:** er fehlte, und damit rechnete
+# JEDE Wicklung dieses Werkzeugs bei 20 °C. Eine Klasse-F-Wicklung liegt im
+# Betrieb bei 155 °C und hat dort **53 % mehr Widerstand** — der ausgewiesene
+# Kupferverlust war also um rund ein Drittel zu klein, und beim Kaefig
+# verschiebt sich zusaetzlich der Schlupf, der direkt am Laeuferwiderstand
+# haengt. Gerechnet wird ueber ``rho_bei``, nicht an fuenf Stellen einzeln.
+#
+# **Die beiden GUSS-Werkstoffe sind neu und der eigentliche Befund:** ein
+# Kurzschlusskaefig wird gegossen, nicht aus Draht gebogen. Al 1350-H19 ist
+# eine KNETlegierung mit 61 % IACS; ein echter Druckgusslaeufer erreicht
+# gemessen nur **40–45 % IACS**, weil Lufteinschluesse und Oxide beim
+# Druckgiessen die Leitfaehigkeit senken. Die Vorgabe des Kaefigs hiess
+# ``al_1350`` und der Kommentar daneben „Aludruckguss" — Absicht und Wert
+# waren also schon immer verschieden, und der Kaefigwiderstand lag um rund
+# 40 % zu niedrig. Kupferdruckguss (90–100 % IACS) ist der Gegenentwurf fuer
+# Hochwirkungsgradlaeufer.
+#
+# 100 % IACS = 1,7241e-8 Ohm*m; die Prozentangaben im Label sind daraus
+# gerechnet und nicht abgeschrieben.
+T_REF_LEITER_C = 20.0
+
 HAIRPIN_MATS = {
-    "cu_etp":   {"label": "Cu-ETP (Reinst-Kupfer, 99.9 %)", "rho_el": 1.72e-8, "density": 8900, "E": 120000, "nu": 0.34},
-    "cu_crZr":  {"label": "CuCrZr (Hochfest-Kupfer)",       "rho_el": 2.05e-8, "density": 8900, "E": 125000, "nu": 0.34},
-    "cu_ag01":  {"label": "CuAg0.1 (Silber-Kupfer)",        "rho_el": 1.75e-8, "density": 8930, "E": 120000, "nu": 0.34},
-    "al_1350":  {"label": "Al 1350-H19 (Aluminium)",        "rho_el": 2.83e-8, "density": 2700, "E":  68000, "nu": 0.33},
+    "cu_etp":   {"label": "Cu-ETP (Reinst-Kupfer, 99.9 %)", "rho_el": 1.72e-8, "density": 8900, "E": 120000, "nu": 0.34, "alpha_20": 0.00393},
+    "cu_crZr":  {"label": "CuCrZr (Hochfest-Kupfer)",       "rho_el": 2.05e-8, "density": 8900, "E": 125000, "nu": 0.34, "alpha_20": 0.00393},
+    "cu_ag01":  {"label": "CuAg0.1 (Silber-Kupfer)",        "rho_el": 1.75e-8, "density": 8930, "E": 120000, "nu": 0.34, "alpha_20": 0.00393},
+    "al_1350":  {"label": "Al 1350-H19 (Aluminium, Draht)", "rho_el": 2.83e-8, "density": 2700, "E":  68000, "nu": 0.33, "alpha_20": 0.00403},
+    "al_guss":  {"label": "Al-Druckguss (Kaefig, 43 % IACS)", "rho_el": 4.01e-8, "density": 2700, "E":  68000, "nu": 0.33, "alpha_20": 0.00403, "guss": True},
+    "cu_guss":  {"label": "Cu-Druckguss (Kaefig, 91 % IACS)", "rho_el": 1.89e-8, "density": 8900, "E": 110000, "nu": 0.34, "alpha_20": 0.00393, "guss": True},
 }
+
+
+# Bei WELCHER Temperatur eine Wicklung gerechnet wird. Das ist eine **Annahme
+# dieses Werkzeugs** und keine Normzahl -- belegt ist der Temperaturbeiwert
+# (IEC 60228), nicht dieser Betriebspunkt. Gewaehlt ist der Auslegungspunkt
+# einer Klasse-F-Wicklung (Grenze 155 °C); wer es anders will, setzt
+# ``geom.tLeiterC``. Jede damit gerechnete Groesse NENNT die Temperatur, damit
+# niemand sie fuer eine Messung haelt.
+#
+# Vorher stand hier nichts, und das hiess: 20 °C fuer jede Wicklung im ganzen
+# Werkzeug -- Staender, Kaefig, Erregung, Anker. Ein Motor wird nicht bei 20 °C
+# betrieben, und der ausgewiesene Kupferverlust war entsprechend zu klein.
+T_LEITER_AUSLEGUNG_C = 115.0
+
+
+def leitertemperatur(geom: dict | None = None) -> float:
+    """Die Temperatur, bei der Leiterwiderstaende gerechnet werden [°C]."""
+    try:
+        t = float((geom or {}).get("tLeiterC") or 0.0)
+    except Exception:                                        # noqa: BLE001
+        t = 0.0
+    return t if t > 0.0 else T_LEITER_AUSLEGUNG_C
+
+
+def rho_bei(mat: dict, t_c: float) -> float:
+    """Spezifischer Widerstand bei ``t_c`` [°C] — die EINE Stelle dafuer.
+
+    ``rho(T) = rho_20 * (1 + alpha_20 * (T - 20))`` (IEC 60228). Ohne
+    ``alpha_20`` im Werkstoff bleibt der Wert stehen, statt eine Temperatur
+    vorzutaeuschen, die das Datenblatt nicht hergibt.
+    """
+    rho = float(mat.get("rho_el") or 0.0)
+    a = float(mat.get("alpha_20") or 0.0)
+    if a <= 0.0:
+        return rho
+    return rho * (1.0 + a * (float(t_c) - T_REF_LEITER_C))
 
 # T_op_max = max. continuous operating temp (irreversible-loss onset for the
 # base "N" grade); T_curie = Curie temperature (magnet destroyed above).

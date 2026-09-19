@@ -221,7 +221,8 @@ def erregung(geom: dict, axial_mm: float, i_f_A: float = 0.0,
 
     mat = HAIRPIN_MATS.get(geom.get("fieldMat") or ERREGER_MAT,
                            HAIRPIN_MATS[ERREGER_MAT])
-    rho = float(mat["rho_el"])
+    from ema_pipeline import rho_bei, leitertemperatur
+    rho = rho_bei(mat, leitertemperatur(geom))
     a_fenster = pg["A_fenster_mm2"] * 1e-6                      # m^2, geometrisch
     l_w = pg["l_windung_mm"] * 1e-3                             # m
     kf = _fuellfaktor()

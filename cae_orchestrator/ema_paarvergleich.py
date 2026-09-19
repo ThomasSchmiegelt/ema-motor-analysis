@@ -463,10 +463,24 @@ ACHSEN = {
         "setzen": _setz_blech,
     },
     "leiterwerkstoff": {
-        "titel": "Material — Leiter",
-        "werte": lambda b: list(HAIRPIN_MATS),
+        "titel": "Material — Leiter (Staender)",
+        # OHNE die Druckgusswerkstoffe: ein gegossener Kaefig ist kein
+        # Staender-Hairpin, und eine Achse, die ihn anbietet, laedt zu einer
+        # Wahl ein, die es nicht gibt.
+        "werte": lambda b: [k for k, v in HAIRPIN_MATS.items()
+                            if not v.get("guss")],
         "beschriften": lambda w: HAIRPIN_MATS[w]["label"],
         "setzen": _setz_oben("hairpin_mat"),
+    },
+    "kaefigwerkstoff": {
+        # Die Entscheidung, die den Laeuferwiderstand einer ASM halbiert:
+        # Aluminium- gegen Kupferdruckguss (43 gegen 91 % IACS). Sie war im
+        # Payload lesbar (`barMat`) und nirgends waehlbar.
+        "titel": "Material — Kaefig (ASM, Druckguss)",
+        "werte": lambda b: [k for k, v in HAIRPIN_MATS.items()
+                            if v.get("guss")] + ["al_1350", "cu_etp"],
+        "beschriften": lambda w: HAIRPIN_MATS[w]["label"],
+        "setzen": _setz_geom("barMat"),
     },
     "kuehlung": {
         "titel": "Kühlung",

@@ -23,7 +23,15 @@ _THINK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
 # Allowed enum codes (must match the pipeline tables + UI dropdowns)
 _LAM   = ["m250_35a", "m270_35a", "m400_50a", "m800_65a", "steel_s235", "steel_42crmo4"]
-_HAIR  = ["cu_etp", "cu_crZr", "cu_ag01", "al_1350"]
+# Aus der Werkstofftabelle ABGELEITET statt danebengeschrieben: eine zweite
+# Liste waere genau die Stelle, an der ein neuer Werkstoff im Schema fehlt
+# und damit fuer CLI, Parametertabelle und Browser nicht vorhanden ist.
+# Die GUSS-Werkstoffe bleiben draussen -- ein Druckgusskaefig ist kein
+# Staender-Hairpin; sie stehen in `_KAEFIG`.
+from ema_pipeline import HAIRPIN_MATS as _HM
+_HAIR   = [k for k, v in _HM.items() if not v.get("guss")]
+_KAEFIG = [k for k, v in _HM.items()
+           if v.get("guss") or k in ("al_1350", "cu_etp")]
 _MAG   = ["ndfeb_n35", "ndfeb_n42", "ndfeb_n50", "ferrite"]
 _COOL  = ["natural", "forced", "water", "oil"]
 _SHAPE = ["v", "vasym", "vv", "u", "delta", "pmasynrm", "spm", "halbach", "spoke", "bar"]
@@ -96,6 +104,17 @@ SCHEMA = {
     "rotor_lam":  {"kind": "enum", "opts": _LAM,  "def": "m270_35a", "desc": "Rotorblech"},
     "stator_lam": {"kind": "enum", "opts": _LAM,  "def": "m270_35a", "desc": "Statorblech"},
     "hairpin_mat":{"kind": "enum", "opts": _HAIR, "def": "cu_etp",   "desc": "Hairpin-Leitermaterial"},
+    # Der Kaefigwerkstoff war im Payload LESBAR (`ema_asm` fragt `barMat`),
+    # stand aber in keinem Schema -- also fuer CLI, Parametertabelle und
+    # Browser nicht vorhanden. Aluminium- gegen Kupferdruckguss ist die
+    # Entscheidung, die den Laeuferwiderstand halbiert.
+    "barMat":     {"kind": "enum", "opts": _KAEFIG, "def": "al_guss", "geom": True, "adv": True,
+                   "desc": "Kaefigwerkstoff der ASM (Druckguss); Al 43 % IACS, Cu 91 % IACS"},
+    # Bei welcher Temperatur Leiterwiderstaende gerechnet werden. ANNAHME des
+    # Werkzeugs (Klasse-F-Auslegungspunkt), kein Normwert; belegt ist nur der
+    # Temperaturbeiwert (IEC 60228). 0 = Vorgabe aus ema_pipeline.
+    "tLeiterC":   {"kind": "num", "lo": 0.0, "hi": 250.0, "def": 0.0, "geom": True, "adv": True,
+                   "desc": "Leitertemperatur für alle Wicklungswiderstände [°C]; 0 = Vorgabe 115 °C"},
     "magnet":     {"kind": "enum", "opts": _MAG,  "def": "ndfeb_n35","desc": "Magnetwerkstoff"},
     "cooling":    {"kind": "enum", "opts": _COOL, "def": "water",    "desc": "Kühlung"},
     "rpm_from":   {"kind": "num", "lo": 100, "hi": 25000, "def": 5000,  "desc": "Basisdrehzahl / Auslegungsdrehzahl [U/min]"},

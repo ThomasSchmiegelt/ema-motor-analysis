@@ -248,7 +248,9 @@ def ankerwicklung(geom: dict, axial_mm: float) -> dict:
     a_leiter = max(ng["A_leiter_m2"], 1e-12)
     # Ankerwiderstand: z Leiter, auf 2a Zweige aufgeteilt -> je Zweig z/(2a)
     # Leiter in Reihe, die 2a Zweige parallel.
-    r_zweig = float(mat["rho_el"]) * (z / zweige) * l_leiter / a_leiter
+    from ema_pipeline import rho_bei, leitertemperatur
+    r_zweig = (rho_bei(mat, leitertemperatur(geom))
+               * (z / zweige) * l_leiter / a_leiter)
     r_anker = r_zweig / zweige
 
     return {

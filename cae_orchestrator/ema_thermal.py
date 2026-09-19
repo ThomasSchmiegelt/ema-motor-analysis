@@ -171,7 +171,11 @@ def cycle_loss_series(drv: dict, geom: dict, axial: float, perf: dict,
     T_rated = rated_torque(geom, axial, cooling)
     J_rated = COOLING_RATING.get(cooling, COOLING_RATING["natural"])["J_rms_Apmm2"]
     V_cu    = copper_volume(geom, axial)
-    rho     = hp_mat["rho_el"]
+    # Bei Betriebstemperatur, nicht bei 20 °C (s. ema_pipeline.rho_bei).
+    # Lokal importiert: ema_pipeline zieht ema_thermal, auf Modulebene waere
+    # das ein Zirkel.
+    from ema_pipeline import rho_bei as _rb, leitertemperatur as _lt
+    rho     = _rb(hp_mat, _lt(geom))
 
     if rpm_base and rpm_base > 0:
         fw = np.clip((rpm - rpm_base) / rpm_base, 0.0, 1.5)
@@ -724,7 +728,8 @@ def design_point_losses(geom: dict, axial: float, rpm: float, load_nm: float,
     J_rated = COOLING_RATING.get(cooling, COOLING_RATING["natural"])["J_rms_Apmm2"]
     V_cu    = copper_volume(geom, axial)
     J       = J_rated * (abs(load_nm) / T_rated) * 1e6     # A/m²
-    P_Cu    = hp_mat["rho_el"] * V_cu * J ** 2
+    from ema_pipeline import rho_bei as _rb, leitertemperatur as _lt
+    P_Cu    = _rb(hp_mat, _lt(geom)) * V_cu * J ** 2
     base    = compute_losses(geom, axial, rpm, 0.0, 0.0, perf, mat, st_mat, hp_mat, mag)
     P_total = P_Cu + base["P_Fe_stator"] + base["P_Fe_rotor"] + base["P_Mag_eddy"] + base["P_Bearing"]
     return {

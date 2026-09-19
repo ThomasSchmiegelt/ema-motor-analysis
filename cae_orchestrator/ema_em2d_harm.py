@@ -830,12 +830,18 @@ def vorbereiten(payload: dict, rpm: float, last_nm: float, work_dir: str,
     # Hausskala -> physikalische Amperes. ``bp["I_s_A"]`` steht in der
     # normierten Hausskala (s. ``ema_asm.k_norm``); eingepraegt wird der
     # physikalische Strom, sonst waere das Feld um genau diesen Faktor daneben.
+    from ema_pipeline import rho_bei as _rho_bei, leitertemperatur as _leitert
     i_pk_phys = float(bp["I_s_A"]) / max(ema_asm.k_norm(geom), 1e-12)
     j_nut = stator_stroeme(geom, i_pk_phys, netz["A_nut_m2"])
 
     return {"geom": geom, "p": p, "axial_m": axial / 1000.0, "bp": bp,
             "netz": netz, "work_dir": work_dir, "omega1": omega1,
-            "sigma": 1.0 / float(mat["rho_el"]), "stabmaterial": mat["label"],
+            # Bei BETRIEBStemperatur. Der Kaefig ist die heisseste Wicklung
+            # der Maschine, und sigma geht hier direkt in den Laeuferstrom und
+            # damit ins Moment -- bei 20 °C gerechnet loeste der Loeser eine
+            # andere Maschine, als die analytische Kette daneben annimmt.
+            "sigma": 1.0 / max(_rho_bei(mat, _leitert(geom)), 1e-30),
+            "t_leiter_C": _leitert(geom), "stabmaterial": mat["label"],
             "j_nut": j_nut, "i_pk_phys": i_pk_phys, "gap_lagen": gap_lagen,
             "T_soll_Nm": float(bp["T_ist_Nm"]), "rpm": float(rpm), "log": log}
 

@@ -112,7 +112,12 @@ KAEFIG_TIEFE_ZU_BREITE = 3.0
 # vergessen, sondern gesetzt und geprueft.
 KAEFIG_STEG_MM = 2.0
 
-KAEFIG_VORGABE = "al_1350"   # Aludruckguss; "cu_etp" = Kupferkaefig
+# Ein Kurzschlusskaefig wird GEGOSSEN. Hier stand `al_1350` -- eine
+# Knetlegierung mit 61 % IACS -- und daneben der Kommentar "Aludruckguss";
+# Absicht und Wert waren also immer schon verschieden. Echter Druckguss
+# erreicht gemessen 40-45 % IACS (Lufteinschluesse, Oxide), der
+# Kaefigwiderstand lag damit um rund 40 % zu niedrig.
+KAEFIG_VORGABE = "al_guss"   # Kupferdruckguss = "cu_guss"
 
 # ── Laeuferbauform ────────────────────────────────────────────────────────────
 #
@@ -603,7 +608,13 @@ def laeuferwicklung(geom: dict, axial_mm: float) -> dict:
     mat = HAIRPIN_MATS.get(geom.get("rotorWireMat") or "cu_etp",
                            HAIRPIN_MATS["cu_etp"])
     a_leiter = max(ng["A_leiter_m2"], 1e-12)
-    r2 = float(mat["rho_el"]) * n2 * l_windung / a_leiter          # [Ohm je Strang]
+    # Auch hier bei Betriebstemperatur: die Laeuferwicklung des
+    # Schleifringlaeufers sitzt neben dem Kaefigplatz und wird genauso heiss.
+    # Sie war die eine Stelle, die beim Umstellen uebersehen wurde -- gefunden
+    # von der Gegenprobe in `test_werkstoffe`, die nach rohen 20-°C-Werten
+    # sucht, statt nur zu zaehlen, wo `rho_bei` schon steht.
+    from ema_pipeline import rho_bei as _rb2, leitertemperatur as _lt2
+    r2 = _rb2(mat, _lt2(geom)) * n2 * l_windung / a_leiter         # [Ohm je Strang]
 
     return {
         "n_nut": n_l, "auslegbar": True, "grund": "",
@@ -833,7 +844,12 @@ def betriebspunkt(geom: dict, axial_mm: float, rpm: float, last_nm: float,
                             HAIRPIN_MATS[KAEFIG_VORGABE])
     i_stab = stabstrom(geom, i_q, kf["n_stab"])
 
-    r_stab = float(mat["rho_el"]) * (kf["l_stab_mm"] * 1e-3) / max(kf["A_stab_mm2"] * 1e-6, 1e-12)
+    # Der Kaefig liegt im Laeufer und ist die heisseste Wicklung der
+    # Maschine; bei 20 °C gerechnet faellt sein Widerstand -- und mit ihm
+    # der Schlupf -- deutlich zu klein aus.
+    from ema_pipeline import rho_bei, leitertemperatur
+    _rho = rho_bei(mat, leitertemperatur(geom))
+    r_stab = _rho * (kf["l_stab_mm"] * 1e-3) / max(kf["A_stab_mm2"] * 1e-6, 1e-12)
     p_stab = kf["n_stab"] * 0.5 * i_stab ** 2 * r_stab           # Amplitude -> eff^2
     zuschlag = kurzschlussring_zuschlag(kf, p)
     p_kaefig = p_stab * (1.0 + zuschlag)

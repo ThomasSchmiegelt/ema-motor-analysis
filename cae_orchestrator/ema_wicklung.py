@@ -383,7 +383,8 @@ def r_strang(geom: dict, axial_mm: float, mat: dict) -> float:
     Kopie: ``R = rho * l * n_slots * n_je_nut / (3 * A)``.
     """
     w = wicklung(geom, axial_mm)
-    return (float(mat["rho_el"]) * w["l_leiter_m"] * w["nut"]["n_slots"]
+    from ema_pipeline import rho_bei, leitertemperatur
+    return (rho_bei(mat, leitertemperatur(geom)) * w["l_leiter_m"] * w["nut"]["n_slots"]
             * w["n_je_nut"] / (3.0 * max(w["A_leiter_m2"], 1e-12)))
 
 

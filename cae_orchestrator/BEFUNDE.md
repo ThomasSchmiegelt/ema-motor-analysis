@@ -65,6 +65,76 @@ gesamte Polteilung; zwischen zwei benachbten Spulen liegt ein offener Spalt.
 
 ---
 
+## 2026-09-19 — Jede Wicklung rechnete bei 20 °C, und der Kaefig aus Draht
+
+**Beobachtung.** Gemeldet als „die Materialangaben müssen angepasst werden,
+allgemein auch für die ASM". Nachgesehen — und es waren zwei Dinge, beide
+tool-weit.
+
+**Messung, erster Fall: die Temperatur fehlte ganz.** `HAIRPIN_MATS` führte
+`rho_el`, `density`, `E`, `nu` — und **keinen Temperaturbeiwert**. Damit rechnete
+JEDER Leiterwiderstand des Werkzeugs bei 20 °C: Ständerkupfer
+(`ema_thermal:174`, `:727`), Strangwiderstand (`ema_wicklung:386`), Käfigstab und
+Läuferwicklung (`ema_asm:836`, `:606`), Erregerwicklung (`ema_eesm:224`),
+Ankerwicklung (`ema_gsm:251`) — **und die Leitfaehigkeit, mit der Elmer den
+Käfig löst** (`ema_em2d_harm:838`, `ema_em3d_harm:759`). Ein Motor läuft nicht
+bei 20 °C: nach IEC 60228 (Kupfer α₂₀ = 0,00393/K, Aluminium 0,00403/K) hat eine
+Klasse-F-Wicklung bei 155 °C **53 % mehr Widerstand**.
+
+**Messung, zweiter Fall: der Käfig war aus Draht.** `KAEFIG_VORGABE = "al_1350"`
+— eine **Knetlegierung** mit 61 % IACS — und der Kommentar in derselben Zeile
+sagte „Aludruckguss". Absicht und Wert waren also seit jeher verschieden. Ein
+echter Druckgusslaeufer erreicht recherchiert **40–45 % IACS** (Lufteinschlüsse
+und Oxide beim Druckgießen); der Käfigwiderstand lag damit um rund 40 % zu
+niedrig — und mit ihm der Schlupf, der direkt daran hängt.
+
+**Was sich dadurch bewegt** (frischer Payload, 120 Nm @ 5000 1/min, gemessen
+über `paarvergleich --achsen maschinenart`, Verlustleistung in W):
+
+| | vorher | nachher |
+|---|---:|---:|
+| PSM | 638,7 | 833,4 |
+| ASM | 1380 | 1928 |
+| SynRM | 1070 | 1459 |
+| EESM | 850,8 | 1077 |
+| GSM | 5448 | 6810 |
+
+Am Auslegungspunkt einzeln nachgemessen: Kupferverlust 130,4 → 179,0 W
+(+37,3 %, also genau `rho(115)/rho(20)`), Gesamtverlust 247,7 → 296,3 W,
+Wicklungstemperatur 59,9 → 61,2 °C. **Jedes gespeicherte Projekt verschiebt
+sich** in Verlust, Wirkungsgrad und Temperatur; die Kennwerte davor und danach
+sind nicht vergleichbar.
+
+**Fundstelle.** `ema_pipeline.HAIRPIN_MATS` / neu `rho_bei` +
+`leitertemperatur`; die sieben Rechenstellen oben; `ema_asm.KAEFIG_VORGABE`.
+
+**Status.** Behoben. `alpha_20` an jedem Werkstoff, `rho_bei(mat, T)` als die
+EINE Umrechnung, neu `al_guss` (43 % IACS) und `cu_guss` (91 % IACS), Käfig
+defaultet auf Guss. `_HAIR` im Schema ist jetzt aus der Tabelle **abgeleitet**
+statt danebengeschrieben — ein neuer Werkstoff erscheint damit ohne Zutun in
+CLI, Parametertabelle und Browser. Neu erreichbar: `geom.barMat` (war lesbar und
+in keinem Schema, also für den Agenten nicht vorhanden) und `geom.tLeiterC`.
+Der Paarvergleich bekommt die Achse **`kaefigwerkstoff`** — gemessen
+Kupferdruckguss 1751 W gegen Aluminium 1928 W bei +1 kg und +14 €, Schlupf
+1,01 statt 1,52 %; und die Ständerachse lässt den Guss weg, weil ein gegossener
+Käfig kein Hairpin ist.
+
+**Die Gegenprobe war das Wertvollste.** `test_werkstoffe.py` sucht nicht nur,
+wo `rho_bei` steht, sondern nach **rohen 20-°C-Werten**, die noch als Widerstand
+durchgehen — und fand damit die eine Stelle, die ich übersehen hatte
+(`ema_asm:606`, die Läuferwicklung des Schleifringläufers).
+
+**Offen und ausdrücklich benannt: die Temperatur ist eine ANNAHME, und sie
+widerspricht der gerechneten.** `T_LEITER_AUSLEGUNG_C = 115 °C` ist der
+Auslegungspunkt einer Klasse-F-Wicklung, **kein Normwert** — belegt ist nur der
+Temperaturbeiwert. Am gemessenen Punkt gibt das LPTN daneben **61,2 °C** aus.
+Richtig wäre eine Iteration (Verlust → Temperatur → Widerstand → Verlust); die
+gibt es hier nicht. Wer es genauer will, setzt `tLeiterC` auf die gerechnete
+Temperatur. Das steht hier, statt dass die beiden Zahlen unkommentiert
+nebeneinander stehen.
+
+---
+
 ## 2026-09-19 — `rotor-check` liess genau das Tor aus, an dem der Lauf scheitert
 
 **Beobachtung.** Beim Abarbeiten der Abnahme aus §12 des Plans (`run cad --frisch
