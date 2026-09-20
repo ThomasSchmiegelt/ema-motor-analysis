@@ -562,3 +562,150 @@ def teile(geom: dict, axial_mm: float | None = None) -> dict:
     aus["staender"] = [_im_kreis(t, _r_s) for t in aus["staender"]]
     aus["n_teile"] = len(aus["teile"]) + len(aus["staender"])
     return aus
+
+
+# Die Rollen, die KEIN Eisen sind. Genau diese werden aus dem Laeuferblech
+# herausgestempelt -- Kupfer und Aluminium eingeschlossen: mu_r ~ 1, die Nut IST
+# magnetisch Luft, ob ein Stab darin liegt oder nicht.
+UNMAGNETISCH = ("luft", "kupfer", "alu")
+
+
+def rastere(teile, setz, schritt_mm: float, a0: float = 0.0,
+            sammle=None) -> int:
+    """Das Unmagnetische der Teile in ein Raster stempeln -- die PYTHON-Fassung.
+
+    Sie ist der Zwilling von ``rastere``/``_stempel`` in ``ema_laeufer.js``, und
+    beide muessen dieselben Zellen treffen. Warum es sie zweimal gibt: die eine
+    laeuft im Browser fuer die Live-Vorschau, die andere im 2-D-FDM auf dem
+    Rechner. Die GEOMETRIE kommt dabei nur einmal vor (``teile()`` hier), aber
+    das Eintragen ins Gitter muss jede Seite selbst tun.
+
+    Das ist dieselbe Lage wie bei ``magnet_legs`` und seinem JS-Spiegel, und sie
+    wird genauso abgesichert: ``test_laeuferbild.py`` fuehrt die JS-Fassung mit
+    ``node`` aus und vergleicht Zelle fuer Zelle.
+
+    ``setz(ix, iy)``     traegt eine Zelle ein (der Aufrufer weiss, was das
+                         heisst -- ``mu = 1`` im FDM, eine Farbe im Bild).
+    ``schritt_mm``       Abtastschritt; der Aufrufer waehlt ihn aus seiner
+                         Zellgroesse (eine halbe Zelle, wie im JS).
+    ``a0``               Rotorwinkel in Bogenmass: der Laeufer dreht, die Teile
+                         drehen mit.
+    ``sammle``           optional: wird je Zelle EINES Teils gerufen, damit der
+                         Aufrufer die Durchflutung auf genau diese Zellen legen
+                         kann (die Spule braucht ihre Zellenzahl).
+
+    Gibt die Zahl der eingetragenen Teile zurueck.
+    """
+    n = 0
+    for t in teile:
+        if str(t.get("rolle")) not in UNMAGNETISCH:
+            continue
+        _stempel(t, setz, schritt_mm, a0, sammle)
+        n += 1
+    return n
+
+
+def _stempel(t, setz, schritt: float, a0: float, sammle=None) -> None:
+    """Ein Teil abtasten. Formen wie in ``ema_laeufer.js._stempel``."""
+    def _punkt(x, y):
+        setz(x, y)
+        if sammle is not None:
+            sammle(x, y)
+
+    form = str(t.get("form"))
+    schritt = max(float(schritt), 1e-6)
+
+    if form == "ring":
+        r = float(t["r_i"])
+        while r <= float(t["r_a"]) + 1e-9:
+            n = max(8, int(math.ceil(2.0 * math.pi * r / schritt)))
+            for i in range(n):
+                a = a0 + 2.0 * math.pi * i / n
+                _punkt(r * math.cos(a), r * math.sin(a))
+            r += schritt
+        return
+
+    if form == "segment":
+        g0 = math.radians(float(t["grad"]) - float(t["halb"]))
+        g1 = math.radians(float(t["grad"]) + float(t["halb"]))
+        r = float(t["r_a"]) - float(t["dicke"])
+        while r <= float(t["r_a"]) + 1e-9:
+            m = max(4, int(math.ceil(r * (g1 - g0) / schritt)))
+            for i in range(m + 1):
+                a = a0 + g0 + (g1 - g0) * i / m
+                _punkt(r * math.cos(a), r * math.sin(a))
+            r += schritt
+        return
+
+    if form == "rechteck":
+        a = a0 + math.radians(float(t["grad"]))
+        ca, sa = math.cos(a), math.sin(a)
+        r = float(t["r0"])
+        while r <= float(t["r1"]) + 1e-9:
+            w = float(t["y0"])
+            while w <= float(t["y1"]) + 1e-9:
+                _punkt(r * ca - w * sa, r * sa + w * ca)
+                w += schritt
+            r += schritt
+        return
+
+    if form == "trapez":
+        a = a0 + math.radians(float(t["grad"]))
+        ca, sa = math.cos(a), math.sin(a)
+        r0, r1 = float(t["r0"]), float(t["r1"])
+        r = r0
+        while r <= r1 + 1e-9:
+            u = (r - r0) / max(r1 - r0, 1e-9)
+            wa = float(t["y0i"]) + (float(t["y0a"]) - float(t["y0i"])) * u
+            wb = float(t["y1i"]) + (float(t["y1a"]) - float(t["y1i"])) * u
+            w = wa
+            while w <= wb + 1e-9:
+                _punkt(r * ca - w * sa, r * sa + w * ca)
+                w += schritt
+            r += schritt
+        return
+
+    if form == "tasche":
+        # Langloch im Schenkelrahmen -- dieselbe Form wie die IPM-Tasche:
+        # Ursprung am inneren Ende, um `tilt` gedreht, zwei Halbkreiskappen.
+        # Beim Reluktanzlaeufer bleibt sie leer, und genau das ist die Bauart:
+        # ohne diese Form war der SynRM-Laeufer im Raster ein VOLLZYLINDER
+        # (gemessen 0,0 % Luft) und hatte damit keinen Reluktanzunterschied --
+        # also gar keine Maschine.
+        a = a0 + math.radians(float(t["grad"]))
+        ca, sa = math.cos(a), math.sin(a)
+        tc = math.cos(math.radians(float(t["tilt_grad"])))
+        ts = math.sin(math.radians(float(t["tilt_grad"])))
+        lng, hr = float(t["laenge"]), float(t["hoehe"]) / 2.0
+        i = -hr
+        while i <= lng + hr + 1e-9:
+            j = -hr
+            while j <= hr + 1e-9:
+                nimm = True
+                if i < 0 and (i * i + j * j) > hr * hr:
+                    nimm = False
+                elif i > lng:
+                    d = i - lng
+                    if (d * d + j * j) > hr * hr:
+                        nimm = False
+                if nimm:
+                    x = float(t["r_pos"]) + i * tc - j * ts
+                    y = float(t["offset"]) + i * ts + j * tc
+                    _punkt(x * ca - y * sa, x * sa + y * ca)
+                j += schritt
+            i += schritt
+        return
+
+    if form == "kreis":
+        cx, cy, rr = float(t["cx"]), float(t["cy"]), float(t["r"])
+        ca, sa = math.cos(a0), math.sin(a0)
+        gx, gy = cx * ca - cy * sa, cx * sa + cy * ca
+        k = -rr
+        while k <= rr + 1e-9:
+            h = -rr
+            while h <= rr + 1e-9:
+                if k * k + h * h <= rr * rr:
+                    _punkt(gx + k, gy + h)
+                h += schritt
+            k += schritt
+        return

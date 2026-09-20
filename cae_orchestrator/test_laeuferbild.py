@@ -706,6 +706,99 @@ pruefe(abs(_r.get("summe", 1.0)) < 1e-3 * max(_r.get("pos", 1), 1),
        f"eine Spulenseite hineinlaeuft, kommt aus der anderen zurueck")
 
 
+
+# ── Der Python-Zwilling des Rasterers ──────────────────────────────────────
+#
+# `ema_laeuferbild.rastere` und `rastere` in `ema_laeufer.js` muessen dieselben
+# Zellen treffen: die eine laeuft im Browser fuer die Live-Vorschau, die andere
+# im 2-D-FDM. Zwei Abschriften waeren die naechste stille Drift -- dieselbe
+# Lage wie bei `magnet_legs`, und sie wird genauso abgesichert: die JS-Fassung
+# wird mit `node` AUSGEFUEHRT und Zelle fuer Zelle verglichen.
+
+
+
+_JS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ema_laeufer.js")
+
+
+def _js_zellen(teile, N, center, gs, a0):
+    """Die JS-Fassung ausfuehren und die getroffenen Zellen einsammeln."""
+    hilf = """
+var global = globalThis; var window = globalThis;
+%s
+var N = %d, center = %d, gs = %f, a0 = %f;
+var teile = %s;
+var grid = new Float32Array(N * N);
+LAEUFER.rastere(grid, N, center, gs, teile, a0, null, 0);
+var aus = [];
+for (var k = 0; k < grid.length; k++) if (grid[k]) aus.push(k);
+console.log(JSON.stringify(aus));
+""" % (open(_JS, encoding="utf-8").read(), N, center, gs, a0,
+       json.dumps(teile))
+    with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False,
+                                     encoding="utf-8") as f:
+        f.write(hilf)
+        pfad = f.name
+    try:
+        aus = subprocess.run(["node", pfad], capture_output=True, text=True,
+                             timeout=120)
+        if aus.returncode != 0:
+            return None, (aus.stderr or "")[-300:]
+        return set(json.loads(aus.stdout.strip().splitlines()[-1])), ""
+    finally:
+        os.unlink(pfad)
+
+
+_N, _CTR, _GS, _A0 = 240, 120, 0.9, 0.31
+_g_lb, _L_lb = geom("eesm", p=4, shaftD=38.0)
+_teile_lb = LB.teile(_g_lb, _L_lb)["teile"]
+_js, _fehler = _js_zellen(_teile_lb, _N, _CTR, _GS, _A0)
+
+if _js is None:
+    pruefe(False, f"JS-Rasterer nicht ausfuehrbar: {_fehler}")
+else:
+    _py = set()
+
+    def _setz(xmm, ymm):
+        _i = int(_CTR + xmm * _GS)
+        _j = int(_CTR + ymm * _GS)
+        if 0 <= _i < _N and 0 <= _j < _N:
+            _py.add(_j * _N + _i)
+
+    _n = LB.rastere(_teile_lb, _setz, 0.5 / _GS, _A0)
+    _fehlt, _zuviel = _js - _py, _py - _js
+    pruefe(_n == len([t for t in _teile_lb
+                      if t["rolle"] in LB.UNMAGNETISCH]),
+           f"Python-Rasterer stempelt alle {_n} unmagnetischen Teile")
+    pruefe(not _fehlt and not _zuviel,
+           f"und trifft dieselben {len(_js)} Zellen wie die JS-Fassung "
+           f"(fehlen {len(_fehlt)}, zuviel {len(_zuviel)})")
+
+# Und die Formen einzeln -- damit ein roter Test sagt, WELCHE auseinanderlaeuft.
+for _art, _kw in (("eesm", dict(p=4, shaftD=38.0)),
+                  ("synrm", dict(p=4, shaftD=38.0)),
+                  ("asm", dict(p=4, shaftD=38.0)),
+                  ("gsm", dict(p=2, shaftD=38.0))):
+    _g2, _L2 = geom(_art, **_kw)
+    _t2 = [t for t in LB.teile(_g2, _L2)["teile"]
+           if t["rolle"] in LB.UNMAGNETISCH]
+    if not _t2:
+        continue
+    _js2, _f2 = _js_zellen(_t2, _N, _CTR, _GS, _A0)
+    _py2 = set()
+
+    def _setz2(xmm, ymm, _s=_py2):
+        _i = int(_CTR + xmm * _GS)
+        _j = int(_CTR + ymm * _GS)
+        if 0 <= _i < _N and 0 <= _j < _N:
+            _s.add(_j * _N + _i)
+
+    LB.rastere(_t2, _setz2, 0.5 / _GS, _A0)
+    _formen = sorted({t["form"] for t in _t2})
+    pruefe(_js2 is not None and _js2 == _py2,
+           f"{_art}: JS und Python treffen dieselben Zellen "
+           f"(Formen {', '.join(_formen)}; "
+           f"{len(_js2 or [])} gegen {len(_py2)})")
+
 print("\n" + "=" * 62)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

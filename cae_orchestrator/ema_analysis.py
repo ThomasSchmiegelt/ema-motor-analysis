@@ -84,6 +84,13 @@ def _evict_lu() -> None:
 # Material constants
 Br_NdFeB   = 1.15   # T – NdFeB N35 remanence
 MU_R_MAG   = 1.05   # NdFeB relative permeability
+# Wie stark eine eingepraegte Spulendurchflutung im Raster wiegt.
+#
+# Dieselbe Groessenordnung wie die Magnet-Ersatzstroeme (`J_amp = 6000/N`):
+# beide landen in derselben rechten Seite, und ein Faktor daneben verschoebe
+# nur die Anzeige -- kalibriert wird das Feld ohnehin an `_analytical_Bgap`.
+J_SPULE_SKALA = 6000.0
+
 MU_R_IRON  = 500.0  # electrical steel (linear; see _saturate_mu for the B-H pass)
 MU0        = 4e-7 * math.pi
 B_SAT_IRON = 2.0    # T – electrical-steel saturation knee (nonlinear μ pass)
@@ -327,13 +334,76 @@ def _rasterise(geom: dict, N: int, rotor_angle: float = 0.0,
                    - iq * math.sin(elAng - rotor_angle * p_pairs)) / IQ_REF
             J[mask] += cur * J_slot_scale
 
+    # ── Der Laeufer einer Maschine OHNE Magnete ──────────────────────────
+    #
+    # Bis zum 20.09.2026 baute dieser Rasterer fuer JEDE Bauart denselben
+    # PM-Laeufer -- Ziffer fuer Ziffer. Gemessen an einem Schenkelpollaeufer
+    # (2p = 8, Polbedeckung 0,55): 2,2 % Luft im Laeuferring, wo 45 % hin
+    # gehoeren, dazu 1224 Magnetzellen, die die Maschine gar nicht hat. Der
+    # Reluktanzunterschied -- der die Bauart AUSMACHT -- fehlte vollstaendig.
+    # Die Pipeline weist die Feldstufe fuer diese Arten zwar ab
+    # (`_gate_maschinenart`), aber jeder andere Weg in denselben Loeser tut
+    # das nicht: `feldbild`, `ema_welle.pruefen`, `ema_optimize._eval_geom`
+    # (und damit Zielwertsuche, Parameterstudie, Vorauswahl), der Handy-Pfad.
+    #
+    # Gezeichnet wird deshalb aus DERSELBEN Quelle wie die Leinwand:
+    # `ema_laeuferbild.teile` liefert die Teile, `rastere` stempelt alles
+    # Unmagnetische heraus. Damit koennen Bild und Feld nicht auseinander
+    # laufen -- sie lesen dieselbe Funktion.
+    _laeufer_teile = None
+    try:
+        import ema_maschinenart as _MAv
+        if not _MAv.hole(_MAv.art_code(geom)).hat_magnete:
+            import ema_laeuferbild as _LBv
+            _erg_lb = _LBv.teile(geom, float(geom.get("axialLen") or 80.0))
+            _laeufer_teile = _erg_lb.get("teile") or []
+    except Exception:                                        # noqa: BLE001
+        _laeufer_teile = None                # lieber der alte Weg als gar keiner
+
+    if _laeufer_teile:
+        # Eine halbe Zelle Abtastschritt, wie im JS -- in MILLIMETERN, weil die
+        # Teile in mm kommen.
+        _schritt_mm = 0.5 / max(sc, 1e-9)
+        _zellen = []
+
+        def _setz_mu(xmm, ymm):
+            _i = int(ctr + xmm * sc)
+            _j = int(ctr + ymm * sc)
+            if 0 <= _i < N and 0 <= _j < N:
+                mu[_j, _i] = 1.0
+
+        def _sammle(xmm, ymm):
+            _i = int(ctr + xmm * sc)
+            _j = int(ctr + ymm * sc)
+            if 0 <= _i < N and 0 <= _j < N:
+                _zellen.append((_j, _i))
+
+        import ema_laeuferbild as _LBv2
+        for _t in _laeufer_teile:
+            if str(_t.get("rolle")) not in _LBv2.UNMAGNETISCH:
+                continue
+            _zellen = []
+            _LBv2._stempel(_t, _setz_mu, _schritt_mm, rotor_angle, _sammle)
+            # Die EINGEPRAEGTE Durchflutung der Erregerspule. Sie ist
+            # Gleichstrom und damit magnetostatisch exakt darstellbar -- anders
+            # als der Kaefig, der ein zeitabhaengiges Feld braucht und deshalb
+            # ueber `feld2d` (Elmer, harmonisch) laeuft.
+            _f = float(_t.get("durchflutung_A") or 0.0)
+            if _f and _zellen:
+                _je = _f / float(len(_zellen)) * (J_SPULE_SKALA / N)
+                for _jz, _iz in _zellen:
+                    J[_jz, _iz] += _je
+
     # Magnets – permanent magnet modelled via numerical curl of M.
     # Standard 2-D FEM approach: J_z_eq = ∂My/∂x − ∂Mx/∂y where M = amp·t̂
     # inside the magnet and 0 outside.  The finite-difference gradient at the
     # boundary pixels automatically produces the correct surface-current term
     # without point-source artefacts.
     poles    = int(geom["p"]) * 2
-    legs, _meta = magnet_legs(geom)   # single source of truth (ema_topology)
+    # Eine Bauart ohne Magnete bekommt keine. `magnet_legs` fragt die
+    # Maschinenart NICHT (es ist die Magnetgeometrie, nicht die Maschine) und
+    # lieferte deshalb auch fuer ASM, SynRM, EESM und GSM Schenkel.
+    legs = [] if _laeufer_teile else magnet_legs(geom)[0]
 
     J_amp  = 6000.0 / N
     Mx_acc = np.zeros((N, N), dtype=np.float32)

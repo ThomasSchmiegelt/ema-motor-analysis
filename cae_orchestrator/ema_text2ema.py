@@ -169,6 +169,29 @@ SCHEMA = {
     "erregerSpuleForm": {"kind": "enum", "opts": ["rechteck", "kegel"],
                          "def": "rechteck", "geom": True, "adv": True,
                          "desc": "Form der Erregerspule: rechteckig oder kegelig gewickelt"},
+    # ── Schenkelpol in MILLIMETERN ──────────────────────────────────────
+    #
+    # Bis zum 20.09.2026 war jede Abmessung des Schenkelpols ein Verhaeltnis
+    # (Polbedeckung, Schuh-, Kern-, Polhoehenanteil). Das ist richtig fuer
+    # einen ersten Wurf und falsch, sobald jemand eine Zeichnung vor sich hat:
+    # dort stehen Millimeter. 0 heisst weiter "wie bisher ableiten", jede
+    # bestehende Auslegung bleibt damit Ziffer fuer Ziffer dieselbe; ein
+    # gesetzter Wert wird GENOMMEN und nachgerechnet, nicht geklemmt.
+    "polSchuhBreiteMm": {"kind": "num", "lo": 0.0, "hi": 400.0, "def": 0.0,
+                         "geom": True, "adv": True,
+                         "desc": "Breite des POLSCHUHS in mm (0 = aus der Polbedeckung ableiten). Sie sitzt am Anfang der Kette: aus ihr folgen Kernbreite, Deckung und der Platz zwischen den Polen"},
+    "polKernBreiteMm": {"kind": "num", "lo": 0.0, "hi": 400.0, "def": 0.0,
+                        "geom": True, "adv": True,
+                        "desc": "Breite des POLKERNS in mm (0 = aus dem Fluss ableiten). Ein schmalerer Kern saettigt — das rechnet B_kern_T aus und verbietet es nicht"},
+    "erregerSpuleDickeMm": {"kind": "num", "lo": 0.0, "hi": 200.0, "def": 0.0,
+                            "geom": True, "adv": True,
+                            "desc": "Dicke der Erregerspule je Seite in mm (0 = aus der Stromdichte ableiten). Dicke mal Hoehe ist der Kupferquerschnitt — wer sie vorgibt, gibt die Stromdichte vor"},
+    "erregerSpuleHoeheMm": {"kind": "num", "lo": 0.0, "hi": 400.0, "def": 0.0,
+                            "geom": True, "adv": True,
+                            "desc": "Hoehe der Erregerspule in mm (0 = ableiten). Gemessen wird ab der Spulenoberkante unter dem Polschuh nach innen"},
+    "polKegelWinkelGrad": {"kind": "num", "lo": 0.0, "hi": 45.0, "def": 0.0,
+                           "geom": True, "adv": True,
+                           "desc": "Kegelwinkel des Polkerns in Grad (0 = das Verhaeltnis aus erregerSpuleForm). Positiv heisst nach innen schmaler. Ein WINKEL ist das, was auf einer Zeichnung steht; das Verhaeltnis haengt an der Kernhoehe"},
     "erregerSpuleFuellung": {"kind": "enum", "opts": ["vorgabe", "max"],
                          "def": "vorgabe", "geom": True, "adv": True,
                          "desc": "Was die Erregerspule bemisst: 'vorgabe' die Stromdichte (fieldCurrentDensity), 'max' der gezeichnete Bauraum zwischen den Polen. Bei 'max' wird die Spule kegelig in den Zwischenpolraum gelegt, die Stromdichte faellt entsprechend und der Polschuh darf mitwachsen, wenn das mehr Wickelraum bringt"},

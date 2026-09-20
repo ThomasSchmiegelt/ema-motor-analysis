@@ -2703,6 +2703,32 @@ def _tor_layout(geom: dict, opts: dict | None = None, log=None) -> list:
 
     Gibt die nicht-fatalen Befunde als Warnungen zurueck.
     """
+    # ── Zuerst: ist es ueberhaupt DIESE Maschine? ────────────────────────
+    #
+    # Dieser Pfad baut den Laeufer aus `magnet_legs` -- also Magnete, und sonst
+    # nichts. Fuer eine Bauart ohne Magnete ist das nicht ungenau, sondern eine
+    # ANDERE Maschine: gemessen bekam ein Schenkelpollaeufer 1224 Magnetzellen
+    # und einen vollen Eisenring statt 45 % Zwischenpolluft. Die Pipeline weist
+    # die 3-D-Stufe fuer diese Arten laengst ab (`_gate_maschinenart`), dieser
+    # Einstieg tat es nicht -- und ein stilles Ersatzmodell ist genau das,
+    # wogegen `ema_maschinenart` gebaut ist.
+    #
+    # Die ASM hat einen eigenen Weg (`feld3d`/`ema_em3d_harm`, harmonisch), und
+    # der wird auch genannt statt nur abzusagen.
+    import ema_maschinenart as _MA3
+    _art3 = _MA3.art_code(geom)
+    if not _MA3.hole(_art3).hat_magnete:
+        _weg = _MA3.hole(_art3).feldweg
+        raise _MA3.ArtNichtUnterstuetzt(
+            f"Dieser 3-D-Pfad zeichnet den Laeufer aus den MAGNETEN, und "
+            f"'{_art3}' hat keine. Gebaut wuerde eine andere Maschine als die "
+            f"gerechnete (gemessen: 1224 Magnetzellen und ein voller Eisenring "
+            f"statt der Zwischenpolluft). "
+            + (f"Fuer '{_art3}' geht der 3-D-Weg ueber `feld3d` "
+               f"(ema_em3d_harm, harmonisch)."
+               if _weg and _weg != "keiner" else
+               f"Fuer '{_art3}' gibt es heute keinen 3-D-Weg."))
+
     from ema_rotorcheck import rotor_layout_check
     try:
         chk = rotor_layout_check(geom)

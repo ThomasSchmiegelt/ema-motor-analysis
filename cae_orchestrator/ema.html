@@ -915,6 +915,23 @@
         die Spule in beiden Fällen — er hält sie gegen die Fliehkraft.
       </div>
     </div>
+    <div class="input-group art-feld" data-arten="eesm gsm" style="display:none">
+      <label style="grid-column:1/-1;margin-bottom:3px">Schenkelpol in Millimetern</label>
+      <label>Breite Polschuh</label><input type="number" id="pol_b_schuh" step="0.1" min="0">
+      <label>Breite Kern</label><input type="number" id="pol_b_kern" step="0.1" min="0">
+      <label>Dicke Spule</label><input type="number" id="pol_d_spule" step="0.1" min="0">
+      <label>Höhe Spule</label><input type="number" id="pol_h_spule" step="0.1" min="0">
+      <label>Kegelwinkel °</label><input type="number" id="pol_kegel" step="0.5" min="0">
+      <div class="hint" style="grid-column:1/-1;font-size:11px;color:#9aa">
+        <b>0 heißt: wie bisher ableiten</b> — aus Polbedeckung, Fluss und Stromdichte;
+        jede bestehende Auslegung bleibt damit Ziffer für Ziffer dieselbe. Ein
+        gesetzter Wert wird <b>genommen und nachgerechnet, nicht geklemmt</b>: was
+        nicht geht, steht mit beiden Zahlen im Befund (ein stillschweigend
+        geklemmter Wert sieht aus wie ein angenommener). Der <b>Kegelwinkel</b>
+        ersetzt das Verhältnis aus „Form der Erregerspule" — ein Winkel ist das,
+        was auf einer Zeichnung steht, das Verhältnis hängt an der Kernhöhe.
+      </div>
+    </div>
     <div class="input-group wick-mat" data-arten="eesm gsm" style="display:none">
       <label style="grid-column:1/-1;margin-bottom:3px">Was die Erregerspule bemisst</label>
       <select id="spule_fuellung" style="grid-column:1/-1"></select>
@@ -13335,6 +13352,11 @@ function escHtml(s) {
                          mat_field: "fieldMat", mat_armature: "armatureMat",
                          spule_form: "erregerSpuleForm",
                          spule_fuellung: "erregerSpuleFuellung",
+                         pol_b_schuh: "polSchuhBreiteMm",
+                         pol_b_kern: "polKernBreiteMm",
+                         pol_d_spule: "erregerSpuleDickeMm",
+                         pol_h_spule: "erregerSpuleHoeheMm",
+                         pol_kegel: "polKegelWinkelGrad",
                          b_ziel: "bZielT",
                          rotor_type: "rotorType", rotor_bars: "rotorBars",
                          rotor_skew: "rotorSkewSlots",
@@ -14413,6 +14435,8 @@ function escHtml(s) {
             // Aenderung nicht bemerkt, ist schlimmer als keine: sie friert
             // die alte Maschine ein und sieht dabei richtig aus.
             g.erregerSpuleForm, g.erregerSpuleFuellung,
+            g.polSchuhBreiteMm, g.polKernBreiteMm, g.erregerSpuleDickeMm,
+            g.erregerSpuleHoeheMm, g.polKegelWinkelGrad,
             g.daempferkaefig, g.daempferStaebeJePol,
             g.daempferMat, g.bZielT, g.poleArcFrac, g.slotWidthRatio,
             g.slotDepth, g.rotorBars, g.armatureWinding

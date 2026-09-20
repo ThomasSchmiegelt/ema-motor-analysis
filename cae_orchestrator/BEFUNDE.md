@@ -17,6 +17,123 @@ kann.
 
 ---
 
+## 2026-09-20 — Der Feldlöser sah bei allen fünf Bauarten denselben PM-Läufer
+
+**Beobachtung** (gemeldet): „die geometrie wird zur zeit nicht korrekt an den
+feldlöser weitergereicht. überprüfe auch die berechnungen der anderen neuen
+maschinen" — und nachgereicht: „auch die berechnung in elmer haut nicht hin."
+
+**Messung.** `ema_analysis.py` enthält die Zeichenkette `machineType` **null
+mal**. Der 2-D-FDM-Rasterer baut den Läufer aus `magnet_legs` — also Magnete,
+und sonst nichts. Nachgemessen über alle fünf Bauarten, Raster 200 × 200,
+derselbe Payload:
+
+| Art | Magnetzellen | Eisenzellen |
+|---|---:|---:|
+| PSM | 1224 | 15627 |
+| ASM | 1224 | 15627 |
+| SynRM | 1224 | 15627 |
+| EESM | 1224 | 15627 |
+| GSM | 1224 | 15627 |
+
+**Bit für Bit dieselbe Maschine.** Eine Asynchronmaschine bekam Permanent­magnete
+und keinen Käfig; ein Reluktanzläufer Magnete statt leerer Barrieren; ein
+Schenkelpolläufer Magnete statt Polen und Erregerspulen; die Gleichstrom­maschine
+Magnete statt eines gewickelten Ankers.
+
+Am Schenkelpolläufer (2p = 8, Polbedeckung 0,55) in Zahlen, die den Kern der
+Sache treffen: **2,2 % Luft im Läuferring, wo 45 % hingehören.** Der
+Reluktanz­unterschied — der die Bauart *ausmacht* — fehlte vollständig.
+
+**Warum es niemandem auffiel:** die Pipeline weist die Feldstufe für diese Arten
+ab (`_gate_maschinenart`), und dort schaut man hin. Jeder **andere** Einstieg in
+denselben Löser tat es nicht: `feldbild`, `ema_welle.pruefen` (ein echter
+Feldlauf, auf dem die Getriebe-Bohrungsentscheidung ruht),
+`ema_optimize._eval_geom` (und damit Zielwertsuche, Parameterstudie,
+`screen`, `leistung`, `ausreizen`, die KI-Vorsortierung), der Handy-Pfad.
+Keines dieser Module nennt die Maschinenart auch nur.
+
+**Und Elmer genauso.** `ema_em3d.py`: null Treffer auf `maschinenart`, elf auf
+`magnet_legs`/`magnet_rects` — der 3-D-Pfad baut denselben PM-Läufer. Die beiden
+ASM-Löser (`ema_em2d_harm`, `ema_em3d_harm`) sind sauber, sie rufen
+`pruefe_stufe`; sie sind aber auch nur für die ASM gebaut.
+
+**Status: behoben.**
+
+1. **Der Läufer kommt aus DERSELBEN Quelle wie die Leinwand.** `_rasterise`
+   fragt `ema_maschinenart`; hat die Art keine Magnete, stempelt es
+   `ema_laeuferbild.teile()` ins Gitter — genau die Teile, die die Live-Vorschau
+   zeichnet. Damit können Bild und Feld nicht auseinanderlaufen, sie lesen eine
+   Funktion. Neu dafür `ema_laeuferbild.rastere`/`_stempel`, der **Python-
+   Zwilling** von `rastere`/`_stempel` in `ema_laeufer.js` (dieselbe Lage wie
+   `magnet_legs` und sein JS-Spiegel).
+   Die eingeprägte **Erregerdurchflutung** geht als Stromdichte mit: Gleichstrom
+   ist magnetostatisch exakt darstellbar, anders als der Käfig.
+   Gemessen danach — Luft im Läuferring, Raster 300:
+
+   | Art | Magnetzellen | Luft im Ring |
+   |---|---:|---:|
+   | PSM | 2752 | 1,7 % |
+   | ASM | 0 | 13,1 % |
+   | SynRM | 0 | 18,8 % |
+   | EESM | 0 | 54,7 % |
+   | GSM | 0 | 18,1 % |
+
+   **Die PSM bleibt Ziffer für Ziffer dieselbe** — `test_fdm_golden.py` grün.
+
+2. **Der SynRM war dabei der zweite Fund.** Seine Flussbarrieren kommen als Form
+   `tasche`, und die fehlte im ersten Wurf des Python-Stempels: gemessen **0,0 %
+   Luft**, also ein Vollzylinder — ein Reluktanzläufer ohne Reluktanz­unterschied
+   ist keine Maschine. Jetzt 18,8 %.
+
+3. **Der 3-D-Elmer-Pfad weist ab, statt zu nähern.** `ema_em3d._tor_layout`
+   fragt zuerst die Maschinenart und nennt für die ASM den Weg, den es gibt
+   (`feld3d`/`ema_em3d_harm`, harmonisch), statt nur abzusagen — dieselbe
+   Haltung wie `ema_maschinenart` überall.
+
+## 2026-09-20 — Der Schenkelpol hatte keine Millimeter
+
+**Beobachtung** (gemeldet): „ich möchte auch abmasse der eesm eingeben … breite
+spule, breite kern, polschuh, höhe der spule, kegelwinkel. Das soll sich dann
+auch im canvas ändern."
+
+Jede Abmessung des Schenkelpols war ein **Verhältnis** (`polbedeckung`,
+`polSchuhAnteil`, `polKernAnteil`, `polHoeheAnteil`, `KEGEL_VERJUENGUNG`).
+Richtig für einen ersten Wurf und falsch, sobald jemand eine Zeichnung vor sich
+hat: dort stehen Millimeter.
+
+**Status: behoben.** Fünf neue Schlüssel — `polSchuhBreiteMm`,
+`polKernBreiteMm`, `erregerSpuleDickeMm`, `erregerSpuleHoeheMm`,
+`polKegelWinkelGrad` — im Geometrie-Reiter unter *Maschinenart*, über
+`cae_cli --set` und in der Parametertabelle.
+
+Zwei Entscheidungen dabei, beide der Hausregel folgend:
+
+* **0 heißt „wie bisher ableiten".** Jede bestehende Auslegung bleibt damit
+  Ziffer für Ziffer dieselbe.
+* **Ein gesetzter Wert wird genommen und nachgerechnet, nicht geklemmt.** Ein
+  geklemmter Wert sieht für den Aufrufer wie ein angenommener aus (dieselbe
+  Regel wie `cae_cli --set`), und bei einer Zeichnung ist das besonders schlimm:
+  wer 24 mm einträgt und 21,7 zurückbekommt, ohne dass es jemand sagt, zeichnet
+  die falsche Maschine. Was nicht geht, steht mit **beiden** Zahlen in
+  `masse_befund` und macht `passt` falsch — etwa „Spulendicke: 40,00 mm liegt
+  außerhalb dessen, was hier darstellbar ist (2,00…5,36 mm)".
+
+Der **Kegelwinkel** ersetzt das Verhältnis: ein Winkel ist das, was auf einer
+Zeichnung steht, das Verhältnis hängt an der Kernhöhe.
+
+Die Kette ist geschlossen und nachgemessen — dieselbe Vorgabe bewegt Zeichnung
+*und* Feld, weil beide `teile()` lesen: Polschuh 55 mm → Luft im Läuferring
+54,7 → 37,8 %; Spule 4 × 35 mm → Zellen mit Spulenstrom 1764 → 2020; Kegel 5° →
+54,7 → 56,1 %.
+
+**Nebenbefund, mitbehoben:** die Begründung, warum ein Pol nicht passt, stürzte
+ab. `schranken[bindend]` führt nur die vier *geometrischen* Schranken, `bindend`
+kann aber auch `kernfluss` oder (neu) `vorgabe` sein — `KeyError` an genau der
+Stelle, die erklären soll, warum etwas nicht geht.
+
+---
+
 ## 2026-09-19 — Der Planetensatz waren drei lose Räder, und niemand maß nach
 
 **Beobachtung** (gemeldet): „hier `/home/cae/t2g/TextToGeometry` gibt es noch ein

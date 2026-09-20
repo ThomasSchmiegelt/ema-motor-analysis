@@ -740,6 +740,93 @@ def koerper(geom: dict, axial_mm: float) -> dict:
                 "kein wickelbarer Raum (d_aussen %.2f mm, r %.1f…%.1f mm) -- "
                 "bemessen wurde ueber die Stromdichte."
                 % (_w["d_aussen_mm"], _w["r_innen_mm"], _w["r_aussen_mm"]))
+    # ── Maße von Hand: 0 heisst ableiten, ein Wert ist eine FORDERUNG ─────
+    #
+    # Bis hierher ist jede Abmessung des Schenkelpols aus Verhaeltnissen
+    # gerechnet (Polbedeckung, Schuh-, Kern-, Polhoehenanteil). Das ist richtig
+    # fuer einen ersten Wurf und falsch, sobald jemand eine Zeichnung vor sich
+    # hat: dort stehen Millimeter.
+    #
+    # Ein gesetzter Wert wird deshalb GENOMMEN und dann nachgerechnet -- nicht
+    # geklemmt. Ein geklemmter Wert sieht fuer den Aufrufer wie ein
+    # angenommener aus (dieselbe Regel wie `cae_cli --set`), und bei einer
+    # Zeichnung ist das besonders schlimm: wer 24 mm eintraegt und 21,7
+    # zurueckbekommt, ohne dass es jemand sagt, zeichnet die falsche Maschine.
+    # Was nicht passt, steht in `masse_befund` und macht `passt` falsch.
+    masse_befund = []
+
+    def _vorgabe(schluessel, ist, name, spanne=None):
+        soll = float(geom.get(schluessel) or 0.0)
+        if soll <= 0.0:
+            return ist, False
+        if spanne and not (spanne[0] <= soll <= spanne[1]):
+            masse_befund.append(
+                f"{name}: {soll:.2f} mm liegt ausserhalb dessen, was hier "
+                f"darstellbar ist ({spanne[0]:.2f}…{spanne[1]:.2f} mm)")
+            return ist, True
+        return soll, True
+
+    # Polschuhbreite. Sie sitzt am Anfang der Kette: aus ihr folgen die
+    # Kernbreite (Fluss), die Deckung und der Platz zwischen den Polen.
+    _b_schuh_max = tau_pol * BEDECKUNG_MAX
+    b_schuh, _s_gesetzt = _vorgabe("polSchuhBreiteMm", b_schuh,
+                                   "Polschuhbreite", (2.0, _b_schuh_max))
+    if _s_gesetzt:
+        b_schuh_k = min(b_schuh * (r_kern_aussen / max(r_rot, 1e-9)),
+                        2.0 * r_kern_aussen * math.sin(
+                            min((b_schuh / 2.0) / max(r_rot, 1e-9),
+                                0.5 * math.pi - 1e-3)))
+        alpha_eff = b_schuh / max(tau_pol, 1e-9)
+
+    # Kernbreite. Sie traegt den Fluss des Schuhs -- zu schmal heisst nicht
+    # "geht nicht", sondern "saettigt", und genau das rechnet `B_kern_T` unten
+    # ohnehin aus. Geprueft wird hier nur, was GEOMETRISCH nicht geht.
+    _b_kern_max = 2.0 * math.sqrt(max(r_max ** 2 - r_kern_aussen ** 2, 0.0))
+    b_kern_aussen, _k_gesetzt = _vorgabe("polKernBreiteMm", b_kern_aussen,
+                                         "Kernbreite", (1.0, _b_kern_max))
+    if _k_gesetzt:
+        b_kern_innen = b_kern_aussen * kegel
+        bindend = "vorgabe"
+
+    # Kegelwinkel statt Verhaeltnis. `KEGEL_VERJUENGUNG` ist ein Verhaeltnis
+    # innen:aussen und damit von der Kernhoehe abhaengig; ein WINKEL ist das,
+    # was auf einer Zeichnung steht. Positiv heisst: nach innen schmaler.
+    _kw = float(geom.get("polKegelWinkelGrad") or 0.0)
+    if _kw > 0.0:
+        _db = 2.0 * h_kern * math.tan(math.radians(min(_kw, 45.0)))
+        if _db >= b_kern_aussen - SPULE_MIN_MM:
+            masse_befund.append(
+                f"Kegelwinkel {_kw:.1f} Grad: der Kern liefe auf "
+                f"{max(b_kern_aussen - _db, 0.0):.2f} mm zusammen, bevor er das "
+                f"Joch erreicht")
+        else:
+            b_kern_innen = b_kern_aussen - _db
+            kegel = b_kern_innen / max(b_kern_aussen, 1e-9)
+
+    # Spulendicke und -hoehe. Beide zusammen sind der Kupferquerschnitt; wer
+    # sie vorgibt, gibt damit die Stromdichte vor, und die steht als Befund da.
+    _d_max = max((b_schuh_k - b_kern_aussen) / 2.0 - SCHUH_UEBERSTAND_MM, 0.1)
+    d_spule, _d_gesetzt = _vorgabe("erregerSpuleDickeMm", d_spule,
+                                   "Spulendicke", (SPULE_MIN_MM, _d_max))
+    _h_max = max(r_kern_aussen - SPULE_UNTER_SCHUH_MM - r_wickel_boden, 0.1)
+    h_spule, _h_gesetzt = _vorgabe("erregerSpuleHoeheMm", h_spule,
+                                   "Spulenhoehe", (SPULE_MIN_MM, _h_max))
+    if _d_gesetzt or _h_gesetzt:
+        d_spule_innen = d_spule
+        r_spule_aussen = r_kern_aussen - SPULE_UNTER_SCHUH_MM
+        r_spule_innen = max(r_spule_aussen - h_spule, r_wickel_boden)
+        h_spule = r_spule_aussen - r_spule_innen
+        r_spule = r_spule_aussen
+        a_wick = 2.0 * d_spule * h_spule
+        # Die Ecke muss weiterhin im Laeufer bleiben -- das ist keine
+        # Geschmacksfrage, sondern die Wand zum Staender.
+        _y = max(b_kern_aussen, b_kern_innen) / 2.0 + d_spule
+        if math.hypot(r_spule_aussen, _y) > r_max + 1e-6:
+            masse_befund.append(
+                f"Spule {d_spule:.2f} x {h_spule:.2f} mm: ihre aeussere Ecke "
+                f"laege bei {math.hypot(r_spule_aussen, _y):.2f} mm und damit "
+                f"ausserhalb des Laeufers ({r_max:.2f} mm)")
+
     b_kern = b_kern_aussen                   # was ein Zeichner liest, der nur EINE Breite kennt
 
     # Der Fuss: der Pol sitzt nicht mehr auf einem Ring, er IST bis zur
@@ -807,6 +894,8 @@ def koerper(geom: dict, axial_mm: float) -> dict:
     im_laeufer = max(r_ecke_kern, r_ecke_spule) <= r_rot + 1e-6
     if not spule_passt:
         passt = False
+    if masse_befund:
+        passt = False
 
     if passt:
         grund = ""
@@ -835,12 +924,22 @@ def koerper(geom: dict, axial_mm: float) -> dict:
                  f"Spule (2 x {d_spule:.1f} mm) belegen {belegt:.1f} mm — es "
                  f"bleiben {frei:.1f} mm statt der geforderten "
                  f"{SPULENLUFT_MM:.1f} mm Luft zum Nachbarpol")
+    elif masse_befund:
+        # Eine Vorgabe von Hand, die nicht geht. Sie ist die praeziseste
+        # Auskunft, die es gibt -- also steht sie da und nicht die allgemeine.
+        grund = "; ".join(masse_befund)
     else:
+        # `schranken` fuehrt nur die vier GEOMETRISCHEN Schranken. `bindend`
+        # kann aber auch 'kernfluss' oder 'vorgabe' sein, und dann gab es hier
+        # einen KeyError statt einer Begruendung -- ein Absturz an genau der
+        # Stelle, die erklaeren soll, warum etwas nicht geht.
+        _eng = schranken.get(bindend)
+        _wie = (f"liesse nur {_eng:.1f} mm Kern" if _eng is not None
+                else f"gibt die Kernbreite vor ({b_kern_aussen:.1f} mm)")
         grund = (f"Die Spule ist zu dick fuer diesen Pol: die engste Schranke "
-                 f"ist '{bindend}' und liesse nur {schranken[bindend]:.1f} mm "
-                 f"Kern, unter dem Mindestmass von {b_kern_min:.1f} mm. "
-                 f"Mehr Polbedeckung, weniger Pole oder eine hoehere "
-                 f"Stromdichte")
+                 f"ist '{bindend}' und {_wie}, unter dem Mindestmass von "
+                 f"{b_kern_min:.1f} mm. Mehr Polbedeckung, weniger Pole oder "
+                 f"eine hoehere Stromdichte")
 
     return {
         "poles": poles,
@@ -872,6 +971,11 @@ def koerper(geom: dict, axial_mm: float) -> dict:
         "fuellung": fuellung(geom),
         "fuellung_hinweis": fuellung_hinweis,
         "bedeckung_eff": round(alpha_eff, 4),
+        # Was von Hand gesetzt wurde und ob es geht. Leer heisst: alles
+        # abgeleitet wie bisher.
+        "masse_befund": list(masse_befund),
+        "kegelwinkel_grad": round(math.degrees(math.atan2(
+            (b_kern_aussen - b_kern_innen) / 2.0, max(h_kern, 1e-9))), 2),
         # Der Aussenradius der SPULE ist nicht der des Kerns: die Spule sitzt
         # neben ihm und muesste mit ihrer Ecke sonst aus dem Laeufer treten.
         "r_spule_aussen_mm": round(r_spule, 3),
