@@ -419,7 +419,11 @@ def baue_netz(geom: dict, kaefig: dict, msh_pfad: str,
     """
     import gmsh
 
-    gmsh.initialize()
+    gmsh.initialize(interruptible=False)   # s. `ema_em3d`: ohne die Flagge
+    # setzt gmsh einen Signalhandler, und das geht nur im Hauptthread --
+    # aus einem Flask-Arbeiter scheitert die Vernetzung mit "signal only
+    # works in main thread of the main interpreter". Also genau dann, wenn
+    # der Weg im BROWSER benutzt wird, und nie im Test.
     gmsh.option.setNumber("General.Terminal", 0)
     try:
         gmsh.model.add("asm2d")
@@ -808,6 +812,8 @@ def vorbereiten(payload: dict, rpm: float, last_nm: float, work_dir: str,
     ema_maschinenart.pruefe_stufe(art, "feld")
     import ema_radien
     ema_radien.pruefe_bauform(payload, "feld")   # Netz ist auf Innenlaeufer gebaut
+    import ema_fluss
+    ema_fluss.pruefe_flussweg(payload, "feld")   # Netz ist ein r-theta-Querschnitt
     if art != "asm":
         raise ema_maschinenart.ArtNichtUnterstuetzt(
             f"Die harmonische 2-D-Stufe ist die Kaefiglaeufer-Stufe; "

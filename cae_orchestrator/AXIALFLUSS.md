@@ -1,7 +1,17 @@
 # Axialflussmaschine — Umsetzungsplan bis Stufe 4
 
-**Stand 05.10.2026: nichts davon ist gebaut.** Dieses Dokument ist der Plan, nicht
-der Zustand. Was das Werkzeug heute mit einer Axialflussmaschine tut, steht als
+**Stand 05.10.2026: Stufe 0 ist gebaut, Stufen 1–4 nicht.** Dieses Dokument ist
+der Plan; was davon steht, sagt die Spalte unten.
+
+| Stufe | Stand |
+|---|---|
+| **0 Tor** | ✅ gebaut — `ema_fluss.py`, `fluxPath` im Schema, Tor an drei Stellen, `test_fluss.py` 35/35 |
+| 1 analytisch | offen |
+| 2 feld | offen (Beleg vorhanden: `axialfluss_scheibenprobe.py`) |
+| 3 em3d | offen |
+| 4 cad | offen |
+
+Was das Werkzeug heute mit einer Axialflussmaschine tut, steht als
 Befund in `BEFUNDE.md` (05.10.2026) — kurz: es rechnet sie als Radialflussmaschine
 und beschriftet sie mit ihrem Namen, an zwölf Stellen, ohne Fehlermeldung.
 
@@ -210,7 +220,14 @@ Begründung bleibt, und sie bleibt richtig.
 
 ---
 
-## 2. Stufe 0 — das Tor (vor allem anderen)
+## 2. Stufe 0 — das Tor (vor allem anderen) — **GEBAUT 05.10.2026**
+
+Abnahme gemessen: `test_fluss.py` **35/35**; `test_radien.py` 38/38, `test_maschinenart.py` 129/129, `test_cae_cli.py`, `test_topology.py` und `smoke_test.py` **23/23** unverändert. `flaechen()` gibt für den Radialfall ziffernweise `r_gap_m*L` und `(rotorOD/2)²*L` zurück, `psi_pm` und `rated_torque` kommen hindurch unverändert heraus (178,8 Nm bleibt 178,8 Nm). Axialfluss wird an allen fünf Stufen abgewiesen.
+
+Zwei Dinge sind beim Bauen dazugekommen, die im Plan nicht standen:
+
+- **`_validate` ließ `fluxPath` fallen** (alle `adv`-Schlüssel werden übersprungen). Ein axialer Payload aus Text→Auslegung oder `ema_design_ai` wäre damit still radial geworden — und dann hätte das Tor nie gefeuert. Jetzt wird er durchgereicht, nach demselben Muster wie `rotorPosition` und mit derselben Begründung; `_validate({})` bleibt dabei unverändert lang.
+- **Ein Befund**: `rated_torque` nimmt am Außenläufer `rotorOD/2` statt der Spaltfläche, gemessen **+22,5 %** Dauermoment. Siehe `BEFUNDE.md` (05.10.2026) — nicht repariert, weil die Invarianzbedingung von Stufe 0 Vorrang hat.
 
 **Was entsteht.** `ema_fluss.py`, nach dem Muster von `ema_radien`: nicht „ist es
 axial", sondern die Größen selbst, damit die Aufrufer den Flussweg nicht kennen

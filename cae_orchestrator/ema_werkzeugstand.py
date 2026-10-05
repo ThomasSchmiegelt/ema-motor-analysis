@@ -66,13 +66,39 @@ PHYSIK: tuple[str, ...] = (
     "ema_gsm.py",           # Gleichstrommaschine: Anker, Erregung, Kommutierung
     "ema_thermal.py",       # LPTN, Verluste am Betriebspunkt
     "ema_em2d_harm.py",     # 2-D-Feldstufe (Elmer, harmonisch)
+    "ema_em2d_stat.py",     # 2-D-Feldstufe (Elmer, magnetostatisch) --
+                            # heute Messinstrument gegen den FDM und in
+                            # keiner ausgewiesenen Kennzahl; trotzdem hier,
+                            # weil ein Feldloeser, der spaeter eine Zahl
+                            # traegt, den Fingerabdruck von Anfang an
+                            # bewegen muss statt ab dem Tag, an dem es
+                            # jemand nachtraegt
     "ema_em3d.py",          # 3-D-Feldstufe
+    "ema_em3d_harm.py",     # 3-D-Feldstufe (Elmer, harmonisch) -- die
+                            # Kurzschlussring-Wirkung der ASM. Sie fehlte hier,
+                            # solange der Weg nur ueber `cae_cli feld3d` zu
+                            # erreichen war; seit dem 20.09.2026 haengt er am
+                            # 3-D-Knopf der Oberflaeche, und was er liefert
+                            # (`ring_wirkung`) ist eine Zahl wie jede andere.
     "ema_topology.py",      # Magnetgeometrie -- die Quelle beider Geometriewege
     "ema_wicklung.py",      # Wicklung, Widerstand, Kupfermasse
     "ema_radien.py",        # Radien und Luftspalt
+    "ema_fluss.py",         # Flussweg: die zwei Integrale der Luftspaltflaeche
+                            # (r^1 fuer psi_pm, r^2 fuer das Moment). Eine
+                            # Aenderung daran bewegt Kt UND das Dauermoment.
     "ema_grenzen.py",       # die Tore, die immer gelten
     "ema_schenkelpol.py",   # Polbefestigung (Fliehkraft am Polfuss) + Daempferkaefig
     "ema_eesm_cad.py",      # Schenkelpolgeometrie -- Quelle fuer CAD, Bild und Tor
+    "ema_laeuferbild.py",   # **seit dem 20.09.2026 keine Zeichnung mehr, sondern
+                            # eine QUELLE**: `ema_analysis._rasterise` stempelt
+                            # den magnetlosen Laeufer aus `teile()` ins
+                            # FDM-Gitter, `ema_em2d_stat` baut daraus seine
+                            # OCC-Flaechen, und `ema_pipeline` zeichnet die
+                            # Umrisse. Eine Aenderung daran bewegt damit
+                            # Kennzahlen und nicht nur Bilder.
+    "ema_synrm_cad.py",     # Flussbarrieren des Reluktanzlaeufers -- sie
+                            # stehen im FDM-Raster und bewegen damit jede
+                            # Kennzahl, die aus einem Feldlauf kommt
     "ema_deck.py",          # eigener Strukturweg (Gmsh + CalculiX)
     "ema_z88.py",           # zweite Meinung zur Struktur
     "ema_aster.py",         # dritte Meinung zur Struktur (Code Aster)
@@ -91,6 +117,7 @@ PHYSIK: tuple[str, ...] = (
 # Der Server meldet den Stand jetzt in der Arbeitsanzeige mit; aendert er sich,
 # waehrend eine Seite offen ist, sagt sie es EINMAL.
 OBERFLAECHE: tuple[str, ...] = (
+    "ema.html",             # die Hauptmaske -- seit 04.10.2026 mit drin
     "ema_studio.html",      # Studio-Seite
     "ema_agent.html",       # Schreibtischseite (PI/Hermes)
     "agent_gemein.js",      # das gemeinsame Verhalten beider
@@ -101,6 +128,22 @@ _GIT_SEK = 30.0
 
 _datei_cache: dict = {}          # pfad -> (mtime, groesse, hash)
 _git_cache: tuple = (0.0, None)  # (zeit, antwort)
+
+
+#: Weitere PYTHON-Dateien, deren Aenderung man im Browser sieht -- fuer
+#: `geladen_veraltet`, nicht fuer den Fingerabdruck.
+_WEITERE: tuple[str, ...] = ("server.py", "ema_diagnose.py", "ema_eesm_cad.py",
+                             "ema_asm.py", "ema_gsm.py", "ema_topology.py",
+                             "ema_schenkelpol.py", "ema_synrm_cad.py")
+
+#: Dateien, die der Server AUSLIEFERT statt sie zu importieren. Sie brauchen
+#: keinen Neustart -- ein Neuladen der Seite genuegt. Der Unterschied gehoert
+#: in die Meldung: „Server neu starten" an der falschen Stelle kostet einen
+#: Serverstart mitten in einem Lauf, und „Seite neu laden" an der falschen
+#: Stelle kostet die naechste halbe Stunde Fehlersuche.
+_AUSGELIEFERT: tuple[str, ...] = ("ema.html", "ema_laeufer.js",
+                                  "ema_mobil.html", "ema_studio.html",
+                                  "ema_agent.html", "agent_gemein.js")
 
 
 def _datei_hash(pfad: str) -> str | None:
@@ -192,6 +235,86 @@ def stand_oberflaeche() -> dict:
     roh = "\n".join(f"{n}:{dateien[n]}" for n in sorted(dateien))
     return {"hash": hashlib.sha1(roh.encode("utf-8")).hexdigest()[:12],
             "dateien": dateien, "fehlt": fehlt}
+
+
+#: Der Stand der Dateien in dem Augenblick, in dem DIESER Prozess sie geladen
+#: hat. Wird beim ersten Aufruf von `geladen_veraltet` gefuellt -- spaeter ist
+#: es zu spaet, dann steht die Datei schon anders auf der Platte.
+_geladen_beim_start: dict | None = None
+
+
+def geladen_veraltet() -> dict:
+    """Laeuft dieser Prozess noch mit dem Code, der auf der Platte liegt?
+
+    **Warum das eine eigene Frage ist.** Python laedt ein Modul EINMAL; ein
+    ``import`` mitten in einer Route sieht danach aus, als hole er die Datei
+    frisch, und tut es nicht. Wer waehrend eines laufenden Servers eine
+    Rechendatei aendert, bekommt im Browser weiter die alte Fassung -- ohne
+    dass irgendetwas widerspricht.
+
+    Gemessen am 20.09.2026 und zweimal am selben Tag gemeldet: der Laeufer der
+    Reluktanzmaschine kam als ``tasche``-Langloch statt als Flussbarriere
+    heraus (also „wieder eine PSM ohne Magnete"), und ein Polkern schien im
+    CAD zu fehlen. Beide Male lag es nicht am Code, sondern daran, dass der
+    Serverprozess aelter war als er. Das ist die schlimmste Sorte Fehler, weil
+    sie das Vertrauen in das Gemessene kostet: man sucht im Quelltext nach
+    etwas, das dort laengst richtig steht.
+
+    Verglichen werden die Dateihashes von JETZT mit denen beim ersten Aufruf
+    (der beim Serverstart passiert). Gibt ``{"veraltet": [...], "seit": ...}``
+    zurueck -- die Liste ist leer, solange nichts angefasst wurde.
+    """
+    global _geladen_beim_start
+    jetzt = {}
+    for name in tuple(PHYSIK) + tuple(_WEITERE) + tuple(_AUSGELIEFERT):
+        h = _datei_hash(os.path.join(_HIER, name))
+        if h is not None:
+            jetzt[name] = h
+    if _geladen_beim_start is None:
+        _geladen_beim_start = {"dateien": dict(jetzt), "zeit": time.time()}
+        return {"veraltet": [], "seit": _geladen_beim_start["zeit"], "n": 0,
+                "neustart": [], "neuladen": []}
+    alt = _geladen_beim_start["dateien"]
+    veraltet = sorted(n for n in set(alt) | set(jetzt)
+                      if alt.get(n) != jetzt.get(n))
+    # **Zwei Faelle, und sie brauchen zwei verschiedene Handgriffe.** Eine
+    # importierte Python-Datei liegt seit dem Start im Speicher -- da hilft nur
+    # ein Serverneustart. Eine ausgelieferte Datei (`ema.html`,
+    # `ema_laeufer.js`, …) liest der Browser bei jedem Aufruf neu -- da genuegt
+    # ein Neuladen der Seite. Beides in einen Satz zu werfen kostet entweder
+    # einen Serverstart mitten in einem vierstuendigen Lauf oder die naechste
+    # halbe Stunde Fehlersuche.
+    neuladen = [n for n in veraltet if n in _AUSGELIEFERT]
+    neustart = [n for n in veraltet if n not in _AUSGELIEFERT]
+    return {"veraltet": veraltet, "seit": _geladen_beim_start["zeit"],
+            "n": len(veraltet), "neustart": neustart, "neuladen": neuladen}
+
+
+def veraltet_text(v: dict) -> str:
+    """Eine Zeile fuer die Oberflaeche -- oder leer, wenn alles frisch ist.
+
+    Sie sagt, WELCHER Handgriff hilft, und nicht bloss, dass etwas alt ist.
+    """
+    v = v or {}
+    if not (v.get("n") or 0):
+        return ""
+
+    def _liste(xs):
+        xs = list(xs)
+        return ", ".join(xs[:4]) + (f" (+{len(xs) - 4})" if len(xs) > 4 else "")
+
+    z = []
+    if v.get("neustart"):
+        z.append(f"Der Server laeuft noch mit dem Code von seinem Start: "
+                 f"{_liste(v['neustart'])} wurde(n) seither geaendert. Python "
+                 f"laedt ein Modul EINMAL \u2014 was der Browser zeigt, kommt "
+                 f"aus der ALTEN Fassung. **Server neu starten**; Neuladen der "
+                 f"Seite genuegt hier nicht.")
+    if v.get("neuladen"):
+        z.append(f"Ausgelieferte Dateien haben sich geaendert "
+                 f"({_liste(v['neuladen'])}) \u2014 **Seite neu laden** "
+                 f"(Strg+F5). Dafuer braucht es keinen Serverneustart.")
+    return "  ".join(z)
 
 
 def abweichung(a: dict, b: dict) -> list:

@@ -368,7 +368,11 @@ def baue_netz(geom: dict, kaefig: dict, axial_mm: float, msh_pfad: str,
     """
     import gmsh
 
-    gmsh.initialize()
+    gmsh.initialize(interruptible=False)   # s. `ema_em3d`: ohne die Flagge
+    # setzt gmsh einen Signalhandler, und das geht nur im Hauptthread --
+    # aus einem Flask-Arbeiter scheitert die Vernetzung mit "signal only
+    # works in main thread of the main interpreter". Also genau dann, wenn
+    # der Weg im BROWSER benutzt wird, und nie im Test.
     gmsh.option.setNumber("General.Terminal", 0)
     try:
         gmsh.model.add("asm3d")
@@ -748,6 +752,9 @@ def _aufbau(payload: dict, rpm: float, last_nm: float, work_dir: str,
     art = ema_maschinenart.art_code(payload)
     ema_maschinenart.pruefe_stufe(art, "em3d")
     ema_radien.pruefe_bauform(payload, "em3d")   # Netz ist auf Innenlaeufer gebaut
+    import ema_fluss
+    ema_fluss.pruefe_flussweg(payload, "em3d")   # Scheiben EINES Querschnitts --
+                                                 # den gibt es axial nicht
     if art != "asm":
         raise ema_maschinenart.ArtNichtUnterstuetzt(
             f"Die harmonische 3-D-Stufe ist die Kaefiglaeufer-Stufe; "
@@ -857,6 +864,10 @@ def ring_wirkung(payload: dict, rpm: float, last_nm: float, work_dir: str,
         "ring_w_mm": round(1000 * ctx["netz"]["ring_w_m"], 2),
         "gap_aufgeloest": bool(ctx["netz"]["lc_gap_m"] <= ctx["netz"]["gap_m"]),
         "work_dir": work_dir, "analytisch": ctx["bp"],
+        # Das NETZ reist mit -- `browser_dateien` braucht seine Radien und die
+        # Baulaenge, um die Startpunkte der Feldlinien zu verteilen. Ohne das
+        # kam `KeyError: 'dims'` heraus, und zwar erst nach vier Minuten Loeser.
+        "netz": ctx["netz"],
     }
 
 
@@ -923,6 +934,187 @@ WILD_ANTEIL = 0.001
 # wirklich nichts uebrig ist. Das steht hier, damit niemand sie fuer den
 # vollstaendigen Schutz haelt.
 B_LEER_T = 1.0e-3
+
+
+#: Welche Koerper im Browser als FESTKOERPER erscheinen (der Rest ist Luft und
+#: wird weggeschnitten). Kaefigstaebe und Kurzschlussringe gehoeren ausdruecklich
+#: dazu -- sie sind bei dieser Bauart das, was man sehen will.
+_FESTKOERPER = (GID_WELLE, GID_ROTOR, GID_STAEBE, GID_STEG, GID_STATOR, GID_RING)
+
+#: Der Phasenwinkel, bei dem das Feld gezeigt wird. 0 Grad heisst: der
+#: Realteil, also der Augenblick, in dem der Staenderstrom seinen Scheitel hat.
+PHASE_GRAD = 0.0
+
+
+def browser_dateien(vtu_pfad: str, out_dir: str, netz: dict,
+                    phase_grad: float = PHASE_GRAD, log=None) -> dict:
+    """Aus der HARMONISCHEN VTU dieselben Browser-Dateien wie beim PSM-Pfad.
+
+    Der 3-D-Betrachter im Reiter 🧲 ist gut, und er ist **nicht** an die PSM
+    gebunden: er liest eine schlanke ``.vtp`` mit der Festkoerperoberflaeche
+    (nach |B| eingefaerbt) und eine zweite mit Feldlinien. Beide entstehen in
+    ``ema_em3d.export_browser_vtp`` / ``export_browser_streamlines`` aus einem
+    Volumennetz mit einem B-Feld -- mehr brauchen sie nicht. Gemeldet als:
+    *„Die Ergebnisse sollen im Browser dargestellt werden, auch die 3D
+    Ergebnisse wie Feldlinien. Orientiere dich dabei an der Darstellung der
+    PSM."*
+
+    Zwei Unterschiede muss dieser Adapter ueberbruecken, und beide sind
+    inhaltlich, nicht technisch:
+
+    1. **Das Feld ist komplex.** Der harmonische Loeser schreibt
+       ``magnetic flux density re e`` und ``… im e``; ein Feldlinienbild
+       braucht ein REELLES Vektorfeld. Gezeigt wird deshalb der Augenblick
+       ``B(t) = Re(B)·cos(phi) - Im(B)·sin(phi)`` -- eine Momentaufnahme eines
+       umlaufenden Feldes, und das steht auch dabei. Die FARBE dagegen traegt
+       die **Amplitude** ``sqrt(Re² + Im²)``: sie ist phasenunabhaengig und
+       damit die Groesse, die man ueber Betriebspunkte hinweg vergleichen darf.
+       Beides zu vermengen waere die stille Sorte Fehler -- ein Bild, das bei
+       jedem Phasenwinkel anders aussieht und wie ein Messwert gelesen wird.
+
+    2. **Das Feld sitzt auf ZELLEN.** Elmer schreibt die Flussdichte hier
+       elementweise (``… e``); die Exporte lesen Punktdaten. ``vtkCellData
+       ToPointData`` mittelt das um und behaelt die Zelldaten (``PassCellData``)
+       -- ohne das ginge ``GeometryIds`` verloren, und genau daran haengt, was
+       als Festkoerper stehen bleibt.
+    """
+    import numpy as np
+    import vtk
+    from vtk.util import numpy_support as ns
+    import ema_em3d
+
+    def _sag(t):
+        if log:
+            try:
+                log(t)
+            except Exception:                                # noqa: BLE001
+                pass
+
+    rd = vtk.vtkXMLUnstructuredGridReader()
+    rd.SetFileName(vtu_pfad)
+    rd.Update()
+    grid = rd.GetOutput()
+    cd = grid.GetCellData()
+
+    def _hole(name):
+        a = cd.GetArray(name)
+        return None if a is None else ns.vtk_to_numpy(a)
+
+    re = _hole("magnetic flux density re e")
+    im = _hole("magnetic flux density im e")
+    if re is None:
+        raise RuntimeError("Die Ergebnisdatei enthaelt keine Flussdichte — "
+                           "MagnetoDynamicsCalcFields hat nicht gerechnet.")
+    re = np.asarray(re, dtype=float).reshape(-1, 3)
+    im = (np.asarray(im, dtype=float).reshape(-1, 3)
+          if im is not None else np.zeros_like(re))
+
+    phi = math.radians(float(phase_grad))
+    b_t = re * math.cos(phi) - im * math.sin(phi)            # Augenblick
+    b_amp = np.sqrt(re * re + im * im)                       # Amplitude je Achse
+
+    for feld, name in ((b_t, "B_phase"), (b_amp, "B_amplitude")):
+        a = ns.numpy_to_vtk(np.ascontiguousarray(feld, dtype=np.float64))
+        a.SetNumberOfComponents(3)
+        a.SetName(name)
+        cd.AddArray(a)
+
+    c2p = vtk.vtkCellDataToPointData()
+    c2p.SetInputData(grid)
+    c2p.PassCellDataOn()          # GeometryIds muss auf den ZELLEN bleiben
+    c2p.Update()
+    grid2 = c2p.GetOutput()
+
+    # `export_browser_streamlines` braucht zusaetzlich die RADIEN und die
+    # Baulaenge -- daraus verteilt es seine Startpunkte ueber den Ringraum und
+    # ueber mehrere axiale Ebenen.
+    #
+    # **Und zwar in den Einheiten DIESER Datei, nicht in denen des PSM-Pfads.**
+    # `ema_em3d` rechnet durchweg in Millimetern, dieser Loeser in METERN --
+    # gemessen spannt seine VTU x = -0,140 … 0,140, also +-140 mm. Der erste
+    # Anlauf rechnete die Radien brav nach mm um, und damit lagen alle
+    # Startpunkte um den Faktor 1000 ausserhalb des Netzes: herausgekommen ist
+    # eine Datei mit **null** Linien, 2209 Byte gross -- und der Lauf meldete
+    # „Feldlinien geschrieben". Deshalb steht unten der Zaehler: eine leere
+    # Datei ist ein Fehlschlag und keine Ausgabe.
+    #
+    # Alles andere in den Exporten ist massstabsfrei (Schrittweite,
+    # `MaximumPropagation` und die Abschneidegrenzen haengen an `r_so`,
+    # `TerminalSpeed` an einem |B|-Perzentil), sie laufen in Metern genauso.
+    tags = {"bodies": {"shaft": GID_WELLE, "rotor": GID_ROTOR,
+                       "stator": GID_STATOR},
+            "magnets": [{"phys": g} for g in
+                        (GID_STAEBE, GID_STEG, GID_RING)],
+            "dims": {"r_shaft": float(netz["r_wel"]),
+                     "r_rot": float(netz["r_rot"]),
+                     "r_si": float(netz["r_si"]),
+                     "r_so": float(netz["r_so"])},
+            "L": float(netz["L_m"])}
+
+    os.makedirs(out_dir, exist_ok=True)
+    erg = {"phase_grad": float(phase_grad)}
+
+    # Die Oberflaeche traegt die AMPLITUDE (phasenunabhaengig, vergleichbar).
+    try:
+        erg["vtp"] = ema_em3d.export_browser_vtp(
+            grid2, "B_amplitude", tags, os.path.join(out_dir, "browser.vtp"))
+        _sag("Browser-Oberflaeche geschrieben (Farbe = |B|-Amplitude)")
+    except Exception as e:                                   # noqa: BLE001
+        erg["vtp_fehler"] = f"{type(e).__name__}: {e}"
+        _sag(f"⚠ Browser-Oberflaeche nicht geschrieben: {e}")
+
+    # Die Feldlinien folgen dem AUGENBLICK -- ein Linienbild einer Amplitude
+    # gaebe es nicht, die Amplitude ist kein Feld, sondern ein Betrag je Achse.
+    try:
+        _lp = ema_em3d.export_browser_streamlines(
+            grid2, "B_phase", tags, os.path.join(out_dir, "browser_lines.vtp"))
+        # **Geschrieben ist nicht gezeichnet.** Der Tracer wirft nicht, wenn
+        # kein einziger Startpunkt im Netz liegt -- er schreibt eine gueltige,
+        # LEERE Datei. Gemessen genau das: 0 Linien, 2209 Byte, und der Lauf
+        # meldete Erfolg. Gezaehlt wird deshalb, was drin steht.
+        _n = _zaehle_linien(_lp)
+        erg["n_linien"] = _n
+        if _n <= 0:
+            erg["lines_fehler"] = ("keine einzige Feldlinie getract — die "
+                                   "Startpunkte liegen ausserhalb des Netzes "
+                                   "oder das Feld ist ueberall unter der "
+                                   "Abbruchschwelle")
+            _sag("⚠ Feldlinien: NULL Linien getract — Datei verworfen")
+            try:
+                os.remove(_lp)
+            except OSError:
+                pass
+        else:
+            erg["lines"] = _lp
+            _sag(f"Feldlinien geschrieben: {_n} Linien "
+                 f"(Augenblick bei {phase_grad:.0f}° elektrisch)")
+    except Exception as e:                                   # noqa: BLE001
+        erg["lines_fehler"] = f"{type(e).__name__}: {e}"
+        _sag(f"⚠ Feldlinien nicht geschrieben: {e}")
+
+    erg["hinweis"] = (
+        f"Harmonischer Lauf: die Oberflaeche ist nach der |B|-AMPLITUDE "
+        f"eingefaerbt (phasenunabhaengig), die Feldlinien zeigen den "
+        f"AUGENBLICK bei {phase_grad:.0f}° elektrisch. Ein umlaufendes "
+        f"Feld hat kein einzelnes Linienbild — dieses ist eine Momentaufnahme.")
+    return erg
+
+
+def _zaehle_linien(vtp_pfad: str) -> int:
+    """Wieviele Polylinien stehen WIRKLICH in der Datei?
+
+    Der Grund steht in `browser_dateien`: `vtkStreamTracer` schreibt bei
+    Startpunkten ausserhalb des Netzes eine gueltige, leere Datei -- und ohne
+    diesen Zaehler meldet der Lauf dafuer Erfolg.
+    """
+    try:
+        import vtk
+        r = vtk.vtkXMLPolyDataReader()
+        r.SetFileName(vtp_pfad)
+        r.Update()
+        return int(r.GetOutput().GetNumberOfLines())
+    except Exception:                                        # noqa: BLE001
+        return -1
 
 
 def _finde_vtu(ordner: str) -> str:

@@ -77,6 +77,33 @@ SCHEMA = {
     "p":          {"kind": "num", "lo": 1,   "hi": 12,  "def": 3, "geom": True,   "desc": "Polpaarzahl", "int": True},
     "machineType":{"kind": "enum", "opts": _ART, "def": "pmsm", "geom": True, "adv": True,
                    "desc": "Maschinenart: pmsm=permanenterregt, asm=Asynchron (Käfig oder Schleifring), synrm=Reluktanz, eesm=fremderregt mit Schenkelpolen, gsm=Gleichstrom mit Kommutator. Analytisch alle fünf; CAD pmsm/asm/eesm/gsm; Feldstufe der Pipeline nur pmsm (ASM über cae_cli feld2d/feld3d)"},
+    # Der FLUSSWEG. Wie `machineType` in `geom`, weil die analytischen
+    # Funktionen nur `geom` bekommen (s. ema_fluss.flussweg). `adv`, weil
+    # Text->Auslegung ihn nicht erfragen soll, solange keine Stufe ihn traegt --
+    # ein Schluessel, der eine Bauform auswaehlbar macht, die das Werkzeug nicht
+    # rechnet, waere schlimmer als keiner. Das Tor sitzt in ema_fluss.
+    "fluxPath":   {"kind": "enum", "opts": ["radial", "axial"], "def": "radial",
+                   "geom": True, "adv": True,
+                   "desc": "Flussweg: radial=zylindrischer Luftspalt (alle Stufen), "
+                           "axial=Ringflaeche/Scheibenlaeufer (KEINE Stufe traegt ihn "
+                           "heute; Plan in AXIALFLUSS.md, Befund in BEFUNDE.md)"},
+    # Die drei Masse, ohne die `ema_fluss.flaechen` den Ringraum nicht bilden
+    # kann. `axialAktivOD` hat ausdruecklich KEINE Vorgabe aus `statorOD`:
+    # dazwischen liegen Bandage, Gehaeuse und Fuegespalt, und eine erfundene
+    # Ableitung waere eine Auslegungsregel mit dem Anschein einer Messung.
+    "axialAktivOD": {"kind": "num", "lo": 0, "hi": 600, "def": 0, "geom": True, "adv": True,
+                     "desc": "Axialfluss: AKTIVER Aussendurchmesser des Ringraums [mm] "
+                             "(0 = nicht gesetzt; nicht aus statorOD abgeleitet)"},
+    "axialLambda":  {"kind": "num", "lo": 0.05, "hi": 0.98, "def": 0.5774, "geom": True, "adv": True,
+                     "desc": "Axialfluss: Teilungsverhaeltnis lambda = Ri/Ro "
+                             "(0,5774 = 1/sqrt(3), der klassische Wert bei endlichem Strombelag)"},
+    "axialSpalte":  {"kind": "num", "lo": 1, "hi": 8, "def": 2, "geom": True, "adv": True, "int": True,
+                     "desc": "Axialfluss: Zahl der Luftspalte (1 = einseitig, 2 = AFIR/TORUS/YASA, "
+                             "mehr = mehrstufig)"},
+    "axialBauform": {"kind": "enum", "opts": ["yasa", "afir", "torus_nn", "einseitig"],
+                     "def": "yasa", "geom": True, "adv": True,
+                     "desc": "Axialfluss-Bauform. Entscheidet, WO sich die Anzugskraft aufhebt: "
+                             "afir am Laeufer, torus_nn/yasa am Staender, einseitig gar nicht"},
     "rotorBars":  {"kind": "num", "lo": 0, "hi": 120, "def": 0, "geom": True, "adv": True, "int": True,
                    "desc": "Läufernutzahl (ASM); 0 = automatisch — beim Käfig nach der Unsymmetrieregel, beim Schleifringläufer dreiteilbar"},
     "rotorType":  {"kind": "enum", "opts": ["kaefig", "schleifring"], "def": "kaefig",
@@ -84,6 +111,31 @@ SCHEMA = {
                    "desc": "ASM-Läuferbauform: kaefig=Kurzschlussläufer, schleifring=gewickelter Läufer mit Anlasswiderstand"},
     "rotorSkewSlots": {"kind": "num", "lo": -1, "hi": 2, "def": -1, "geom": True, "adv": True,
                    "desc": "Schrägung der Läufernuten in LÄUFERnutteilungen; -1 = automatisch nach Bauform (Käfig 1,0, Schleifring 0), 0 = ausdrücklich ohne Schrägung"},
+    # Der Reluktanzlaeufer. Regeln und Quellen in `ema_synrm_cad`.
+    "synrmBarrieren": {"kind": "num", "lo": 0, "hi": 5, "def": 0, "int": True,
+                       "geom": True, "adv": True,
+                       "label": "Flussbarrieren je Pol (0 = ableiten)"},
+    "synrmIsolationsgrad": {"kind": "num", "lo": 0.0, "hi": 1.2, "def": 0.0,
+                            "geom": True, "adv": True,
+                            "label": "Isolationsgrad Luft/Eisen (0 = 0,5)"},
+    "synrmStegMm": {"kind": "num", "lo": 0.0, "hi": 10.0, "def": 0.0,
+                    "geom": True, "adv": True,
+                    "label": "Tangentialsteg am Rand [mm] (0 = ableiten)"},
+    "synrmBetaGrad": {"kind": "num", "lo": 0.0, "hi": 15.0, "def": 0.0,
+                      "geom": True, "adv": True,
+                      "label": "Freiwinkel an der q-Achse [\u00b0]"},
+    # Der Kaefiglaeufer in MILLIMETERN -- dieselbe Regel wie beim Schenkelpol:
+    # 0 heisst „wie bisher ableiten", ein gesetzter Wert wird genommen und
+    # nachgerechnet, nicht geklemmt.
+    "laeuferNutTiefeMm": {"kind": "num", "lo": 0.0, "hi": 60.0, "def": 0.0,
+                          "geom": True, "adv": True,
+                          "label": "Laeufernuttiefe [mm] (0 = ableiten)"},
+    "laeuferNutBreiteMm": {"kind": "num", "lo": 0.0, "hi": 40.0, "def": 0.0,
+                           "geom": True, "adv": True,
+                           "label": "Laeufernutbreite [mm] (0 = ableiten)"},
+    "laeuferStegMm": {"kind": "num", "lo": 0.0, "hi": 20.0, "def": 0.0,
+                      "geom": True, "adv": True,
+                      "label": "Laeufersteg [mm] (0 = ableiten)"},
     "rotorTurnsPerSlot": {"kind": "num", "lo": 2, "hi": 24, "def": 2, "geom": True, "adv": True, "int": True,
                    "desc": "Leiter je Läufernut beim Schleifringläufer"},
     "polHoeheAnteil": {"kind": "num", "lo": 0.15, "hi": 0.65, "def": 0.38,
@@ -433,6 +485,39 @@ def _validate(raw: dict) -> dict:
         out["shaftBoreD"] = 0
     if out["rpm_to"] <= out["rpm_from"]:
         out["rpm_to"] = out["rpm_from"] * 2
+    # Den FLUSSWEG durchreichen, aus genau dem Grund, aus dem ``rotorPosition``
+    # oben durchgereicht wird -- und hier waere das Verschwinden schlimmer.
+    #
+    # ``fluxPath`` ist ``adv``, wird also von der Schleife oben uebersprungen.
+    # Damit verliert jeder Payload, der durch ``_validate`` laeuft (Text->
+    # Auslegung, ``ema_design_ai``), die Angabe „axial" -- und wird still
+    # radial. Dann feuert das Tor in ``ema_fluss`` nie, und genau der Fall, den
+    # es abfangen soll, kommt als plausible Radialflussrechnung heraus.
+    # Gemessen beim Bauen von Stufe 0 (``test_fluss.py``).
+    #
+    # NUR wenn vorhanden: ``_validate({})`` bleibt damit Zeichen fuer Zeichen
+    # so lang wie bisher (``test_cae_cli.py`` nagelt die Laenge fest).
+    #
+    # Die radiale Zurechtrueckung oben laeuft dabei weiter und erzeugt fuer eine
+    # Scheibe bedeutungslose ``statorID``/``rotorOD``. Das ist in Stufe 0
+    # richtig: das Tor weist ab, es entsteht keine Zahl. Die eigene Ordnung des
+    # Ringraums ist Stufe 1 (s. AXIALFLUSS.md §3).
+    for _k in ("fluxPath", "axialAktivOD", "axialLambda", "axialSpalte",
+               "axialBauform"):
+        if raw.get(_k) in (None, ""):
+            continue
+        _spec = SCHEMA[_k]
+        _v = raw[_k]
+        if _spec["kind"] == "enum":
+            if _v in _spec["opts"]:
+                out[_k] = _v
+        else:
+            try:
+                _v = float(_v)
+            except (TypeError, ValueError):
+                continue
+            _v = max(_spec["lo"], min(_spec["hi"], _v))
+            out[_k] = int(round(_v)) if _spec.get("int") else round(_v, 4)
     return out
 
 

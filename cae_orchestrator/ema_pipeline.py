@@ -31,11 +31,15 @@ class AuslegungReisst(RuntimeError):
     dieselbe Haltung wie bei `ema_asm`s „nicht erreichbar, weil …".
     """
 
-    def __init__(self, text, wege=None, befund="", tor=""):
+    def __init__(self, text, wege=None, befund="", tor="",
+                 befunde=None, hinweise=None):
         super().__init__(text)
         self.wege = list(wege or [])
         self.befund = befund or ""
         self.tor = tor or ""
+        # ALLES, was offen ist -- nicht nur das Tor, das angehalten hat.
+        self.befunde = list(befunde or ([befund] if befund else []))
+        self.hinweise = list(hinweise or [])
 
 
 def _gate_maschinenart(data: dict, state: dict | None = None,
@@ -73,10 +77,32 @@ def _gate_maschinenart(data: dict, state: dict | None = None,
     # Luftspalt, Ringspannung, Magnethaltung), die Pipeline noch nicht.
     import ema_radien
     ema_radien.pruefe_bauform(data or {}, stufe)
+    # Und dasselbe Tor fuer den FLUSSWEG. Eine Axialflussmaschine durch
+    # diese Kette zu schicken gaebe keine Fehlermeldung, sondern Zahlen
+    # unter fremdem Namen: `rated_torque` legt eine Zylinderformel auf eine
+    # Scheibe, `psi_pm` nimmt `R_gap*L` fuer einen Ringraum (gemessen 1,49
+    # bzw. 1,66 daneben), das Raster baut Ringe aus `hypot(X, Y)`. Zwoelf
+    # solche Stellen, keine wirft einen Fehler -- BEFUNDE.md, 05.10.2026.
+    import ema_fluss
+    ema_fluss.pruefe_flussweg(data or {}, stufe)
     if state is not None:
         _log(state, f"\U0001F6E1 Maschinenart: {art.label}", 4)
     if stufe == "feld":
         ema_maschinenart.pruefe_feldweg(code, "fdm")
+    elif stufe == "lauf":
+        # **Der LAUF selbst wird nicht mehr an der Feldstufe abgewiesen.**
+        # Gemeldet als „die Analyse kann nicht starten" -- und gemessen war es
+        # genau das: von fuenf Bauarten brach die Pipeline bei VIER schon bei
+        # 4 % ab, weil `_gate_maschinenart(data, state, "feld")` ganz oben
+        # stand. Sie gatete damit den ganzen Lauf auf eine einzige Stufe.
+        #
+        # Das ist falsch, und zwar nach der eigenen Regel dieses Repos: ein
+        # Weg, den nur die Kommandozeile hat, ist fuer den, der vor dem
+        # Bildschirm sitzt, nicht vorhanden. Geometrie, analytische Kette,
+        # Festigkeit, Thermik und Fahrzyklus traegt die Pipeline fuer ALLE
+        # fuenf -- nur die quantitative Feldstufe liegt bei vieren woanders.
+        # Der Lauf sagt das jetzt und rechnet weiter, statt anzuhalten.
+        ema_maschinenart.pruefe_stufe(code, "analytisch")
     elif stufe == "em3d":
         # Auch "em3d" ist nicht gleich "em3d": die Pipeline rechnet hier
         # ``ema_em3d`` (magnetostatisch, Magnete als Quelle), der Kaefiglaeufer
@@ -85,6 +111,78 @@ def _gate_maschinenart(data: dict, state: dict | None = None,
         ema_maschinenart.pruefe_em3d_weg(code, "elmer3d_stat")
     else:
         ema_maschinenart.pruefe_stufe(code, stufe)
+
+
+#: Welche Maschinenart ihren Betriebspunkt selbst rechnet -- und in welchem
+#: Modul. Die PSM fehlt mit Absicht: bei ihr IST der FDM die Quelle.
+_ART_BETRIEBSPUNKT = {"asm": "ema_asm", "synrm": "ema_synrm",
+                      "eesm": "ema_eesm", "gsm": "ema_gsm"}
+
+
+def _perf_der_art(data: dict, geom: dict, axial: float, rpm: float,
+                  last_nm: float, perf_fdm: dict,
+                  state: dict | None = None) -> tuple:
+    """Der Betriebspunkt aus dem Modul der MASCHINENART -- oder der des FDM.
+
+    **Warum das noetig ist.** ``run_em_analysis`` eicht seine Amplitude auf
+    ``_analytical_Bgap``, und die rechnet aus ``Br_NdFeB`` und ``magThick``.
+    Gemessen am 20.09.2026 ueber alle fuenf Bauarten am frischen Payload kam
+    deshalb fuenfmal dasselbe heraus -- ``B_gap`` 0,6300 T, ``Kt`` 0,0410 --,
+    obwohl im Raster fuenf verschiedene Laeufer standen. Eine Formel ohne
+    Magnet ist fuer eine magnetlose Maschine keine.
+
+    Die vier anderen Arten rechnen ihren Betriebspunkt laengst selbst, mit
+    allem, was der FDM gar nicht kennen kann: Schlupf und Magnetisierungsstrom
+    (ASM), Reluktanzanteil (SynRM), Erregerstrom (EESM), Kommutierung (GSM).
+    Genommen wird deshalb ihr ``perf`` -- und wo es Schluessel nicht fuehrt,
+    bleibt der des FDM stehen statt einer Null.
+
+    **Der FDM wird dabei NICHT uebersprungen** (seit dem Rasterumbau zeichnet
+    er die richtige Geometrie) -- er bleibt das Bild, aus dem man sieht, wo der
+    Fluss laeuft. Die Reihenfolge ist damit die beabsichtigte: erst FDM, dann
+    Elmer, und die Kennzahlen dazwischen von der Art, die sie kennt.
+
+    Gibt ``(perf, quelle)``.
+    """
+    try:
+        import ema_maschinenart
+        code = ema_maschinenart.art_code(geom)
+    except Exception:                                        # noqa: BLE001
+        return perf_fdm, "fdm"
+    modul = _ART_BETRIEBSPUNKT.get(code)
+    if not modul:
+        return perf_fdm, "fdm"
+    try:
+        bp = __import__(modul).betriebspunkt(geom, axial, float(rpm),
+                                             float(last_nm))
+    except Exception as e:                                   # noqa: BLE001
+        if state is not None:
+            _log(state, f"\u26a0 Betriebspunkt aus {modul} nicht gerechnet "
+                        f"({type(e).__name__}: {e}) \u2014 es bleibt beim "
+                        f"FDM-Wert, und der ist fuer diese Bauart auf einen "
+                        f"Magneten geeicht, den sie nicht hat.", 23)
+        return perf_fdm, "fdm"
+
+    # Die Module fuehren ihren Betriebspunkt teils als eigenes `perf`-Unterdict
+    # (ASM/SynRM/EESM), teils flach (GSM). Beides wird gelesen; was sie NICHT
+    # fuehren, bleibt beim FDM-Wert -- eine fehlende Zahl durch eine Null zu
+    # ersetzen waere genau die stille Sorte Fehler, gegen die das hier steht.
+    neu = dict(perf_fdm)
+    quelle = dict(bp.get("perf") or {})
+    for k in ("B_gap_T", "Kt_Nm_per_A", "psi_pm_Wb", "emf_peak_V",
+              "emf_rms_V"):
+        if k in quelle:
+            neu[k] = quelle[k]
+        elif k in bp:
+            neu[k] = bp[k]
+    if state is not None:
+        _log(state,
+             f"\U0001F9ED Betriebspunkt aus {modul}: B_gap "
+             f"{neu.get('B_gap_T')} T, Kt {neu.get('Kt_Nm_per_A')} Nm/A "
+             f"\u2014 der FDM daneben zeigt die Feldverteilung, seine "
+             f"Amplitude ist auf einen Magneten geeicht und gilt fuer diese "
+             f"Bauart nicht.", 23)
+    return neu, modul
 
 
 def _gate_laeufer(data: dict, state: dict | None = None,
@@ -105,6 +203,43 @@ def _gate_laeufer(data: dict, state: dict | None = None,
         art = _MA.art_code(geom)
     except Exception:                                        # noqa: BLE001
         return
+    if art == "synrm":
+        # Der Reluktanzlaeufer: seine enge Stelle ist weder eine Magnettasche
+        # noch ein Nutsteg, sondern der **Tangentialsteg** zwischen dem Ende
+        # einer Flussbarriere und dem Laeuferrand -- und davon gibt es mehrere
+        # duenne in Reihe. Gerechnet wird hier, ob die Barrieren ueberhaupt in
+        # das Blech passen (``ema_synrm_cad.barrieren`` -- dieselbe Funktion,
+        # aus der gezeichnet wird); ob die Stege die Fliehkraft TRAGEN, rechnet
+        # dieses Tor ausdruecklich NICHT, und das steht auch da.
+        try:
+            import ema_synrm_cad
+            b = ema_synrm_cad.barrieren(geom, float(data.get("axial_len") or 80.0))
+        except Exception as exc:                             # noqa: BLE001
+            if state is not None:
+                _log(state, f"\u26A0 Laeufertor (Flussbarrieren) nicht "
+                            f"gerechnet: {type(exc).__name__}: {exc}")
+            return
+        for _f in (b.get("befund") or []):
+            if state is not None:
+                _log(state, f"\u26A0 Flussbarrieren: {_f}")
+        if not b.get("passt") and not geom.get("barriereFreigabe"):
+            _txt = ("Flussbarrieren nicht auslegbar: "
+                    + str(b.get("grund")
+                          or "; ".join(b.get("befund") or []) or "kein Platz")
+                    + " \u2014 mit geom.barriereFreigabe=true trotzdem bauen.")
+            if fatal:
+                raise AuslegungReisst(_txt, tor="laeufer")
+            if state is not None:
+                _log(state, "\u26A0 " + _txt)
+            return
+        if state is not None:
+            _log(state, f"\u2713 Flussbarrieren: {b['k']} je Pol, "
+                        f"Isolationsgrad q-Achse {b['kw_ist']:.2f}, "
+                        f"Tangentialsteg {b['steg_rand_mm']:.1f} mm "
+                        f"(die Fliehkraft an den Stegen prueft dieses Tor "
+                        f"NICHT \u2014 dafuer die Struktur-FEM)")
+        return
+
     if art == "eesm":
         # Der Schenkelpol: Kern plus Erregerspule muessen auf die Polteilung
         # passen, und zwischen zwei Spulen muss Luft bleiben. Gerechnet in
@@ -194,17 +329,68 @@ def _gate_laeufer(data: dict, state: dict | None = None,
             _log(state, "\u2139 " + daem["wirkung"], 5)
             if daem["hinweis"]:
                 _log(state, "\u26A0 " + daem["hinweis"], 5)
+        # Ein gerissenes Tor sagt seit dem 03.10.2026 auch hier, was HILFT.
+        # Vorher flogen diese drei Stellen als nacktes ``RuntimeError`` heraus,
+        # waehrend der Flussbarrieren-Zweig elf Zeilen weiter oben laengst
+        # ``AuslegungReisst`` warf -- und damit die ganze Kette bediente, die
+        # schon existiert: ``server.py`` liest ``e.wege``, legt sie in den
+        # Zustand, und die Oberflaeche macht Knoepfe daraus. Vom Platz davor
+        # sah man deshalb nur einen Traceback.
+        _ax = float((data or {}).get("axial_len") or 80.0)
+
+        def _ent_pol():
+            try:
+                import ema_eesm_cad as _EC
+                return _EC.entlastung(geom, _ax)
+            except Exception:                                # noqa: BLE001
+                return {"wege": [], "kombi": {}, "hinweise": []}
+
+        def _ent_bef():
+            try:
+                import ema_schenkelpol as _SP
+                _n = float((data or {}).get("rpm_to")
+                           or (data or {}).get("rpm_from") or 0.0)
+                return _SP.entlastung(geom, _ax, _n)
+            except Exception:                                # noqa: BLE001
+                return {"wege": [], "hinweise": []}
+
+        def _reissen(titel, grund, ent):
+            # Was GEFUNDEN wurde, ist eine Liste -- nicht nur der Befund des
+            # Tors, das gerade gehalten hat. Gemeldet als „wieder steht
+            # nirgends, was das Problem ist": der Laeufer zerfiel in
+            # Einzelarme, waehrend der Lauf am Daempferkaefig stehenblieb.
+            # Die Hinweise werden NICHT mehr an die Meldung geklebt (daraus
+            # wurde ein Bandwurm) -- sie stehen im Kasten in eigenen Zeilen.
+            wege, hinw, bef = [], [], [f"{titel}: {grund}"]
+            for q in (ent, _ent_pol(), _ent_bef()):
+                for w in (q.get("wege") or []):
+                    if w not in wege:
+                        wege.append(w)
+                for h in (q.get("hinweise") or []):
+                    if h not in hinw:
+                        hinw.append(h)
+                for b in (q.get("befunde") or []):
+                    # Der Befund des haltenden Tors steht schon vorn -- die
+                    # Quellen liefern ihn ohne Titel davor, deshalb wird gegen
+                    # den GRUND verglichen und nicht gegen das Praefix.
+                    if b in bef or str(grund) in b or b in str(grund):
+                        continue
+                    bef.append(b)
+            raise AuslegungReisst(f"{titel}: {grund}", wege=wege,
+                                  befund=str(grund), tor="laeufer",
+                                  befunde=bef, hinweise=hinw)
+
         if not k["passt"]:
             if fatal:
-                raise RuntimeError("Laeufertor (Schenkelpol): " + k["grund"])
+                _reissen("Laeufertor (Schenkelpol)", k["grund"], _ent_pol())
             _log(state, "\u26A0 Laeufertor (Schenkelpol): " + k["grund"], 5)
         if bef is not None and not bef["haelt"]:
             if fatal:
-                raise RuntimeError("Polbefestigung: " + bef["grund"])
+                _reissen("Polbefestigung", bef["grund"], _ent_bef())
             _log(state, "\u26A0 Polbefestigung: " + bef["grund"], 5)
         if daem is not None and not daem["passt"]:
             if fatal:
-                raise RuntimeError("Daempferkaefig: " + daem["grund"])
+                _reissen("Daempferkaefig", daem["grund"], _ent_bef())
             _log(state, "\u26A0 Daempferkaefig: " + daem["grund"], 5)
         return
     if art == "gsm":
@@ -1253,6 +1439,56 @@ def _field_vmax(B) -> float:
     return min(IRON_B_SAT_DISPLAY, max(1.6, 1.4 * float(np.percentile(pos, 99.9))))
 
 
+# Farbe je Rolle -- dieselbe Zuordnung wie `ema_laeufer.js FARBE`, aber als
+# UMRISS: auf einem Feldbild soll das Teil erkennbar sein, ohne das Feld
+# darunter zuzudecken.
+_UMRISS_FARBE = {"pol": "#9fb4d8", "eisen": "#9fb4d8", "luft": "#cfd6e4",
+                 "kupfer": "#e0a060", "alu": "#dfe3e8"}
+
+
+def _draw_laeufer_umrisse(ax, geom: dict, sc: float, ctr: float,
+                          rotor_angle: float = 0.0) -> None:
+    """Umrisse dessen, was im Laeufer einer MAGNETLOSEN Bauart liegt.
+
+    Kaefigstaebe, Flussbarrieren, Schenkelpole mit ihren Erregerspulen,
+    Ankernuten -- gezeichnet aus ``ema_laeuferbild.teile()`` und
+    ``ema_laeuferbild.umriss()``, also aus genau den Zahlen, die
+    ``ema_analysis._rasterise`` ins Gitter stempelt. Damit kann das Bild dem
+    Feld darunter nicht widersprechen; eine eigene Zeichenrechnung waere die
+    vierte Fassung derselben Geometrie.
+    """
+    from matplotlib.patches import Polygon as MplPoly
+    try:
+        import ema_laeuferbild as _LB
+        lb = _LB.teile(geom, float(geom.get("axialLen") or 80.0))
+    except Exception:                                        # noqa: BLE001
+        return
+    c, s_ = math.cos(rotor_angle), math.sin(rotor_angle)
+    for t in (lb.get("teile") or []):
+        try:
+            pts = _LB.umriss(t)
+        except Exception:                                    # noqa: BLE001
+            continue
+        farbe = _UMRISS_FARBE.get(str(t.get("rolle")), "#9fb4d8")
+        verts = [(ctr + (x * c - y * s_) * sc, ctr + (x * s_ + y * c) * sc)
+                 for x, y in pts]
+        ax.add_patch(MplPoly(verts, closed=True, fill=False, ec=farbe,
+                             lw=0.7, alpha=0.85, zorder=11))
+    # Der Staender der Gleichstrommaschine ist der einzige, der eigene Teile
+    # hat -- und er dreht sich NICHT mit.
+    for t in (lb.get("staender") or []):
+        try:
+            pts = _LB.umriss(t)
+        except Exception:                                    # noqa: BLE001
+            continue
+        if str(t.get("rolle")) == "eisen":
+            continue                                # der Vollring sagt nichts
+        farbe = _UMRISS_FARBE.get(str(t.get("rolle")), "#9fb4d8")
+        ax.add_patch(MplPoly([(ctr + x * sc, ctr + y * sc) for x, y in pts],
+                             closed=True, fill=False, ec=farbe, lw=0.7,
+                             alpha=0.85, zorder=11))
+
+
 def _draw_magnet_outlines(ax, geom: dict, sc: float, ctr: float,
                           rotor_angle: float = 0.0) -> None:
     """Overlay each magnet's outline on a field frame, matching the rasteriser's
@@ -1260,6 +1496,18 @@ def _draw_magnet_outlines(ax, geom: dict, sc: float, ctr: float,
     surface magnets annular wedges; coloured red (N) / blue (S)."""
     from matplotlib.patches import Polygon as MplPoly
     from ema_topology import magnet_legs
+    # **Eine Bauart ohne Magnete bekommt keine Magnetumrisse.** Diese Funktion
+    # fragte die Maschinenart nicht und zeichnete deshalb auf JEDEM Feldbild
+    # zwoelf rote und blaue Magnete -- auch auf dem einer Asynchronmaschine
+    # (gemessen 20.09.2026: 12 Umrisse fuer alle fuenf Bauarten). Gemeldet als
+    # „wenn ich die asm rechne, sind die magnete mit dargestellt": das Raster
+    # unter dem Bild war seit dem 20.09. richtig, die Zeichnung darueber nicht.
+    # Statt dessen wird gezeichnet, was WIRKLICH im Laeufer liegt -- aus
+    # derselben `ema_laeuferbild.teile()`, aus der auch der Rasterer liest.
+    import ema_maschinenart as _MAm
+    if not _MAm.hole(_MAm.art_code(geom)).hat_magnete:
+        _draw_laeufer_umrisse(ax, geom, sc, ctr, rotor_angle)
+        return
     try:
         legs, _meta = magnet_legs(geom)
     except Exception:
@@ -2194,38 +2442,24 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
         # Der Reluktanzlaeufer hatte hier gar keinen Zweig: `hat_magnete` ist
         # False, also zeichnete die Magnetschleife nichts, und uebrig blieb
         # eine LEERE Scheibe -- ausgerechnet fuer die Bauart, deren ganzes
-        # Moment aus der Laeufergeometrie kommt. Gefunden bei der Schlussprobe
-        # ueber alle Bauarten (275 Formen gegen 311 bei der PSM: genau die
-        # fehlenden Taschen).
+        # Moment aus der Laeufergeometrie kommt.
         #
-        # Gezeichnet werden dieselben gestanzten Taschen wie beim IPM, nur
-        # LEER. Die Lage kommt aus `magnet_legs` -- `ema_synrm` selbst kennt
-        # nur eine Ersatz-Barrierenhoehe und keine Geometrie; dieselbe Wahl
-        # trifft `ema_laeuferbild._synrm` fuer die Leinwand, damit Bild und
-        # Vorschau nicht zwei verschiedene Laeufer zeigen.
+        # Seit dem 20.09.2026 kommen die Barrieren aus `ema_synrm_cad`
+        # (Auslegungsregeln samt Quelle) und werden ueber
+        # `ema_laeuferbild.teile()`/`umriss()` gezeichnet -- derselben Quelle
+        # wie Leinwand und FDM-Raster. Vorher standen hier die gestanzten
+        # IPM-Taschen aus `magnet_legs`, nur leer; gemeldet als „in der
+        # reluktanzmaschine sind nur die magnete entfernt".
         try:
-            _legs_s, _ = magnet_legs(geom)
-            _gap_s = float(geom.get("magGapMm", 0.1) or 0.1)
-            for _pole in range(n_poles):
-                _a = 2 * _m.pi * _pole / max(n_poles, 1)
-                for _lg in _legs_s:
-                    if getattr(_lg, "placement", "interior") != "interior":
-                        continue
-                    _h = float(_lg.thickness) + 2.0 * _gap_s
-                    _L = float(_lg.length)
-                    _ca, _sa = _m.cos(_a), _m.sin(_a)
-                    _tc, _ts = _m.cos(_lg.tilt), _m.sin(_lg.tilt)
-                    _pts = []
-                    for _lx, _ly in ((0.0, -_h / 2), (_L, -_h / 2),
-                                     (_L, _h / 2), (0.0, _h / 2)):
-                        _x = float(_lg.r_pos) + _lx * _tc - _ly * _ts
-                        _y = float(_lg.offset) + _lx * _ts + _ly * _tc
-                        _pts.append((_x * _ca - _y * _sa, _x * _sa + _y * _ca))
-                    _mp = MplPoly(_pts, closed=True, fc='#11131c',
-                                  ec='#2b3a55', lw=0.6)
-                    ax.add_patch(_mp); _mp.set_clip_path(_rotor_clip)
+            import ema_laeuferbild as _LBq
+            _lb_s = _LBq.teile(geom, float(geom.get("axialLen") or 80.0))
+            for _t_s in (_lb_s.get("teile") or []):
+                _mp = MplPoly(_LBq.umriss(_t_s), closed=True, fc='#11131c',
+                              ec='#2b3a55', lw=0.6)
+                ax.add_patch(_mp); _mp.set_clip_path(_rotor_clip)
             _laeufer_leg = [Patch(fc='#11131c', ec='#2b3a55',
-                                  label=f'Flussbarrieren ({len(_legs_s)} je Pol)')]
+                                  label=str(_lb_s.get("zaehlung")
+                                            or "Flussbarrieren"))]
         except Exception:                                    # noqa: BLE001
             _laeufer_leg = []
 
@@ -2708,7 +2942,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
     # nackten Traceback sieht. Im Teil-Nachrechnen wird nur gewarnt, nicht
     # abgewiesen: die Geometrie liegt dort fertig auf der Platte und wird gar nicht
     # neu gebaut — ein hartes Tor würde ein ladbares Altprojekt unrechenbar machen.
-    _gate_maschinenart(data, state, "feld")
+    _gate_maschinenart(data, state, "lauf")
     _gate_grenzen(data, state, fatal=not partial)
     _gate_rotor_layout(data, state, fatal=not partial)
     _gate_rotor_stress(data, state, fatal=not partial)
@@ -2874,6 +3108,23 @@ def run_pipeline(data: dict, state: dict, frames: list,
                                               axial_mm=axial)
         sf_ref = em0["sf_ref"]   # OC calibration factor — reused for all loaded frames
         perf   = em0["performance"]
+        # **Der FDM zeichnet das Feld; die ZAHLEN kommen von der Maschinenart.**
+        #
+        # Gemessen am 20.09.2026 ueber alle fuenf Bauarten am frischen Payload:
+        # der FDM lieferte fuenf verschiedene Laeufer im Raster und dieselben
+        # Kennzahlen -- B_gap 0,6300 T und Kt 0,0410, fuenfmal. Der Grund ist
+        # die Eichung: `run_em_analysis` skaliert auf `_analytical_Bgap`, und
+        # die rechnet aus `Br_NdFeB` und `magThick`. Eine Formel ohne Magnet
+        # ist fuer eine magnetlose Maschine keine.
+        #
+        # Jede der vier anderen Arten bringt ihren eigenen Betriebspunkt mit
+        # (`ema_asm`/`ema_synrm`/`ema_eesm`/`ema_gsm`, jeweils
+        # `betriebspunkt(...)`), und der ist die belastbare Quelle: er kennt
+        # Schlupf, Erregung, Reluktanzanteil und Kommutierung. Das FDM-Bild
+        # bleibt daneben stehen -- es zeigt, WO der Fluss laeuft, und ist seit
+        # dem Rasterumbau die richtige Geometrie.
+        perf, _perf_quelle = _perf_der_art(data, geom, axial, rpm_to, load_nm,
+                                           perf, state)
         # Welchen Luftspalt dieses Netz wirklich geoeffnet hat. Bei genuegend feinem
         # Netz ist das der gezeichnete und die Zeile faellt weg; sonst muss sie
         # dastehen, denn dann ist jede aus DIESEM Feld abgeleitete Groesse die einer

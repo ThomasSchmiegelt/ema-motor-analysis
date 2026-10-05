@@ -17,6 +17,44 @@ kann.
 
 ---
 
+## 2026-10-05 · `rated_torque` nimmt am Außenläufer den falschen Radius (+22,5 %)
+
+**Beim Bauen von `ema_fluss` (Stufe 0) gemessen**, nicht gesucht: die beiden
+Kennzahlen, die aus der Luftspaltfläche kommen, benutzen **verschiedene
+Radien**.
+
+| | Radius | Fundstelle |
+|---|---|---|
+| `psi_pm` → `Kt`, EMK | **mittlerer Spaltradius** `r_gap_m(geom)` → `ema_radien` | `ema_analysis.compute_performance:1370` |
+| `T_dauer` | **Läuferaußenradius** `rotorOD/2` | `ema_thermal.rated_torque:78` |
+
+Am Innenläufer ist das der halbe Luftspalt und damit gleichgültig — gemessen an
+der Vorgabegeometrie **−0,7 %** (178,8 gegen 180,1 Nm). Am **Außenläufer** ist
+`rotorOD/2` nicht die Spaltfläche, sondern die **Außenfläche des Läuferrings**:
+
+    Aussenlaeufer (statorOD 180, statorID 60, rotorID 181,4, rotorOD 200)
+      Laeuferflaeche am Spalt      r =  90,70 mm
+      mittlerer Spaltradius        r =  90,35 mm
+      rated_torque rechnet mit     r = 100,00 mm
+      T_dauer  201,1 Nm   statt   164,1 Nm      ->  +22,5 %
+
+Das ist kein Grenzfall, sondern ein lebender Wert: `STUFEN_AUSSEN =
+("analytisch",)` — der Außenläufer **ist** auf der analytischen Stufe getragen,
+und `rated_torque` gehört zu ihr. Die Schubspannung greift an der Fläche an,
+die dem Spalt zugewandt ist; `ema_radien.radien()` gibt sie als
+`r_rotor_gap_mm` längst heraus und wird hier nicht gefragt. Die Richtung des
+Fehlers ist dabei die unangenehme: das Dauermoment kommt zu **groß** heraus.
+
+**Nicht repariert.** `ema_fluss.flaechen()` reproduziert beide Ausdrücke
+Ziffer für Ziffer, einschließlich dieses — die erste Abnahmebedingung von
+Stufe 0 ist, dass sich an keiner radialen Kennzahl etwas bewegt
+(`test_fluss.py`). Eine Reparatur mitten in einem Umbau wäre genau die stille
+Änderung, gegen die `ema_werkzeugstand` gebaut ist: sie verschöbe das
+Dauermoment jedes bestehenden Projekts, ohne dass der Umbau es ankündigt. Jetzt
+steht der Unterschied wenigstens an **einer** Stelle sichtbar beieinander
+(`ema_fluss.flaechen` gibt `r_fluss_m` und `r_moment_m` getrennt heraus, und
+`uebersicht()` druckt beide).
+
 ## 2026-10-05 · Axialfluss: zwölf Stellen geben eine Zahl, wo ein Nein hingehört
 
 **Beobachtung.** Das Werkzeug hat kein Tor für den **Flussweg**. `machineType`
