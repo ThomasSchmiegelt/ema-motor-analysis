@@ -12,7 +12,7 @@ Dokument ist der Plan; was davon steht, sagt die Spalte unten.
 |---|---|
 | **0 Tor** | ✅ gebaut — `ema_fluss.py`, `fluxPath` im Schema, Tor an drei Stellen, `test_fluss.py` 35/35 |
 | **1 analytisch** | ✅ gebaut — `ema_axial.py` (Kreisringplatte, Anzug, Bandage, Zahnform, λ-Grenze), `test_axial.py` **69/69** |
-| **2 feld** | ✅ gebaut — `ema_axial_fdm.py` (abgewickelter Mehrschnitt durch den **unveränderten** Haus-FDM), `test_axial_fdm.py` **46/46**. **Belastbar sind ψ und B_gap(r), das Moment NICHT** |
+| **2 feld** | ✅ gebaut — `ema_axial_fdm.py` (abgewickelter Mehrschnitt durch den **unveränderten** Haus-FDM), `test_axial_fdm.py` **46/46**. **Belastbar sind Form, Linearitaet, Carterfaktor und das Leerlaufmoment — NICHT die Amplitude, ihr Verlauf ueber r oder das Moment** (s. `BEFUNDE.md`) |
 | 3 em3d | offen |
 | 4 cad | offen |
 
@@ -392,8 +392,15 @@ gemessen 1,03 / 1,09 / 1,19 über die Nutbreite. Die übrige Suite unverändert
 
 - **ψ konvergiert über der Schnittzahl (16,0 → 0,14 %), das Moment nicht.** ψ
   hängt an EINEM geeichten Feld, die Maxwellsche Schubspannung am Produkt zweier
-  unabhängig geeichter. Der Plan nannte die Momentreihe als Abnahme — gemessen
-  ist ψ der belastbare Teil, und das steht in jeder Ausgabe.
+  unabhängig geeichter. Der Plan nannte die Momentreihe als Abnahme — über der
+  Schnittzahl ist ψ der stabilere Teil.
+- **Über der GITTERauflösung konvergiert aber auch ψ nicht** (erst im
+  Gesamtdurchlauf gemessen, s. `BEFUNDE.md`): B1 oszilliert über N = 320…1280
+  zwischen 0,874 und 0,973 T, weil der 1-mm-Luftspalt und der 6-mm-Magnet auf das
+  Gitter schnappen. Belastbar sind deshalb nur die Größen, die ein **Verhältnis**
+  bilden oder an einer geschlossenen Form hängen — Formfaktor gegen 4/π,
+  Linearität, Carterfaktor, Leerlaufmoment ≈ 0, Unabhängigkeit von der
+  Fensterbreite. Die Amplitude und ihr Verlauf über r sind es nicht.
 - **Zwei Momentwege, Faktor ~3 auseinander**, über den Strom konstant — ein
   Normierungsunterschied (ψ auf 1 Windung/Nut, `_analytical_Barm` auf
   `N_ph = slots/3`; vgl. `ema_asm.k_norm`). Nicht aufgelöst: das entscheidet

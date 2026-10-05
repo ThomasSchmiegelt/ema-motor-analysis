@@ -17,6 +17,73 @@ kann.
 
 ---
 
+## 2026-10-05 · Gesamtdurchlauf: B_gap(r) aus dem Mehrschnitt ist NICHT konvergiert
+
+**Beim ersten vollständigen Durchlauf gemessen** — also genau dort, wo ein
+Modul aufhört, Testfälle zu rechnen, und anfängt, eine Maschine zu beschreiben.
+Der Lauf (8 Schnitte, N = 520, 3000 1/min, 120 Nm) gab aus:
+
+    B_gap(r) [T]   0,9787  0,9759  0,9578  0,7900  0,7815  0,9249  0,9275  0,9115
+    r [mm]           78,5    85,4    92,2    99,1   106,0   112,8   119,7   126,6
+
+Eine **Delle** von 20 % mitten im Ringraum, und sie sieht aus wie ein Befund
+über die Maschine. Sie ist keiner: dieselben Radien bei drei Auflösungen
+gerechnet **wandert die Delle mit N**. Konvergenz an EINEM Radius
+(r = 102,5 mm, Fenster 4 Polteilungen, bis zu 7,9 Pixel im Luftspalt):
+
+    N      320      480      640      800     1000     1280
+    B1   0,9726   0,8998   0,9331   0,8995   0,9195   0,8739  T
+    Abw.  11,3 %    3,0 %    6,8 %    2,9 %    5,2 %      —
+
+Es **oszilliert** und konvergiert nicht monoton; selbst bei 1280 Punkten liegen
+benachbarte Stufen 3…5 % auseinander. Die abgetastete Zeile liegt dabei
+nachweislich zu 100 % in Luft (geprüft) — die Ursache ist nicht die Abtastung,
+sondern dass die dünnen Schichten des Stapels (Luftspalt 1 mm, Magnet 6 mm) auf
+das Gitter **schnappen**: eine halbe Pixelbreite Versatz ändert den wirksamen
+Spalt um Prozente, und die Form der Luftspaltwelle hängt daran.
+
+**Damit ist die Stufe-2-Aussage „belastbar sind ψ und B_gap(r)" zu stark und in
+`AXIALFLUSS.md` korrigiert.** Belastbar sind die Größen, die eine
+**Verhältnis**bildung tragen oder an einer geschlossenen Form hängen:
+
+| hält | Beleg |
+|---|---|
+| Form der reinen Magnetwelle | nutlos 1,2622 gegen 4/π = 1,2732 (0,9 %) |
+| Linearität | J → 2J gibt exakt 2,000000 |
+| Leerlaufmoment ≈ 0 | −0,55 Nm gegen −311,6 Nm unter Last |
+| Carterfaktor | 1,03 / 1,09 / 1,19 über die Nutbreite, Verhältnis zweier Läufe |
+| Unabhängigkeit von der Fensterbreite | 1,29 % über Faktor 4 |
+
+**Nicht belastbar** sind die absolute Amplitude und ihr Verlauf über dem Radius —
+dieselbe Lage wie beim Statoreisen-|B| des radialen FDM, und aus demselben
+Grund: ein Merkmal, das nur wenige Pixel breit ist, ist nicht aufgelöst, und die
+Zahl darüber konvergiert nicht. Der radiale Weg hat damit übrigens dasselbe
+Problem an derselben Stelle: `luftspalt_im_netz` meldet bei N = 520 **1,04
+Pixel** im 0,7-mm-Spalt.
+
+**Nicht repariert.** Der Ausweg wäre ein körperangepasstes Netz (Elmer) statt
+eines kartesischen Rasters — also Stufe 3, und dort steht die Aufgabe ohnehin
+schon: den Normierungswiderschied beim Moment entscheiden. Was dieser Lauf
+ändert, ist die Beschriftung, nicht die Rechnung.
+
+**Zwei Dinge aus demselben Durchlauf, die nicht den Axialfluss betreffen:**
+
+*Die Thermik lief für eine Axialflussmaschine klaglos durch* und meldete
+T_winding 68,2 / T_magnet 81,8 °C — plausible Zahlen für eine Maschine, die es
+nicht gibt, und die 80-°C-Magnetgrenze schon überschritten. Das LPTN ist ein
+Schalennetz von innen nach außen; beim YASA sitzt der Ständer ZWISCHEN zwei
+Scheiben und hat diesen Weg nicht, beim AFIR liegt die Wicklung außen. Das ist
+nicht die falsche Parametrierung, sondern die falsche Netztopologie.
+`run_thermal_analysis` weist Axialfluss jetzt ab und nennt den Grund; die
+Schubspannungsgrenze `rated_torque` gilt weiter, sie geht über `ema_fluss`.
+
+*Der radiale Durchlauf bestätigt zwei schon bekannte Posten* (nicht neu, aber
+jetzt am vollen Lauf): `ema_saettigung` meldet **B_zahn = 8,712 T** und
+`saett_pct = None` — unphysikalisch, vgl. den Eintrag vom 2026-10-04; und
+`T_cogging_Nm = 116,78` steht neben einem Dauermoment von 178,8 Nm, also bei
+65 % davon. Beides nicht untersucht.
+
+
 ## 2026-10-05 · Axialfluss Stufe 2: ψ konvergiert, das MOMENT nicht — zwei Ursachen
 
 Beim Bauen der axialen Feldstufe (`ema_axial_fdm`, abgewickelter Mehrschnitt)

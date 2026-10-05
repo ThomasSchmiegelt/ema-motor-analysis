@@ -782,7 +782,31 @@ def run_thermal_analysis(geom: dict, axial: float, rpm: float, load_nm: float,
     """Standalone S1 duty-point thermal analysis (continuous load_nm @ rpm).
 
     ``htc_oil``>0 (aus einer CFD-Spritzölrechnung, ``ema_cfd``) speist einen direkten
-    Wicklung→Kühlmittel-Pfad ein (s. ``conductances``); 0 = unverändertes Preset-Modell."""
+    Wicklung→Kühlmittel-Pfad ein (s. ``conductances``); 0 = unverändertes Preset-Modell.
+
+    **Axialfluss wird abgewiesen -- und zwar wegen der TOPOLOGIE, nicht wegen
+    falscher Zahlen.** Dieses Netz ist eine Folge von Schalen von innen nach
+    aussen: Welle -> Laeufer -> Luftspalt -> Staender -> Gehaeuse -> Kuehlmittel.
+    Beim YASA sitzt der Staender ZWISCHEN zwei rotierenden Scheiben und hat
+    diesen Weg nach aussen ueberhaupt nicht; seine Waerme geht ueber die
+    Zahnstirnseiten auf einen Ring oder direkt ins Oel. Beim AFIR liegt die
+    Wicklung aussen, also genau andersherum als hier angenommen.
+
+    Gemessen am Vorgabe-Payload lief es **klaglos durch** und meldete
+    T_winding 68,2 / T_magnet 81,8 °C -- plausible Zahlen fuer eine Maschine, die
+    es nicht gibt, und die Magnetgrenze von 80 °C schon ueberschritten. Genau die
+    Art Ergebnis, gegen die ``ema_fluss`` gebaut ist.
+    """
+    import ema_fluss
+    if ema_fluss.flussweg(geom) == "axial":
+        raise ema_fluss.FlusswegNichtUnterstuetzt(
+            "Axialfluss: das LPTN ist ein Schalennetz von innen nach aussen "
+            "(Welle -> Laeufer -> Spalt -> Staender -> Gehaeuse). Beim YASA "
+            "sitzt der Staender ZWISCHEN zwei Scheiben und hat diesen Weg nicht, "
+            "beim AFIR liegt die Wicklung aussen. Das ist nicht die falsche "
+            "Parametrierung, sondern die falsche Netztopologie -- sie waere neu "
+            "aufzustellen (AXIALFLUSS.md, Stufe 4). Die Schubspannungsgrenze "
+            "rated_torque gilt dagegen weiter, sie geht ueber ema_fluss.")
     losses = design_point_losses(geom, axial, rpm, load_nm,
                                  perf, mat, st_mat, hp_mat, mag, cooling)
     caps   = compute_capacities(geom, axial, mat, st_mat, hp_mat, mag)

@@ -811,6 +811,22 @@ def bilder(geom: dict, ordner: str, k_schnitte: int = 5, N: int = 360,
                  f"{a['spaltverhaeltnis_spanne']:.2f}x", fontsize=9)
     ax.legend(fontsize=7.5)
     ax.grid(alpha=0.25)
+    # **Der Warnsatz gehoert INS Bild.** Beim ersten Gesamtdurchlauf zeigte diese
+    # Kurve eine Delle von 20 % mitten im Ringraum, und sie liest sich wie ein
+    # Befund ueber die Maschine. Sie ist keiner: dieselben Radien bei anderer
+    # Aufloesung gerechnet wandert sie mit N, und B1 oszilliert ueber
+    # N = 320...1280 zwischen 0,874 und 0,973 T, weil der 1-mm-Spalt und der
+    # 6-mm-Magnet auf das Gitter schnappen (BEFUNDE.md, 05.10.2026). Ein Bild,
+    # das wie ein Messergebnis aussieht und keines ist, ist die schlimmste
+    # Variante -- dieselbe Regel wie bei den Saettigungsbildern.
+    ax.text(0.0, -0.30,
+            "⚠ Die AMPLITUDE ist nicht konvergiert: B1 oszilliert ueber "
+            "N = 320…1280 um ±5 % (duenne Schichten schnappen aufs Gitter). "
+            "Strukturen in dieser Kurve sind Rasterartefakte, keine Befunde ueber "
+            "die Maschine. Belastbar sind Formfaktor, Linearitaet und Carterzahl "
+            "— s. BEFUNDE.md, 05.10.2026.",
+            transform=ax.transAxes, fontsize=6.4, color="#c98b2e", wrap=True,
+            va="top")
     f2 = os.path.join(ordner, "feld_axial_bgap_r.png")
     fig.savefig(f2, bbox_inches="tight", transparent=True)
     plt.close(fig)
