@@ -17,6 +17,169 @@ kann.
 
 ---
 
+## 2026-10-04 · Alle fünf Bauarten laufen durch — drei Stufen wissen nicht, welche
+
+**Gemessen.** Ein Pipelinelauf je Maschinenart, gleicher frischer Payload, nur
+`machineType` getauscht (Projekte `20261004_0755…_synrm`, `_0759…_asm`,
+`_0804…_gsm`, `_0808…_pmsm`, `20261004_073715_EESM_Durchlauf`). **Alle fünf
+beenden mit `done`** und schreiben je acht Ergebnisblöcke. Das CAD ist dabei
+sauber nach Art getrennt — fünf echte FreeCAD-Läufe, fünf verschiedene
+Rotorvolumen (PSM 1.728.350 · ASM 1.911.551 · SynRM 1.401.226 · EESM 814.464 ·
+GSM 1.693.032 mm³). Drei Stufen danach sind es nicht:
+
+**1. Die Struktur-FEM liefert für vier Bauarten denselben Sicherheitsfaktor.**
+`safety_factor_fem = 9.687` für SynRM, ASM, GSM **und** PSM — Ziffer für Ziffer.
+Vier verschiedene Läufer (Flussbarrieren, Käfig, Anker, Magnettaschen) können
+nicht dieselbe Fliehkraftsicherheit haben. Bestätigt den schon notierten Befund,
+dass `ema_deck` für jede Art dasselbe Rotorblech vernetzt — jetzt über alle
+Arten gemessen statt nur an PSM/ASM. Die EESM liefert gar keinen Wert.
+
+**2. GSM und PSM haben eine bitgleiche Leistungshüllkurve.** `P_max` 176,5 kW,
+`T_peak` 280,9 Nm, beide „begrenzt durch kuehlung". Eine Gleichstrommaschine mit
+Kommutator und eine permanenterregte Synchronmaschine können dieselbe Hüllkurve
+nicht teilen; `power_envelope` rechnet dq-Größen, die es bei der GSM nicht gibt
+(`ARTEN['gsm'].ohne_bedeutung` führt sie bereits als bedeutungslos — die
+Hüllkurve fragt das nicht).
+
+**3. Magnettemperatur für Maschinen ohne Magnete.** SynRM 43,9 · ASM 51,4 ·
+GSM 51,4 · EESM 67,1 °C, bei `hat_magnete = False` und ohne Magnetmasse. Der
+Wert ist nicht nur unnötig, er ist das Kriterium, an dem `ema_sicherheit` die
+Entmagnetisierung prüft — eine Grenze für ein Bauteil, das es nicht gibt.
+
+**Nicht repariert.** Alle drei sind Rechenstufen, deren Umbau die Zahlen
+bestehender Projekte verschiebt; welche davon wie nach Art verzweigen soll, ist
+eine Auslegungsentscheidung. Was sie gemeinsam haben: die Stufe fragt
+`ema_maschinenart` nicht. `gilt()`/`filtern()` gibt es dafür seit jeher.
+
+
+## 2026-10-03 · Der Vorgabe-Zweig der Erregerspule kann NICHT bestehen — für keinen Wert
+
+**Stand 03.10.2026, nachmittags: behoben.** Der Sitz folgt jetzt der ECKE statt dem
+Boden des Polschuhs — dieselbe Regel wie im abgeleiteten Weg (`_spule_einpassen`):
+`r_spule_aussen = min(r_kern_aussen - SPULE_UNTER_SCHUH_MM, sqrt(r_spule_max² - y²))`.
+Gemessen über denselben Sweep: **187 von 480** bestehen jetzt (vorher 0), die 27 von 40
+ohne Vorgabe sind unberührt. Dass die Reparatur keine tragende Auslegung verschieben
+kann, ist genau der Befund unten: es gab keine. Reicht der Platz zwischen Sitz und
+Wickelboden danach nicht, wird das als Befund MIT beiden Zahlen gemeldet statt die Höhe
+still zu kürzen. Der zweite Punkt (Spanne gegen abgeleiteten Wert) bleibt offen, der
+dritte (`nabe_zusammen` als Warnung) ebenfalls.
+
+**Beobachtung.** Sobald `erregerSpuleDickeMm` **oder** `erregerSpuleHoeheMm` gesetzt
+ist, weist `ema_eesm_cad.koerper` die Geometrie ab — unabhängig vom Wert, auch
+mitten im Intervall, das dieselbe Funktion als „darstellbar" nennt. Gemessen am
+frischen EESM-Payload (p=5, Stator 280/190, Rotor 188, Welle 100, L=80):
+
+| Vorgabe | `passt` | abgeleitete Dicke |
+|---|---|---|
+| keine (beide 0) | **True** | 8,19 mm |
+| Dicke 10,0 | False | 8,19 mm |
+| Dicke 4,59 (= genannte Obergrenze) | False | 4,59 mm |
+| **Dicke 2,0 (= genannte Untergrenze)** | **False** | 2,00 mm |
+| Höhe 15,0 | False | 8,19 mm |
+
+**Ursache, geometrisch.** Im Vorgabe-Zweig (`ema_eesm_cad.py`, Block
+`if _d_gesetzt or _h_gesetzt:`) wird der Spulensitz auf
+`r_spule_aussen = r_kern_aussen - SPULE_UNTER_SCHUH_MM` gesetzt. Die Prüfung
+darunter verlangt
+`hypot(r_spule_aussen, y) <= r_spule_max` mit
+`r_spule_max = r_kern_aussen - SPULE_SCHUH_LUFT_MM` (`:627`). **Beide Konstanten
+sind 0,5 mm**, also ist `r_spule_aussen == r_spule_max`. Die Ecke eines Rechtecks
+liegt für jede halbe Breite `y > 0` weiter von der Achse entfernt als seine
+Oberkante — die Bedingung ist damit **für jede Spule mit Breite > 0 unerfüllbar**.
+Nachgemessen: r_kern_aussen 84,713 · r_spule_aussen 84,213 · r_spule_max 84,213 ·
+Ecke bei y = 0,1 mm bereits 84,213…, bei y = 5 mm 84,361.
+
+**Warum es nicht auffiel.** Der ABGELEITETE Weg geht nicht durch diesen Zweig: dort
+löst `_spule_einpassen` Dicke und Höhe gekoppelt und legt die Ecke auf
+`r_rot - RAND_LUFT_MM` — die richtige Bedingung. Geprüft ist genau dieser Weg; der
+Vorgabe-Zweig wurde am 20.09.2026 ergänzt („0 heißt ableiten, ein gesetzter Wert
+wird genommen und NACHGERECHNET"), und seine Nachrechnung ist seitdem tot.
+
+**Zweiter, kleinerer Befund daneben.** Die genannte Spanne und der abgeleitete Wert
+widersprechen sich: `koerper` meldet „Spulendicke darstellbar 2,00…4,59 mm" und
+leitet im selben Lauf **8,19 mm** ab. `_d_max` kommt aus
+`(b_schuh_k - b_kern_aussen)/2 - SCHUH_UEBERSTAND_MM`, der abgeleitete Wert aus dem
+Füllungs-Pfad — zwei Rechnungen über dieselbe Größe.
+
+**Nicht repariert.** Beides ändert gezeichnete Geometrie für jede Auslegung, die
+diese Vorgaben setzt, und die Entscheidung, auf welche der beiden Bedingungen der
+Sitz gelegt wird, ist eine Auslegungsentscheidung. Der naheliegende Weg wäre, den
+Vorgabe-Zweig dieselbe `_spule_einpassen`-Platzierung benutzen zu lassen wie den
+abgeleiteten.
+
+**Was stattdessen geschehen ist (03.10.2026).** Das Tor sagt jetzt, was hilft, statt
+nur abzusagen: `masse_schranken` trägt die Spannen als ZAHLEN (vorher nur im
+Begründungssatz), `ema_eesm_cad.entlastung` und `ema_schenkelpol.entlastung` rechnen
+Auswege und prüfen jeden gegen dasselbe Tor, `ema_pipeline._gate_laeufer` wirft
+`AuslegungReisst` statt `RuntimeError` (vorher: Traceback ohne Vorschlag, obwohl der
+Flussbarrieren-Zweig elf Zeilen darüber es längst richtig machte), und
+`ema_diagnose._wege_laeufer` kennt die Läufer-Tore. Für genau diesen Fall meldet die
+Entlastung ehrlich **keinen** Einzelweg, sondern: „Keine EINZELNE dieser Vorgaben
+heilt das Tor — erst alle zusammen." Das ist die richtige Auskunft, solange der
+Befund oben steht.
+
+**Offen, dritter Punkt.** `nabe_zusammen = False` („die Polkörper berühren sich an
+der Bohrung NICHT — der Läufer zerfällt in Einzelarme", `ema_pipeline.py:258`) ist
+eine **Warnung**, während drei harmlosere Befunde harte Ablehnungen sind. Die
+Begründung im Code („ein zu dünnes Joch sättigt, es bricht nicht") gilt für
+`nabe_reicht`; `nabe_zusammen` sagt aber nicht „zu dünn", sondern „nicht
+vorhanden". Die beiden teilen sich dort eine Schwere.
+
+
+## 2026-09-20 · umrichter-Kriterium und Niedrigdrehzahl-Direktantrieb sind unvereinbar
+
+**Beobachtung.** Das Sicherheitskriterium `umrichter` verlangt, dass die Maschine bei
+`rpm_to` (Minimum im Schema: 500 1/min, `geom`: Untergrenze 500) mit 40–100 % der
+Klemmenspannung GEMK belegt (`ok = 0.4 ≤ ausnutzung ≤ reserve`). Bei 48 V Klemmen,
+Stator-D 420 mm, L 150 mm, p=12, B_gap 0.439 T sind es
+**171 % mit einer Windung je Nut** — und `n_soll = max(1, floor(0.58)) = 1`
+empfiehlt denselben Zustand als „passend". Keine Windungszahl erfüllt das Kriterium
+bei dieser Geometrie, und eine Geometrie, die es bei 200 Nm Dauerlast und 48 V
+erfüllt, müsste den Luftspaltflus mehr als halbieren — verliert damit Kt, braucht
+doppelten Strom, und die thermischen Kriterien (Magnet 80 °C / Wicklung) werden
+verletzt. Die beiden Kriterien schließen sich für diese Bauart aus.
+
+**Wozu die Maschine gedacht ist.** 2,5-t-Einachsanhänger, Rad Ø 650 mm, max. 6 km/h
+= **49.3 1/min am Rad, Direktantrieb** (Übersetzung 1). Mit einer Windung/Nut
+(Gegen-EMK 47.4 V bei 500 1/min) sind das
+49.3/500 × 47.4 V = **4.7 V = 17 % von 27.7 V (48/√3)** bei der Betriebsgrenze —
+weit unter der Klemmenspannung. Die Eigenschaft, die das Kriterium schützen will
+(Umrichter weder ungenutzt noch überfordert), ist am wirklichen Betriebspunkt
+erfüllt; verletzt ist nur der Vergleich mit der 10-fachen, nirgends betriebenen
+Drehzahl.
+
+**Gemessen an Projekt** 20260920_213045 (Entwurf, guete=entwurf):
+`sicherheit` → „✗ umrichter — Gegen-EMK bei 500 1/min belegt 171 % der
+Klemmenspannung (48 V bei 1 Wdg/Nut) — passend waeren 1 Wdg/Nut". Dagegen in
+derselben Rechnung: „✓ zyklusdrehzahl — Custom CSV verlangt 49 1/min gegen sichere
+500 1/min" und „✓ drehzahl — sichere 500 gegen Betriebsmaximum 500 1/min".
+
+**Fundstellen.**
+- `ema_analysis.py:1062` `umrichter_passt()` — Kriterien `0.4 ≤ emf_1t·n_wdg/v_ph ≤ SPANNUNGSRESERVE`,
+  `n_soll = max(1, floor(reserve·v_ph/emf_1t))`; `v_ph = v_dc/√3`.
+- `ema_sicherheit.py:347–360` — Übernahme des Kriteriums in `sicherheit`,
+  Bewertung bei `rpm_to` (= `payload['rpm_to']`), nicht bei der Zyklusdrehzahl.
+- `ema_pipeline.py:825` `MAGNETS`: alle drei NdFeB-Grade mit `T_op_max = 80 °C`;
+  nur Ferrit Y30 mit 250 °C (Br 0.40 T — für diese Last unbrauchbar), d. h. ein
+  Magnet mit höherer Dauergrenze ist im Werkzeug nicht vorhanden.
+
+**Konsequenz.** Nicht repariert. Wer eine 48-V-Niedrigdrehzahl-Auslegung prüft,
+bekannt: das `umrichter`-Kriterium ist für die hier zulässige Kombination
+(rpm_to ≥ 500, vdc = 48, Direktantrieb) mit 200 Nm Dauerlast **nicht erfüllbar**,
+und die Verletzung ist im Bericht als solche ausgewiesen, nicht als Betriebsgrenze.
+
+---
+
+## 2026-09-20 · Magnet-Dauergrenze 80 °C bei Auslegungspunkt 500 1/min / 200 Nm (Projekt 20260920_213045)
+
+`magnet_dauer` verletzt um 4 K (84 °C ≥ Grenze 80, NdFeB N35) am **Auslegungspunkt
+500 1/min / 200 Nm** — einem Punkt, den der Zyklus nie erreicht (max. 49 1/min,
+T_rms 165 Nm; dort: Magnet 67 °C, erfüllt). Im Werkzeug ist nur N35/N42/N50 mit
+80 °C oder Ferrit mit 0.4 T Br wählbar (Fundstelle: `ema_pipeline.py:825`);
+Kühlung `forced` ist der beste nicht-flüssige Zustand, den `cooling` hergibt
+(natural/forced/water/oil). Ob Ölbad die 80 °C am Auslegungspunkt unterbietet,
+wird in Runde 3 gemessen.
+
 ## 2026-09-20 — Der Feldlöser sah bei allen fünf Bauarten denselben PM-Läufer
 
 **Beobachtung** (gemeldet): „die geometrie wird zur zeit nicht korrekt an den
