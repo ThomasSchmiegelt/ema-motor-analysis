@@ -104,7 +104,22 @@ VORGABE = "radial"
 #: Querschnitt gibt es axial nicht. Der Weg dorthin ist der abgewickelte
 #: Mehrschnitt (``AXIALFLUSS.md`` §4, Geruest in
 #: ``axialfluss_scheibenprobe.py``).
-STUFEN_AXIAL: tuple = ("analytisch",)
+STUFEN_AXIAL: tuple = ("analytisch", "feld")
+
+#: **Welcher LOESER die axiale Feldstufe traegt.** Dieselbe Unterscheidung wie
+#: ``ema_maschinenart.Art.feldweg``, und aus demselben Grund: „traegt die Stufe"
+#: und „geht DIESEN Weg" sind zwei Fragen. Die Pipeline rechnet ihr Feld mit der
+#: 2-D-FDM auf einem ``R = hypot(X, Y)``-Raster; eine Scheibe ist darin nicht
+#: abbildbar. Ohne diese Trennung haette ``STUFEN_AXIAL`` mit "feld" darin
+#: bedeutet, die Pipeline duerfe eine Axialflussmaschine durch die radiale FDM
+#: schicken -- und die haette klaglos ein Ringfeld ausgegeben und „Axialfluss"
+#: darueber geschrieben. Genau diese stille Ersatzrechnung ist der Anlass des
+#: ganzen Moduls.
+FELDWEG_AXIAL = "fdm_scheibe"
+FELDWEG_WERKZEUG = {
+    "fdm": "die 2-D-FDM der Pipeline (ema_analysis._rasterise)",
+    "fdm_scheibe": "der abgewickelte Mehrschnitt (ema_axial_fdm.felder)",
+}
 
 #: Welche MASCHINENART axial ueberhaupt eine Bauform hat. Die Matrix ist nicht
 #: voll besetzt, und das ist die Aussage -- eine Reluktanzmaschine braucht
@@ -205,6 +220,25 @@ def pruefe_art_flussweg(quelle) -> str:
         f"{ema_maschinenart.ARTEN[code].label} als Axialflussmaschine: "
         f"{hinweis}. Axial getragen: "
         f"{', '.join(k for k, (t, _) in ART_AXIAL.items() if t)}.")
+
+
+def pruefe_feldweg(quelle, weg: str) -> str:
+    """Traegt der Flussweg die Feldstufe **auf diesem Loeser**?
+
+    ``pruefe_flussweg(quelle, "feld")`` sagt nur, dass es fuer den Axialfluss
+    ueberhaupt eine Feldstufe gibt. Welcher Loeser sie traegt, sagt
+    ``FELDWEG_AXIAL`` -- und wer die Scheibe in die radiale FDM schickt, bekommt
+    hier einen Fehler mit der Adresse des richtigen Werkzeugs statt ein Ringfeld
+    unter fremdem Namen. Wortgleich zu ``ema_maschinenart.pruefe_feldweg``.
+    """
+    w = pruefe_flussweg(quelle, "feld")
+    if w == "radial" or weg == FELDWEG_AXIAL:
+        return w
+    raise FlusswegNichtUnterstuetzt(
+        f"{LABEL[w]}: die Feldstufe laeuft nicht ueber "
+        f"'{FELDWEG_WERKZEUG.get(weg, weg)}', sondern ueber "
+        f"'{FELDWEG_WERKZEUG[FELDWEG_AXIAL]}'. Das Raster der Pipeline baut "
+        f"Ringe aus hypot(X, Y); eine Scheibe ist darin nicht abbildbar.")
 
 
 def axial_bauform(geom: dict) -> str:

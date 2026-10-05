@@ -99,8 +99,8 @@ print("\n— 2. Das Tor: kein Axialfluss unter fremdem Namen —")
 # den Axialfluss ueber `ema_axial`; die Tabelle ist der Sinn des Moduls, und ein
 # Test, der sie auf leer festnagelt, verhindert genau den Ausbau, fuer den das
 # Tor gebaut wurde. Festgenagelt wird statt dessen, WAS NICHT traegt.
-pruefe(F.STUFEN_AXIAL == ("analytisch",),
-       "STUFEN_AXIAL traegt 'analytisch' (Stufe 1) und sonst nichts")
+pruefe(F.STUFEN_AXIAL == ("analytisch", "feld"),
+       "STUFEN_AXIAL traegt 'analytisch' (Stufe 1) und 'feld' (Stufe 2)")
 pruefe(F.flussweg(vorgabe()) == "radial" and F.flussweg({}) == "radial"
        and F.flussweg(None) == "radial",
        "ohne Angabe gilt radial (Vorgabe, nicht Rateschritt)")
@@ -111,7 +111,16 @@ pruefe(F.flussweg({"geom": {"fluxPath": "axial"}}) == "axial"
 ax = {"geom": vorgabe(fluxPath="axial", axialAktivOD=260.0)}
 pruefe(F.pruefe_flussweg(ax, "analytisch") == "axial",
        "'analytisch' laeuft durch (ema_axial rechnet sie)")
-for stufe in ("feld", "cad", "em3d", "lauf"):
+# 'feld' traegt seit Stufe 2 -- aber auf einem EIGENEN Loeser. Die Unterscheidung
+# ist die von ema_maschinenart: "traegt die Stufe" ist nicht "geht DIESEN Weg".
+pruefe(F.pruefe_flussweg(ax, "feld") == "axial",
+       "'feld' laeuft durch (Stufe 2, ema_axial_fdm)")
+try:
+    F.pruefe_feldweg(ax, "fdm")
+    pruefe(False, "aber die radiale FDM muesste abweisen")
+except F.FlusswegNichtUnterstuetzt:
+    pruefe(True, "aber NICHT ueber die radiale FDM der Pipeline")
+for stufe in ("cad", "em3d", "lauf"):
     try:
         F.pruefe_flussweg(ax, stufe)
         pruefe(False, f"Stufe '{stufe}' muesste abweisen — tut es nicht")

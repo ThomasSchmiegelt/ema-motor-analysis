@@ -930,6 +930,16 @@ def luftspalt_mm(geom: dict) -> float:
     laufen ohne Tor, dort ist sie der numerische Boden).
     """
     import ema_grenzen
+    import ema_fluss
+    if ema_fluss.flussweg(geom) == "axial":
+        # Axial ist der Spalt eine AXIALE Strecke und keine Differenz zweier
+        # Radien -- die alte Formel ist dort nicht ungenau, sie meint eine andere
+        # Groesse. Derselbe Fehlertyp wie beim Aussenlaeufer, nur eine Dimension
+        # weiter: sie kaeme als halbe Differenz von statorID und rotorOD heraus,
+        # also als Zahl ueber zwei Flaechen, die sich axial gar nicht
+        # gegenueberstehen. Gefuehrt wird er als ``axialSpaltMm``.
+        return max(float((geom or {}).get("axialSpaltMm", 0) or 1.0),
+                   ema_grenzen.LUFTSPALT_MM[0])
     import ema_radien
     return max(ema_radien.radien(geom)["luftspalt_mm"], ema_grenzen.LUFTSPALT_MM[0])
 

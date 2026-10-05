@@ -84,6 +84,7 @@ PHYSIK: tuple[str, ...] = (
     "ema_wicklung.py",      # Wicklung, Widerstand, Kupfermasse
     "ema_radien.py",        # Radien und Luftspalt
     "ema_axial.py",         # Axialfluss: Ringraum, Rueckenblech, Anzug, Bandage
+    "ema_axial_fdm.py",     # Axialfluss-Feldstufe: abgewickelter Mehrschnitt
     "ema_fluss.py",         # Flussweg: die zwei Integrale der Luftspaltflaeche
                             # (r^1 fuer psi_pm, r^2 fuer das Moment). Eine
                             # Aenderung daran bewegt Kt UND das Dauermoment.

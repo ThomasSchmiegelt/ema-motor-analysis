@@ -89,6 +89,11 @@ def _gate_maschinenart(data: dict, state: dict | None = None,
         _log(state, f"\U0001F6E1 Maschinenart: {art.label}", 4)
     if stufe == "feld":
         ema_maschinenart.pruefe_feldweg(code, "fdm")
+        # Und dasselbe fuer den FLUSSWEG. Seit Stufe 2 traegt der Axialfluss die
+        # Feldstufe -- aber ueber den abgewickelten Mehrschnitt, nicht ueber die
+        # radiale FDM dieser Pipeline. Ohne diese Zeile liesse `STUFEN_AXIAL`
+        # mit "feld" darin die Scheibe durch das hypot-Raster laufen.
+        ema_fluss.pruefe_feldweg(data or {}, "fdm")
     elif stufe == "lauf":
         # **Der LAUF selbst wird nicht mehr an der Feldstufe abgewiesen.**
         # Gemeldet als „die Analyse kann nicht starten" -- und gemessen war es

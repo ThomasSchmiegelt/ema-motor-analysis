@@ -17,6 +17,87 @@ kann.
 
 ---
 
+## 2026-10-05 · Axialfluss Stufe 2: ψ konvergiert, das MOMENT nicht — zwei Ursachen
+
+Beim Bauen der axialen Feldstufe (`ema_axial_fdm`, abgewickelter Mehrschnitt)
+gemessen. Beide Punkte sind **nicht repariert**, sondern benannt — der zweite
+ließe sich durch einen Faktor zum Verschwinden bringen, und genau das wäre falsch.
+
+**1. Zwei Momentwege, Faktor ~3 auseinander, über den Strom konstant.**
+
+| Last | i_q | T_maxwell | 1,5·p·ψ·i_q | Verhältnis |
+|---|---|---|---|---|
+| 50 Nm | 83,4 A | 164,35 Nm | 52,25 Nm | 3,145 |
+| 100 Nm | 159,1 A | 311,57 Nm | 100,90 Nm | 3,088 |
+| 200 Nm | 308,9 A | 600,73 Nm | 204,86 Nm | 2,932 |
+
+Dass das Verhältnis über den Strom nahezu konstant ist, schließt einen
+Physikfehler weitgehend aus: es ist ein **Normierungsunterschied**. `psi` ist auf
+**eine Windung je Nut** normiert — so rechnet `compute_performance`, und
+`conductorsPerSlot` geht dort gar nicht ein —, während `_analytical_Barm`, der
+Eichanker des Ankerfeldes und damit von `B_t`, mit der **physikalischen**
+Durchflutung `N_ph = slots/3` rechnet. Genau diese Brücke heißt in `ema_asm`
+`k_norm = π·k_w·N_ph/p²`, und dort steht auch, was passiert, wenn man sie
+vergisst: man vergleicht zwei verschieden große Ampere. Dem Radialweg fällt es
+nicht auf, weil er `T_maxwell` und `Kt` nie gegeneinander hält.
+
+**Nicht aufgelöst, und zwar absichtlich.** Welcher Bezug gilt, entscheidet ein
+unabhängiger Löser (Stufe 3, Elmer-Ringsektor) und nicht ein Faktor, der die
+Abweichung verschwinden lässt. `felder()` gibt beide Zahlen heraus und schreibt
+den Widerspruch dazu — dasselbe Verfahren wie `ema_leistung`, das den Widerspruch
+zwischen `rated_torque` und dem LPTN über die Kennlinie schreibt, statt ihn zu
+glätten.
+
+**2. Über der Schnittzahl konvergiert ψ, das Moment nicht.** Gemessen
+(k = 2 / 4 / 8, Bezug k = 8, 100 Nm, 3000 1/min):
+
+    psi   0,05826 -> 0,05207 -> 0,04977 Wb    Abweichung 16,0 % -> 0,14 % -> 0
+    T     streut; k = 4 liegt weiter von k = 8 entfernt als k = 2
+
+Der Grund ist strukturell: `psi` hängt an EINEM geeichten Feld, die Maxwellsche
+Schubspannung am **Produkt zweier unabhängig geeichter** Felder (B_n am
+Magnetanker, B_t überwiegend am Ankeranker), und B_t ist dabei die kleine Größe.
+Beide Eichfehler gehen multiplikativ ein.
+
+**Daraus folgt der Geltungsbereich von Stufe 2, und er steht in jeder Ausgabe:
+belastbar sind ψ und B_gap(r), das Moment ist es nicht.** Dieselbe Haltung wie
+beim Statoreisen-|B| des radialen FDM (konvergiert auch nicht, und was statt
+dessen geht).
+
+**Zwei eigene Fehler auf dem Weg dahin, beide behoben** — sie stehen hier, weil
+beide plausibel aussahen:
+
+*Das quadratische Gebiet wurde mit LUFT gepolstert.* Der FDM-Matrixbauer verlangt
+ein quadratisches Gitter, der Stapel ist aber niedriger als das Fenster breit.
+Mit Luft gefüllt hängt das Ergebnis an der Fensterbreite, weil mit dem Quadrat
+auch der Streuweg wächst — gemessen bei r = 102,5 mm und gleicher Maschenweite:
+B1 = 0,86410 / 0,84730 / 0,83494 / 0,82445 T über 2 / 4 / 6 / 8 Polteilungen,
+**ohne zu konvergieren**. Mit EISEN gepolstert ist die Polsterung wirkungslos
+(jenseits des Joches gibt es keine Quelle), und die Abhängigkeit fällt auf
+1,29 % über denselben Faktor 4. Physikalisch ist das auch die richtige Aussage:
+ein Joch schließt den Fluss ein.
+
+*Die nötige Fensterbreite springt mit dem Radius* (innen ist die Polteilung
+kleiner), also sprang mit ihr das Ergebnis mitten im Ringraum — die Schnittreihe
+war dadurch nicht monoton und sah aus wie ein Verfahren, das nicht konvergiert.
+Alle Schnitte benutzen jetzt dieselbe Breite, die des Innenrands.
+
+*Und ein drittes, das keine Spur hinterlassen hätte:* der Lastfall rechnete mit
+Strom **null**, weil `estimate_dq_currents` ein Tupel zurückgibt und kein Dict
+und kein `axial_mm` kennt — ein stilles `except` hat den `TypeError` verschluckt.
+Heraus kam das Leerlaufmoment (−0,18 Nm statt 100 Nm Soll), und nichts
+widersprach. Ein Fehlschlag dort ist jetzt ein benannter Grund im Ergebnis
+(`strom_fehlschlag`, `last_gerechnet`) und kein Nullstrom.
+
+**Nebenbefund, der die Hauskonstante bestätigt:** der Carterfaktor dieser Nut ist
+gemessen **1,03 / 1,09 / 1,19** bei `slotWidthRatio` 0,3 / 0,5 / 0,7 und klammert
+damit die angenommenen 1,15 ein — anders als beim Käfigläufer, wo der 2-D-Lauf
+3,2 gegen 1,15 fand. Gemessen wird er an der **Grundwelle**: an der Spitze
+gerechnet kam 0,82 heraus, also kleiner als eins, was es nicht geben kann — über
+einem Zahn ist der Fluss gebündelt, die lokale Spitze steigt durch die Nutung,
+während der Fluss je Pol fällt.
+
+
 ## 2026-10-05 · `rotor-check` meldet FAIL bei der Drehzahl, die es selbst vorschlägt
 
 **Beobachtung, nicht diagnostiziert.** `test_rotorcheck.py` schlägt an zwei

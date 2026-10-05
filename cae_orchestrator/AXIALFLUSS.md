@@ -1,6 +1,6 @@
 # Axialflussmaschine — Umsetzungsplan bis Stufe 4
 
-**Stand 05.10.2026: Stufen 0 und 1 sind gebaut, Stufen 2–4 nicht.** Dieses
+**Stand 05.10.2026: Stufen 0, 1 und 2 sind gebaut, Stufen 3–4 nicht.** Dieses
 Dokument ist der Plan; was davon steht, sagt die Spalte unten.
 
 > **Zwei Angaben in §1 waren falsch und sind korrigiert** — beide erst beim Bauen
@@ -12,7 +12,7 @@ Dokument ist der Plan; was davon steht, sagt die Spalte unten.
 |---|---|
 | **0 Tor** | ✅ gebaut — `ema_fluss.py`, `fluxPath` im Schema, Tor an drei Stellen, `test_fluss.py` 35/35 |
 | **1 analytisch** | ✅ gebaut — `ema_axial.py` (Kreisringplatte, Anzug, Bandage, Zahnform, λ-Grenze), `test_axial.py` **69/69** |
-| 2 feld | offen (Beleg vorhanden: `axialfluss_scheibenprobe.py`) |
+| **2 feld** | ✅ gebaut — `ema_axial_fdm.py` (abgewickelter Mehrschnitt durch den **unveränderten** Haus-FDM), `test_axial_fdm.py` **46/46**. **Belastbar sind ψ und B_gap(r), das Moment NICHT** |
 | 3 em3d | offen |
 | 4 cad | offen |
 
@@ -380,7 +380,34 @@ denen `aehnlich` vergleicht.
 
 ---
 
-## 4. Stufe 2 — Feld: Quasi-3-D-Mehrschnitt
+## 4. Stufe 2 — Feld: Quasi-3-D-Mehrschnitt — **GEBAUT 05.10.2026**
+
+Abnahme gemessen: `test_axial_fdm.py` **46/46**; nutloser Ständer gibt
+Grundwelle/Spitze **1,2622** gegen 4/π = 1,2732 (0,9 %), Linearitätsprobe exakt
+2,000000, Leerlaufmoment −0,55 Nm gegen −311,6 Nm unter Last, Carterfaktor
+gemessen 1,03 / 1,09 / 1,19 über die Nutbreite. Die übrige Suite unverändert
+(`smoke_test` 23/23, `test_axial` 69/69, `test_fluss` 36/36).
+
+**Drei Dinge kamen anders heraus als geplant** — alle drei in `BEFUNDE.md`:
+
+- **ψ konvergiert über der Schnittzahl (16,0 → 0,14 %), das Moment nicht.** ψ
+  hängt an EINEM geeichten Feld, die Maxwellsche Schubspannung am Produkt zweier
+  unabhängig geeichter. Der Plan nannte die Momentreihe als Abnahme — gemessen
+  ist ψ der belastbare Teil, und das steht in jeder Ausgabe.
+- **Zwei Momentwege, Faktor ~3 auseinander**, über den Strom konstant — ein
+  Normierungsunterschied (ψ auf 1 Windung/Nut, `_analytical_Barm` auf
+  `N_ph = slots/3`; vgl. `ema_asm.k_norm`). Nicht aufgelöst: das entscheidet
+  Stufe 3 und nicht ein Korrekturfaktor.
+- **Das quadratische Gitter wird mit EISEN gepolstert, nicht mit Luft.** Mit Luft
+  hängt das Ergebnis an der Fensterbreite und konvergiert nicht (0,864 → 0,824 T
+  über Faktor 4); mit Eisen sind es 1,29 %. Alle Schnitte teilen dieselbe Breite,
+  damit der stufige Wechsel nicht als Sprung in die Schnittreihe geht.
+
+**Das Tor folgt dem ASM-Muster:** `STUFEN_AXIAL` trägt `feld`, aber
+`FELDWEG_AXIAL = fdm_scheibe` — die Pipeline fragt
+`ema_fluss.pruefe_feldweg(data, fdm)` und weist die Scheibe weiterhin ab, mit der
+Adresse des richtigen Werkzeugs. Ohne das hätte „feld trägt“ geheißen, die
+radiale FDM dürfe eine Scheibe rechnen.
 
 **Die gute Nachricht zuerst.** `_build_fv_matrix(mu)` und `_solve_fdm(mu, J)`
 nehmen nur Material- und Stromfelder auf einem gleichmäßigen kartesischen Gitter;

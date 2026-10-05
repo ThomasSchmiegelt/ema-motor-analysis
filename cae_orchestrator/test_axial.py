@@ -248,16 +248,22 @@ pruefe(ema_rotorcheck.rotor_layout_check(gr).get("flussweg") is None,
 
 print("\n— 9. Maschinenart x Flussweg, Stufen, Schema —")
 
-pruefe(F.STUFEN_AXIAL == ("analytisch",),
-       "analytisch traegt den Axialfluss, die uebrigen Stufen nicht")
-for stufe in ("feld", "cad", "em3d", "lauf"):
+pruefe(F.STUFEN_AXIAL == ("analytisch", "feld"),
+       "analytisch (Stufe 1) und feld (Stufe 2) tragen den Axialfluss")
+for stufe in ("cad", "em3d", "lauf"):
     try:
         F.pruefe_flussweg({"geom": ax}, stufe)
         pruefe(False, f"Stufe '{stufe}' muesste abweisen")
     except F.FlusswegNichtUnterstuetzt:
         pruefe(True, f"Stufe '{stufe}' weist Axialfluss weiterhin ab")
-pruefe(F.pruefe_flussweg({"geom": ax}, "analytisch") == "axial",
-       "analytisch laeuft durch")
+pruefe(F.pruefe_flussweg({"geom": ax}, "analytisch") == "axial"
+       and F.pruefe_flussweg({"geom": ax}, "feld") == "axial",
+       "analytisch und feld laufen durch")
+try:
+    F.pruefe_feldweg({"geom": ax}, "fdm")
+    pruefe(False, "die radiale FDM muesste abweisen")
+except F.FlusswegNichtUnterstuetzt:
+    pruefe(True, "die Feldstufe geht ueber ema_axial_fdm, nicht ueber die FDM")
 for art, soll in (("pmsm", True), ("gsm", True), ("eesm", True),
                   ("asm", False), ("synrm", False)):
     q = {"geom": dict(ax, machineType=art)}
