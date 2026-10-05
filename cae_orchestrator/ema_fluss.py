@@ -129,19 +129,54 @@ FELDWEG_WERKZEUG = {
 #: Scheibenlaeufer mit gedrucktem oder eisenlosem Anker), ist aber die einzige
 #: Art ohne Feldstufe -- ``feldweg="keiner"``, weil ein kommutierter Anker nicht
 #: magnetostatisch ist. Daran aendert die Scheibe nichts.
+#: **Korrigiert am 05.10.2026.** Die erste Fassung schrieb hier Urteile ueber
+#: die MASCHINE, wo nur Aussagen ueber dieses WERKZEUG zulaessig sind -- und zwei
+#: davon waren schlicht falsch. Sie lauteten:
+#:
+#:   asm:   "ein Scheibenkaefig ist schwer herstellbar [...] Nicht getragen"
+#:   synrm: "die Anisotropie braucht orientiertes Blech IN einer Scheibe --
+#:           nicht blechbar. Nicht getragen"
+#:
+#: Die Axialfluss-Asynchronmaschine mit Kaefiglaeufer ist ein eigenes
+#: Forschungsfeld; Igelspacher (TU Muenchen, 2018/2020) widmet ihr eine ganze
+#: Dissertation samt den drei Bauformen (ein Stator/ein Rotor, zwei Statoren/ein
+#: Rotor, ein Stator/zwei Rotoren), der Stapelbauweise und einer Beispielmaschine
+#: mit reduziertem Rotorjoch. "Schwer herstellbar" war kein Befund, sondern eine
+#: Vermutung in der Form eines Befunds -- genau das, was ``BEFUNDE.md`` als
+#: Gegenteil seiner selbst benennt.
+#:
+#: ``nicht gebaut`` ist deshalb jetzt von ``gibt es nicht`` getrennt. Das
+#: Werkzeug darf sagen, was ES traegt; ueber die Maschinenwelt sagt es nichts.
+#:
+#: Quellen, die der Mensch am 05.10.2026 dagegengehalten hat:
+#:   * Igelspacher, "Zur Theorie der Axialfluss-Asynchronmaschine als
+#:     ausfallsicherer Antrieb", Diss. TU Muenchen 2018/2020 -- Kap. 2
+#:   * HAW Hamburg, Forschungsgruppe Elektrische Mobilitaet: Pancake-Design,
+#:     Single-Rotor-Single-Stator / DRSS / DSSR, Halbacharrays, kernlose
+#:     Luftspulenwicklungen
+#:   * Wikipedia "Scheibenlaeufermotor": eisenloser bzw. gedruckter Scheibenanker,
+#:     Fluss parallel zur Drehachse, Durchmesser groesser als Baulaenge
 ART_AXIAL = {
-    "pmsm":  (True,  "die beherrschende Bauform (YASA, TORUS, AFIR): "
+    "pmsm":  (True,  "gebaut. Die verbreitetste Bauform (YASA, TORUS, AFIR): "
                      "Sektormagnete flach auf der Scheibe"),
-    "gsm":   (True,  "der klassische Scheibenlaeufer mit gedrucktem oder "
-                     "eisenlosem Anker -- kein Rastmoment, kleinste Traegheit. "
-                     "Weiterhin ohne Feldstufe, aus dem alten Grund"),
-    "eesm":  (True,  "moeglich, aber selten: Ringerregerspule axial, "
-                     "Schleifringe wie bisher"),
-    "asm":   (False, "ein Scheibenkaefig ist schwer herstellbar, und der "
-                     "Schlupfverlust faellt in der am schlechtesten gekuehlten "
-                     "Scheibe an. Nicht getragen"),
-    "synrm": (False, "die Anisotropie braucht orientiertes Blech IN einer "
-                     "Scheibe -- nicht blechbar. Nicht getragen"),
+    "gsm":   (True,  "gebaut (analytisch). Der Scheibenlaeufer mit gedrucktem "
+                     "oder eisenlosem Anker ist die aelteste axiale Bauform -- "
+                     "kein Rastmoment, kleinste Traegheit. Weiterhin ohne "
+                     "Feldstufe, aus dem alten Grund (kommutierter Anker)"),
+    "eesm":  (True,  "gebaut (analytisch): Ringerregerspule axial, Schleifringe "
+                     "wie bisher"),
+    "asm":   (False, "NICHT GEBAUT -- und das ist eine Aussage ueber dieses "
+                     "Werkzeug, nicht ueber die Maschine. Die "
+                     "Axialfluss-Asynchronmaschine mit Kaefiglaeufer existiert "
+                     "und ist erforscht (Igelspacher, Diss. TU Muenchen 2020, "
+                     "drei Bauformen + Stapelbauweise). Was hier fehlt, ist der "
+                     "Scheibenkaefig in ema_asm und ein harmonischer Loeser auf "
+                     "dem abgewickelten Schnitt"),
+    "synrm": (False, "NICHT GEBAUT. Der Reluktanzlaeufer als Scheibe ist "
+                     "ungewoehnlich und fertigungstechnisch anspruchsvoll "
+                     "(Anisotropie in der Scheibenebene), aber die frueher hier "
+                     "stehende Behauptung 'nicht blechbar' ist nicht belegt und "
+                     "zurueckgenommen"),
 }
 
 #: Bauformen des Axialflusses und wieviele Luftspalte sie haben. Der Name

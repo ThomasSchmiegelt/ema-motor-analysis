@@ -325,6 +325,58 @@ def eichung_anker(geom: dict, i_pk: float) -> float:
     return EA._analytical_Barm(geom, i_pk)
 
 
+def betriebspunkt(geom: dict, rpm: float, last_nm: float,
+                  axial_mm: float | None = None) -> dict:
+    """i_q und i_d der Scheibenmaschine -- OHNE den Laeufer, den sie nicht hat.
+
+    Hier stand ``ema_analysis.estimate_dq_currents``, und das war falsch. Die
+    Funktion rechnet MTPA ueber ``estimate_saliency(geom)``, die ihrerseits auf
+    ``magnet_legs`` steht -- und der Payload traegt dort weiterhin die
+    Schemavorgabe ``magShape = "v"``. Gemessen am 05.10.2026: zwei V-Schenkel je
+    Pol mit tilt +-60 Grad, Salienz **2,589**, daraus ``i_d = -9,9 A``. Der
+    Betriebspunkt der axialen Feldstufe kam damit aus einem IPM-Laeufer, den
+    eine Scheibe nicht hat; ueber das Ankerfeld ging er in das Moment ein.
+    Gemeldet als „deine maschine sieht aus wie eine psm mit magneten in
+    v-anordnung".
+
+    Was statt dessen gilt, ist der einfachste Fall, den es gibt: die
+    Axialfluss-PM-Maschine traegt **Oberflaechenmagnete flach auf der Scheibe**
+    -- keine Tasche, kein Steg, keine Vorzugsrichtung im Blech. Damit ist
+    ``Ld = Lq``, es gibt **kein Reluktanzmoment**, und MTPA ist ``i_d = 0``.
+    Das ist keine Vereinfachung, sondern die Bauart (vgl. HAW Hamburg: Rotoren
+    mit Permanentmagneten, Halbacharrays, kernlose Luftspulenwicklungen).
+
+    ``Kt`` kommt aus ``ema_fluss.flaechen`` -- derselben Quelle wie psi und das
+    Dauermoment --, nicht aus ``compute_performance``, die ueber
+    ``_analytical_Bgap`` wieder am Radiallaeufer haengt.
+
+    Wo eine Scheibenmaschine **doch** salient ist -- ein vergrabener
+    Scheibenmagnet, ein Reluktanzlaeufer --, ist das hier NICHT gerechnet und
+    steht als Grenze im Ergebnis, statt mit einer fremden Salienz gefuellt zu
+    werden.
+    """
+    import ema_fluss
+
+    f = ema_fluss.flaechen(geom, axial_mm)
+    a_fluss = f["a_fluss_m2"]
+    p = max(1, int((geom or {}).get("p", 3) or 3))
+    b_gap = eichung_magnet(geom)
+    psi = p * (2.0 / math.pi) * b_gap * a_fluss
+    kt = max(1.5 * p * psi, 1e-9)
+    i_lim = float(EA.umrichter(geom).get("i_max_1t", 800.0))
+    i_q = max(min(float(last_nm) / kt, i_lim), 0.0)
+    return {
+        "i_q_A": i_q, "i_d_A": 0.0,
+        "Kt_Nm_per_A": kt, "psi_Wb": psi, "B_gap_T": b_gap,
+        "i_grenze_A": i_lim, "am_anschlag": i_q >= i_lim - 1e-9,
+        "salienz": 1.0,
+        "hinweis": ("Oberflaechenmagnete flach auf der Scheibe: Ld = Lq, kein "
+                    "Reluktanzmoment, MTPA ist i_d = 0. Ein vergrabener "
+                    "Scheibenmagnet oder ein Reluktanzlaeufer WAERE salient und "
+                    "ist hier nicht gerechnet."),
+    }
+
+
 # ── Der Rasterer: eine abgewickelte Scheibe ──────────────────────────────────
 
 def rastere_scheibe(geom: dict, r_m: float, N: int = 400,
@@ -608,11 +660,11 @@ def felder(geom: dict, k_schnitte: int = 5, N: int = 400, rpm: float = 1000.0,
     # benannter Grund im Ergebnis.
     iq = id_ = 0.0
     strom_grund = ""
+    bp = {}
     if last_nm > 0:
         try:
-            iq, id_ = EA.estimate_dq_currents(
-                geom, rpm, last_nm, b_gap_t=eichung_magnet(geom))
-            iq, id_ = float(iq), float(id_)
+            bp = betriebspunkt(geom, rpm, last_nm, axial_mm)
+            iq, id_ = bp["i_q_A"], bp["i_d_A"]
         except Exception as e:                                       # noqa: BLE001
             strom_grund = f"{type(e).__name__}: {e}"
 
@@ -666,6 +718,7 @@ def felder(geom: dict, k_schnitte: int = 5, N: int = 400, rpm: float = 1000.0,
         "mm_je_px": 1.0 / px_je_mm, "radien_m": radien, "dr_m": dr,
         "i_q_A": iq, "i_d_A": id_, "rpm": rpm, "last_nm": last_nm,
         "strom_fehlschlag": strom_grund,
+        "betriebspunkt": bp,
         "last_gerechnet": bool(last_nm <= 0 or (abs(iq) + abs(id_)) > 0.1),
         "psi_Wb": psi, "Kt_Nm_per_A": 1.5 * p * psi,
         "T_maxwell_Nm": t_nm,
@@ -685,6 +738,9 @@ def felder(geom: dict, k_schnitte: int = 5, N: int = 400, rpm: float = 1000.0,
             "radialen Stromkomponenten im Wickelkopf fehlen. Nachzumessen an "
             "Stufe 3 (Elmer-Ringsektor), nicht anzunehmen.",
             "Eisen linear (MU_R_IRON), keine Saettigung -- wie im radialen FDM.",
+            "Der Betriebspunkt setzt OBERFLAECHENmagnete voraus (Ld = Lq, kein "
+            "Reluktanzmoment, i_d = 0). Ein vergrabener Scheibenmagnet oder ein "
+            "Reluktanzlaeufer waere salient und ist nicht gerechnet.",
             "BELASTBAR sind psi und B_gap(r); das MOMENT ist es nicht. Es ist "
             "das Produkt zweier unabhaengig geeichter Felder (B_n am "
             "Magnetanker, B_t ueberwiegend am Ankeranker), konvergiert ueber "
@@ -755,8 +811,8 @@ def bilder(geom: dict, ordner: str, k_schnitte: int = 5, N: int = 360,
     iq = id_ = 0.0
     if last_nm > 0:
         try:
-            iq, id_ = EA.estimate_dq_currents(
-                geom, rpm, last_nm, b_gap_t=eichung_magnet(geom))
+            _bp = betriebspunkt(geom, rpm, last_nm)
+            iq, id_ = _bp["i_q_A"], _bp["i_d_A"]
         except Exception:                                            # noqa: BLE001
             iq = id_ = 0.0
 

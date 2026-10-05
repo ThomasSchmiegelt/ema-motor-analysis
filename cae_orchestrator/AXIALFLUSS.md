@@ -643,3 +643,42 @@ der Großteil der Zeichenarbeit in Python, und die eine handgespiegelte
 - **Die Lagerung.** Beim einseitigen Aufbau liegen 12,2 kN dauerhaft am Lager.
   Das ist eine Lebensdauerfrage, und das Werkzeug rechnet heute keine Lager —
   auch nicht radial.
+
+---
+
+## 10. Offen — Stand 05.10.2026, Abend
+
+**Der Payload ist noch halb radial.** `statorOD`, `statorID`, `rotorOD`,
+`shaftD`, `magShape`, `magWidth`, `magDist`, `magDepthRel` … werden axial
+mitgeschleppt und bedeuten dort nichts. Dass `magShape = "v"` dabei bis in den
+Betriebspunkt durchschlug, ist in `BEFUNDE.md` (05.10.2026) belegt und an der
+Ursache behoben — die **Quelle** ist es nicht: ein eigener, vollständiger
+axialer Parametersatz mit Abweisung der radialen Maße steht aus. Das ist die
+nächste Arbeit, vor Stufe 3.
+
+**Was die Scheibenmaschine noch nicht ist.** Drei Quellen, die der Mensch am
+05.10.2026 dagegengehalten hat und die das Werkzeug bisher nicht abbildet:
+
+- **Axialfluss-Asynchronmaschine mit Käfigläufer** (Igelspacher, Diss. TU
+  München 2018/2020). Kap. 2: drei Bauformen, Stapelbauweise, Variante mit
+  **reduziertem Rotorjoch** (hebt Leistungs- und Momentdichte und koppelt die
+  Teilmaschinen magnetisch), Beispielmaschine. `ART_AXIAL["asm"]` sagt jetzt
+  „nicht gebaut" statt „schwer herstellbar"; es fehlen der Scheibenkäfig in
+  `ema_asm` und ein harmonischer Löser auf dem abgewickelten Schnitt.
+- **Eisenloser / gedruckter Scheibenanker** (Wikipedia „Scheibenläufermotor";
+  HAW Hamburg: „kernlose Luftspulenwicklungen"). Mein Schnitt setzt immer einen
+  **genuteten Eisenständer** voraus — `_BAUFORMEN` kennt keine Bauform ohne
+  Zähne. Das ist die älteste axiale Bauform überhaupt und fehlt ganz.
+- **Halbacharrays** (HAW Hamburg: „ermöglichen den Verzicht auf
+  ferromagnetisches Rotormaterial"). Die radiale Seite hat `magShape="halbach"`
+  seit jeher; die axiale Magnetlage kennt nur ±y.
+
+**Und die Rangfolge für morgen**, aus den Befunden dieses Tages:
+
+1. Eigener axialer Parametersatz + Abweisung der radialen Maße (Ursache von
+   „magShape=v" und allem, was daraus noch kommt).
+2. Bauform ohne Zähne (Luftspulen-/Scheibenanker) — sonst bildet das Werkzeug
+   genau die Maschine nicht ab, auf die der Name „Scheibenläufer" zeigt.
+3. Stufe 3 (Elmer-Ringsektor): sie hat zwei klar benannte Aufgaben — den
+   Normierungsunterschied beim Moment (Faktor ~3) entscheiden und die Amplitude
+   liefern, für die der kartesische Raster nicht reicht.

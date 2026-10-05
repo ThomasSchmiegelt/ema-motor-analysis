@@ -1197,6 +1197,7 @@ def _analytical_Bgap(geom: dict) -> float:
     _legs, meta = magnet_legs(geom)
     f_orient   = _orient_factor(geom)                       # 90°-rotation flux scaling
 
+    _axial_tor(geom, "_analytical_Bgap")
     if meta.is_surface:
         # Surface magnets occupy the outer rotor band (inside the OD) and face the
         # air gap directly; gap = statorID/2 - rotorOD/2 (normal mechanical gap).
@@ -1452,6 +1453,28 @@ XI_GEO_SPAN = (1.6, 4.5)
 DQ_TORQUE_MARGIN_NM = 5.0
 
 
+def _axial_tor(geom: dict, was: str) -> None:
+    """Diese Formel steht auf einem RADIALEN Laeufer -- axial gibt es ihn nicht.
+
+    Gemessen am 05.10.2026 (s. ``BEFUNDE.md``): ein Payload mit
+    ``fluxPath="axial"`` traegt weiterhin ``magShape="v"`` aus der Schemavorgabe,
+    und ``magnet_legs`` liefert dafuer **zwei V-Schenkel je Pol mit tilt +-60
+    Grad**. ``estimate_saliency`` kam damit auf **2,589** -- die Salienz einer
+    V-Tasche, die es auf einer Scheibe nicht gibt -- und ueber
+    ``estimate_dq_currents`` ging daraus ein ``i_d = -9,9 A`` in den
+    Betriebspunkt der Feldstufe. Der Lauf trug also innen einen IPM-Laeufer.
+    """
+    import ema_fluss
+    if ema_fluss.flussweg(geom) == "axial":
+        raise ema_fluss.FlusswegNichtUnterstuetzt(
+            f"Axialfluss: {was} steht auf der LAEUFERTOPOLOGIE eines "
+            f"Radiallaeufers (magnet_legs/magShape). Der Payload traegt dort "
+            f"weiterhin die Schemavorgabe 'v', und daraus faellt die Salienz "
+            f"einer V-Tasche, die eine Scheibe nicht hat. Die axiale Maschine "
+            f"hat Oberflaechenmagnete auf der Scheibe; ihren Betriebspunkt "
+            f"rechnet ema_axial_fdm.betriebspunkt.")
+
+
 def estimate_saliency(geom: dict) -> float:
     """Estimate Lq/Ld saliency ratio from magnetic circuit reluctance.
 
@@ -1483,6 +1506,7 @@ def estimate_saliency(geom: dict) -> float:
     ≈3.2.  Topologies without a researched band (``custom``) keep the previous
     behaviour unchanged.
     """
+    _axial_tor(geom, "estimate_saliency")
     import ema_referenz
 
     _legs, meta = magnet_legs(geom)

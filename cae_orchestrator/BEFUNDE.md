@@ -17,6 +17,90 @@ kann.
 
 ---
 
+## 2026-10-05 · Die „Axialflussmaschine" trug innen einen V-Magnet-IPM-Läufer
+
+**Vom Menschen gefunden, nicht vom Werkzeug** — gemeldet als *„deine maschine
+sieht aus wie eine psm mit magneten in v-anordnung. schau mal nach"*. Er hatte
+recht, und zwar an der empfindlichsten Stelle.
+
+**Gemessen** an genau dem Payload, mit dem der Gesamtdurchlauf lief
+(`fluxPath="axial"`, `axialAktivOD=260`, 2p=16, 48 Nuten):
+
+| | |
+|---|---|
+| `magShape` im axialen Payload | **`"v"`** — die Schemavorgabe, nie abgewiesen |
+| `magnet_legs(geom)` | **2 V-Schenkel je Pol**, `tilt = ±1,047 rad` (±60°), `len 24,08`, `dick 6,00` |
+| `estimate_saliency(geom)` | **2,589** — die Salienz einer V-Tasche |
+| `estimate_dq_currents` | i_q 189,2 A, **i_d −9,9 A** |
+| dieselbe Geometrie mit `magShape="spm"` | Salienz 1,02, **i_d 0,0 A** |
+
+Der Betriebspunkt der axialen Feldstufe kam also aus einem **IPM-Läufer mit
+V-Tasche**, den eine Scheibe nicht hat — und über das Ankerfeld ging er in B_t
+und damit ins Moment ein. `_analytical_Bgap` am selben Payload liefert 0,8807 T
+aus der IPM-Formel (mit einer Polteilung aus `statorID`); benutzt wurde sie
+nicht, erreichbar war sie.
+
+**Warum es keine der Prüfungen gefunden hat:** die Tore in `ema_fluss` fragen
+nach dem *Flussweg* und nach der *Maschinenart*, und beide Antworten waren
+richtig. Die **Läufertopologie** ist eine dritte Achse, und nach der hat nichts
+gefragt. `test_axial_fdm` prüft Form, Linearität, Carterzahl und Konvergenz —
+alles Größen, die der Phantom-Läufer gar nicht berührt, weil er nur über den
+STROM wirkt. Der Fehler saß genau im Spalt zwischen zwei richtigen Toren.
+
+**Behoben.** `estimate_saliency` und `_analytical_Bgap` weisen Axialfluss jetzt
+ab (`_axial_tor`) und nennen den Grund; `ema_axial_fdm.betriebspunkt` rechnet
+i_q aus dem **axialen** Kt (über `ema_fluss.flaechen`) mit `i_d = 0`. Das ist
+keine Vereinfachung, sondern die Bauart: Oberflächenmagnete flach auf der
+Scheibe heißt Ld = Lq, also kein Reluktanzmoment. Gemessen danach i_q 182,1 A
+statt 189,2, i_d 0,0 statt −9,9. Dass eine Scheibenmaschine mit vergrabenem
+Magnet oder als Reluktanzläufer **doch** salient wäre, steht als Grenze im
+Ergebnis statt mit einer fremden Salienz gefüllt zu werden.
+
+**Offen geblieben:** der Payload trägt weiterhin `statorOD/statorID/rotorOD/
+shaftD/magShape/magWidth/…` aus der Radialmaschine. Sie sind axial
+bedeutungslos, werden aber mitgeschleppt und sind damit die nächste Stelle
+derselben Art. Ein eigener, vollständiger axialer Parametersatz mit Abweisung
+der radialen Maße steht aus.
+
+
+## 2026-10-05 · Zwei Urteile über Maschinen, die keine Befunde waren
+
+In `ema_fluss.ART_AXIAL` stand:
+
+    asm:   "ein Scheibenkaefig ist schwer herstellbar [...] Nicht getragen"
+    synrm: "die Anisotropie braucht orientiertes Blech IN einer Scheibe --
+            nicht blechbar. Nicht getragen"
+
+Beides war **Vermutung in der Form eines Befunds** — und das erste ist falsch.
+Der Mensch hat dagegengehalten:
+
+* **Igelspacher, „Zur Theorie der Axialfluss-Asynchronmaschine als
+  ausfallsicherer Antrieb", Diss. TU München 2018/2020** (207 S.) — Kapitel 2
+  behandelt Axialfluss-Asynchronmaschinen mit Käfigläufer samt allen drei
+  Bauformen (1 Stator/1 Rotor, 2 Statoren/1 Rotor, 1 Stator/2 Rotoren), der
+  Stapelbauweise, einer Variante mit **reduziertem Rotorjoch** zur Erhöhung der
+  Leistungsdichte und einer Beispielmaschine. Eine Maschine, der jemand eine
+  Dissertation widmet, ist nicht „schwer herstellbar, nicht getragen".
+* **HAW Hamburg, Forschungsgruppe Elektrische Mobilität** — Pancake-Design,
+  Single-Rotor-Single-Stator / DRSS / DSSR, Halbacharrays (erlauben den Verzicht
+  auf ferromagnetisches Rotormaterial), kernlose Luftspulenwicklungen.
+* **Wikipedia „Scheibenläufermotor"** — eisenloser bzw. gedruckter Scheibenanker,
+  „das Magnetfeld verläuft parallel zur Drehachse", „der Durchmesser der Motoren
+  ist größer als deren Länge", magnetischer Kreis außerhalb der Scheibe
+  geschlossen.
+
+**Korrigiert.** Die Tabelle sagt jetzt, was dieses WERKZEUG trägt, und nicht,
+was es für baubar hält: `asm` ist „NICHT GEBAUT — und das ist eine Aussage über
+dieses Werkzeug, nicht über die Maschine", mit dem Verweis auf die Dissertation
+und der konkreten Lücke (Scheibenkäfig in `ema_asm`, harmonischer Löser auf dem
+abgewickelten Schnitt). Bei `synrm` ist „nicht blechbar" zurückgenommen.
+
+**Die Regel dahinter, zum Mitschreiben:** ein Tor darf sagen „das rechne ich
+nicht". Es darf nicht sagen „das gibt es nicht", und erst recht nicht in einem
+Tonfall, der wie eine Messung klingt. Alle drei Quellen standen im Netz; keine
+wurde gelesen, bevor die Zeile geschrieben wurde.
+
+
 ## 2026-10-05 · Gesamtdurchlauf: B_gap(r) aus dem Mehrschnitt ist NICHT konvergiert
 
 **Beim ersten vollständigen Durchlauf gemessen** — also genau dort, wo ein

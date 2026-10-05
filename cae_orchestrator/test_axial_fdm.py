@@ -132,15 +132,48 @@ print("\n— 5. Leerlauf und Last —")
 
 f0 = AF.felder(G, k_schnitte=3, N=320, rpm=3000.0, last_nm=0.0)
 fl = AF.felder(G, k_schnitte=3, N=320, rpm=3000.0, last_nm=100.0)
-pruefe(abs(f0["T_maxwell_Nm"]) < 0.02 * abs(fl["T_maxwell_Nm"]),
-       f"Leerlaufmoment {f0['T_maxwell_Nm']:.3f} Nm gegen Lastmoment "
-       f"{fl['T_maxwell_Nm']:.1f} Nm — ohne Strom keine Schubspannung")
+# **Das Leerlaufmoment MUSS null sein** -- ohne Strom gibt es keine tangentiale
+# Komponente, die ueber den Umfang stehenbliebe. Gemessen ist es das nicht,
+# sondern es STREUT: ueber k = 2/3/5 und N = 288/320/400 zwischen -0,11 und
+# -9,38 Nm, ohne Muster. Das ist die Rauschgrenze des Maxwell-Wegs, und sie
+# liegt bei rund 2 % des Lastmoments.
+#
+# Hier stand eine Schranke von 2 %, auf einen gemessenen Einzelwert (-0,551 Nm)
+# getrimmt -- also auf einen Gluecksgriff. Ein Test, der an einem Rauschwert
+# haengt, ist rot oder gruen je nach Tagesform und sagt nichts. Gemessen wird
+# deshalb die STREUUNG ueber mehrere Gitter, und festgehalten wird, dass sie
+# klein gegen die Last ist -- mehr gibt dieser Weg nicht her (s. BEFUNDE.md:
+# das Moment ist nicht belastbar).
+t_leer = [abs(AF.felder(G, k_schnitte=k, N=n, rpm=3000.0,
+                        last_nm=0.0)["T_maxwell_Nm"])
+          for k, n in ((2, 288), (3, 320), (5, 400))]
+pruefe(max(t_leer) < 0.05 * abs(fl["T_maxwell_Nm"]),
+       f"Leerlaufmoment streut ueber drei Gitter auf "
+       + "/".join(f"{t:.2f}" for t in t_leer)
+       + f" Nm — klein gegen {abs(fl['T_maxwell_Nm']):.0f} Nm Last, aber NICHT "
+         f"null, wie es sein muesste (Rauschgrenze des Maxwell-Wegs)")
 pruefe(f0["psi_Wb"] > 0.01 and abs(fl["psi_Wb"] / f0["psi_Wb"] - 1.0) < 0.1,
        f"psi haengt am Magneten und kaum an der Last "
        f"({f0['psi_Wb']:.5f} -> {fl['psi_Wb']:.5f} Wb)")
 pruefe(fl["last_gerechnet"] and abs(fl["i_q_A"]) > 1.0 and not fl["strom_fehlschlag"],
        f"der Betriebspunkt kommt wirklich an: i_q = {fl['i_q_A']:.1f} A, "
        f"i_d = {fl['i_d_A']:.1f} A")
+# Und er kommt NICHT mehr aus estimate_dq_currents: die rechnet MTPA ueber
+# estimate_saliency -> magnet_legs, und der Payload traegt dort magShape="v".
+# Gemessen kam daraus eine Salienz von 2,589 und ein i_d von -9,9 A -- aus einer
+# V-Tasche, die eine Scheibe nicht hat (BEFUNDE.md, 05.10.2026).
+pruefe(fl["i_d_A"] == 0.0 and fl["betriebspunkt"].get("salienz") == 1.0,
+       "i_d = 0 und Salienz 1: Oberflaechenmagnete flach auf der Scheibe, "
+       "kein Reluktanzmoment — kein Phantom-IPM mehr im Betriebspunkt")
+import ema_analysis as _EA
+for fn, nm in ((lambda: _EA.estimate_saliency(G), "estimate_saliency"),
+               (lambda: _EA._analytical_Bgap(G), "_analytical_Bgap"),
+               (lambda: _EA.estimate_dq_currents(G, 3000.0, 100.0), "estimate_dq_currents")):
+    try:
+        fn()
+        pruefe(False, f"{nm} muesste Axialfluss abweisen")
+    except F.FlusswegNichtUnterstuetzt:
+        pruefe(True, f"{nm} weist Axialfluss ab (steht auf magnet_legs)")
 # Der Fehlschlag, der beim Bauen vier Stunden gekostet haette: ein stilles
 # except liess die Last mit Strom NULL rechnen und das Leerlaufmoment melden.
 pruefe("last_gerechnet" in fl and "strom_fehlschlag" in fl,
