@@ -17,6 +17,99 @@ kann.
 
 ---
 
+## 2026-10-05 · Axialfluss: zwölf Stellen geben eine Zahl, wo ein Nein hingehört
+
+**Beobachtung.** Das Werkzeug hat kein Tor für den **Flussweg**. `machineType`
+hat eines (`ema_maschinenart`), die Läuferbauform hat eines (`ema_radien`,
+`pruefe_bauform`) — die Richtung, in der der Luftspalt liegt, hat keines, weil
+sie nie als Begriff auftaucht: `grep -i "axial|AFPM|YASA|Scheibenläufer"` findet
+im ganzen Baum nur `axialLen`/`axial_mm`, also die *Paketlänge* einer
+Radialflussmaschine. Eine Axialflussmaschine wird deshalb nicht abgewiesen,
+sondern **als Radialflussmaschine gerechnet und mit ihrem Namen beschriftet** —
+derselbe Fehlertyp, gegen den `ema_maschinenart` gebaut ist („er bekommt
+PSM-Zahlen mit einem anderen Etikett").
+
+**Gemessen, wie weit die radiale Annahme reicht.** 93 Dateien lesen
+`statorID`/`statorOD`/`rotorOD` unmittelbar; **17** fragen `ema_radien`
+(59 Aufrufstellen). Die Kapselung, die für Innen-/Außenläufer gebaut wurde,
+deckt also ein Fünftel der Lesestellen ab — und sie kapselt die falsche Frage:
+`radien()` ordnet Radien, setzt aber voraus, dass der Spalt eine **Differenz
+zweier Radien** ist. Axial ist er eine axiale Strecke.
+
+**Die zwölf Stellen, die eine Zahl liefern würden** (keine wirft einen Fehler):
+
+| Stelle | was herauskäme |
+|---|---|
+| `ema_thermal.rated_torque` (2σ·πR²L) | Zylinderformel auf eine Scheibe: beliebiger Wert |
+| `ema_analysis.compute_performance` (`psi_pm = p(2/π)B·R_gap·L`) | falsches Flächenintegral, gemessen Faktor 1,49 daneben |
+| `ema_saettigung` (`B_zahn = B_gap/((1−swr)·k_fe)`) | die dokumentierte Kürzung der Nutteilung (`:52`) gilt nur auf **einem** Radius |
+| `ema_analysis.luftspalt_mm` | `(statorID − rotorOD)/2` — bildet den Spalt nicht |
+| `ema_radien.radien` | wirft `spalt ≤ 0` oder prüft eine Ringwand, die es nicht gibt — ein Fehler, aber der falsche |
+| `ema_rotorcheck` (Lamé-Ring) | eine Scheibe unter Axialzug ist kein rotierender Ring |
+| `ema_rotorcheck`/`rotor_layout_check` | prüft den Blechsteg, den eine Scheibe nicht hat (vgl. Befund „Polbefestigung") |
+| `ema_thermal` LPTN | Schalennetz von innen nach außen; beim jochlosen Stator die falsche Topologie |
+| `ema_analysis.estimate_saliency` | legt `magThick` in den d-Pfad; axial ist das die axiale Richtung |
+| `ema_analysis._rasterise` / `_sample_airgap` | `R = hypot(X,Y)`-Ringe: baut eine Radialmaschine |
+| `ema_em3d.baue_netz` / `ema_em3d_harm.baue_netz` | Scheiben **eines** Querschnitts — den gibt es axial nicht |
+| `ema_analysis.r_gap_m` | ein Radius für zwei verschiedene Integrale (s. u.) |
+
+**Gemessen, warum ein Radius nicht reicht.** Flussverkettung wiegt die
+Ringfläche mit r¹, das Moment mit r². Radial fallen beide auf `R_gap` zusammen —
+axial nicht. An der Vorgabegeometrie (Stator 280/190, Rotor 188,6, L = 80,
+water = 40 kPa aus `COOLING_RATING`), axial mit Ro = 130 mm, λ = Ri/Ro = 0,577,
+zwei Luftspalten:
+
+| | radial | axial (2 Spalte) | Faktor |
+|---|---|---|---|
+| Flussfläche `R_gap·L` bzw. `n·(Ro²−Ri²)/2` | 75,44 cm² | 112,66 cm² | 1,49 |
+| Momentintegral `R²L` bzw. `n(Ro³−Ri³)/3` | 711 | 1183 | 1,66 |
+| T_dauer | **178,8 Nm** | **297,2 Nm** | 1,66 |
+
+Die 178,8 Nm sind die Gegenprobe: dieselbe Zahl steht im Docstring von
+`ema_thermal.mit_umrichtergrenze`. Wer `R_gap·L` durch *eine* Ersatzfläche
+ersetzt, hat danach entweder `Kt` oder das thermische Dauermoment richtig, nie
+beide.
+
+**Gemessen, dass der Hauslöser es trägt.** `_build_fv_matrix(mu)` und
+`_solve_fdm(mu, J)` nehmen nur Material- und Stromfelder auf einem
+gleichmäßigen kartesischen Gitter — sie kennen keinen Radius. Eine abgewickelte
+Axialfluss-Scheibe (r = 102,5 mm, 2p = 16, Fenster = genau 2 Polteilungen mit
+Polgrenze bei x = 0, damit Dirichlet A = 0 am Seitenrand die *richtige*
+Bedingung ist, 400×400, Luftspalt 5 px) durch die **unveränderten**
+Hausfunktionen `_solve_fdm`, `_material_labels`, `_curl_a`:
+
+    Permeanz hm/(hm+µr·kc·g)  0,8325  →  B_an 0,9573 T
+    B_axial Spitze            0,9573 T
+    B_axial Grundwelle        1,2098 T  = 1,264 × Spitze   (4/π = 1,273 → nahezu rechteckig)
+    B_tangential Spitze       0,3839 T  (40,1 % der Normalkomponente)
+    Klirranteil               42,6 %
+    Linearitätsprobe J → 2J   2,000000 × A
+
+Radiusgebunden sind also nur `_rasterise` und `_sample_airgap`, nicht der
+Löserkern. Nachrechenbar mit `axialfluss_scheibenprobe.py`. Der Stator ist in diesem Lauf massives Eisen ohne Nuten; der Lauf
+trägt keine Nutungsaussage.
+
+**Gemessen, welche Last dabei fehlt.** Aus derselben Scheibe:
+⟨B_n²⟩/2µ₀ = **345,8 kPa** Normalspannung, auf 353,7 cm² Ringfläche
+**12,23 kN axialer Anzug je Luftspalt** — gegen 40 kPa Schubspannung, die das
+Moment macht. Verhältnis **8,6 : 1**. Bei zwei Spalten hebt sich das nur bei
+mittigem Stator auf; 0,10 mm Versatz aus 1,0 mm Spalt lassen 4,99 kN übrig,
+und zwar **in Richtung des Versatzes** (destabilisierend). Keine der
+Strukturstufen kennt diese Lastart: `ema_deck`, `ema_z88`, `ema_aster` rechnen
+Fliehkraft, `ema_schenkelpol` die Polbefestigung. Eine Axiallast gibt es
+nirgends.
+
+**Nicht repariert, und bewusst nicht.** Was hier fehlt, ist keine Formel,
+sondern ein Tor — und ein Tor ohne die Stufen dahinter ist richtig, ein
+Schemaschlüssel `fluxPath` ohne Tor wäre schlimmer als der heutige Zustand
+(dann hieße eine ausgewählte Bauform, das Werkzeug trage sie). Die Reihenfolge
+steht in `AXIALFLUSS.md`: erst das Tor und das begründete Nein, dann die vier
+Stufen. Der Umbau von `compute_performance` und `rated_torque` auf getrennte
+Flächenintegrale verschiebt Zahlen **bestehender** Projekte, falls er den
+Radialfall nicht Stelle für Stelle reproduziert; beide Module stehen in
+`ema_werkzeugstand._MODULE`, der Fingerabdruck meldet die Änderung also an
+jeder gespeicherten Rechnung.
+
 ## 2026-10-04 · Alle fünf Bauarten laufen durch — drei Stufen wissen nicht, welche
 
 **Gemessen.** Ein Pipelinelauf je Maschinenart, gleicher frischer Payload, nur
