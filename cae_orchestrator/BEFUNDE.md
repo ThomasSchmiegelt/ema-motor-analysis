@@ -17,6 +17,98 @@ kann.
 
 ---
 
+## 2026-10-05 · `rotor-check` meldet FAIL bei der Drehzahl, die es selbst vorschlägt
+
+**Beobachtung, nicht diagnostiziert.** `test_rotorcheck.py` schlägt an zwei
+Prüfungen fehl: „Verb: bei der vorgeschlagenen Drehzahl hält es (Exit 0)" und
+„und meldet dort PASS statt FAIL". Das Verb rechnet also einen Entlastungsweg aus
+(`ema_rotorcheck.entlastung`, Höchstdrehzahl), und bei genau dieser Drehzahl
+besteht sein eigenes Tor nicht.
+
+**Gegengeprüft, dass es nicht von diesem Tag stammt:** mit `git stash` auf die
+unveränderte `ema_rotorcheck.py` zurückgesetzt schlagen dieselben zwei Prüfungen
+identisch fehl. Der Axialfluss-Umbau vom 05.10.2026 (das neue Flussweg-Tor am
+Anfang von `rotor_layout_check`/`rotor_stress_check`) ist nicht die Ursache.
+
+**Warum das wichtig ist:** `entlastung` ist ausdrücklich dafür gebaut, dass
+**jeder Weg gegen DASSELBE Tor nachgeprüft wird, bevor er vorgeschlagen wird** —
+„einer, der es erneut reissen lässt, ist keiner" (s. `cae_orchestrator/CLAUDE.md`).
+Genau diese Zusicherung hält hier nicht, und der Vorschlag ist dann schlimmer als
+keiner: er schickt eine Auslegungsentscheidung in eine Drehzahl, die wieder
+abgewiesen wird. Die Rundung „auf die sichere Seite" (dokumentiert: auf 50
+aufgerundet lag die Sicherheit wieder bei 1,297 statt 1,30) ist der erste Ort,
+an dem man suchen würde.
+
+**Nicht repariert** — dieser Befund entstand beim Durchmessen der Testsätze für
+einen anderen Umbau, und eine Reparatur am Fliehkrafttor mitten in einem
+Axialfluss-Umbau wäre genau die stille Vermischung, gegen die
+`ema_werkzeugstand` gebaut ist.
+
+
+## 2026-10-05 · Zwei Angaben in `AXIALFLUSS.md` §1 waren falsch — beide beim Bauen gemessen
+
+Beide standen in der ersten Fassung des Plans vom selben Tag, beide sind dort
+jetzt mit Begründung korrigiert. Sie stehen hier, weil ein korrigierter Plan nicht
+zeigt, **dass** korrigiert wurde — und weil beide Fehler eine Art haben, die
+wiederkommt.
+
+**1. λ = 1/√3 ist nicht herleitbar.** Der Plan nannte es „den klassischen Wert
+bei endlichem Strombelag". Nachgerechnet:
+
+    T = 2π·σ·Ro³·(1−λ³)/3   →   dT/dλ = −2π·σ·Ro³·λ²  < 0  für jedes λ > 0
+
+Das Momentintegral ist in λ **monoton fallend**, es hat gar kein inneres Maximum.
+Und die Voraussetzung hält: σ ist über r konstant, solange der Zahn keilförmig
+ist — der Leiterquerschnitt je Nut wächst mit der Nutteilung, also mit r, und der
+Flächenstrombelag `K = J·swr·h_z` hängt damit nicht von r ab.
+
+Der Literaturwert ist **λ = 1/3** und stammt aus der Mitteldurchmesser-Näherung
+`T ≈ σ·(π·D_m·L_e)·(D_m/2)`. Die liegt bei λ → 0 um **25 %** zu niedrig (1,5708
+gegen 2,0944 in Einheiten von σ·Ro³) und erzeugt dadurch ein Maximum, das die
+Maschine nicht hat. **1/√3 = 0,5774 ist keiner der beiden Werte** — es war von
+Anfang an eine Zahl ohne Herleitung, genau die Art Konstante, die der Plan im
+selben Abschnitt zu vermeiden verspricht (Vorbild: die flachen 20 %
+Kurzschlussring-Zuschlag, die `feld3d` um mindestens das Dreifache widerlegt hat).
+
+Bindend ist statt dessen die **Zeichnung am Innenrand** (`ema_axial.lambda_grenze`):
+dort wird die Nut zu schmal oder der Zahn zu dünn, beides aus `slots` und
+`slotWidthRatio`. Gemessen bei Q = 48, swr = 0,5, 2 mm Fertigungsboden:
+λ_min = **0,2351**, bindend die Nut; bei Q = 72 λ_min = 0,3526.
+
+**2. Der Kragstreifen in §1.7 war eine UNTERE Schranke, obwohl „obere" dastand.**
+Gerechnet war ein Kragstreifen über dem **aktiven** Ring (Ro − Ri = 55 mm), mit
+der Begründung, die Ringscheibe trage umfangs mit und sei steifer. Das zweite
+stimmt und ist unerheblich: die Scheibe ist nicht am Innenrand des Ringraums
+eingespannt, sondern an der **Nabe**. Der Hebel ist damit 100 mm statt 55 —
+(100/55)⁴ ≈ 11, abzüglich der um 1/(1−ν²) höheren Plattensteifigkeit bleibt
+**Faktor 9**.
+
+Gemessen an der Kreisringplatte (`ema_axial._platte`, innen eingespannt, außen
+frei, Druck nur auf dem aktiven Ring, Nabe bei r = 30 mm), gegen die alten Zahlen:
+
+| 2p | t magnetisch | w (Platte) | Anteil 1-mm-Spalt | alt (Kragstreifen) |
+|---|---|---|---|---|
+| 8 | 25,70 mm | 13,1 µm | 1,3 % | 1,4 µm |
+| 16 | 12,85 mm | **105,0 µm** | **10,5 %** | 11,1 µm |
+| 24 | 8,57 mm | 354,3 µm | 35,4 % | 37,5 µm |
+| 40 | 5,14 mm | 1640,4 µm | 164,0 % | 173,5 µm |
+
+Die Durchbiegung bindet also **viel früher** als der Plan sagte. Der Plattenlöser
+ist gegen den Kragstreifen im Grenzfall des schmalen Rings geprüft (0,26 %
+Abweichung bei 1 mm Ringbreite), Randrest ~1e-21, Linearität in q exakt 2,000000
+und in t exakt 8,000000 (`test_axial.py`).
+
+**Was daraus als Auslegungsauskunft folgt** — und was ohne die Rechnung nicht zu
+sehen war: die Steifigkeitsforderung ist **polzahlunabhängig** (sie hängt am Druck
+und an der Geometrie, nicht an der Flussaufteilung), die magnetische fällt mit der
+Polzahl, also kreuzen sie sich. Und der Haupthebel ist nicht die Blechdicke,
+sondern der **Einspannradius**: von 30 auf 75 mm fällt die Durchbiegung um
+Faktor 9 (105,0 → 11,1 µm), die nötige Dicke von 13,06 auf 6,17 mm.
+
+**Beides behoben** (das ist der Unterschied zu den anderen Einträgen hier): die
+Angaben waren noch nicht in Gebrauch, es hing keine gespeicherte Rechnung daran.
+`AXIALFLUSS.md` trägt beide Korrekturen mit den alten Zahlen zum Nachvollziehen.
+
 ## 2026-10-05 · `rated_torque` nimmt am Außenläufer den falschen Radius (+22,5 %)
 
 **Beim Bauen von `ema_fluss` (Stufe 0) gemessen**, nicht gesucht: die beiden

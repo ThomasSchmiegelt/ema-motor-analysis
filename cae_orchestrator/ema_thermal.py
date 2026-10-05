@@ -74,12 +74,33 @@ def rated_torque(geom: dict, axial: float, cooling: str) -> float:
 
     T = 2·σ·V_rotor is the standard electromagnetic sizing relation. σ depends on
     how hard the machine can be cooled. This replaces the free ``load_nm`` as the
-    reference the cycle loads are measured against."""
-    R_rot = geom["rotorOD"] / 2 / 1000
-    L     = axial / 1000
-    V_rot = math.pi * R_rot ** 2 * L
+    reference the cycle loads are measured against.
+
+    **Das Momentintegral kommt aus ``ema_fluss``** -- EINE Quelle fuer beide
+    Flusswege. Radial ist ``a_moment_m3`` ziffernweise ``(rotorOD/2/1000)^2 * L``
+    und ``2*pi*sigma*a_moment`` damit genau das alte ``2*sigma*V_rot``; axial ist
+    es das r^2-gewichtete Integral ueber den Ringraum, ``n*(Ro^3-Ri^3)/3``.
+
+    Warum nicht weiter ueber ein Rotorvolumen: eine Scheibe hat keinen Zylinder,
+    an dem die Schubspannung angreift. ``2*sigma*pi*R^2*L`` darauf anzuwenden
+    gaebe eine Zahl ohne Bedeutung -- und zwar ohne Fehlermeldung.
+
+    Zwei Dinge bleiben ausdruecklich, wie sie waren:
+
+    * ``a_moment_m3`` nimmt radial den **Laeuferaussen**radius, nicht den
+      Spaltradius -- so rechnet diese Funktion seit jeher. Dass das am
+      Aussenlaeufer um +22,5 % daneben liegt, ist ein eigener Befund
+      (``BEFUNDE.md``, 05.10.2026) und wird hier NICHT mitrepariert: der Umbau
+      darf keine Zahl eines bestehenden Projekts verschieben.
+    * ``axial`` wird weiterhin als Paketlaenge in Millimetern gelesen. Neu ist
+      allein, dass ein fehlender Wert ueber ``stapellaenge_m`` auf
+      ``geom["axialLen"]`` zurueckfaellt statt auf 0 -- kein Aufrufer tut das,
+      und der Rueckfall ist der aus dem Befund vom 12.09.2026.
+    """
+    import ema_fluss
+    a_moment = ema_fluss.flaechen(geom, axial)["a_moment_m3"]
     sigma = COOLING_RATING.get(cooling, COOLING_RATING["natural"])["sigma_kPa"] * 1000.0
-    return max(1.0, 2.0 * sigma * V_rot)
+    return max(1.0, 2.0 * sigma * math.pi * a_moment)
 
 
 def mit_umrichtergrenze(t_thermisch: float, t_bei_strom, i_grenze: float = 0.0,

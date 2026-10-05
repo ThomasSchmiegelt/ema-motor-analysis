@@ -92,8 +92,42 @@ VORGABE = "radial"
 
 #: Welche Stufen den Axialfluss heute wirklich tragen. Wie in
 #: ``ema_maschinenart`` und ``ema_radien``: die zweite Spalte ist der Sinn der
-#: Tabelle. Heute leer -- Stufe 0 ist das Tor, nicht die Rechnung.
-STUFEN_AXIAL: tuple = ()
+#: Tabelle.
+#:
+#: ``analytisch`` traegt seit dem 05.10.2026 (``ema_axial``): Ringraum, die
+#: beiden Flaechenintegrale, Rueckenblech (magnetisch UND Durchbiegung, mit der
+#: Kreisringplatte statt einer Schranke), axialer Anzug samt negativer
+#: Steifigkeit, Magnethaltung in der Scheibenebene, Zahnform.
+#:
+#: ``feld``/``cad``/``em3d`` ausdruecklich NICHT -- das Raster baut Ringe aus
+#: ``hypot(X, Y)``, das 3-D-Netz Scheiben EINES Querschnitts, und einen solchen
+#: Querschnitt gibt es axial nicht. Der Weg dorthin ist der abgewickelte
+#: Mehrschnitt (``AXIALFLUSS.md`` §4, Geruest in
+#: ``axialfluss_scheibenprobe.py``).
+STUFEN_AXIAL: tuple = ("analytisch",)
+
+#: Welche MASCHINENART axial ueberhaupt eine Bauform hat. Die Matrix ist nicht
+#: voll besetzt, und das ist die Aussage -- eine Reluktanzmaschine braucht
+#: orientiertes Blech in einer Scheibe, und das ist nicht blechbar.
+#:
+#: Bemerkenswert: die GSM hat axial die aelteste Bauform von allen (der
+#: Scheibenlaeufer mit gedrucktem oder eisenlosem Anker), ist aber die einzige
+#: Art ohne Feldstufe -- ``feldweg="keiner"``, weil ein kommutierter Anker nicht
+#: magnetostatisch ist. Daran aendert die Scheibe nichts.
+ART_AXIAL = {
+    "pmsm":  (True,  "die beherrschende Bauform (YASA, TORUS, AFIR): "
+                     "Sektormagnete flach auf der Scheibe"),
+    "gsm":   (True,  "der klassische Scheibenlaeufer mit gedrucktem oder "
+                     "eisenlosem Anker -- kein Rastmoment, kleinste Traegheit. "
+                     "Weiterhin ohne Feldstufe, aus dem alten Grund"),
+    "eesm":  (True,  "moeglich, aber selten: Ringerregerspule axial, "
+                     "Schleifringe wie bisher"),
+    "asm":   (False, "ein Scheibenkaefig ist schwer herstellbar, und der "
+                     "Schlupfverlust faellt in der am schlechtesten gekuehlten "
+                     "Scheibe an. Nicht getragen"),
+    "synrm": (False, "die Anisotropie braucht orientiertes Blech IN einer "
+                     "Scheibe -- nicht blechbar. Nicht getragen"),
+}
 
 #: Bauformen des Axialflusses und wieviele Luftspalte sie haben. Der Name
 #: allein entscheidet nichts; er sagt, wo sich die Anzugskraft aufhebt.
@@ -148,6 +182,29 @@ def pruefe_flussweg(quelle, stufe: str) -> str:
         f"(05.10.2026). Ein Radialfluss-Ergebnis unter diesem Namen waere "
         f"schlimmer als keines -- gemessen laege allein die Flussflaeche um "
         f"den Faktor 1,49 daneben, das Moment um 1,66.")
+
+
+def pruefe_art_flussweg(quelle) -> str:
+    """Hat DIESE Maschinenart axial ueberhaupt eine Bauform?
+
+    Zwei Tore, die wie eines aussehen und es nicht sind: ``pruefe_flussweg``
+    fragt, ob die STUFE den Flussweg traegt, dieses hier, ob die ART ihn hat.
+    Eine Reluktanzmaschine als Scheibe abzuweisen ist keine Luecke im Werkzeug,
+    sondern eine Aussage ueber die Maschine.
+    """
+    import ema_maschinenart
+
+    w = flussweg(quelle)
+    if w == "radial":
+        return w
+    code = ema_maschinenart.art_code(quelle)
+    traegt_art, hinweis = ART_AXIAL.get(code, (False, "unbekannte Art"))
+    if traegt_art:
+        return w
+    raise FlusswegNichtUnterstuetzt(
+        f"{ema_maschinenart.ARTEN[code].label} als Axialflussmaschine: "
+        f"{hinweis}. Axial getragen: "
+        f"{', '.join(k for k, (t, _) in ART_AXIAL.items() if t)}.")
 
 
 def axial_bauform(geom: dict) -> str:

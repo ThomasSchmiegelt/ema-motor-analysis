@@ -1,12 +1,17 @@
 # Axialflussmaschine — Umsetzungsplan bis Stufe 4
 
-**Stand 05.10.2026: Stufe 0 ist gebaut, Stufen 1–4 nicht.** Dieses Dokument ist
-der Plan; was davon steht, sagt die Spalte unten.
+**Stand 05.10.2026: Stufen 0 und 1 sind gebaut, Stufen 2–4 nicht.** Dieses
+Dokument ist der Plan; was davon steht, sagt die Spalte unten.
+
+> **Zwei Angaben in §1 waren falsch und sind korrigiert** — beide erst beim Bauen
+> von Stufe 1 aufgefallen, beide in `BEFUNDE.md` (05.10.2026): λ = 1/√3 ist
+> **nicht herleitbar**, und der Kragstreifen in §1.7 war eine **untere**, keine
+> obere Schranke. Die ursprünglichen Zahlen stehen dort zum Nachvollziehen.
 
 | Stufe | Stand |
 |---|---|
 | **0 Tor** | ✅ gebaut — `ema_fluss.py`, `fluxPath` im Schema, Tor an drei Stellen, `test_fluss.py` 35/35 |
-| 1 analytisch | offen |
+| **1 analytisch** | ✅ gebaut — `ema_axial.py` (Kreisringplatte, Anzug, Bandage, Zahnform, λ-Grenze), `test_axial.py` **69/69** |
 | 2 feld | offen (Beleg vorhanden: `axialfluss_scheibenprobe.py`) |
 | 3 em3d | offen |
 | 4 cad | offen |
@@ -78,11 +83,36 @@ entweder `Kt` oder das thermische Dauermoment richtig, nie beide.
 | 0,70 | 91,0 mm | 241,8 Nm |
 | 0,80 | 104,0 mm | 179,6 Nm |
 
-Bei festem σ wächst T monoton mit kleinerem λ — unphysikalisch, weil das
-Wickelfenster am Innenrand mitschrumpft. Mit endlichem Strombelag ergibt sich
-λ = 1/√3 = 0,577. **Zu tun in Stufe 1:** λ aus dem *gezeichneten* Wickelfenster
-herleiten statt den Literaturwert zu setzen — sonst ist es dieselbe Art
-Konstante wie die 20 % Kurzschlussring, die `feld3d` widerlegt hat.
+**Korrigiert am 05.10.2026.** Hier stand: „Mit endlichem Strombelag ergibt sich
+λ = 1/√3 = 0,577." Das ist nicht herleitbar. Nachgerechnet:
+
+```
+T = 2πσ·Ro³·(1−λ³)/3   →   dT/dλ = −2πσ·Ro³·λ²  < 0  für jedes λ > 0
+```
+
+**monoton fallend, kein inneres Maximum.** Und σ ist über r konstant, solange der
+Zahn keilförmig ist: der Leiterquerschnitt je Nut wächst mit der Nutteilung, also
+mit r, und der Flächenstrombelag `K = J·swr·h_z` hängt damit **nicht** von r ab.
+
+Der Literaturwert **λ = 1/3** stammt aus der Mitteldurchmesser-Näherung
+`T ≈ σ·(π·D_m·L_e)·(D_m/2)`, und die liegt bei λ → 0 um **25 %** zu niedrig
+(1,5708 gegen 2,0944 in Einheiten von σ·Ro³). Sie erzeugt damit ein Maximum, das
+die Maschine nicht hat. **1/√3 = 0,5774 ist überhaupt keiner der beiden Werte.**
+
+| λ | T_exakt/(σRo³) | T_Näherung | Näherung/exakt |
+|---|---|---|---|
+| 0,000 | 2,0944 | 1,5708 | 0,750 |
+| **1/3** | 2,0168 | **1,8617** | 0,923 |
+| 0,577 | 1,6913 | 1,6518 | 0,977 |
+| 0,950 | 0,2987 | 0,2986 | 1,000 |
+
+**Was λ wirklich bindet, ist die Zeichnung am Innenrand** (`ema_axial.lambda_grenze`):
+dort wird die Nut zu schmal oder der Zahn zu dünn, beides aus `slots` und
+`slotWidthRatio`. Gemessen bei Q = 48, swr = 0,5 und 2 mm Fertigungsboden:
+**λ_min = 0,2351**, bindend die Nut; bei Q = 72 sind es 0,3526. Das beste λ ist
+das kleinste **zeichenbare**, und welche Grenze bindet, wird genannt. Ein Optimum
+entsteht erst durch ein **zweites** Ziel (Masse, Rückenblech, Durchbiegung) —
+nicht durch das Moment allein.
 
 ### 1.4 Die Geometrie läuft mit dem Radius — kein Querschnitt stellt die Maschine dar
 
@@ -142,12 +172,43 @@ und wird vom Anzug belastet:
 | 32 | 6,43 mm | 0,089 mm | 8,9 % |
 | 40 | 5,14 mm | 0,173 mm | **17,3 %** |
 
-Kragstreifen je Meter Breite, also **obere Schranke** — die Ringscheibe trägt
-umfangs mit. Maßgeblich ist der Trend, und er dreht die Polzahl um: radial senkt
-eine hohe Polzahl das Joch und kostet nichts, axial senkt sie die Steifigkeit
-gegen den Anzug. Oberhalb etwa 2p = 32 bemisst **nicht mehr der Fluss, sondern
-die Durchbiegung** das Rückenblech. Das ist dieselbe Art „welche Grenze bindet"-
-Auskunft wie `joch_bindet` beim Schenkelpol.
+**Korrigiert am 05.10.2026: der Kragstreifen war eine UNTERE Schranke, keine
+obere.** Hier stand, die Zahlen seien obere Schranken, weil die Ringscheibe
+umfangs mittrage. Der Denkfehler lag eine Ebene darunter: gerechnet war ein
+Kragstreifen über dem **aktiven** Ring (Ro − Ri = 55 mm), die Scheibe ist aber an
+der **Nabe** eingespannt. Der Hebel ist damit 100 mm statt 55 — (100/55)⁴ ≈ 11,
+abzüglich der um 1/(1−ν²) höheren Plattensteifigkeit bleibt **Faktor 9**.
+
+`ema_axial.ruecken` rechnet deshalb die **Kreisringplatte** (`_platte`,
+achssymmetrische Plattengleichung, innen eingespannt, außen frei, Druck nur auf
+dem aktiven Ring) und keine Schranke. Geprüft gegen den Kragstreifen im Grenzfall
+des schmalen Rings (0,26 % bei 1 mm Ringbreite), Randrest ~1e-21, Linearität in q
+exakt 2,000000 und in t exakt 8,000000 (`test_axial.py`). Gemessen mit magnetisch
+bemessener Dicke, Nabe bei r = 30 mm:
+
+| 2p | t magnetisch | w (Kreisringplatte) | Anteil am 1-mm-Spalt | *alt (Kragstreifen)* |
+|---|---|---|---|---|
+| 8 | 25,70 mm | 13,1 µm | 1,3 % | *1,4 µm* |
+| 16 | 12,85 mm | **105,0 µm** | **10,5 %** | *11,1 µm* |
+| 24 | 8,57 mm | 354,3 µm | 35,4 % | *37,5 µm* |
+| 32 | 6,43 mm | 839,9 µm | 84,0 % | *88,8 µm* |
+| 40 | 5,14 mm | 1640,4 µm | 164,0 % | *173,5 µm* |
+
+Die Durchbiegung bindet also **viel früher** als hier stand. Zwei Aussagen kommen
+dazu, und sie sind die eigentliche Auslegungsauskunft:
+
+**Die Steifigkeitsforderung ist polzahlUNABHÄNGIG** — sie hängt am Druck und an
+der Geometrie, nicht daran, wie sich der Fluss aufteilt; die magnetische fällt mit
+der Polzahl. Deshalb **kreuzen** sie sich, und `ruecken()` sagt wo: mit Nabe bei
+30 mm bindet der Fluss bis 2p = 8 und danach die Durchbiegung, mit einer Nabe bis
+an Ri erst ab 2p = 40.
+
+**Die Nabe ist der Haupthebel, nicht die Blechdicke.** Von 30 auf 75 mm
+Einspannradius fällt die Durchbiegung um **Faktor 9** (105,0 → 11,1 µm bei
+gleicher Dicke), die nötige Dicke für 10 % Spaltanteil von 13,06 auf 6,17 mm. Das
+ist der Griff, den eine Auslegung zuerst anfassen sollte — `axialNabeD` ist
+deshalb ein eigener Schemaparameter. Dieselbe Art „welche Grenze bindet"-Auskunft
+wie `joch_bindet` beim Schenkelpol.
 
 ### 1.8 Magnethaltung: die Fliehkraft wechselt die Ebene
 
@@ -272,7 +333,13 @@ Dazu:
 
 ---
 
-## 3. Stufe 1 — analytisch
+## 3. Stufe 1 — analytisch — **GEBAUT 05.10.2026**
+
+Abnahme gemessen: `test_axial.py` **69/69**, `test_fluss.py` 35/35, dazu `test_radien` 38/38, `test_maschinenart` 129/129, `test_saettigung`, `test_zyklen` 116/116, `test_paarvergleich` 102/102, `test_cae_cli`, `test_topology` und `smoke_test` **23/23** unverändert. **178,8 Nm radial bleibt 178,8 Nm**: `psi_pm` ist über 216 geprüfte Geometrien bitgleich, `rated_torque` innerhalb eines ulp (2,0e-16 relativ — die Multiplikationsreihenfolge ändert sich, der Wert nicht).
+
+Entstanden ist `ema_axial.py` mit `auslegung`, `lambda_grenze`, `zahnform`, `anzug`, `_platte`, `ruecken`, `bandage`, `moment`, `uebersicht`. Umgebaut: `compute_performance` und `rated_torque` gehen durch `ema_fluss.flaechen`. Neue Tore: `rotor_layout_check`, `rotor_stress_check` und `ema_saettigung.bewerten` weisen Axialfluss ab und **nennen die Funktion, die es rechnet** — statt eine Ringspannung auf eine Scheibe oder eine gekürzte Nutteilung auf zwei Radien anzuwenden.
+
+**Was NICHT getragen ist:** `screen`, `paarvergleich`, `steckbrief` und `sicherheit` sind radial verdrahtet (Zylindervolumen, Magnettaschen, LPTN-Schalennetz). Sie gehören zur analytischen Stufe, aber nicht zu `ema_axial`, und sie sind **nicht** axial gebaut — wer sie braucht, baut sie; bis dahin ist `ema_axial.uebersicht` die Auskunft.
 
 **Was entsteht.** `ema_axial.py` — und zwar nach der Hausregel, dass jede Größe
 sagt, welche Grenze bindet:

@@ -100,6 +100,25 @@ SCHEMA = {
     "axialSpalte":  {"kind": "num", "lo": 1, "hi": 8, "def": 2, "geom": True, "adv": True, "int": True,
                      "desc": "Axialfluss: Zahl der Luftspalte (1 = einseitig, 2 = AFIR/TORUS/YASA, "
                              "mehr = mehrstufig)"},
+    "axialSpaltMm":  {"kind": "num", "lo": 0.2, "hi": 5.0, "def": 1.0, "geom": True, "adv": True,
+                      "desc": "Axialfluss: Luftspalt [mm] -- eine AXIALE Strecke, nicht die "
+                              "Differenz zweier Radien"},
+    "axialMagnetDicke": {"kind": "num", "lo": 1.0, "hi": 30.0, "def": 6.0, "geom": True, "adv": True,
+                      "desc": "Axialfluss: Magnetdicke in AXIALER Richtung [mm]"},
+    "axialPolbedeckung": {"kind": "num", "lo": 0.3, "hi": 1.0, "def": 1.0, "geom": True, "adv": True,
+                      "desc": "Axialfluss: Magnetbogen / Polteilung (1,0 = vollpolig). Geht in "
+                              "Polfluss, Anzug und Magnetmasse"},
+    "axialZahnform": {"kind": "enum", "opts": ["keil", "parallel"], "def": "keil",
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Zahnform. keil (b ~ r) haelt B_zahn ueber dem Radius "
+                              "konstant; parallel laesst sie mit 1/r steigen -- am Innenrand um "
+                              "1/lambda hoeher"},
+    "axialNabeD":    {"kind": "num", "lo": 0, "hi": 600, "def": 0, "geom": True, "adv": True,
+                      "desc": "Axialfluss: Einspanndurchmesser der Laeuferscheibe an der Nabe [mm] "
+                              "(0 = shaftD). DER Haupthebel gegen die Durchbiegung"},
+    "axialBminMm":   {"kind": "num", "lo": 0.5, "hi": 10.0, "def": 2.0, "geom": True, "adv": True,
+                      "desc": "Axialfluss: Fertigungsboden fuer Nut- und Zahnbreite am Innenrand "
+                              "[mm]. Bindet lambda nach unten"},
     "axialBauform": {"kind": "enum", "opts": ["yasa", "afir", "torus_nn", "einseitig"],
                      "def": "yasa", "geom": True, "adv": True,
                      "desc": "Axialfluss-Bauform. Entscheidet, WO sich die Anzugskraft aufhebt: "
@@ -503,7 +522,8 @@ def _validate(raw: dict) -> dict:
     # richtig: das Tor weist ab, es entsteht keine Zahl. Die eigene Ordnung des
     # Ringraums ist Stufe 1 (s. AXIALFLUSS.md §3).
     for _k in ("fluxPath", "axialAktivOD", "axialLambda", "axialSpalte",
-               "axialBauform"):
+               "axialBauform", "axialSpaltMm", "axialMagnetDicke",
+               "axialPolbedeckung", "axialZahnform", "axialNabeD", "axialBminMm"):
         if raw.get(_k) in (None, ""):
             continue
         _spec = SCHEMA[_k]

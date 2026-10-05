@@ -221,7 +221,29 @@ def eisenwege(geom: dict, axial_mm: float, b_gap_t: float,
 def bewerten(geom: dict, axial_mm: float, b_gap_magnet: float,
              i_q: float = 0.0, i_d: float = 0.0,
              blech="m270_35a") -> dict:
-    """Ein Aufruf vom Betriebspunkt zur Saettigungsaussage."""
+    """Ein Aufruf vom Betriebspunkt zur Saettigungsaussage.
+
+    **Axialfluss wird abgewiesen, und zwar wegen EINER Zeile.** ``eisenwege``
+    rechnet ``B_zahn = B_gap * tau_nut / (b_zahn * k_fe)``, und weil
+    ``nutgeometrie`` die Nutbreite als festen Anteil der Nutteilung setzt,
+    kuerzt sich die Teilung heraus (s. Modulkopf). Das gilt nur, weil radial
+    ALLE Zaehne auf einem Radius sitzen.
+
+    Axial laeuft die Nutteilung mit dem Radius: bei keilfoermigem Zahn kuerzt
+    sie sich weiter heraus, bei PARALLELEM Zahn nicht -- dort gilt
+    ``B_zahn ~ 1/r`` und der Innenrand traegt ``1/lambda`` mal so viel
+    (gemessen 1,299 T aussen gegen 2,250 T innen bei lambda = 0,577). Eine
+    einzige Zahl waere also entweder richtig oder um 1,73 daneben, je nach
+    Zahnform -- und nichts sagte, welcher Fall vorliegt. Gerechnet wird es in
+    ``ema_axial.zahnform``, das beide Raender nennt.
+    """
+    import ema_fluss
+    if ema_fluss.flussweg(geom) == "axial":
+        raise ema_fluss.FlusswegNichtUnterstuetzt(
+            "Axialfluss: die Kuerzung der Nutteilung in B_zahn gilt nur, wenn "
+            "alle Zaehne auf EINEM Radius sitzen. Axial haengt sie an der "
+            "Zahnform -- gerechnet in ema_axial.zahnform(geom, b_gap), das "
+            "Aussen- UND Innenrand nennt.")
     g = gap_resultierend(geom, b_gap_magnet, i_q, i_d)
     e = eisenwege(geom, axial_mm, g["B_gap_T"], blech)
     # Der Steg kommt als EIGENE Aussage mit, NICHT als dritte Zeile der

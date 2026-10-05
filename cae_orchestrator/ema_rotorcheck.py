@@ -282,7 +282,31 @@ def zusatzteile_check(geom: dict, min_web_mm: float | None = None) -> dict:
 
 
 def rotor_layout_check(geom: dict, min_web_mm: float | None = None) -> dict:
-    """Run the 2-D rotor layout gate.  JSON-serialisable report."""
+    """Run the 2-D rotor layout gate.  JSON-serialisable report.
+
+    **Axialfluss hat hier nichts zu prüfen und sagt das.** Dieses Tor sucht
+    Magnettaschen in einem Querschnitt senkrecht zur Drehachse und misst Stege
+    gegen den Rotorrand. Eine Scheibe hat beides nicht: der Sektormagnet sitzt
+    FLACH auf ihr, und die Fliehkraft zieht ihn radial nach aussen IN der
+    Scheibenebene, wo kein Blechsteg ihn haelt (``ema_axial.bandage``).
+
+    Das ist derselbe Befundtyp wie bei der EESM: ``rotor_layout_check`` gab
+    einer fremderregten Maschine „Layout OK" mit Exit 0, weil es Magnettaschen
+    prüfte, die es dort nicht gibt. Ein „OK" wäre hier schlimmer als ein Nein.
+    """
+    import ema_fluss
+    if ema_fluss.flussweg(geom) == "axial":
+        return {
+            "ok": False, "fatal": [
+                "Axialfluss: dieses Tor prueft Magnettaschen in einem Querschnitt "
+                "senkrecht zur Drehachse und Stege gegen den Rotorrand -- eine "
+                "Scheibe hat beides nicht. Der Sektormagnet wird von Klebung oder "
+                "einer Bandage am Aussenrand gehalten, nicht von einem Blechsteg; "
+                "gerechnet wird das in ema_axial.bandage(geom, rpm). Die Scheibe "
+                "selbst trägt ausserdem den axialen Anzug (ema_axial.ruecken)."],
+            "warnings": [], "pockets": [], "surface": False,
+            "flussweg": "axial",
+        }
     if min_web_mm is None:
         min_web_mm = BRIDGE_MM
 
@@ -484,7 +508,17 @@ KT_POCKET = 1.5
 
 def rotor_stress_check(geom: dict, mat: dict, target: dict,
                        sf_target: float = 1.3) -> dict:
-    """Centrifugal structural gate at n_max.  Reports BOTH plane states, gates
+    """Centrifugal structural gate at n_max.
+
+    **Axialfluss wird abgewiesen.** Die Lame-Loesung gilt fuer einen rotierenden
+    RING -- beim Innenlaeufer von der Welle bis zum Luftspalt, beim
+    Aussenlaeufer vom Luftspalt nach aussen. Eine Laeuferscheibe ist keiner von
+    beiden: sie traegt zusaetzlich einen **axialen** Flaechendruck (gemessen
+    345,8 kPa, 8,6 : 1 zum momentbildenden Schub), und der biegt sie, statt sie
+    zu dehnen. Eine Ringspannung darauf anzuwenden gaebe eine Zahl ohne
+    Bedeutung und ohne Fehlermeldung -- gerechnet wird es in
+    ``ema_axial.ruecken`` (Kreisringplatte) und ``ema_axial.bandage``.
+      Reports BOTH plane states, gates
     on the CONSERVATIVE (plane-strain) value.  Pure math (millisecond).
 
     ``mat`` must carry ``density`` [kg/m^3], ``nu``, ``yield_mpa`` [MPa].
@@ -498,6 +532,15 @@ def rotor_stress_check(geom: dict, mat: dict, target: dict,
     Aussenlaeufer einen Ring gerechnet, der die halbe Maschine umfasst, und
     damit eine Spannung, die es nicht gibt.
     """
+    import ema_fluss
+    if ema_fluss.flussweg(geom) == "axial":
+        raise ema_fluss.FlusswegNichtUnterstuetzt(
+            "Axialfluss: die Ringspannung (Lame) ist fuer einen rotierenden RING "
+            "gebildet, nicht fuer eine Scheibe unter axialem Flaechendruck "
+            "(gemessen 345,8 kPa, 8,6 : 1 zum momentbildenden Schub). Gerechnet "
+            "wird es in ema_axial.ruecken (Kreisringplatte, innen eingespannt) "
+            "und ema_axial.bandage (Fliehkraft IN der Scheibenebene, die kein "
+            "Blechsteg haelt).")
     import ema_radien
     r = ema_radien.radien(geom)
     nu     = float(mat.get("nu", 0.30))

@@ -95,8 +95,12 @@ for pos in ("innen", "aussen"):
 
 print("\n— 2. Das Tor: kein Axialfluss unter fremdem Namen —")
 
-pruefe(F.STUFEN_AXIAL == (),
-       "STUFEN_AXIAL ist leer — keine Stufe traegt den Axialfluss")
+# Stufe 0 hatte hier `== ()`. Seit Stufe 1 (05.10.2026) traegt `analytisch`
+# den Axialfluss ueber `ema_axial`; die Tabelle ist der Sinn des Moduls, und ein
+# Test, der sie auf leer festnagelt, verhindert genau den Ausbau, fuer den das
+# Tor gebaut wurde. Festgenagelt wird statt dessen, WAS NICHT traegt.
+pruefe(F.STUFEN_AXIAL == ("analytisch",),
+       "STUFEN_AXIAL traegt 'analytisch' (Stufe 1) und sonst nichts")
 pruefe(F.flussweg(vorgabe()) == "radial" and F.flussweg({}) == "radial"
        and F.flussweg(None) == "radial",
        "ohne Angabe gilt radial (Vorgabe, nicht Rateschritt)")
@@ -105,7 +109,9 @@ pruefe(F.flussweg({"geom": {"fluxPath": "axial"}}) == "axial"
        "axial wird in geom UND oben im Payload erkannt, auch als Synonym")
 
 ax = {"geom": vorgabe(fluxPath="axial", axialAktivOD=260.0)}
-for stufe in ("analytisch", "feld", "cad", "em3d", "lauf"):
+pruefe(F.pruefe_flussweg(ax, "analytisch") == "axial",
+       "'analytisch' laeuft durch (ema_axial rechnet sie)")
+for stufe in ("feld", "cad", "em3d", "lauf"):
     try:
         F.pruefe_flussweg(ax, stufe)
         pruefe(False, f"Stufe '{stufe}' muesste abweisen — tut es nicht")

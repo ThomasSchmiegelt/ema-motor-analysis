@@ -83,6 +83,7 @@ PHYSIK: tuple[str, ...] = (
     "ema_topology.py",      # Magnetgeometrie -- die Quelle beider Geometriewege
     "ema_wicklung.py",      # Wicklung, Widerstand, Kupfermasse
     "ema_radien.py",        # Radien und Luftspalt
+    "ema_axial.py",         # Axialfluss: Ringraum, Rueckenblech, Anzug, Bandage
     "ema_fluss.py",         # Flussweg: die zwei Integrale der Luftspaltflaeche
                             # (r^1 fuer psi_pm, r^2 fuer das Moment). Eine
                             # Aenderung daran bewegt Kt UND das Dauermoment.

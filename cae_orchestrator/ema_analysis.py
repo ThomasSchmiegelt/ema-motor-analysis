@@ -366,11 +366,20 @@ def _rasterise(geom: dict, N: int, rotor_angle: float = 0.0,
         _schritt_mm = 0.5 / max(sc, 1e-9)
         _zellen = []
 
+        # **Was spaeter in der Liste steht, gewinnt** -- genau wie in
+        # `ema_laeufer.zeichne`, das die Teile der Reihe nach uebermalt. Bis
+        # zum 20.09.2026 stempelte der Rasterer NUR das Unmagnetische, damit
+        # gewann dort immer die Luft, waehrend im Bild der Pol gewann: zwei
+        # Laeufer aus einer Quelle. Mit der Reihenfolge als Regel ist eine
+        # Ueberlappung harmlos statt eine Fehlerquelle, und das Bild kann dem
+        # Feld nicht mehr widersprechen.
+        _mu_zelle = [1.0]
+
         def _setz_mu(xmm, ymm):
             _i = int(ctr + xmm * sc)
             _j = int(ctr + ymm * sc)
             if 0 <= _i < N and 0 <= _j < N:
-                mu[_j, _i] = 1.0
+                mu[_j, _i] = _mu_zelle[0]
 
         def _sammle(xmm, ymm):
             _i = int(ctr + xmm * sc)
@@ -380,15 +389,15 @@ def _rasterise(geom: dict, N: int, rotor_angle: float = 0.0,
 
         import ema_laeuferbild as _LBv2
         for _t in _laeufer_teile:
-            if str(_t.get("rolle")) not in _LBv2.UNMAGNETISCH:
-                continue
+            _unmag = str(_t.get("rolle")) in _LBv2.UNMAGNETISCH
+            _mu_zelle[0] = 1.0 if _unmag else MU_R_IRON
             _zellen = []
             _LBv2._stempel(_t, _setz_mu, _schritt_mm, rotor_angle, _sammle)
             # Die EINGEPRAEGTE Durchflutung der Erregerspule. Sie ist
             # Gleichstrom und damit magnetostatisch exakt darstellbar -- anders
             # als der Kaefig, der ein zeitabhaengiges Feld braucht und deshalb
             # ueber `feld2d` (Elmer, harmonisch) laeuft.
-            _f = float(_t.get("durchflutung_A") or 0.0)
+            _f = float(_t.get("durchflutung_A") or 0.0) if _unmag else 0.0
             if _f and _zellen:
                 _je = _f / float(len(_zellen)) * (J_SPULE_SKALA / N)
                 for _jz, _iz in _zellen:
@@ -1095,6 +1104,71 @@ def r_gap_m(geom: dict) -> float:
     return ema_radien.radien(geom)["r_gap_mm"] / 1000.0
 
 
+def zielfeld_luftspalt(geom: dict, axial_mm: float | None = None) -> tuple:
+    """Auf WELCHES Luftspaltfeld eicht der FDM -- je Maschinenart.
+
+    **Der FDM loeste seit dem 20.09.2026 die richtige Geometrie und meldete
+    trotzdem fuer alle fuenf Bauarten dieselbe Zahl.** Gemessen am frischen
+    Payload, fuenf verschiedene Laeufer im Raster::
+
+        pmsm   B_gap 0,6300 T   Kt 0,0410
+        asm    B_gap 0,6300 T   Kt 0,0410
+        synrm  B_gap 0,6300 T   Kt 0,0410
+        eesm   B_gap 0,6300 T   Kt 0,0410
+        gsm    B_gap 0,6300 T   Kt 0,0410
+
+    Der Grund steht in ``_analytical_Bgap``: sie rechnet aus ``Br_NdFeB`` und
+    ``magThick`` und kennt keine Maschinenart. Das Raster war seit dem Umbau
+    richtig, der ANKER nicht -- und weil der FDM seine Amplitude auf ihn eicht
+    (``sf = B_analytical / pk_fdm``), kam am Ende fuer jede Bauart die PSM
+    heraus. Gemeldet als „es ist wieder eine PSM ohne Magnete".
+
+    Jede Art bringt ihre eigene Antwort mit, und sie war jedesmal schon da:
+
+    ============ ====================== ==============================
+    Art          Quelle                 was sie bedeutet
+    ============ ====================== ==============================
+    ``pmsm``     ``_analytical_Bgap``   der Magnet, unveraendert
+    ``asm``      ``ema_asm.ziel_feld``  Ziel-Luftspaltfeld der
+                                        Magnetisierung (``bZielT``)
+    ``eesm``     ``ema_eesm.ziel_feld`` dasselbe, ueber die Erregung
+    ``gsm``      ``ema_gsm.ziel_feld``  Feld unter dem Polschuh
+    ``synrm``    ``ema_synrm``          **keine eigene Erregung** -- ihr
+                                        Luftspaltfeld kommt allein vom
+                                        Staenderstrom
+    ============ ====================== ==============================
+
+    Die Reluktanzmaschine ist der interessante Fall und der Grund, warum hier
+    ein Paar herauskommt statt einer Zahl: ihr Feld im **Leerlauf ist null**,
+    und das ist kein Mangel, sondern ihre Bauart. Wer dort 0,63 T hinschreibt,
+    behauptet einen Magneten. Das zweite Element sagt deshalb, WOHER die Zahl
+    kommt -- ``"magnet"``, ``"erregung"`` oder ``"staender"`` --, damit der
+    Aufrufer eine Null nicht fuer einen Rechenfehler haelt.
+
+    Gibt ``(b_gap_T, quelle)``.
+    """
+    try:
+        import ema_maschinenart
+        art = ema_maschinenart.art_code(geom)
+    except Exception:                                        # noqa: BLE001
+        art = "pmsm"
+
+    if art == "pmsm":
+        return _analytical_Bgap(geom), "magnet"
+    if art == "synrm":
+        # Kein eigener Erreger: was im Luftspalt steht, hat der Staender
+        # hineingetragen. Im Leerlauf ist das null.
+        return 0.0, "staender"
+    for modul, name in (("ema_asm", "asm"), ("ema_eesm", "eesm"),
+                        ("ema_gsm", "gsm")):
+        if art == name:
+            try:
+                return float(__import__(modul).ziel_feld(geom)), "erregung"
+            except Exception:                                # noqa: BLE001
+                break
+    return _analytical_Bgap(geom), "magnet"
+
+
 def _analytical_Bgap(geom: dict) -> float:
     """Open-circuit air-gap flux density [T] from a magnetic-circuit estimate.
 
@@ -1293,10 +1367,22 @@ def compute_performance(geom: dict, B_gap: float, rpm: float = 1000.0,
     poles   = p * 2
     n_slots = int(geom["slots"])
     L_ax    = stapellaenge_m(geom, axial_mm)
-    R_gap   = r_gap_m(geom)                                          # m
+    # Die FLUSSFLAECHE kommt aus ``ema_fluss`` -- EINE Quelle fuer beide
+    # Flusswege. Radial ist ``a_fluss_m2`` ziffernweise ``r_gap_m(geom) * L_ax``,
+    # also genau der Ausdruck, der hier stand; axial ist es das r^1-gewichtete
+    # Integral ueber den Ringraum, ``n*(Ro^2-Ri^2)/2``.
+    #
+    # Warum nicht weiter ``R_gap * L_ax``: bei einer Scheibe gibt es keinen
+    # Spaltradius, und die Flaeche faellt nicht in ein Produkt aus Radius und
+    # Laenge auseinander. Ein Ersatzradius traefe hier oder beim Moment daneben,
+    # nie beides -- gemessen 1,49 gegen 1,66 (s. ema_fluss-Modulkopf).
+    import ema_fluss
+    _fl     = ema_fluss.flaechen(geom, axial_mm)
+    A_fluss = _fl["a_fluss_m2"]                                      # m^2
+    R_gap   = _fl.get("r_fluss_m", 0.0)                              # m, nur radial
 
     # Flux linkage (normalised, 1 turn per slot assumed)
-    psi_pm  = p * (2 / math.pi) * B_gap * R_gap * L_ax
+    psi_pm  = p * (2 / math.pi) * B_gap * A_fluss
     omega_e = rpm * 2 * math.pi / 60 * p
     emf_pk  = psi_pm * omega_e
     emf_rms = emf_pk / math.sqrt(2)
@@ -1313,10 +1399,18 @@ def compute_performance(geom: dict, B_gap: float, rpm: float = 1000.0,
     # Luftspalt hin aufging. Faellt der Aufruf aus (unvollstaendige Geometrie), gilt
     # weiter die alte Zeile, damit ``compute_performance`` nie an ihr scheitert.
     try:
+        # ``ema_rastmoment`` rechnet die NUTOEFFNUNG einer zylindrischen Bohrung.
+        # Bei einer Scheibe waere das ein radiales Nutungsmodell unter fremdem
+        # Namen -- genau die stille Ersatzrechnung, gegen die ``ema_fluss``
+        # gebaut ist. Axial faellt es deshalb ausdruecklich auf den Rueckfall.
+        if _fl["flussweg"] != "radial":
+            raise NotImplementedError("Nutungsmodell ist auf die Bohrung gebaut")
         import ema_rastmoment
         T_cogging_est = ema_rastmoment.rastmoment(geom, B_gap, L_ax * 1000.0)["T_rast_Nm"]
     except Exception:                                                # noqa: BLE001
-        T_cogging_est = Br_NdFeB * R_gap * L_ax * 0.05 / lcm * 1000  # Rueckfall
+        # Der Rueckfall nimmt dieselbe Flussflaeche und ist damit fuer beide
+        # Flusswege gebildet; radial ist er ziffernweise die alte Zeile.
+        T_cogging_est = Br_NdFeB * A_fluss * 0.05 / lcm * 1000       # Rueckfall
 
     return {
         "B_gap_T":          round(B_gap, 3),
