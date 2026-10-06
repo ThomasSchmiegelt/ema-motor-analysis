@@ -52,6 +52,8 @@ function P() {
     stapel: +$("stapel").value,
     ro, ri: lam * ro, lam,
     poles: +$("poles").value, q: +$("q").value, bnut: +$("bnut").value,
+    magSegU: +$("magSegU").value, magSegR: +$("magSegR").value,
+    magFuge: +$("magFuge").value, qr: +$("qr").value,
     spalt: +$("spalt").value, zahn: +$("zahn").value,
     jochS: +$("jochS").value, jochR: +$("jochR").value,
     magd: +$("magd").value, alpha: +$("alpha").value,
@@ -164,19 +166,27 @@ function draufsicht(cv, p) {
     ctx.fillText(`Nut ${p.bnut.toFixed(1)} mm — über r konstant`, cx, cy + s * p.ro + 17);
   }
   ctx.fillStyle = "#8a93a3"; ctx.font = "12px system-ui"; ctx.textAlign = "left";
-  ctx.fillText(`Ständer: ${p.q} radiale Nuten · 2p = ${p.poles}`, 10, 18);
+  const MZ = magnetSegmente(p), RZ = magnetRinge(p);
+  const laeuferZahl =
+      p.laeufer === "kaefig"   ? `${stabzahl(p)} Läuferzähne`
+    : p.laeufer === "eisenlos" ? `${p.poles * 9} Leiterbahnen`
+    : `${p.poles * MZ.nU * RZ.nR} Magnete (${p.poles}×${MZ.nU}×${RZ.nR})`;
+  ctx.fillText(`Ständer: ${p.q} Nuten = ${p.q} Zähne · 2p = ${p.poles} · ` +
+               `Läufer: ${laeuferZahl}`, 10, 18);
 }
 
 function laeuferFlaeche(ctx, cx, cy, s, p, a0, a1) {
-  const n = p.poles, pb = p.alpha;
+  const imSektor = (mid, rand) => {
+    const d = ((mid - (a0 + a1) / 2 + Math.PI * 3) % TAU) - Math.PI;
+    return Math.abs(d) <= (a1 - a0) / 2 + rand;
+  };
   if (p.laeufer === "kaefig") {
-    const qr = Math.max(6, Math.round(p.q * 0.86));
+    const qr = stabzahl(p);
     ctx.fillStyle = "#49525f";
     ring(ctx, cx, cy, s, p.ri, p.ro, a0, a1); ctx.fill();
     for (let i = 0; i < qr; i++) {
       const th = i * TAU / qr;
-      let d = ((th - (a0 + a1) / 2 + Math.PI * 3) % TAU) - Math.PI;
-      if (Math.abs(d) > (a1 - a0) / 2 + .05) continue;
+      if (!imSektor(th, .05)) continue;
       if (nutPfad(ctx, cx, cy, s, th, p.bnut * .8, p.ri, p.ro)) {
         ctx.fillStyle = "#9aa4b0"; ctx.fill();
       }
@@ -185,7 +195,8 @@ function laeuferFlaeche(ctx, cx, cy, s, p, a0, a1) {
     ring(ctx, cx, cy, s, p.ro, p.ro + 4, a0, a1); ctx.fill();
     ring(ctx, cx, cy, s, p.ri - 4, p.ri, a0, a1); ctx.fill();
     ctx.fillStyle = "#dfe4ec"; ctx.font = "11px system-ui"; ctx.textAlign = "center";
-    ctx.fillText("Läuferzähne + Käfig", cx + s * (p.ro * .7) * Math.cos((a0 + a1) / 2),
+    ctx.fillText(`${qr} Läuferzähne + Käfig`,
+                 cx + s * (p.ro * .7) * Math.cos((a0 + a1) / 2),
                  cy - s * (p.ro * .7) * Math.sin((a0 + a1) / 2));
   } else if (p.laeufer === "eisenlos") {
     // Scheibenanker: KEIN Eisen, nur radiale Leiterbahnen.
@@ -193,38 +204,50 @@ function laeuferFlaeche(ctx, cx, cy, s, p, a0, a1) {
     ctx.strokeStyle = "#c87f3a"; ctx.lineWidth = Math.max(1, s * p.bnut * .35);
     for (let i = 0; i < nl; i++) {
       const th = i * TAU / nl;
-      let d = ((th - (a0 + a1) / 2 + Math.PI * 3) % TAU) - Math.PI;
-      if (Math.abs(d) > (a1 - a0) / 2) continue;
+      if (!imSektor(th, 0)) continue;
       ctx.beginPath();
       ctx.moveTo(cx + s * p.ri * Math.cos(th), cy - s * p.ri * Math.sin(th));
       ctx.lineTo(cx + s * p.ro * Math.cos(th), cy - s * p.ro * Math.sin(th));
       ctx.stroke();
     }
     ctx.fillStyle = "#dfe4ec"; ctx.font = "11px system-ui"; ctx.textAlign = "center";
-    ctx.fillText("eisenloser Anker — Leiterbahnen", 
+    ctx.fillText("eisenloser Anker — Leiterbahnen",
                  cx + s * (p.ro * .72) * Math.cos((a0 + a1) / 2),
                  cy - s * (p.ro * .72) * Math.sin((a0 + a1) / 2));
   } else {
-    const seg = p.laeufer === "halbach" ? 4 : 1;
-    if (p.laeufer !== "halbach") {
+    // Sektormagnete bzw. Halbach: die Belegung kommt aus `magnetSegmente`
+    // (umfangs) und `magnetRinge` (radial) -- EINE Quelle fuer Draufsicht,
+    // Abwicklung und Feldloeser.
+    const M = magnetSegmente(p), R = magnetRinge(p);
+    const wPol = TAU / p.poles;
+    if (!M.hal) {
       ctx.fillStyle = "#39414c"; ring(ctx, cx, cy, s, p.ri, p.ro, a0, a1); ctx.fill();
     }
-    for (let k = 0; k < n * seg; k++) {
-      const w = TAU / (n * seg), th0 = k * w, th1 = th0 + w * (seg > 1 ? 1 : pb);
-      const m0 = th0 + w * (1 - (seg > 1 ? 1 : pb)) / 2;
-      const mid = (m0 + m0 + w * (seg > 1 ? 1 : pb)) / 2;
-      let d = ((mid - (a0 + a1) / 2 + Math.PI * 3) % TAU) - Math.PI;
-      if (Math.abs(d) > (a1 - a0) / 2 + w) continue;
-      const pol = seg > 1 ? (k % 4) : (k % 2);
-      ctx.fillStyle = seg > 1
-        ? ["#c0392b", "#8e44ad", "#2e6fb7", "#8e44ad"][pol]
-        : (pol ? "#2e6fb7" : "#c0392b");
-      ring(ctx, cx, cy, s, p.ri, p.ro, m0, m0 + w * (seg > 1 ? 1 : pb));
-      ctx.save(); ctx.clip();
-      ring(ctx, cx, cy, s, p.ri, p.ro, a0, a1); ctx.fill(); ctx.restore();
+    if (M.eng || R.eng) {                       // Fuge frisst die Platte auf
+      ctx.fillStyle = "#e06c5a"; ctx.font = "12px system-ui"; ctx.textAlign = "center";
+      ctx.fillText("Fuge breiter als die Platte", cx, cy - s * (p.ri + p.ro) / 2);
+      return;
     }
+    for (let pol = 0; pol < p.poles; pol++)
+      for (const sg of M.seg) {
+        const th0 = (pol + sg.u0) * wPol, th1 = (pol + sg.u1) * wPol;
+        if (!imSektor((th0 + th1) / 2, wPol)) continue;
+        // Die Farbe folgt der AXIALEN Komponente der Magnetisierung, nicht
+        // einem Zaehlindex -- dieselbe Regel wie `ema_em3d._magnet_klasse`:
+        // bei Halbach kippt der Index dort, wo die Physik nicht kippt.
+        const [, my] = magnetRichtung(p, pol, sg.k, M.nU, M.hal);
+        ctx.fillStyle = Math.abs(my) < 0.3 ? "#8e44ad"
+                      : my > 0 ? "#c0392b" : "#2e6fb7";
+        for (const rg of R.rg) {
+          ring(ctx, cx, cy, s, rg.r0, rg.r1, th0, th1);
+          ctx.save(); ctx.clip();
+          ring(ctx, cx, cy, s, rg.r0, rg.r1, a0, a1); ctx.fill(); ctx.restore();
+        }
+      }
     ctx.fillStyle = "#dfe4ec"; ctx.font = "11px system-ui"; ctx.textAlign = "center";
-    ctx.fillText(p.laeufer === "halbach" ? "Halbach — kein Rotoreisen" : "Sektormagnete",
+    const n = p.poles * M.nU * R.nR;
+    ctx.fillText((M.hal ? "Halbach — kein Rotoreisen · " : "Sektormagnete · ") +
+                 `${n} Platten`,
                  cx + s * (p.ro * .72) * Math.cos((a0 + a1) / 2),
                  cy - s * (p.ro * .72) * Math.sin((a0 + a1) / 2));
   }
@@ -296,6 +319,10 @@ function halbschnitt(cv, p) {
           const rr = p.ri + (p.ro - p.ri) * (i + .5) / 9;
           ctx.fillRect(x_ + dm * .2, Y(rr) - 1.5, dm * .6, 3);
         }
+        ctx.fillStyle = "#dfe4ec"; ctx.font = "10px system-ui"; ctx.textAlign = "center";
+        ctx.save(); ctx.translate(x_ + dm / 2, Y((p.ri + p.ro) / 2)); ctx.rotate(-Math.PI / 2);
+        ctx.fillText(`${stabzahl(p)} Stäbe`, 0, 3); ctx.restore();
+        ctx.fillStyle = "#9aa4b0";
         ctx.fillRect(x_, Y(p.ro + 4), dm, s * 4);     // Kurzschlussring aussen
         ctx.fillRect(x_, Y(p.ri), dm, s * 4);         // und innen
       } else if (p.laeufer === "eisenlos") {
@@ -304,11 +331,15 @@ function halbschnitt(cv, p) {
         // EIN Pol: der Schnitt steht an einer Winkellage, der Polwechsel liegt
         // in theta. Ueber dem Radius die Polung zu wechseln waere eine Maschine
         // mit Polen in RADIALER Richtung -- die es nicht gibt.
+        // Was ueber dem Radius WECHSELT, ist die PLATTE: hier werden die
+        // radialen Fugen sichtbar, die der abgewickelte Schnitt nicht zeigt.
+        const R = magnetRinge(p);
         ctx.fillStyle = "#c0392b";
-        ctx.fillRect(x_, Y(p.ro), dm, s * (p.ro - p.ri));
+        for (const rg of R.rg)
+          if (rg.h > 0) ctx.fillRect(x_, Y(rg.r1), dm, s * rg.h);
         ctx.fillStyle = "#dfe4ec"; ctx.font = "10px system-ui"; ctx.textAlign = "center";
         ctx.save(); ctx.translate(x_ + dm / 2, Y((p.ri + p.ro) / 2)); ctx.rotate(-Math.PI / 2);
-        ctx.fillText("N", 0, 3); ctx.restore();
+        ctx.fillText(R.nR > 1 ? `N · ${R.nR} Ringe` : "N", 0, 3); ctx.restore();
       }
       // Scheibenblatt bis zur Nabe -- der Laeufer haengt an der Welle, er
       // schwebt nicht im Ringraum.
@@ -399,7 +430,7 @@ function abwicklung(cv, p) {
       const jTop = (l.seite === "unten") ? yT : yT + dm;
       if (dj > .5) { ctx.fillStyle = "#39414c"; ctx.fillRect(X(0), jTop, s * breite, dj); }
       if (p.laeufer === "kaefig") {
-        const qr = Math.max(6, Math.round(p.q * .86)), tauR = TAU * p.rs / qr;
+        const qr = stabzahl(p), tauR = TAU * p.rs / qr;
         ctx.fillStyle = "#49525f"; ctx.fillRect(X(0), mTop, s * breite, dm);
         ctx.fillStyle = "#9aa4b0";
         for (let i = 0; (i + .5) * tauR < breite; i++)
@@ -409,15 +440,20 @@ function abwicklung(cv, p) {
         for (let i = 0; i * tauS * .5 < breite; i++)
           ctx.fillRect(X(i * tauS * .5), mTop, Math.max(1, s * p.bnut * .3), dm);
       } else {
-        const seg = p.laeufer === "halbach" ? 4 : 1, wSeg = tauP / seg;
-        for (let i = 0; i * wSeg < breite; i++) {
-          const u = i * wSeg, bw = wSeg * (seg > 1 ? 1 : p.alpha);
-          const off = wSeg * (1 - (seg > 1 ? 1 : p.alpha)) / 2;
-          const k = i % (seg > 1 ? 4 : 2);
-          ctx.fillStyle = seg > 1 ? ["#c0392b", "#8e44ad", "#2e6fb7", "#8e44ad"][k]
-                                  : (k ? "#2e6fb7" : "#c0392b");
-          ctx.fillRect(X(u + off), mTop, s * bw, dm);
-        }
+        // Die radiale Segmentierung ist hier UNSICHTBAR, und das ist richtig:
+        // eine radiale Fuge liegt auf konstantem Radius, dieser Schnitt steht
+        // bei EINEM Radius. Sichtbar wird sie in Draufsicht und r-z-Schnitt.
+        const M = magnetSegmente(p);
+        for (let pol = 0; pol * tauP < breite + tauP; pol++)
+          for (const sg of M.seg) {
+            const u0 = (pol + sg.u0) * tauP, w = sg.breit * tauP;
+            if (u0 >= breite || u0 + w <= 0) continue;
+            const [, my] = magnetRichtung(p, pol, sg.k, M.nU, M.hal);
+            ctx.fillStyle = Math.abs(my) < 0.3 ? "#8e44ad"
+                          : my > 0 ? "#c0392b" : "#2e6fb7";
+            const a = Math.max(0, u0), b = Math.min(breite, u0 + w);
+            ctx.fillRect(X(a), mTop, s * (b - a), dm);
+          }
       }
     }
     z += l.d;
@@ -438,6 +474,64 @@ function abwicklung(cv, p) {
   }
   ctx.fillStyle = "#8a93a3"; ctx.font = "12px system-ui"; ctx.textAlign = "left";
   ctx.fillText(`abgewickelt bei r = ${p.rs.toFixed(1)} mm`, 10, 18);
+}
+
+/* ---- Stueckzahlen -------------------------------------------------------
+ * Wie VIELE Magnete, wie viele Zaehne -- und was die Stueckelung kostet.
+ * Sie rechnet nichts, was eine Auslegung waere: die Plattengroesse folgt
+ * unmittelbar aus der Zeichnung, und die Stabzahlregel kommt aus
+ * `ema_asm.stabzahl` (gespiegelt in `geometrie.js`, von `pruefe.js` gegen die
+ * Python-Fassung gehalten).
+ */
+function stueckzahlen(p) {
+  const bad = (c, t) => c ? `<span class="bad">${t}</span>` : t;
+  const warn = (c, t) => c ? `<span class="warn">${t}</span>` : t;
+  const r = [["Ständerzähne", `${p.q} — so viele wie Nuten, das ist keine zweite Größe`]];
+
+  if (p.laeufer === "kaefig") {
+    const b = stabzahlBefund(p);
+    r.push(["Läuferzähne / Stäbe",
+      `<b>${b.nR}</b> ` + (b.gesetzt ? "(gesetzt)" : "(abgeleitet: ≈0,85·Q, Auswahlregel)") +
+      (b.warn.length
+        ? ` — <span class="warn">${b.warn.join(", ")}</span>: synchrone ` +
+          `Oberwellenmomente, Kleben beim Anlauf`
+        : " — besteht die Auswahlregel ✓")]);
+    r.push(["Läufernutteilung bei r_s",
+      `${(2 * Math.PI * p.rs / b.nR).toFixed(2)} mm (Ständer ${(2 * Math.PI * p.rs / p.q).toFixed(2)} mm)`]);
+    return r;
+  }
+  if (p.laeufer === "eisenlos") {
+    r.push(["Leiterbahnen im Läufer", `${p.poles * 9} — gezeichnet, nicht ausgelegt`]);
+    return r;
+  }
+
+  const M = magnetSegmente(p), R = magnetRinge(p);
+  const n = p.poles * M.nU * R.nR;
+  const bSeg = M.breit * 2 * Math.PI * ((p.ri + p.ro) / 2) / p.poles;  // mm am mittleren Radius
+  r.push(["Magnete", `<b>${n}</b> = ${p.poles} Pole × ${M.nU} umfangs × ${R.nR} radial` +
+    (M.hal ? " — beim Halbach ist das der Entwurfsparameter" : "")]);
+  r.push(["Platte (mittlerer Radius)",
+    bad(M.eng || R.eng,
+        `${bSeg.toFixed(1)} × ${R.h.toFixed(1)} mm × ${p.magd} mm` +
+        (M.eng || R.eng ? " — Fuge breiter als die Platte" : ""))]);
+  if (M.nU > 1 || R.nR > 1) {
+    // Was die Stueckelung an Magnetflaeche KOSTET -- die Fugen sind Luft.
+    const belegt = M.nU * M.breit * R.nR * R.h;
+    const voll = M.bed * (p.ro - p.ri);
+    r.push(["Fugenverlust an Magnetfläche",
+      warn(belegt < voll * 0.9,
+        `${((1 - belegt / Math.max(voll, 1e-9)) * 100).toFixed(1)} % ` +
+        `(${p.magFuge} mm Fuge, ${M.nU - (M.hal ? 0 : 1)}× umfangs + ${R.nR - 1}× radial)`)]);
+  }
+  if (M.hal)
+    r.push(["Halbach-Wellenlänge",
+      `${(2 * M.nU)} Segmente = 2 Polteilungen — die Magnetisierung dreht ` +
+      `${(180 / M.nU).toFixed(0)}° je Segment`]);
+  r.push(["radiale Fugen im abgewickelten Schnitt",
+    R.nR > 1 ? "<b>nicht sichtbar</b> — sie liegen auf konstantem Radius, " +
+               "der Schnitt steht bei einem Radius"
+             : "keine"]);
+  return r;
 }
 
 /* ---- Masse aus der Zeichnung -------------------------------------------- */
@@ -470,6 +564,7 @@ function tabelle(p) {
         return `<b>${wer}</b> bei ${grenze.toFixed(1)} mm`;
       })()],
     ["Polteilung innen → außen", `${tauI.toFixed(1)} → ${tauA.toFixed(1)} mm`],
+    ...stueckzahlen(p),
     ["Spalt / Polteilung", `${(p.spalt / tauI).toFixed(4)} innen → ${(p.spalt / tauA).toFixed(4)} außen ` +
       `(×${(tauA / tauI).toFixed(2)} über r)`],
     ["Baulänge / Durchmesser",
@@ -490,6 +585,23 @@ function zeichne() {
   const p = P();
   $("topo_hint").textContent = TOPO_TEXT[p.topo];
   $("lf_hint").textContent = LF_TEXT[p.laeufer];
+  const MH = magnetSegmente(p), RH = magnetRinge(p);
+  $("mag_hint").innerHTML = p.laeufer === "kaefig"
+    ? "Der Käfigläufer hat keine Magnete — hier wirkt nur die Stabzahl darunter."
+    : p.laeufer === "eisenlos"
+    ? "Beim Scheibenanker trägt der STÄNDER die Magnete; die Segmentierung wirkt dort."
+    : `<b>${p.poles * MH.nU * RH.nR} Magnete</b> = ${p.poles} × ${MH.nU} × ${RH.nR}. ` +
+      (MH.hal ? "Beim Halbach dreht die Magnetisierung " +
+                `${(180 / MH.nU).toFixed(0)}° je Segment (Wellenlänge = 2 Polteilungen). `
+              : "Umfangs gegen Wirbelstromverluste, radial weil der Polbogen nach außen breiter wird. ") +
+      "Die Fuge ist eine radiale Linie, also ein fester Winkel — ihre mm-Angabe gilt am mittleren Radius.";
+  const QB = stabzahlBefund(p);
+  $("qr_hint").innerHTML = p.laeufer !== "kaefig"
+    ? "wirkt nur beim Käfigläufer"
+    : `<b>${QB.nR}</b> ${QB.gesetzt ? "gesetzt" : "abgeleitet"} — ` +
+      (QB.warn.length ? `<span class="warn">${QB.warn.join(", ")}</span>`
+                      : "besteht die Auswahlregel") +
+      ". 0 = ableiten (≈0,85·Q, wie <code>ema_asm.stabzahl</code>).";
   $("sek_v").textContent = Math.round(p.sektor * 180 / Math.PI);
   $("rs_v").textContent = p.rs.toFixed(0);
   $("rs_t").textContent = `r = ${p.rs.toFixed(1)} mm`;

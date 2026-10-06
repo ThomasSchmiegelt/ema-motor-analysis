@@ -17,6 +17,68 @@ kann.
 
 ---
 
+## 2026-10-06 · Das Halbach-Array der Ansichtsseite trug die doppelte Polzahl
+
+**Beobachtung.** Beim Einbau einstellbarer Magnet- und Zahnzahlen in
+`cae_orchestrator/axialfluss/` fiel auf, dass die Magnetisierung des
+Halbach-Arrays an drei Stellen einzeln ausgeschrieben war — in der Draufsicht,
+in der Abwicklung und im Feldlöser — und zwar überall als
+
+    seg = 4;  My = [1, 0, -1, 0][idx % 4]          mit  w = tau_p / 4
+
+Das sind vier Segmente **je Polteilung** und eine volle Drehung der
+Magnetisierung über dieselbe Strecke. Eine Halbach-Wellenlänge sind aber **zwei**
+Polteilungen: über eine Polteilung dreht die Magnetisierung 180°, nicht 360°.
+Das gezeichnete Array hatte damit die doppelte Polzahl der Einstellung daneben.
+
+**Messung** (`axialfluss/pruefe.js` §7, 16 Pole, 4 Segmente je Polteilung,
+Fenster = 2 Polteilungen breit, Harmonische der Normalkomponente in der
+Spaltmitte):
+
+| | Grundwelle (λ = 2 τ_p) | 2. Harmonische (λ = τ_p) |
+|---|---:|---:|
+| alte Regel | 2,087e4 | **5,472e5** |
+| berichtigt | **5,605e5** | 1,609e4 |
+
+Die alte Regel legte also das **26-fache** in die Harmonische, die zur doppelten
+Polzahl gehört; berichtigt trägt die Grundwelle das **35-fache** der zweiten.
+Bei 2p = 16 zeichnete und rechnete die Seite eine 32-polige Maschine.
+
+**Zweiter Teil: `Mx` fehlte im Quellterm.** `feldGitter` setzte nur `My` und
+rechnete `J = dMy/dx`; der Kommentar begründete das damit, die x-Komponente
+stecke „im Sprung zwischen den Segmenten und damit ohnehin in curl M". Das gilt
+für `dMy/dx`, nicht für den zweiten Term: `(curl M)_z = dMy/dx − dMx/dy`, und
+`−dMx/dy` ist ein Flächenstrom auf der **oberen und unteren** Fläche des
+Magnetbandes. Bei Sektormagneten ist `Mx = 0` und der Term wirklich null — beim
+Halbach trägt er die halbe Erregung, und gerade die Umfangskomponente ist der
+Grund, aus dem ein Halbach-Array den Fluss einseitig bündelt.
+
+**Fundstelle.** `axialfluss/ansicht.js` (Draufsicht und Abwicklung),
+`axialfluss/feld.js:feldGitter`. Dass es drei Fassungen waren, ist derselbe
+Befund in klein: die Datei `geometrie.js` ist ausdrücklich dagegen gebaut
+(„zwei Beschreibungen derselben Geometrie wären genau die Drift"), die
+Magnetbelegung stand trotzdem daneben.
+
+**Status: behoben.** `geometrie.js` führt jetzt `magnetSegmente`,
+`magnetRinge` und `magnetRichtung` als die EINE Quelle; `magnetRichtung` dreht
+`π/nU` je Segment über `pol + k/nU`, also 180° je Polteilung. Die Segmente sind
+dabei so gelegt, dass das erste die **Polgrenze** überspannt (dort tangential)
+und das mittlere auf der **Polachse** steht (dort normal) — die klassische
+Anordnung. `pruefe.js` §7 misst beides und führt die alte Regel als Gegenprobe
+mit, damit der Befund nachprüfbar bleibt statt nur behauptet zu sein.
+
+**Was NICHT betroffen ist:** die Sektormagnete. Ein Magnet je Pol reproduziert
+den Stand vor dem Umbau Ziffer für Ziffer (B1 0,80818 T, in `pruefe.js` §6
+festgenagelt), und die vier Prüfungen 1–5 stehen unverändert.
+
+**Offen bleibt `ema_axial_fdm.py`**: dort gibt es noch gar keinen Halbach-Zweig
+(`_BAUFORMEN` kennt yasa/torus_nn/afir/einseitig, alle mit Sektormagneten), die
+Bauart ist auf dem Python-Weg also nicht etwa falsch, sondern nicht vorhanden.
+Wer sie dort einbaut, nimmt `magnetRichtung` als Vorlage und nicht die alte
+Zeichnung.
+
+---
+
 ## 2026-10-06 · B_gap war sehr wohl konvergierbar — es lag am gleichmäßigen Gitter
 
 **Widerruft den Befund vom 05.10.2026** („B_gap(r) aus dem Mehrschnitt ist NICHT

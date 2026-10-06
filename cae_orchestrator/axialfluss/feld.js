@@ -36,6 +36,25 @@
 const MU0 = 4e-7 * Math.PI;
 const BR = 1.15, MUR_MAG = 1.05, MUR_FE = 500, KC = 1.15;
 
+/* Welcher Magnet sitzt bei x, und wie ist er magnetisiert?
+ *
+ * EINE Stelle fuer Zeichnung und Loeser -- die Belegung kommt aus
+ * `magnetSegmente`/`magnetRichtung` in `geometrie.js`. Vorher stand sie an
+ * DREI Stellen einzeln: `seg = 4` plus `[1, 0, -1, 0]` in der Draufsicht, in
+ * der Abwicklung und hier. Null heisst Luft (Fuge oder Polluecke).
+ */
+function magnetBei(p, M, x, tauP) {
+  const u = x / tauP, pol = Math.floor(u), rest = u - pol;
+  for (const sg of M.seg)
+    // Beim Halbach ueberspannt Segment 0 die POLGRENZE, liegt also zur Haelfte
+    // im Nachbarpol -- deshalb wird um +-1 Polteilung mitgesucht, und die
+    // Magnetisierung gehoert dann auch zu dem Nachbarpol.
+    for (const vs of [0, 1, -1])
+      if (Math.abs(rest - (sg.mitte + vs)) <= sg.breit / 2)
+        return magnetRichtung(p, pol + vs, sg.k, M.nU, M.hal);
+  return null;
+}
+
 /* Gitter aus der Schichtung: mu und J, rechteckig. ``stapelLagen`` ist DIE
  * Quelle -- dieselbe, aus der auch gezeichnet wird. Zwei Beschreibungen
  * derselben Geometrie waeren genau die Drift, gegen die `ema_laeufer.js`
@@ -78,12 +97,19 @@ function feldGitter(p, nx, ny) {
   for (let j = 0; j < ny; j++) { dyv[j] = yk[j + 1] - yk[j]; yc[j] = (yk[j] + yk[j + 1]) / 2; }
 
   const mu = new Float64Array(nx * ny).fill(1);
+  // Mx traegt beim Halbach die halbe Erregung und fehlte hier ganz: der frueher
+  // notierte Grund ("die x-Komponente steckt im Sprung zwischen den Segmenten")
+  // gilt nur fuer dMy/dx. Der Term -dMx/dy ist ein Flaechenstrom auf der OBEREN
+  // und UNTEREN Magnetflaeche und hat damit nichts zu tun.
   const My = new Float64Array(nx * ny);
+  const Mx = new Float64Array(nx * ny);
   const J = new Float64Array(nx * ny);
   const rolle = new Uint8Array(nx * ny);   // 0 Luft 1 Eisen 2 Magnet 3 Leiter
 
   const iq = p.last;                        // Staenderstrom, willkuerliche Einheit
   const magAmp = BR / (MU0 * MUR_MAG);
+  const M = magnetSegmente(p);              // EINE Quelle, s. geometrie.js
+  const qr = stabzahl(p);                   // dito -- Regel aus ema_asm
 
   for (let j = 0; j < ny; j++) {
     const y = yc[j];
@@ -99,10 +125,9 @@ function feldGitter(p, nx, ny) {
           const tief = lg.seite === "unten" ? (y - lg.y0 < p.magd)
                                             : (lg.y1 - y < p.magd);
           if (tief) {
-            mu[k] = MUR_MAG; rolle[k] = 2;
-            const pol = Math.floor(x / tauP) % 2 ? -1 : 1;
-            const mitte = (x % tauP) / tauP;
-            if (Math.abs(mitte - 0.5) <= p.alpha / 2) My[k] = magAmp * pol;
+            const m = magnetBei(p, M, x, tauP);
+            if (m) { mu[k] = MUR_MAG; rolle[k] = 2;
+                     Mx[k] = magAmp * m[0]; My[k] = magAmp * m[1]; }
             else mu[k] = 1;
           } else { mu[k] = MUR_FE; rolle[k] = 1; }
           continue;
@@ -131,7 +156,6 @@ function feldGitter(p, nx, ny) {
                     : (lg.y1 - y < p.magd);
         if (!aktiv) { mu[k] = MUR_FE; rolle[k] = 1; continue; }
         if (p.laeufer === "kaefig") {
-          const qr = Math.max(6, Math.round(p.q * 0.86));
           const tauR = (2 * Math.PI * p.rs) / qr;
           const u = x % tauR;
           if (Math.abs(u - tauR / 2) <= p.bnut * 0.4) { mu[k] = 1; rolle[k] = 3; }
@@ -139,29 +163,30 @@ function feldGitter(p, nx, ny) {
         } else if (p.laeufer === "eisenlos") {
           mu[k] = 1; rolle[k] = 3;          // blanker Leiter, kein Eisen
         } else {
-          const seg = p.laeufer === "halbach" ? 4 : 1;
-          const w = tauP / seg, idx = Math.floor(x / w), u = (x % w) / w;
-          mu[k] = MUR_MAG; rolle[k] = 2;
-          if (seg === 1) {
-            if (Math.abs(u - 0.5) <= p.alpha / 2)
-              My[k] = magAmp * (idx % 2 ? -1 : 1);
-            else { mu[k] = 1; rolle[k] = 0; }
-          } else {
-            // Halbach: die Magnetisierung dreht je Segment um 90 Grad. Nur die
-            // y-Komponente traegt hier -- die x-Komponente steckt im Sprung
-            // zwischen den Segmenten und damit ohnehin in curl M.
-            My[k] = magAmp * [1, 0, -1, 0][idx % 4];
-          }
+          const m = magnetBei(p, M, x, tauP);
+          if (m) { mu[k] = MUR_MAG; rolle[k] = 2;
+                   Mx[k] = magAmp * m[0]; My[k] = magAmp * m[1]; }
+          else { mu[k] = 1; rolle[k] = 0; }   // Fuge oder Polluecke
         }
         continue;
       }
     }
   }
-  // J = curl M = dMy/dx   (Mx = 0)
+  // J = (curl M)_z = dMy/dx - dMx/dy.
+  // Der zweite Term war weggelassen, weil Mx bei Sektormagneten null ist. Beim
+  // Halbach ist er es nicht, und er sitzt genau dort, wo das Array arbeitet:
+  // auf den beiden FLAECHEN des Magnetbandes. In y ist das Gitter ungleich-
+  // maessig, also mit den Abstaenden der Zellmitten differenzieren.
   for (let j = 0; j < ny; j++)
     for (let i = 1; i < nx - 1; i++)
       J[j * nx + i] += (My[j * nx + i + 1] - My[j * nx + i - 1]) / (2 * dx);
-  return { mu, J, rolle, nx, ny, dx, dyv, yc, yk, breite, hGes, tauP, tauS, bnd };
+  for (let j = 1; j < ny - 1; j++) {
+    const h = (yc[j + 1] - yc[j - 1]);
+    for (let i = 0; i < nx; i++)
+      J[j * nx + i] -= (Mx[(j + 1) * nx + i] - Mx[(j - 1) * nx + i]) / h;
+  }
+  return { mu, J, Mx, My, rolle, nx, ny, dx, dyv, yc, yk, breite, hGes,
+           tauP, tauS, bnd, qr, nMag: p.poles * M.nU * magnetRinge(p).nR };
 }
 
 /* Rot-Schwarz-SOR auf dem rechteckigen Gitter.

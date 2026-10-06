@@ -36,6 +36,42 @@ beiden Momentwege liegen um den Faktor 3 auseinander.
 | `feld.js` | der Feldlöser der abgewickelten Scheibe (qualitativ) |
 | `pruefe.js` | misst den Löser **ohne Browser** nach: `node pruefe.js` |
 
+## Wie viele Magnete, wie viele Zähne
+
+Beides ist einstellbar, und zwar genau so weit, wie es eine Einstellung ist:
+
+* **Ständerzähne** sind keine eigene Größe. Ein genuteter Ring hat so viele
+  Zähne wie Nuten — zwei Felder dafür wären eine Einstellung, die es nicht gibt.
+  Das Feld heißt deshalb „Ständernuten Q = Zähne".
+* **Magnete** haben zwei: Segmente je Pol **umfangs** (gegen Wirbelstrom­verluste
+  und weil eine große Platte kaum zu handhaben ist) und **über dem Radius**
+  (weil der Polbogen nach außen breiter wird und eine Platte über Ri…Ro sonst
+  ein ungünstiges Seitenverhältnis hat). Die Zahl steht in der Tabelle:
+  `2p × umfangs × radial`.
+* **Läuferzähne/-stäbe** des Käfigläufers sind frei setzbar, `0` leitet sie ab.
+  Die Ableitung ist ein **Spiegel von `ema_asm.stabzahl`** — ≈0,85·Q, aber nicht
+  gleich Q, nicht um 0/±p/±2p/±3p daneben und kein Vielfaches der Polzahl;
+  `pruefe.js` §8 hält die JS-Fassung über 30 Fälle gegen die Python-Fassung.
+  Eine von Hand gesetzte Zahl wird **gezeichnet und benannt**, nicht geklemmt.
+
+Zwei Dinge, die dabei gemessen und nicht angenommen wurden:
+
+* Die **Fuge zwischen zwei Segmenten ist eine radiale Linie**, also ein fester
+  Winkel — so sind Ringsektormagnete gefertigt. Ihre mm-Angabe gilt am mittleren
+  Radius. Dadurch ist sie als Bruchteil der Polteilung radiusunabhängig, und
+  genau deshalb können alle drei Ansichten UND der Löser dieselbe Funktion
+  lesen. Sie kostet: 4×3 statt 1×1 nimmt bei 1 mm Fuge 12,1 % der Magnetfläche,
+  und B1 fällt von 0,8082 auf 0,7485 T — der Löser sieht die Fugen.
+* Die **radiale Segmentierung ist im abgewickelten Schnitt unsichtbar**, und das
+  ist richtig: eine radiale Fuge liegt auf konstantem Radius, der Schnitt steht
+  bei einem Radius. Sie erscheint in der Draufsicht und im r–z-Halbschnitt, und
+  die Tabelle sagt es.
+
+Dabei ist ein Befund herausgekommen: das **Halbach-Array trug die doppelte
+Polzahl** (`seg = 4`, `[1,0,-1,0]` je Polteilung = 360° statt 180°), und `Mx`
+fehlte ganz im Quellterm. Beides behoben, gemessen und in `BEFUNDE.md`
+(06.10.2026) aufgeschrieben.
+
 ## Der Feldlöser
 
 Finite Volumen, harmonisch gemittelte Flächenleitwerte, **Jacobi-vorkonditioniertes

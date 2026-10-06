@@ -101,9 +101,19 @@
     <div class="z"><label>Ro aktiv</label><input type="number" id="ro" value="130" min="20" max="600" step="1"><span class="e">mm</span></div>
     <div class="z"><label>λ = Ri/Ro</label><input type="number" id="lam" value="0.577" min="0.1" max="0.95" step="0.001"><span class="e">–</span></div>
     <div class="z"><label>Polzahl 2p</label><input type="number" id="poles" value="16" min="2" max="64" step="2"><span class="e">–</span></div>
-    <div class="z"><label>Ständernuten Q</label><input type="number" id="q" value="48" min="3" max="192" step="3"><span class="e">–</span></div>
+    <div class="z"><label>Ständernuten Q = Zähne</label><input type="number" id="q" value="48" min="3" max="192" step="3"><span class="e">–</span></div>
     <div class="z"><label>Nutbreite b</label><input type="number" id="bnut" value="6" min="0.5" max="40" step="0.1"><span class="e">mm</span></div>
-    <p class="hint">parallelflankig — konstant über r, deshalb werden die Zähne nach außen breiter</p>
+    <p class="hint">parallelflankig — konstant über r, deshalb werden die Zähne nach außen breiter.
+      Die ZahnZAHL ist keine eigene Größe: ein genuteter Ring hat so viele Zähne wie Nuten.</p>
+  </div>
+
+  <div class="grp"><h2>Magnete &amp; Läuferzähne</h2>
+    <div class="z"><label>Segmente je Pol, umfangs</label><input type="number" id="magSegU" value="1" min="1" max="16" step="1"><span class="e">–</span></div>
+    <div class="z"><label>Segmente über dem Radius</label><input type="number" id="magSegR" value="1" min="1" max="8" step="1"><span class="e">–</span></div>
+    <div class="z"><label>Fuge zwischen Segmenten</label><input type="number" id="magFuge" value="1" min="0" max="10" step="0.1"><span class="e">mm</span></div>
+    <p class="hint" id="mag_hint"></p>
+    <div class="z"><label>Läuferstäbe / -zähne</label><input type="number" id="qr" value="0" min="0" max="192" step="1"><span class="e">–</span></div>
+    <p class="hint" id="qr_hint"></p>
   </div>
 
   <div class="grp"><h2>Axialer Aufbau</h2>
