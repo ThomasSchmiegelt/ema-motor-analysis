@@ -11,7 +11,7 @@ const fs = require("fs"), vm = require("vm");
 const ctx = { console, performance: { now: () => Date.now() }, Math, Float64Array,
               Uint8Array, Number, Set, document: null };
 vm.createContext(ctx);
-for (const f of ["geometrie.js", "feld.js"])
+for (const f of ["geometrie.js", "feld.js", "schnitt.js"])
   vm.runInContext(fs.readFileSync(__dirname + "/" + f, "utf8"), ctx, f);
 
 const BASIS = {
@@ -19,7 +19,7 @@ const BASIS = {
   ro: 130, ri: 75.01, lam: 0.577, poles: 16, q: 48, bnut: 6,
   spalt: 1, zahn: 25, jochS: 12, jochR: 13, magd: 6, alpha: 0.85,
   welle: 30, wkI: 14, rs: 102.5, last: 0,
-  magSegU: 1, magSegR: 1, magFuge: 1, qr: 0,
+  magSegU: 1, magSegR: 1, magFuge: 1, qr: 0, beta: 0,
   rotorOhneJoch: false, statorOhneJoch: true, nSpalte: 2,
 };
 const P = (o) => ({ ...BASIS, ...o });
@@ -31,10 +31,11 @@ function lauf(p, ny, iter) {
   const g0 = ctx.feldGitter(p, 8, 8);
   const nx = Math.round(ny * (g0.breite / g0.hGes));
   const g = ctx.feldGitter(p, nx, ny);
-  const { A, relRest, schritte } = ctx.loeseCG(g, iter, 1e-11);
+  const loe = ctx.loeseFeld(p, g, iter);
+  const { A, relRest, schritte } = loe;
   const rest = relRest;
   const { Bx, By } = ctx.feldAus(g, A);
-  const e = ctx.eichung(p, g, By);
+  const e = ctx.eichung(p, g, By, loe.pkMag);
   let amax = 0; for (const v of A) amax = Math.max(amax, Math.abs(v));
   // Grundwelle der Normalkomponente in der Spaltmitte
   const j = e.jGap, N = nx; let re = 0, im = 0;
@@ -203,6 +204,101 @@ console.log("\n— 8. Läuferstabzahl gegen die Python-Fassung —");
      `qr = Q = 48 wird gezeichnet und benannt: ${b.warn.join(", ")}`);
   pr(ctx.stabzahlBefund(P({ q: 48, poles: 16, qr: 0 })).warn.length === 0,
      `die abgeleitete Zahl (${ctx.stabzahl(P({ q: 48, poles: 16, qr: 0 }))}) besteht die Regel selbst`);
+}
+
+console.log("\n— 9. Achsschnitt: der Mehrschnitt trägt, was ein 2-D-Lauf nicht kann —");
+{
+  const p = P();
+  const t0 = Date.now();
+  const erg = ctx.schnittRechnen(p, 12, 80, 3000);
+  const tSolve = Date.now() - t0;
+  console.log(`   12 Scheiben, ${erg.ny} Zeilen, ${tSolve} ms, ` +
+              `${erg.schritte} CG-Schritte, rel. Rest ${erg.relRest.toExponential(1)}`);
+
+  // Die Scheiben lassen sich nur deshalb ohne Umrechnung stapeln, weil die
+  // Schichtung nicht am Radius hängt. Wäre das nicht so, wäre jedes (r,z)-Bild
+  // eine Interpolation und der Luftspalt verschmierte.
+  const yk = erg.scheiben.map((s) => s.g.yk);
+  pr(yk.every((y) => y.length === yk[0].length &&
+                     y.every((v, i) => Math.abs(v - yk[0][i]) < 1e-12)),
+     "alle Scheiben haben dasselbe z-Gitter — stapelbar ohne Interpolation");
+
+  // Die Pointe: der Winkel ist Ablesen, kein Lauf.
+  const t1 = Date.now();
+  for (let a = 0; a < 360; a++) ctx.rzBei(erg, a * Math.PI / 180);
+  const tLesen = Date.now() - t1;
+  pr(tLesen < tSolve / 5,
+     `360 Schnittwinkel abgelesen in ${tLesen} ms gegen ${tSolve} ms für EINEN ` +
+     `Lauf — „alle 360°" kostet ${(tLesen / Math.max(tSolve, 1)).toFixed(2)}× einen Winkel`);
+
+  // DIE Aussage dieser Bauart: parallelflankige Nut ⇒ tau_s wächst mit r,
+  // die Nutbreite nicht ⇒ der Zahn wird außen breiter ⇒ B_Zahn fällt.
+  const v = ctx.zahnVerlauf(erg, p);
+  console.log("   r [mm]   τs    Zahn   B_Spalt  B_Zahn  B_Zahn(geo)");
+  for (const a of v)
+    console.log(`   ${a.r.toFixed(1).padStart(5)} ${a.tauS.toFixed(2).padStart(6)} ` +
+      `${a.zahn.toFixed(2).padStart(6)} ${a.b_spalt.toFixed(4).padStart(8)} ` +
+      `${a.b_zahn.toFixed(4).padStart(7)} ${a.b_zahn_geo.toFixed(4).padStart(10)}`);
+  const fallend = v.every((a, i) => i === 0 || a.b_zahn <= v[i - 1].b_zahn * 1.06);
+  pr(fallend && v[0].b_zahn > v[v.length - 1].b_zahn * 1.3,
+     `B_Zahn fällt ${v[0].b_zahn.toFixed(3)} → ${v[v.length - 1].b_zahn.toFixed(3)} T ` +
+     `(×${(v[0].b_zahn / v[v.length - 1].b_zahn).toFixed(2)}) — kritisch am INNENrand`);
+
+  // Gegenprobe, dass das wirklich die NUT ist und nicht der Spalt: der
+  // Spaltleitwert hängt nicht am Radius, also muss B_Spalt fast stehen.
+  const rk = ctx.radialeKopplung(erg, p);
+  pr(rk.spanne < 0.10,
+     `B_Spalt steht dabei auf ${(rk.spanne * 100).toFixed(1)} % — die ` +
+     `Zahnänderung kommt aus der Geometrie, nicht aus dem Spalt`);
+
+  // Und die Naeherung wird beziffert statt nur genannt.
+  pr(rk.jeSpalt < 0.05,
+     `∂/∂r fallengelassen: das Feld ändert sich um ${(rk.jeSpalt * 100).toFixed(3)} % ` +
+     `je Luftspaltlänge — die Scheiben-Näherung trägt hier`);
+
+  // Eine Eichung fuer ALLE Scheiben. Jede einzeln geeicht ergaebe per
+  // Konstruktion dieselbe Spaltspitze und loeschte genau das aus, was dieser
+  // Schnitt zeigen soll.
+  pr(new Set(erg.scheiben.map((s) => s.sf)).size === 1,
+     "eine einzige Eichung für alle Scheiben — sonst wäre die radiale " +
+     "Änderung wegnormiert, bevor man sie sieht");
+  const je = erg.scheiben.map((s) => ctx.radialeKopplung(
+    { ...erg, scheiben: [s] }, p).spalt[0].b);
+  console.log(`   Gegenprobe: je Scheibe einzeln geeicht wäre B_Spalt überall ` +
+              `${(ctx.eichung ? "" : "")}gleich; mit EINER Eichung spannt es ` +
+              `${Math.min(...je).toFixed(4)} … ${Math.max(...je).toFixed(4)} T`);
+}
+
+console.log("\n— 10. Stromwinkel β: was eine Drehzahländerung im Feld bewegt —");
+{
+  // Eine magnetostatische Rechnung kennt keine Drehzahl. Sichtbar wird sie
+  // allein über den Stromvektor — unter Feldschwächung dreht er in die
+  // d-Achse. β ist also die ehrliche Achse; die Abbildung Drehzahl → (i_d,i_q)
+  // hat diese Seite NICHT (die steht in ema_analysis.estimate_dq_currents).
+  const b = (beta, last) => lauf(P({ last, beta: beta * Math.PI / 180 }), 100, 3000).b1;
+  const leer = b(0, 0);
+  const q = b(0, 200), d = b(-90, 200), dp = b(90, 200);
+  console.log(`   Leerlauf ${leer.toFixed(4)} · β=0 (q-Achse) ${q.toFixed(4)} ` +
+              `· β=−90° ${d.toFixed(4)} · β=+90° ${dp.toFixed(4)} T`);
+  // Der Anker ist auf `last` Prozent der MAGNETgrundwelle gesetzt. Dann muss
+  // bei last = 100 gelten: beta = 0 addiert in QUADRATUR (der q-Strom dreht die
+  // Resultierende), beta = -+90 addiert bzw. subtrahiert direkt. Das ist eine
+  // Rechnung, die aufgehen MUSS, wenn die Normierung stimmt -- und sie ging
+  // ueber die Spitze normiert nicht auf.
+  const e1 = b(0, 100), d1 = b(-90, 100), p1 = b(90, 100);
+  console.log(`   last = 100 %:  β=0 ${e1.toFixed(4)} (soll √2·${leer.toFixed(4)} = ` +
+              `${(leer * Math.SQRT2).toFixed(4)}) · β=−90° ${d1.toFixed(4)} ` +
+              `(soll 2×  = ${(2 * leer).toFixed(4)}) · β=+90° ${p1.toFixed(4)} (soll 0)`);
+  pr(Math.abs(e1 / (leer * Math.SQRT2) - 1) < 0.08,
+     `β = 0 addiert in Quadratur: ${(e1 / leer).toFixed(3)}× statt ${Math.SQRT2.toFixed(3)}× ` +
+     `— der q-Strom dreht die Resultierende, er schwächt nicht`);
+  pr(Math.abs(d1 / (2 * leer) - 1) < 0.08 && p1 < leer * 0.15,
+     `β = ∓90° addiert/subtrahiert direkt: ${(d1 / leer).toFixed(3)}× und ` +
+     `${(p1 / leer).toFixed(3)}× — Feldverstärkung und -schwächung`);
+  pr(Math.abs(q - leer) / leer > 0.3,
+     `und der Regler WIRKT: bei 200 % steht die Grundwelle auf ` +
+     `${(q / leer).toFixed(2)}× statt auf 1,000× (roh war der Hub bei ±400 ` +
+     `ganze 0,02 %)`);
 }
 
 console.log(`\n${ok} bestanden, ${fehl} fehlgeschlagen`);

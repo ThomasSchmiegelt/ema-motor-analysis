@@ -17,6 +17,71 @@ kann.
 
 ---
 
+## 2026-10-06 · Der Ständerstrom der Ansichtsseite war ein Regler, der nichts tat
+
+**Beobachtung.** Beim Bau des Achsschnitts (`axialfluss/schnitt.js`) sollte der
+Stromwinkel β dazu — die Größe, über die eine Drehzahländerung in einem
+magnetostatischen Feld überhaupt sichtbar wird. Dabei fiel auf, dass schon der
+vorhandene Regler „Ständerstrom" nichts bewegt.
+
+**Messung** (`axialfluss/feld.js`, 16 Pole, 48 Nuten, Grundwelle der
+Normalkomponente in der Spaltmitte, ungeeicht):
+
+| `last` | B₁ | Ankeranteil |
+|---:|---:|---:|
+| 0 | 8,9067e5 | — |
+| **200** (Reglerrand ±400) | 8,9073e5 | **0,01 %** |
+| 10 000 | 8,9866e5 | 0,90 % |
+| 100 000 | 1,3412e6 | 50,6 % |
+
+Über seinen **ganzen** Stellbereich bewegte der Regler das Feld um 0,02 %.
+
+**Ursache.** `iq` stand roh im Quellterm (`J[k] += -iq*sin(el)`), während die
+Magnete als `curl M` mit `magAmp = Br/(µ₀·µ_r) ≈ 8,7e5` und geteilt durch `dx`
+in **denselben** Vektor gingen — ein Verhältnis von rund 6·10⁶. Es gab also
+keine Einheit, in der die Zahl im Eingabefeld etwas bedeutet hätte; der Wert
+daneben war beliebig und das Ergebnis entsprechend.
+
+**Status: behoben, und zwar ohne Eichfaktor.** Der Löser ist linear, also ist
+`A = A_Magnet + A_Anker`. `feldGitter` führt den Ständerstrom jetzt in einem
+eigenen Vektor `Js` mit **Einheitsamplitude**, `loeseFeld` löst beide Teile und
+setzt den Ankeranteil auf `last` Prozent der **Magnet-Grundwelle im Spalt** —
+gemessen, nicht geeicht. Das Feld heißt deshalb nicht mehr „Ständerstrom",
+sondern **„Ankerrückwirkung [%]"**: 100 % heißt „Ankerfeld so stark wie der
+Magnet". Anders als `COIL_J_SCALE` im 3-D-Pfad (an EINER Maschine geeicht, was
+dort auch dasteht) gibt es hier keine Konstante, die bei einer anderen
+Geometrie danebenläge.
+
+**Zwei Dinge, die dabei falsch gewesen wären und gemessen auffielen:**
+
+1. **Über die SPITZE normiert geht die Rechnung nicht auf.** Die Spitze des
+   Ankerfeldes sitzt über der Nut und ist eine örtliche Zacke; gekoppelt wird,
+   was als Grundwelle umläuft. Mit der Spitze als Maß ergab β = ∓90° bei
+   `last` = 100 % nicht die erwartete Summe (gemessen 0,301 T statt 0 T bzw.
+   1,616 T). Über die **Grundwelle** normiert schließt die Algebra: β = −90°
+   gibt 1,6162 T gegen ein gefordertes 2 × 0,8082 = 1,6164 T (0,01 % daneben),
+   β = +90° gibt 0,0216 T (soll 0), β = 0 gibt 1,433× gegen √2 = 1,414×
+   (der Überschuss sind die Harmonischen des Ankerfeldes). Die **Eichung**
+   bleibt dagegen eine Spitze — die Arbeitsgerade `Br·hm/(hm+µ_r·kc·g)` ist ein
+   Spitzenwert. Zwei Maße für zwei Zwecke, beide im Quelltext benannt.
+2. **Geeicht werden darf nur der MAGNETanteil.** `eichung` pinnte die Spitze
+   des SUMMENfeldes auf die magnetische Arbeitsgerade — dann hängt der Maßstab
+   an der Last, und jede Last sähe gleich stark aus. Gemessen bewegte sich die
+   Grundwelle dadurch um 0,0 %, obwohl der Ankeranteil längst richtig skaliert
+   war. `loeseFeld` reicht deshalb `pkMag` durch. Das ist derselbe Fehler, den
+   das Hauptwerkzeug schon einmal hatte („die Magnete werden unter Last
+   ignoriert", s. `CLAUDE.md`, geteilte Eichung in `run_em_analysis`) — und
+   dieselbe Lösung.
+
+**Fundstelle.** `axialfluss/feld.js` (`feldGitter`, `loeseFeld`, `eichung`),
+Prüfungen in `axialfluss/pruefe.js` §10.
+
+**Was dadurch teurer wird:** unter Last zwei Lösungen je Gitter statt einer.
+Im Leerlauf (`last = 0`) ist der Weg Ziffer für Ziffer der alte, `Js` ist dann
+überall null und wird nicht gelöst.
+
+---
+
 ## 2026-10-06 · Das Halbach-Array der Ansichtsseite trug die doppelte Polzahl
 
 **Beobachtung.** Beim Einbau einstellbarer Magnet- und Zahnzahlen in

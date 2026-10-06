@@ -35,6 +35,10 @@
 
 const MU0 = 4e-7 * Math.PI;
 const BR = 1.15, MUR_MAG = 1.05, MUR_FE = 500, KC = 1.15;
+// Deckel der Farbskala, geteilt mit `schnitt.js`: ueber dem Saettigungsknie
+// ist die lineare Rechnung ohnehin nicht mehr zustaendig. Ohne Deckel setzt
+// immer eine Eisenecke die Skala und das halbe Bild ist weiss.
+const B_KNIE = 2.1;
 
 /* Welcher Magnet sitzt bei x, und wie ist er magnetisiert?
  *
@@ -103,10 +107,20 @@ function feldGitter(p, nx, ny) {
   // und UNTEREN Magnetflaeche und hat damit nichts zu tun.
   const My = new Float64Array(nx * ny);
   const Mx = new Float64Array(nx * ny);
-  const J = new Float64Array(nx * ny);
+  const J = new Float64Array(nx * ny);     // Magnete (curl M)
+  // Der Staenderstrom wird GETRENNT gefuehrt und mit EINHEITSAMPLITUDE
+  // aufgebaut. Grund: der Loeser ist linear, also ist A = A_Magnet + A_Anker,
+  // und dann laesst sich der Ankeranteil hinterher auf einen MESSBAREN Bruchteil
+  // des Magnetanteils setzen, statt ihn in willkuerlichen Einheiten anzugeben.
+  // Vorher stand `iq` roh im Quellterm, und bei +-400 -- dem ganzen Stellbereich
+  // des Reglers -- bewegte sich das Feld um 0,02 %: ein Regler, der nichts tut.
+  // Dieselbe Aufteilung und derselbe Grund wie die geteilte Eichung in
+  // `ema_analysis.run_em_analysis` (Magnet gegen `_analytical_Bgap`, Anker gegen
+  // `_analytical_Barm`).
+  const Js = new Float64Array(nx * ny);
   const rolle = new Uint8Array(nx * ny);   // 0 Luft 1 Eisen 2 Magnet 3 Leiter
 
-  const iq = p.last;                        // Staenderstrom, willkuerliche Einheit
+  const iq = p.last ? 1 : 0;                // Einheitsamplitude, s. oben
   const magAmp = BR / (MU0 * MUR_MAG);
   const M = magnetSegmente(p);              // EINE Quelle, s. geometrie.js
   const qr = stabzahl(p);                   // dito -- Regel aus ema_asm
@@ -143,7 +157,14 @@ function feldGitter(p, nx, ny) {
             if (iq !== 0) {
               const sIdx = Math.floor(x / tauS);
               const el = (sIdx + 0.5) * tauS / p.rs * (p.poles / 2);
-              J[k] += -iq * Math.sin(el);
+              // `beta` ist der STROMWINKEL gegen die q-Achse, elektrisch. Er
+              // war nicht da, und ohne ihn gibt es nur reines q-Moment: der
+              // Feldschwaechbetrieb -- also das, was eine Drehzahlaenderung im
+              // magnetostatischen Feld ueberhaupt SICHTBAR macht -- war nicht
+              // einstellbar. Dieselben drei Darstellungsarten wie
+              // `field_modes` im Hauptwerkzeug: Laeuferlage, Stromwinkel,
+              // Last-Rampe.
+              Js[k] += -iq * Math.sin(el + (p.beta || 0));
             }
           }
         }
@@ -185,7 +206,7 @@ function feldGitter(p, nx, ny) {
     for (let i = 0; i < nx; i++)
       J[j * nx + i] -= (Mx[(j + 1) * nx + i] - Mx[(j - 1) * nx + i]) / h;
   }
-  return { mu, J, Mx, My, rolle, nx, ny, dx, dyv, yc, yk, breite, hGes,
+  return { mu, J, Js, Mx, My, rolle, nx, ny, dx, dyv, yc, yk, breite, hGes,
            tauP, tauS, bnd, qr, nMag: p.poles * M.nU * magnetRinge(p).nR };
 }
 
@@ -239,8 +260,9 @@ function loese(g, iter = 900, omega = 1.85) {
  * den Materialsprung ab, weil die Diagonale die Summe der Flaechenleitwerte
  * ist.
  */
-function loeseCG(g, iter = 600, tol = 1e-10) {
-  const { mu, J, nx, ny, dx, dyv } = g;
+function loeseCG(g, iter = 600, tol = 1e-10, quelle = null) {
+  const { mu, nx, ny, dx, dyv } = g;
+  const J = quelle || g.J;
   const n = nx * ny;
   const nu = new Float64Array(n);
   for (let k = 0; k < n; k++) nu[k] = 1 / mu[k];
@@ -329,24 +351,94 @@ function feldAus(g, A) {
   return { Bx, By };
 }
 
-/* Eichung: die Spitze der Normalkomponente in der Spaltmitte auf die
- * Arbeitsgerade. Dieselbe Groesse und dieselbe Begruendung wie im Hausloeser --
- * der rohe SOR-Wert haengt an der willkuerlichen Amplitude von J. Gibt es
- * keinen Magneten (Kaefig, Scheibenlaeufer ohne Erregung), wird NICHT geeicht,
- * und das Bild traegt dann keine Tesla-Achse, sondern eine relative. */
-function eichung(p, g, By) {
-  const perm = p.magd / (p.magd + MUR_MAG * KC * p.spalt);
-  const bAn = BR * perm * p.alpha;
+/* Die Gitterzeile in der Mitte des ersten Luftspalts. Steckte in `eichung`
+ * fest und wird jetzt auch von der geteilten Loesung gebraucht. */
+function spaltZeile(g) {
   const sp = g.bnd.find((b) => b.art === "spalt");
-  if (!sp) return { sf: 1, bAn: 0, geeicht: false };
+  if (!sp) return -1;
   const ym = (sp.y0 + sp.y1) / 2;
   let j = 1, best = Infinity;
   for (let q = 1; q < g.ny - 1; q++) {
     const d = Math.abs(g.yc[q] - ym);
     if (d < best) { best = d; j = q; }
   }
+  return j;
+}
+
+/* Die GRUNDWELLE der Normalkomponente im Spalt. Das Fenster ist genau eine
+ * elektrische Periode breit, Harmonische 1 ist also die Grundwelle.
+ *
+ * Fuer das Verhaeltnis Anker/Magnet ist sie das richtige Mass und die Spitze
+ * das falsche: die Spitze des Ankerfeldes sitzt ueber der Nut und ist eine
+ * oertliche Zacke, waehrend gekoppelt wird, was als Grundwelle umlaeuft.
+ * Gemessen: ueber die Spitze normiert kam bei reinem d-Strom nicht die
+ * erwartete Summe heraus, ueber die Grundwelle schon. (Die EICHUNG bleibt
+ * dagegen eine SPITZE -- die Arbeitsgerade `Br*hm/(hm+mu_r*kc*g)` ist ein
+ * Spitzenwert. Zwei Masse fuer zwei Zwecke, und beide stehen hier.)
+ */
+function spaltGrundwelle(g, By, j) {
+  let re = 0, im = 0;
+  for (let i = 0; i < g.nx; i++) {
+    const th = (2 * Math.PI * i) / g.nx;
+    re += By[j * g.nx + i] * Math.cos(th);
+    im += By[j * g.nx + i] * Math.sin(th);
+  }
+  return (2 * Math.hypot(re, im)) / g.nx;
+}
+
+function spaltSpitze(g, By, j) {
   let pk = 0;
   for (let i = 1; i < g.nx - 1; i++) pk = Math.max(pk, Math.abs(By[j * g.nx + i]));
+  return pk;
+}
+
+/* Magnet und Anker GETRENNT loesen und zusammensetzen.
+ *
+ * `p.last` ist dadurch keine willkuerliche Zahl mehr, sondern der Ankeranteil
+ * in PROZENT der Magnetspitze im Spalt -- eine Groesse, die sich aussprechen
+ * laesst. 100 heisst: die Ankerrueckwirkung ist so stark wie der Magnet.
+ * Gemessen wird sie, nicht gerechnet; es gibt also keinen Eichfaktor, der bei
+ * einer anderen Geometrie danebenlaege (anders als `COIL_J_SCALE` im
+ * 3-D-Pfad, das an EINER Maschine geeicht ist und das auch sagt).
+ *
+ * Kostet bei Last ZWEI Loeserlaeufe statt einem. Ohne Last ist es Ziffer fuer
+ * Ziffer der alte Weg -- `g.Js` ist dann ueberall null und wird nicht geloest.
+ */
+function loeseFeld(p, g, iter) {
+  const m = loeseCG(g, iter, 1e-11, g.J);
+  const j = spaltZeile(g);
+  const Bm = j < 0 ? null : feldAus(g, m.A).By;
+  const pm = Bm ? spaltSpitze(g, Bm, j) : 0;        // fuer die Eichung
+  const gm = Bm ? spaltGrundwelle(g, Bm, j) : 0;    // fuer das Verhaeltnis
+  if (!p.last)
+    return { A: m.A, relRest: m.relRest, schritte: m.schritte, anker: 0, pkMag: pm };
+  const a = loeseCG(g, iter, 1e-11, g.Js);
+  const ga = spaltGrundwelle(g, feldAus(g, a.A).By, j);
+  if (!(ga > 0) || !(gm > 0))
+    return { A: m.A, relRest: m.relRest, schritte: m.schritte, anker: 0,
+             pkMag: pm, grund: "Ankerfeld nicht messbar" };
+  const f = (p.last / 100) * (gm / ga);
+  const A = new Float64Array(m.A.length);
+  for (let k = 0; k < A.length; k++) A[k] = m.A[k] + f * a.A[k];
+  // `pkMag` reist mit: geeicht wird am MAGNETanteil. Am Summenfeld geeicht
+  // hinge der Massstab an der Last, und dann saehe jede Last gleich stark aus.
+  return { A, relRest: Math.max(m.relRest, a.relRest),
+           schritte: m.schritte + a.schritte, anker: p.last / 100, pkMag: pm };
+}
+
+/* Eichung: die Spitze der Normalkomponente in der Spaltmitte auf die
+ * Arbeitsgerade. Dieselbe Groesse und dieselbe Begruendung wie im Hausloeser --
+ * der rohe SOR-Wert haengt an der willkuerlichen Amplitude von J. Gibt es
+ * keinen Magneten (Kaefig, Scheibenlaeufer ohne Erregung), wird NICHT geeicht,
+ * und das Bild traegt dann keine Tesla-Achse, sondern eine relative. */
+function eichung(p, g, By, pkVor) {
+  const perm = p.magd / (p.magd + MUR_MAG * KC * p.spalt);
+  const bAn = BR * perm * p.alpha;
+  const j = spaltZeile(g);
+  if (j < 0) return { sf: 1, bAn: 0, geeicht: false };
+  // `pkVor` ist die Spitze des MAGNETfeldes allein (aus `loeseFeld`); ohne
+  // sie wird das uebergebene Feld gemessen -- der Leerlauffall.
+  const pk = pkVor > 0 ? pkVor : spaltSpitze(g, By, j);
   if (pk < 1e-30) return { sf: 1, bAn: 0, geeicht: false, jGap: j };
   const hatMag = g.rolle.includes(2);
   return hatMag ? { sf: bAn / pk, bAn, geeicht: true, jGap: j, pk }
@@ -373,10 +465,10 @@ function zeichneFeld(cv, p) {
   // CG statt SOR: gemessen 451 Schritte / 100 ms gegen 5000 SOR-Durchgaenge /
   // 4 s bei gleichem Ergebnis (B1 0,77118 T). Der Operator ist SPD, und SORs
   // Rate haengt an der Kondition, die der mu-Sprung 1 -> 500 verdirbt.
-  const loe = loeseCG(g, +p.iter, 1e-11);
+  const loe = loeseFeld(p, g, +p.iter);
   const A = loe.A, rest = loe.relRest;
   const { Bx, By } = feldAus(g, A);
-  const e = eichung(p, g, By);
+  const e = eichung(p, g, By, loe.pkMag);
 
   // Bildbereich
   const pad = 32;
@@ -390,7 +482,6 @@ function zeichneFeld(cv, p) {
   // nichts. Dieselbe Entscheidung wie `IRON_B_SAT_DISPLAY` im Hauptwerkzeug:
   // ueber dem Saettigungsknie ist die lineare Rechnung ohnehin nicht mehr
   // zustaendig, also wird dort abgeschnitten und das gesagt.
-  const B_KNIE = 2.1;
   const Bm = new Float64Array(nx * g.ny);
   for (let k = 0; k < Bm.length; k++) Bm[k] = Math.hypot(Bx[k], By[k]) * Math.abs(e.sf);
   let deckel;

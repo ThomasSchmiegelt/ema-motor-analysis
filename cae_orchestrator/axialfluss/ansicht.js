@@ -62,6 +62,9 @@ function P() {
     fluss: $("fluss").checked, masse: $("masse").checked,
     last: +$("last").value, netz: +$("netz").value, iter: +$("iter").value,
     feldAn: $("feldAn").checked,
+    beta: +$("beta").value * Math.PI / 180,
+    rzAn: $("rzAn").checked, rzN: +$("rzN").value,
+    theta: +$("theta").value * Math.PI / 180,
   };
   p.rs = p.ri + (p.ro - p.ri) * (+$("rschnitt").value / 100);
   // Der Laeufer der DSER-Bauart traegt Zaehne und Kaefig und KEIN Joch --
@@ -580,6 +583,122 @@ function tabelle(p) {
   $("tab").innerHTML = r.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join("");
 }
 
+/* ---- Der Schnitt durch die Achse ---------------------------------------
+ *
+ * Er wird GEMERKT und nicht bei jedem Tastendruck neu gerechnet. Was ihn
+ * ungueltig macht, ist alles ausser dem Schnittwinkel: der ist reines Ablesen
+ * (s. Modulkopf von `schnitt.js`). Dieselbe Trennung wie im Hauptwerkzeug
+ * zwischen einem neuen `mu` — neue Faktorisierung — und einem weiteren
+ * Betriebspunkt auf derselben.
+ */
+let RZ = null, RZ_MARKE = "", UMLAUF = 0, RZ_TIMER = 0;
+
+function rzMarke(p) {
+  return JSON.stringify([p.topo, p.laeufer, p.stapel, p.ro, p.ri, p.poles, p.q,
+    p.bnut, p.spalt, p.zahn, p.jochS, p.jochR, p.magd, p.alpha, p.welle,
+    p.magSegU, p.magSegR, p.magFuge, p.qr, p.last, p.beta, p.rzN, p.netz, p.iter]);
+}
+
+/* Ein Scheibenlauf kostet GEMESSEN 0,6 s im Leerlauf und 2,3 s unter Last
+ * (dort zwei Loesungen je Scheibe, s. `loeseFeld`). An `input` gehaengt waere
+ * das ein Lauf je Tastendruck. Also erst, wenn die Eingabe steht -- und bis
+ * dahin sagt die Flaeche, dass sie rechnet, statt ein veraltetes Feld zu
+ * zeigen, das zu anderen Zahlen gehoert.
+ */
+function rzAnstossen(p) {
+  if (RZ && RZ_MARKE === rzMarke(p)) { rzZeichnen(p, RZ); return; }
+  clearTimeout(RZ_TIMER);
+  rzWartenZeigen();
+  RZ_TIMER = setTimeout(() => {
+    const q = P();
+    if (!q.rzAn) return;
+    rzZeichnen(q, rzSorgen(q));
+  }, 420);
+}
+
+function rzWartenZeigen() {
+  for (const id of ["c_rz", "c_scheibe", "c_zahn"]) {
+    const cv = $(id), ctx = cv.getContext("2d");
+    ctx.fillStyle = "#101216"; ctx.fillRect(0, 0, cv.width, cv.height);
+    ctx.fillStyle = "#8a93a3"; ctx.font = "15px system-ui"; ctx.textAlign = "center";
+    ctx.fillText("rechnet die Scheiben …", cv.width / 2, cv.height / 2);
+  }
+}
+
+function rzSorgen(p) {
+  const m = rzMarke(p);
+  if (RZ && RZ_MARKE === m) return RZ;
+  RZ = schnittRechnen(p, p.rzN, Math.max(40, Math.min(160, p.netz)), p.iter);
+  RZ_MARKE = m;
+  return RZ;
+}
+
+/* Was trifft der Schnitt? Beides sind RADIALE Linien — Nutflanke wie
+ * Polgrenze —, ihre Winkel haengen also nicht vom Radius ab, und derselbe
+ * Schnitt trifft bei Ri dieselbe Stelle im Pol wie bei Ro. Das ist keine
+ * Nebensaechlichkeit: bei einer Radialflussmaschine waere es anders. */
+function schnittLage(p, theta) {
+  const thP = 2 * Math.PI / p.poles, thS = 2 * Math.PI / p.q;
+  const fP = ((theta % thP) + thP) % thP / thP;
+  const fS = ((theta % thS) + thS) % thS / thS;
+  const dS = Math.min(fS, 1 - fS);
+  const wo = dS < 0.12 ? "<b>Zahnmitte</b>"
+           : Math.abs(fS - 0.5) < 0.12 ? "<b>Nutmitte</b>" : "Zahnflanke";
+  const imPol = Math.abs(fP - 0.5) < 0.08 ? "Polmitte"
+              : Math.min(fP, 1 - fP) < 0.08 ? "Polgrenze"
+              : `${(fP * 100).toFixed(0)} % der Polteilung`;
+  return `${wo} · ${imPol} — Nut- und Polgrenze sind beide RADIAL, der Schnitt ` +
+         `trifft bei Ri dieselbe Stelle wie bei Ro.`;
+}
+
+function rzZeichnen(p, erg) {
+  const deckel = erg.eich.geeicht ? B_KNIE
+    : Math.max(...Array.from(rzBei(erg, p.theta).Bm)) || 1e-9;
+  zeichneSchnittRZ($("c_rz"), p, erg, p.theta, deckel);
+  zeichneSpaltScheibe($("c_scheibe"), p, erg, p.theta, deckel * 0.55);
+  const v = zeichneZahnKurve($("c_zahn"), p, erg);
+  $("th_v").textContent = (p.theta * 180 / Math.PI).toFixed(1);
+  $("th_hint").innerHTML = schnittLage(p, p.theta);
+  rzTabelle(p, erg, v);
+}
+
+/* Die Zeilen, die der Achsschnitt BEITRAEGT -- und die eine, die seine
+ * Naeherung beziffert statt sie nur zu nennen. */
+function rzTabelle(p, erg, v) {
+  const rk = radialeKopplung(erg, p);
+  const i = v.length - 1;
+  const bad = (c, t) => c ? `<span class="bad">${t}</span>` : t;
+  const r = [
+    ["B_Zahn innen → außen (gemessen)",
+      `${v[0].b_zahn.toFixed(3)} → ${v[i].b_zahn.toFixed(3)} T ` +
+      `(×${(v[0].b_zahn / Math.max(v[i].b_zahn, 1e-9)).toFixed(2)}) — ` +
+      `das ist die Signatur der parallelflankigen Nut` +
+      // Oberhalb des Knies rechnet ein LINEARER Loeser nicht mehr richtig: in
+      // Wirklichkeit saettigt das Eisen und schiebt den Fluss zur Seite. Das
+      // VERHAELTNIS innen/aussen bleibt die Aussage, die Hoehe nicht.
+      (v[0].b_zahn > B_KNIE
+        ? `<br><span class="bad">über dem Sättigungsknie (${B_KNIE} T) — ` +
+          `dieser Löser ist linear (µr = 500 ohne B-H-Kurve), die HÖHE ist ` +
+          `dort nicht belastbar, das Verhältnis innen/außen schon</span>` : "")],
+    ["… gegen die Geometrie B_Spalt·τs/(τs−b)",
+      `${(v[0].b_zahn / v[0].b_zahn_geo * 100).toFixed(0)} % innen, ` +
+      `${(v[i].b_zahn / v[i].b_zahn_geo * 100).toFixed(0)} % außen — ` +
+      `der Rest streut über die Nut statt durch den Zahn`],
+    ["B_Spalt über dem Radius",
+      `${(rk.spanne * 100).toFixed(1)} % Spanne — der Spaltleitwert hängt nicht ` +
+      `am Radius, die Zahnänderung kommt allein aus der Geometrie`],
+    ["Tragfähigkeit der Scheiben-Näherung",
+      bad(rk.jeSpalt > 0.05,
+        `${(rk.jeSpalt * 100).toFixed(3)} % Feldänderung je Luftspaltlänge. ` +
+        `∂/∂r ist fallengelassen; vertretbar, solange das klein gegen die ` +
+        `axiale Änderung ist`)],
+    ["Kosten", `${erg.nSch} Löserläufe für die Erregung · jeder weitere ` +
+      `Schnittwinkel kostet nichts`],
+  ];
+  $("tab").insertAdjacentHTML("beforeend",
+    r.map(([a, b]) => `<tr><td>${a}</td><td>${b}</td></tr>`).join(""));
+}
+
 /* ---- Anstoss ------------------------------------------------------------ */
 function zeichne() {
   const p = P();
@@ -613,7 +732,54 @@ function zeichne() {
   // sonst haengt die Maske bei jedem Tastendruck.
   $("fig_feld").style.display = p.feldAn ? "" : "none";
   if (p.feldAn) zeichneFeld($("c_feld"), p);
+  for (const id of ["fig_rz", "fig_scheibe", "fig_zahn"])
+    $(id).style.display = p.rzAn ? "" : "none";
+  if (p.rzAn) rzAnstossen(p);
+  else clearTimeout(RZ_TIMER);
 }
+
+/* Der Schnittwinkel loest KEINEN neuen Lauf aus -- sonst waere die
+ * Eigenschaft, um derentwegen der Mehrschnitt so gebaut ist, am Regler nicht
+ * zu merken. */
+function nurWinkel() {
+  const p = P();
+  if (!p.rzAn || !RZ || RZ_MARKE !== rzMarke(p)) { zeichne(); return; }
+  rzZeichnen(p, RZ);
+}
+
 for (const el of document.querySelectorAll("input,select"))
-  el.addEventListener("input", zeichne);
+  if (el.id !== "theta") el.addEventListener("input", zeichne);
+$("theta").addEventListener("input", nurWinkel);
+
+$("btn_best").addEventListener("click", () => {
+  // Den staerksten Schnitt SUCHEN statt ihn zu raten: 360 Ablesungen auf den
+  // schon geloesten Scheiben, also einen Wimpernschlag.
+  if (!$("rzAn").checked) $("rzAn").checked = true;
+  clearTimeout(RZ_TIMER);
+  const erg = rzSorgen(P());      // ausdruecklicher Zuruf: sofort, nicht warten
+  let best = 0, bw = -1;
+  for (let a = 0; a < 720; a++) {
+    const th = a * Math.PI / 360, f = rzBei(erg, th);
+    let m = 0;
+    for (let k = 0; k < f.nS; k++) m = Math.max(m, Math.abs(f.Bz[k * f.ny + erg.jGap]));
+    if (m > bw) { bw = m; best = th; }
+  }
+  $("theta").value = (best * 180 / Math.PI).toFixed(1);
+  zeichne();
+});
+
+$("btn_um").addEventListener("click", () => {
+  if (UMLAUF) { cancelAnimationFrame(UMLAUF); UMLAUF = 0; $("btn_um").textContent = "▶ 360°"; return; }
+  if (!$("rzAn").checked) { $("rzAn").checked = true; zeichne(); }
+  $("btn_um").textContent = "⏸ halt";
+  const t0 = performance.now(), th0 = +$("theta").value;
+  const takt = () => {
+    const th = (th0 + (performance.now() - t0) / 24) % 360;
+    $("theta").value = th.toFixed(1);
+    nurWinkel();
+    UMLAUF = requestAnimationFrame(takt);
+  };
+  UMLAUF = requestAnimationFrame(takt);
+});
+
 zeichne();

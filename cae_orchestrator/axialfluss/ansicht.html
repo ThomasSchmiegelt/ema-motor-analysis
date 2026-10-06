@@ -66,6 +66,10 @@
   table.m{width:100%;border-collapse:collapse;font-size:11.5px}
   table.m td{padding:2px 4px;border-bottom:1px solid #23272f}
   table.m td:last-child{text-align:right;font-variant-numeric:tabular-nums}
+  button{background:#232833;border:1px solid var(--rand);color:var(--text);
+         border-radius:4px;padding:3px 7px;font-size:11.5px;cursor:pointer}
+  button:hover{border-color:var(--akz);color:var(--akz)}
+  button[disabled]{opacity:.45;cursor:default}
   .warn{color:var(--akz)}
   .bad{color:#e06c5a}
 </style>
@@ -128,13 +132,35 @@
   </div>
 
   <div class="grp"><h2>Magnetfeld</h2>
-    <div class="z"><label>Ständerstrom</label><input type="number" id="last" value="0" min="-400" max="400" step="10"><span class="e">–</span></div>
+    <div class="z"><label>Ankerrückwirkung</label><input type="number" id="last" value="0" min="-200" max="200" step="10"><span class="e">%</span></div>
+    <div class="z"><label>Stromwinkel β (el.)</label><input type="number" id="beta" value="0" min="-90" max="90" step="5"><span class="e">°</span></div>
+    <p class="hint">Der Ständerstrom steht in <b>Prozent der Magnet-Grundwelle
+      im Spalt</b> — gemessen, nicht geeicht: 100 % heißt „Ankerfeld so stark
+      wie der Magnet". β = 0 ist die q-Achse (dreht die Resultierende), β = ±90°
+      die d-Achse (verstärkt bzw. schwächt). <b>Eine Drehzahl kommt in einer
+      magnetostatischen Rechnung nicht vor</b> — sichtbar wird sie allein über
+      (i_d, i_q), und die über der Drehzahl zu bestimmen ist
+      <code>ema_analysis.estimate_dq_currents</code>, also der Python-Weg.
+      Hier ist β die ehrliche Achse.</p>
     <div class="z"><label>Gitter (Zeilen, Ziel)</label><input type="number" id="netz" value="110" min="40" max="220" step="10"><span class="e">–</span></div>
     <div class="z"><label>CG-Schritte (max)</label><input type="number" id="iter" value="1200" min="100" max="6000" step="100"><span class="e">–</span></div>
     <div class="z"><label><input type="checkbox" id="feldAn" checked> Feld rechnen</label></div>
     <p class="hint">Die y-Linien liegen auf den <b>Schichtgrenzen</b> — der
       Spalt ist exakt 1 mm, egal wie fein gerechnet wird. Qualitativ; Zahlen
       kommen aus <code>ema_axial_fdm.py</code>.</p>
+  </div>
+
+  <div class="grp"><h2>Schnitt durch die Achse</h2>
+    <div class="z"><label><input type="checkbox" id="rzAn"> r–z rechnen (Mehrschnitt)</label></div>
+    <div class="z"><label>Scheiben über r</label><input type="number" id="rzN" value="12" min="3" max="32" step="1"><span class="e">–</span></div>
+    <div class="z"><label>Schnittwinkel θ</label><span class="e" id="th_v">0</span><span class="e">°</span></div>
+    <input type="range" id="theta" min="0" max="360" value="0" step="0.5">
+    <p class="hint" id="th_hint"></p>
+    <div class="z"><button id="btn_best" type="button">⌖ stärkster Schnitt</button>
+      <button id="btn_um" type="button">▶ 360°</button><span class="e"></span></div>
+    <p class="hint">Der Winkel kostet <b>nichts</b> — die Scheiben tragen ihren
+      ganzen Umfang, es wird nur eine andere Spalte abgelesen. Einen neuen Lauf
+      kostet jede Änderung an der <i>Erregung</i>: Strom, Stromwinkel.</p>
   </div>
 
   <div class="grp"><h2>Darstellung</h2>
@@ -167,6 +193,29 @@
       <code>A = 0</code> auf den Jochaußenflächen und den Polgrenzen: keine
       Luft- oder Eisenpolsterung nötig. <i>Qualitativ</i> — zur Prüfung der
       Zeichnung.</figcaption></figure>
+  <figure id="fig_rz" style="display:none">
+    <canvas id="c_rz" width="700" height="880"></canvas>
+    <figcaption><b>Schnitt durch die Achse, gerechnet</b> — nicht als ein
+      2-D-Problem, das geht hier nicht: zweidimensional hieße invariant in θ,
+      und in θ liegt der Polwechsel. Zusammengesetzt aus Lösungen der
+      abgewickelten Ebene bei mehreren Radien (Mehrschnitt / Quasi-3-D).
+      Fallengelassen wird dabei <code>∂/∂r</code> — wie weit das trägt, steht in
+      der Tabelle. <b>Feldlinien in dieser Ebene gibt es bewusst nicht:</b> sie
+      bräuchten B<sub>r</sub>, und das setzt das Scheibenmodell auf null; die
+      Pfeile zeigen den axialen Fluss, und <i>dass</i> er axial steht, ist die
+      Aussage.</figcaption></figure>
+  <figure id="fig_scheibe" style="display:none">
+    <canvas id="c_scheibe" width="860" height="860"></canvas>
+    <figcaption><b>Alle 360°</b> — B<sub>z</sub> in der Spaltmitte über der
+      ganzen Scheibe, rot zum Ständer / blau zurück. Fällt beim Mehrschnitt
+      gratis ab: ein Fenster ist eine elektrische Periode, der Rest ist
+      Ablesen.</figcaption></figure>
+  <figure class="weit" id="fig_zahn" style="display:none">
+    <canvas id="c_zahn" width="1740" height="420"></canvas>
+    <figcaption><b>B<sub>Zahn</sub> über dem Radius</b> — die Signatur der
+      Bauart, gemessen: die Nut ist parallelflankig, τ<sub>s</sub> wächst mit r,
+      also wird der Zahn nach außen breiter und B<sub>Zahn</sub> fällt. Der
+      kritische Punkt liegt am <b>Innen</b>rand.</figcaption></figure>
   <figure class="weit"><table class="m" id="tab"></table>
     <figcaption>Aus der Zeichnung abgelesen bzw. unmittelbar daraus gerechnet —
       keine Auslegung.</figcaption></figure>
@@ -174,4 +223,5 @@
 </main>
 <script src="geometrie.js"></script>
 <script src="feld.js"></script>
+<script src="schnitt.js"></script>
 <script src="ansicht.js"></script>
