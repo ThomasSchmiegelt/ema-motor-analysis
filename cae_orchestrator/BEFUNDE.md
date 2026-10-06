@@ -17,6 +17,83 @@ kann.
 
 ---
 
+## 2026-10-06 · Kapitel 2 der Dissertation gelesen — drei Stellen des Axialflussbaus sind falsch
+
+Gestern habe ich die Quelle **gefunden und nicht gelesen** und stattdessen aus
+Allgemeinwissen gebaut. Nachgeholt (Igelspacher, Diss. TU München 2018/2020,
+Kap. 2 „Axialfluss-Asynchronmaschinen mit Käfigläufer", S. 5–13). Drei Befunde
+gegen den eigenen Bau, alle wörtlich belegbar.
+
+**1. `ema_axial.zahnform` kennt die richtige Nutform nicht — beide Fälle sind falsch.**
+
+> „verlaufen die Nuten radial und werden **parallelflankig** ausgeführt, da die
+> Anzahl an Leiter bzw. deren Abmessungen sich in radialer Richtung nicht
+> verändern. Als Konsequenz werden **die Zähne von kleinen zu großen Radien hin
+> breiter**, weshalb der kritische Punkt bei Betrachtung der Zahninduktionen
+> **beim Innenradius** liegt. Hierin liegt auch die Tatsache begründet, dass die
+> Flussdichte in den Zähnen von Axialflussmaschinen **mit steigendem Radius
+> abnimmt**."
+
+Gebaut sind zwei Fälle: `keil` (b_Zahn ∝ r, also konstantes `slotWidthRatio`)
+und `parallel` (b_Zahn konstant). Die wirkliche Bauart ist **keiner von beiden**:
+parallelflankig ist die **NUT**, also `b_nut = const` und
+
+    b_zahn(r) = 2*pi*r/Q − b_nut        →   B_zahn(r) = B_gap · tau_s(r) / (b_zahn(r)·k_fe)
+
+Das fällt mit r (richtig) und läuft gegen `B_gap/k_fe` für große r. Meine
+Vorgabe `keil` liefert B_zahn **konstant über r** — die Quelle sagt ausdrücklich
+das Gegenteil. Der kritische Punkt am Innenradius stimmt bei mir zufällig, aber
+aus dem falschen Grund (ich hatte ihn nur im Fall `parallel`).
+
+**2. `ema_axial.lambda_grenze` bindet an der falschen Größe.**
+
+> „Da die Windungen radial verlaufen, befindet sich außen und innen ein
+> Wickelkopf bzw. im Falle eines Käfigs die Kurzschlussringe. [...] so ist der
+> **Platzbedarf für den Wickelkopf innerhalb** der Maschine als kritisch
+> anzusehen, da der Bauraum durch die **Welle** begrenzt ist. Der Innenradius
+> wird folglich **maßgeblich durch den benötigten Platzbedarf für den
+> Wickelkopf** beeinflusst."
+
+Gebaut ist eine Schranke aus Nut- und Zahnbreite am Innenrand gegen einen
+2-mm-Fertigungsboden. Das ist ein Stellvertreter, nicht die Sache: bindend ist
+der **innere Wickelkopf** gegen die Welle. Dass λ „aus der Zeichnung" kommt, war
+richtig; die gezeichnete Größe war die falsche.
+
+**3. `_BAUFORMEN` trägt PM-Namen und bildet die ASM-Topologien nicht ab.**
+
+Die neutralen Namen der Quelle sind **ESER / DSER / ESDR** (ein/zwei Statoren,
+ein/zwei Rotoren), und sie gelten für PM *und* Käfig:
+
+| | Joch | Spalte | Kernaussage |
+|---|---|---|---|
+| **ESER** | beide | 1 | einfachste Konstruktion; `σ_L ≈ B²/(2µ0)` hängt vom **Betrag** der Flussdichte ab, nicht von der Richtung, „weswegen er sich entlang der Luftspaltfläche **nicht wie im Fall der Radialflussmaschine ausgleichen** kann" → ein Lager trägt das dauerhaft, daher kleine Leistungen |
+| **DSER** | **Rotor braucht keins** (nur Restjoch zur Wellenanbindung) — der Fluss geht axial durch die **Rotorzähne** von Stator zu Stator | 2 | Wicklungen 120° el. verdreht **und gespiegelt**, sonst wirken die Flüsse gegeneinander; geteilte Statorwicklung → deutlich besser kühlbar → große Leistungen |
+| **ESDR** | Stator theoretisch ohne (Restjoch für die Festigkeit der Wicklung) | 2 | Wicklung beidseitig um den Stator, **keine Kreuzungen im Wickelkopf** → kompakter; dafür zwei Rotorjoche → größere rotierende Masse |
+
+Mein `afir`-Stapel (`stator|spalt|magnet|ruecken|magnet|spalt|stator`) kann die
+**DSER-ASM gar nicht abbilden**: dort trägt der Rotor **Zähne und Käfig und
+kein Joch**. Und zwei Variationen fehlen ganz:
+
+* **Stapelbauweise** — mehrere Teilmaschinen auf einer Welle, „rein **mechanisch**
+  gekoppelte Maschinen, die sich trotz der konstruktiven Nähe elektromagnetisch
+  nicht beeinflussen"; bei gerader Anzahl ESER heben sich die axialen Kräfte in
+  Summe auf.
+* **DSDR mit reduziertem Rotorjoch** — aus zwei ESER, Rotorjoch halbiert, um
+  rotierende Masse zu senken und die Momentdichte zu heben. Der Preis ist, dass
+  die Teilmaschinen dadurch **magnetisch** gekoppelt werden: fällt eine aus,
+  schließt sich der Fluss der intakten „nicht nur über das Rotorjoch sondern auch
+  über die ausgefallene Teilmaschine, was einer **fiktiven Luftspaltvergrößerung**
+  entspricht" → höherer Magnetisierungsstrom. Das ist der Gegenstand der ganzen
+  Dissertation.
+
+**Bestätigt, nicht widerlegt:** der axiale Anzug `σ_L ≈ B²/(2µ0)` und seine
+Begründung decken sich mit dem hier gemessenen 8,6 : 1 (BEFUNDE 05.10.2026).
+
+**Noch nicht repariert.** Punkt 1 ist eine Formel und klein; Punkt 2 braucht ein
+Wickelkopfmodell, das es axial nicht gibt; Punkt 3 ist ein Umbau von
+`_BAUFORMEN` samt Namensgebung. Reihenfolge in `AXIALFLUSS.md` §10.
+
+
 ## 2026-10-05 · Die „Axialflussmaschine" trug innen einen V-Magnet-IPM-Läufer
 
 **Vom Menschen gefunden, nicht vom Werkzeug** — gemeldet als *„deine maschine
