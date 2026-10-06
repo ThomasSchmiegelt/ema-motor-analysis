@@ -117,6 +117,16 @@
     <div class="z"><label>Wickelkopf innen</label><input type="number" id="wkI" value="14" min="0" max="80" step="1"><span class="e">mm</span></div>
   </div>
 
+  <div class="grp"><h2>Magnetfeld</h2>
+    <div class="z"><label>Ständerstrom</label><input type="number" id="last" value="0" min="-400" max="400" step="10"><span class="e">–</span></div>
+    <div class="z"><label>Gitter (Zeilen, Ziel)</label><input type="number" id="netz" value="110" min="40" max="220" step="10"><span class="e">–</span></div>
+    <div class="z"><label>CG-Schritte (max)</label><input type="number" id="iter" value="1200" min="100" max="6000" step="100"><span class="e">–</span></div>
+    <div class="z"><label><input type="checkbox" id="feldAn" checked> Feld rechnen</label></div>
+    <p class="hint">Die y-Linien liegen auf den <b>Schichtgrenzen</b> — der
+      Spalt ist exakt 1 mm, egal wie fein gerechnet wird. Qualitativ; Zahlen
+      kommen aus <code>ema_axial_fdm.py</code>.</p>
+  </div>
+
   <div class="grp"><h2>Darstellung</h2>
     <div class="z"><label>Läufer aufgeschnitten</label><span class="e" id="sek_v">120</span><span class="e">°</span></div>
     <input type="range" id="sektor" min="0" max="360" value="120" step="5">
@@ -140,9 +150,18 @@
     <figcaption><b>Abgewickelter Schnitt</b> bei <span id="rs_t"></span> —
       die Ebene, in der ein 2-D-Löser rechnen kann (θ–z, tangential, <i>nicht</i>
       durch die Achse).</figcaption></figure>
+  <figure class="weit" id="fig_feld" style="display:none">
+    <canvas id="c_feld" width="1740" height="560"></canvas>
+    <figcaption><b>Magnetfeld der abgewickelten Scheibe</b> — |B| als Fläche,
+      Feldlinien als Höhenlinien des Vektorpotentials. Rechteckiges Gitter,
+      <code>A = 0</code> auf den Jochaußenflächen und den Polgrenzen: keine
+      Luft- oder Eisenpolsterung nötig. <i>Qualitativ</i> — zur Prüfung der
+      Zeichnung.</figcaption></figure>
   <figure class="weit"><table class="m" id="tab"></table>
     <figcaption>Aus der Zeichnung abgelesen bzw. unmittelbar daraus gerechnet —
       keine Auslegung.</figcaption></figure>
 </section>
 </main>
-<script src="axialfluss_ansicht.js"></script>
+<script src="geometrie.js"></script>
+<script src="feld.js"></script>
+<script src="ansicht.js"></script>

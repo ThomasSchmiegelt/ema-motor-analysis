@@ -17,6 +17,59 @@ kann.
 
 ---
 
+## 2026-10-06 · B_gap war sehr wohl konvergierbar — es lag am gleichmäßigen Gitter
+
+**Widerruft den Befund vom 05.10.2026** („B_gap(r) aus dem Mehrschnitt ist NICHT
+konvergiert"). Dort stand, die Amplitude oszilliere über N = 320…1280 zwischen
+0,874 und 0,973 T, weil der 1-mm-Luftspalt und der 6-mm-Magnet auf das Gitter
+schnappen — und daraus folgte die Einschränkung, nur Verhältnisgrößen seien
+belastbar. Die Beobachtung stimmt, der Schluss war zu früh.
+
+**Gemessen am JS-Feldlöser der Ansichtsseite** (`axialfluss/feld.js`, derselbe
+abgewickelte Schnitt, eigenes Gitter). Mit gleichmäßigem dy, rechteckig statt
+quadratisch — also ohne den Quadratzwang und ohne Polsterung:
+
+    72×60   84×78   120×106  168×146  192×160
+    0,79201 0,76763 0,86127  —        0,80873   T     → ±6 %, nicht monoton
+
+Mit **y-Linien auf den Schichtgrenzen** (ungleichmäßiges dy, jede Grenze ist
+eine Zellfläche, der Luftspalt bekommt mindestens 5 Zeilen):
+
+    60×58   84×78   120×106  168×146  228×195
+    0,85351 0,81333 0,80818  0,78649  0,78313   T
+    Abweichung zum feinsten: 8,99 %  3,86 %  3,20 %  0,43 %  0
+
+**Monoton fallend.** Es ist also kein prinzipielles Problem des kartesischen
+Rasters, sondern eine Folge davon, dass die Gitterlinien die dünnen Schichten
+schneiden statt auf ihnen zu liegen. Der Spalt ist dann exakt 1 mm, gleich wie
+fein gerechnet wird.
+
+**Was daraus für `ema_axial_fdm.py` folgt:** derselbe Umbau ist dort möglich und
+würde die Einschränkung aufheben. Er ist allerdings nicht gratis —
+`ema_analysis._build_fv_matrix` rechnet mit EINER Maschenweite und einem
+quadratischen Gitter; ein ungleichmäßiges y bräuchte einen eigenen
+Matrixaufbau. Das ist der Preis dafür, bisher den Hauslöser unverändert benutzt
+zu haben, und er ist jetzt beziffert.
+
+**Zwei weitere Messungen aus demselben Lauf:**
+
+*CG schlägt SOR um Faktor 40.* Der Operator ist SPD (Finite Volumen, harmonisch
+gemittelte Flächenleitwerte, Dirichlet) — bei µr-Sprüngen 1 → 500 verdirbt die
+Kondition genau SORs Rate. Gemessen auf 120×100: SOR ω=1,95 braucht 5000
+Durchgänge / 4,1 s, Jacobi-vorkonditioniertes CG 451 Schritte / 0,10 s, beide
+auf B1 = 0,77118 T.
+
+*Die Flussbilanz schließt.* Ständermitte führt **89 %** des Spaltflusses (Rest
+streut über die Nuten), und beide Luftspalte führen denselben Fluss
+(Verhältnis 1,000) — der Fluss geht wirklich axial durch den Zahn und kehrt
+umfangs im Joch zurück. `axialfluss/pruefe.js` misst das ohne Browser nach,
+5 Prüfungen.
+
+**Nicht geändert:** der Faktor ~3 zwischen den beiden Momentwegen
+(Normierungsunterschied, BEFUNDE 05.10.2026) ist davon unberührt — er hängt
+nicht am Gitter.
+
+
 ## 2026-10-06 · Kapitel 2 der Dissertation gelesen — drei Stellen des Axialflussbaus sind falsch
 
 Gestern habe ich die Quelle **gefunden und nicht gelesen** und stattdessen aus

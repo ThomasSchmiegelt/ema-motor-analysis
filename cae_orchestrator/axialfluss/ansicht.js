@@ -58,6 +58,8 @@ function P() {
     welle: +$("welle").value / 2, wkI: +$("wkI").value,
     sektor: +$("sektor").value * Math.PI / 180,
     fluss: $("fluss").checked, masse: $("masse").checked,
+    last: +$("last").value, netz: +$("netz").value, iter: +$("iter").value,
+    feldAn: $("feldAn").checked,
   };
   p.rs = p.ri + (p.ro - p.ri) * (+$("rschnitt").value / 100);
   // Der Laeufer der DSER-Bauart traegt Zaehne und Kaefig und KEIN Joch --
@@ -234,25 +236,6 @@ function laeuferFlaeche(ctx, cx, cy, s, p, a0, a1) {
  * groesser ist als die Baulaenge und der Fluss parallel zur Drehachse laeuft.
  * Sie ist zugleich die Ebene, in der man NICHT rechnen kann -- Invarianz in
  * theta hiesse eine Maschine ohne Pole. */
-function stapelLagen(p) {
-  const L = [];
-  const st = (seite) => ({ art: "stator", d: p.zahn + (p.statorOhneJoch ? 2 : p.jochS), seite });
-  const rot = (seite) => ({ art: "rotor", seite,
-                            d: p.magd + (p.rotorOhneJoch ? 3 : p.jochR) });
-  // ``seite`` sagt, wo der LUFTSPALT liegt: dorthin zeigt der Magnet bzw. der
-  // Laeuferzahn, das Joch liegt auf der anderen Seite.
-  if (p.topo === "eser") { L.push(st("oben"), { art: "spalt", d: p.spalt }, rot("unten")); }
-  else if (p.topo === "dser") { L.push(st("oben"), { art: "spalt", d: p.spalt }, rot("beide"),
-                                       { art: "spalt", d: p.spalt }, st("unten")); }
-  else { L.push(rot("oben"), { art: "spalt", d: p.spalt }, st("beide"),
-                { art: "spalt", d: p.spalt }, rot("unten")); }
-  const ges = [];
-  for (let k = 0; k < p.stapel; k++) {
-    if (k) ges.push({ art: "fuge", d: Math.max(4, p.spalt * 4) });
-    for (const l of L) ges.push({ ...l });
-  }
-  return ges;
-}
 
 function halbschnitt(cv, p) {
   const ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
@@ -514,6 +497,10 @@ function zeichne() {
   halbschnitt($("c_schnitt"), p);
   abwicklung($("c_abw"), p);
   tabelle(p);
+  // Das Feld kostet Rechenzeit und wird deshalb nur auf Zuruf gerechnet --
+  // sonst haengt die Maske bei jedem Tastendruck.
+  $("fig_feld").style.display = p.feldAn ? "" : "none";
+  if (p.feldAn) zeichneFeld($("c_feld"), p);
 }
 for (const el of document.querySelectorAll("input,select"))
   el.addEventListener("input", zeichne);
