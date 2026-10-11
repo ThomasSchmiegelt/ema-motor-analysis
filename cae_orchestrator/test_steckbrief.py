@@ -168,8 +168,15 @@ with tempfile.TemporaryDirectory() as tmp:
     pruefe("STECKBRIEF" in text and "Kennwerte (mit Herkunft)" in text,
            "als Text gibt es genau das, was ein Agent vorliest")
     md = SB.als_markdown(SB.steckbrief(voll, mit_laeufen=False))
-    pruefe(md.startswith("- Maschinenart:") and "Herkunft:" in md,
-           "und als Stichpunkte fuer AGENTS.projekt.md")
+    # Der FLUSSWEG steht vorn, nicht die Maschinenart — dieselbe Reihenfolge
+    # wie in der Maske und aus demselben Grund: er ist die Entscheidung davor
+    # (er bestimmt, ob der Luftspalt ein Zylindermantel oder eine Ringflaeche
+    # ist, und damit jede Flaeche darunter). Geprueft wird deshalb, dass die
+    # Stichpunktliste mit einer MASCHINENaussage beginnt und beide Zeilen
+    # traegt — nicht, welche von beiden zufaellig zuerst kommt.
+    pruefe(md.startswith("- Flussweg:") and "\n- Maschinenart:" in md
+           and "Herkunft:" in md,
+           "und als Stichpunkte fuer AGENTS.projekt.md (Flussweg vor Maschinenart)")
 
 
 # ── 3) Der Rueckweg: frueher gelaufene Zuege ────────────────────────────────

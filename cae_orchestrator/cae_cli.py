@@ -213,7 +213,7 @@ def cmd_geom(args) -> int:
     return EXIT_OK
 
 
-def frischer_payload() -> dict:
+def frischer_payload(flussweg: str = "radial") -> dict:
     """Ein NEUTRALER Grundpayload aus den Schemavorgaben — ohne jedes Altprojekt.
 
     Warum es den geben muss
@@ -285,6 +285,18 @@ def frischer_payload() -> dict:
     # wird nur noch die Laenge (``magWidth = 0`` heisst „Slot fuellen").
     # NUR im frischen Payload: bestehende Projekte tragen ``pocketMode`` in ihrem
     # gespeicherten Payload und aendern sich um keine Ziffer.
+    # **Die Scheibe geht hier NICHT weiter.** Alles ab dieser Zeile ist radial:
+    # Taschenwaende, Magnetlaenge, Layouttor. Gemessen am 07.10.2026 endete
+    # `--frisch --set fluxPath=axial` deshalb mit „Wandmodus: Auch der kuerzeste
+    # Magnet passt nicht zwischen die Waende" -- fuer den Agenten war die
+    # Axialflussmaschine damit gar nicht anlegbar, obwohl fuenf Stufen sie
+    # tragen. Eine Scheibe hat keine Magnettasche; `ema_fluss.axial_vorgabe` ist
+    # die EINE Quelle ihrer Startwerte.
+    if str(flussweg or "").lower() == "axial":
+        import ema_fluss as _FLA
+        payload["geom"] = _FLA.axial_vorgabe(payload["geom"])
+        return payload
+
     payload["geom"]["pocketMode"] = "wand"
     payload["geom"]["magWidth"] = 0
 
@@ -341,9 +353,27 @@ def frischer_payload() -> dict:
     return payload
 
 
+def _flussweg_aus_set(args) -> str:
+    """Den gewuenschten Flussweg aus den ``--set``-Zuweisungen lesen.
+
+    Er muss VOR dem Bau des frischen Payloads bekannt sein: ``--set`` wird
+    danach angewandt, und bis dahin ist die halbe radiale Einpassung schon
+    gelaufen (und bei einer Scheibe gescheitert). Deshalb hier ein Blick voraus
+    statt einer zusaetzlichen Flagge -- der Agent soll EINEN Schluessel kennen
+    (`fluxPath`), nicht zwei Wege, ihn zu setzen.
+    """
+    for z in (getattr(args, "set", None) or []):
+        k, _, v = str(z).partition("=")
+        if k.strip() in ("fluxPath", "geom.fluxPath"):
+            w = v.strip().strip('"\'').lower()
+            if w in ("axial", "afpm", "scheibe", "scheibenlaeufer"):
+                return "axial"
+    return "radial"
+
+
 def _load_payload(args) -> dict:
     if getattr(args, "frisch", False):
-        return frischer_payload()
+        return frischer_payload(_flussweg_aus_set(args))
     if args.payload_file:
         with open(args.payload_file, encoding="utf-8") as f:
             data = json.load(f)
@@ -1220,6 +1250,22 @@ def _lastfall_zeile(payload: dict) -> str:
 PFLICHTPUNKTE = [
     dict(name="einsatz", frage="Wofuer ist die Maschine? (Fahrzeug, Geraet, Pruefstand)",
          quelle="aufgabe", hinweis="steht in der Aufgabe oder wird erfragt"),
+    # **Der Flussweg steht VOR der Maschinenart**, weil er mehr entscheidet:
+    # Ringraum statt Zylinder, radiale statt axiale Nuten, ein anderer Feld-,
+    # CAD- und 3-D-Loeser. Bis zum 07.10.2026 stand er hier gar nicht, und der
+    # Agent konnte eine Axialflussmaschine nicht einmal anlegen -- `--frisch`
+    # lief in die radiale Taschen-Einpassung und brach ab.
+    dict(name="flussweg", frage="Radial- oder Axialfluss? (geom.fluxPath)",
+         quelle="maschinenart",
+         hinweis="Vorgabe radial. Axial = Scheibenlaeufer: der Luftspalt ist eine "
+                 "RINGFLAECHE, die Nuten laufen radial, das Moment waechst mit "
+                 "Ro^2 statt Ro. Anlegen mit `--frisch --set fluxPath=axial` "
+                 "(ema_fluss.axial_vorgabe setzt die axialen Masse auf einen "
+                 "tragfaehigen Startpunkt). Getragen: analytisch, feld "
+                 "(Mehrschnitt), cad (ema_axial_cad), em3d (Ringsektor), "
+                 "thermik, zyklus -- NICHT die Struktur-FEM (sie rechnet "
+                 "Fliehkraft, die Hauptlast der Scheibe ist der axiale Anzug). "
+                 "Das Verb `axial` rechnet die Scheibe eigens"),
     # Die erste Entscheidung ueberhaupt -- und die einzige, die ueber die
     # Bedeutung fast aller uebrigen entscheidet. Steht sie nicht in der Aufgabe,
     # ist die Voreinstellung PSM, und die ist dann eine ANNAHME, keine Wahl.
@@ -1283,6 +1329,32 @@ def cmd_maschinenart(args) -> int:
 
     Exit: 0 = ok.
     """
+    # **Der Flussweg gehoert hierher.** Der Agent fragt an dieser Stelle „was
+    # kann ich bauen", und bis zum 07.10.2026 bekam er fuenf Maschinenarten und
+    # kein Wort darueber, dass es den Scheibenlaeufer gibt -- `SKILL.md` nannte
+    # ihn null mal. Eine Moeglichkeit, von der nichts erzaehlt, ist keine.
+    import ema_fluss as _FLM
+    print("Flusswege (Vorgabe: radial) — die Entscheidung VOR der Maschinenart")
+    print()
+    for _w in ("radial", "axial"):
+        _g = {"fluxPath": _w}
+        _st = (", ".join(_FLM.STUFEN_AXIAL) if _w == "axial"
+               else "alle (analytisch, feld, cad, em3d, struktur, thermik, zyklus)")
+        print(f"  {_w:7s} {_FLM.LABEL[_w]}")
+        print(f"          getragene Stufen: {_st}")
+        if _w == "axial":
+            print(f"          Feld ueber {_FLM.FELDWEG_WERKZEUG[_FLM.FELDWEG_AXIAL]}")
+            print(f"          3-D  ueber "
+                  f"{_FLM.EM3D_WERKZEUG_FLUSS[_FLM.EM3D_WEG_AXIAL]}")
+            print(f"          CAD  ueber {_FLM.CAD_WERKZEUG[_FLM.CAD_WEG_AXIAL]}")
+            print("          NICHT getragen: struktur — die Struktur-FEM rechnet")
+            print("          Fliehkraft, die Hauptlast der Scheibe ist der axiale")
+            print("          ANZUG (gemessen 8,6 : 1 zum Schub). `axial` rechnet")
+            print("          Durchbiegung und Bandage.")
+            print("          Anlegen: --frisch --set fluxPath=axial")
+            print("          Rechnen: `cae_cli.py axial` (eigenes Verb)")
+    print()
+
     import ema_maschinenart as MA
 
     if getattr(args, "code", None):
@@ -1309,6 +1381,147 @@ def cmd_maschinenart(args) -> int:
     print()
     print("Setzen:   --set geom.machineType=asm")
     print("Vergleich: paarvergleich --achse maschinenart")
+    return 0
+
+
+def _feld2d_magnetostatisch(args, payload: dict, art: str, arbeit: str,
+                            kennung) -> int:
+    """Elmer 2-D **magnetostatisch** -- der Weg der Reluktanz- UND der
+    fremderregten Synchronmaschine.
+
+    `ema_em2d_harm` ist harmonisch und fuer den Kaefig gebaut (Kreisfrequenz,
+    Leitfaehigkeit je Koerper); ein Reluktanzlaeufer hat nichts davon. Gerechnet
+    wird deshalb mit `ema_em2d_stat` -- und die Groesse, die dabei wirklich
+    etwas sagt, ist das **Verhaeltnis** der Luftspaltwelle bei Staender-
+    durchflutung laengs und quer zur Vorzugsrichtung: die Anisotropie, aus der
+    das ganze Moment dieser Bauart kommt.
+
+    Der glatte Laeufer laeuft als Bezug mit. Ohne ihn waere jede gemessene
+    Anisotropie eine Aussage ueber einen Loeser, den niemand geprueft hat --
+    er MUSS 1,000 ergeben, weil ein Vollzylinder keine Vorzugsrichtung hat.
+
+    **Die EESM geht denselben Weg** (20.09.2026), und aus demselben Grund: ihr
+    Schenkelpollaeufer ist ebenso anisotrop, und ihre Erregerwicklung fuehrt
+    GLEICHstrom -- eine eingepraegte Gleichdurchflutung ist magnetostatisch
+    exakt darstellbar. Dort kommt die Erregung als eigener Messschritt dazu,
+    samt ihrer Linearitaetsprobe: mu_r ist konstant, also MUSS doppelte
+    Erregung doppeltes Feld geben. Nicht darstellbar bleibt, was ZEITabhaengig
+    ist -- Kaefig und kommutierter Anker; die GSM gehoert deshalb nicht hierher.
+    """
+    import ema_em2d_stat as ES
+    geom = dict(payload.get("geom") or {})
+    axial = float(getattr(args, "axial_mm", 0) or payload.get("axial_len")
+                  or geom.get("axialLen") or 80.0)
+    lagen = int(getattr(args, "gap_lagen", 0) or ES.GAP_LAGEN)
+    i_pk = 300.0                       # Massstab; er kuerzt sich im Verhaeltnis
+
+    def _log(t):
+        print(f"  {t}")
+
+    try:
+        ctx = ES.vorbereiten(geom, arbeit, axial_mm=axial, gap_lagen=lagen,
+                             melde=_log)
+        # **Die Anisotropie wird OHNE Erregung gemessen** (`erregung=0.0`), und
+        # das ist nicht beilaeufig: ``ES.loese`` hat die Vorgabe 1,0, und mit
+        # erregtem Laeufer misst man nicht mehr die Antwort des EISENS auf den
+        # Staenderstrom, sondern die Summe aus ihr und dem Laeuferfeld. Gemessen
+        # am frischen EESM-Payload: mit Erregung kam eine "Anisotropie" von
+        # 1,154 bei 70,1 % Klirranteil heraus, ohne sie 1,738 bei 16 % -- der
+        # Klirranteil ist dabei der Zeigefinger, denn die Erregerwelle steht in
+        # der d-Achse und sieht in der Summe wie eine Verzerrung aus. Bei der
+        # SynRM faellt es nicht auf, sie hat keine Spulen; genau deshalb steht
+        # es hier und nicht im EESM-Zweig.
+        a1 = ES.loese(ctx, id_=i_pk, erregung=0.0)
+        a2 = ES.loese(ctx, iq=i_pk, erregung=0.0)
+        _log("Bezugsfall: derselbe Staender auf einem GLATTEN Laeufer…")
+        cg = ES.vorbereiten(geom, arbeit + "_glatt", axial_mm=axial,
+                            gap_lagen=lagen, teile=[])
+        g1 = ES.loese(cg, id_=i_pk, erregung=0.0)
+        g2 = ES.loese(cg, iq=i_pk, erregung=0.0)
+        # **Die Erregung ist die Groesse, die die EESM von der SynRM trennt.**
+        # Eine Anisotropie allein beschreibt einen Schenkelpollaeufer nur halb:
+        # sein Feld kommt aus der Erregerwicklung, und ob die im Modell wirklich
+        # eingepraegt ist, sagt nur eine Messung. Die Probe ist die LINEARITAET
+        # -- mu_r ist konstant, also MUSS doppelte Erregung doppeltes Feld
+        # geben; weicht das ab, ist nicht der Laeufer schuld, sondern der Lauf.
+        err = None
+        if art == "eesm":
+            # Umgekehrt: Staender aus, Laeufer an -- das Erregerfeld allein.
+            e0 = ES.loese(ctx, erregung=0.0)
+            e1 = ES.loese(ctx, erregung=1.0)
+            e2 = ES.loese(ctx, erregung=2.0)
+            err = {"b0": e0["grundwelle"], "b1": e1["grundwelle"],
+                   "b2": e2["grundwelle"], "klirr": e1["klirr_pct"]}
+    except Exception as e:                                   # noqa: BLE001
+        return _oertlicher_fehlschlag(e, "Feldlauf (magnetostatisch)")
+
+    b_hoch = max(a1["grundwelle"], a2["grundwelle"])
+    b_tief = min(a1["grundwelle"], a2["grundwelle"])
+    xi = b_hoch / max(b_tief, 1e-12)
+    xi_glatt = max(g1["grundwelle"], g2["grundwelle"]) \
+        / max(min(g1["grundwelle"], g2["grundwelle"]), 1e-12)
+
+    z = [f"Feld 2-D MAGNETOSTATISCH (Elmer) — {art}",
+         f"  Netz            {ctx['netz']['dreiecke']} Dreiecke, "
+         f"{ctx['netz']['knoten']} Knoten, {ctx['netz']['n_koerper']} Koerper",
+         f"  Luftspaltwelle  {b_hoch:.4f} T laengs / {b_tief:.4f} T quer",
+         f"  ANISOTROPIE     {xi:.3f}",
+         f"  Klirranteil     {a1['klirr_pct']:.1f} % / {a2['klirr_pct']:.1f} %",
+         "",
+         f"  Bezugsfall glatter Laeufer: {xi_glatt:.4f} "
+         f"(muss 1,000 sein — ein Vollzylinder hat keine Vorzugsrichtung)",
+         "",
+         "  Was diese Stufe NICHT sagt: die absolute Hoehe ist ein Ergebnis",
+         "  DIESES Netzes und DIESER linearen Permeabilitaet (mu_r = "
+         f"{ES.MU_R_EISEN:.0f}, wie im FDM, damit die Zahlen vergleichbar",
+         "  bleiben) — Saettigung ist nicht gerechnet. Moment und Verluste",
+         "  kommen weiterhin aus der analytischen Stufe."]
+    # **Ein hoher Klirranteil relativiert die Zahl darueber.** Die Anisotropie
+    # ist ein Verhaeltnis von GRUNDWELLEN; traegt die gemessene Welle nur zu
+    # einem kleinen Teil ihre Grundwelle, ist sie kein Mass mehr fuer das, was
+    # die Maschine an der Welle liefert. Gemessen am Schenkelpollaeufer
+    # (2p = 8, Staender allein in der d-Achse): 84,4 % -- sechs Polschuhe mit
+    # breiten Luecken dazwischen formen aus einer Sinusdurchflutung eine stark
+    # gestufte Welle, das ist die Bauart und kein Fehler. Aber es steht da.
+    _kl_max = max(a1["klirr_pct"] or 0.0, a2["klirr_pct"] or 0.0)
+    if _kl_max > 40.0:
+        z.append(f"  ⚠ Klirranteil bis {_kl_max:.0f} % — die Luftspaltwelle ist "
+                 f"stark gestuft (ausgepraegte Pole mit Luecken dazwischen).")
+        z.append("    Die Anisotropie oben vergleicht GRUNDWELLEN; bei dieser "
+                 "Kurvenform sagt sie")
+        z.append("    weniger ueber das Moment an der Welle als bei einer "
+                 "sinusnahen Welle.")
+    if abs(xi_glatt - 1.0) > 0.01:
+        z.append(f"  \u26a0 Der Bezugsfall weicht um {100*abs(xi_glatt-1):.1f} % "
+                 f"von 1 ab — dem gemessenen Verhaeltnis ist dann nicht zu trauen.")
+    if err:
+        lin = (err["b2"] / err["b1"]) if err["b1"] else None
+        z[1:1] = [
+            f"  ERREGUNG        {err['b1']:.4f} T bei Nennerregung "
+            f"(Klirranteil {err['klirr']:.1f} %)",
+            f"                  0-Erregung {err['b0']:.4f} T, doppelte "
+            f"{err['b2']:.4f} T",
+            f"                  Linearitaet {lin:.3f}x "
+            f"(muss 2,000 sein — mu_r ist konstant)"
+            if lin else "                  Linearitaet nicht messbar",
+        ]
+        if lin and abs(lin - 2.0) > 0.02:
+            z.append(f"  ⚠ Die Erregung ist nicht linear ({lin:.3f}x statt "
+                     f"2,000x) — in einem linearen Loeser ist das ein Befund "
+                     f"ueber den LAUF, nicht ueber die Maschine.")
+    text = "\n".join(z)
+    print()
+    print(text)
+    _ablegen(args, "feld2d", text,
+             daten={"art": art, "anisotropie": round(xi, 4),
+                    "B_laengs_T": round(b_hoch, 5), "B_quer_T": round(b_tief, 5),
+                    "anisotropie_glatt": round(xi_glatt, 5),
+                    "klirr_pct": [a1["klirr_pct"], a2["klirr_pct"]],
+                    "dreiecke": ctx["netz"]["dreiecke"],
+                    "knoten": ctx["netz"]["knoten"],
+                    **({"erregung": {k: (None if v is None else round(v, 5))
+                                     for k, v in err.items()}} if err else {})},
+             pid=kennung)
     return 0
 
 
@@ -1354,14 +1567,6 @@ def cmd_feld2d(args) -> int:
 
     import ema_maschinenart as MA
     art = MA.art_code(payload)
-    try:
-        MA.pruefe_stufe(art, "feld")
-    except MA.ArtNichtUnterstuetzt as e:
-        return _die(str(e), EXIT_USAGE)
-    if art != "asm":
-        return _die(f"feld2d ist die Kaefiglaeufer-Stufe; '{art}' gehoert nicht "
-                    f"hierher. 'maschinenart {art}' sagt, was diese Art traegt.",
-                    EXIT_USAGE)
 
     kennung = getattr(args, "projekt", None) or getattr(args, "_pid", None)
     pdir = _projekt_pfad(kennung) if kennung else ""
@@ -1372,6 +1577,32 @@ def cmd_feld2d(args) -> int:
     rpm = float(getattr(args, "rpm", 0) or payload.get("rpm_to")
                 or payload.get("rpm_from") or 3000.0)
     last = float(getattr(args, "last_nm", 0) or payload.get("load_nm") or 100.0)
+
+    # **EIN Verb, der richtige Loeser.** Bis zum 20.09.2026 war `feld2d` die
+    # Kaefiglaeuferstufe und wies alles andere ab -- auch die
+    # Reluktanzmaschine, fuer die Elmer 2-D genau das richtige Werkzeug ist:
+    # sie ist magnetostatisch, ihr Moment kommt allein aus der
+    # Laeufergeometrie. Gemeldet als „elmer geht bei reluktanz nicht". Zwei
+    # Verbnamen fuer „rechne das Feld in Elmer 2-D" waeren die schlechtere
+    # Loesung: ein oertliches Modell (und ein Mensch) muss dann wissen, welcher
+    # Loeser zu welcher Bauart gehoert -- und genau dafuer gibt es
+    # `ema_maschinenart`.
+    # Die EESM geht denselben Weg (20.09.2026). Ihre Erregerwicklung fuehrt
+    # GLEICHstrom, und eine eingepraegte Gleichdurchflutung ist magnetostatisch
+    # exakt darstellbar -- das ist gerade der Fall, den dieser Loeser kann.
+    # Nicht darstellbar ist, was zeitabhaengig ist (Kaefig, kommutierter Anker),
+    # und deshalb bleibt die GSM draussen.
+    if art in ("synrm", "eesm"):
+        return _feld2d_magnetostatisch(args, payload, art, arbeit, kennung)
+
+    try:
+        MA.pruefe_stufe(art, "feld")
+    except MA.ArtNichtUnterstuetzt as e:
+        return _die(str(e), EXIT_USAGE)
+    if art != "asm":
+        return _die(f"feld2d ist die Kaefiglaeufer-Stufe; '{art}' gehoert nicht "
+                    f"hierher. 'maschinenart {art}' sagt, was diese Art traegt.",
+                    EXIT_USAGE)
 
     import ema_em2d_harm as EH
     try:
@@ -2150,6 +2381,42 @@ def cmd_feldbild(args) -> int:
         return _die("--sektor braucht zwei Gradwerte, z.B. 25,115", EXIT_USAGE)
 
     ziel = os.path.join(pdir, "charts")
+    # Die Scheibe hat ihre eigenen Bilder. Hier brach es bis zum 06.10.2026 mit
+    # einem Traceback aus `_analytical_Bgap` ab -- ein Tor darf sagen „ich
+    # rechne das nicht", aber nie als Absturz und nie ohne den Weg zu nennen.
+    import ema_fluss as _FLb
+    if _FLb.flussweg(geom) == "axial":
+        return _die("Axialfluss: diese Bilder kommen aus der radialen FDM "
+                    "(R = hypot(X, Y)) und meinen einen Zylinderschnitt. Die "
+                    "Scheibe zeichnet `cae_cli.py axial --bilder --projekt "
+                    f"{os.path.basename(pdir)}` (abgewickelter Schnitt und "
+                    "B_gap ueber dem Radius), eine Bildreihe dazu mit "
+                    "`--frames N`.", EXIT_USAGE)
+
+    if int(getattr(args, "frames", 0) or 0) > 1:
+        # Eine BILDREIHE ueber den Laeuferwinkel. Die Pipeline schreibt sie nur
+        # fuer die PSM, weil `pruefe_feldweg` die radiale FDM fuer jede andere
+        # Art als FELDWEG abweist -- vier von sechs Projektordnern blieben
+        # dadurch leer. Hier ist es ausdruecklich ein BILD, und was der Art an
+        # Physik fehlt, steht in jedem Frame.
+        ordner = os.path.join(pdir, "frames_feld")
+        fr = FB.frames(geom, ordner, n_frames=int(args.frames), N=int(args.n),
+                       iq=iq, id_=id_,
+                       rpm=float(payload.get("rpm_to") or 3000.0),
+                       last_nm=float(payload.get("load_nm") or 0.0),
+                       melde=lambda i, n: print(f"\r  Frame {i}/{n}",
+                                                end="", flush=True))
+        print()
+        text = (f"{fr['n']} Frames ueber {fr['periode_grad']:.1f}\u00b0 mech "
+                f"(eine Polteilung) nach {ordner}"
+                + (f", Video {os.path.basename(fr['video'])}" if fr["video"]
+                   else " (kein ffmpeg — kein Video)")
+                + f"\n  Betriebspunkt i_q={fr['i_q_A']:.0f} A, i_d={fr['i_d_A']:.0f} A"
+                + (f"\n  {fr['fussnote']}" if fr["fussnote"] else ""))
+        print("ERGEBNIS: " + text)
+        _ablegen(args, "feldbild", text, daten=fr, pid=os.path.basename(pdir))
+        return EXIT_OK
+
     bilder = FB.feldbilder(
         geom, ziel, ansichten=ansichten, N=int(args.n),
         rotor_angle=math.radians(float(args.winkel)), iq=iq, id_=id_,
@@ -2223,6 +2490,250 @@ def cmd_welle(args) -> int:
     _ablegen(args, "welle", text, daten=b,
              ok=(b["empfehlung"] == "hohlwelle"))
     return EXIT_OK if b["empfehlung"] == "hohlwelle" else 1
+
+
+def cmd_axial(args) -> int:
+    """Die Axialflussmaschine rechnen -- Stufe 1 analytisch, Stufe 2 im Feld.
+
+    **Warum es dieses Verb gibt.** ``ema_axial`` (Stufe 1) und
+    ``ema_axial_fdm`` (Stufe 2) standen seit ihrer Entstehung ohne einen
+    einzigen Aufrufer ausserhalb ihrer eigenen Tests da: keine Route, kein
+    Verb, kein Knopf. Gerechnet und unerreichbar ist dasselbe wie nicht
+    gerechnet -- derselbe Befund wie bei den Agentenlaeufen vor
+    ``/agent/laeufe`` und bei den Parameterstudien vor ihrer Ablage.
+
+    **Woher B_gap kommt, ist die eine Entscheidung hier.** Stufe 1 rechnet es
+    NICHT; sie bekommt es. ``--stufe analytisch`` nimmt die Arbeitsgerade
+    (``ema_axial_fdm.eichung_magnet``), ``--stufe feld`` misst es im
+    abgewickelten Mehrschnitt und reicht den MESSWERT an Stufe 1 weiter. Der
+    Unterschied der beiden ist selbst eine Auskunft und wird deshalb genannt,
+    statt dass eine der beiden Zahlen stillschweigend gewinnt.
+
+    Exit: 0 = gerechnet, 1 = eine Grenze gerissen, 2 = Bedienfehler.
+    """
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    echo_sets(applied)
+    geom = payload.get("geom") or {}
+    if not geom:
+        return _die("Keine Geometrie im Payload — axial braucht geom.", EXIT_USAGE)
+
+    try:
+        import ema_fluss, ema_axial, ema_axial_fdm
+    except ImportError as e:                       # fehlendes Modul ist kein Befund
+        return _oertlicher_fehlschlag(e, "Axialfluss")
+
+    # Das Tor zuerst -- und zwar dasselbe, das auch der Lauf fuehrt. Ein
+    # radialer Payload hier durchzulassen hiesse, Ringraumzahlen aus
+    # Zylindermassen zu rechnen; die saehen plausibel aus.
+    if str(geom.get("fluxPath", "radial")) != "axial":
+        return _die("Dieser Payload ist RADIAL (fluxPath = radial). Setze "
+                    "--set fluxPath=axial, oder nimm einen Payload aus einem "
+                    "Projekt, das ueber den Reiter ⊙ Axialfluss angelegt "
+                    "wurde.", EXIT_USAGE)
+    try:
+        ema_fluss.pruefe_flussweg(geom, "analytisch")
+    except Exception as e:                          # noqa: BLE001
+        return _die(str(e), EXIT_USAGE)
+
+    stufe = getattr(args, "stufe", "beides")
+    axial_mm = float(geom.get("axialZahnLaengeMm")
+                     or payload.get("axial_len") or 25.0)
+    zeilen = [ema_fluss.uebersicht(geom, axial_mm), ""]
+    daten = {"flaechen": ema_fluss.flaechen(geom, axial_mm)}
+
+    b_gap = None
+    if stufe in ("feld", "beides"):
+        rpm = float(payload.get("rpm_to") or payload.get("rpm_from") or 1000.0)
+        last = float(payload.get("load_nm") or 0.0)
+        try:
+            f = ema_axial_fdm.felder(geom, k_schnitte=int(args.schnitte),
+                                     N=int(args.n), rpm=rpm, last_nm=last)
+        except Exception as e:                      # noqa: BLE001
+            return _oertlicher_fehlschlag(e, "Axialfluss-Feldstufe")
+        b_gap = f["B_gap_grundwelle_mittel_T"]
+        daten["feld"] = f
+        # Nicht `ema_axial_fdm.uebersicht` rufen: die rechnete `felder` ein
+        # ZWEITES Mal, und zwei Laeufe derselben Stufe koennen auseinanderliegen.
+        zeilen.append(
+                      f"Feldstufe: {f['k_schnitte']} abgewickelte Schnitte, N = {f['N']}\n"
+                      f"  B_gap Grundwelle ueber r  "
+                      + "  ".join(f"{b:.4f}" for b in f["B_gap_ueber_r_T"]) + " T\n"
+                      f"  Mittel (r-gewichtet)      {b_gap:.4f} T\n"
+                      f"  psi {f['psi_Wb']:.6f} Wb   Kt {f['Kt_Nm_per_A']:.4f} Nm/A   "
+                      f"T_maxwell {f['T_maxwell_Nm']:.2f} Nm")
+        for g in f.get("grenzen", []):
+            zeilen.append(f"  ℹ {g}")
+        zeilen.append("")
+
+    analytisch = ema_axial_fdm_eichung(geom)
+    if b_gap is None:
+        b_gap = analytisch
+        zeilen.append(f"B_gap = {b_gap:.4f} T aus der Arbeitsgeraden "
+                      f"(nicht gemessen — mit --stufe feld wird es gemessen)")
+    else:
+        # **Verglichen werden muss GLEICHES mit GLEICHEM**, und bis zum
+        # 07.10.2026 tat diese Zeile das nicht: `b_gap` ist die GRUNDWELLE des
+        # gemessenen Spaltverlaufs, `eichung_magnet` ist der flussgewichtete
+        # MITTELWERT der Arbeitsgeraden. Die beiden liegen schon bei idealer
+        # Rechteckwelle um 1,46 auseinander, und die Zeile meldete daraus
+        # +33,2 % — eine Zahl, die nichts bedeutet. Verglichen wird jetzt gegen
+        # `eichung_magnet_grundwelle`; dann sind die -8 % der gemessene
+        # Nutungsverlust und damit eine Aussage ueber die Maschine.
+        _h1 = ema_axial_fdm_grundwelle(geom)
+        abw = (b_gap / _h1 - 1.0) * 100.0 if _h1 else 0.0
+        zeilen.append(f"B_gap Grundwelle gemessen {b_gap:.4f} T gegen die "
+                      f"analytische Grundwelle {_h1:.4f} T  ({abw:+.1f} %)")
+        zeilen.append(f"  (die Arbeitsgerade traegt drei Werte: Mittel "
+                      f"{analytisch:.4f} \u00b7 Spitze "
+                      f"{ema_axial_fdm_spitze(geom):.4f} \u00b7 Grundwelle "
+                      f"{_h1:.4f} T — verwechselt kostet das 46 %)")
+        # Dieser Hinweis sagte bis zum 06.10.2026, die Abweichung sei
+        # "ueberwiegend das GITTER, nicht die Physik". Das war falsch -- sie kam
+        # aus der Eichung (s. BEFUNDE.md), und seit deren Berichtigung
+        # konvergiert die Stufe ueber N auf 0,1 %. Was uebrig bleibt, ist die
+        # NUTUNG, und das ist eine Aussage ueber die Maschine: `eichung_magnet`
+        # traegt den Carterfaktor als angenommene 1,15, der Loeser misst an
+        # derselben Scheibe 1,096 und sieht zusaetzlich die Streuung, die eine
+        # Permeanzformel nicht kennt.
+        if abs(abw) > 3.0:
+            zeilen.append("  ⓘ Diese Abweichung ist ueberwiegend die NUTUNG: "
+                          "der Loeser sieht den offenen Nutschlitz, die "
+                          "Arbeitsgerade kennt ihn nur als angenommenen "
+                          "Carterfaktor KC = 1,15. Nachmessen mit "
+                          "`ema_axial_fdm.carter`; die Stufe selbst "
+                          "konvergiert ueber N auf 0,1 %.")
+    zeilen.append("")
+    zeilen.append(ema_axial.uebersicht(geom, b_gap,
+                                       rpm=float(payload.get("rpm_to") or 0.0)))
+    daten["b_gap_t"] = b_gap
+    daten["b_gap_analytisch_t"] = analytisch
+
+    if getattr(args, "bilder", False):
+        kennung = getattr(args, "projekt", "") or getattr(args, "_pid", "") or ""
+        ordner = _projekt_pfad(kennung) if kennung else ""
+        if not ordner:
+            print("  (kein Projekt gebunden — ohne --projekt keine Bilder)")
+        else:
+            import os as _os
+            ziel = _os.path.join(ordner, "charts")
+            _os.makedirs(ziel, exist_ok=True)
+            try:
+                bl = ema_axial_fdm.bilder(geom, ziel, k_schnitte=int(args.schnitte),
+                                          N=int(args.n))
+                zeilen.append("")
+                zeilen.append(f"Bilder nach {ziel}: "
+                              + ", ".join(_os.path.basename(x) for x in (bl or [])))
+            except Exception as e:                  # noqa: BLE001
+                zeilen.append(f"  ⚠ Bilder nicht geschrieben: {type(e).__name__}: {e}")
+
+    if int(getattr(args, "frames", 0) or 0) > 1:
+        kennung = getattr(args, "projekt", "") or getattr(args, "_pid", "") or ""
+        ordner = _projekt_pfad(kennung) if kennung else ""
+        if not ordner:
+            print("  (kein Projekt gebunden — ohne --projekt keine Frames)")
+        else:
+            import os as _os
+            ziel = _os.path.join(ordner, "frames_axial")
+            try:
+                fr = ema_axial_fdm.frames(
+                    geom, ziel, n_frames=int(args.frames), N=int(args.n),
+                    rpm=float(payload.get("rpm_to") or 1000.0),
+                    last_nm=float(payload.get("load_nm") or 0.0),
+                    melde=lambda i, n: print(f"\r  Frame {i}/{n}", end="", flush=True))
+                print()
+                zeilen.append("")
+                zeilen.append(f"Frames: {fr['n']} Bilder ueber "
+                              f"{fr['periode_grad']:.1f}\u00b0 mech (eine el. "
+                              f"Periode) nach {ziel}"
+                              + (f", Video {_os.path.basename(fr['video'])}"
+                                 if fr["video"] else " (kein ffmpeg — kein Video)"))
+            except Exception as e:                  # noqa: BLE001
+                zeilen.append(f"  ⚠ Frames nicht geschrieben: {type(e).__name__}: {e}")
+
+    if getattr(args, "sektor", False):
+        # **Stufe 3.** Der eine Weg, auf dem sich die Mehrschnitt-Naeherung
+        # nachmessen laesst statt sie zu glauben: derselbe Leerlauf, dasselbe
+        # lineare Eisen, aber eine echte 3-D-Loesung mit Raendern bei Ri und Ro.
+        kennung = getattr(args, "projekt", "") or getattr(args, "_pid", "") or ""
+        ordner = _projekt_pfad(kennung) if kennung else ""
+        import os as _os, tempfile as _tf
+        ziel = _os.path.join(ordner, "axial_sektor") if ordner \
+            else _tf.mkdtemp(prefix="axsektor_")
+        try:
+            import ema_axial_em3d as AE
+        except ImportError as e:
+            return _oertlicher_fehlschlag(e, "Axialfluss-Sektor")
+        try:
+            v = AE.vergleich(geom, ziel, k_schnitte=int(args.schnitte),
+                             N=int(args.n), lc_mm=float(args.lc),
+                             lc_spalt_mm=float(args.lc_spalt),
+                             melde=lambda st, _p: print(f"  · {st}", flush=True))
+        except Exception as e:                      # noqa: BLE001
+            return _oertlicher_fehlschlag(e, "Axialfluss-Sektor")
+        zeilen.append("")
+        if not v.get("ok"):
+            zeilen.append(f"Sektor (Stufe 3): {v.get('grund')}")
+        else:
+            n = v["drei"]["netz"]
+            zeilen.append(f"Sektor (Stufe 3, Elmer): {n['knoten']} Knoten, "
+                          f"{n['tets']} Tets, ein Pol "
+                          f"({math.degrees(n['alpha']):.1f} Grad, anti-periodisch)")
+            zeilen.append("  r [mm]   " + "  ".join(
+                f"{r:7.1f}" for r in v["r_mm"][::4]))
+            zeilen.append("  3-D  [T] " + "  ".join(
+                f"{b:7.4f}" for b in v["B_3d_T"][::4]))
+            zeilen.append("  Schnitt  " + "  ".join(
+                f"{b:7.4f}" for b in v["B_2d_T"][::4]))
+            if v.get("abw_mittel_pct") is not None:
+                zeilen.append(f"  Abweichung Mehrschnitt gegen 3-D: "
+                              f"{v['abw_mittel_pct']:+.1f} % im Mittel, "
+                              f"{v['abw_max_pct']:.1f} % groesste")
+            if v.get("rand_innen") is not None:
+                zeilen.append(
+                    f"  RANDABFALL (das, was der Mehrschnitt nicht kann): "
+                    f"innen {v['rand_innen'] * 100:.0f} %, aussen "
+                    f"{v['rand_aussen'] * 100:.0f} % der Spaltmitte")
+            for gz in v.get("grenzen", []):
+                zeilen.append(f"  ℹ {gz}")
+            daten["sektor"] = {k: x for k, x in v.items() if k != "drei"}
+            daten["sektor"]["ordner"] = ziel
+
+    text = "\n".join(zeilen)
+    if getattr(args, "json", False):
+        emit(daten, args)
+    else:
+        print(text)
+    _ablegen(args, "axial", text, daten=daten, ok=True)
+    return EXIT_OK
+
+
+def ema_axial_fdm_eichung(geom: dict) -> float:
+    """Der MITTELWERT der Arbeitsgeraden (`Br*perm*alpha`) -- flussgewichtet.
+
+    Die Arbeitsgerade traegt drei verschiedene Werte, und sie zu verwechseln
+    kostete am 06.10.2026 45 % (s. ``BEFUNDE.md``). Deshalb hat jeder seinen
+    eigenen Zugriff, statt dass der Aufrufer raten muss, welchen er bekommt.
+    """
+    import ema_axial_fdm
+    return float(ema_axial_fdm.eichung_magnet(geom))
+
+
+def ema_axial_fdm_spitze(geom: dict) -> float:
+    """Die SPITZE der Arbeitsgeraden (`Br*perm`) -- der Flachdachwert."""
+    import ema_axial_fdm
+    return float(ema_axial_fdm.eichung_magnet_spitze(geom))
+
+
+def ema_axial_fdm_grundwelle(geom: dict) -> float:
+    """Die GRUNDWELLE der Arbeitsgeraden -- der Partner jeder gemessenen."""
+    import ema_axial_fdm
+    return float(ema_axial_fdm.eichung_magnet_grundwelle(geom))
 
 
 def cmd_leistung(args) -> int:
@@ -3971,6 +4482,50 @@ def build_parser() -> argparse.ArgumentParser:
     _add_globals(s)
     s.set_defaults(fn=cmd_umrichter)
 
+    s = sub.add_parser("axial",
+                       help="Axialflussmaschine / Scheibenlaeufer rechnen: Ringraum, "
+                            "Stufe 1 (analytisch) und Stufe 2 (abgewickeltes Feld)")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project",
+                   help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    g.add_argument("--frisch", action="store_true",
+                   help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--set", action="append", metavar="KEY=WERT",
+                   help="einzelnen Parameter aendern, mehrfach angebbar")
+    s.add_argument("--force", action="store_true",
+                   help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--stufe", choices=("analytisch", "feld", "beides"),
+                   default="beides",
+                   help="analytisch = B_gap aus der Arbeitsgeraden; feld = im "
+                        "abgewickelten Mehrschnitt MESSEN; beides (Vorgabe) "
+                        "rechnet das Feld und nennt die Abweichung")
+    s.add_argument("--schnitte", type=int, default=5,
+                   help="Zahl der abgewickelten Schnitte ueber dem Radius (Vorgabe 5)")
+    s.add_argument("--n", type=int, default=360,
+                   help="Rasterweite je Schnitt (Vorgabe 360)")
+    s.add_argument("--bilder", action="store_true",
+                   help="Feldbilder nach <projekt>/charts/ schreiben "
+                        "(braucht --projekt)")
+    s.add_argument("--frames", type=int, default=0, metavar="N",
+                   help="N Bilder ueber den LAEUFERWINKEL nach "
+                        "<projekt>/frames_axial/ samt anim.mp4 (braucht "
+                        "--projekt). Eine elektrische Periode, nicht eine "
+                        "mechanische Umdrehung")
+    s.add_argument("--sektor", action="store_true",
+                   help="Stufe 3: EIN Polsektor des Ringraums in Elmer 3-D "
+                        "(anti-periodisch) und der Vergleich gegen den "
+                        "Mehrschnitt. Minuten, braucht Elmer")
+    s.add_argument("--lc", type=float, default=0.0,
+                   help="Zellgroesse im Groben [mm] (0 = aus der Geometrie)")
+    s.add_argument("--lc-spalt", type=float, default=0.0, dest="lc_spalt",
+                   help="Zellgroesse im Luftspalt [mm] (0 = aus der Spaltweite)")
+    s.add_argument("--projekt", help="Zielprojekt fuer die Ablage")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_axial)
+
     s = sub.add_parser("welle",
                        help="Vollwelle oder Hohlwelle? Misst am Feld, ob durch die "
                             "Welle Fluss laeuft, und wie gross die Bohrung darf")
@@ -4050,6 +4605,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--id", dest="id_", type=float, default=0.0, help="d-Strom in A")
     s.add_argument("--sektor", default="25,115",
                    help="Schnittsektor in Grad (von,bis) fuer die Schnittdarstellung")
+    s.add_argument("--frames", type=int, default=0, metavar="N",
+                   help="statt der Einzelbilder eine BILDREIHE ueber den "
+                        "Laeuferwinkel nach <projekt>/frames_feld/ samt "
+                        "anim.mp4 (eine Polteilung, nicht eine Umdrehung)")
     s.add_argument("--vtu",
                    help="3D-Elmer-VTU fuer den Laengsschnitt (Vorgabe: juengste im Projekt)")
     s.add_argument("--set", action="append", metavar="KEY=WERT",

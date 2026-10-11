@@ -269,14 +269,36 @@ for code in ("synrm", "eesm"):
     pruefe(MA.traegt(code, "analytisch"),
            f"'{code}' traegt die analytische Stufe")
     # Was eine Art traegt, ist je Art verschieden — und genau das ist der
-    # Sinn der Tabelle. Die EESM traegt seit dem 18.09.2026 das CAD
-    # (Schenkelpol samt Erregerspulen), die SynRM weiterhin nichts davon.
-    _traegt_cad = {"synrm": False, "eesm": True}[code]
-    pruefe(MA.traegt(code, "cad") is _traegt_cad,
-           f"'{code}' traegt 'cad' {'' if _traegt_cad else 'NICHT '}— und sagt es")
-    for stufe in ("feld", "em3d"):
-        pruefe(not MA.traegt(code, stufe),
-               f"'{code}' traegt '{stufe}' NICHT — und sagt es")
+    # Sinn der Tabelle. Die EESM traegt das CAD seit dem 18.09.2026
+    # (Schenkelpol samt Erregerspulen), die SynRM seit dem 20.09.2026
+    # (Flussbarrieren aus `ema_synrm_cad`, an einem echten FreeCAD-Bau
+    # nachgemessen).
+    pruefe(MA.traegt(code, "cad"),
+           f"'{code}' traegt 'cad' — und sagt es")
+    # **Die Feldstufe traegt seit dem 20.09.2026 — aber ueber einen anderen
+    # LOESER.** Genau diese Unterscheidung ist der Zweck von `feldweg`: beide
+    # Bauarten sind magnetostatisch und in Elmer 2-D (`ema_em2d_stat`) richtig
+    # aufgehoben, in der 2-D-FDM der Pipeline dagegen nicht (sie eicht auf
+    # `_analytical_Bgap`, die weder Salienz noch Erregerstrom kennt). Die Art
+    # traegt die Stufe also, und das Pipelinetor weist sie trotzdem ab.
+    pruefe(MA.traegt(code, "feld") and MA.ARTEN[code].feldweg == "elmer2d_stat",
+           f"'{code}' traegt 'feld' — ueber Elmer 2-D magnetostatisch")
+    try:
+        MA.pruefe_feldweg(code, "fdm")
+        pruefe(False, f"'{code}' wird von der Pipeline dennoch abgewiesen")
+    except MA.ArtNichtUnterstuetzt as e:
+        pruefe("magnetostatisch" in str(e),
+               f"'{code}': die Pipeline weist ab und NENNT das richtige Werkzeug")
+    # **Beide tragen seit dem 20.09.2026 das 3-D, und beide nach einem
+    # DURCHGELAUFENEN Loeser** -- nicht nach einem bloss gebauten Netz.
+    # SynRM: 103.433 Knoten, 672 Barrieren-Prismen, 0 Magnete.
+    # EESM: 48.055 Knoten, 61 Laeuferkoerper, 12 Erregerspulen mit +-459 A,
+    # Loeser 290 s, Orientierungspruefung 0,12 Grad gegen 3 Grad Toleranz.
+    # Ihr Laeufer wurde bis dahin in `ema_em3d` gar nicht gebaut; jetzt kommt
+    # er aus `laeufer_profile` (derselben `teile()`-Quelle wie Leinwand,
+    # Raster und CAD) und die Erregung als eingepraegte Gleichstromdichte.
+    pruefe(MA.traegt(code, "em3d"),
+           f"'{code}' traegt 'em3d' — nach einem durchgelaufenen Loeser")
     pruefe(not art.hat_magnete,
            f"'{code}' hat keine Magnete; Isc und Entmagnetisierung sind fuer sie "
            f"nicht null, sondern nicht vorhanden")
@@ -459,6 +481,123 @@ for _p in (1, 2, 4, 6):
            f"2p={_kn['poles']}: Nabe bis r {_kn['r_nabe_mm']:.2f} mm, "
            f"{_kn['h_nabe_mm']:.2f} von {_kn['h_joch_fluss_mm']:.2f} mm "
            f"noetig -> reicht {_kn['nabe_reicht']}")
+
+
+
+# ══════════════════════════════════════════════════════════════════════════
+#  Der Reluktanzlaeufer -- Flussbarrieren nach Auslegungsregeln
+#
+#  Bis zum 20.09.2026 war er eine IPM-Tasche ohne Magnet. Geprueft wird hier
+#  nicht, dass eine Zahl sich nicht geaendert hat, sondern dass die vier
+#  Regeln aus `ema_synrm_cad` WIRKLICH gelten -- jede einzeln nachgerechnet.
+# ══════════════════════════════════════════════════════════════════════════
+
+import math as _m                                            # noqa: E402
+import ema_synrm_cad as SC                                   # noqa: E402
+import ema_laeuferbild as _LBs                               # noqa: E402
+
+print("\n== Reluktanzlaeufer: die vier Auslegungsregeln ==")
+
+_gs = dict(_frisch()["geom"], machineType="synrm") if "_frisch" in dir() else None
+if _gs is None:
+    import cae_cli as _cc
+    _gs = dict(_cc.frischer_payload()["geom"], machineType="synrm")
+
+# (1) Barrierenzahl aus der Nutteilungsregel slots = 2p(2k+1).
+for _slots, _p, _soll in ((36, 2, 4), (54, 3, 4), (48, 4, 3), (24, 1, 5)):
+    _bz = SC.barrierenzahl(dict(_gs, slots=_slots, p=_p))
+    _k = (_slots / (2 * _p) - 1) / 2
+    if abs(_k - round(_k)) < 1e-9 and SC.K_MIN <= round(_k) <= SC.K_MAX:
+        pruefe(_bz["k"] == _soll and _bz["nutteilung_passt"],
+               f"{_slots} Nuten / 2p={2 * _p}: k = {_bz['k']} aus der "
+               f"Nutteilungsregel (erwartet {_soll})")
+    else:
+        pruefe(SC.K_MIN <= _bz["k"] <= SC.K_MAX and not _bz["nutteilung_passt"],
+               f"{_slots} Nuten / 2p={2 * _p}: Regel geht nicht auf, "
+               f"Rueckfall auf k = {_bz['k']} ({_bz['grund'][:40]}…)")
+
+# Die im Bericht durchgerechnete Maschine (36 Nuten, 4 Pole) muss auf die dort
+# genannten 4 Barrieren kommen -- das ist die Probe gegen die QUELLE.
+pruefe(SC.barrierenzahl(dict(_gs, slots=36, p=2))["k"] == 4,
+       "Moghaddam 5.1.3: 36 Nuten, 4 Pole -> 4 Barrieren")
+
+# (2) Die Endpunkte liegen bei konstanter Laeufernutteilung.
+_b = SC.barrieren(_gs, 80.0)
+_p_ = int(_gs["p"])
+_am = _b["alpha_m_grad"]
+pruefe(abs(_am - (180.0 / _p_) / (2 * _b["k"] + 1)) < 1e-3,
+       f"alpha_m = (pi/p)/(2k+1) = {_am:.4f}°")
+pruefe(abs(_am - 360.0 / float(_gs["slots"])) < 1e-3,
+       f"und trifft die Staendernutteilung ({360.0 / float(_gs['slots']):.4f}°)")
+_soll_w = [(2 * h - 1) * _am / 2.0 for h in range(1, _b["k"] + 1)]
+_ist_w = [x["endwinkel_grad"] for x in _b["barrieren"]]
+pruefe(all(abs(a - s) < 1e-3 for a, s in zip(_ist_w, _soll_w)),
+       f"Endpunkte bei (2h-1)*alpha_m/2: "
+       f"{', '.join(f'{x:.2f}' for x in _ist_w)}°")
+pruefe(max(_ist_w) < 90.0 / _p_,
+       f"und alle diesseits der q-Achse ({max(_ist_w):.2f} < {90.0 / _p_:.2f}°)")
+
+# (3) Die Form trifft BEIDE vorgegebenen Punkte -- das ist der Grund fuer den
+#     Kreisbogen (eine Feldlinie hat dafuer einen Freiheitsgrad zu wenig).
+_r_e = _b["r_e_mm"]
+for _i, _x in enumerate(_b["barrieren"], start=1):
+    _pts = _x["punkte"]
+    _rr = [_m.hypot(a, c) for a, c in _pts]
+    _ww = [abs(c) for a, c in _pts]
+    # Der q-Achsen-Punkt: dort ist |y| minimal.
+    _j = min(range(len(_pts)), key=lambda t: _ww[t])
+    pruefe(abs(max(_rr) - _r_e) < 0.05,
+           f"Barriere {_i}: reicht bis an den Tangentialsteg "
+           f"({max(_rr):.2f} gegen {_r_e:.2f} mm)")
+    pruefe(min(_rr) >= _b["r_in_mm"] - 0.05,
+           f"Barriere {_i}: bleibt ausserhalb der Welle "
+           f"({min(_rr):.2f} >= {_b['r_in_mm']:.2f} mm)")
+
+# (4) Der Isolationsgrad wird getroffen, und die Eisensegmente folgen dem Fluss.
+pruefe(abs(_b["kw_ist"] - _b["kw_soll"]) < 0.02,
+       f"Isolationsgrad q-Achse {_b['kw_ist']:.3f} gegen "
+       f"{_b['kw_soll']:.3f} gefordert")
+_th = [0.0] + [_m.radians(x["endwinkel_grad"]) for x in _b["barrieren"]] \
+    + [_m.pi / (2 * _p_)]
+_dsin = [_m.sin(_p_ * _th[h + 1]) - _m.sin(_p_ * _th[h]) for h in range(_b["k"] + 1)]
+_ssoll = [d / sum(_dsin) for d in _dsin]
+_sist = [x["eisen_darunter_mm"] for x in _b["barrieren"]]
+_sist_n = [v / sum(_sist) for v in _sist]
+pruefe(all(abs(a - s) < 0.02
+           for a, s in zip(_sist_n, [v / sum(_ssoll[:-1]) for v in _ssoll[:-1]])),
+       "Eisensegmente ~ sin(p*theta_a) - sin(p*theta_i) (Moghaddam 6.2.2)")
+
+# Und die Wirkung: mehr Luft in der q-Achse muss die Anisotropie heben.
+_eng = SC.barrieren(dict(_gs, synrmIsolationsgrad=0.25), 80.0)
+_weit = SC.barrieren(dict(_gs, synrmIsolationsgrad=0.75), 80.0)
+pruefe(sum(x["dicke_mm"] for x in _weit["barrieren"])
+       > 1.5 * sum(x["dicke_mm"] for x in _eng["barrieren"]),
+       f"ein hoeherer Isolationsgrad bringt mehr Luft "
+       f"({sum(x['dicke_mm'] for x in _eng['barrieren']):.1f} -> "
+       f"{sum(x['dicke_mm'] for x in _weit['barrieren']):.1f} mm)")
+
+# Ueber alle Polzahlen: nichts tritt aus dem Laeufer, nichts in die Welle.
+for _pp in (1, 2, 3, 4, 5):
+    _g2 = dict(_gs, p=_pp, slots=6 * _pp * 3)
+    _t2 = _LBs.teile(_g2, 80.0)
+    _rot = float(_g2["rotorOD"]) / 2.0
+    _wel = float(_g2["shaftD"]) / 2.0
+    _alle = [(_m.hypot(x, y)) for _t in _t2["teile"]
+             for x, y in _LBs.umriss(_t)]
+    pruefe(_t2["teile"] and max(_alle) <= _rot + 1e-6 and min(_alle) >= _wel,
+           f"2p={2 * _pp}: {len(_t2['teile'])} Barrieren, alle zwischen Welle "
+           f"({_wel:.1f}) und Rand ({_rot:.1f} mm): "
+           f"{min(_alle):.2f}…{max(_alle):.2f}")
+
+# Die Bauart haengt NICHT mehr an magShape -- das war der gemeldete Fehler.
+_v = _LBs.teile(dict(_gs, magShape="v"), 80.0)
+_u = _LBs.teile(dict(_gs, magShape="u"), 80.0)
+pruefe(_v["n_teile"] == _u["n_teile"]
+       and _v["teile"][0]["punkte"] == _u["teile"][0]["punkte"],
+       "die Barrieren haengen nicht mehr an der Magnet-Anordnung "
+       "(magShape v und u geben dieselbe Zeichnung)")
+pruefe(all(t["form"] == "polygon" for t in _v["teile"]),
+       "und sie sind Polygonzuege, keine IPM-Langloecher")
 
 
 print(f"\n{_ok} bestanden, {_fehl} fehlgeschlagen")

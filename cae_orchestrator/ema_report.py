@@ -45,6 +45,24 @@ DEFAULT_NUM_CTX = int(os.environ.get("CAE_LLM_NUM_CTX", "65536"))
 
 # ── Context extraction ──────────────────────────────────────────────────────
 
+def _hat_magnete(geom: dict) -> bool:
+    """Traegt der Laeufer dieser Maschinenart Permanentmagnete?"""
+    try:
+        import ema_maschinenart as _MA
+        return bool(_MA.hole(_MA.art_code(geom)).hat_magnete)
+    except Exception:                                        # noqa: BLE001
+        return True                                          # Vorgabe ist die PSM
+
+
+def _art_label(geom: dict) -> str:
+    """Die Maschinenart im Klartext -- aus `ema_maschinenart`, keine zweite Liste."""
+    try:
+        import ema_maschinenart as _MA
+        return _MA.hole(_MA.art_code(geom)).label
+    except Exception:                                        # noqa: BLE001
+        return "PSM — permanenterregte Synchronmaschine"
+
+
 def build_context(project_dir: str) -> dict:
     """Compact dict of metrics + image map for the report."""
     meta, results = {}, {}
@@ -66,6 +84,12 @@ def build_context(project_dir: str) -> dict:
         ("em_curve",      "charts/em_curve.png",                 "EM-Kennlinie über Drehzahl"),
         ("structural",    "charts/structural_sweep.png",         "Strukturkennlinie"),
         ("deformation",   "charts/deformation.png",              "FEM-Verformung"),
+        # ⊙ Nur bei einem Axiallauf vorhanden: die Scheibe hat keine
+        # Strukturkennlinie und keine FEM-Verformung, sondern Durchbiegung
+        # unter dem axialen Anzug und die Magnetfliehkraft in ihrer Ebene.
+        ("axial_struktur", "charts/axial_struktur.png",
+         "⊙ Scheibenfestigkeit: Durchbiegung unter dem axialen Anzug und "
+         "Magnethaltung in der Scheibenebene"),
         ("thermal",       "charts/thermal.png",                  "Thermische Analyse (LPTN)"),
         ("drivecycle",    "charts/drivecycle.png",               "Fahrzyklus-Auswertung"),
         # Echte 3D-Magnetfeldberechnung (Elmer) — nur vorhanden, wenn ein 3D-Lauf lief.
@@ -120,9 +144,21 @@ def build_context(project_dir: str) -> dict:
             "shaftD":   geom.get("shaftD"),
             "poles":    int(geom.get("p", 0)) * 2,
             "slots":    geom.get("slots"),
-            "magShape": geom.get("magShape"),
-            "magTopologie": TOPOLOGY_LABELS.get(geom.get("magShape", "v"),
-                                                geom.get("magShape")),
+            # **Die MASCHINENART stand hier nicht** -- `ema_report.py` und
+            # `ema_experts.py` enthielten sie null mal, und der Bericht einer
+            # Asynchronmaschine beschrieb deshalb wortwoertlich „die gewaehlte
+            # V-Form der Magnete, typisch fuer innerlaeuferige
+            # Permanentmagnetmotoren". Das ist kein Stilfehler, sondern ein
+            # Bericht ueber eine andere Maschine. Sie steht jetzt da, und die
+            # Magnet-Topologie faellt weg, wo es keine Magnete gibt -- sonst
+            # bekommt das Modell einen Schluessel angeboten, ueber den es
+            # schreiben soll.
+            "maschinenart": _art_label(geom),
+            "hat_magnete": _hat_magnete(geom),
+            **({"magShape": geom.get("magShape"),
+                "magTopologie": TOPOLOGY_LABELS.get(geom.get("magShape", "v"),
+                                                    geom.get("magShape"))}
+               if _hat_magnete(geom) else {}),
             "axial":    meta.get("axial_len"),
             "n_faces":  (results.get("geometry") or {}).get("n_faces"),
             "mass_kg":  round((results.get("geometry") or {}).get("mass_g", 0) / 1000, 2),
@@ -131,7 +167,11 @@ def build_context(project_dir: str) -> dict:
             "rotor":   summary.get("rotor_lam"),
             "stator":  summary.get("stator_lam"),
             "hairpin": summary.get("hairpin"),
-            "magnet":  summary.get("magnet"),
+            # Der Magnetwerkstoff steht im Payload jeder Maschine -- auch dort,
+            # wo gar kein Magnet verbaut ist. Im Bericht einer fremderregten
+            # Maschine liest sich „Magnet: NdFeB N35" wie eine Aussage ueber
+            # ihren Laeufer. Weggelassen, wo es keinen gibt.
+            **({"magnet": summary.get("magnet")} if _hat_magnete(geom) else {}),
         },
         "em": {
             "B_gap_T":      summary.get("B_gap_T"),
@@ -156,6 +196,11 @@ def build_context(project_dir: str) -> dict:
             "u_max_um":       fem.get("max_displacement_um"),
             "max_safe_rpm":   summary.get("max_safe_rpm"),
         },
+        # ⊙ Die Festigkeitszahlen der Scheibe stehen im `summary` (dort holen
+        # sie Steckbrief, Sicherheit und der Ergebnisreiter ebenfalls). Der
+        # Bericht bekommt es deshalb als Ganzes durchgereicht, statt die sieben
+        # Schluessel hier ein zweites Mal aufzuzaehlen.
+        "summary": summary,
         "thermal": {
             "cooling":    summary.get("cooling"),
             "T_winding":  summary.get("T_winding_C"),
@@ -275,6 +320,14 @@ def build_context(project_dir: str) -> dict:
             "zone_grob":       mz.get("mesh_cl"),
             "axial_mm":        e3.get("axial_mm"),
             "warnungen":       e3.get("warnings", []),
+            # Der harmonische Weg (ASM) traegt einen ANDEREN Befund -- den
+            # Kurzschlussring, den ein Querschnitt gar nicht kennt. Ohne diese
+            # drei Schluessel faellt er hier heraus und der Bericht zeigt einen
+            # 3-D-Abschnitt, der von Endeffekten einer Magnetmaschine spricht,
+            # waehrend im Projekt eine Asynchronmaschine gerechnet wurde.
+            "harmonisch":      e3.get("harmonisch"),
+            "art":             e3.get("art"),
+            "bericht":         e3.get("bericht"),
         }
 
     # Experimentelle Spritzöl-Kühlung (Blender/Mantaflow) — falls ein 💧-Lauf im Projekt liegt.
@@ -363,6 +416,20 @@ def _prompt_for(ctx: dict) -> str:
         )
     vollast_img   = "[BILD:drivecycle_vollast]"   if "drivecycle_vollast"   in available else ""
     anhaenger_img = "[BILD:drivecycle_anhaenger]" if "drivecycle_anhaenger" in available else ""
+    # ⊙ Bei der Scheibe gibt es weder `structural` (Lame-Kennlinie) noch
+    # `deformation` (FEM) — das Festigkeitskapitel haette sonst keinen einzigen
+    # Platzhalter, und die Prosa stuende vor einer leeren Tabelle. Statt dessen
+    # das Bild, das zu ihren beiden Lasten gehoert.
+    axstr_img = ("[BILD:axial_struktur]" if "axial_struktur" in available else "")
+    fest_img = (axstr_img if axstr_img else
+                "[BILD:structural]  und ggf. [BILD:deformation]")
+    fest_satz = ("Bei dieser Maschine ist es eine SCHEIBE: keine Fliehkraft-FEM "
+                 "und keine Ringspannung, sondern die Durchbiegung unter dem "
+                 "axialen Anzug (Kreisringplatte) und die Fliehkraft der Magnete "
+                 "IN der Scheibenebene, wo kein Blechsteg steht. Nenne beide "
+                 "Lasten und sage, welche das Rueckenblech bindet — aber keine "
+                 "Zahlen, die stehen in der Tabelle."
+                 if axstr_img else "")
 
     has_3d = bool(ctx.get("em3d"))
     if has_3d:
@@ -412,9 +479,9 @@ darauf: welche Aussagen tragfähig sind und welche auf einer Näherung beruhen.
 Schreibe einen strukturierten, sachlichen Bericht in Markdown mit genau diesen Abschnitten:
 
 1. **Zusammenfassung** — 3–5 Sätze zur Gesamtbewertung (qualitativ, ohne Zahlen)
-2. **Geometrie und Konstruktion** — Abmessungen, Polzahl/Nutzahl, gewählte Magnet-Topologie (`geometry.magTopologie`) und ihre Eignung, Masse
+2. **Geometrie und Konstruktion** — Abmessungen, Polzahl/Nutzahl, Masse. Die MASCHINENART steht in `geometry.maschinenart` und ist verbindlich: schreibe ueber die Maschine, die dort steht, und ueber keine andere. Nur wenn `geometry.hat_magnete` wahr ist, gibt es eine Magnet-Topologie (`geometry.magTopologie`) — bei einer Asynchron-, Reluktanz-, fremderregten oder Gleichstrommaschine existieren weder Magnete noch eine Magnetanordnung, und ein Satz darueber waere eine Aussage ueber eine andere Maschine
 3. **Elektromagnetische Auslegung** — B_gap, Kt, Drehmoment, Rastmoment (analytisch nach Zhu/Howe: kgV aus Nut- und Polzahl, Nutschlitzbreite, Luftspalt, Schrägung — GESCHÄTZT, nicht gemessen; der FDM kann es nicht, seine gedrehte Rastergeometrie erzeugt ein größeres Scheinmoment); falls `em_erweitert` vorhanden: Ld/Lq und Salienz ξ, Magnet- vs. Reluktanzmoment-Anteil (besonders bei PMa-SynRM/Spoke), MTPA-Stromwinkel, Kurzschlussstrom Isc; falls `segmentierung` vorhanden: Wirkung der Magnetsegmentierung auf die Wirbelstromverluste (Verlustfaktor, Skintiefe, ggf. Wirkungslos-Warnung)
-4. **Festigkeit** — σ_v,max, Sicherheitsfaktor, Verschiebung, max. sichere Drehzahl
+4. **Festigkeit** — σ_v,max, Sicherheitsfaktor, Verschiebung, max. sichere Drehzahl. {fest_satz}
 5. **Thermisches Verhalten** — Kühlung, Endtemperaturen, Gesamtverluste, ggf. Warnungen; falls `em_erweitert.demag` vorhanden: Demagnetisierungs-Reserve bei Magnettemperatur (Risiko ja/nein)
 {fahrzyklus_section}
 7. **Empfehlungen** — 3–5 konkrete Verbesserungsvorschläge basierend auf den Zahlen (inkl. Topologie-/Segmentierungs-Eignung)
@@ -426,7 +493,7 @@ Verfügbare Bild-KEYs: {available}
 Zuordnung (strikt einhalten — kein Bild in Abschnitt 1 Zusammenfassung):
 - Abschnitt 2 Geometrie:              [BILD:cross_section] oder [BILD:side_view]
 - Abschnitt 3 Elektromagnetik:        [BILD:em_field]  und  [BILD:em_field_load]  und  [BILD:airgap]  und  [BILD:em_curve]
-- Abschnitt 4 Festigkeit:             [BILD:structural]  und ggf. [BILD:deformation]
+- Abschnitt 4 Festigkeit:             {fest_img}
 - Abschnitt 5 Thermik:                [BILD:thermal]
 - Abschnitt 6 Fahrzyklus:             [BILD:drivecycle]{(f"  und  {vollast_img}") if vollast_img else ""}{(f"  und  {anhaenger_img}") if anhaenger_img else ""}
 {drei_d_img}
@@ -518,8 +585,24 @@ def _normalize_paragraphs(md: str) -> str:
         out: list[str] = []
         changed = False
         i = 0
+        # **Ein Codeblock ist Struktur.** Gemessen am ASM-Bericht: der
+        # eingesetzte Ringbefund steht als ```-Block, und die Zeilen darin
+        # enden nicht auf Satzzeichen — also zog dieser Durchgang sie zu einer
+        # einzigen Zeile zusammen ("Stabverlust 5669.4 W Ringverlust 3163.2 W").
+        # Die Funktion verspricht in ihrem eigenen Docstring, Struktur zu
+        # erhalten; ein Zaun gehoert dazu.
+        im_zaun = False
         while i < len(lines):
             line = lines[i]
+            if line.lstrip().startswith("```"):
+                im_zaun = not im_zaun
+                out.append(line)
+                i += 1
+                continue
+            if im_zaun:
+                out.append(line)
+                i += 1
+                continue
             if (not _is_structural(line)
                     and not line.rstrip().endswith((".", "!", "?", ":", ";"))
                     and i + 1 < len(lines)):
@@ -562,6 +645,31 @@ _EM3D_KEYS = ("em3d_field3d", "em3d_endeffect", "em3d_airgap_2d3d",
               "em3d_slice_mid", "em3d_model_iso", "em3d_model_axial")
 
 
+def _abschnitt_entfernen(md: str, muster: str) -> str:
+    """Schneidet jeden Abschnitt heraus, dessen UEBERSCHRIFT ``muster`` trifft.
+
+    Entfernt wird von der Ueberschrift bis zur naechsten Ueberschrift gleicher
+    oder hoeherer Ebene -- nicht bis zur naechsten ueberhaupt, sonst bliebe eine
+    Unterueberschrift ohne ihren Rumpf stehen.
+    """
+    zeilen = md.split("\n")
+    aus, i = [], 0
+    while i < len(zeilen):
+        m = re.match(r"^(#{1,6})\s+(.*)$", zeilen[i])
+        if m and re.search(muster, m.group(2), re.I):
+            ebene = len(m.group(1))
+            i += 1
+            while i < len(zeilen):
+                m2 = re.match(r"^(#{1,6})\s", zeilen[i])
+                if m2 and len(m2.group(1)) <= ebene:
+                    break
+                i += 1
+            continue
+        aus.append(zeilen[i])
+        i += 1
+    return "\n".join(aus)
+
+
 def _ensure_em3d_section(md: str, ctx: dict) -> str:
     """Garantiert einen eigenen, bebilderten 3D-Abschnitt. Erkennt ein vom LLM bereits
     geschriebenes 3D-Kapitel (Überschrift mit „3D" / „Elmer") bzw. gesetzte em3d-Bild-
@@ -569,6 +677,40 @@ def _ensure_em3d_section(md: str, ctx: dict) -> str:
     3D-Bildern angehängt (qualitativer Einleitungstext, Zahlen stehen in der Kennwerttabelle)."""
     if not ctx.get("em3d"):
         return md
+
+    # **Der harmonische Weg (ASM) hat andere Ergebnisse, nicht weniger.** Er
+    # rechnet keinen Luftspaltverlauf ueber die Baulaenge, sondern zweimal
+    # dasselbe Netz -- mit leitendem und mit isolierendem Kurzschlussring -- und
+    # sein Ergebnis ist der Ringbefund. Der bebilderte PSM-Abschnitt findet dort
+    # kein einziges seiner Bilder und haette den ganzen Lauf verschwiegen; und
+    # die PSM-Kennwerttabelle danebenzustellen hiesse, Zahlen zu behaupten, die
+    # dieser Lauf gar nicht liefert. Also ein eigener Abschnitt mit dem
+    # gerechneten Befund im Wortlaut.
+    if (ctx["em3d"] or {}).get("harmonisch"):
+        # **Was das Modell hier geschrieben hat, muss WEG.** Die Aufforderung
+        # traegt einen §8 ueber Endeffekte und den 2-D-gegen-3-D-Vergleich der
+        # Luftspaltinduktion -- beides Groessen des magnetostatischen Wegs. An
+        # einem harmonischen ASM-Lauf gibt es sie nicht, und den Abschnitt
+        # daneben stehen zu lassen hiesse, zwei Auskuenfte ueber denselben Lauf
+        # zu geben, von denen eine erfunden ist.
+        md = _abschnitt_entfernen(md, r"(3d|3-d|elmer)")
+        e3h = ctx["em3d"]
+        txt = str(e3h.get("bericht") or "").rstrip()
+        if not txt:
+            return md
+        intro = (
+            "Die Asynchronmaschine geht in 3D einen anderen Weg als die "
+            "permanenterregte: ihr Laeuferstrom wird induziert, also ist das "
+            "Feld zeitabhaengig und eine Magnetostatik kann es grundsaetzlich "
+            "nicht abbilden. Gerechnet wird deshalb harmonisch. Die Frage, die "
+            "nur ein dreidimensionales Modell beantworten kann, ist der "
+            "Kurzschlussring: im Querschnitt kommt er gar nicht vor. Gemessen "
+            "wird er, indem zweimal dasselbe Netz geloest wird — einmal mit "
+            "leitendem, einmal mit isolierendem Ring. Der Befund ist eine "
+            "UNTERE Schranke; jede Netzverfeinerung schiebt ihn nach oben.")
+        return (md.rstrip() + "\n\n## 3D-Magnetfeld, harmonisch (Elmer FEM)\n\n"
+                + intro + "\n\n```\n" + txt + "\n```\n")
+
     img_map = ctx.get("_img_map", {})
     avail = [k for k in _EM3D_KEYS if k in img_map]
     if not avail:
@@ -1260,6 +1402,7 @@ def to_rag_markdown(prose_md: str, ctx: dict | None = None) -> str:
     title, descr = "Auslegungsbericht (allgemein)", []
     if ctx:
         g = ctx.get("geometry") or {}; th = ctx.get("thermal") or {}; mt = ctx.get("materials") or {}
+        if g.get("maschinenart"): descr.append(str(g["maschinenart"]).split(" — ")[0])
         if g.get("magTopologie"): descr.append(str(g["magTopologie"]))
         if th.get("cooling"):     descr.append(f"Kühlung: {th['cooling']}")
         if mt.get("magnet"):      descr.append(f"Magnet: {mt['magnet']}")
@@ -1348,6 +1491,7 @@ def _single_md_tables(ctx: dict) -> str:
 
     blocks = []
     blocks.append(_tbl("Geometrie und Konstruktion", [
+        ("Maschinenart",     g.get("maschinenart"), "", None),
         ("Magnet-Topologie", g.get("magTopologie"), "", None),
         ("Polzahl",          g.get("poles"),        "", None),
         ("Nutzahl",          g.get("slots"),        "", None),
@@ -1404,6 +1548,30 @@ def _single_md_tables(ctx: dict) -> str:
         ("FEM-Drehzahl",               st.get("rpm_fem"),         "U/min", 0),
         ("Max. sichere Drehzahl",      st.get("max_safe_rpm"),    "U/min", 0),
     ]))
+    # ⊙ Die SCHEIBE hat eine eigene Festigkeitstabelle, weil sie andere Lasten
+    # traegt: axialer Anzug (Kreisringplatte) und Fliehkraft der Magnete IN der
+    # Scheibenebene. Sie unter „Fliehkraft-FEM" zu mischen hiesse, zwei Modelle
+    # unter einem Namen zu fuehren — und die obige Tabelle ist bei einem
+    # Axiallauf ohnehin leer, weil `_tbl` fehlende Werte weglaesst.
+    _axs = (ctx.get("summary") or {})
+    if _axs.get("structural_basis") == "scheibe":
+        blocks.append(_tbl(
+            "Festigkeit der Läuferscheibe (KEINE FEM: Kreisringplatte + "
+            "Magnetfliehkraft in der Scheibenebene)", [
+                ("Axialer Anzug (Normalspannung)", _axs.get("axial_anzug_kPa"), "kPa", 1),
+                ("Durchbiegung w_max",             _axs.get("axial_w_max_um"), "µm", 1),
+                ("… als Anteil des Luftspalts",
+                 (None if _axs.get("axial_w_anteil_spalt") is None
+                  else _axs["axial_w_anteil_spalt"] * 100), "%", 1),
+                ("Bindend für das Rückenblech",    _axs.get("axial_ruecken_bindet"), "", None),
+                ("Magnetfliehkraft in der Scheibenebene",
+                 _axs.get("axial_magnetkraft_kN"), "kN", 2),
+                ("Klebescherspannung",             _axs.get("axial_klebescher_MPa"), "MPa", 2),
+                ("… zulässig (Angabe)",            _axs.get("axial_klebe_zul_MPa"), "MPa", 1),
+                ("Klebung hält",
+                 (None if _axs.get("axial_klebung_haelt") is None
+                  else ("ja" if _axs["axial_klebung_haelt"] else "NEIN")), "", None),
+            ]))
     gt = ctx.get("getriebe") or {}
     if gt:
         _iw = gt.get("in_welle") or {}

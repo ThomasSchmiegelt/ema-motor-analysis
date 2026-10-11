@@ -672,16 +672,43 @@ except ema_maschinenart.ArtNichtUnterstuetzt:
     pruefe(False, "pruefe_stufe('asm','cad') laesst durch")
 pruefe("cad" in ema_maschinenart.ARTEN["eesm"].stufen,
        "und die EESM ebenfalls — Schenkelpol, Erregerspulen, zwei Schleifringe")
-pruefe("feld" not in ema_maschinenart.ARTEN["eesm"].stufen,
-       "aber NICHT die Feldstufe: die 2-D-FDM ist reell und magnetostatisch und "
-       "kann eine Gleichstrom-Erregerwicklung so wenig darstellen wie einen "
-       "Kaefig — das steht als Luecke da statt als stille Vollstaendigkeit")
-try:
-    ema_maschinenart.pruefe_stufe("synrm", "cad")
-    pruefe(False, "synrm wird von der CAD-Stufe noch abgewiesen")
-except ema_maschinenart.ArtNichtUnterstuetzt:
-    pruefe(True, "synrm wird von der CAD-Stufe noch abgewiesen "
-                 "(ehrlich, statt PSM-Geometrie unter falschem Namen)")
+# **Die Feldstufe traegt seit dem 20.09.2026 -- auf einem anderen LOESER.**
+# Die 2-D-FDM scheidet weiterhin aus, aber nicht aus dem Grund, der hier lange
+# stand: eine eingepraegte GLEICHdurchflutung ist magnetostatisch exakt
+# darstellbar. Nicht darstellbar ist Zeitabhaengiges. Gerechnet wird in
+# `ema_em2d_stat` (`feldweg="elmer2d_stat"`), und das Pipelinetor weist die Art
+# deshalb ueber `pruefe_feldweg` ab statt ueber `stufen`.
+pruefe("feld" in ema_maschinenart.ARTEN["eesm"].stufen
+       and ema_maschinenart.ARTEN["eesm"].feldweg == "elmer2d_stat",
+       "und die Feldstufe ueber Elmer 2-D magnetostatisch -- NICHT ueber die "
+       "Pipeline, die sie weiterhin abweist")
+# Die SynRM traegt das CAD seit dem 20.09.2026 -- ihr Laeufer entsteht aus
+# `ema_synrm_cad` nach Auslegungsregeln und nicht mehr als IPM-Tasche ohne
+# Magnet. Geprueft wird nicht nur die Tabelle, sondern was das SKRIPT wirklich
+# baut: die Barrieren muessen als Polygone drinstehen und geschnitten werden.
+pruefe("cad" in ema_maschinenart.ARTEN["synrm"].stufen,
+       "und die SynRM ebenfalls — Flussbarrieren aus ema_synrm_cad")
+pruefe("feld" in ema_maschinenart.ARTEN["synrm"].stufen
+       and ema_maschinenart.ARTEN["synrm"].feldweg == "elmer2d_stat",
+       "und die Feldstufe ebenso -- der FDM eicht auf `_analytical_Bgap` und "
+       "sieht die Salienz nicht (gemessen d/q ~ 1,0 gegen 1,719 aus Elmer), "
+       "Elmer magnetostatisch kann sie")
+
+import ema_synrm_cad as _SYc                                 # noqa: E402
+_gsy = geom(machineType="synrm")
+_bsy = _SYc.barrieren(_gsy, 100.0)
+_csy = skript(_gsy)
+pruefe("SYNRM_BARRIEREN = [[" in _csy and "_synrm_barrier_solids" in _csy,
+       f"das Skript traegt die {len(_bsy['barrieren'])} Barrieren je Pol als "
+       f"Polygone und schneidet sie")
+_zsy = lauf(_csy)
+pruefe("HAT_MAGNETE = False" in _csy
+       and "Magnets_N" not in _zsy.objekte and "Magnets_S" not in _zsy.objekte,
+       "und KEINE Magnete — die Bauart hat keine (am ausgefuehrten Skript "
+       "gezaehlt, nicht am Text)")
+pruefe(_zsy.objekte.get("Rotor") is not None,
+       "und der Rotor entsteht trotzdem — die Barrieren sind Luft IM Blech, "
+       "kein eigener Koerper")
 
 
 print("\n" + "=" * 62)

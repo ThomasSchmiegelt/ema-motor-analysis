@@ -84,6 +84,8 @@ python3 cae_cli.py auftrag --projekt <id> --ergaenzen entscheidungen \
 | `db <was>` | **Rechnungsdatenbank**: `import` · `liste` · `zeige --lauf X` · `guete --lauf X` · `vergleich`. Kennwerte **mit Herkunft je Größe** |
 | `lernen <was>` | **was aus dem eigenen Bestand folgt**: `zeige` · `merke --regel … --beleg …` · `pruefe` · **`probieren`** = geplanter Versuch: jede Bauform ueber jede Polzahl, mit `--merken` landen die Befunde als belegte Regeln im Speicher |
 | `recherche <was>` | **Internet**: `suche <begriffe>` · `hole <adresse>` |
+| `maschinenart` | **Welche Maschinen es gibt und wie weit jede getragen ist** — und seit dem 07.10.2026 **ZUERST die Flusswege** (radial/axial) samt den Stufen, die jeder trägt. Das ist die Reihenfolge der Entscheidungen: erst der Flussweg (Zylinder oder Scheibe), dann die Erregung (PSM/ASM/SynRM/EESM/GSM). Zu jeder Angabe steht, wo sie **aufhört** — ohne das stünde die Wahl frei und der Lauf schlüge erst später fehl, oder, schlimmer, er liefe durch und gäbe Zahlen unter fremdem Namen heraus |
+| `axial` | **Die Axialflussmaschine — der Scheibenläufer.** Eine eigene Bauart, keine andere Parametrierung: der Luftspalt ist eine **Ringfläche**, die Nuten laufen **radial**, das Moment wächst mit `Ro²`. Anlegen mit `--frisch --set fluxPath=axial` (`ema_fluss.axial_vorgabe` setzt die zwanzig axialen Maße auf einen tragfähigen Startpunkt — ohne das ist der Payload eine Sammlung von Nullen). `--stufe analytisch` gibt Ringraum, axialen **Anzug**, Rückenblech, Bandage und Dauermoment; `--stufe feld` **misst** `B_gap(r)` im abgewickelten Mehrschnitt (das ist eine KURVE, keine Zahl — radial gibt es sie nicht); `--sektor` rechnet Stufe 3 in Elmer 3-D als anti-periodischen **Ringsektor** einer Polteilung und stellt sie gegen den Mehrschnitt (die Abweichung über dem Radius IST das Ergebnis — der `∂/∂r`-Term, den der Mehrschnitt fallen lässt); `--bilder` legt Schnitt und `B_gap(r)` nach `charts/`. **Getragen sind analytisch, feld, cad, em3d, thermik und zyklus** — jedes auf seinem eigenen Weg (`ema_axial_fdm`, `ema_axial_cad`, `ema_axial_em3d`, `ema_axial_thermik`), **nicht** über die radialen Löser. **NICHT getragen ist die Struktur-FEM**: sie rechnet Fliehkraft am Zylinder-Rotor, die Hauptlast der Scheibe ist der axiale Anzug (gemessen 8,6 : 1 zum Schub). Seit dem 11.10.2026 rechnet der LAUF statt dessen ihre beiden eigenen Lasten mit — Durchbiegung unter dem Anzug (Kreisringplatte) und Fliehkraft der Magnete IN der Scheibenebene —, legt `charts/axial_struktur.png` ab und schreibt `axial_anzug_kPa`, `axial_w_max_um`, `axial_w_anteil_spalt`, `axial_ruecken_bindet`, `axial_magnetkraft_kN` und `axial_klebescher_MPa` ins `summary` (Herkunft **`axial1d`**). **`max_safe_rpm` bleibt `None`, und das ist kein Mangel**: der Anzug haengt an B_gap und nicht an der Drehzahl, und ob die Magnethaltung traegt, sagt erst eine zulaessige Spannung — `--set axialKlebeZulMpa=<MPa>` bzw. `axialBandageZulMpa`; ohne sie steht die Kraft da und kein erfundener Querschnitt. Offen bleiben die Fliehkraftspannung des Blechs gegen seine Streckgrenze und die Verbindung Scheibe–Nabe; beides steht als „Nicht gerechnet“ im Protokoll und im Steckbrief. `run analyse` läuft trotzdem durch und überspringt nur, was nicht trägt — im Protokoll steht je Stufe, was sie stattdessen rechnet. **Dazu gehört seit dem 09.10.2026 die Feld-ANIMATION**: ihre Rahmen rastern `hypot(X, Y)`, also einen Zylinderschnitt, und darin ist eine Scheibe ein Ring ohne Merkmal — gemessen 72 Rahmen × ~9 s für ein Bild der falschen Maschine. Es gibt deshalb **kein `em_field.png` und kein `anim.mp4`** für eine Scheibe; gezeichnet sind der abgewickelte Schnitt und `B_gap(r)` (`charts/feld_axial_*.png`). Erwarte sie nicht und melde ihr Fehlen nicht als Mangel. **Die Arbeitsgerade trägt drei verschiedene Werte** (Mittel · Spitze · Grundwelle, 1,00 : 1,18 : 1,46); wer sie verwechselt, liegt um 46 % daneben, und das Verb schreibt alle drei hin. Exit 0 = gerechnet |
 | `feld2d` | **Die Feldstufe des Käfigläufers** (Elmer 2-D, harmonisch). Sättigt den Läufersteg **durch Messung**, misst den Carter-Faktor der *gezeichneten* Nut (2,27 gegen die 1,15, die `ema_asm` ansetzt) und tastet die Momenten-Schlupf-Kennlinie ab. Zwei unabhängige Momentwege (Arkkio und Leistungsbilanz) stimmen auf 0,00 % überein |
 | `feld3d` | **Was der Kurzschlussring wirklich kostet** (Elmer 3-D, harmonisch). Die eine Größe, die ein Querschnitt grundsätzlich nicht hergibt. Das Modell ist an zwei Punkten gegen `feld2d` geprüft, an denen der Ring keine Rolle spielt (ohne Käfigstrom 0,3 %, bei ideal kurzgeschlossenem Käfig 0,14 %). Die Ringzahl selbst ist eine **untere Schranke** — 63–78 % des Stabverlusts je nach Netz, jede Verfeinerung schiebt sie nach oben, sie konvergiert auf dieser Maschine nicht aus. Sicher ist damit nur: die früher angesetzten pauschalen 20 % sind um mindestens das Dreifache zu klein; `ema_asm.kurzschlussring_zuschlag` rechnet den Zuschlag seitdem aus der Geometrie. `--nur-netz` sagt vorher, was der Lauf kostet — und warnt ab 150.000 Knoten (gemessen: 102.918 Knoten brauchen 12,9 GB, bei rund 200.000 bricht MUMPS mit fehlendem Arbeitsspeicher ab; Elmer meldet danach trotzdem „FINISHED“ und schreibt ein Nullfeld). Der 0,7-mm-Luftspalt ist seit dem Scheibenbau des Netzes **aufgelöst** (zwei Elementlagen bei 59.796 Knoten — vorher eine einzige bei 166.614 Tetraedern) |
 | `beitrag <kanal>` | **Beitragsentwurf für Instagram oder X** aus dem, was gerechnet wurde: Text, Hashtags, Bildauswahl, Alternativtexte — und aus den Marken einer Bildschirmaufnahme Schnittvorschläge. **Veröffentlicht wird nichts** |
@@ -656,6 +658,76 @@ Typ und Auswahlliste — `python3 cae_cli.py raw GET /param_schema` zeigt sie sa
 **Nicht im Schema, aber im Payload:** reine CAD-Schalter (`genBearingA`, `splineTeeth`,
 `windingHeadStyle` …). Die gehen weiterhin durch, wenn sie in der Vorlage stehen — aber
 ohne Grenzen und ohne Typprüfung. Was das Feld beeinflusst, steht im Schema.
+
+### Und noch davor: RADIAL- oder AXIALFLUSS?
+
+Die Vorgabe `geom.fluxPath = radial` ist wie die Maschinenart eine **Annahme**, nicht
+eine Wahl — und sie entscheidet mehr als die Maschinenart: beim Axialfluss (dem
+**Scheibenläufer**) ist der Luftspalt eine **Ringfläche** statt eines Zylindermantels,
+die Nuten laufen **radial**, und das Moment wächst mit `Ro²` statt mit `Ro`. Das ist
+kein anderer Parametersatz derselben Maschine, sondern eine andere Maschine.
+
+```bash
+python3 cae_cli.py maschinenart                      # nennt BEIDE Flusswege zuerst
+python3 cae_cli.py axial --frisch --set fluxPath=axial   # eine Scheibe anlegen und rechnen
+```
+
+**Anlegen geht nur so.** `--frisch --set fluxPath=axial` setzt über
+`ema_fluss.axial_vorgabe` die zwanzig axialen Maße auf einen tragfähigen Startpunkt
+(Ø 260 mm, λ = 0,577, YASA mit zwei Luftspalten, 6 mm Magnet, 1 mm Spalt). Ohne das
+ist der Payload eine Sammlung von Nullen, und der erste Zugriff darauf stirbt. Es ist
+ein **Ausgangspunkt, keine Auslegung** — danach gehört `paarvergleich` dazu wie beim
+Radialfluss.
+
+**Welche Stufe die Scheibe trägt, und auf WELCHEM Weg.** „Trägt die Stufe" und „geht
+DIESEN Weg" sind zwei Fragen, genau wie bei der Maschinenart:
+
+| Stufe | trägt? | Weg |
+|---|---|---|
+| analytisch | ja | `ema_axial` (Ringraum, Anzug, Rücken, Bandage) |
+| feld | ja | **abgewickelter Mehrschnitt** `ema_axial_fdm.felder` — NICHT die radiale FDM |
+| cad | ja | `ema_axial_cad` (Scheibe, radiale Nuten) — NICHT `build_full_motor_script` |
+| em3d | ja | **anti-periodischer Ringsektor** `ema_axial_em3d` — NICHT der Vollmotor |
+| thermik | ja | `ema_axial_thermik` (eigenes LPTN: die Scheibe ist ein anderer Wärmepfad) |
+| zyklus | ja | derselbe wie radial (er hängt nur an `rpm_motor`/`T_motor`) |
+| **struktur** | **nein** | die Struktur-FEM rechnet **Fliehkraft**; die Hauptlast der Scheibe ist der **axiale Anzug** (gemessen 8,6 : 1 zum momentbildenden Schub) und steht in keinem der drei Löser. `axial` rechnet Durchbiegung (`ruecken`) und Bandage. |
+
+**Ein `analyse`-Lauf läuft durch und überspringt, was nicht trägt** — er bricht nicht
+ab. Im Protokoll steht je übersprungene Stufe, was sie stattdessen rechnet. Der
+Berechnungs-Reiter gilt mit: `fdm_resolution` ist das N des abgewickelten Gitters,
+`axial_schnitte` die Zahl der Scheiben (Entwurf 5, Detail 9), und Kühlung, Werkstoffe,
+Umgebungstemperatur und Last wirken gemessen (Luft statt Wasser: 45,5 → 223,2 °C
+Wicklung; Ferrit statt N35: Kt 0,561 → 0,194).
+
+**Drei Dinge, die bei der Scheibe anders zu lesen sind:**
+
+* **`B_gap_T` ist der Mittelwert der Arbeitsgeraden, `B_gap_gemessen_T` die gemessene
+  Grundwelle im Leerlauf.** Die Arbeitsgerade trägt drei verschiedene Werte (Mittel ·
+  Spitze · Grundwelle, Verhältnis 1,00 : 1,18 : 1,46), und sie zu verwechseln kostete
+  am 06.10.2026 45 %. Wer sie vergleicht, vergleicht Gleiches mit Gleichem — `axial`
+  schreibt alle drei hin.
+* **`B_gap(r)` ist eine KURVE, keine Zahl.** Radial ist das Luftspaltfeld über dem
+  Umfang aufgetragen; axial hängt es vom Radius ab, weil die Polteilung mit r wächst.
+  Das ist die Aussage der Bauform, und `axial --stufe feld` gibt sie je Scheibe aus.
+* **Die bindende Sättigungsstelle ist der INNENrand**, wenn `axialZahnform = parallel`
+  — dort ist die Nutteilung um `1/λ` kleiner. Beim `keil` (b ~ r, Vorgabe) kürzt sich
+  die Nutteilung heraus und `B_zahn` steht über r konstant. Das sagt `axial` in der
+  Zeile `Zahn`.
+
+**Was die Scheibe NICHT hat und was dazu gehört**: keine Magnettasche (also kein
+Wandmodus, kein Layouttor — der Sektormagnet wird von Klebung oder einer Bandage am
+Außenrand gehalten), keine Lager/Gehäuse/Bandage im CAD, kein 2-D-Schnittbild (ein
+Querschnitt senkrecht zur Drehachse zeigt bei einer Scheibe einen Ring ohne Merkmal).
+Jede Ausgabe führt ihre `ungeprueft`-Liste mit; lies sie, bevor du eine Zahl
+weitergibst.
+
+```bash
+# die ganze Kette an einer Scheibe
+python3 cae_cli.py axial --frisch --set fluxPath=axial --stufe beides --schnitte 7
+python3 cae_cli.py axial --from-project <pid> --sektor        # Stufe 3: Elmer-Ringsektor
+python3 cae_cli.py axial --from-project <pid> --bilder        # Schnitt + B_gap(r)
+python3 cae_cli.py run analyse --from-project <pid>           # CAD, Feld, Thermik, Zyklus
+```
 
 ### Noch davor: WELCHE MASCHINENART?
 

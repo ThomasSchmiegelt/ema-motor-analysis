@@ -202,6 +202,97 @@ def test_streamlines_export():
     print(f"✓ streamlines: {poly.GetNumberOfLines()} Feldlinien, nur Bmag, UInt32/float32")
 
 
+def test_harmonische_browserdateien():
+    """Der ASM-Lauf bekommt dieselben Browser-Dateien wie die PSM.
+
+    Gemeldet als: *„Die Ergebnisse sollen im Browser dargestellt werden, auch
+    die 3D Ergebnisse wie Feldlinien. Orientiere dich dabei an der Darstellung
+    der PSM."* Der Betrachter ist nicht an die PSM gebunden -- er laedt eine
+    schlanke `.vtp` der Festkoerperoberflaeche und eine zweite mit Feldlinien.
+    `ema_em3d_harm.browser_dateien` schreibt beide aus der HARMONISCHEN VTU und
+    ueberbrueckt dabei zwei inhaltliche Unterschiede: das Feld ist komplex
+    (Oberflaeche = Amplitude, Linien = Augenblick) und sitzt auf ZELLEN.
+
+    **Der eigentliche Gegenstand dieses Tests ist aber die Einheit.**
+    `ema_em3d` rechnet in Millimetern, dieser Loeser in METERN. Der erste
+    Anlauf rechnete die Radien nach mm um; damit lagen alle Startpunkte um den
+    Faktor 1000 ausserhalb des Netzes, `vtkStreamTracer` schrieb eine gueltige,
+    LEERE Datei (0 Linien, 2209 Byte) -- und der Lauf meldete „Feldlinien
+    geschrieben". Geprueft werden deshalb beide Richtungen: dass es mit den
+    richtigen Einheiten Linien gibt, und dass die falschen als Fehlschlag
+    gemeldet werden statt als Ausgabe.
+    """
+    import numpy as np
+    import vtk
+    from vtk.util import numpy_support as ns
+    import ema_em3d_harm as E3H
+
+    # Ein synthetisches Volumengitter in METERN -- wie die echte VTU.
+    nx = ny = 17
+    nz = 9
+    img = vtk.vtkImageData()
+    img.SetDimensions(nx, ny, nz)
+    img.SetOrigin(-0.14, -0.14, 0.0)
+    img.SetSpacing(0.28 / (nx - 1), 0.28 / (ny - 1), 0.08 / (nz - 1))
+    app = vtk.vtkAppendFilter()
+    app.SetInputData(img)
+    app.Update()
+    grid = app.GetOutput()
+    n_z = grid.GetNumberOfCells()
+
+    # Komplexes B auf den ZELLEN: Realteil +z, Imaginaerteil +x (also ein
+    # umlaufendes Feld -- genau der Fall, den ein Linienbild nicht als Ganzes
+    # zeigen kann).
+    re = np.zeros((n_z, 3)); re[:, 2] = 1.0
+    im = np.zeros((n_z, 3)); im[:, 0] = 0.4
+    for feld, name in ((re, "magnetic flux density re e"),
+                       (im, "magnetic flux density im e")):
+        a = ns.numpy_to_vtk(np.ascontiguousarray(feld))
+        a.SetNumberOfComponents(3)
+        a.SetName(name)
+        grid.GetCellData().AddArray(a)
+    gid = ns.numpy_to_vtk(np.full(n_z, E3H.GID_ROTOR, dtype=np.int32))
+    gid.SetName("GeometryIds")
+    grid.GetCellData().AddArray(gid)
+
+    d = tempfile.mkdtemp()
+    vtu = os.path.join(d, "harm.vtu")
+    w = vtk.vtkXMLUnstructuredGridWriter()
+    w.SetFileName(vtu)
+    w.SetInputData(grid)
+    w.Write()
+
+    netz_m = {"r_wel": 0.030, "r_rot": 0.0943, "r_si": 0.0950,
+              "r_so": 0.140, "L_m": 0.080}
+
+    # (a) Richtige Einheiten -> Linien.
+    erg = E3H.browser_dateien(vtu, os.path.join(d, "gut"), netz_m)
+    assert erg.get("vtp") and os.path.getsize(erg["vtp"]) > 0, erg
+    assert erg.get("n_linien", 0) > 0, f"keine Feldlinien: {erg}"
+    assert erg.get("lines") and os.path.exists(erg["lines"]), erg
+    # Die Oberflaeche traegt die AMPLITUDE: |(0,0,1) + i(0.4,0,0)| je Achse
+    # ergibt (0.4, 0, 1), Betrag 1.0770 -- und NICHT 1.0 wie der Augenblick.
+    rd = vtk.vtkXMLPolyDataReader(); rd.SetFileName(erg["vtp"]); rd.Update()
+    bm = ns.vtk_to_numpy(rd.GetOutput().GetPointData().GetArray("Bmag"))
+    assert abs(float(np.median(bm)) - math.hypot(0.4, 1.0)) < 1e-3, \
+        f"Oberflaeche zeigt nicht die Amplitude: {float(np.median(bm))}"
+    assert "Momentaufnahme" in erg.get("hinweis", ""), \
+        "der Hinweis muss sagen, dass ein umlaufendes Feld kein Linienbild hat"
+
+    # (b) Die GEMESSENE Falle: dieselben Radien in Millimetern.
+    erg2 = E3H.browser_dateien(vtu, os.path.join(d, "falsch"),
+                               {k: v * 1000.0 for k, v in netz_m.items()})
+    assert erg2.get("n_linien") == 0, f"erwartet 0 Linien, ist {erg2}"
+    assert "lines" not in erg2, "eine leere Datei darf kein Ergebnis sein"
+    assert "ausserhalb des Netzes" in (erg2.get("lines_fehler") or ""), erg2
+    assert not os.path.exists(os.path.join(d, "falsch", "browser_lines.vtp")), \
+        "die leere Datei muss verworfen werden"
+
+    print(f"✓ harmonische Browser-Dateien: {erg['n_linien']} Feldlinien, "
+          f"Oberflaeche = Amplitude; falsche Einheit wird als Fehlschlag "
+          f"gemeldet (0 Linien, Datei verworfen)")
+
+
 def test_assign_pieces_single_keeps_magnet_not_pocket():
     """PMa-SynRM-Regression: Magnet-Prisma und seine obround-Luft-Tasche haben denselben
     Schwerpunkt; bei KURZEN Magneten (5×3 mm Außenlage) passiert die Taschen-Schale das
@@ -249,10 +340,15 @@ def test_monitor_keeps_pockets_until_its_own_ladder_step():
                 "pocket_clear_mm": 0.0, "pocket_clear_geom_mm": 0.1,
                 "mesh_zones": {"gap_cl": 1.0, "mag_cl": 4.0, "mesh_cl": 10.0}}
 
+    # `_geom("v")` faellt durch das Rotor-Layouttor (Taschenkollision, 6,20 mm)
+    # -- das ist hier NICHT der Gegenstand: geprueft wird der Knoten-Regler.
+    # Ohne die ausdrueckliche Freigabe kaeme der Test gar nicht bis dahin.
+    # Dass das Tor greift, prueft `test_layouttor_vor_dem_netzbau`.
+    _g = dict(_geom("v")); _g["layoutFreigabe"] = True
     E3.build_mesh = fake
     try:
         msh = os.path.join(tempfile.mkdtemp(), "cap.msh")
-        tags, warns = E3._build_mesh_capped(_geom("v"), 120.0, {"target_nodes": 100000}, msh)
+        tags, warns = E3._build_mesh_capped(_g, 120.0, {"target_nodes": 100000}, msh)
     finally:
         E3.build_mesh = real
 
@@ -263,6 +359,69 @@ def test_monitor_keeps_pockets_until_its_own_ladder_step():
     assert any("Magnettaschen" in w and "NICHT im 3D-Netz" in w for w in warns), warns
     print(f"✓ Selbstheil-Monitor: {len(with_pk)} Versuche mit Taschen vor dem Abschalten, "
           f"Nutzer-Warnung gesetzt")
+
+
+def test_rueckweg_zum_letzten_guten_netz():
+    """Ein Knotenziel ist ein Wunsch, ein gebautes Netz ist ein Ergebnis.
+
+    Gemessen an einem SynRM-Laeufer (672 Flussbarrieren, 0,70 mm Luftspalt):
+    der Zielregler vergroeberte vom Erstbau (312.402 Knoten) ueber 138.932 auf
+    103.416 -- alle drei tragfaehig, alle 672 Barrieren drin. Der vierte
+    Versuch (`gap_cl` 1,750 statt 1,613) zerfiel in 332 entartete Tetraeder,
+    und die Selbstheil-Leiter arbeitete sich danach durch immer GROEBERE Netze,
+    die alle aus demselben Grund scheiterten. Uebrig blieb ein Abbruch, obwohl
+    zwanzig Minuten vorher ein gutes Netz dastand.
+
+    Der Rueckweg kostet EINEN Netzbau und liefert garantiert eines. Die Leiter
+    bleibt fuer den Fall, dass schon der ERSTE Versuch scheitert -- dann gibt
+    es nichts, wohin zurueck.
+
+    Schneller Unit-Test mit gefaelschtem `build_mesh` (kein gmsh).
+    """
+    calls = []
+    real = E3.build_mesh
+
+    def fake(geom, axial, opts, msh_path):
+        calls.append(dict(opts))
+        # Grob geht schief -- genau wie gemessen: der Fehler kommt vom
+        # VERGROEBERN, nicht vom Modell.
+        if float(opts.get("gap_cl", 0.0)) > 1.70:
+            raise E3._DegenerateMeshError("332 entartete Tetraeder")
+        open(msh_path, "w").write("x")
+        n = 312402 if float(opts.get("gap_cl", 0.0)) < 0.5 else 103416
+        return {"n_nodes": n, "n_magnets": 0, "n_slots": 54, "n_barriers": 672,
+                "n_pockets": 0, "n_pockets_want": 0, "mag_pockets_effective": False,
+                "n_bodies": {"air": 5}, "bodies": {}, "magnets": [],
+                "pocket_clear_mm": 0.0, "pocket_clear_geom_mm": 0.1,
+                "mesh_zones": {"gap_cl": float(opts.get("gap_cl", 0.42)),
+                               "mag_cl": float(opts.get("mag_cl", 3.89)),
+                               "mesh_cl": float(opts.get("mesh_cl", 7.78))}}
+
+    # `_geom("v")` faellt durch das Rotor-Layouttor (Taschenkollision, 6,20 mm)
+    # -- das ist hier NICHT der Gegenstand: geprueft wird der Knoten-Regler.
+    # Ohne die ausdrueckliche Freigabe kaeme der Test gar nicht bis dahin.
+    # Dass das Tor greift, prueft `test_layouttor_vor_dem_netzbau`.
+    _g = dict(_geom("v")); _g["layoutFreigabe"] = True
+    E3.build_mesh = fake
+    try:
+        msh = os.path.join(tempfile.mkdtemp(), "rueck.msh")
+        tags, warns = E3._build_mesh_capped(_g, 120.0,
+                                            {"target_nodes": 60000}, msh)
+    finally:
+        E3.build_mesh = real
+
+    assert tags["n_nodes"] == 103416, \
+        f"es muss das letzte tragfaehige Netz herauskommen, ist {tags['n_nodes']}"
+    # Der LETZTE Aufruf ist der Rueckweg -- mit den Groessen, die gebaut haben.
+    assert float(calls[-1]["gap_cl"]) <= 1.70, \
+        f"der Rueckweg muss die guten Zellgroessen nehmen: {calls[-1]}"
+    assert any("nicht erreichbar" in w for w in warns), \
+        f"das unerreichbare Knoten-Ziel muss BENANNT werden: {warns}"
+    # Und die Leiter darf nicht gelaufen sein: sie haette noch groeber gemacht.
+    assert not any("mag_pockets" in c and c["mag_pockets"] is False for c in calls), \
+        "die Mitigationsleiter darf hier gar nicht erst greifen"
+    print(f"✓ Rueckweg: {len(calls)} Netzbauten, angenommen wurde das letzte "
+          f"tragfaehige ({tags['n_nodes']} Knoten), Ziel als unerreichbar benannt")
 
 
 def test_pockets_off_is_counted_as_zero():
@@ -447,6 +606,10 @@ def main():
     test_assign_pieces_single_keeps_magnet_not_pocket()
     test_mesh_tagging()
     test_skew_twists_magnets()
+    # Stand bis zum 20.09.2026 NICHT in dieser Liste -- ein Test, der nie
+    # laeuft, ist gruen, weil er schweigt. Aufgefallen, als der Rueckweg-Test
+    # danebengesetzt wurde und ueber dasselbe Layouttor stolperte.
+    test_monitor_keeps_pockets_until_its_own_ladder_step()
     test_pockets_off_is_counted_as_zero()
     test_sif_generation()
     test_hex_mesh_and_piola_sif()
@@ -456,7 +619,151 @@ def main():
     test_streamlines_export()
     test_layouttor_vor_dem_netzbau()
     test_magnetfarbe_folgt_der_magnetisierung()
+    test_zellgroesse_an_der_geometrie_gedeckelt()
+    test_harmonische_browserdateien()
+    test_rueckweg_zum_letzten_guten_netz()
     print("\nALLE EM3D-MESH-TESTS BESTANDEN ✅  (Elmer-Solve separat, sobald installiert)")
+
+
+def test_magnetlose_bauart_bekommt_keine_magnete():
+    """`magnet_rects` fragt die MASCHINENART.
+
+    Sie lieferte fuer jede Bauart Schenkel -- gemessen 12 fuer pmsm wie fuer
+    asm, synrm, eesm und gsm --, weil `magnet_legs` die TASCHENLAGE beschreibt
+    und nicht den Magnetbestand. Der 3-D-Netzbauer haette einer
+    Reluktanzmaschine damit zwoelf Magnete ins Blech gesetzt. Dieselbe Luecke
+    steckte am 20.09.2026 auch im FDM-Rasterer und in den Feldbildern; die
+    Fundstellen stehen in BEFUNDE.md.
+    """
+    g = _geom("v")
+    assert len(E3.magnet_rects(dict(g, machineType="pmsm"))) == 16
+    for art in ("asm", "synrm", "eesm", "gsm"):
+        assert E3.magnet_rects(dict(g, machineType=art)) == [], art
+
+
+def test_synrm_bekommt_seine_flussbarrieren():
+    """Der Reluktanzlaeufer kommt als Barrieren ins 3-D-Netz, nicht als Magnete.
+
+    Und zwar aus DERSELBEN Quelle wie die Zeichnung: `ema_synrm_cad` liefert
+    die Mittellinie samt Dicke, aus der auch die beiden Raender des
+    gezeichneten Polygons entstehen.
+    """
+    import ema_synrm_cad as SY
+    g = dict(_geom("v"), machineType="synrm")
+    br = E3.barrier_rects(g)
+    ml = SY.mittellinien(g)
+    poles = 2 * int(g["p"])
+    # Je Barriere und je q-Achse ein Kastenprisma pro Abschnitt.
+    soll = poles * sum(max(len(x["punkte"]) - 1, 0) for x in ml)
+    assert len(br) == soll, f"{len(br)} Prismen statt {soll}"
+    assert {round(b["thick"], 3) for b in br} == \
+        {round(x["dicke_mm"], 3) for x in ml}
+    # Und sie liegen im Blech, nicht in der Welle oder ausserhalb.
+    r_i, r_a = g["shaftD"] / 2.0, g["rotorOD"] / 2.0
+    for b in br:
+        r = math.hypot(b["cx"], b["cy"])
+        assert r_i <= r <= r_a, f"Barriere bei r={r:.1f} mm"
+    # Die PSM bleibt unberuehrt.
+    assert E3.barrier_rects(dict(g, machineType="pmsm")) == []
+
+
+def test_tor_nennt_den_weg_der_wirklich_traegt():
+    """Was das Tor sagt, muss stimmen -- und erreichbar sein.
+
+    Bis zum 20.09.2026 verwies es fuer ALLE magnetlosen Bauarten auf `feld3d`
+    (`ema_em3d_harm`, harmonisch). Das ist der ASM-Weg; EESM und GSM wurden
+    damit auf einen Pfad geschickt, der sie ebenso abweist.
+    """
+    import ema_maschinenart as MA
+    g = _geom("v")
+    # Der Reluktanzlaeufer geht durch -- dieser Pfad ist magnetostatisch.
+    E3._tor_layout(dict(g, machineType="synrm"))
+    for art, erwartet in (("asm", "feld3d"),
+                          ("eesm", "keinen 3-D-Weg"),
+                          ("gsm", "keinen 3-D-Weg")):
+        try:
+            E3._tor_layout(dict(g, machineType=art))
+            assert False, f"{art} muesste abgewiesen werden"
+        except MA.ArtNichtUnterstuetzt as e:
+            assert erwartet in str(e), f"{art}: {e}"
+
+
+def _ok(bed, text):
+    assert bed, text
+    print(f"✓ {text}")
+
+
+def test_zellgroesse_an_der_geometrie_gedeckelt():
+    """Der Knoten-Zielregler darf nicht an duennen Merkmalen vorbeivergroebern.
+
+    Er multipliziert alle Zellgroessen mit ``(n/ziel)**(1/1.85)``, bis die
+    Knotenzahl passt, und kennt dabei kein Merkmal. Gemessen am 20.09.2026 an
+    einem SynRM-Laeufer (672 Flussbarrieren, duennste 5,15 mm): Versuch 1 baute
+    mit ``mag_cl = 3,89`` sauber durch (312.402 Knoten), der Regler vergroeberte
+    auf Ziel 60.000 (x2,440 -> ``mag_cl = 9,49``, fast doppelt so breit wie die
+    Barriere), und die Versuche 2 bis 4 scheiterten an 302…308 entarteten
+    Tetraedern. Ein Koerper schmaler als seine Zelle wird nicht grob
+    abgebildet, sondern zu Slivern zerrieben.
+
+    Geprueft wird die Decke selbst -- ohne Gmsh, in Millisekunden. Der echte
+    Netzbau dahinter kostet Minuten und steht in `BEFUNDE.md`.
+    """
+    import cae_cli
+    import ema_em3d as E
+
+    # 1. SynRM: die Decke folgt der duennsten BARRIERE.
+    g = dict(cae_cli.frischer_payload()["geom"])
+    g["machineType"] = "synrm"
+    gap_deck, deck = E._cl_decke(g, 80.0)
+    import ema_synrm_cad as SC
+    dicken = [float(b["dicke_mm"]) for b in SC.barrieren(g, 80.0)["barrieren"]]
+    _ok(deck is not None and abs(deck - 0.8 * min(dicken)) < 1e-9,
+       f"SynRM: Decke {deck:.3f} mm = 0,8 x duennste Barriere "
+       f"({min(dicken):.3f} mm)")
+    # Der gemessene Fall: 9,49 mm lag darueber, 3,89 mm darunter.
+    _ok(9.49 > deck > 3.89,
+       f"der gemessene Fehlversuch (mag_cl 9,49) liegt ueber der Decke, "
+       f"der geglueckte (3,89) darunter")
+
+    # 2. PSM: dieselbe Regel, anderes Merkmal (Magnetdicke).
+    gp = dict(cae_cli.frischer_payload()["geom"])
+    gp["machineType"] = "pmsm"
+    gap_dp, dp = E._cl_decke(gp, 80.0)
+    _ok(dp is not None and abs(dp - 0.8 * float(gp["magThick"])) < 1e-9,
+       f"PSM: Decke {dp:.3f} mm = 0,8 x magThick ({gp['magThick']} mm)")
+
+    # 3. **Der Luftspalt bekommt seine Decke aus einer MESSUNG, nicht aus
+    #    einer Faustregel.** Im ersten Anlauf bekam er gar keine, weil eine
+    #    Hausmessung 1,75 mm bei 0,70 mm Spalt (2,5x) als funktionierend
+    #    ausweist. Der Lauf ohne Decke hat die Grenze dann wirklich vermessen:
+    #    2,3x traegt (103.416 Knoten), 3,1x zerfaellt (304 Sliver). 2,5x laesst
+    #    beide gemessenen Guten zu und schliesst den Schlechten aus.
+    gap = (g["statorID"] - g["rotorOD"]) / 2.0
+    _ok(gap_deck is not None and abs(gap_deck - E.GAP_CL_MAX_X * gap) < 1e-9,
+        f"Luftspaltdecke {gap_deck:.3f} mm = {E.GAP_CL_MAX_X}x Spalt ({gap:.3f} mm)")
+    _ok(1.613 < gap_deck < 2.165,
+        f"sie liegt zwischen dem gemessen guten 1,613 und dem gemessen "
+        f"schlechten 2,165 ({gap_deck:.3f})")
+    _ok(abs(gap_deck - 1.75) < 1e-6,
+        "und trifft damit genau den Wert, der in der Hausmessung traegt (1,75)")
+    import inspect
+    quelle = inspect.getsource(E._build_mesh_capped)
+
+    # 4. Die Decke bindet VOR dem Netzbau -- also gegen den Zielregler UND
+    #    gegen die Selbstheil-Leiter. Gemessen war es gerade die Leiter, die
+    #    den Fehler verschlimmert hat ("Magnet-Mesh x1,5 vergroebern" auf ein
+    #    Netz, das an zu grossen Zellen gescheitert war).
+    # 5. Eine Leiterstufe, die durch die Decke wirkungslos wird, darf keinen
+    #    Netzbau kosten -- gemessen sieben Minuten je Fehlversuch.
+    _ok("uebersprungen" in quelle,
+        "eine wirkungslose Mitigationsstufe wird uebersprungen statt gebaut")
+
+    vor_bau = quelle.index("_cl_decke(geom, axial)")
+    bau = quelle.index("tags = build_mesh(geom, axial, cur, msh)")
+    _ok(vor_bau < bau,
+       "sie wird vor JEDEM Netzbau angewandt, nicht nur im Zielregler")
+    print("✓ Zellgroesse an der Geometrie gedeckelt "
+          "(Zielregler laeuft nicht an duennen Merkmalen vorbei)")
 
 
 if __name__ == "__main__":

@@ -246,7 +246,120 @@ def _wh_spread():
     return "Lagen 2/4/6/8/10/12/14/16°, f=%s mm" % [round(f, 2) for f in fs]
 check("Wickelkopf-Spreizung je Lage (per Lage, Krone + Schweißseite)", _wh_spread)
 
-# ── 9. (optional) real FreeCAD CAD build + rotor FEM ─────────────────────────────
+# ── 9. ⊙ Axialfluss: die Scheibe (Stufe 1, Mehrschnitt, CAD-Zahlen) ─────────────
+#
+# Diese Kette fehlte im Smoke-Test ganz, und sie ist die juengste: `ema_axial*`
+# ist vom 06./07.10.2026. Gemeldet wurde es von der anderen Seite -- „Smoketest
+# bei Axialfluss ist ohne CAD, ich moechte mit CAD" -- und dabei fiel auf, dass
+# es hier ueberhaupt keinen axialen Pruefpunkt gab.
+#
+# Der erste Fall ist der WICHTIGSTE und sieht nach dem langweiligsten aus: der
+# Payload, wie ihn der Browser schickt. Er trug `fluxPath="axial"` und keine
+# einzige axiale Zahl, weil ② Geometrie kein axiales Feld hat -- und der Lauf
+# starb an der ersten (`'axialAktivOD' fehlt`, mit Traceback im
+# Protokollfenster). Genau dieser Payload steht jetzt hier.
+print("\n[⊙ Axialfluss]")
+AX_GEOM = None
+def _ax_payload():
+    global AX_GEOM
+    import ema_fluss as AXF
+    browser = {"fluxPath": "axial", "statorOD": 280, "p": 3, "slots": 54,
+               "shaftD": 60}                      # was `buildPayload` schickte
+    g, erg = AXF.axial_ergaenzen(dict(browser))
+    assert erg, "axial_ergaenzen meldet nichts, obwohl axialAktivOD fehlte"
+    assert any("axialAktivOD" in z for z in erg), erg
+    # Die Pflichtschluessel tragen danach eine Zahl > 0 -- sonst stirbt der
+    # erste Zugriff wieder, nur eine Zeile spaeter.
+    for k in AXF.AXIAL_PFLICHT:
+        assert float(g[k]) > 0, f"{k} ist nach dem Ergaenzen {g[k]!r}"
+    # Und zweimal ergaenzen ergaenzt nichts: sonst wuerde der Server dem
+    # Protokoll bei jedem Lauf eine Vorgabe melden, die schon drinsteht.
+    _, erg2 = AXF.axial_ergaenzen(g)
+    assert not erg2, f"nicht idempotent: {erg2}"
+    # p/slots des Menschen bleiben stehen -- die Vorgabe fuellt nur Luecken.
+    assert g["p"] == 3 and g["slots"] == 54, (g["p"], g["slots"])
+    AX_GEOM = g
+    return f"{len(erg)} ergaenzt ({erg[0]}), p/slots gehalten"
+check("Browser-Payload 'fluxPath=axial' ohne axiale Maße wird vollständig", _ax_payload)
+
+def _ax_flaechen():
+    import ema_fluss as AXF
+    f = AXF.flaechen(AX_GEOM, 25.0)
+    assert f["flussweg"] == "axial" and f["n_spalte"] == 2, f
+    # Zwei Integrale ueber denselben Ringraum, gegen die geschlossene Form und
+    # nicht gegen eine Merkzahl: der Fluss waechst mit r^1, das Moment mit r^2
+    # (das ist der Satz, aus dem folgt, dass kein Ersatzradius beides trifft).
+    ri, ro = f["r_innen_m"], f["r_aussen_m"]
+    n = f["n_spalte"]
+    sf = n * (ro ** 2 - ri ** 2) / 2.0
+    sm = n * (ro ** 3 - ri ** 3) / 3.0
+    assert abs(f["a_fluss_m2"] - sf) / sf < 1e-9, (f["a_fluss_m2"], sf)
+    assert abs(f["a_moment_m3"] - sm) / sm < 1e-9, (f["a_moment_m3"], sm)
+    return (f"∫r dr={f['a_fluss_m2'] * 1e4:.2f}·1e-4, "
+            f"∫r² dr={f['a_moment_m3'] * 1e4:.2f}·1e-4, λ={f['lambda']:.4f}")
+check("ema_fluss.flaechen (axial): ∫r dr und ∫r² dr geschlossen", _ax_flaechen)
+
+def _ax_stufe1():
+    import ema_axial
+    t = ema_axial.uebersicht(AX_GEOM, 0.8137)       # B_gap der Arbeitsgeraden
+    for wort in ("Ringraum", "lambda", "Polteilung"):
+        assert wort in t, f"'{wort}' fehlt in der Übersicht"
+    a = ema_axial.auslegung(AX_GEOM, 25.0)
+    # Polteilung waechst mit r -- das ist der Satz, aus dem der Mehrschnitt folgt.
+    assert a["polteilung_aussen_m"] > a["polteilung_innen_m"] > 0, a
+    assert a["spaltverhaeltnis_spanne"] > 1.0, a["spaltverhaeltnis_spanne"]
+    return (f"2p={a['poles']}, Q={a['slots']}, τ_p {a['polteilung_innen_m'] * 1e3:.1f}"
+            f"→{a['polteilung_aussen_m'] * 1e3:.1f} mm")
+check("ema_axial Stufe 1 (Ringraum, λ-Schranke, Zahnform)", _ax_stufe1)
+
+def _ax_mehrschnitt():
+    import ema_axial_fdm as AXFD
+    e = AXFD.felder(AX_GEOM, k_schnitte=3, N=200)
+    assert len(e["schnitte"]) == 3 and len(e["radien_m"]) == 3, e["k_schnitte"]
+    assert e["psi_Wb"] > 0 and e["Kt_Nm_per_A"] > 0, (e["psi_Wb"], e["Kt_Nm_per_A"])
+    b = e["B_gap_ueber_r_T"]
+    assert len(b) == 3 and all(x > 0 for x in b), b
+    # Der Spaltleitwert haengt nicht am Radius: B_Spalt steht ueber Ri..Ro.
+    # Gemessen 2,6 % (LIESMICH), hier als Schranke -- faellt es auseinander,
+    # stimmt die Eichung nicht mehr fuer alle Scheiben gemeinsam.
+    spanne = (max(b) - min(b)) / (sum(b) / len(b))
+    assert spanne < 0.12, f"B_Spalt streut {spanne * 100:.1f} % über r: {b}"
+    # Alle Scheiben haben DASSELBE z-Gitter -- darauf beruht, dass der
+    # Mehrschnitt ohne Interpolation zusammengelegt werden darf.
+    lg = AXFD.lagen(AX_GEOM)
+    assert lg and lg[-1]["z1"] > lg[0]["z0"], lg
+    assert e["radien_m"] == sorted(e["radien_m"]), e["radien_m"]
+    return (f"3 Schnitte, {len(lg)} Lagen, ψ={e['psi_Wb'] * 1e3:.1f} mWb, "
+            f"Kt={e['Kt_Nm_per_A']:.3f} Nm/A, B_Spalt streut {spanne * 100:.1f} %")
+check("ema_axial_fdm Mehrschnitt löst (ψ, Kt, B_gap über r)", _ax_mehrschnitt)
+
+def _ax_cad():
+    import ema_axial_cad as AXC
+    pr = AXC.pruefen(AX_GEOM, 25.0)
+    assert pr["ok"], "Scheibe nicht zeichenbar: " + " | ".join(pr["befunde"])
+    t = pr["teile"]
+    # Die Stueckzahl folgt aus der Schichtung: je Magnetlage 2p Pole mal
+    # Segmente umfangs mal Ringe radial. Festgenagelt ist dabei nichts -- die
+    # Faktoren kommen alle aus `teile` selbst, und genau diese Stueckelung gab
+    # es bis zum 07.10.2026 nur in JavaScript.
+    n_lagen = sum(1 for l in t["lagen"] if l["art"] == "magnet")
+    soll = n_lagen * t["poles"] * t["segmente"]["nU"] * t["ringe"]["nR"]
+    assert t["n_magnet"] == soll, (t["n_magnet"], soll, n_lagen)
+    # Je Nut ein Zahn und eine Spule, je Magnetlage eine Laeuferscheibe.
+    n_zahn = sum(1 for x in t["teile"] if x["rolle"] == "zahn")
+    n_spule = sum(1 for x in t["teile"] if x["rolle"] == "spule")
+    assert n_zahn == n_spule, (n_zahn, n_spule)
+    assert n_zahn % t["slots"] == 0 and n_zahn >= t["slots"], (n_zahn, t["slots"])
+    assert t["hoehe_mm"] > 0 and t["r_aussen_mm"] > t["r_innen_mm"] > 0, t
+    # Das Skript muss gueltiges Python sein, bevor FreeCAD es sieht.
+    code = AXC.baue_skript(AX_GEOM, 25.0, "/tmp/_smoke_axial.FCStd")
+    ast.parse(code)
+    return (f"{len(t['teile'])} Teile, {t['n_magnet']} Magnete, "
+            f"{t['slots']} Zähne, Bauhöhe {t['hoehe_mm']:.1f} mm, "
+            f"Skript {len(code) // 1024} kB")
+check("ema_axial_cad: Scheibe zeichenbar + Skript gültig", _ax_cad)
+
+# ── 10. (optional) real FreeCAD CAD build + rotor FEM ────────────────────────────
 if "--cad" in sys.argv:
     print("\n[CAD build — slow]")
     fr = mods["fr"]
@@ -266,8 +379,36 @@ if "--cad" in sys.argv:
             f"FEM not OK: {p.get('solver_status')}"
         return f"σ_v,max={p['max_von_mises_MPa']} MPa, nodes={p['node_count']}"
     check("rotor FEM (CalculiX) solves", _fem)
+
+    # ⊙ Und die SCHEIBE wirklich bauen. Das ist der Punkt, um den gebeten
+    # wurde: ohne ihn prüfte der Knopf beim Axialfluss alles ausser dem
+    # Erzeuger, der neu ist. Nachgemessen wird am fertigen Körper -- Zahl der
+    # Festkörper, Gültigkeit und paarweise DURCHDRINGUNG -- und zwar mit genau
+    # der Nachmessung, die `bau_axial.py` benutzt (`messung_aus_stdout`), nicht
+    # mit einer zweiten.
+    def _cad_axial():
+        import ema_axial_cad as AXC
+        code = AXC.baue_skript(AX_GEOM, 25.0, "/tmp/_smoke_axial.FCStd")
+        r = fr.run_freecad_script(code, timeout=900)
+        assert r.get("cad_success") or "CAD_SUCCESS" in r.get("stdout", ""), \
+            "Scheibe nicht gebaut: " + (r.get("stderr", "") or "")[:300]
+        mz = AXC.messung_aus_stdout(r.get("stdout") or "")
+        n = mz.get("teile", {}) or {}
+        assert n, "keine Nachmessung im stdout (AX_TEILE fehlt)"
+        ungueltig = [k for k, v in n.items()
+                     if isinstance(v, dict) and v.get("gueltig") is False]
+        assert not ungueltig, f"ungültige Festkörper: {ungueltig[:5]}"
+        # Eine Durchdringung ist ein Befund und kein Fehler des Tests -- aber
+        # sie muss GEPRÜFT worden sein, sonst sagt die Null nichts.
+        assert mz.get("ueberlapp") is not None, "Überlapp nicht geprüft"
+        assert not mz.get("ueberlapp"), str(mz.get("ueberlapp_text"))[:300]
+        return (f"{len(n)} Körper, {r.get('volume', 0):.0f} mm³, "
+                f"{mz.get('ueberlapp_geprueft')} Paare überlappfrei"
+                + (" + STEP" if "STEP_SAVED" in r.get("stdout", "") else ""))
+    check("⊙ FreeCAD-Scheibenbau (ema_axial_cad) + Nachmessung", _cad_axial)
 else:
-    print("\n(skip FreeCAD/FEM — pass --cad to include the slow build)")
+    print("\n(skip FreeCAD/FEM — pass --cad to include the slow build,"
+          " Vollmotor + Läufer-FEM + ⊙ Scheibe)")
 
 # ── training file (record build + upsert/label, no disk pollution) ───────────
 print("\n[training]")

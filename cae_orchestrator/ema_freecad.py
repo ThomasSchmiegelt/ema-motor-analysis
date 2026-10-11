@@ -192,7 +192,9 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
                 + str(_kf.get("grund") or "kein momentbildender Strom")
                 + " — die Nuttiefe faellt sonst still auf den 2-mm-Fertigungs"
                   "boden zurueck. Mit geom.kaefigFreigabe=true trotzdem zeichnen.")
-        _r_a = R_rot - _ASM.KAEFIG_STEG_MM               # Aussenkante der Nut
+        # Aussenkante der Nut -- der Steg kommt aus `kaefig()` (Vorgabe
+        # `laeuferStegMm`), nicht aus der Konstanten.
+        _r_a = R_rot - float(_kf.get("steg_mm", _ASM.KAEFIG_STEG_MM))
         cage_json = json.dumps({
             "n": int(_kf["n_stab"]),
             "b": float(_kf["stabbreite_mm"]),
@@ -301,6 +303,26 @@ def build_full_motor_script(geom: dict, axial_len: float, save_path: str,
                 "Ankerwicklung passt nicht in ihre Nut — mit geom.ankerFreigabe"
                 "=true trotzdem zeichnen.")
         gsm_json = json.dumps(_gd)
+
+    # Der Reluktanzlaeufer: die Flussbarrieren als POLYGONE, und zwar exakt
+    # die, die `ema_laeuferbild.teile()` liefert — dieselbe Quelle, aus der die
+    # Leinwand zeichnet und `ema_analysis._rasterise` stempelt. Ein eigener
+    # Barrierenbauer hier waere die vierte Fassung derselben Geometrie, und
+    # dann baute FreeCAD einen anderen Laeufer als das Feld rechnet.
+    synrm_json = "None"
+    if _MA.art_code(geom) == "synrm":
+        import ema_synrm_cad as _SY
+        import ema_laeuferbild as _LBf
+        _sb = _SY.barrieren(geom, axial_len)
+        if not _sb.get("passt") and not geom.get("barriereFreigabe"):
+            raise ValueError(
+                "Flussbarrieren nicht auslegbar: "
+                + str(_sb.get("grund") or "; ".join(_sb.get("befund") or []))
+                + " — mit geom.barriereFreigabe=true trotzdem zeichnen.")
+        _lt = _LBf.teile(geom, axial_len)
+        synrm_json = json.dumps([[[round(x, 4), round(y, 4)]
+                                  for x, y in _LBf.umriss(_t)]
+                                 for _t in (_lt.get("teile") or [])])
 
     _wk_dat   = ema_wicklung.wicklung(geom, axial_len)
     wind_art  = _wk_dat["art"]
@@ -411,6 +433,7 @@ ROTORWICKLUNG = {wick_json}   # Schleifringlaeufer (ASM) aus ema_asm.laeuferwick
 POLLAEUFER = {pol_json}   # Schenkelpollaeufer (EESM) aus ema_eesm_cad.koerper
 GSM = {gsm_json}   # Gleichstrommaschine aus ema_gsm.zeichenmasse
 HAT_MAGNETE = {hat_magnete!r}   # Bauart-Tatsache, nicht Anzeigewahl
+SYNRM_BARRIEREN = {synrm_json}   # Flussbarrieren (SynRM) aus ema_laeuferbild.umriss
 GEN_BEAR_A = {gen_bear_a!r}; GEN_BEAR_B = {gen_bear_b!r}; GEN_INSUL = {gen_insul!r}
 bearing_od = {bearing_od}; bearing_w = {bearing_w}; bearing_gap = {bearing_gap}
 insul_thk  = {insul_thk}
@@ -449,6 +472,24 @@ def _custom_barrier_solids():
             if gp:
                 ex, ey = gp[-1]
                 shapes.append(Part.makeCylinder(w / 2, axial + 4, App.Vector(ex, ey, -axial / 2 - 2)))
+    return shapes
+
+# Flussbarrieren des Reluktanzlaeufers: je Barriere ein Prisma ueber die volle
+# Paketlaenge, aus dem Laeuferblech geschnitten. Die Punkte kommen fertig
+# gedreht aus `ema_laeuferbild.umriss` -- hier wird NICHTS nachgerechnet.
+def _synrm_barrier_solids():
+    shapes = []
+    for pts in (SYNRM_BARRIEREN or []):
+        if len(pts) < 3:
+            continue
+        vs = [App.Vector(float(x), float(y), -axial / 2 - 2) for x, y in pts]
+        if (vs[0] - vs[-1]).Length > 1e-9:
+            vs.append(vs[0])
+        try:
+            face = Part.Face(Part.Wire(Part.makePolygon(vs)))
+            shapes.append(face.extrude(App.Vector(0, 0, axial + 4)))
+        except Exception as e:
+            print("WARN: Flussbarriere nicht baubar:", e)
     return shapes
 
 # Flux-barrier radial slots (air). q-axis = between poles (i+0.5)·pitch, d-axis =
@@ -1032,6 +1073,17 @@ if GEN_ROTOR:
                 rotor_solid = rotor_cut
             else:
                 print("WARN: balance-bolt holes produced an invalid rotor — skipped")
+    # Die Flussbarrieren des Reluktanzlaeufers (Luft im Blech).
+    if SYNRM_BARRIEREN:
+        sb_shapes = _synrm_barrier_solids()
+        if sb_shapes:
+            rotor_cut = rotor_solid.cut(Part.makeCompound(sb_shapes))
+            if rotor_cut.isValid():
+                rotor_solid = rotor_cut
+                print("CAD_INFO: %d Flussbarrieren geschnitten" % len(sb_shapes))
+            else:
+                print("WARN: Flussbarrieren ergaben einen ungueltigen Rotor "
+                      "— uebersprungen")
     # Flux-barrier radial air slots (q-/d-axis), cut into the rotor iron.
     if GEN_FB_Q or GEN_FB_D:
         fb_shapes = _flux_barrier_slots()
@@ -1140,13 +1192,26 @@ if GEN_ROTOR:
             _lam.append(_seg.transformGeometry(_m))
         _add("Commutator", Part.makeCompound(_lam), (0.80, 0.52, 0.22))
 
-        # Die Buersten: 2p Stueck, in der neutralen Zone zwischen den Polen.
+        # Die Buersten -- Masse aus `ema_gsm.kommutator`, nicht erfunden.
+        #
+        # Bis zum 20.09.2026 stand hier `_bb = 0.35 * _kl` und ein Quader
+        # `_bb x _bb x 0.7*_kl`: die Buerste wuchs also mit der
+        # Kommutatorlaenge statt mit dem Strom, den sie fuehrt. Gemessen an
+        # einem echten Bau 615.887 mm^3 je Stueck, sechs davon **groesser als
+        # der ganze Staender**. Jetzt: Breite in Umfangsrichtung und Laenge in
+        # Achsrichtung aus der Stromdichte am Kohlekontakt, die Hoehe aus
+        # `H_BUERSTE_MM` -- und so viele Arme, wie die Wicklungsart hat (bei
+        # der Wellenwicklung sind es ZWEI, nicht 2p).
         _bu2 = []
-        _bb = max(0.35 * _kl, 3.0)
-        for _i in range(int(GSM["poles"])):
-            _g = 360.0 * (_i + 0.5) / int(GSM["poles"])
-            _b = Part.makeBox(_bb, _bb, _kl * 0.7,
-                              App.Vector(_kd, -_bb / 2.0, _kz + 0.15 * _kl))
+        _bw = float(GSM.get("b_buerste_mm") or 8.0)
+        _bl = min(float(GSM.get("l_buerste_mm") or _kl), _kl)
+        _bh = float(GSM.get("h_buerste_mm") or 25.0)
+        _na = max(int(GSM.get("n_buerstenarme") or GSM["poles"]), 1)
+        for _i in range(_na):
+            _g = 360.0 * (_i + 0.5) / _na
+            _b = Part.makeBox(_bh, _bw, _bl,
+                              App.Vector(_kd, -_bw / 2.0,
+                                         _kz + (_kl - _bl) / 2.0))
             _b.rotate(App.Vector(0, 0, 0), App.Vector(0, 0, 1), _g)
             _bu2.append(_b)
         _add("Brushes", Part.makeCompound(_bu2), (0.15, 0.15, 0.17))

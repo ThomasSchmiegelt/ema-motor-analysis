@@ -783,3 +783,119 @@ $("btn_um").addEventListener("click", () => {
 });
 
 zeichne();
+
+
+/* ---- Die Bruecke zum Projekt -------------------------------------------
+ *
+ * Diese Seite laeuft ueber `file://` unveraendert weiter: gibt es keinen
+ * Server, bleibt die Leiste verborgen und nichts hier tut etwas. Das ist kein
+ * Zugestaendnis, sondern der Grund, aus dem sie eigenstaendig gebaut wurde --
+ * sie muss pruefbar sein, ohne dass etwas laeuft.
+ *
+ * Die Zuordnung Feldname <-> Schemaschluessel wird GEHOLT (`/axialfluss/felder`,
+ * aus `ema_fluss.SEITE_FELDER`) und nicht abgeschrieben. Eine zweite Zuordnung
+ * waere dieselbe Falle wie die handgespiegelte `magnetLegs` im Hauptwerkzeug.
+ */
+let FELDER = null, PROJEKT = null;
+
+function werteLesen() {
+  // Was die Seite im FORMULAR stehen hat, nicht was `P()` daraus rechnet:
+  // `P()` halbiert Radien und rechnet Winkel in Bogenmass um, und die
+  // Rueckrichtung muesste das spiegeln. Zwei Umrechnungen fuer dieselbe Groesse
+  // sind eine zu viel.
+  const w = {};
+  for (const f of FELDER || []) {
+    const el = $(f.seite);
+    if (el) w[f.seite] = f.kind === "enum" ? el.value : +el.value;
+  }
+  return w;
+}
+
+function werteSetzen(w) {
+  let n = 0;
+  for (const f of FELDER || []) {
+    const el = $(f.seite);
+    if (!el || !(f.seite in w)) continue;
+    el.value = f.kind === "enum" ? w[f.seite]
+             : (Math.round(w[f.seite] * 1e6) / 1e6);
+    n++;
+  }
+  return n;
+}
+
+const pSagt = (t, schlecht) => {
+  const el = $("p_sagt");
+  if (el) { el.textContent = t; el.className = schlecht ? "bad" : "e"; }
+};
+
+async function bruecke() {
+  // Projektkennung aus der Abfragezeichenkette -- so reicht der Reiter sie
+  // durch (`/axialfluss?projekt=...`), und so laesst sich die Seite auch in
+  // einem eigenen Fenster an dasselbe Projekt haengen.
+  const q = new URLSearchParams(location.search);
+  PROJEKT = q.get("projekt") || null;
+  let r;
+  try { r = await fetch("/axialfluss/felder"); } catch { return; }   // file://
+  if (!r.ok) return;
+  FELDER = (await r.json()).felder || [];
+  $("pleiste").style.display = "flex";
+  $("p_wo").textContent = PROJEKT ? `Projekt ${PROJEKT}` : "kein Projekt gewählt";
+  for (const [id, fn] of [["p_holen", holen], ["p_geben", geben],
+                          ["p_rechnen", rechnen]])
+    $(id).addEventListener("click", fn);
+  if (PROJEKT) holen(true);
+}
+
+async function holen(still) {
+  if (!PROJEKT) { pSagt("kein Projekt — die Adresse braucht ?projekt=…", true); return; }
+  const r = await fetch(`/axialfluss/vorgabe?projekt=${encodeURIComponent(PROJEKT)}`);
+  const d = await r.json();
+  if (!d.ok) { pSagt(d.grund, true); return; }
+  if (!d.anzahl) {
+    // Ein radiales Projekt hat KEINE axialen Schluessel. Das ist kein Fehler
+    // und wird auch nicht mit Vorgaben gefuellt -- die Seite behaelt ihre
+    // eigenen Werte, und das steht da.
+    pSagt(`„${d.label}" trägt keine axiale Geometrie (Flussweg: ${d.flussweg}) — ` +
+          `die Zeichnung bleibt, wie sie ist`, false);
+    return;
+  }
+  const n = werteSetzen(d.werte);
+  zeichne();
+  pSagt(`${n} Felder aus „${d.label}" übernommen`, false);
+  if (still) $("p_wo").textContent = `Projekt ${PROJEKT} — ${d.label}`;
+}
+
+async function geben() {
+  const r = await fetch("/axialfluss/uebernehmen", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projekt: PROJEKT, werte: werteLesen() }) });
+  const d = await r.json();
+  if (!d.ok) { pSagt(d.grund, true); return; }
+  PROJEKT = d.projekt;
+  $("p_wo").textContent = `Projekt ${PROJEKT}`;
+  pSagt(`übernommen — fluxPath = axial, ${d.geom.axialBauform}, ` +
+        `2p = ${d.geom.p * 2}, Q = ${d.geom.slots}`, false);
+}
+
+async function rechnen() {
+  // B_gap kommt aus dem Feldlauf DIESER Seite. Die Stufe rechnet es nicht und
+  // soll es auch nicht erfinden -- sie bekommt es als Messwert uebergeben.
+  const p = P();
+  if (!p.feldAn) { pSagt("erst „Feld rechnen“ einschalten — Stufe 1 braucht B_gap", true); return; }
+  const e = zeichneFeld($("c_feld"), p);
+  if (!e || !e.e || !e.e.geeicht) {
+    pSagt("ohne Magnet gibt es kein geeichtes B_gap", true); return;
+  }
+  const r = await fetch("/axialfluss/rechnen", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ werte: werteLesen(), b_gap: e.e.bAn }) });
+  const d = await r.json();
+  if (!d.ok) { pSagt(d.grund, true); return; }
+  const kasten = $("stufe1");
+  kasten.style.display = "";
+  $("stufe1_t").textContent = d.text;
+  pSagt(`Stufe 1 gerechnet mit B_gap = ${d.b_gap_t.toFixed(3)} T`, false);
+  kasten.scrollIntoView({ behavior: "smooth", block: "nearest" });
+}
+
+bruecke();

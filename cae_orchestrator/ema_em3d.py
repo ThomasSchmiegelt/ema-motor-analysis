@@ -58,6 +58,39 @@ COIL_J_SCALE = 199.0
 EM3D_MAX_NODES = 55000
 # Harte Obergrenze für die vom Nutzer wählbare Ziel-Knotenzahl (UI-Regler 10k–300k). Oberhalb ~345k
 # reicht der RAM dieser Maschine für den MUMPS-Direktlöser nicht mehr (OOM) — 300k lässt Sicherheit.
+#: Wie weit die Luftspalt-Zellgroesse ueber den Luftspalt hinaus darf, bevor
+#: das Netz an ihm entartet. Gemessen, nicht gewaehlt -- s. `_cl_decke`.
+GAP_CL_MAX_X = 2.5
+
+# Laeuferprofile, die AUF dem Rand enden (Schuhband der EESM, Kaefignut am
+# Rotorrand), werden um diesen Betrag nach aussen gedehnt und danach mit dem
+# Laeuferzylinder geschnitten -- sonst bleibt zwischen Polygonsehne und
+# echtem Kreis ein Eisensplitter stehen (gemessen 0,0006 mm, s. _build_mesh_once).
+RAND_UEBERSTAND_MM = 1.0
+RAND_TOL_MM = 0.05
+
+# Ob die Leiter aus der Luft GESCHNITTEN und die Luftstuecke VERSCHMOLZEN
+# werden, bevor alles ins ``occ.fragment`` geht. Beides ist gemessen und steht
+# deshalb als Konstante da statt als stille Entscheidung mitten im Code.
+LAEUFER_LEITER_SCHNEIDEN = True
+LAEUFER_LUFT_VERSCHMELZEN = True
+
+# **Unscharfe Boolesche Rechnung, und nur dort, wo sie gebraucht wird.**
+# Gemessen am Schenkelpollaeufer: die Erregerspule liegt mit drei von vier Ecken
+# INNERHALB der Zwischenpolluft, die vierte sitzt **8,2 Nanometer** von deren
+# Rand entfernt. Das ist kein Zeichenfehler -- beide Teile kommen aus derselben
+# `teile()`-Quelle und sollen dort aneinandergrenzen; es ist der Rest, den zwei
+# um 30 Grad gegeneinander gedrehte Rechnungen desselben Punktes uebriglassen.
+# Fuer den Stempler und fuer den 2-D-Netzbauer ist das nichts, fuer OCC ist es
+# eine Flaeche von 8e-6 mm Breite und damit „Invalid boundary mesh (overlapping
+# facets)". `Geometry.ToleranceBoolean` sagt OCC, Merkmale unterhalb dieses
+# Masses zu verschmelzen statt sie zu bauen. 0,1 Mikrometer liegt drei
+# Groessenordnungen unter dem kleinsten ECHTEN Merkmal dieser Kette (dem
+# 0,1-mm-Klebespalt der Magnettasche) und tausend ueber dem Splitter.
+# Gesetzt wird sie **nur, wenn es Laeuferprofile gibt** -- der PSM-Weg bleibt
+# damit Ziffer fuer Ziffer derselbe, auch in den Booleschen Operationen.
+TOLERANZ_BOOLEAN_MM = 1e-4
+
 EM3D_NODE_CEILING = 300000
 
 # In-Process-Cache des fertig gebauten 3D-Netzes je em3d-Arbeitsverzeichnis. Das Mesh hängt
@@ -77,6 +110,19 @@ def magnet_rects(geom: dict) -> list:
     `pole_ang = p_i·2π/poles`, alternierendes Vorzeichen, Startpunkt rotiert, Länge
     entlang `pole_ang+tilt`. Returns Liste von Dicts mit Mittelpunkt, Winkel, Maßen,
     Magnetisierungs-Einheitsvektor und Polindex/-vorzeichen."""
+    # **Eine Bauart ohne Magnete bekommt keine.** `magnet_legs` beschreibt die
+    # TASCHENLAGE und liefert deshalb fuer jede Bauart Schenkel -- gemessen 12
+    # fuer pmsm wie fuer asm, synrm, eesm und gsm. Ohne diese Frage baute der
+    # 3-D-Netzbauer einer Reluktanzmaschine zwoelf Magnete ins Blech; dieselbe
+    # Luecke, die am 20.09.2026 schon im FDM-Rasterer (`_rasterise`) und in den
+    # Feldbildern (`_draw_magnet_outlines`) gefunden wurde, hier eine Ebene
+    # tiefer. Die Fundstellen stehen in BEFUNDE.md.
+    try:
+        import ema_maschinenart as _MAm3
+        if not _MAm3.hole(_MAm3.art_code(geom)).hat_magnete:
+            return []
+    except Exception:                                        # noqa: BLE001
+        pass
     poles = int(geom["p"]) * 2
     legs, _meta = TOPO.magnet_legs(geom)
     out = []
@@ -156,6 +202,42 @@ def barrier_rects(geom: dict) -> list:
             out.append({"cx": rc * math.cos(a), "cy": rc * math.sin(a),
                         "ang": a, "length": length, "thick": fbw})
 
+    # **Der Reluktanzlaeufer.** Seine Barrieren kommen nicht aus
+    # `genFluxBarrierQ/D` (radiale Schlitze) und nicht aus dem Designer,
+    # sondern aus `ema_synrm_cad` -- gebogene Kanaele um die q-Achse. Der
+    # Netzbauer hier setzt Barrieren seit jeher aus Kastenprismen entlang einer
+    # Polylinie zusammen; er bekommt deshalb die **Mittellinie** derselben
+    # Barriere und ihre Dicke, also dieselben Zahlen, aus denen auch die beiden
+    # Raender des gezeichneten Polygons entstehen. Der Unterschied ist die
+    # Sehne statt des Bogens (gemessen 0,02…0,31 mm, 0,4…6,1 % der Dicke).
+    #
+    # Ohne das baute dieser Pfad fuer den SynRM einen VOLLEN Eisenring -- also
+    # eine Maschine ohne Reluktanzunterschied, und damit keine.
+    try:
+        import ema_maschinenart as _MAb
+        if _MAb.art_code(geom) == "synrm":
+            import ema_synrm_cad as _SYb
+            for _ml in _SYb.mittellinien(geom):
+                _w = max(0.5, float(_ml["dicke_mm"]))
+                _pl = _ml["punkte"]
+                for _i in range(poles):
+                    _ga = (_i + 0.5) * 2 * math.pi / poles     # q-Achse
+                    _c, _s = math.cos(_ga), math.sin(_ga)
+                    _gp = [(x * _c - y * _s, x * _s + y * _c) for x, y in _pl]
+                    for _k in range(len(_gp) - 1):
+                        _ax, _ay = _gp[_k]
+                        _bx, _by = _gp[_k + 1]
+                        _dx, _dy = _bx - _ax, _by - _ay
+                        _ll = math.hypot(_dx, _dy)
+                        if _ll < 1e-6:
+                            continue
+                        out.append({"cx": (_ax + _bx) / 2.0,
+                                    "cy": (_ay + _by) / 2.0,
+                                    "ang": math.atan2(_dy, _dx),
+                                    "length": _ll, "thick": _w})
+    except Exception:                                        # noqa: BLE001
+        pass
+
     cbars = geom.get("customBarriers") or []
     for p_i in range(poles):
         pa = p_i * 2 * math.pi / poles
@@ -202,6 +284,104 @@ def slot_rects(geom: dict) -> list:
         out.append({"cx": rc * math.cos(a), "cy": rc * math.sin(a),
                     "ang": a, "length": slot_d, "thick": width})
     return out
+
+
+def laeufer_profile(geom: dict, axial_mm: float) -> list:
+    """Der Laeufer einer Bauart OHNE Magnete als Polygonzuege -- aus ``teile()``.
+
+    **Warum es das braucht.** ``ema_em3d`` baut den Laeufer aus
+    ``magnet_rects``: ein Rotorzylinder, in den Magnete und ihre Taschen
+    geschnitten werden. Fuer eine Bauart ohne Magnete ist das kein ungenaues
+    Modell, sondern ein VOLLZYLINDER -- also eine andere Maschine. Bis zum
+    20.09.2026 wies der 3-D-Pfad sie deshalb ab.
+
+    Gebraucht wird nur eines: was im Laeufer NICHT Eisen ist. Und das steht
+    laengst fest -- ``ema_laeuferbild.teile()`` beschreibt jeden Laeufer als
+    Liste von Zeichenteilen, und ``umriss()`` gibt jedes davon als
+    geschlossenen Polygonzug in Millimetern im globalen Rahmen. Dieselbe
+    Quelle, aus der seit heute die Leinwand zeichnet, der FDM rastert, der
+    2-D-Elmer seine Flaechen baut und das CAD schneidet. Eine fuenfte Fassung
+    des Schenkelpols waere die Stelle, an der sie auseinanderlaufen.
+
+    ``eisen`` und ``pol`` fallen heraus: das IST der Rotorzylinder, in den
+    hineingeschnitten wird. Uebrig bleiben Luft (Zwischenpolraum,
+    Flussbarrieren, Kaefignuten) und Leiter (Erregerspule, Daempferstab,
+    Ankerwicklung) -- letztere mit ihrer **Durchflutung**, denn bei EESM und
+    GSM ist sie die einzige Quelle des Feldes.
+
+    Gibt eine Liste ``{punkte, rolle, durchflutung_A}``; leer fuer die PSM.
+    """
+    try:
+        import ema_maschinenart
+        if ema_maschinenart.hole(ema_maschinenart.art_code(geom)).hat_magnete:
+            return []
+        import ema_laeuferbild
+        d = ema_laeuferbild.teile(geom, float(axial_mm))
+    except Exception:                                        # noqa: BLE001
+        return []
+    if d.get("fehler"):
+        return []
+    aus = []
+    for t in d.get("teile") or []:
+        rolle = str(t.get("rolle") or "")
+        if rolle in ("eisen", "pol"):
+            continue
+        try:
+            pts = ema_laeuferbild.umriss(t)
+        except Exception:                                    # noqa: BLE001
+            continue
+        if len(pts) < 3:
+            continue
+        aus.append({"punkte": [(float(x), float(y)) for x, y in pts],
+                    "rolle": rolle,
+                    "durchflutung_A": float(t.get("durchflutung_A") or 0.0)})
+    return aus
+
+
+def _profil_kennwerte(punkte) -> tuple:
+    """Flaeche und Schwerpunkt eines geschlossenen Polygonzugs (Gauss).
+
+    Gebraucht von ``_assign_pieces``: es ordnet die Fragment-Volumina ueber
+    Schwerpunkt UND Masse zu, und beides muss vorher bekannt sein. Bei einem
+    Rechteck steht es in den Feldern, bei einem Polygonzug muss es gerechnet
+    werden -- und zwar aus derselben Kontur, die auch extrudiert wird, sonst
+    ordnet die Zuordnung an der falschen Stelle zu.
+    """
+    n = len(punkte)
+    a2 = 0.0
+    cx = cy = 0.0
+    for i in range(n):
+        x0, y0 = punkte[i]
+        x1, y1 = punkte[(i + 1) % n]
+        kreuz = x0 * y1 - x1 * y0
+        a2 += kreuz
+        cx += (x0 + x1) * kreuz
+        cy += (y0 + y1) * kreuz
+    if abs(a2) < 1e-12:
+        xs = [p[0] for p in punkte]
+        ys = [p[1] for p in punkte]
+        return 0.0, sum(xs) / n, sum(ys) / n
+    return abs(a2) / 2.0, cx / (3.0 * a2), cy / (3.0 * a2)
+
+
+def _profil_pieces(profile: list, L: float) -> list:
+    """Aus Profilen die Stuecke, die ``_assign_pieces`` erwartet."""
+    aus = []
+    for pr in profile:
+        pts = pr["punkte"]
+        flaeche, cx, cy = _profil_kennwerte(pts)
+        xs = [p[0] for p in pts]
+        ys = [p[1] for p in pts]
+        aus.append({"cx": cx, "cy": cy, "z0": 0.0, "z1": float(L),
+                    # `length`/`thick` gehen NUR in die Abstandstoleranz der
+                    # Zuordnung ein; die Masse kommt aus `vol_pred`.
+                    "length": max(max(xs) - min(xs), 1e-6),
+                    "thick": max(max(ys) - min(ys), 1e-6),
+                    "vol_pred": max(flaeche * float(L), 1e-9),
+                    "rolle": pr["rolle"],
+                    "durchflutung_A": pr.get("durchflutung_A", 0.0),
+                    "punkte": pts})
+    return aus
 
 
 def _assign_pieces(target_pieces, avail, dist_frac=0.5, mlo=0.3, mhi=2.6, single=False):
@@ -466,6 +646,28 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             sec = occ.addThruSections(loops, -1, True, True)      # makeSolid, ruled
             return [t for (d, t) in sec if d == 3]
 
+        # **Ein Polygon-Prisma ueber die volle Laenge.** Damit bekommt der
+        # 3-D-Pfad die Laeufer, die er bis zum 20.09.2026 gar nicht bauen
+        # konnte: Schenkelpol, Kaefig, Anker und Flussbarriere kommen als
+        # Polygonzug aus `laeufer_profile` -- derselben `teile()`-Quelle, aus
+        # der Leinwand, FDM-Raster, 2-D-Elmer und CAD lesen. Eine fuenfte
+        # Fassung waere die Stelle, an der sie auseinanderlaufen.
+        def _poly_loop(punkte, z):
+            pts = [occ.addPoint(float(x), float(y), z) for x, y in punkte]
+            ls = [occ.addLine(pts[k], pts[(k + 1) % len(pts)])
+                  for k in range(len(pts))]
+            return occ.addCurveLoop(ls)
+
+        def _extrude_poly(punkte):
+            try:
+                w0 = _poly_loop(punkte, 0.0)
+                w1 = _poly_loop(punkte, L)
+                sec = occ.addThruSections([w0, w1], -1, True, True)
+                vol = [d for d in sec if d[0] == 3]
+                return vol[0][1] if vol else None
+            except Exception:                                # noqa: BLE001
+                return None
+
         # Gerades Vollprisma 0..L (für Statornuten: die rotieren NICHT mit dem Rotor mit).
         def _extrude_straight(pc):
             w0 = _rect_loop(pc["cx"], pc["cy"], 0.0, pc["ang"], pc["length"], pc["thick"])
@@ -497,6 +699,135 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         brects = barrier_rects(geom)
         bpieces, _bn, _bs = _magnet_pieces(brects, L, _opts_eff)
         bar_vol_tags = [_extrude(pc) for pc in bpieces]
+
+        # Der Laeufer einer Bauart OHNE Magnete: Luft und Leiter als
+        # Polygon-Prismen. Fuer die PSM ist die Liste leer und alles darunter
+        # ein No-op -- ihr Weg bleibt Ziffer fuer Ziffer derselbe.
+        # ── Der Laeufer einer Bauart OHNE Magnete ────────────────────────
+        #
+        # Luft (Zwischenpolraum, Flussbarriere, Kaefignut) und Leiter
+        # (Erregerspule, Ankerwicklung, Daempferstab) als Polygon-Prismen aus
+        # `laeufer_profile` -- derselben `teile()`-Quelle wie Leinwand,
+        # FDM-Raster, 2-D-Elmer und CAD. Fuer die PSM ist die Liste leer und
+        # alles hier ein No-op; ihr Weg bleibt Ziffer fuer Ziffer derselbe.
+        #
+        # **Zwei Dinge, die der Stempler darf und OCC nicht:**
+        #
+        # 1. *Ueberlappen.* Die Zeichenteile folgen der Reihenfolge-Regel
+        #    („was spaeter in der Liste steht, gewinnt"), und danach liegt die
+        #    Erregerspule INNERHALB der Zwischenpolluft. Fuer den Stempler
+        #    harmlos, fuer den Netzbauer nicht: gemessen „Invalid boundary
+        #    mesh (overlapping facets)". Die Leiter werden deshalb aus der
+        #    Luft herausgeschnitten.
+        # 2. *Sich genau beruehren.* Zwischenpolluft und Schuhband grenzen am
+        #    Schuhboden exakt aneinander -- beschreiben denselben Kreis aber
+        #    mit VERSCHIEDEN vielen Stuetzpunkten (Polygon 20, Segment 24).
+        #    Zwei Polygonzuege desselben Kreises treffen sich nirgends genau,
+        #    und dazwischen bleiben nadelduenne Splitter stehen. Sie werden
+        #    deshalb VERSCHMOLZEN statt aneinandergelegt.
+        # 3. *Eine Gerade an einen Kreis legen.* Das Schuhband endet auf dem
+        #    Laeuferrand, und sein Bogen ist ein Polygonzug -- der Laeufer
+        #    selbst ist ein echter OCC-Zylinder. Die Sehne liegt INNERHALB
+        #    des Kreises, und dazwischen bleibt ein Eisensplitter von
+        #    gemessen 0,0006 mm stehen (50 Stuetzpunkte auf 19,2 Grad bei
+        #    r = 94,3). Die Randpunkte werden deshalb um `RAND_UEBERSTAND_MM`
+        #    nach AUSSEN geschoben und das Prisma danach mit dem
+        #    Laeuferzylinder GESCHNITTEN -- dann ist der Rand der exakte
+        #    Kreis und keine Naeherung davon. Dasselbe Verfahren wie beim
+        #    Sektornetz, das seine Teile ebenfalls voll baut und an die
+        #    Domaene schneidet.
+        #
+        # Danach ist der Laeufer eine ZERLEGUNG und keine Ueberlagerung, und
+        # die Reihenfolge ist wieder egal -- dasselbe Argument wie bei der
+        # Bogenoberkante im Zeichner.
+        _profile = laeufer_profile(geom, axial)
+        if _profile:
+            gmsh.option.setNumber("Geometry.ToleranceBoolean",
+                                  TOLERANZ_BOOLEAN_MM)
+
+        def _rand_dehnen(punkte):
+            """Punkte AUF dem Laeuferrand nach aussen schieben (s. Punkt 3)."""
+            aus = []
+            for _px, _py in punkte:
+                _r = math.hypot(_px, _py)
+                if _r > r_rot - RAND_TOL_MM and _r > 1e-9:
+                    _f = (r_rot + RAND_UEBERSTAND_MM) / _r
+                    aus.append((_px * _f, _py * _f))
+                else:
+                    aus.append((_px, _py))
+            return aus
+
+        def _am_rand(punkte):
+            return any(math.hypot(px, py) > r_rot - RAND_TOL_MM for px, py in punkte)
+
+        def _prisma(pr):
+            """Prisma aus einem Profil -- am Rand gedehnt und zurueckgeschnitten."""
+            _rand = _am_rand(pr["punkte"])
+            _t = _extrude_poly(_rand_dehnen(pr["punkte"]) if _rand else pr["punkte"])
+            if _t is None or not _rand:
+                return _t
+            try:
+                _res, _m = occ.intersect([(3, _t)], [(3, rotor)],
+                                         removeObject=True, removeTool=False)
+                _rest = [tt for (dd, tt) in _res if dd == 3]
+                return _rest[0] if _rest else None
+            except Exception:                                # noqa: BLE001
+                return None
+
+        _ist_leiter = [abs(float(pr.get("durchflutung_A") or 0.0)) > 1e-9
+                       or str(pr.get("rolle")) in ("kupfer", "alu")
+                       for pr in _profile]
+        _leiter_pr = [pr for pr, k in zip(_profile, _ist_leiter) if k]
+        _luft_pr = [pr for pr, k in zip(_profile, _ist_leiter) if not k]
+
+        _leiter_paare = [(t, pr) for pr, t in
+                         ((pr, _prisma(pr)) for pr in _leiter_pr)
+                         if t is not None]
+        _leiter_tags = [t for t, _pr in _leiter_paare]
+        _luft_tags = [t for t in (_prisma(pr) for pr in _luft_pr)
+                      if t is not None]
+        if _luft_tags or _leiter_tags:
+            occ.synchronize()
+        if _luft_tags and _leiter_tags and LAEUFER_LEITER_SCHNEIDEN:
+            rest = []
+            for t in _luft_tags:
+                try:
+                    res, _m = occ.cut([(3, t)], [(3, x) for x in _leiter_tags],
+                                      removeObject=True, removeTool=False)
+                    rest += [tt for (dd, tt) in res if dd == 3]
+                except Exception:                            # noqa: BLE001
+                    rest.append(t)
+            _luft_tags = rest
+            occ.synchronize()
+        if len(_luft_tags) > 1 and LAEUFER_LUFT_VERSCHMELZEN:
+            try:
+                res, _m = occ.fuse([(3, _luft_tags[0])],
+                                   [(3, t) for t in _luft_tags[1:]])
+                _luft_tags = [tt for (dd, tt) in res if dd == 3]
+                occ.synchronize()
+            except Exception:                                # noqa: BLE001
+                pass
+
+        # Schwerpunkt und Masse kommen aus OCC, nicht aus dem Polygon: nach
+        # Schnitt und Verschmelzung sind die Koerper andere als die Kontur, aus
+        # der sie entstanden -- und `_assign_pieces` ordnet ueber genau diese
+        # beiden Groessen zu.
+        lpieces, lauf_vol_tags = [], []
+        for t, rolle, strom in ([(t, "luft", 0.0) for t in _luft_tags]
+                                + [(t, pr.get("rolle", "kupfer"),
+                                    float(pr.get("durchflutung_A") or 0.0))
+                                   for t, pr in _leiter_paare]):
+            try:
+                gx, gy, _gz = occ.getCenterOfMass(3, t)
+                vm = occ.getMass(3, t)
+            except Exception:                                # noqa: BLE001
+                continue
+            _kant = max((vm / max(L, 1e-9)) ** 0.5, 1e-6)
+            lpieces.append({"cx": gx, "cy": gy, "z0": 0.0, "z1": float(L),
+                            "length": _kant, "thick": _kant,
+                            "vol_pred": max(vm, 1e-9),
+                            "rolle": rolle, "durchflutung_A": strom})
+            lauf_vol_tags.append(t)
 
         # Magnettaschen: EIN einheitliches Luft-LANGLOCH (obround: Rechteck + zwei Halbkreis-Enden)
         # um jeden vergrabenen Magneten, mit dem ECHTEN Geometrie-Tab-Klebespalt `clr` (magGapMm,
@@ -634,6 +965,7 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             + [(3, t) for t in cap_vol_tags if t is not None] \
             + [(3, t) for t in bolt_tags if t is not None] \
             + [(3, t) for t in slot_vol_tags if t is not None] \
+            + [(3, t) for t in lauf_vol_tags if t is not None] \
             + [(3, t) for t in ring_tags]
         occ.fragment(all_in, [])
         occ.synchronize()
@@ -662,6 +994,13 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         _used = mag_taken | bar_taken | cap_taken | bolt_taken
         slot_avail = [t for t in vinfo if t[0] not in _used]
         slot_assign, slot_taken = _assign(slot_pieces, slot_avail)
+        # Die Laeuferteile zuletzt: sie liegen alle IM Rotor und koennen mit
+        # nichts anderem verwechselt werden. `dist_frac` grosszuegig, weil ein
+        # Polygonschwerpunkt beim Fragmentieren am Rotorrand wandern kann.
+        _used2 = _used | slot_taken
+        lauf_avail = [t for t in vinfo if t[0] not in _used2]
+        lauf_assign, lauf_taken = _assign(lpieces, lauf_avail,
+                                          dist_frac=1.2, mlo=0.2, mhi=3.0)
 
         def _surfs_of(vols):
             s = set()
@@ -678,6 +1017,7 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         cap_vols = [v for vs in cap_assign.values() for v in vs]
         bolt_vols = [v for vs in bolt_assign.values() for v in vs]
         slot_vols = [v for vs in slot_assign.values() for v in vs]
+        lauf_vols = [v for vs in lauf_assign.values() for v in vs]
         # Flussbarrieren, Bolzenlöcher, Statornuten in die Feinzone (mag_cl). Magnete + Magnet-
         # Taschen NUR wenn KEINE Taschen aktiv: bei aktiven Taschen grenzen Magnet- und Taschen-
         # Oberfläche an den dünnen 0,1–0,3-mm-Klebespalt — ein mm-Ziel (mag_cl) dort ist geometrie-
@@ -685,7 +1025,8 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         # `Mesh.MeshSizeMin ≈ 0,8·clr` + den natürlichen Größengradienten aufgelöst (verifiziert:
         # so meshen die gefusten Kanäle sauber; ein festes Feinband auf ALLEN Magnetflächen sprengt
         # dagegen die Knotenzahl / hängt).
-        fine_surfs = (_surfs_of(bar_vols) | _surfs_of(bolt_vols) | _surfs_of(slot_vols))
+        fine_surfs = (_surfs_of(bar_vols) | _surfs_of(bolt_vols)
+                      | _surfs_of(slot_vols) | _surfs_of(lauf_vols))
         if not (opts.get("mag_pockets", True) and _pocket_clr > 0):
             fine_surfs |= _surfs_of(mag_vols)
 
@@ -818,9 +1159,25 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
             groups["air"].append(v)
         for v in bolt_vols:
             groups["air"].append(v)                         # Bolzen-Durchgangslöcher (Luft)
+
+        # **Der Laeufer einer Bauart ohne Magnete.** Alles darin ist magnetisch
+        # Luft (mu_r ~ 1): die Zwischenpolluft und die Flussbarriere sowieso,
+        # der Kaefigstab und die Wicklung ebenso -- Kupfer und Aluminium sind
+        # magnetisch nicht von Luft zu unterscheiden. Was sie UNTERSCHEIDET,
+        # ist der Strom, und den bekommen sie unten als eigene Koerper.
+        laeufer_leiter = []                                  # (volumen, durchflutung_A)
+        for i, pc in enumerate(lpieces):
+            for v in lauf_assign.get(i, []):
+                if abs(float(pc.get("durchflutung_A") or 0.0)) > 1e-9:
+                    laeufer_leiter.append((v, float(pc["durchflutung_A"]),
+                                           pc.get("vol_pred", 0.0)))
+                else:
+                    groups["air"].append(v)
+
         for (v, gx, gy, gz, vmass) in vinfo:
-            if v in (mag_taken | bar_taken | cap_taken | bolt_taken | slot_taken):
-                continue                                    # Magnet/Barriere/Kappe/Bolzen/Nut schon zugeordnet
+            if v in (mag_taken | bar_taken | cap_taken | bolt_taken
+                     | slot_taken | lauf_taken):
+                continue                                    # Magnet/Barriere/Kappe/Bolzen/Nut/Laeufer schon zugeordnet
             # Ringe über einen ECHTEN Innenpunkt (Element-Schwerpunkt): konzentrische
             # Ringe haben ihren Volumenschwerpunkt auf der Achse → dort Radius untauglich.
             pr = _probe(v)
@@ -888,6 +1245,27 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
                                   "length": sp["length"], "thick": sp["thick"]})
             for v in slot_assign[i]:
                 vol_class[v] = "coil"
+        # **Die LAEUFERLEITER als eigene Koerper.** Erregerspule (EESM),
+        # Ankerwicklung (GSM) und Daempferstab tragen eine eingepraegte
+        # GLEICHdurchflutung -- und die ist bei EESM und GSM die einzige Quelle
+        # des Feldes. Magnetisch sind sie Luft (mu_r ~ 1), sie brauchen aber je
+        # einen eigenen Koerper, damit die `.sif` ihnen eine Stromdichte geben
+        # kann. Dieselbe Bauform wie die Statornut, nur steht der Strom hier
+        # fest statt aus dem Betriebspunkt zu kommen.
+        tags["laeufer_leiter"] = []
+        for i, pc in enumerate(lpieces):
+            a = float(pc.get("durchflutung_A") or 0.0)
+            if abs(a) < 1e-9 or not lauf_assign.get(i):
+                continue
+            nm = f"rotorleiter_{i}"
+            phys = _phys(3, lauf_assign[i], nm)
+            tags["laeufer_leiter"].append(
+                {"name": nm, "phys": phys, "A": a,
+                 "vol_mm3": float(pc.get("vol_pred") or 0.0),
+                 "rolle": pc.get("rolle", "")})
+            for v in lauf_assign[i]:
+                vol_class[v] = "coil"
+
         # Stirnring-Leiter (oben/unten) je als eigener Körper (Material Luft; im Lastfall
         # azimutale Rückführ-Stromdichte). z_sign = +1 oben (z>L) / −1 unten (z<0).
         tags["coil_rings"] = []
@@ -923,6 +1301,12 @@ def _build_mesh_once(geom: dict, axial: float, opts: dict, msh_path: str) -> dic
         tags["n_magnets"] = len(tags["magnets"])
         tags["n_barriers"] = len(bar_vols)
         tags["n_slots"] = len(slot_vols)
+        # Was vom Laeufer der magnetlosen Bauart wirklich im Netz steht --
+        # gezaehlt, nicht angefordert. Dieselbe Regel wie bei den Taschen:
+        # „gebaut" und „zugeordnet" sind zwei verschiedene Zahlen.
+        tags["n_laeufer_teile"] = len(lauf_vols)
+        tags["n_laeufer_teile_want"] = len(lpieces)
+        tags["n_laeufer_leiter"] = len(laeufer_leiter)
         # Magnettaschen ZÄHLEN, nicht nur anfordern. `mag_pockets=True` sagt nur, dass sie
         # GEBAUT werden sollten — ob die Luft-Schalen die Schwerpunkt-/Massenzuordnung
         # (`_assign_pieces`) überlebt haben, steht erst hier fest. Ohne diesen Zähler ist
@@ -1355,6 +1739,11 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
             ring_info = {"K": C0 / (t_ring * max(p_pairs, 1)), "p": p_pairs,
                          "id": id_, "iq": iq}
     loaded = inject and bool(slot_J)
+    # Die Erregerwicklung des Laeufers fuehrt ihren Gleichstrom AUCH im
+    # Leerlauf -- ohne die Divergenzbereinigung waere genau der Fall unbrauchbar,
+    # fuer den die fremderregte Maschine gebaut ist.
+    _lauf_strom = any(abs(float(x.get("A") or 0.0)) > 1e-9
+                      for x in (tags.get("laeufer_leiter") or []))
     tags["operating_point"] = {"excitation": "loaded" if op_loaded else "open_circuit",
                                "field_loaded": loaded,
                                "rpm": float(opts.get("rpm", 0.0) or 0.0),
@@ -1417,7 +1806,8 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
                 '  Jfix: Linear System Max Iterations = 10000\n'
                 '  Jfix: Linear System Convergence Tolerance = 1.0e-6\n'
                 '  Jfix: Linear System Preconditioning = ILU1\n'
-                '  Jfix: Linear System Abort Not Converged = False\n') if loaded else ''
+                '  Jfix: Linear System Abort Not Converged = False\n') \
+        if (loaded or _lauf_strom) else ''
     # Piola-Transformation: curl-konforme Kantenelemente niedrigster Ordnung brauchen sie
     # auf NICHT-simpliziellen Elementen (Hexaeder/Prismen), sonst wird das Feld falsch. Auf
     # reinen Tetraeder-Netzen ist sie nicht nötig (daher nur im Hex-Modus gesetzt). WICHTIG:
@@ -1430,7 +1820,8 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
              '  Equation = "MgDyn"\n'
              '  Procedure = "MagnetoDynamics" "WhitneyAVSolver"\n'
              '  Variable = "AV"\n'
-             '  Fix Input Current Density = ' + ('True' if loaded else 'False') + '\n'
+             '  Fix Input Current Density = '
+             + ('True' if (loaded or _lauf_strom) else 'False') + '\n'
              + gauge
              + piola
              + jfix_cfg
@@ -1512,6 +1903,37 @@ def write_sif(geom: dict, opts: dict, tags: dict, work_dir: str,
             bf += 1
         else:
             S.append(f'Body {c["phys"]}\n  Name = "{c["name"]}"\n  Equation = 1\n  Material = 2\nEnd\n')
+
+    # **Die Erregerwicklung des Laeufers -- die einzige Feldquelle der EESM.**
+    #
+    # Sie steht hier NEBEN dem Lastfall und nicht darin: eine fremderregte
+    # Maschine hat auch im Leerlauf ein Feld, das ist ihre Bauart. Die
+    # Durchflutung kommt aus `ema_eesm.erregung` ueber `ema_laeuferbild.teile()`
+    # -- derselben Quelle wie Leinwand, FDM-Raster und CAD -- und wird hier nur
+    # noch auf den Querschnitt bezogen. `COIL_J_SCALE` ist derselbe
+    # mm-gegen-m-Faktor wie bei der Statornut; zwei Faktoren waeren zwei
+    # verschieden grosse Ampere in derselben Datei.
+    #
+    # **Was daran NICHT streng ist, und warum es trotzdem so dasteht:** der
+    # Strom laeuft als axiale Dichte durch ein Prisma, das bei z=0 und z=L
+    # aufhoert -- die Wickelkoepfe, die ihn schliessen, sind nicht gebaut. Ueber
+    # den Querschnitt hebt er sich auf (+A und -A je Pol), die Summe ist also
+    # null und das Neumann-System bleibt konsistent; die Restdivergenz an den
+    # Stirnseiten raeumt `Fix Input Current Density` weg. Dieselbe Naeherung und
+    # dieselbe Grenze wie bei der Ankerrueckwirkung des Staenders: in der
+    # MITTELEBENE belastbar, an den Stirnseiten nicht. Das steht im Ergebnis.
+    for lc in tags.get("laeufer_leiter", []):
+        _A = float(lc.get("A") or 0.0)
+        _q = float(lc.get("vol_mm3") or 0.0) / max(float(tags.get("L") or 1.0), 1e-9)
+        if abs(_A) < 1e-9 or _q <= 1e-9:
+            S.append(f'Body {lc["phys"]}\n  Name = "{lc["name"]}"\n  Equation = 1\n'
+                     f'  Material = 2\nEnd\n')
+            continue
+        _J = COIL_J_SCALE * _A / _q
+        S.append(f'Body {lc["phys"]}\n  Name = "{lc["name"]}"\n  Equation = 1\n'
+                 f'  Material = 2\n  Body Force = {bf}\nEnd\n')
+        S.append(f'Body Force {bf}\n  Current Density 3 = Real {_J:.6e}\nEnd\n')
+        bf += 1
 
     # Stirnring-Leiter: azimutale Rückführ-Stromdichte (schließt den Nutstrom).
     # J_θ = z_sign·K·(i_d·sin(pθ)+i_q·cos(pθ)), θ=atan2(y,x); CD1=−y·J_θ, CD2=+x·J_θ.
@@ -2594,6 +3016,82 @@ def _seed_cl(geom, opts):
     return gap_cl, mag_cl, mesh_cl, mag_grow
 
 
+def _cl_decke(geom, axial=None):
+    """Wie GROB die Zellen hoechstens werden duerfen -- aus der Geometrie.
+
+    ``_seed_cl`` kennt solche Schranken laengst, der **Zielregler** aber nicht:
+    er multipliziert die Zellgroessen mit ``(n/ziel)**(1/1.85)``, bis die
+    Knotenzahl passt, und laeuft dabei an duennen Merkmalen vorbei. Was dann
+    entsteht, ist kein groeberes Netz, sondern ein kaputtes.
+
+    Gemessen am 20.09.2026 an einem SynRM-Laeufer (672 Flussbarrieren, duennste
+    5,15 mm): Versuch 1 baute mit ``mag_cl = 3,89`` sauber durch (312.402
+    Knoten, alle 672 Barrieren). Der Regler vergroeberte auf das Knotenziel
+    60.000 (``x2,440`` → ``mag_cl = 9,49``, also fast **doppelt so breit wie
+    die Barriere**), und die Versuche 2 bis 4 scheiterten an 302…308 entarteten
+    Tetraedern. Schlimmer noch: die Selbstheil-Leiter antwortet darauf mit
+    „Luftspalt-/Magnet-Mesh x1,5 vergroebern" -- sie vergroebert ein Netz, das
+    gerade daran gescheitert ist, zu grob zu sein.
+
+    **Zwei Decken, und die zweite kam erst durch eine Messung zustande.**
+
+    ``mag_cl`` ist die offensichtliche: Magnete und Flussbarrieren sind eigene
+    Koerper, die IN den Rotor gefragmentet werden; eine Zelle breiter als der
+    Koerper bildet ihn nicht grob ab, sondern zerreibt ihn zu Slivern.
+
+    ``gap_cl`` bekam im ersten Anlauf **keine** Decke, und zwar aus einem
+    guten Grund: die Hauserfahrung sagt, dieselbe Delta-Geometrie baute ihre
+    Magnettaschen sowohl bei ``gap_cl = 0,42`` (245k Knoten) als auch bei
+    ``gap_cl = 1,75`` (30k Knoten) -- bei 0,70 mm Luftspalt also bis zum
+    **2,5-fachen**. Eine Decke bei einer Zelle je Spalt haette diese gemessen
+    funktionierende Einstellung verboten.
+
+    Der Lauf mit nur der ``mag_cl``-Decke hat dann die Grenze wirklich
+    vermessen (SynRM, 0,70 mm Spalt):
+
+    ====== ============== ==========================
+    gap_cl Vielfaches      Ergebnis
+    ====== ============== ==========================
+    0,420  0,6x           ✓ 312.402 Knoten
+    1,025  1,5x           ✓ 138.932 Knoten
+    1,613  2,3x           ✓ 103.416 Knoten
+    2,165  3,1x           ✗ 304 entartete Tetraeder
+    ====== ============== ==========================
+
+    Zwischen 2,3x und 3,1x liegt die Grenze; ``GAP_CL_MAX_X = 2.5`` laesst
+    beide gemessenen guten Werte zu (2,3x hier und 2,5x an der Delta-Geometrie)
+    und schliesst den gemessenen schlechten aus. Das ist keine Faustregel,
+    sondern die engste Schranke, die zu den vorliegenden Messungen passt -- und
+    sie steht als Konstante da, damit die naechste Messung sie verschieben kann.
+
+    Gibt ``(gap_max, mag_max)`` in mm zurueck; ``None`` heisst „keine Decke".
+    """
+    try:
+        gap = max(0.05, (float(geom["statorID"]) - float(geom["rotorOD"])) / 2.0)
+        gap_max = GAP_CL_MAX_X * gap
+    except Exception:                                        # noqa: BLE001
+        gap_max = None
+
+    duenn = None
+    try:
+        import ema_maschinenart as _MA
+        if _MA.art_code(geom) == "synrm":
+            import ema_synrm_cad as _SC
+            b = _SC.barrieren(geom, float(axial or 80.0))
+            d = [float(x.get("dicke_mm") or 0.0) for x in (b.get("barrieren") or [])]
+            d = [x for x in d if x > 1e-6]
+            duenn = min(d) if d else None
+        else:
+            t = float(geom.get("magThick") or 0.0)
+            duenn = t if t > 1e-6 else None
+    except Exception:                                        # noqa: BLE001
+        duenn = None
+    # 0,8 x Merkmal: dieselbe Zahl, mit der `_build_mesh_once` den Klebespalt
+    # der Magnettasche aufloest (`MeshSizeMin ~ 0,8*clr`) -- kein zweiter
+    # Beiwert fuer dieselbe Frage.
+    return gap_max, (0.8 * duenn if duenn else None)
+
+
 def _mesh_logger(msh, log=None):
     """Öffnet ein Mesh-Build-Logfile neben ``msh`` (``mesh_build.log``) und gibt eine Schreib-
     Funktion zurück, die JEDE Zeile mit Zeitstempel ins File schreibt UND (best-effort) an den
@@ -2718,16 +3216,108 @@ def _tor_layout(geom: dict, opts: dict | None = None, log=None) -> list:
     import ema_maschinenart as _MA3
     _art3 = _MA3.art_code(geom)
     if not _MA3.hole(_art3).hat_magnete:
-        _weg = _MA3.hole(_art3).feldweg
+        # **Der Reluktanzlaeufer geht hier durch, und zwar seit dem
+        # 20.09.2026.** Dieser Pfad ist magnetostatisch (WhitneyAV) -- also
+        # genau die richtige Physik fuer eine Maschine, deren Moment allein aus
+        # der Laeufergeometrie kommt. Was fehlte, war nicht der Loeser, sondern
+        # die GEOMETRIE: `magnet_rects` lieferte Magnete (jetzt keine mehr) und
+        # `barrier_rects` kannte die Flussbarrieren nicht (jetzt ueber
+        # `ema_synrm_cad.mittellinien`). Geprueft wird dafuer, ob die Barrieren
+        # ueberhaupt ins Blech passen -- `rotor_layout_check` weiter unten
+        # prueft MAGNETtaschen und haette hier nichts zu sagen.
+        if _art3 == "synrm":
+            try:
+                import ema_synrm_cad as _SY3
+                _b3 = _SY3.barrieren(geom, None)
+            except Exception as _e3:                         # noqa: BLE001
+                if log:
+                    log(f"\u26a0 Barrierentor nicht auswertbar "
+                        f"({type(_e3).__name__}) — ungeprueft weiter")
+                return []
+            if not _b3.get("passt") and not (geom or {}).get("barriereFreigabe"):
+                raise LayoutUngueltig(
+                    "Flussbarrieren nicht auslegbar: "
+                    + str(_b3.get("grund")
+                          or "; ".join(_b3.get("befund") or []) or "kein Platz")
+                    + " — mit geom.barriereFreigabe=true trotzdem bauen.")
+            if log:
+                log(f"\u2713 Flussbarrieren: {_b3['k']} je Pol, Isolationsgrad "
+                    f"q-Achse {_b3['kw_ist']:.2f}")
+            return list(_b3.get("befund") or [])
+
+        # **Der Schenkelpollaeufer geht hier durch, seit dem 20.09.2026.**
+        # Der Satz darunter -- „dieser Pfad kennt eingepraegte Stroeme nur im
+        # Staender" -- stimmte, bis `laeufer_profile` den Laeufer aus
+        # `ema_laeuferbild.teile()` baute und `write_sif` den Erregerspulen
+        # ihre Gleichstromdichte gab. Eine eingepraegte GLEICHdurchflutung ist
+        # magnetostatisch exakt darstellbar; das ist gerade der Fall, den ein
+        # magnetostatischer Loeser kann. Nicht darstellbar bleibt, was
+        # ZEITabhaengig ist -- Kaefig und kommutierter Anker.
+        #
+        # Geprueft wird, was hier wirklich etwas heisst: ob Polkern und
+        # Erregerspule in die Polteilung passen. `rotor_layout_check` prueft
+        # Magnettaschen und haette an einem Schenkelpol nichts zu sagen --
+        # dasselbe Argument wie beim Reluktanzlaeufer eine Ebene darueber.
+        if _art3 == "eesm":
+            try:
+                import ema_eesm_cad as _EE3
+                _k3 = _EE3.koerper(geom, float((opts or {}).get("axial_mm")
+                                               or geom.get("axialLen") or 80.0))
+            except Exception as _e4:                         # noqa: BLE001
+                if log:
+                    log(f"\u26a0 Schenkelpoltor nicht auswertbar "
+                        f"({type(_e4).__name__}) — ungeprueft weiter")
+                return []
+            if not _k3.get("passt") and not (geom or {}).get("layoutFreigabe"):
+                raise LayoutUngueltig(
+                    "Schenkelpol passt nicht in die Polteilung: "
+                    + str(_k3.get("grund") or "kein Platz")
+                    + " — mit geom.layoutFreigabe=true trotzdem bauen.")
+            if log:
+                log("\u2713 Schenkelpol: Kern und Erregerspule passen in die "
+                    "Polteilung")
+            # Was dieser Weg NICHT rechnet, steht als Warnung im Lauf und nicht
+            # nur im Quelltext: der Erregerstrom laeuft als axiale Dichte durch
+            # ein Prisma, dessen Wickelkoepfe nicht gebaut sind.
+            _ung = _k3.get("ungeprueft") or []
+            if isinstance(_ung, str):          # eine Zeichenkette ist EIN Befund,
+                _ung = [_ung]                  # nicht eine Liste von Buchstaben
+            return list(_ung) + [
+                "Die HOEHE des Luftspaltfelds ist hier nicht belastbar, und "
+                "sie HAENGT AM NETZ: an derselben Maschine gemessen 0,196 T "
+                "bei 48.055 Knoten und 0,328 T bei 44.229 gegen 0,509 T aus "
+                "dem 2-D-Elmer derselben Erregung. Zwei Gruende, beide "
+                "bekannt — der 0,7-mm-Luftspalt ist in einem bezahlbaren "
+                "3-D-Netz nicht aufloesbar, und COIL_J_SCALE ist an EINER "
+                "Maschine und am STAENDER geeicht. Belastbar sind Muster und "
+                "Verhaeltnisse, nicht die Amplitude.",
+                "Erregerwicklung ohne Wickelkoepfe modelliert (axiale "
+                "Stromdichte, Summe ueber den Querschnitt null, Restdivergenz "
+                "ueber 'Fix Input Current Density') — in der MITTELEBENE "
+                "belastbar, an den Stirnseiten nicht."]
+
+        # Fuer alle anderen magnetlosen Bauarten baute dieser Pfad eine ANDERE
+        # Maschine, und dafuer gibt es keinen Ersatz im 3-D:
+        #   * ASM  -- Kaefig, braucht ein zeitabhaengiges Feld: `feld3d`
+        #             (`ema_em3d_harm`, harmonisch).
+        #   * EESM -- Schenkelpol mit eingepraegter Gleicherregung im LAEUFER;
+        #             dieser Pfad kennt eingepraegte Stroeme nur im Staender.
+        #   * GSM  -- kommutierter Anker, zeitabhaengig.
+        # Bis zum 20.09.2026 stand hier fuer ALLE drei „geht ueber feld3d
+        # (ema_em3d_harm, harmonisch)" -- das stimmt nur fuer die ASM, und die
+        # anderen beiden wurden damit auf einen Weg geschickt, der sie ebenso
+        # abweist. Der Text folgt jetzt dem `feldweg` der Art.
+        _weg3 = _MA3.hole(_art3).feldweg
+        _rat = {
+            "elmer2d_harm": ("Fuer '%s' geht der 3-D-Weg ueber `feld3d` "
+                             "(ema_em3d_harm, harmonisch)." % _art3),
+        }.get(_weg3, "Fuer '%s' gibt es heute keinen 3-D-Weg: dieser Pfad ist "
+                     "magnetostatisch und kennt eingepraegte Stroeme nur im "
+                     "Staender." % _art3)
         raise _MA3.ArtNichtUnterstuetzt(
             f"Dieser 3-D-Pfad zeichnet den Laeufer aus den MAGNETEN, und "
             f"'{_art3}' hat keine. Gebaut wuerde eine andere Maschine als die "
-            f"gerechnete (gemessen: 1224 Magnetzellen und ein voller Eisenring "
-            f"statt der Zwischenpolluft). "
-            + (f"Fuer '{_art3}' geht der 3-D-Weg ueber `feld3d` "
-               f"(ema_em3d_harm, harmonisch)."
-               if _weg and _weg != "keiner" else
-               f"Fuer '{_art3}' gibt es heute keinen 3-D-Weg."))
+            f"gerechnete. " + _rat)
 
     from ema_rotorcheck import rotor_layout_check
     try:
@@ -2805,6 +3395,16 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
     mitigations = _mesh_mitigations()
     mit_i = 0                      # nächster Mitigationsschritt bei Fehler
     scale_passes = 0               # Ziel-/Cap-Nachführungen
+    gedeckelt = {}                 # Zellgrößen, die an der Geometrie-Decke hingen
+    # **Das letzte Netz, das WIRKLICH gebaut hat.** Ein Knotenziel ist ein
+    # Wunsch, ein gebautes Netz ist ein Ergebnis -- und der Regler warf bisher
+    # das zweite weg, um das erste zu jagen. Gemessen an einem SynRM-Laeufer:
+    # Versuch 3 lieferte 103.416 Knoten mit allen 672 Flussbarrieren, Versuch 4
+    # (dieselbe Geometrie, nur groebere Zellen) zerfiel in 332 Sliver, und die
+    # Selbstheil-Leiter arbeitete sich danach durch immer groebere Netze, die
+    # alle aus demselben Grund scheiterten. Uebrig blieb ein Abbruch, obwohl
+    # zwanzig Minuten vorher ein gutes Netz dastand.
+    letztes_gutes = None           # (opts, n_knoten)
     pocket_ok_nodes = []           # Knotenzahlen der Versuche, die die Taschen getragen haben
     # 7 Mitigationsstufen + bis zu 4 Ziel-/Cap-Nachführungen; seit die Taschen nicht mehr
     # vorab still abgeschaltet werden, kann die Leiter tatsächlich bis ans Ende laufen.
@@ -2813,6 +3413,14 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
 
     tags = None
     for attempt in range(1, max_attempts + 1):
+        # **Die Decke bindet vor JEDEM Bau** -- also den Zielregler UND die
+        # Selbstheil-Leiter. An einer der beiden Stellen zu klemmen hiesse, die
+        # andere weiter ins Leere laufen zu lassen; gemessen war es gerade die
+        # Leiter, die den Fehler verschlimmert hat.
+        for _k, _deck in zip(("gap_cl", "mag_cl"), _cl_decke(geom, axial)):
+            if _deck and float(cur.get(_k, 0) or 0) > _deck + 1e-9:
+                gedeckelt.setdefault(_k, (float(cur[_k]), _deck))
+                cur = dict(cur, **{_k: _deck})
         try:
             wl(f"Versuch {attempt}: gap={cur.get('gap_cl',0):.3f} mag={cur.get('mag_cl',0):.2f} "
                f"grob={cur.get('mesh_cl',0):.2f} pockets={cur.get('mag_pockets',True)} "
@@ -2820,13 +3428,55 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
             tags = build_mesh(geom, axial, cur, msh)
         except Exception as e:
             wl(f"  ✗ FEHLER: {type(e).__name__}: {str(e)[:180]}")
+            # **Erst zurueck zum letzten guten Netz, dann erst die Leiter.**
+            # Scheitert ein Versuch, dem ein geglueckter vorausging, war die
+            # Vergroeberung schuld -- und die naechste Leiterstufe vergroebert
+            # noch mehr. Der Rueckweg kostet EINEN Netzbau und liefert
+            # garantiert ein Netz; die Leiter bleibt fuer den Fall, dass schon
+            # der ERSTE Versuch scheitert (dann gibt es nichts, wohin zurueck).
+            if letztes_gutes is not None:
+                cur, _n_gut = dict(letztes_gutes[0]), letztes_gutes[1]
+                wl(f"  ↩ zurueck zum letzten Netz, das gebaut hat "
+                   f"({_n_gut} Knoten) — das Knoten-Ziel ist an dieser "
+                   f"Geometrie nicht erreichbar", ui=True)
+                warns.append(
+                    f"Knoten-Ziel {target if target else cap} nicht erreichbar: "
+                    f"jede groebere Zellgroesse liess das Netz entarten. "
+                    f"Gebaut wurde das letzte tragfaehige Netz mit "
+                    f"{_n_gut} Knoten.")
+                tags = build_mesh(geom, axial, cur, msh)
+                letztes_gutes = None      # nur EIN Rueckweg, sonst Endlosschleife
+                break
             if mit_i >= len(mitigations):
                 wl("  ⚠ Mitigationsleiter erschöpft — Netzbau bleibt fehlgeschlagen.")
                 if logpath:
                     warns.append(f"Netzbau trotz Selbstheilung fehlgeschlagen — Details: {logpath}")
                 raise
-            label, cur = mitigations[mit_i](cur, _seed_cl(geom, cur))
-            mit_i += 1
+            # **Eine Stufe, die durch die Decke wirkungslos wird, kostet
+            # keinen Netzbau mehr.** Die Leiter traegt die Stufe
+            # „Luftspalt-/Magnet-Mesh x1,5 vergroebern"; sind beide Groessen
+            # schon an ihrer Geometriedecke, aendert sie nichts — und der
+            # naechste Bau waere ein wortgleicher Wiederholungslauf von sieben
+            # Minuten, an dessen Ende derselbe Fehler steht. Also
+            # weiterschalten, bis sich wirklich etwas bewegt.
+            vorher = dict(cur)
+            while mit_i < len(mitigations):
+                label, kand = mitigations[mit_i](dict(vorher), _seed_cl(geom, vorher))
+                mit_i += 1
+                for _k, _deck in zip(("gap_cl", "mag_cl"), _cl_decke(geom, axial)):
+                    if _deck and float(kand.get(_k, 0) or 0) > _deck + 1e-9:
+                        kand[_k] = _deck
+                if any(kand.get(k) != vorher.get(k)
+                       for k in set(kand) | set(vorher)):
+                    cur = kand
+                    break
+                wl(f"  (uebersprungen: '{label}' bewegt nichts — die "
+                   f"Zellgroessen haengen an der Geometriedecke)")
+            else:
+                wl("  ⚠ Mitigationsleiter erschöpft — Netzbau bleibt fehlgeschlagen.")
+                if logpath:
+                    warns.append(f"Netzbau trotz Selbstheilung fehlgeschlagen — Details: {logpath}")
+                raise
             wl(f"  → Selbstheil-Monitor greift ein: {label}", ui=True)
             warns.append(f"Netzbau geheilt: {label} (überlappende Facetten).")
             continue
@@ -2843,6 +3493,7 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
             pk_txt = "KEINE Magnettaschen (abgeschaltet)"
         wl(f"  ✓ {n} Knoten, {tags.get('n_magnets','?')} Magnete, "
            f"{tags.get('n_slots',0)} Nuten, {tags.get('n_barriers',0)} Barrieren, {pk_txt}")
+        letztes_gutes = (dict(cur), n)
         if n_pk:
             pocket_ok_nodes.append(n)      # dieser Netzbau trug die Taschen (für den Hinweis unten)
         if tags.get("caps_dropped") or (cur.get("mag_pockets", True) is False
@@ -2861,7 +3512,15 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
                 f"Knoten-Ziel {target if target else cap} nicht konfliktfrei vernetzbar "
                 f"(Klebespalt {tags.get('pocket_clear_geom_mm', 0.1)} mm). Das 3D-Feld zeigt die "
                 "Magnete deshalb in massivem Eisen, die 2D-FDM-Lösung dagegen mit Luftkappen." + hint)
-        elif cur.get("mag_pockets", True) and not n_pk:
+        elif (cur.get("mag_pockets", True) and not n_pk
+              and int(tags.get("n_magnets") or 0) > 0):
+            # Die letzte Bedingung ist neu (20.09.2026): eine Bauart OHNE
+            # Magnete hat auch keine Magnettaschen, und „0 gebaut, 0
+            # zugeordnet" ist dort kein Befund, sondern der Normalfall.
+            # Gemessen an einem SynRM-Lauf meldete die Zeile „3D-Rotor ohne
+            # Flussbarrieren", waehrend 672 Barrieren-Prismen im Netz standen —
+            # eine Warnung, die das Gegenteil dessen sagt, was der Fall ist,
+            # ist schlimmer als keine.
             # Taschen waren an, wurden gebaut — aber keine einzige Luft-Schale hat die
             # Zuordnung überlebt. Das blieb bisher völlig unbemerkt: das 3D-Feld zeigt dann
             # Magnete in massivem Eisen, während die 2D-FDM-Lösung Luftkappen hat.
@@ -2893,6 +3552,20 @@ def _build_mesh_capped(geom, axial, opts, msh, log=None):
 
         break                                            # akzeptiert
 
+    # **Eine bindende Decke heisst: das Knotenziel ist nicht erreichbar.**
+    # Das gehoert gesagt. Wer 60.000 einstellt und 312.402 bekommt, sucht sonst
+    # den Fehler beim Regler, waehrend die Geometrie die Antwort ist -- und die
+    # naechste Stellschraube ist dann nicht das Ziel, sondern der Luftspalt,
+    # die Barrierendicke oder eine kuerzere Maschine.
+    if gedeckelt:
+        _w = "; ".join(f"{k} {v:.3f} statt {a:.3f} mm" for k, (a, v) in gedeckelt.items())
+        warns.append(
+            f"Zellgroesse an der GEOMETRIE gedeckelt ({_w}): groeber ginge nur "
+            f"noch, indem der Luftspalt bzw. das duennste Laeufermerkmal "
+            f"unaufgeloest bleibt — dabei entstehen keine groberen Zellen, "
+            f"sondern entartete (Sliver). Das Knoten-Ziel "
+            f"{target if target else cap} ist an dieser Geometrie deshalb "
+            f"nicht erreichbar; gebaut wurden {tags['n_nodes']} Knoten.")
     if scale_passes and target:
         warns.append(f"Netz auf {tags['n_nodes']} Knoten angesteuert (Ziel {target}).")
     elif scale_passes:
@@ -3076,6 +3749,68 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
     geom = payload.get("geom", payload)
     axial = float(payload.get("axial_len") or payload.get("axialLen")
                   or geom.get("axialLen") or 120.0)
+
+    # **Die Asynchronmaschine geht einen ANDEREN Weg -- und der wird hier
+    # gegangen, nicht nur genannt.**
+    #
+    # Dieser Pfad ist magnetostatisch; ein Kaefig braucht ein zeitabhaengiges
+    # Feld. Bis zum 20.09.2026 sagte das Tor das auch und verwies auf `feld3d`
+    # (`ema_em3d_harm`, harmonisch) -- nur gibt es `feld3d` ausschliesslich in
+    # `cae_cli.py`. Wer im Browser auf den 3-D-Knopf drueckt, bekam damit einen
+    # Abbruch samt Verweis auf etwas, das an dieser Stelle gar nicht erreichbar
+    # ist. Ein Weg, den nur die Kommandozeile hat, ist fuer den, der vor dem
+    # Bildschirm sitzt, nicht vorhanden -- dieselbe Regel, die dieses Repo fuer
+    # die Agentenkoepfe aufstellt.
+    #
+    # Also: derselbe Knopf, der richtige Loeser. Das Ergebnis ist ein anderes
+    # (Momente mit und ohne Kurzschlussring statt eines Feldbilds), und es sagt
+    # das auch -- `art`/`harmonisch` stehen drin, und die Oberflaeche zeigt den
+    # Bericht statt eine Kennwerttabelle zu erfinden, die es nicht gibt.
+    # **Und derselbe Knopf traegt seit dem 07.10.2026 auch die SCHEIBE.**
+    # Gemeldet als „wie bekomme ich die axialfluss maschine nach elmer?
+    # geometrie axialfluss gibt es dort nicht" -- und das stimmte: `ema_axial_em3d`
+    # war fertig, getestet und gegen den Mehrschnitt gerechnet, aber nur ueber
+    # `cae_cli.py axial --sektor` erreichbar. Derselbe Fall wie bei der ASM eine
+    # Zeile weiter unten, und dieselbe Antwort: der Flussweg entscheidet, WELCHER
+    # Loeser laeuft, nicht der Aufrufer.
+    #
+    # Die Reihenfolge ist nicht beliebig -- der Flussweg kommt VOR der
+    # Maschinenart: eine Axialflussmaschine ist payloadseitig eine PSM
+    # (`machineType` bleibt "pmsm"), also wuerde die Artabfrage sie
+    # stillschweigend in den magnetostatischen Vollmotorweg schicken.
+    import ema_fluss as _FLX
+    if _FLX.flussweg(geom) == "axial":
+        return _run_em3d_axial(payload, geom, axial, project_dir, _log)
+
+    try:
+        import ema_maschinenart as _MAr
+        _artr = _MAr.art_code(geom)
+        _wegr = _MAr.hole(_artr).feldweg
+    except Exception:                                        # noqa: BLE001
+        _artr, _wegr = "pmsm", "fdm"
+    if _wegr == "elmer2d_harm":
+        return _run_em3d_harmonisch(payload, geom, axial, project_dir, _log)
+
+    # **Die Tabelle bleibt die Wahrheit.** `_tor_layout` laesst den
+    # Reluktanzlaeufer seit dem 20.09.2026 durch (Netz und Physik stimmen:
+    # magnetostatisch, 672 Barrieren-Prismen, 0 Magnete — gemessen). Freigegeben
+    # ist die Stufe damit noch nicht: dafuer fehlt ein durchgelaufener LOESER,
+    # und ein Tor, das auf einem nicht zu Ende gerechneten Lauf geoeffnet wird,
+    # ist genau die Zusicherung, die dieses Werkzeug nicht geben soll. Solange
+    # `stufen` kein "em3d" fuehrt, sagt der Abbruch das — und nennt den Weg,
+    # der heute wirklich traegt.
+    try:
+        _MAr.pruefe_stufe(_artr, "em3d")
+    except _MAr.ArtNichtUnterstuetzt as _e:
+        if _artr == "synrm":
+            raise _MAr.ArtNichtUnterstuetzt(
+                str(_e) + " Das 3-D-NETZ dieser Bauart ist gebaut und "
+                "gemessen (Flussbarrieren als Luftprismen, keine Magnete); was "
+                "fehlt, ist ein freigegebener Loeserlauf. Heute traegt "
+                "`cae_cli.py feld2d` — derselbe Loeser in 2-D, magnetostatisch, "
+                "mit dem glatten Laeufer als Bezugsfall.") from None
+        raise
+
     opts = _em3d_opts(payload)
 
     work = os.path.join(project_dir, "em3d")
@@ -3095,6 +3830,191 @@ def run_em3d(payload: dict, project_dir: str, progress_cb=None) -> dict:
         res.setdefault("warnings", []).append(f"results.json-Merge fehlgeschlagen: {e}")
 
     _log("✓ 3D-Feldberechnung fertig", 100)
+    return res
+
+
+def _run_em3d_axial(payload: dict, geom: dict, axial: float,
+                    project_dir: str, log) -> dict:
+    """Der 3-D-Weg der Scheibe: ein anti-periodischer Ringsektor EINER Polteilung.
+
+    Gerechnet wird, was hier die eigentliche Frage ist: **was der radiale Term
+    kostet**, den der abgewickelte Mehrschnitt fallen laesst. Deshalb laeuft
+    nicht nur der Sektor, sondern `ema_axial_em3d.vergleich` -- Sektor UND
+    Mehrschnitt auf derselben Geometrie, und die Abweichung ueber dem Radius ist
+    das Ergebnis. Ein Sektor allein waere eine Zahl ohne Bezug.
+
+    Die Netzfeinheit kommt aus demselben 3-D-Reiter wie radial (`mesh_cl`,
+    `gap_cl`); ohne Angabe entscheidet `ema_axial_em3d` selbst.
+    """
+    import ema_axial_em3d as AX3
+
+    work = os.path.join(project_dir, "axial_em3d")
+    os.makedirs(work, exist_ok=True)
+    _o = _em3d_opts(payload)
+    lc = float(_o.get("mesh_cl") or 0.0)
+    lcs = float(_o.get("gap_cl") or 0.0)
+    ksch = max(3, int(payload.get("axial_schnitte") or 7))
+    nax = max(200, int(payload.get("fdm_resolution") or 300))
+
+    log("\u2299 Axialfluss: 3-D als anti-periodischer RINGSEKTOR einer "
+        "Polteilung (ema_axial_em3d) — der magnetostatische Vollmotorweg baut "
+        "konzentrische Zylinder und waere hier eine andere Maschine.", 2)
+    v = AX3.vergleich(geom, work, k_schnitte=ksch, N=nax, lc_mm=lc,
+                      lc_spalt_mm=lcs,
+                      melde=lambda w, p=0: log(f"  \u00b7 {w}", 2))
+    if not v.get("ok"):
+        raise RuntimeError("Axialer Ringsektor nicht gerechnet — "
+                           + str(v.get("grund") or "ohne Grund"))
+
+    drei = v.get("drei") or {}
+    netz = drei.get("netz") or {}
+    res = {"art": "axial", "source": "axial_em3d", "flussweg": "axial",
+           "sektor": {k: x for k, x in v.items() if k != "drei"},
+           "vtu_path": drei.get("vtu") or "", "work_dir": work,
+           "mesh": {"nodes": netz.get("knoten"), "tets": netz.get("tets"),
+                    "sektor_grad": (netz.get("alpha") or 0.0) * 180.0 / math.pi},
+           "bericht": _axial_em3d_bericht(v)}
+    for g in (v.get("grenzen") or []):
+        log(f"  \u2139 {g}", 3)
+    log(f"\u2713 Sektor gegen Mehrschnitt: "
+        f"{v.get('abw_mittel_pct'):+.1f} % im Mittel, "
+        f"{v.get('abw_max_pct'):.1f} % groesste Abweichung", 95)
+    try:
+        _persist_em3d_summary(project_dir, res)
+    except Exception as e:                                   # noqa: BLE001
+        log(f"  \u26a0 Ablage fehlgeschlagen: {e}")
+    return res
+
+
+def _axial_em3d_bericht(v: dict) -> str:
+    """Was der Sektor gegen den Mehrschnitt gemessen hat -- als Text.
+
+    Die Kennwerttabelle des PSM-Wegs (Luftspaltprofil ueber z, Arkkio-Moment)
+    bekommt dieser Lauf NICHT: er liefert sie nicht, und sie zu erfinden waere
+    schlimmer als sie wegzulassen -- dieselbe Entscheidung wie beim
+    harmonischen ASM-Lauf.
+    """
+    z = ["Axialfluss, 3-D-Ringsektor gegen abgewickelten Mehrschnitt", ""]
+    rm = v.get("r_mm") or []
+    b3 = v.get("B_3d_T") or []
+    b2 = v.get("B_2d_T") or []
+    aw = v.get("abweichung_pct") or []
+    if rm:
+        z.append("  r [mm]      3-D    Mehrschnitt     Abw.")
+        for i, r in enumerate(rm):
+            if i < len(b3) and i < len(b2) and i < len(aw):
+                z.append(f"  {r:7.1f}   {b3[i]:.4f}      {b2[i]:.4f}   "
+                         f"{aw[i]:+7.1f} %")
+        z.append("")
+    if v.get("abw_mittel_pct") is not None:
+        z.append(f"  Im Mittel {v['abw_mittel_pct']:+.1f} %, groesste "
+                 f"{v.get('abw_max_pct', 0.0):.1f} %")
+    ri, ra = v.get("rand_innen"), v.get("rand_aussen")
+    if ri is not None and ra is not None:
+        z.append(f"  RANDABFALL: innen {ri:.0%}, aussen {ra:.0%} — der Anteil, "
+                 f"den der Mehrschnitt per Konstruktion NICHT kennt")
+    z.append("")
+    z.append("  Die Abweichung IST das Ergebnis: sie ist der radiale Term "
+             "(d/dr), den der Mehrschnitt fallen laesst.")
+    for g in (v.get("grenzen") or []):
+        z.append(f"  \u2139 {g}")
+    return "\n".join(z)
+
+
+def _run_em3d_harmonisch(payload: dict, geom: dict, axial: float,
+                         project_dir: str, log) -> dict:
+    """Der 3-D-Weg der Asynchronmaschine: harmonisch, ueber ``ema_em3d_harm``.
+
+    Gerechnet wird, was dort die eigentliche Frage ist -- was der
+    **Kurzschlussring** ausmacht: zweimal dasselbe Netz, einmal mit leitendem
+    und einmal mit isolierendem Ring. Die Zahl ist ausdruecklich eine **untere
+    Schranke** (jede Netzverfeinerung hebt sie), und das steht im Bericht.
+    """
+    import ema_asm
+    import ema_em3d_harm as E3H
+
+    work = os.path.join(project_dir, "feld3d")
+    os.makedirs(work, exist_ok=True)
+    # Der Betriebspunkt kommt aus demselben Payload wie beim magnetostatischen
+    # Weg -- der 3-D-Reiter schickt ihn als `rpm`/`load_nm` (Karte „Betriebs-
+    # punkt"), die Pipeline als `rpm_to`/`load_nm`.
+    _o = _em3d_opts(payload)
+    rpm = float(_o.get("rpm") or payload.get("rpm") or payload.get("rpm_to")
+                or payload.get("rpm_from") or 3000.0)
+    last = float(_o.get("load_nm") or payload.get("load_nm") or 100.0)
+
+    kf = dict(ema_asm.kaefig(geom, axial))
+    kf["steg_mm"] = ema_asm.KAEFIG_STEG_MM
+    if not kf.get("erreichbar", True):
+        # Ein nicht auslegbarer Kaefig ergibt ein Netz der Fertigungsuntergrenze
+        # und stundenlange Rechnung an einer Maschine, die es nicht gibt.
+        raise RuntimeError("Nicht gerechnet — "
+                           + ema_asm.nicht_erreichbar_text(kf))
+
+    log("Asynchronmaschine: 3-D HARMONISCH (ema_em3d_harm) statt "
+        "magnetostatisch — der Kaefig braucht ein zeitabhaengiges Feld.", 2)
+    kz = E3H.ring_wirkung(payload, rpm=rpm, last_nm=last, work_dir=work,
+                          log=lambda t: log("  " + str(t)))
+    vtu = ""
+    try:
+        vtu = E3H._finde_vtu(os.path.join(work, "results"))
+    except Exception:                                        # noqa: BLE001
+        vtu = ""
+    # **Dieselben Browser-Dateien wie beim PSM-Pfad.** Der 3-D-Betrachter ist
+    # nicht an die PSM gebunden -- er liest eine schlanke `.vtp` der
+    # Festkoerperoberflaeche und eine zweite mit Feldlinien, und beide entstehen
+    # aus einem Volumennetz mit B-Feld. Der ASM-Lauf hatte seine VTU laengst;
+    # was fehlte, war der Schritt von der VTU zu den Dateien, die der Browser
+    # laden kann. `ema_em3d_harm.browser_dateien` ueberbrueckt die beiden
+    # inhaltlichen Unterschiede (komplexes Feld, Zelldaten) und sagt in
+    # `browser["hinweis"]`, was das Bild zeigt.
+    browser = {}
+    if vtu:
+        try:
+            browser = E3H.browser_dateien(
+                vtu, work, kz.get("netz") or {},
+                log=lambda t: log("  " + str(t)))
+        except Exception as e:                               # noqa: BLE001
+            browser = {"fehler": f"{type(e).__name__}: {e}"}
+            log(f"  \u26a0 Browser-Dateien nicht erzeugt: {e}")
+    res = {"art": "asm", "harmonisch": True, "source": "em3d_harm",
+           "bericht": E3H.bericht(kz), "kennwerte": kz,
+           "vtu_path": vtu, "work_dir": work, "browser": browser,
+           "mesh": {"nodes": kz.get("knoten"), "tets": kz.get("tets")}}
+    # **Dieselben Schluessel wie beim PSM-Lauf** -- `vtp_path`/`lines_path`.
+    # `/em3d/vtp` und `/em3d/streamlines` bedienen den ASM-Lauf damit ohne eine
+    # einzige neue Route; eine zweite Route waere die Stelle, an der die beiden
+    # Bauarten im Browser auseinanderlaufen.
+    if browser.get("vtp"):
+        res["vtp_path"] = browser["vtp"]
+    if browser.get("lines"):
+        res["lines_path"] = browser["lines"]
+
+    # **Gerechnet und nicht abgelegt ist dasselbe wie nicht gerechnet.** Der
+    # magnetostatische Weg schreibt seine Zusammenfassung seit jeher nach
+    # `results.json` (`_persist_em3d_summary`); dieser hier tat es nicht, und
+    # damit war ein fertiger ASM-3-D-Lauf nach dem Schliessen des Reiters weg:
+    # kein Abschnitt im Bericht, nichts im Steckbrief, nichts beim naechsten
+    # Oeffnen des Projekts. Gemessen am Testprojekt `20260920_182501`: 142 MB
+    # Elmer-Ergebnisse auf der Platte und `results["em3d"]` leer.
+    #
+    # Abgelegt wird, was diesen Lauf ausmacht -- der Ringbefund im Wortlaut und
+    # die Kennwerte, aus denen er entstand. Die Kennwerttabelle des PSM-Wegs
+    # (Luftspalt-Grundwelle ueber z, Arkkio-Moment) gibt es hier NICHT, und sie
+    # zu erfinden waere schlimmer als sie wegzulassen.
+    try:
+        _persist_em3d_summary(project_dir, {
+            "art": "asm", "harmonisch": True, "quelle": "ema_em3d_harm",
+            "bericht": res["bericht"], "kennwerte": kz, "mesh": res["mesh"],
+            "axial_mm": axial,
+            "warnings": ([browser["fehler"]] if browser.get("fehler") else []),
+            "b_gap_mid_peak": kz.get("B_gap_1_mit_T"),
+            "torque_Nm": kz.get("T_mit_Ring_Nm"),
+            "torque_note": ("harmonischer 3-D-Lauf; das absolute Moment haengt "
+                            "an der Aufloesung des Luftspalts"),
+        })
+    except Exception as e:                                   # noqa: BLE001
+        log(f"  \u26a0 3-D-Zusammenfassung nicht abgelegt: {e}")
     return res
 
 
@@ -3473,7 +4393,11 @@ def _persist_em3d_summary(project_dir: str, res: dict):
         "b_gap_mid_peak", "b_gap_axial", "z_axial", "torque_arkkio_Nm",
         "torque_Nm", "torque_note", "operating_point",
         "compare_2d", "mesh", "mesh_zones", "axial_mm", "skew_deg",
-        "skew_segments", "skew_step_deg", "warnings")}
+        "skew_segments", "skew_step_deg", "warnings",
+        # Der harmonische Weg (ASM) traegt andere Groessen -- er rechnet den
+        # Kurzschlussring, nicht ein Luftspaltprofil ueber z. Was er NICHT hat,
+        # bleibt `None` statt mit einer PSM-Zahl gefuellt zu werden.
+        "art", "harmonisch", "quelle", "bericht", "kennwerte")}
     # Bild-Schlüssel+Titel (Dateien liegen in charts/) für den Bericht.
     summary["images"] = [{"key": im.get("key"), "title": im.get("title")}
                          for im in (res.get("images") or []) if im.get("key")]

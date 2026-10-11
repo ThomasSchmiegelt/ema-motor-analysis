@@ -74,7 +74,8 @@ _study_ordner = {"wurzel": STUDY_FIELD_DIR, "kennung": None, "pfad": None}
 
 # Geometry-only CAD preview + smoke-test state (staged workflow, separate threads)
 _cad_state   = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
-_smoke_state = {"status": "idle", "progress": 0, "log": [], "result": None, "error": None}
+_smoke_state = {"status": "idle", "progress": 0, "log": [], "result": None,
+                "error": None, "cad": False}
 
 # STEP-Import: erkennt Magnetlage aus einer hochgeladenen Motor-STEP, schreibt
 # motor.FCStd (Rotor benannt) und liefert die erkannte Geometrie an den Designer.
@@ -130,6 +131,22 @@ def index():
     return send_from_directory(os.path.dirname(__file__), "ema.html")
 
 
+@app.route("/oberflaeche")
+def oberflaeche_stand():
+    """Der Fingerabdruck der ausgelieferten Oberflaeche.
+
+    Ein offener Reiter laedt sich nicht von selbst neu, und nichts sagte ihm,
+    dass auf der Platte inzwischen eine andere Maske liegt. Das kostete am
+    03./04.10.2026 mehrere Runden Fehlersuche an einer Seite, die den Fehler
+    gar nicht mehr hatte. Die Agentenseiten fuehren diese Pruefung laengst
+    (`seiteVeraltet`); hier fehlte sie."""
+    try:
+        import ema_werkzeugstand as _W
+        return jsonify(_W.stand_oberflaeche())
+    except Exception as e:                                   # noqa: BLE001
+        return jsonify({"hash": "", "fehler": str(e)})
+
+
 # ── Analysis pipeline ─────────────────────────────────────────────────────────
 
 def _payload_auffuellen(payload: dict) -> dict:
@@ -163,7 +180,43 @@ def _payload_auffuellen(payload: dict) -> dict:
     geom.update(payload.get("geom") or {})
     voll = {**grund, **{k: v for k, v in payload.items() if k != "geom"}}
     voll["geom"] = geom
-    return voll
+    # **Die Scheibe braucht Masse, die die Maske nicht hat.** Die
+    # `axial*`-Schluessel werden im Reiter ⊙ Axialfluss gezeichnet, nicht in
+    # ② Geometrie -- `buildPayload` schickte deshalb `fluxPath="axial"` ohne
+    # eine einzige axiale Zahl, und der Lauf starb am ersten Zugriff
+    # (`'axialAktivOD' fehlt`, gemeldet am 09.10.2026). Das Schema fuellt alles
+    # ausser `axialAktivOD` schon auf; genau dafuer ist diese Zeile da.
+    #
+    # Ergaenzt wird MIT Auskunft (`axial_ergaenzen`), und die Liste reist im
+    # Payload mit, damit jede Stufe, die sie ausgibt, dieselbe liest. Still zu
+    # fuellen waere der Fehler, gegen den `ema_fluss` ueberhaupt gebaut ist.
+    return _axial_ergaenzen(voll)
+
+
+def _axial_ergaenzen(payload: dict) -> dict:
+    """Die axialen Masse im Payload vervollstaendigen -- und benennen, was dazukam.
+
+    Eigene Funktion, weil sie an VIER Tueren gebraucht wird: ``/analyse``
+    (ueber ``_payload_auffuellen``), ``/cad_preview``, ``/em3d`` und
+    ``/em3d/sector``. Genau die drei letzten gingen ohne sie nicht -- „auch
+    geht es in Elmer nicht, ich kann die Geometrie nicht uebernehmen" war
+    derselbe fehlende Schluessel wie im Lauf, nur an einer anderen Tuer.
+    """
+    if not isinstance(payload, dict):
+        return payload
+    geom = payload.get("geom")
+    if not isinstance(geom, dict):
+        return payload
+    try:
+        import ema_fluss as _FLA
+        if _FLA.flussweg(geom) != "axial":
+            return payload
+        payload["geom"], _erg = _FLA.axial_ergaenzen(geom)
+        if _erg:
+            payload["axial_ergaenzt"] = _erg
+    except Exception:                                        # noqa: BLE001
+        pass
+    return payload
 
 
 @app.route("/analyse", methods=["POST", "OPTIONS"])
@@ -195,7 +248,7 @@ def cad_preview():
         return jsonify({"error": "Analyse läuft bereits"}), 409
     if _cad_state["status"] == "running":
         return jsonify({"error": "CAD-Vorschau läuft bereits"}), 409
-    data = request.get_json(force=True)
+    data = _axial_ergaenzen(request.get_json(force=True))
     _cad_state.update({"status": "running", "progress": 0, "log": [],
                        "result": None, "error": None})
     threading.Thread(target=_run_cad_preview, args=(data,), daemon=True).start()
@@ -298,7 +351,7 @@ def em3d_start():
         return jsonify({"error": elmer_runner.INSTALL_HINT, "need_install": True}), 503
     if _em3d_state["status"] == "running":
         return jsonify({"error": "3D-Berechnung läuft bereits"}), 409
-    data = request.get_json(force=True) or {}
+    data = _axial_ergaenzen(request.get_json(force=True) or {})
 
     proj_dir, proj_id = _em3d_setup(data)
     threading.Thread(target=_em3d_body, args=(data, proj_dir, proj_id),
@@ -346,9 +399,24 @@ def _em3d_finish_error(e):
         _em3d_state["status"] = "aborted"
         _em3d_state["error"] = None
     else:
+        # **Ein begruendetes Nein ist kein Absturz.** Weist das Tor der
+        # Maschinenart (oder das Layouttor) die Stufe ab, ist das ein
+        # ERGEBNIS: die Art traegt sie nicht, und der Text sagt warum und was
+        # statt dessen geht. Ein Traceback darunter schickt den, der davorsitzt,
+        # in den Quelltext statt auf die Antwort -- gemessen am GSM-Testlauf,
+        # wo unter der vollstaendigen Begruendung sechs Zeilen Python standen.
+        _sauber = False
+        try:
+            import ema_maschinenart as _MA
+            import ema_em3d as _E3
+            _sauber = isinstance(e, (_MA.ArtNichtUnterstuetzt,
+                                     getattr(_E3, "LayoutUngueltig", ())))
+        except Exception:                                    # noqa: BLE001
+            pass
         _em3d_state["error"] = str(e)
-        _em3d_state["log"].append("⚠ " + str(e))
-        _em3d_state["log"].append(traceback.format_exc()[:600])
+        _em3d_state["log"].append(("ℹ " if _sauber else "⚠ ") + str(e))
+        if not _sauber:
+            _em3d_state["log"].append(traceback.format_exc()[:600])
         _em3d_state["status"] = "error"
 
 
@@ -365,7 +433,7 @@ def em3d_sweep_start():
         return jsonify({"error": elmer_runner.INSTALL_HINT, "need_install": True}), 503
     if _em3d_state["status"] == "running":
         return jsonify({"error": "3D-Berechnung läuft bereits"}), 409
-    data = request.get_json(force=True) or {}
+    data = _axial_ergaenzen(request.get_json(force=True) or {})
     if not (data.get("sweep") or []):
         return jsonify({"error": "Kein Betriebspunkt im Drehzahlband (sweep ist leer)"}), 400
 
@@ -418,7 +486,7 @@ def em3d_sector_start():
         return jsonify({"error": elmer_runner.INSTALL_HINT, "need_install": True}), 503
     if _em3d_state["status"] == "running":
         return jsonify({"error": "3D-Berechnung läuft bereits"}), 409
-    data = request.get_json(force=True) or {}
+    data = _axial_ergaenzen(request.get_json(force=True) or {})
 
     proj_dir, proj_id = _em3d_project_dir(data)
 
@@ -1517,24 +1585,33 @@ def em3d_saved_delete(rid):
 
 @app.route("/smoke_test", methods=["POST", "OPTIONS"])
 def smoke_test_run():
-    """Run smoke_test.py (fast ~15 s sanity check, no FreeCAD) in a subprocess."""
+    """Run smoke_test.py in a subprocess — fast (~15 s) or, with ``cad``, real.
+
+    ``{"cad": true}`` reicht ``--cad`` durch: FreeCAD baut dann wirklich (Voll-
+    motor + Laeufer-FEM und die SCHEIBE ueber ``ema_axial_cad``) und der Lauf
+    dauert Minuten. Ohne die Flagge bleibt es genau beim bisherigen Verhalten.
+    Gebraucht wurde sie, weil der Knopf beim Axialfluss ausgerechnet die neue
+    Stufe uebersprang — „Smoketest bei Axialfluss ist ohne CAD" (09.10.2026).
+    """
     if request.method == "OPTIONS":
         return "", 200
     if _smoke_state["status"] == "running":
         return jsonify({"error": "Smoke-Test läuft bereits"}), 409
+    mit_cad = bool((request.get_json(silent=True) or {}).get("cad"))
     _smoke_state.update({"status": "running", "progress": 0, "log": [],
-                         "result": None, "error": None})
-    threading.Thread(target=_run_smoke, daemon=True).start()
-    return jsonify({"status": "started"}), 202
+                         "result": None, "error": None, "cad": mit_cad})
+    threading.Thread(target=_run_smoke, args=(mit_cad,), daemon=True).start()
+    return jsonify({"status": "started", "cad": mit_cad}), 202
 
 
-def _run_smoke():
+def _run_smoke(mit_cad: bool = False):
     import subprocess, sys, re
     _ansi = re.compile(r"\x1b\[[0-9;]*m")
     try:
         script = os.path.join(os.path.dirname(__file__), "smoke_test.py")
         proc = subprocess.Popen(
-            [sys.executable, script], cwd=os.path.dirname(__file__),
+            [sys.executable, script] + (["--cad"] if mit_cad else []),
+            cwd=os.path.dirname(__file__),
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
         for line in proc.stdout:
             _smoke_state["log"].append(_ansi.sub("", line.rstrip("\n")))
@@ -1554,8 +1631,11 @@ def _run_smoke():
 
 @app.route("/smoke_test/status")
 def smoke_test_status():
-    return jsonify({k: _smoke_state[k]
-                    for k in ("status", "progress", "log", "result", "error")})
+    # `cad` reist mit: sonst steht am Ende „28 bestanden" da, ohne dass
+    # erkennbar waere, ob FreeCAD dabei war -- und genau das war die Frage.
+    return jsonify({k: _smoke_state.get(k)
+                    for k in ("status", "progress", "log", "result", "error",
+                              "cad")})
 
 
 @app.route("/preview_field", methods=["POST", "OPTIONS"])
@@ -2428,11 +2508,38 @@ def em3d_bericht():
     if _em3d_report_state["status"] == "running":
         return jsonify({"error": "Elmer-Bericht laeuft bereits"}), 409
     d = request.get_json(silent=True) or {}
+    base = _fx3d_project_base(d.get("projekt") or "current") or _state.get("project_dir")
     res = _em3d_state.get("result")
     if not res:
-        return jsonify({"error": "Kein 3-D-Ergebnis — erst einen Lauf rechnen "
-                                 "oder einen gespeicherten laden"}), 400
-    base = _fx3d_project_base(d.get("projekt") or "current") or _state.get("project_dir")
+        # **„Erst einen Lauf rechnen" ist die falsche Auskunft, wenn die
+        # Maschinenart gar keinen 3-D-Lauf kennt.** Gemeldet am 20.09.2026 aus
+        # dem Elmer-Bericht einer Gleichstrommaschine: der Satz schickt den
+        # Benutzer auf einen Knopf, der ihn danach abweist -- und die zweite
+        # Absage erklaert dann, was die erste haette sagen muessen. Dieselbe
+        # Regel wie ueberall hier: ein begruendetes Nein ist ein Ergebnis.
+        hinweis = ("Kein 3-D-Ergebnis — erst einen Lauf rechnen oder einen "
+                   "gespeicherten laden")
+        try:
+            import ema_maschinenart as _MA
+            _pl = {}
+            _mp = os.path.join(base or "", "meta.json")
+            if base and os.path.exists(_mp):
+                with open(_mp, encoding="utf-8") as _f:
+                    _pl = (json.load(_f) or {}).get("payload") or {}
+            _code = _MA.art_code(_pl.get("geom") or {})
+            _art = _MA.hole(_code)
+            if not _MA.traegt(_code, "em3d"):
+                hinweis = (f"{_art.label}: diese Maschinenart traegt die "
+                           f"3-D-Feldstufe nicht — es gibt hier also nichts "
+                           f"nachzurechnen, und ein Lauf wuerde abgewiesen. "
+                           f"Getragen wird: {', '.join(_art.stufen)}.")
+                if _art.feldweg != "keiner":
+                    hinweis += (" Das Feld rechnet "
+                                + _MA.FELDWEG_WERKZEUG.get(_art.feldweg,
+                                                           _art.feldweg) + ".")
+        except Exception:                                    # noqa: BLE001
+            pass
+        return jsonify({"error": hinweis}), 400
     if not base:
         return jsonify({"error": "kein Projekt gebunden"}), 400
     payload = {}
@@ -2839,18 +2946,48 @@ def _run(data):
         _state["project_dir"] = proj_dir
         _state["project_id"]  = proj_id
         _state["vorschlaege"] = []
+        _state["befunde"] = []
+        _state["diagnose"] = {}
+        _state["befund"] = ""
+        _state["tor"] = ""
         run_pipeline(data, _state, _frames, WORKSPACE, proj_dir)
     except Exception as e:
         import traceback
         # Ein Tor, das gerechnete Auswege kennt, gibt sie mit (AuslegungReisst).
         # Die Oberflaeche macht daraus Knoepfe, statt "Analyse fehlgeschlagen"
         # anzuzeigen und den Benutzer selbst rechnen zu lassen.
-        wege = list(getattr(e, "wege", []) or [])
+        # **Jeder Fehlschlag bekommt einen BEFUND, nicht nur das Fliehkrafttor.**
+        # `AuslegungReisst` traegt seine Wege selbst; alles andere ging bisher
+        # als nackter Traceback ins Protokoll und in der Oberflaeche stand
+        # „Analyse fehlgeschlagen". `ema_diagnose` macht aus jedem Fehlschlag
+        # dieselbe Form -- Titel, Befund, gerechnete Wege, Hinweise -- und die
+        # Oberflaeche kann sie schon zeichnen.
+        try:
+            import ema_diagnose
+            _d = ema_diagnose.diagnose(e, data, _state.get("log"))
+        except Exception:                                    # noqa: BLE001
+            _d = {}
+        wege = list(getattr(e, "wege", []) or []) or list(_d.get("wege") or [])
         _state["vorschlaege"] = wege
-        _state["befund"] = getattr(e, "befund", "") or ""
-        _state["tor"] = getattr(e, "tor", "") or ""
+        _state["befund"] = (getattr(e, "befund", "") or _d.get("befund")
+                            or str(e))
+        _state["tor"] = getattr(e, "tor", "") or _d.get("tor") or ""
+        _state["diagnose"] = _d
+        _state["befunde"] = (list(getattr(e, "befunde", []) or [])
+                             or list(_d.get("befunde") or []))
+        # Der Traceback entfaellt, sobald der Fehlschlag ERKLAERT ist -- nicht
+        # erst, wenn es auch einen Knopf dazu gibt. Ein begruendetes Nein ohne
+        # Einzelweg ("keine dieser Vorgaben heilt es allein, erst alle
+        # zusammen") ist ein Ergebnis und kein Absturz; mit Traceback darunter
+        # liest es sich wie einer. Bleibt die Diagnose stumm, bleibt er stehen.
+        # NICHT an den Hinweisen festmachen: der ``else``-Zweig von
+        # ``ema_diagnose`` haengt immer „Zuletzt lief: …" an, damit waere
+        # der Traceback bei JEDEM Fehlschlag weg -- auch bei einem echten
+        # Absturz, wo er die einzige Spur ist. ``tor`` setzt nur, wer ein
+        # benanntes Tor erkannt hat.
+        _erklaert = bool(wege or _d.get("tor"))
         _state["log"].append(
-            f"FATAL: {e}" if wege else
+            f"FATAL: {e}" if _erklaert else
             f"FATAL: {e}\n{traceback.format_exc()[:600]}")
         _state["status"] = "error"
 
@@ -2865,7 +3002,11 @@ def status():
         # Gerechnete Auswege eines gerissenen Tors (leer im Normalfall).
         "vorschlaege": _state.get("vorschlaege") or [],
         "befund":      _state.get("befund") or "",
+        # ALLE offenen Befunde, nicht nur der des haltenden Tors.
+        "befunde":     _state.get("befunde") or [],
         "tor":         _state.get("tor") or "",
+        # Titel, Hinweise und die fertige Chatfrage -- s. `ema_diagnose`.
+        "diagnose":    _state.get("diagnose") or {},
     })
 
 
@@ -4210,6 +4351,244 @@ def agent_vorgabe():
         "ref": "meta.json"})
     return jsonify({"ok": True, "id": pid, "projekt": pid,
                     "ordner": proj_dir, "brief": brief})
+
+
+# ---------------------------------------------------------------------------
+# Axialfluss: die Zeichenseite, ihr Reiter und der Weg ins Projekt
+# ---------------------------------------------------------------------------
+#
+# Die Seite ist eigenstaendig gebaut worden, damit sie geprueft werden konnte,
+# bevor etwas davon in `ema.html` wandert -- und sie BLEIBT eigenstaendig: der
+# Reiter laedt sie als `<iframe>`, wie der Agentenreiter `/agent`. Eine Quelle,
+# kein zweites Layout. Ueber `file://` laeuft sie unveraendert weiter.
+
+AXIAL_DIR = os.path.join(os.path.dirname(__file__), "axialfluss")
+
+
+@app.route("/axialfluss")
+def axialfluss_weiter():
+    # Mit Schraegstrich, damit die RELATIVEN Skriptpfade der Seite
+    # (`src="geometrie.js"`) auf `/axialfluss/geometrie.js` zeigen und nicht
+    # auf die Wurzel. Genau diese Relativitaet ist es, die dieselbe Datei
+    # ueber `file://` unveraendert laufen laesst.
+    return Response(status=308, headers={"Location": "/axialfluss/"})
+
+
+@app.route("/axialfluss/")
+def axialfluss_seite():
+    return send_from_directory(AXIAL_DIR, "ansicht.html")
+
+
+@app.route("/axialfluss/<path:datei>")
+def axialfluss_datei(datei: str):
+    """Die Skripte und das LIESMICH der Seite.
+
+    Die festen Routen darunter (`felder`, `vorgabe`, `uebernehmen`, `rechnen`)
+    gewinnen gegen diese Regel: Flask ordnet statische Regeln vor solchen mit
+    Platzhalter. Zusaetzlich wird hier nur ausgeliefert, was wirklich als Datei
+    im Ordner liegt -- ein Name, der beides waere, kaeme also gar nicht erst
+    hierher.
+    """
+    import re
+    sicher = os.path.basename(datei)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", sicher or ""):
+        return jsonify({"error": "ungueltiger Name"}), 403
+    if not os.path.isfile(os.path.join(AXIAL_DIR, sicher)):
+        return jsonify({"error": "nicht gefunden"}), 404
+    return send_from_directory(AXIAL_DIR, sicher)
+
+
+@app.route("/axialfluss/felder")
+def axialfluss_felder():
+    """Die Zuordnung Feldname <-> Schemaschluessel, aus EINER Quelle.
+
+    Die Seite holt sie, statt sie abzuschreiben. Eine zweite Zuordnung waere
+    dieselbe Falle wie die handgespiegelte `magnetLegs`: beide Seiten saehen
+    richtig aus und meinten verschiedene Maschinen.
+    """
+    import ema_fluss
+    from ema_text2ema import SCHEMA
+    felder = []
+    for seite, (schl, fak) in ema_fluss.SEITE_FELDER.items():
+        spec = SCHEMA.get(schl, {})
+        felder.append({"seite": seite, "schluessel": schl, "faktor": fak,
+                       "kind": spec.get("kind"), "lo": spec.get("lo"),
+                       "hi": spec.get("hi"), "opts": spec.get("opts"),
+                       "desc": spec.get("desc")})
+    return jsonify({"ok": True, "felder": felder,
+                    "topo_bauform": ema_fluss.TOPO_BAUFORM,
+                    "bauform_spalte": ema_fluss.BAUFORM_SPALTE})
+
+
+@app.route("/axialfluss/vorgabe")
+def axialfluss_vorgabe():
+    """Was im Projekt an axialer Geometrie steht -- in den Feldern der Seite.
+
+    Fehlt ein Schluessel, fehlt er auch in der Antwort; die Seite behaelt dann
+    ihren eigenen Wert. Ihn hier mit einer Vorgabe zu fuellen hiesse, einen
+    Wert zu erfinden, der im Projekt nicht steht.
+    """
+    import ema_fluss
+    pid = str(request.args.get("projekt") or "").strip()
+    if not pid:
+        return jsonify({"ok": False, "grund": "kein Projekt genannt"}), 400
+    if not _safe_name(pid):
+        return jsonify({"ok": False, "grund": "ungueltiger Projektname"}), 403
+    pfad = os.path.join(PROJECTS_ROOT, pid, "meta.json")
+    if not os.path.isfile(pfad):
+        return jsonify({"ok": False, "grund": f"{pid} hat keine meta.json"}), 404
+    try:
+        with open(pfad, encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, ValueError) as e:
+        return jsonify({"ok": False, "grund": f"meta.json unlesbar: {e}"}), 500
+    geom = (meta.get("payload") or {}).get("geom") or meta.get("geom") or {}
+    werte = ema_fluss.zur_seite(geom)
+    return jsonify({"ok": True, "projekt": pid, "werte": werte,
+                    "flussweg": geom.get("fluxPath", "radial"),
+                    "label": meta.get("label") or pid,
+                    "anzahl": len(werte)})
+
+
+@app.route("/axialfluss/geom", methods=["POST", "OPTIONS"])
+def axialfluss_geom():
+    """Felder der Zeichenseite -> Geometrie-Teilmenge, OHNE etwas abzulegen.
+
+    Der kurze Weg fuer die Hauptmaske: ``buildPayload`` holt sich damit die
+    gezeichnete Scheibe aus dem Reiter ⊙ Axialfluss, bevor es den Lauf startet.
+    Gerechnet und gespeichert wird nichts -- ``/axialfluss/uebernehmen`` ist die
+    Tuer, die schreibt, und das soll ein Knopfdruck bleiben und keine
+    Nebenwirkung des Rechnenknopfes.
+
+    Umgerechnet wird ueber ``ema_fluss.aus_seite``, also ueber DIESELBE
+    Zuordnung wie die Uebernahme. Eine zweite in JavaScript waere dieselbe
+    Falle wie die handgespiegelte ``magnetLegs``: beide Seiten saehen richtig
+    aus und meinten verschiedene Maschinen.
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import ema_fluss
+    body = request.get_json(silent=True) or {}
+    werte = body.get("werte")
+    if not isinstance(werte, dict) or not werte:
+        return jsonify({"ok": False, "grund": "keine Felder uebergeben"}), 400
+    geom, ergaenzt = ema_fluss.axial_ergaenzen(ema_fluss.aus_seite(werte))
+    return jsonify({"ok": True, "geom": geom, "ergaenzt": ergaenzt,
+                    "ergaenzt_satz": ema_fluss.ERGAENZT_SATZ,
+                    "anzahl": len(geom)})
+
+
+@app.route("/axialfluss/uebernehmen", methods=["POST", "OPTIONS"])
+def axialfluss_uebernehmen():
+    """Die gezeichnete Scheibe ins Projekt schreiben.
+
+    Derselbe Weg wie die Designer-Uebergabe (`/agent/vorgabe`): der Payload
+    wird auf den vollstaendigen Satz aufgefuellt und als `meta.json` abgelegt,
+    also dort, wo `cae_cli.py --from-project`, der Steckbrief und die Bruecke
+    zum Geometrie-Reiter ohnehin nachsehen. Kein neues Werkzeug.
+
+    Gerechnet wird dabei NICHTS. Wer die Scheibe hinlegt, will sie zuerst
+    ablegen; ein Pipelinelauf waere Minuten fuer eine Uebergabe, die Sekunden
+    dauern darf -- und die Stufen `cad`/`em3d` weisen den Axialfluss ohnehin
+    ab, das steht im Tor und nicht hier.
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import datetime
+    import ema_fluss, ema_projekt
+    from ema_pipeline import create_project_dir
+    body = request.get_json(silent=True) or {}
+    werte = body.get("werte")
+    if not isinstance(werte, dict) or not werte:
+        return jsonify({"ok": False, "grund": "keine Felder uebergeben"}), 400
+
+    pid = str(body.get("projekt") or "").strip()
+    if pid:
+        if not _safe_name(pid):
+            return jsonify({"ok": False, "grund": "ungueltiger Projektname"}), 403
+        proj_dir = os.path.join(PROJECTS_ROOT, pid)
+        if not os.path.isdir(proj_dir):
+            return jsonify({"ok": False, "grund": f"Projekt {pid} gibt es nicht"}), 404
+    else:
+        proj_dir, pid = create_project_dir(
+            PROJECTS_ROOT, str(body.get("name") or "").strip(), origin="axialfluss")
+
+    # Vorhandenen Payload weiterfuehren, sonst faellt alles aus dem Projekt
+    # heraus, was nicht axiale Geometrie ist (Betriebspunkt, Kuehlung, Zyklus).
+    pfad = os.path.join(proj_dir, "meta.json")
+    alt_meta = {}
+    if os.path.isfile(pfad):
+        try:
+            with open(pfad, encoding="utf-8") as f:
+                alt_meta = json.load(f)
+        except (OSError, ValueError):
+            alt_meta = {}
+    payload = dict(alt_meta.get("payload") or {})
+    geom = dict(payload.get("geom") or {})
+    geom.update(ema_fluss.aus_seite(werte))
+    payload["geom"] = geom
+    payload = _payload_auffuellen(payload)
+    # `_payload_auffuellen` legt Schemavorgaben UNTER den Payload; die axialen
+    # Felder muessen danach noch einmal obenauf, sonst gewaenne eine Vorgabe
+    # gegen das Gezeichnete.
+    payload["geom"].update(ema_fluss.aus_seite(werte))
+
+    meta = dict(alt_meta)
+    meta.update({"label": alt_meta.get("label") or pid,
+                 "created": alt_meta.get("created")
+                 or datetime.datetime.now().isoformat(timespec="seconds"),
+                 "payload": payload, "geom": payload["geom"],
+                 "axial_len": payload.get("axial_len")})
+    try:
+        with open(pfad, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2, ensure_ascii=False, default=str)
+    except OSError as e:
+        return jsonify({"ok": False, "grund": f"meta.json nicht schreibbar: {e}"}), 500
+
+    ema_projekt.update(proj_dir, status="vorgabe",
+                       design={"source": "axialfluss", "vorgabe": True})
+    ema_projekt.append_evolution(proj_dir, {
+        "action": "vorgabe:axialfluss",
+        "note": (f"Scheibenlaeufer gezeichnet und uebernommen: "
+                 f"{payload['geom'].get('axialBauform')}, "
+                 f"2p = {int(payload['geom'].get('p', 0)) * 2}, "
+                 f"Q = {payload['geom'].get('slots')}, "
+                 f"Ro = {payload['geom'].get('axialAktivOD', 0) / 2:.0f} mm"),
+        "ref": "meta.json"})
+    return jsonify({"ok": True, "id": pid, "projekt": pid, "ordner": proj_dir,
+                    "geom": payload["geom"]})
+
+
+@app.route("/axialfluss/rechnen", methods=["POST", "OPTIONS"])
+def axialfluss_rechnen():
+    """Stufe 1 auf der gezeichneten Scheibe -- und der Grund, warum es sie gibt.
+
+    `ema_axial` und `ema_axial_fdm` standen seit ihrer Entstehung ohne einen
+    einzigen Aufrufer ausserhalb ihrer eigenen Tests da (s. `BEFUNDE.md`,
+    06.10.2026). Gerechnet und unerreichbar ist dasselbe wie nicht gerechnet.
+    """
+    if request.method == "OPTIONS":
+        return ("", 204)
+    import ema_fluss, ema_axial
+    body = request.get_json(silent=True) or {}
+    werte = body.get("werte") or {}
+    try:
+        b_gap = float(body.get("b_gap", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        b_gap = 0.0
+    if not (b_gap > 0):
+        return jsonify({"ok": False,
+                        "grund": ("B_gap fehlt. Die Seite rechnet ihr Feld selbst "
+                                  "und kennt die Spaltspitze; diese Stufe RECHNET "
+                                  "sie nicht und erfindet sie auch nicht.")}), 400
+    geom = ema_fluss.aus_seite(werte)
+    axial = geom.get("axialZahnLaengeMm", 25.0)
+    try:
+        return jsonify({"ok": True, "b_gap_t": b_gap,
+                        "flaechen": ema_fluss.flaechen(geom, axial),
+                        "text": ema_axial.uebersicht(geom, b_gap)})
+    except Exception as e:                      # noqa: BLE001 - Befund melden
+        return jsonify({"ok": False, "grund": f"{type(e).__name__}: {e}"}), 500
 
 
 @app.route("/project/<pid>/stand")
@@ -6288,7 +6667,20 @@ def laeuferbild():
         if not geom:
             return jsonify({"error": "kein geom"}), 400
         axial = data.get("axial_len") or geom.get("axialLen") or 80.0
-        return jsonify(ema_laeuferbild.teile(geom, float(axial)))
+        erg = ema_laeuferbild.teile(geom, float(axial))
+        # **Laeuft dieser Prozess noch mit dem Code, der auf der Platte liegt?**
+        # Python laedt ein Modul EINMAL; das `import` oben sieht danach aus, als
+        # hole es die Datei frisch, und tut es nicht. Wer waehrend eines
+        # laufenden Servers eine Zeichendatei aendert, bekommt im Browser weiter
+        # die alte Fassung -- ohne dass irgendetwas widerspricht. Gemessen und
+        # zweimal am selben Tag gemeldet (s. `ema_werkzeugstand.geladen_veraltet`).
+        try:
+            import ema_werkzeugstand
+            erg["server_veraltet"] = ema_werkzeugstand.veraltet_text(
+                ema_werkzeugstand.geladen_veraltet())
+        except Exception:                                    # noqa: BLE001
+            pass
+        return jsonify(erg)
     except Exception as e:                                   # noqa: BLE001
         # Ein Zeichner darf die Oberflaeche nicht anhalten: die Leinwand
         # zeichnet ohne Teile den nackten Laeufer weiter.
@@ -6380,4 +6772,11 @@ if __name__ == "__main__":
         print(ema_mobil.zugang_text(5000))
     except Exception as _e:
         print(f"  (Handy-Zugang nicht verfuegbar: {_e})")
+    # Den Dateistand JETZT merken -- spaeter ist es zu spaet, dann steht die
+    # Datei schon anders auf der Platte und der Vergleich saehe frisch aus.
+    try:
+        import ema_werkzeugstand
+        ema_werkzeugstand.geladen_veraltet()
+    except Exception:                                        # noqa: BLE001
+        pass
     app.run(host="0.0.0.0", port=5000, debug=False, threaded=True)

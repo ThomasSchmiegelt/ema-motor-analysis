@@ -70,9 +70,21 @@
          border-radius:4px;padding:3px 7px;font-size:11.5px;cursor:pointer}
   button:hover{border-color:var(--akz);color:var(--akz)}
   button[disabled]{opacity:.45;cursor:default}
+  #pleiste{display:flex;align-items:center;gap:9px;padding:7px 14px;
+           background:#1b2129;border-bottom:1px solid var(--rand);font-size:12px}
+  #pleiste .e{color:var(--leise)}
+  #p_wo{color:var(--akz2)}
   .warn{color:var(--akz)}
   .bad{color:#e06c5a}
 </style>
+<div id="pleiste" style="display:none">
+  <span id="p_wo">—</span>
+  <span style="flex:1"></span>
+  <button id="p_holen" type="button">↓ aus dem Projekt</button>
+  <button id="p_rechnen" type="button">Σ Stufe 1 rechnen</button>
+  <button id="p_geben" type="button">↑ ins Projekt übernehmen</button>
+  <span id="p_sagt" class="e"></span>
+</div>
 <header>
   <h1>Axialflussmaschine / Scheibenläufer — Ansicht</h1>
   <span class="q">gezeichnet nach Igelspacher, Diss. TU München 2020, Kap. 2 ·
@@ -216,6 +228,11 @@
       Bauart, gemessen: die Nut ist parallelflankig, τ<sub>s</sub> wächst mit r,
       also wird der Zahn nach außen breiter und B<sub>Zahn</sub> fällt. Der
       kritische Punkt liegt am <b>Innen</b>rand.</figcaption></figure>
+  <figure class="weit" id="stufe1" style="display:none">
+    <pre id="stufe1_t" style="margin:0;white-space:pre-wrap;font:12px/1.55 ui-monospace,monospace;color:var(--text)"></pre>
+    <figcaption><b>Stufe 1</b> (<code>ema_axial.uebersicht</code>) — gerechnet
+      auf dem Server, mit dem <i>gemessenen</i> B_gap dieser Seite. Ringraum,
+      λ-Schranke, Zahnform, axialer Anzug, Rückenblech, Dauermoment.</figcaption></figure>
   <figure class="weit"><table class="m" id="tab"></table>
     <figcaption>Aus der Zeichnung abgelesen bzw. unmittelbar daraus gerechnet —
       keine Auslegung.</figcaption></figure>

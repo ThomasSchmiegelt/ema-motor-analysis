@@ -70,7 +70,13 @@ Das Tor, und was es NICHT tut
 
 ``pruefe_flussweg(quelle, stufe)`` weist ab, was nicht gebaut ist -- dasselbe
 Tor wie ``ema_radien.pruefe_bauform``, aus demselben Grund. ``STUFEN_AXIAL``
-ist heute **leer**, und das ist die Aussage: keine Stufe traegt den Axialfluss.
+traegt seit dem 06.10.2026 ``analytisch``, ``feld``, ``thermik`` und ``zyklus``,
+seit dem 07.10.2026 auch ``cad`` und ``em3d`` -- **jedes ueber einen eigenen
+Erzeuger** (``cad_weg``/``em3d_weg``), nicht ueber den Vollmotorweg. Allein
+``struktur`` steht weiter aussen vor, und das ist die Aussage: die Scheibe
+traegt zwei Lasten, die die radiale Struktur-FEM nicht kennt (axialer Anzug,
+Fliehkraft IN der Scheibenebene), und sie werden in ``ema_axial.ruecken`` bzw.
+``ema_axial.bandage`` gerechnet.
 
 ``flaechen()`` rechnet trotzdem fuer beide Wege. Das ist kein Widerspruch,
 sondern die Trennung von Tor und Formel: das Tor sagt, was das Werkzeug
@@ -104,7 +110,153 @@ VORGABE = "radial"
 #: Querschnitt gibt es axial nicht. Der Weg dorthin ist der abgewickelte
 #: Mehrschnitt (``AXIALFLUSS.md`` §4, Geruest in
 #: ``axialfluss_scheibenprobe.py``).
-STUFEN_AXIAL: tuple = ("analytisch", "feld")
+#: Seit dem 07.10.2026 traegt die Scheibe auch **em3d** -- aber ueber einen
+#: anderen Loeser, genau wie bei "feld". `ema_axial_em3d` vernetzt EINE
+#: Polteilung als echten Ringsektor und loest sie anti-periodisch in Elmer; der
+#: magnetostatische Pipelineweg `ema_em3d` dagegen baut konzentrische Zylinder
+#: und Magnete aus `magnet_legs` -- fuer eine Scheibe eine andere Maschine.
+#: Dieselbe Trennung wie `FELDWEG_AXIAL`, und aus demselben Grund.
+#: **`cad` traegt seit dem 07.10.2026** -- ueber `ema_axial_cad`, nicht ueber
+#: `ema_freecad.build_full_motor_script` (das zeichnet einen Zylinder mit Nuten
+#: im Mantel). Dritte Stufe mit eigenem Weg, dritte Begruendung derselben Art:
+#: „traegt die Stufe" ist nicht „geht DIESEN Weg".
+STUFEN_AXIAL: tuple = ("analytisch", "feld", "em3d", "cad", "thermik", "zyklus")
+
+#: Welcher CAD-Erzeuger den Flussweg traegt.
+CAD_WEG_AXIAL = "scheibe"
+CAD_WERKZEUG = {
+    "vollmotor": "ema_freecad.build_full_motor_script (Zylinder, Nuten im Mantel)",
+    "scheibe": "ema_axial_cad.baue_skript (Scheibe, radiale Nuten)",
+}
+
+
+def cad_weg(geom: dict) -> str:
+    """Welcher CAD-Erzeuger fuer diesen Flussweg gilt -- EINE Stelle."""
+    return CAD_WEG_AXIAL if flussweg(geom) == "axial" else "vollmotor"
+
+
+def pruefe_cad_weg(geom: dict, weg: str) -> None:
+    """Abweisen, wenn der falsche Erzeuger gerufen wird.
+
+    Ohne das hiesse ``STUFEN_AXIAL`` mit "cad" darin, der Vollmotorerzeuger
+    duerfe eine Scheibe zeichnen -- und der haette klaglos einen Zylinder
+    gebaut und „Axialfluss" darueber geschrieben.
+    """
+    soll = cad_weg(geom)
+    if soll != weg:
+        raise FlusswegNichtUnterstuetzt(
+            f"{LABEL[flussweg(geom)]}: das CAD entsteht hier ueber "
+            f"{CAD_WERKZEUG.get(soll, soll)}, nicht ueber "
+            f"{CAD_WERKZEUG.get(weg, weg)}.")
+
+#: Welcher 3-D-Loeser die Scheibe traegt. Muster `ema_maschinenart.EM3D_WEG`.
+EM3D_WEG_AXIAL = "sektor_axial"
+EM3D_WERKZEUG_FLUSS = {
+    "elmer3d_stat": "der magnetostatische Vollmotor (ema_em3d)",
+    "sektor_axial": ("der anti-periodische Ringsektor EINER Polteilung "
+                     "(ema_axial_em3d)"),
+}
+
+
+def em3d_weg(geom: dict) -> str:
+    """Welcher 3-D-Weg fuer diesen Flussweg gilt -- EINE Stelle."""
+    return (EM3D_WEG_AXIAL if flussweg(geom) == "axial"
+            else "elmer3d_stat")
+
+
+def pruefe_em3d_weg(geom: dict, weg: str) -> None:
+    """Abweisen, wenn der falsche 3-D-Loeser gerufen wird.
+
+    Ohne das hiesse ``STUFEN_AXIAL`` mit "em3d" darin, der magnetostatische
+    Vollmotorweg duerfe eine Scheibe vernetzen -- und der haette klaglos
+    konzentrische Zylinder gebaut und „Axialfluss" darueber geschrieben.
+    """
+    soll = em3d_weg(geom)
+    if soll != weg:
+        raise FlusswegNichtUnterstuetzt(
+            f"{LABEL[flussweg(geom)]}: die 3-D-Stufe geht hier ueber "
+            f"{EM3D_WERKZEUG_FLUSS.get(soll, soll)}, nicht ueber "
+            f"{EM3D_WERKZEUG_FLUSS.get(weg, weg)}.")
+
+#: Wie die Stufennamen der Pipeline heissen. ``run_pipeline`` kennt
+#: ``geometry/field/structural/thermal/drivecycle``, dieses Modul kennt
+#: ``cad/feld/struktur/thermik/zyklus`` -- und eine Zuordnung im Kopf des
+#: Lesers ist keine. Was hier NICHT steht, traegt der Axialfluss nicht.
+STUFE_AUS_PIPELINE = {
+    "geometry": "cad", "field": "feld", "structural": "struktur",
+    "thermal": "thermik", "drivecycle": "zyklus",
+}
+
+
+def stufen_aufteilen(geom: dict, stufen) -> tuple:
+    """Einen Stufensatz AUFTEILEN statt ihn abzuweisen: (traegt, uebersprungen).
+
+    ``stufen_pruefen`` ist das Tor fuer einen AUSDRUECKLICH verlangten Schritt
+    ("rechne mir das CAD") -- dort ist ein Nein richtig, und es nennt den Weg,
+    der stattdessen geht. Fuer den ganzen LAUF ist es die falsche Antwort, und
+    zwar nach der Regel, die in ``_gate_maschinenart`` schon ausgeschrieben
+    steht: dort wurden vier von fuenf Maschinenarten bei 4 % abgewiesen, weil
+    EINE Stufe woanders liegt, und das war ein Fehler. Beim Axialfluss war es
+    bis zum 07.10.2026 genauso -- aus dem Browser lief **kein** Axiallauf, weil
+    ``stages`` dort ``None`` ist und das Tor dann den vollen Satz prueft und an
+    ``geometry``/``structural`` haengenbleibt. Gerechnet wurde dadurch nichts,
+    obwohl Feld, Thermik und Fahrzyklus laengst tragen.
+
+    Zurueck kommen zwei Listen. Die zweite ist nicht Abfall, sondern die
+    Auskunft: der Aufrufer schreibt sie ins Protokoll, samt dem Weg, der es
+    rechnet. Eine stillschweigend uebersprungene Stufe waere schlimmer als eine
+    abgewiesene.
+    """
+    if flussweg(geom) != "axial":
+        return (list(stufen or ()), [])
+    traegt, offen = [], []
+    for p in (stufen or ()):
+        (traegt if STUFE_AUS_PIPELINE.get(p, p) in STUFEN_AXIAL
+         else offen).append(p)
+    return (traegt, offen)
+
+
+#: Was statt der uebersprungenen Stufe geht -- je Stufe EIN Satz, damit das
+#: Protokoll nicht nur sagt, was NICHT laeuft.
+STUFE_STATTDESSEN = {
+    "geometry": ("Das CAD der Scheibe baut `ema_axial_cad` (radiale Nuten, "
+                 "Sektormagnete), nicht `ema_freecad.build_full_motor_script` "
+                 "(Zylinder, Nuten im Mantel) \u2014 derselbe Knopf, der richtige "
+                 "Erzeuger."),
+    "structural": ("Die Struktur-FEM rechnet Fliehkraft an einem Blechschnitt; "
+                   "die Hauptlast der Scheibe ist der axiale ANZUG (gemessen "
+                   "8,6 : 1 zum Schub) und steht in keiner der drei Loeser. "
+                   "`ema_axial.ruecken`/`bandage` rechnen ihn, erreichbar "
+                   "ueber `cae_cli.py axial`."),
+}
+
+
+def stufen_pruefen(geom: dict, stufen) -> None:
+    """Einen STUFENSATZ gegen den Flussweg pruefen.
+
+    Der Lauf als Ganzes (``stufe = "lauf"``) ist fuer die Scheibe die falsche
+    Frage: sie traegt Feld, Thermik und Fahrzyklus, aber weder CAD noch
+    Struktur-FEM noch 3-D. Wer den ganzen Satz abweist, weist damit auch das ab,
+    was laengst geht; wer ihn durchlaesst, rechnet CAD auf einer Scheibe. Also
+    einzeln, und die Meldung NENNT die Stufe, die bindet, samt dem, was bleibt.
+    """
+    if flussweg(geom) != "axial":
+        return
+    offen = [p for p in (stufen or ())
+             if STUFE_AUS_PIPELINE.get(p, p) not in STUFEN_AXIAL]
+    if not offen:
+        return
+    traegt = [p for p in (stufen or ()) if p not in offen]
+    raise FlusswegNichtUnterstuetzt(
+        f"{LABEL['axial']}: die Stufe(n) {', '.join(sorted(offen))} tragen ihn "
+        f"nicht."
+        + (f" Getragen waeren hier: {', '.join(sorted(traegt))}."
+           if traegt else "")
+        + f" Insgesamt getragen: {', '.join(STUFEN_AXIAL)}. "
+        f"Waehle im Reiter ⑤ Berechnung nur die tragenden Stufen, oder nimm "
+        f"`cae_cli.py axial`. Ein Radialfluss-Ergebnis unter diesem Namen waere "
+        f"schlimmer als keines -- gemessen laege allein die Flussflaeche um den "
+        f"Faktor 1,49 daneben, das Moment um 1,66.")
 
 #: **Welcher LOESER die axiale Feldstufe traegt.** Dieselbe Unterscheidung wie
 #: ``ema_maschinenart.Art.feldweg``, und aus demselben Grund: „traegt die Stufe"
@@ -422,3 +574,276 @@ def uebersicht(geom: dict, axial_mm: float | None = None) -> str:
     z.append(f"  Luftspaltkraft traegt: {t['traeger']}")
     z.append(f"  {t['aussage']}")
     return "\n".join(z)
+
+
+# ---------------------------------------------------------------------------
+# Die Zeichenseite und das Schema -- EINE Zuordnung
+# ---------------------------------------------------------------------------
+#
+# ``axialfluss/ansicht.html`` ist als eigenstaendige Seite gebaut worden, damit
+# sie geprueft werden konnte, bevor etwas davon in ``ema.html`` wandert. Sie
+# hat dabei einen VOLLSTAENDIGEN axialen Parametersatz bekommen -- aus der
+# Bauart heraus, nicht aus dem radialen abgeleitet -- und der ist jetzt der
+# axiale Parametersatz des Werkzeugs.
+#
+# Diese Tabelle ist die einzige Stelle, an der Feldname und Schemaschluessel
+# verbunden sind. Die Seite HOLT sie sich (``GET /axialfluss/felder``) und
+# schreibt sie nicht ab: eine zweite Zuordnung waere dieselbe Falle wie die
+# handgespiegelte ``magnetLegs`` -- beide Seiten saehen richtig aus und
+# meinten verschiedene Maschinen.
+#
+# Drei Umrechnungen stehen darin, und jede ist eine, die man genau einmal
+# falsch macht:
+#   * die Seite fuehrt den AUSSENRADIUS, das Schema den DURCHMESSER
+#   * die Seite fuehrt die POLZAHL 2p, das Schema die POLPAARE p
+#   * ``topo`` und ``axialBauform`` sind DASSELBE in zwei Vokabularen
+#     (Dissertation gegen Industrie), nicht zwei Einstellungen
+
+#: Seitenname -> (Schemaschluessel, Faktor Seite->Schema).
+#: Faktor ``None`` heisst: keine Zahl, s. ``_UMSCHRIFT``.
+SEITE_FELDER: dict[str, tuple[str, float | None]] = {
+    "ro":      ("axialAktivOD", 2.0),      # Radius -> Durchmesser
+    "lam":     ("axialLambda", 1.0),
+    "poles":   ("p", 0.5),                 # Polzahl 2p -> Polpaare p
+    "q":       ("slots", 1.0),
+    "bnut":    ("axialNutBreiteMm", 1.0),
+    "spalt":   ("axialSpaltMm", 1.0),
+    "zahn":    ("axialZahnLaengeMm", 1.0),
+    "jochS":   ("axialJochStaenderMm", 1.0),
+    "jochR":   ("axialJochLaeuferMm", 1.0),
+    "magd":    ("axialMagnetDicke", 1.0),
+    "alpha":   ("axialPolbedeckung", 1.0),
+    "welle":   ("shaftD", 1.0),            # beides Durchmesser
+    "wkI":     ("axialWickelkopfMm", 1.0),
+    "stapel":  ("axialStapel", 1.0),
+    "magSegU": ("axialMagSegUmfang", 1.0),
+    "magSegR": ("axialMagSegRadial", 1.0),
+    "magFuge": ("axialMagFugeMm", 1.0),
+    "qr":      ("axialLaeuferStaebe", 1.0),
+    "topo":    ("axialBauform", None),
+    "laeufer": ("axialLaeuferart", None),
+}
+
+#: ``topo`` der Seite <-> ``axialBauform`` des Schemas. Dasselbe Merkmal, zwei
+#: Vokabulare: die Seite zaehlt Staender und Laeufer (Igelspacher Kap. 2), die
+#: Industrie benennt die Bauform. Wer beides als zwei Einstellungen fuehrte,
+#: haette zwei Zahlen fuer die Zahl der Luftspalte.
+#:
+#: Die Unterscheidung YASA / TORUS innerhalb von ESDR steht NICHT hier, sondern
+#: folgt aus ``axialJochStaenderMm``: yokeless heisst ohne Staenderjoch. Sie
+#: hier zu fuehren hiesse, sie zweimal einstellbar zu machen.
+TOPO_BAUFORM = {"eser": "einseitig", "dser": "afir", "esdr": "yasa"}
+BAUFORM_TOPO = {"einseitig": "eser", "afir": "dser",
+                "yasa": "esdr", "torus_nn": "esdr"}
+
+#: Zahl der magnetisch wirksamen Luftspalte je Teilmaschine, AUS der Bauform.
+#: ``axialSpalte`` bleibt als Schluessel bestehen (``flaechen`` liest ihn), wird
+#: hier aber gesetzt statt unabhaengig eingestellt -- sonst stuenden Bauform und
+#: Spaltzahl nebeneinander und koennten sich widersprechen.
+BAUFORM_SPALTE = {"einseitig": 1, "afir": 2, "yasa": 2, "torus_nn": 2}
+
+
+def _zahl(x, vorgabe=0.0):
+    try:
+        return float(x)
+    except (TypeError, ValueError):
+        return vorgabe
+
+
+def aus_seite(werte: dict) -> dict:
+    """Felder der Zeichenseite -> Geometrie-Teilmenge fuer den Payload.
+
+    Setzt ``fluxPath="axial"`` mit: wer diese Seite uebernimmt, meint eine
+    Axialflussmaschine, und die Stufen fragen genau diesen Schluessel.
+    """
+    g: dict = {"fluxPath": "axial"}
+    for seite, (schl, fak) in SEITE_FELDER.items():
+        if seite not in werte:
+            continue
+        roh = werte[seite]
+        if fak is None:
+            if seite == "topo":
+                g[schl] = TOPO_BAUFORM.get(str(roh), "yasa")
+            else:
+                g[schl] = str(roh)
+            continue
+        w = _zahl(roh) * fak
+        g[schl] = int(round(w)) if schl in ("p", "slots", "axialStapel",
+                                            "axialMagSegUmfang",
+                                            "axialMagSegRadial",
+                                            "axialLaeuferStaebe") else w
+    # Abgeleitet, nicht eingestellt -- s. BAUFORM_SPALTE.
+    bf = g.get("axialBauform", "yasa")
+    g["axialSpalte"] = BAUFORM_SPALTE.get(bf, 2) * max(1, int(g.get("axialStapel", 1)))
+    # YASA gegen TORUS folgt aus dem Staenderjoch, nicht aus einem zweiten Feld.
+    if bf in ("yasa", "torus_nn"):
+        g["axialBauform"] = "yasa" if _zahl(g.get("axialJochStaenderMm"), 0) <= 0.5 \
+                            else "torus_nn"
+    # Die Zahnform folgt aus der Zeichnung: die Seite zeichnet durchweg
+    # PARALLELFLANKIGE Nuten, das ist ihre Aussage (Igelspacher Kap. 2.1).
+    g["axialZahnform"] = "parallel"
+    return g
+
+
+def zur_seite(geom: dict) -> dict:
+    """Die Gegenrichtung: Geometrie -> Felder der Zeichenseite.
+
+    Fehlt ein Schluessel, fehlt er auch im Ergebnis -- die Seite behaelt dann
+    ihren eigenen Wert. Ihn hier mit einer Vorgabe zu fuellen hiesse, einen
+    Wert zu erfinden, der im Projekt nicht steht.
+    """
+    w: dict = {}
+    for seite, (schl, fak) in SEITE_FELDER.items():
+        if schl not in geom or geom[schl] is None:
+            continue
+        if fak is None:
+            w[seite] = (BAUFORM_TOPO.get(str(geom[schl]), "esdr")
+                        if seite == "topo" else str(geom[schl]))
+        else:
+            w[seite] = _zahl(geom[schl]) / fak
+    return w
+
+
+#: **Ein tragfaehiger Axialfluss-Startpunkt -- die EINE Quelle.**
+#:
+#: ``ema_text2ema.SCHEMA`` traegt fuer jeden axialen Schluessel ``def: None``:
+#: die Felder sind beschrieben, aber nicht VORBELEGT, weil die Zeichenseite sie
+#: ohnehin alle setzt. Fuer den Agenten war das eine Sackgasse -- ``--frisch``
+#: plus ``--set fluxPath=axial`` ergab einen Payload aus Nullen, und der erste
+#: Zugriff darauf starb (gemessen: ``TypeError: float() argument ... not
+#: 'NoneType'`` in der Thermik, ``'axialAktivOD' fehlt`` in ``flaechen``).
+#:
+#: Die Zahlen hier sind die Maschine aus ``AXIALFLUSS.md`` §1, also derselbe
+#: Fall, gegen den Stufe 1, der Mehrschnitt, der Elmer-Sektor und die Thermik
+#: gemessen sind. Sie sind ein **Ausgangspunkt und keine Auslegung**: nichts
+#: daran ist optimiert, und genau deshalb muss danach ``paarvergleich`` laufen.
+AXIAL_VORGABE = {
+    "axialAktivOD": 260.0,        # aktiver Aussendurchmesser (NICHT statorOD)
+    "axialLambda": 0.577,         # Ri/Ro -- nahe am Momentoptimum des freien Rings
+    "axialBauform": "yasa",       # zwei Spalte, jochloser Staender
+    "axialSpalte": 2,             # folgt der Bauform (BAUFORM_SPALTE)
+    "axialSpaltMm": 1.0,
+    "axialMagnetDicke": 6.0,
+    "axialPolbedeckung": 0.85,
+    "axialZahnform": "keil",      # b ~ r: B_zahn ueber dem Radius konstant
+    "axialNabeD": 0.0,            # 0 = shaftD
+    "axialBminMm": 2.0,
+    "axialNutBreiteMm": 0.0,      # 0 = aus slotWidthRatio (s. ema_axial.nutbreite_mm)
+    "axialZahnLaengeMm": 25.0,
+    "axialJochStaenderMm": 0.0,   # jochlos (YASA); > 0 nur wo die Bauform es braucht
+    "axialJochLaeuferMm": 13.0,
+    "axialWickelkopfMm": 14.0,
+    "axialStapel": 1,
+    "axialLaeuferart": "sektor",
+    "axialMagSegUmfang": 1,
+    "axialMagSegRadial": 1,
+    "axialMagFugeMm": 1.0,
+    "axialLaeuferStaebe": 0,
+}
+
+
+#: **Welche axialen Schluessel eine ECHTE Zahl brauchen** -- und welche nicht.
+#:
+#: Bei den uebrigen ist 0 eine gueltige Wahl und bedeutet „ableiten":
+#: ``axialJochStaenderMm`` 0 = jochlos, ``axialNabeD`` 0 = ``shaftD``,
+#: ``axialNutBreiteMm`` 0 = aus ``slotWidthRatio``. Diese fuenf dagegen sind
+#: ohne Zahl keine Maschine -- und genau daran scheiterte der erste Anlauf:
+#: ``axialAktivOD`` stand als **0** im Schema (nicht als ``None``), die
+#: Vorbelegung griff nicht, und der Lauf endete mit „'axialAktivOD' fehlt".
+AXIAL_PFLICHT = ("axialAktivOD", "axialLambda", "axialSpaltMm",
+                 "axialMagnetDicke", "axialPolbedeckung", "axialZahnLaengeMm",
+                 "axialJochLaeuferMm", "axialWickelkopfMm")
+
+
+#: Wo eine 0 keine Zahl ist, sondern "ableiten". Ohne diesen Zusatz liest das
+#: Protokoll "axialNabeD = 0.0" als ergaenztes MASS -- und ein Nabendurchmesser
+#: von null waere keine Maschine. Dieselbe Unterscheidung wie in
+#: ``AXIAL_PFLICHT``, nur fuer die Ausgabe.
+NULL_HEISST = {
+    "axialNabeD": " (0 = Einspannung auf shaftD)",
+    "axialJochStaenderMm": " (0 = jochlos, wie es die Bauform yasa meint)",
+    "axialNutBreiteMm": " (0 = aus slotWidthRatio)",
+    "axialLaeuferStaebe": " (0 = abgeleitet, Spiegel von ema_asm.stabzahl)",
+}
+
+#: Was eine ergaenzte Vorgabe IST -- ein Satz, der mit jedem Fundstueck
+#: mitgeht. Er steht hier und nicht an den drei Stellen, die ihn ausgeben.
+ERGAENZT_SATZ = ("Ausgangspunkt aus ema_fluss.AXIAL_VORGABE (AXIALFLUSS.md "
+                 "§1), KEINE Auslegung: nichts daran ist optimiert. Gezeichnet "
+                 "und eingestellt wird die Scheibe im Reiter ⊙ Axialfluss "
+                 "(dort „↑ ins Projekt übernehmen“), danach paarvergleich.")
+
+
+def axial_ergaenzen(geom: dict | None = None) -> tuple[dict, list[str]]:
+    """Wie ``axial_vorgabe`` -- und sagt dazu, WAS sie gesetzt hat.
+
+    Der Grund, aus dem es diese zweite Tuer gibt: ``axial_vorgabe`` fuellt
+    stillschweigend, und still war genau das Problem. Der Browser schickte
+    ``fluxPath="axial"`` ohne einen einzigen ``axial*``-Schluessel -- die Maske
+    hat keine, die Scheibe wird im Reiter ⊙ Axialfluss gezeichnet --, und der
+    Lauf starb am ersten Zugriff (``'axialAktivOD' fehlt``, gemeldet am
+    09.10.2026 mit vollem Traceback im Protokollfenster). Eine Vorgabe
+    einzusetzen macht den Lauf moeglich; sie **unbenannt** einzusetzen macht aus
+    einer fremden Maschine eine, die aussieht wie die eigene.
+
+    Rueckgabe: der ergaenzte Payload und je ergaenztem Schluessel eine Zeile
+    ``name = wert``. Leere Liste heisst: alles kam von aussen.
+    """
+    g = dict(geom or {})
+    vorher = {k: g.get(k) for k in AXIAL_VORGABE}
+    g = axial_vorgabe(g)
+    ergaenzt = [f"{k} = {g[k]}" + NULL_HEISST.get(k, "")
+                for k in AXIAL_VORGABE if _geaendert(vorher[k], g[k])]
+    return g, ergaenzt
+
+
+def _geaendert(alt, neu) -> bool:
+    """Hat ``axial_vorgabe`` diesen Schluessel wirklich angefasst?"""
+    if alt is None or alt == "":
+        return True
+    try:
+        return abs(float(alt) - float(neu)) > 1e-12
+    except (TypeError, ValueError):
+        return str(alt) != str(neu)
+
+
+def axial_vorgabe(geom: dict | None = None) -> dict:
+    """Die axialen Schluessel eines Payloads auf tragfaehige Werte setzen.
+
+    Gesetzt wird nur, was **fehlt oder ``None`` ist** -- ein ausdruecklich
+    gesetzter Wert bleibt stehen. Dazu ``fluxPath="axial"``, ``p``/``slots``
+    passend (16 Pole, 48 Nuten ergibt q = 1, die klassische Konzentrierte) und
+    ``magShape="spm"``: eine Scheibe traegt Oberflaechenmagnete, und die
+    Schemavorgabe ``"v"`` haette eine V-Tasche bedeutet, die es dort nicht gibt
+    -- genau daraus fiel am 05.10.2026 eine Salienz von 2,589 in den
+    Betriebspunkt (s. ``BEFUNDE.md``).
+
+    Wer wissen muss, WAS ergaenzt wurde, nimmt ``axial_ergaenzen`` -- diese
+    Fassung fuellt still, und das ist nur dort richtig, wo der Aufrufer die
+    Vorgabe ausdruecklich bestellt hat (``cae_cli.py --frisch``).
+    """
+    g = dict(geom or {})
+    g["fluxPath"] = "axial"
+    for k, v in AXIAL_VORGABE.items():
+        roh = g.get(k)
+        fehlt = roh is None or roh == ""
+        if not fehlt and k in AXIAL_PFLICHT:
+            # Hier ist 0 KEINE Wahl, sondern eine Luecke.
+            fehlt = _zahl(roh, 0.0) <= 0
+        if fehlt:
+            g[k] = v
+    # Oberflaechenmagnete flach auf der Scheibe. Der Schluessel heisst radial
+    # `magShape`, und `spm` ist dort genau das: Magnete auf dem Rand, ohne Tasche.
+    if str(g.get("magShape") or "") in ("", "v", "vasym", "vv", "u", "delta",
+                                        "pmasynrm"):
+        g["magShape"] = "spm"
+    # Eine Scheibe hat keine Magnettasche, also auch keine Taschenwaende: der
+    # Wandmodus ist dort gegenstandslos und sein Einpassen scheitert ehrlich
+    # ("auch der kuerzeste Magnet passt nicht zwischen die Waende"), weil das
+    # Layouttor fuer eine Scheibe gar nicht zustaendig ist.
+    g["pocketMode"] = "position"
+    if not (_zahl(g.get("p"), 0) > 0):
+        g["p"] = 8
+    if not (_zahl(g.get("slots"), 0) >= 3):
+        g["slots"] = 48
+    return g

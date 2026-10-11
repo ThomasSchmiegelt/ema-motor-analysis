@@ -166,14 +166,30 @@ pruefe(fl["i_d_A"] == 0.0 and fl["betriebspunkt"].get("salienz") == 1.0,
        "i_d = 0 und Salienz 1: Oberflaechenmagnete flach auf der Scheibe, "
        "kein Reluktanzmoment — kein Phantom-IPM mehr im Betriebspunkt")
 import ema_analysis as _EA
-for fn, nm in ((lambda: _EA.estimate_saliency(G), "estimate_saliency"),
-               (lambda: _EA._analytical_Bgap(G), "_analytical_Bgap"),
-               (lambda: _EA.estimate_dq_currents(G, 3000.0, 100.0), "estimate_dq_currents")):
-    try:
-        fn()
-        pruefe(False, f"{nm} muesste Axialfluss abweisen")
-    except F.FlusswegNichtUnterstuetzt:
-        pruefe(True, f"{nm} weist Axialfluss ab (steht auf magnet_legs)")
+# **Geaendert am 07.10.2026: hier wird ANTWORTET, nicht abgewiesen.** Die drei
+# Funktionen warfen `FlusswegNichtUnterstuetzt`, und der GRUND war richtig (die
+# V-Taschen-Salienz der Schemavorgabe, gemessen 2,589, hat eine Scheibe nicht) --
+# die Haerte aber nicht: sie toeteten jeden Axiallauf aus der Oberflaeche,
+# nachdem Feld, Betriebspunkt und Eckdrehzahl schon gerechnet waren. Fuer beide
+# gibt es eine RICHTIGE Antwort, und die ist besser als ein Abbruch:
+pruefe(_EA.estimate_saliency(G) == 1.0,
+       "estimate_saliency antwortet 1,0 — Oberflaechenmagnete, Ld = Lq, kein "
+       "Reluktanzmoment. Genau das setzt betriebspunkt ohnehin voraus")
+_bg = _EA._analytical_Bgap(G)
+pruefe(abs(_bg - AF.eichung_magnet(G)) < 1e-12,
+       f"_analytical_Bgap DELEGIERT an ema_axial_fdm.eichung_magnet "
+       f"({_bg:.4f} T) — eine radiale Zahl unter axialem Namen war der Anlass "
+       f"des Tors, ein Abbruch ist aber nicht die Antwort darauf")
+_dq = _EA.estimate_dq_currents(G, 3000.0, 100.0)
+pruefe(abs(float(_dq[1])) < 1e-9 if isinstance(_dq, (list, tuple))
+       else True,
+       f"und estimate_dq_currents liefert i_d = 0 (Salienz 1), also denselben "
+       f"Betriebspunkt wie ema_axial_fdm.betriebspunkt")
+# Die Gegenprobe, die das traegt: der RADIALE Weg bleibt unberuehrt.
+_gr = dict(G); _gr["fluxPath"] = "radial"
+pruefe(_EA.estimate_saliency(_gr) != 1.0,
+       "waehrend ein radialer Laeufer weiterhin seine echte Salienz bekommt — "
+       "die Abzweigung haengt am Flussweg, nicht an einem Sonderfall")
 # Der Fehlschlag, der beim Bauen vier Stunden gekostet haette: ein stilles
 # except liess die Last mit Strom NULL rechnen und das Leerlaufmoment melden.
 pruefe("last_gerechnet" in fl and "strom_fehlschlag" in fl,
@@ -185,8 +201,15 @@ pruefe(fl["widerspruch"] and "k_norm" in fl["widerspruch"],
        "zwei Momentwege, der Unterschied benannt und auf ema_asm.k_norm bezogen")
 v = [AF.felder(G, k_schnitte=2, N=288, rpm=3000.0, last_nm=l)["T_verhaeltnis"]
      for l in (50.0, 200.0)]
-pruefe(all(vv and 2.0 < vv < 4.5 for vv in v)
-       and abs(v[0] - v[1]) / v[1] < 0.15,
+# Die Schranke war 4,5 und ist 5,5, seit die Eichung an der Spitze der
+# Arbeitsgeraden haengt statt an ihrem Mittelwert (06.10.2026): T_maxwell waechst
+# mit dem Magnetfeld, T_aus_Kt haengt weiter an ``eichung_magnet`` (dem
+# Mittelwert) — das Verhaeltnis ist also um genau den Eichfaktor 1,176
+# gewandert. Gemessen ueber 25…200 Nm bleibt es 4,18…4,85 (16 %), also eine
+# NORMIERUNG und keine Stromabhaengigkeit; das ``(2/pi)`` in ``betriebspunkt``
+# auf einen schon gemittelten Wert ist der offene Rest (s. ``BEFUNDE.md``).
+pruefe(all(vv and 2.0 < vv < 5.5 for vv in v)
+       and abs(v[0] - v[1]) / v[1] < 0.20,
        f"und er ist ueber den Strom nahezu konstant ({v[0]:.2f} gegen {v[1]:.2f}) "
        f"— also Normierung und nicht Physik")
 pruefe(abs(fl["T_aus_Kt_Nm"] - 1.5 * (a["poles"] // 2) * fl["psi_Wb"] * fl["i_q_A"])
@@ -203,10 +226,19 @@ pruefe(kv["reihe"][1]["psi_abw_pct"] <= kv["reihe"][0]["psi_abw_pct"] + 1e-9,
        f"psi konvergiert monoton: k=4 ({kv['reihe'][1]['psi_abw_pct']:.2f} %) "
        f"liegt naeher an k=8 als k=2 ({kv['reihe'][0]['psi_abw_pct']:.2f} %) — "
        f"bei NICHT konstanter Aufloesung war genau das verletzt")
-pruefe(kv["reihe"][1]["psi_abw_pct"] < 8.0 < kv["reihe"][0]["psi_abw_pct"],
-       f"k=2 ist mit {kv['reihe'][0]['psi_abw_pct']:.1f} % deutlich zu grob, "
-       f"k=4 mit {kv['reihe'][1]['psi_abw_pct']:.1f} % brauchbar — der "
-       f"Mehrschnitt heisst nicht umsonst so")
+# Diese Pruefung forderte bis zum 06.10.2026, dass k=2 um MEHR als 8 % neben
+# k=8 liegt — sie hielt also das schlechte Konvergenzverhalten der alten
+# Eichung fest. Dort wurde jeder Schnitt an SEINER EIGENEN genuteten Spitze
+# geeicht, und die haengt davon ab, wo bei diesem Radius eine Nut gegenueber dem
+# Magneten steht: der Eichfaktor sprang von Schnitt zu Schnitt, und das radiale
+# Integral brauchte viele Schnitte, um das auszumitteln. Seit alle Schnitte am
+# NUTLOSEN Lauf gegen dieselbe analytische Spitze eichen, liegt schon k=2 bei
+# 1,2 %. Gefordert wird jetzt, was die Stufe leisten soll: k=4 unter 3 %, und
+# die Monotonie prueft die Zeile darueber.
+pruefe(kv["reihe"][1]["psi_abw_pct"] < 3.0,
+       f"k=4 liegt mit {kv['reihe'][1]['psi_abw_pct']:.1f} % unter 3 % "
+       f"(k=2: {kv['reihe'][0]['psi_abw_pct']:.1f} %) — und seit der Eichung am "
+       f"nutlosen Lauf ist schon k=2 brauchbar")
 # **Das Moment konvergiert NICHT, und das wird festgehalten statt weggetestet.**
 # psi haengt an EINEM geeichten Feld (dem Magnetfeld), die Schubspannung am
 # PRODUKT zweier unabhaengig geeichter Felder -- B_n aus dem Magnetanker, B_t
@@ -252,8 +284,42 @@ pruefe(len(fl["grenzen"]) >= 3 and any("Stufe 3" in g for g in fl["grenzen"]),
 print("\n— 9. Das Tor: die Stufe traegt, der WEG ist ein anderer —")
 
 ax = {"geom": G}
-pruefe(F.STUFEN_AXIAL == ("analytisch", "feld"),
-       "STUFEN_AXIAL traegt jetzt 'feld'")
+print("\n— Der LAEUFER dreht sich wirklich —")
+# `rotor_winkel` erreichte bis zum 06.10.2026 nur die Staenderstroeme; die
+# Magnete klebten an `X % tau_p`. Gemessen stand der Schwerpunkt von
+# `j_magnet` ueber eine ganze elektrische Periode auf 40,170 mm -- jeder
+# Winkel gab dasselbe Raster. Aufgefallen ist es erst an einer BILDREIHE.
+import math as _m
+_a = AX.auslegung(G)
+_r = 0.5 * (_a["r_innen_m"] + _a["r_aussen_m"])
+_per = 2.0 * (2.0 * _m.pi / _a["poles"])          # eine el. Periode
+_ras = lambda w: AF.rastere_scheibe(G, _r, 240, 0.0, 0.0, rotor_winkel=w)
+_s0, _sP, _sH = _ras(0.0), _ras(_per), _ras(_per / 2.0)
+_j0, _jP, _jH = _s0["j_magnet"], _sP["j_magnet"], _sH["j_magnet"]
+_n = float(np.abs(_j0).max()) or 1.0
+pruefe(float(np.abs(_jP - _j0).max()) / _n < 1e-12,
+       "nach einer vollen elektrischen Periode ist das Raster IDENTISCH")
+# Eine halbe Periode ist genau EINE Polteilung: dasselbe Muster, umgepolt.
+_schief = int((np.abs(_jH + _j0) / _n > 1e-9).sum())
+pruefe(_schief < _j0.size * 0.005,
+       f"nach einer halben Periode ist es umgepolt — bis auf {_schief} von "
+       f"{_j0.size} Zellen ({_schief / _j0.size * 100:.3f} %) an einer "
+       f"Magnetkante, die durch den Schichtversatz auf einen Gleitkomma-"
+       f"Gleichstand faellt")
+pruefe(float(np.abs(_jH - _j0).max()) / _n > 1.5,
+       "und es ist NICHT dasselbe — der Laeufer steht eine Polteilung weiter")
+# Die Bildreihe selbst: sie muss sich zwischen zwei Frames unterscheiden.
+_f0 = _ras(0.0)["j_magnet"]
+_f1 = _ras(_per / 8.0)["j_magnet"]
+pruefe(float(np.abs(_f1 - _f0).max()) / _n > 0.5,
+       "ein Achtel Periode weiter sieht das Raster anders aus — eine Bildreihe, "
+       "in der sich nichts bewegt, waere wertlos")
+
+pruefe(set(F.STUFEN_AXIAL) == {"analytisch", "feld", "em3d", "cad", "thermik", "zyklus"},
+       "STUFEN_AXIAL traegt analytisch, feld, em3d, cad, thermik und zyklus — jedes auf SEINEM Weg")
+for _nicht in ("struktur",):
+    pruefe(_nicht not in F.STUFEN_AXIAL,
+           f"{_nicht} traegt den Axialfluss NICHT")
 pruefe(F.pruefe_flussweg(ax, "feld") == "axial",
        "die Stufe wird getragen")
 try:
@@ -270,12 +336,16 @@ try:
     pruefe(False, "das Pipelinetor muesste die Feldstufe abweisen")
 except F.FlusswegNichtUnterstuetzt:
     pruefe(True, "das zentrale Pipelinetor weist sie ab (dieselbe Stelle wie die Art)")
-for stufe in ("cad", "em3d", "lauf"):
+for stufe in ("lauf",):
     try:
         F.pruefe_flussweg(ax, stufe)
         pruefe(False, f"Stufe '{stufe}' muesste abweisen")
     except F.FlusswegNichtUnterstuetzt:
         pruefe(True, f"Stufe '{stufe}' weist weiterhin ab")
+# `em3d` traegt seit dem 07.10.2026 -- aber nur auf dem Ringsektor.
+pruefe(F.pruefe_flussweg(ax, "em3d") == "axial"
+       and F.em3d_weg(ax["geom"]) == "sektor_axial",
+       "em3d laeuft durch, aber ueber ema_axial_em3d")
 gr = {k: v.get("def") for k, v in T.SCHEMA.items() if v.get("geom")}
 gr["axialLen"] = 80
 pruefe(ema_pipeline._gate_maschinenart({"geom": gr}, None, "feld") is None,
@@ -283,6 +353,74 @@ pruefe(ema_pipeline._gate_maschinenart({"geom": gr}, None, "feld") is None,
 import ema_werkzeugstand
 pruefe("ema_axial_fdm.py" in ema_werkzeugstand.PHYSIK,
        "ema_axial_fdm.py steht im Fingerabdruck — es bewegt B_gap und das Moment")
+
+print("\n— Die drei Anker der Eichung sind DREI verschiedene Groessen —")
+
+# Gegen Invarianten gemessen, nicht gegen festgenagelte Zahlen: eine Zahl
+# festzunageln prueft nur, dass sich nichts geaendert hat; diese Verhaeltnisse
+# folgen aus der Fourierreihe einer Rechteckwelle und muessen gelten.
+# Ausdruecklich an einer Geometrie mit Polbedeckung < 1: bei alpha = 1 (der
+# Vorgabe von G) fallen Mittel und Spitze zusammen, und dann prueft die Reihe
+# genau die Verwechslung NICHT, um die es geht.
+_GA = dict(G, axialPolbedeckung=0.85)
+_sp = AF.eichung_magnet_spitze(_GA)
+_h1 = AF.eichung_magnet_grundwelle(_GA)
+_mi = AF.eichung_magnet(_GA)
+_al = AF._polbedeckung(_GA)
+pruefe(abs(_al - 0.85) < 1e-9,
+       f"die Probegeometrie traegt wirklich alpha = {_al:.2f} (sonst prueft die "
+       f"Reihe darunter nichts)")
+pruefe(_mi < _sp < _h1,
+       f"Mittel {_mi:.4f} < Spitze {_sp:.4f} < Grundwelle {_h1:.4f} T — "
+       f"die Reihenfolge ist keine Geschmacksfrage")
+pruefe(abs(_mi / _sp - _al) < 1e-9,
+       f"Mittel/Spitze ist GENAU die Polbedeckung ({_mi/_sp:.6f} gegen {_al:.6f})")
+pruefe(abs(_h1 / _sp - 4 / math.pi * math.sin(_al * math.pi / 2)) < 1e-9,
+       "Grundwelle/Spitze ist GENAU 4/pi*sin(alpha*pi/2) — die Fourierreihe")
+pruefe(abs(AF.eichung_magnet(G) - AF.eichung_magnet_spitze(G)) < 1e-9,
+       "und bei alpha = 1 fallen Mittel und Spitze zusammen — der Grund, warum "
+       "die Verwechslung an der Vorgabegeometrie unauffaellig blieb")
+pruefe(abs(_h1 / _mi - 1.457) < 0.01,
+       f"und Grundwelle/Mittel ist {_h1/_mi:.3f} — der Faktor, mit dem der "
+       f"Mehrschnitt am 06.10.2026 um 49 % neben dem 3-D-Sektor lag")
+
+# Die eigentliche Probe: der Loeser muss die Grundwelle der Arbeitsgeraden am
+# NUTLOSEN Schnitt treffen. Trifft er sie, ist die Eichung richtig verankert —
+# und zwar ohne dass irgendwo eine Grundwelle vorgegeben wurde, denn geeicht
+# wird an der SPITZE.
+_r = 0.5 * (AX.auslegung(G)["r_innen_m"] + AX.auslegung(G)["r_aussen_m"])
+_so = AF.schnitt(G, _r, N=420, nuten=False)
+pruefe(abs(_so["b_n_spitze_T"] / _sp - 1.0) < 0.02,
+       f"nutlose Spitze {_so['b_n_spitze_T']:.4f} T trifft den Anker {_sp:.4f} T "
+       f"(das ist die Eichung selbst)")
+pruefe(abs(_so["b_n_grundwelle_T"] / _h1 - 1.0) < 0.05,
+       f"und die nutlose GRUNDWELLE {_so['b_n_grundwelle_T']:.4f} T trifft die "
+       f"analytische {_h1:.4f} T auf {abs(_so['b_n_grundwelle_T']/_h1-1)*100:.1f} % "
+       f"— ungeeicht, also eine echte Gegenprobe")
+
+_sm = AF.schnitt(G, _r, N=420, nuten=True)
+pruefe(_sm["b_n_grundwelle_T"] < _so["b_n_grundwelle_T"],
+       f"die Nutung SENKT die Grundwelle ({_sm['b_n_grundwelle_T']:.4f} gegen "
+       f"{_so['b_n_grundwelle_T']:.4f} T) — und beide tragen jetzt dieselbe Eichung")
+pruefe(_sm["b_n_spitze_T"] > _so["b_n_spitze_T"],
+       f"waehrend sie die SPITZE HEBT ({_sm['b_n_spitze_T']:.4f} gegen "
+       f"{_so['b_n_spitze_T']:.4f} T) — ueber dem Zahn ist der Fluss gebuendelt. "
+       f"Genau deshalb ist die genutete Spitze als Anker untauglich")
+pruefe(abs(_sm["eichfaktor_magnet"] - _so["eichfaktor_magnet"])
+       / max(_so["eichfaktor_magnet"], 1e-30) < 1e-6,
+       "genutet und nutlos tragen denselben Eichfaktor — sonst waere der "
+       "Nutungsverlust in der Eichung versteckt statt gemessen")
+pruefe(_sm.get("eichung_art") == "spitze_nutlos",
+       "und das Ergebnis sagt, WORAN geeicht wurde")
+
+# Das Staenderjoch: alpha darf genau EINMAL eingehen.
+_gj = dict(G, axialJochStaenderMm=0)
+_hj = AF._jochhoehe(_gj)
+_hr = AF._rueckenhoehe(dict(G, axialJochLaeuferMm=0, axialRueckenMm=0))
+pruefe(abs(_hj / _hr - 1.0) < 0.25,
+       f"Staenderjoch {_hj:.2f} mm und Rueckenblech {_hr:.2f} mm liegen "
+       f"beieinander ({abs(_hj/_hr-1)*100:.1f} %) — beide fuehren den halben "
+       f"Polfluss umfangs. Mit alpha^2 standen 7,89 gegen 11,10 mm")
 
 print(f"\n{_ok} bestanden, {_fehl} fehlgeschlagen")
 sys.exit(1 if _fehl else 0)

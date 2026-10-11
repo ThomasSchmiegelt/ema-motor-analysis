@@ -194,6 +194,84 @@ def lambda_grenze(geom: dict) -> dict:
     }
 
 
+def nutbreite_mm(geom: dict, r_mm: float) -> float:
+    """**Die Nutbreite am Radius r -- die EINE Quelle.** In Millimetern.
+
+    Es gab zwei, und sie widersprachen sich um 42 %: ``zahnform`` rechnete aus
+    ``slotWidthRatio`` (dem radialen Schluessel), waehrend der axiale
+    Parametersatz seit dem 06.10.2026 ``axialNutBreiteMm`` fuehrt -- ausdruecklich
+    *in mm statt als Verhaeltnis, weil die Nut parallelflankig ist*. Am
+    Vorgabe-Payload sind das 8,508 mm gegen 6,000 mm, und daraus fielen
+    **B_zahn 1,312 gegen 1,014 T** am Aussenrand: ein Saettigungsurteil ueber
+    einen Zahn, den niemand gezeichnet hat. Gefunden beim Bauen des CAD, weil
+    ein Zeichner sich entscheiden muss (BEFUNDE.md, 07.10.2026).
+
+    Vorrang hat der axiale Schluessel. Ist er 0, gilt weiter ``slotWidthRatio``,
+    und dann aendert sich fuer bestehende Auslegungen keine Ziffer.
+
+    **Die Zahnform entscheidet, wie b mit r laeuft**, und das ist der ganze
+    Unterschied der beiden Bauarten:
+
+    * ``keil``   -- b ~ r, also konstanter WINKEL: die Nutteilung kuerzt sich
+      heraus wie radial, B_zahn ist ueber r konstant;
+    * ``parallel`` -- b konstant in mm: B_zahn ~ 1/r, der Innenrand traegt
+      1/lambda mal so viel.
+
+    Der mm-Wert gilt in beiden Faellen am **Aussenrand** -- dort ist die Nut am
+    weitesten, und eine Fertigungsangabe bezieht sich auf das groesste Mass.
+    """
+    g = _geom(geom)
+    a = auslegung(g)
+    ro = a["r_aussen_m"] * 1000.0
+    q = max(3, int(a["slots"]))
+    tau_ro = 2.0 * math.pi * ro / q
+    vor = g.get("axialNutBreiteMm")
+    try:
+        b_ro = float(vor) if vor not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        b_ro = 0.0
+    if not (b_ro > 0):
+        swr = min(0.8, max(0.2, float(g.get("slotWidthRatio", 0) or 0.5)))
+        b_ro = swr * tau_ro
+    b_ro = min(b_ro, 0.9 * tau_ro)          # eine Nut, die den Zahn frisst, ist keine
+    if a["zahnform"] == "parallel":
+        return float(b_ro)
+    return float(b_ro * max(r_mm, 0.0) / ro)
+
+
+def nutbreite_befund(geom: dict) -> dict:
+    """Welche der beiden Quellen gilt -- und was die andere gesagt haette.
+
+    Steht im Ergebnis, weil eine Zahl, die sich um 42 % aendert, je nachdem
+    welchen Schluessel man liest, nicht stillschweigend ausgetauscht werden darf.
+    """
+    g = _geom(geom)
+    a = auslegung(g)
+    ro = a["r_aussen_m"] * 1000.0
+    q = max(3, int(a["slots"]))
+    tau_ro = 2.0 * math.pi * ro / q
+    swr = min(0.8, max(0.2, float(g.get("slotWidthRatio", 0) or 0.5)))
+    aus_swr = swr * tau_ro
+    vor = g.get("axialNutBreiteMm")
+    try:
+        gesetzt = float(vor) if vor not in (None, "") else 0.0
+    except (TypeError, ValueError):
+        gesetzt = 0.0
+    b = nutbreite_mm(g, ro)
+    d = {"b_nut_aussen_mm": b, "tau_nut_aussen_mm": tau_ro,
+         "quelle": "axialNutBreiteMm" if gesetzt > 0 else "slotWidthRatio",
+         "aus_slotWidthRatio_mm": aus_swr,
+         "axialNutBreiteMm": gesetzt or None,
+         "swr_wirksam": b / tau_ro if tau_ro else 0.0}
+    if gesetzt > 0 and abs(gesetzt - aus_swr) / max(aus_swr, 1e-9) > 0.02:
+        d["hinweis"] = (
+            f"Zwei Schluessel fuer die Nutbreite: gezeichnet wird "
+            f"{b:.3f} mm aus axialNutBreiteMm; slotWidthRatio = {swr:.2f} "
+            f"haette {aus_swr:.3f} mm ergeben ({abs(gesetzt/aus_swr-1)*100:.0f} % "
+            f"Unterschied). Vorrang hat der axiale Schluessel.")
+    return d
+
+
 def zahnform(geom: dict, b_gap_t: float, b_sat_t: float | None = None) -> dict:
     """Zahnflussdichte am Aussen- UND am Innenrand -- die Zahnform entscheidet.
 
@@ -215,14 +293,30 @@ def zahnform(geom: dict, b_gap_t: float, b_sat_t: float | None = None) -> dict:
 
     g = _geom(geom)
     a = auslegung(g)
-    swr = min(0.8, max(0.2, float(g.get("slotWidthRatio", 0) or 0.5)))
     b_sat = float(b_sat_t or 0.0) or 1.70
-    b_aussen = b_gap_t / ((1.0 - swr) * STAPELFAKTOR)
     keil = a["zahnform"] != "parallel"
-    b_innen = b_aussen if keil else b_aussen / a["lambda"]
+    # **Die Nutbreite kommt aus `nutbreite_mm`, nicht aus `slotWidthRatio`.**
+    # Hier stand `swr` direkt, und damit rechnete diese Funktion ueber einen
+    # Zahn, den der axiale Parametersatz nicht beschreibt (s. `nutbreite_mm`,
+    # BEFUNDE 07.10.2026). Gerechnet wird jetzt an BEIDEN Raendern aus der
+    # wirklichen Breite -- fuer `keil` faellt dabei genau die alte Kuerzung
+    # heraus, weil b ~ r die Nutteilung herauskuerzt.
+    ro = a["r_aussen_m"] * 1000.0
+    ri = a["r_innen_m"] * 1000.0
+    q = max(3, int(a["slots"]))
+
+    def _b_zahn(r):
+        tau = 2.0 * math.pi * r / q
+        z = tau - nutbreite_mm(g, r)
+        return b_gap_t * tau / (max(z, 1e-6) * STAPELFAKTOR)
+
+    b_aussen = _b_zahn(ro)
+    b_innen = _b_zahn(ri)
+    swr = nutbreite_mm(g, ro) / (2.0 * math.pi * ro / q)
     return {
         "zahnform": "keil" if keil else "parallel",
         "b_zahn_aussen_t": b_aussen, "b_zahn_innen_t": b_innen,
+        "nutbreite": nutbreite_befund(g),
         "ueberhoehung": b_innen / b_aussen,
         "b_sat_t": b_sat,
         "haelt": bool(b_innen <= b_sat),
@@ -358,10 +452,27 @@ def ruecken(geom: dict, b_gap_t: float, b_fe_zul_t: float | None = None,
     Durchbiegung um Faktor 9. Die Steifigkeitsforderung ist dabei
     **polzahlunabhaengig**, die magnetische faellt mit der Polzahl -- deshalb
     kreuzen sie sich, und deshalb steht hier, welche bindet.
+
+    ``lam`` ist die Blechsorte aus ``ema_pipeline.LAMINATES``; daraus kommen E
+    und nu der Platte. Der Parameter stand bis zum 09.10.2026 in der Signatur
+    und wurde **nirgends gelesen** -- die Platte rechnete immer mit 200 GPa und
+    nu = 0,30, egal welche Sorte gewaehlt war. Heute bewegt das keine Ziffer
+    (alle fuenf Sorten tragen ``E = 200000`` MPa und ``nu = 0,30``, gemessen),
+    und genau deshalb war es nicht aufgefallen; eine Signatur, die etwas
+    entgegennimmt und wegwirft, ist trotzdem eine Falle fuer den naechsten
+    Werkstoff. ``E`` kommt in **MPa** herein (so steht es in der Tabelle, die
+    auch die FEM speist) und wird hier auf Pa gebracht.
     """
     g = _geom(geom)
     a = auslegung(g)
     az = anzug(g, b_gap_t)
+    e_pa, nu_pl = 200e9, 0.30
+    if lam:
+        try:
+            e_pa = float(lam.get("E") or 200000.0) * 1e6
+            nu_pl = float(lam.get("nu") or 0.30)
+        except (TypeError, ValueError):
+            e_pa, nu_pl = 200e9, 0.30
     b_zul = float(b_fe_zul_t or 0.0) or B_FE_ZUL_VORGABE
     quelle = "hereingereicht (Blechsorte)" if b_fe_zul_t else \
              f"Modulvorgabe {B_FE_ZUL_VORGABE} T (Auslegungswert, nicht B_sat)"
@@ -380,7 +491,7 @@ def ruecken(geom: dict, b_gap_t: float, b_fe_zul_t: float | None = None,
     sig = az["sigma_n_pa"]
 
     def _w(t):
-        return _platte(a_nabe, ro, t, sig, ri)["w_max_m"]
+        return _platte(a_nabe, ro, t, sig, ri, e_pa=e_pa, nu=nu_pl)["w_max_m"]
 
     # t_steif monoton fallend in w -> Bisektion. Die Spanne ist bewusst weit:
     # bei kleiner Nabe braucht es mehr als die magnetische Dicke.
@@ -399,8 +510,9 @@ def ruecken(geom: dict, b_gap_t: float, b_fe_zul_t: float | None = None,
     t_soll = max(t_mag, t_steif)
     bindet = "Durchbiegung" if t_steif > t_mag else "Fluss"
     artikel = "die" if bindet == "Durchbiegung" else "der"
-    pl = _platte(a_nabe, ro, t_soll, sig, ri)
+    pl = _platte(a_nabe, ro, t_soll, sig, ri, e_pa=e_pa, nu=nu_pl)
     return {
+        "e_pa": e_pa, "nu": nu_pl,
         "t_magnetisch_m": t_mag, "t_steifigkeit_m": t_steif,
         "t_soll_m": t_soll, "bindet": bindet,
         "steifigkeit_erreichbar": erreichbar,

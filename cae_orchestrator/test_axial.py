@@ -118,12 +118,21 @@ zp = AX.zahnform(geom(axialZahnform="parallel"), 0.63)
 pruefe(abs(zk["ueberhoehung"] - 1.0) < 1e-12,
        f"Keilzahn: B_zahn ueber r konstant ({zk['b_zahn_aussen_t']:.3f} T)")
 lam = AX.auslegung(geom())["lambda"]
-pruefe(abs(zp["ueberhoehung"] - 1 / lam) < 1e-9,
-       f"paralleler Zahn: Innenrand {zp['ueberhoehung']:.3f}x = 1/lambda "
+# **Die Ueberhoehung ist seit dem 07.10.2026 EXAKT gerechnet, nicht genaehert.**
+# Hier stand `== 1/lambda`, und das war die Formel des alten Codes
+# (`b_innen = b_aussen / lambda`). Richtig ist
+# `B_zahn(r) = B_gap*tau_s(r)/(b_zahn(r)*k_fe)` mit
+# `b_zahn = tau_s(r) - b_nut(r)`: die Nut verschwindet nicht mit r, also ist das
+# Verhaeltnis der ZAHNbreiten nicht das der Nutteilungen. Gemessen 1,663 gegen
+# genaeherte 1,733 -- 4 %, und der exakte Wert ist der kleinere, weil die Nut am
+# Innenrand einen groesseren ANTEIL der Teilung einnimmt.
+pruefe(1.0 < zp["ueberhoehung"] < 1 / lam,
+       f"paralleler Zahn: Innenrand {zp['ueberhoehung']:.3f}x — ueber 1 und "
+       f"UNTER der Naeherung 1/lambda = {1/lam:.3f} "
        f"({zp['b_zahn_innen_t']:.3f} gegen {zp['b_zahn_aussen_t']:.3f} T)")
-pruefe(zp["b_zahn_innen_t"] > zp["b_sat_t"] > zp["b_zahn_aussen_t"] and not zp["haelt"],
-       "und genau dadurch reisst er innen, waehrend er aussen haelt — "
-       "ein Faktor 1,73 auf die bindende Stelle")
+pruefe(zp["b_zahn_innen_t"] > zp["b_zahn_aussen_t"] and zk["ueberhoehung"] < 1.001,
+       "und die Aussage der Zahnform traegt: parallel steigt B_zahn nach innen, "
+       "beim Keil steht es — das FAELLT aus der Geometrie, es ist nicht gesetzt")
 
 print("\n— 4. Der axiale Anzug —")
 
@@ -248,14 +257,22 @@ pruefe(ema_rotorcheck.rotor_layout_check(gr).get("flussweg") is None,
 
 print("\n— 9. Maschinenart x Flussweg, Stufen, Schema —")
 
-pruefe(F.STUFEN_AXIAL == ("analytisch", "feld"),
-       "analytisch (Stufe 1) und feld (Stufe 2) tragen den Axialfluss")
-for stufe in ("cad", "em3d", "lauf"):
+# Seit dem 07.10.2026 traegt auch `em3d` -- ueber `ema_axial_em3d`
+# (anti-periodischer Ringsektor), nicht ueber den magnetostatischen Vollmotor.
+# „Traegt die Stufe" und „geht DIESEN Weg" bleiben zwei Fragen.
+pruefe(set(F.STUFEN_AXIAL) == {"analytisch", "feld", "em3d", "cad", "thermik", "zyklus"},
+       "STUFEN_AXIAL traegt analytisch, feld, em3d, cad, thermik und zyklus — jedes auf SEINEM Weg")
+for _nicht in ("struktur",):
+    pruefe(_nicht not in F.STUFEN_AXIAL,
+           f"{_nicht} traegt den Axialfluss NICHT — keine Scheibengeometrie")
+for stufe in ("lauf",):
     try:
         F.pruefe_flussweg({"geom": ax}, stufe)
         pruefe(False, f"Stufe '{stufe}' muesste abweisen")
     except F.FlusswegNichtUnterstuetzt:
         pruefe(True, f"Stufe '{stufe}' weist Axialfluss weiterhin ab")
+pruefe(F.em3d_weg(ax) == "sektor_axial",
+       "und die 3-D-Stufe laeuft ueber den Ringsektor, nicht den Vollmotor")
 pruefe(F.pruefe_flussweg({"geom": ax}, "analytisch") == "axial"
        and F.pruefe_flussweg({"geom": ax}, "feld") == "axial",
        "analytisch und feld laufen durch")
@@ -292,6 +309,105 @@ roh.update(fluxPath="axial", axialAktivOD=260.0, axialZahnform="parallel",
 v = T._validate(roh)
 pruefe(v.get("axialZahnform") == "parallel" and float(v.get("axialNabeD")) == 90.0,
        "_validate reicht alle axialen Masse durch (sonst feuerte das Tor nie)")
+
+# ---------------------------------------------------------------------------
+# Die Scheibenfestigkeit in der PIPELINE — der Weg aus der Maske
+# ---------------------------------------------------------------------------
+#
+# `ruecken`/`bandage` waren gerechnet, getestet und von der Oberflaeche aus
+# unerreichbar: Struktur-FEM und Lame-Kennlinie uebersprangen die Scheibe, und
+# darunter stand ein Verweis auf `cae_cli.py axial`. Ein Weg, den nur die
+# Kommandozeile hat, ist fuer den, der vor dem Bildschirm sitzt, nicht
+# vorhanden (09.10.2026). Geprueft wird deshalb die ORCHESTRIERUNG — dass sie
+# die richtigen Funktionen ruft, nichts nachbaut und benennt, was fehlt.
+print("\n— Scheibenfestigkeit in der Pipeline —")
+
+import ema_pipeline as _P                                           # noqa: E402
+
+_g = geom()
+_st = _P._axial_struktur(_g, 0.8137, 6000.0, _P.LAMINATES["m270_35a"])
+
+pruefe(_st["ruecken"] == AX.ruecken(_g, 0.8137,
+                                           lam=_P.LAMINATES["m270_35a"]),
+       "die Durchbiegung kommt aus ema_axial.ruecken — nicht nachgebaut")
+pruefe(_st["anzug"] == AX.anzug(_g, 0.8137),
+       "der axiale Anzug aus ema_axial.anzug")
+pruefe(_st["bandage"] == AX.bandage(_g, 6000.0),
+       "die Magnetfliehkraft aus ema_axial.bandage")
+
+# Die gezeichnete Blechdicke wird gegen die noetige gestellt. Ohne das liefen
+# Zeichnung und Rechnung auseinander, ohne dass es jemand saehe.
+pruefe(abs(_st["t_ist_m"] * 1000.0 - float(_g["axialJochLaeuferMm"])) < 1e-9,
+       f"die GEZEICHNETE Dicke wird gelesen ({_st['t_ist_m'] * 1e3:.1f} mm), "
+       f"nicht die gerechnete")
+pruefe(_st["t_reicht"] is (_st["t_ist_m"] >= _st["ruecken"]["t_soll_m"]),
+       "und das Urteil ist genau dieser Vergleich")
+pruefe(_st["w_anteil_spalt_ist"] is not None
+       and abs(_st["w_anteil_spalt_ist"]
+               - _st["w_bei_t_ist_m"] / _st["luftspalt_m"]) < 1e-12,
+       "der Anteil des Luftspalts ist w/g und keine zweite Rechnung")
+
+# Eine duennere Scheibe MUSS sich mehr biegen -- und zwar deutlich, denn die
+# Plattensteifigkeit geht mit t^3. Das ist die Probe, dass hier wirklich die
+# Platte gerechnet wird und nicht irgendein Ersatzmass.
+_duenn = _P._axial_struktur({**_g, "axialJochLaeuferMm": 6.5}, 0.8137, 6000.0,
+                            _P.LAMINATES["m270_35a"])
+_faktor = _duenn["w_bei_t_ist_m"] / _st["w_bei_t_ist_m"]
+pruefe(6.0 < _faktor < 10.0,
+       f"halbe Dicke -> {_faktor:.1f}-fache Durchbiegung (t^3 waeren 8,0) — "
+       f"es wird die Platte gerechnet")
+pruefe(_duenn["t_reicht"] is False,
+       "und 6,5 mm reichen dann nicht mehr")
+
+# Vierfache Drehzahl -> vierfache Fliehkraft? Nein: n^2, also 16-fach.
+_schnell = _P._axial_struktur(_g, 0.8137, 12000.0, _P.LAMINATES["m270_35a"])
+pruefe(abs(_schnell["bandage"]["kraft_gesamt_N"]
+           / _st["bandage"]["kraft_gesamt_N"] - 4.0) < 1e-9,
+       "doppelte Drehzahl -> vierfache Fliehkraft in der Scheibenebene")
+pruefe(abs(_st["anzug"]["sigma_n_pa"]
+           - _schnell["anzug"]["sigma_n_pa"]) < 1e-9,
+       "der axiale Anzug dagegen bewegt sich mit der Drehzahl NICHT — er "
+       "haengt an B_gap, und genau deshalb faellt hier keine Drehzahlgrenze an")
+
+# Das Urteil ueber die Klebung gibt es nur MIT Angabe. Eine fehlende Angabe
+# darf nicht als bestandener Nachweis durchgehen.
+pruefe(_st["bandage"].get("klebung_haelt") is None,
+       "ohne zulaessige Scherspannung gibt es KEIN Urteil ueber die Klebung")
+_mit = _P._axial_struktur({**_g, "axialKlebeZulMpa": 2.5}, 0.8137, 6000.0,
+                          _P.LAMINATES["m270_35a"])
+pruefe(_mit["bandage"]["klebung_haelt"] is True,
+       "mit 2,5 MPa zulaessig haelt sie (gemessen 1,89 MPa)")
+_knapp = _P._axial_struktur({**_g, "axialKlebeZulMpa": 1.0}, 0.8137, 6000.0,
+                            _P.LAMINATES["m270_35a"])
+pruefe(_knapp["bandage"]["klebung_haelt"] is False,
+       "mit 1,0 MPa nicht — und das Nein ist ein Ergebnis")
+pruefe("t_bandage_m" not in _st["bandage"],
+       "ohne zulaessige Bandagenspannung wird KEINE Dicke genannt")
+
+pruefe(_st["max_safe_rpm"] is None and _st["max_safe_rpm_grund"],
+       "es gibt keine Hoechstdrehzahl — und es steht da, WARUM nicht")
+pruefe(len(_st["ungeprueft"]) >= 4
+       and any("Fliehkraftspannung der Scheibe SELBST" in u
+               for u in _st["ungeprueft"]),
+       f"was NICHT gerechnet ist, steht als Liste da ({len(_st['ungeprueft'])} "
+       f"Punkte) — allen voran die Fliehkraftspannung des Blechs")
+
+# `lam` war bis zum 09.10.2026 in der Signatur und wurde nirgends gelesen.
+# Heute bewegt es keine Ziffer (alle Sorten tragen E = 200 GPa, nu = 0,30),
+# aber die Platte MUSS es jetzt benutzen, sonst ist es wieder eine Falle.
+pruefe(abs(_st["ruecken"]["e_pa"]
+           - float(_P.LAMINATES["m270_35a"]["E"]) * 1e6) < 1.0,
+       "ruecken() liest E aus der Blechsorte (in MPa) statt 200 GPa zu raten")
+_weich = AX.ruecken(_g, 0.8137, lam={"E": 100000.0, "nu": 0.30})
+pruefe(_weich["t_steifigkeit_m"] > _st["ruecken"]["t_steifigkeit_m"],
+       "und ein weicheres Blech braucht mehr Dicke (Gegenprobe gegen "
+       "einen wieder wirkungslosen Parameter)")
+
+# Das Bild muss entstehen -- es ist die eine Stelle, an der ein Mensch die
+# Durchbiegung gegen den Luftspalt sieht.
+_b64 = _P._axial_struktur_chart(_st, _g)
+pruefe(isinstance(_b64, str) and len(_b64) > 10000,
+       f"das Scheibenbild wird gerendert ({len(_b64) // 1024} kB base64)")
 
 print(f"\n{_ok} bestanden, {_fehl} fehlgeschlagen")
 sys.exit(1 if _fehl else 0)

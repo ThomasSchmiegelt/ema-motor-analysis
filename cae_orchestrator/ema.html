@@ -118,14 +118,17 @@
        fiel auf seine HTML-Vorgabehoehe von 150 px zurueck — gemeldet als
        „das Studio wird nur im oberen Drittel eingeblendet". Wer hier einen
        vierten Kopf anhaengt: in JEDE der drei Regeln. */
-    #panel-agent,#panel-agent-hermes,#panel-agent-studio{height:100%;flex-direction:column}
+    #panel-agent,#panel-agent-hermes,#panel-agent-studio,
+    #panel-axial{height:100%;flex-direction:column}
     #panel-agent.active,#panel-agent-hermes.active,
-    #panel-agent-studio.active{display:flex}
+    #panel-agent-studio.active,#panel-axial.active{display:flex}
+    #panel-axial .agent-leiste,
     #panel-agent .agent-leiste,
     #panel-agent-hermes .agent-leiste,
     #panel-agent-studio .agent-leiste{display:flex;align-items:center;gap:10px;flex:0 0 auto;
                                padding:6px 12px;background:#22272e;border-bottom:1px solid var(--brd);
                                font-size:.78rem;color:#8aa}
+    #panel-axial iframe,
     #panel-agent iframe,
     #panel-agent-hermes iframe,
     #panel-agent-studio iframe{flex:1;width:100%;border:0;display:block;min-height:0}
@@ -152,6 +155,11 @@
             height:52px;overflow:hidden}
     .foot-row{display:flex;align-items:center;gap:16px;flex-shrink:0}
     #footer .foot-start{width:auto;flex-shrink:0;padding:9px 26px;font-size:.85rem}
+    #footer .foot-sel{display:flex;align-items:center;gap:5px;flex-shrink:0;
+      font-size:.74rem;color:#9ab;white-space:nowrap}
+    #footer .foot-sel select{width:auto;padding:6px 7px;font-size:.78rem;
+      background:#2a2a2e;border:1px solid #444;color:#ddd;border-radius:4px}
+    #footer .foot-sel select:disabled{opacity:.45;cursor:not-allowed}
     #footer .foot-secondary{width:auto;flex-shrink:0;padding:9px 14px;font-size:.8rem;
             background:#3a3a42;color:#dde}
     #footer .foot-secondary:hover{background:#474752}
@@ -246,6 +254,7 @@
     <button class="tab-btn"        id="tbtn-live"    onclick="switchTab('live')">▶ Live-Simulation</button>
     <button class="tab-btn"        id="tbtn-designer" onclick="switchTab('designer')">🎨 Designer</button>
     <button class="tab-btn"        id="tbtn-import"  onclick="switchTab('import')">📥 STEP-Import</button>
+    <button class="tab-btn"        id="tbtn-axial"   onclick="switchTab('axial')">⊙ Axialfluss</button>
     <button class="tab-btn"        id="tbtn-getriebe" onclick="switchTab('getriebe')">⚙ Getriebe</button>
     <button class="tab-btn"        id="tbtn-em3d"    onclick="switchTab('em3d')">🧲 3D-Feld</button>
     <button class="tab-btn"        id="tbtn-oil"     onclick="switchTab('oil')">💧 Spritzöl-Kühlung</button>
@@ -760,6 +769,19 @@
        getragen ist, und kommt aus `ema_maschinenart` selbst. -->
   <div class="section">
     <div class="section-title">Maschinenart</div>
+    <!-- Der Flussweg steht VOR der Maschinenart, weil er die Entscheidung
+         davor ist: er bestimmt, ob der Luftspalt ein Zylindermantel oder eine
+         Ringflaeche ist, und damit jede Flaeche darunter. Er stand bisher nur
+         im Schema; `buildPayload` schickte ihn nicht mit, und der Knopf
+         „Echte Berechnung" konnte deshalb nicht sagen, was er rechnet. -->
+    <div class="input-group">
+      <label style="grid-column:1/-1;margin-bottom:3px">Flussweg</label>
+      <select id="flux_path" style="grid-column:1/-1">
+        <option value="radial" selected>radial — zylindrischer Luftspalt (alle Stufen)</option>
+        <option value="axial">axial — Ringfläche / Scheibenläufer (analytisch + Feld)</option>
+      </select>
+    </div>
+    <p id="flux_hint" class="hint" style="margin:-2px 0 8px;font-size:.74rem;color:#8a93a3"></p>
     <div class="input-group">
       <label style="grid-column:1/-1;margin-bottom:3px">Woher der Luftspaltfluss kommt</label>
       <select id="machine_art" style="grid-column:1/-1">
@@ -777,6 +799,16 @@
     </div>
     <div id="art_hinweis" class="hint"
          style="grid-column:1/-1;font-size:11px;color:#9aa;margin-top:2px"></div>
+    <!-- Was der Laeufer dieser Bauart WIRKLICH traegt -- aus /laeuferbild,
+         also aus derselben Quelle wie die Zeichnung. Sie steht hier und nicht
+         unter der Leinwand: der Kasten dort ist 224 px breit und kuerzt bei
+         85 Zeichen, die Beschreibung der Reluktanzmaschine war 558 lang und
+         brach mitten im Satz ab. Gemeldet als „man kann die beschreibung
+         nicht lesen". -->
+    <div id="laeufer_beschreibung" class="hint"
+         style="grid-column:1/-1;font-size:11px;color:#8fb;margin-top:4px;
+                border-top:1px solid #2a3140;padding-top:4px;
+                display:none;line-height:1.45"></div>
 
     <!-- Alles, was NUR EINE Bauart hat. `data-arten` sagt, welche; gefuellt
          wird aus /param_schema (`_ART_FELDER`), damit Grenzen, Auswahllisten
@@ -811,6 +843,22 @@
         <label>Leiter je Läufernut</label>
         <input type="number" id="rotor_turns" step="1"/><span>-</span>
       </div>
+      <div class="input-group">
+        <label style="grid-column:1/-1;margin-bottom:3px">Käfigläufer in Millimetern</label>
+        <label>Nuttiefe</label><input type="number" id="laeufer_nut_tiefe" step="0.1" min="0"><span>mm</span>
+        <label>Nutbreite</label><input type="number" id="laeufer_nut_breite" step="0.1" min="0"><span>mm</span>
+        <label>Steg zum Rand</label><input type="number" id="laeufer_steg" step="0.1" min="0"><span>mm</span>
+      <div class="masse-vorgabe" style="grid-column:1/-1;font-size:11px;
+           color:#8fb; border-top:1px solid #2a3140; margin-top:4px;
+           padding-top:4px; display:none"></div>
+        <div class="hint" style="grid-column:1/-1;font-size:11px;color:#9aa">
+          <b>0 heißt: wie bisher ableiten</b> — die Nuttiefe folgt der
+          <b>Stromdichte</b> im Stab, nicht dem verfügbaren Platz. Ein gesetzter
+          Wert wird <b>genommen und nachgerechnet, nicht geklemmt</b>. Gilt für
+          den <b>Käfig</b>; die Nut des Schleifringläufers bemisst der Strom
+          ihrer Wicklung, dort wirken diese Felder nicht.
+        </div>
+      </div>
       <div class="hint" style="font-size:11px;color:#9aa">
         Nutzahl 0 = automatisch: beim Käfig nach der Unsymmetrieregel (nie
         gleich der Ständernutzahl, nicht um 0/p/2p/3p daneben), beim
@@ -825,6 +873,10 @@
       <div class="input-group">
         <label>Polbedeckung (Schenkelpol)</label>
         <input type="number" id="pol_bedeckung" step="0.01"/><span>-</span>
+      </div>
+      <div class="input-group">
+        <label>Polschuhhöhe (Anteil der Polhöhe)</label>
+        <input type="number" id="pol_schuh_anteil" step="0.01"/><span>-</span>
       </div>
       <div class="hint" style="font-size:11px;color:#9aa">
         Polschuhbreite / Polteilung. NICHT die Magnetbedeckung der PSM (0,83):
@@ -915,13 +967,37 @@
         die Spule in beiden Fällen — er hält sie gegen die Fliehkraft.
       </div>
     </div>
+    <div class="input-group art-feld" data-arten="synrm" style="display:none">
+      <label style="grid-column:1/-1;margin-bottom:3px">Flussbarrieren (Reluktanzläufer)</label>
+      <label>Barrieren je Pol</label><input type="number" id="synrm_k" step="1" min="0"><span>-</span>
+      <label>Isolationsgrad</label><input type="number" id="synrm_kw" step="0.05" min="0"><span>-</span>
+      <label>Tangentialsteg</label><input type="number" id="synrm_steg" step="0.1" min="0"><span>mm</span>
+      <label>Freiwinkel</label><input type="number" id="synrm_beta" step="0.5" min="0"><span>°</span>
+      <div class="masse-vorgabe" style="grid-column:1/-1;font-size:11px;
+           color:#8fb; border-top:1px solid #2a3140; margin-top:4px;
+           padding-top:4px; display:none"></div>
+      <div class="hint" style="grid-column:1/-1;font-size:11px;color:#9aa">
+        <b>0 heißt: wie bisher ableiten.</b> Die <b>Barrierenzahl</b> folgt der
+        Nutteilungsregel <code>slots = 2p(2k+1)</code> (Läufernutteilung =
+        Ständernutteilung); geht die nicht auf, gilt <code>k &gt; q</code>. Über
+        5 Barrieren bringt es nichts mehr. Der <b>Isolationsgrad</b>
+        Luft/Eisen entlang der q-Achse ist der Haupthebel auf L<sub>q</sub>;
+        der Bestbereich für das Moment liegt bei 0,2…0,6, Vorgabe 0,5. Der
+        <b>Freiwinkel</b> verschiebt alle Endpunkte von der q-Achse weg — der
+        Griff gegen Momentwelligkeit, hier nicht gerechnet. Regeln und Quellen:
+        <code>ema_synrm_cad</code>.
+      </div>
+    </div>
     <div class="input-group art-feld" data-arten="eesm gsm" style="display:none">
       <label style="grid-column:1/-1;margin-bottom:3px">Schenkelpol in Millimetern</label>
-      <label>Breite Polschuh</label><input type="number" id="pol_b_schuh" step="0.1" min="0">
-      <label>Breite Kern</label><input type="number" id="pol_b_kern" step="0.1" min="0">
-      <label>Dicke Spule</label><input type="number" id="pol_d_spule" step="0.1" min="0">
-      <label>Höhe Spule</label><input type="number" id="pol_h_spule" step="0.1" min="0">
-      <label>Kegelwinkel °</label><input type="number" id="pol_kegel" step="0.5" min="0">
+      <label>Breite Polschuh</label><input type="number" id="pol_b_schuh" step="0.1" min="0"><span>mm</span>
+      <label>Breite Kern</label><input type="number" id="pol_b_kern" step="0.1" min="0"><span>mm</span>
+      <label>Dicke Spule</label><input type="number" id="pol_d_spule" step="0.1" min="0"><span>mm</span>
+      <label>Höhe Spule</label><input type="number" id="pol_h_spule" step="0.1" min="0"><span>mm</span>
+      <label>Kegelwinkel</label><input type="number" id="pol_kegel" step="0.5" min="0"><span>°</span>
+      <div class="masse-vorgabe" style="grid-column:1/-1;font-size:11px;
+           color:#8fb; border-top:1px solid #2a3140; margin-top:4px;
+           padding-top:4px; display:none"></div>
       <div class="hint" style="grid-column:1/-1;font-size:11px;color:#9aa">
         <b>0 heißt: wie bisher ableiten</b> — aus Polbedeckung, Fluss und Stromdichte;
         jede bestehende Auslegung bleibt damit Ziffer für Ziffer dieselbe. Ein
@@ -1207,6 +1283,31 @@
     <div class="input-group" style="grid-column:1/-1;font-size:.74rem;color:#aaa;margin-top:6px;line-height:1.3">
       <span style="grid-column:1/-1">⏱ Geschätzte Laufzeit:<br/>
       <span id="runtime_estimate" style="color:#7db9e8;font-family:monospace">— Sek.</span></span>
+    </div>
+    <!-- ⊙ Die EINE Rechengroesse, die nur die Scheibe hat. Der abgewickelte
+         Mehrschnitt loest k Scheiben ueber dem Ringraum und legt sie
+         uebereinander; k ist damit fuer die Scheibe, was die Bildzahl fuer die
+         Drehung ist. Sie stand in `ema_text2ema.GUETE` (Entwurf 5, Detail 9)
+         und in `cae_cli.py`, aber in KEINEM Feld der Maske -- `test_steckbrief`
+         hat den Abgleich der beiden Tabellen deshalb beanstandet, und der
+         Browser schickte `axial_schnitte` gar nicht mit (09.10.2026).
+         Sichtbar nur beim Axialfluss: radial gibt es keinen Mehrschnitt. -->
+    <div class="input-group" id="axial_calc_wrap" style="display:none">
+      <label>⊙ Schnitte über dem Radius</label>
+      <select id="axial_schnitte" style="grid-column:2/-1">
+        <option value="3">3 — grob</option>
+        <option value="5" selected>5 — Entwurf</option>
+        <option value="7">7</option>
+        <option value="9">9 — Detail</option>
+        <option value="13">13 — fein</option>
+      </select>
+      <small style="grid-column:1/-1;font-size:.7rem;color:#666">
+        Der Mehrschnitt (Quasi-3-D): k abgewickelte Scheiben bei verschiedenen
+        Radien, aufsummiert mit r¹ für den Fluss und r² für das Moment.
+        Ein einzelner Schnitt ist keine Axialflussmaschine — Polteilung und
+        Nutteilung wachsen mit r, der kritische Punkt liegt am
+        <b>Innen</b>rand. Gilt für die Feldstufe <i>und</i> für den
+        Vergleich, den der 3-D-Ringsektor gegen sie führt.</small>
     </div>
     <div class="input-group">
       <label>FDM Auflösung</label>
@@ -3204,6 +3305,34 @@
         <option value="ferrite">Ferrit Y30 — Br = 0.40 T</option>
       </select>
     </div>
+    <!-- ⊙ Zwei zulässige Spannungen, die das Werkzeug NICHT wissen kann.
+         In der Scheibenebene hält den Sektormagneten kein Blechsteg — nur
+         Klebung oder eine Bandage am Außenrand. Für beides führt dieses
+         Werkzeug KEINE Werkstofftabelle (`LAMINATES`, `MAGNETS`,
+         `HAIRPIN_MATS` kennen weder Klebstoff noch Faserverbund), also wird
+         ohne Zahl nur die KRAFT genannt und kein Urteil erfunden. Wer eine
+         Zahl hat, trägt sie hier ein und bekommt dafür ein Ja oder Nein.
+         Sie stehen bei den WERKSTOFFEN, weil sie welche sind — und in
+         ③ Betrieb, weil ② Geometrie beim Axialfluss ausgeblendet ist. -->
+    <div id="ax_halt_wrap" style="display:none">
+      <div style="font-size:.76rem;color:#8bc34a;margin:10px 0 4px">
+        ⊙ Magnethaltung der Scheibe <span style="color:#777">— optional;
+        ohne Zahl nennt der Lauf nur die Kraft</span></div>
+      <div class="input-group">
+        <label>Klebung zul. τ</label>
+        <input type="number" id="ax_klebe_zul" value="0" min="0" max="80" step="0.5"/><span>MPa</span>
+        <small style="grid-column:1/-1;font-size:.7rem;color:#666">
+          Zulässige <b>Scher</b>spannung der Magnetklebung. 0 = unbekannt →
+          die Scherspannung steht im Ergebnis, ein Urteil darüber nicht.</small>
+      </div>
+      <div class="input-group">
+        <label>Bandage zul. σ</label>
+        <input type="number" id="ax_bandage_zul" value="0" min="0" max="3000" step="10"/><span>MPa</span>
+        <small style="grid-column:1/-1;font-size:.7rem;color:#666">
+          Zulässige <b>Zug</b>spannung der Bandage am Außenrand. 0 = unbekannt
+          → es wird keine Bandagendicke genannt.</small>
+      </div>
+    </div>
   </div>
 
   <!-- 7. Thermal -->
@@ -3668,6 +3797,35 @@
 
       <!-- Structural -->
       <div id="rtab-stress" class="rtab-content">
+        <!-- ⊙ Die SCHEIBE traegt andere Lasten als der Zylinder, und bis zum
+             09.10.2026 stand hier fuer sie nichts: Struktur-FEM und
+             Lame-Kennlinie sind beide uebersprungen, also war der Reiter leer.
+             Gerechnet wird jetzt, was sie wirklich traegt -- axialer Anzug
+             (Kreisringplatte) und Fliehkraft der Magnete IN der Scheibenebene;
+             der radiale Teil darunter wird dafuer ausgeblendet, denn seine
+             Tabellen sind dann leer und eine leere Tabelle liest sich wie ein
+             Fehlschlag. -->
+        <div id="axstr-wrap" style="display:none;margin-bottom:14px">
+          <div class="section-h">⊙ Scheibenfestigkeit</div>
+          <div id="axstr-note" style="font-size:.76rem;color:#9ab;line-height:1.5;
+               background:#17202a;border-left:3px solid #4fc3f7;padding:8px 10px;
+               border-radius:3px;margin-bottom:10px"></div>
+          <img id="axstr-img" class="chart-img" src="" alt="Scheibenfestigkeit"
+               style="margin-bottom:12px"/>
+          <div class="two-col">
+            <div>
+              <div class="section-h">Rückenblech &amp; Durchbiegung</div>
+              <div class="fem-box" id="axstr-box"></div>
+            </div>
+            <div>
+              <div class="section-h">Magnethaltung in der Scheibenebene</div>
+              <div class="fem-box" id="axstr-mag"></div>
+            </div>
+          </div>
+          <div id="axstr-offen" style="margin-top:10px;font-size:.74rem;color:#c8a45a;
+               line-height:1.45"></div>
+        </div>
+        <div id="radstr-wrap">
         <img id="stress-img" class="chart-img" src="" alt="Strukturkennlinie" style="margin-bottom:12px"/>
         <div class="two-col">
           <div>
@@ -3681,6 +3839,7 @@
             </tr></thead><tbody id="struct-tbody"></tbody></table>
           </div>
         </div>
+        </div><!-- /radstr-wrap -->
         <div id="conn-wrap" style="margin-top:16px;display:none">
           <div class="section-h">🔗 Wellenverbindung (Blechpaket–Welle)</div>
           <div class="two-col">
@@ -3991,6 +4150,21 @@
   </div>
 
 <!-- ════════ TAB: Agent (Rahmen auf /agent — eine Quelle, kein zweites Layout) ════════ -->
+<div class="tab-panel" id="panel-axial">
+  <div class="agent-leiste">
+    <span>⊙ Axialfluss / Scheibenläufer — eigener Parametersatz, eigener Ständer.
+      <b>Die Stufen <code>cad</code> und <code>em3d</code> tragen ihn nicht</b>
+      (Stufe 0 weist ab und sagt es); getragen sind <code>analytisch</code> und
+      <code>feld</code>.</span>
+    <span style="flex:1"></span>
+    <a href="/axialfluss/" target="_blank" rel="noopener"
+       style="color:#7db9e8;text-decoration:none">↗ in eigenem Fenster öffnen</a>
+    <a href="#" onclick="axNeu();return false;"
+       style="color:#7db9e8;text-decoration:none">⟳ neu laden</a>
+  </div>
+  <iframe id="axial-rahmen" title="Axialfluss-Ansicht"></iframe>
+</div>
+
 <div class="tab-panel" id="panel-agent">
   <div class="agent-leiste">
     <span>🤖 PI im Browser — links der Agent, rechts Ergebnisse und Bilder</span>
@@ -4046,6 +4220,19 @@
   <script src="/ema_laeufer.js"></script>
   <div class="loading-bar" id="load_bar"></div>
   <div class="overlay">
+    <!-- ⊙ Beim Axialfluss zeigen die Echtzeitdaten die falsche Maschine:
+         sie kommen aus dem radialen FDM-Modell dieser Leinwand, und das
+         rastert einen Zylinderquerschnitt. Statt sie stehen zu lassen (und
+         damit Zahlen einer Maschine zu zeigen, die nicht gerechnet wird),
+         treten sie beiseite und sagen, was an ihre Stelle tritt. -->
+    <div id="ov_axial" style="display:none;font-size:.74rem;color:#9bd;line-height:1.5">
+      <b style="color:#8bc34a">⊙ Axialfluss</b><br>
+      <span id="ov_axial_t">—</span>
+      <div style="margin-top:6px;color:#889;font-size:.70rem">
+        Abbild der Zeichnung aus Reiter ⊙ Axialfluss — dieselbe
+        Zeichnung, nicht eine zweite. Die Echtzeitdaten sind ausgesetzt: sie
+        kommen aus dem radialen FDM-Modell dieser Leinwand.</div>
+    </div>
     <button id="ov_play" onclick="toggleSim()"
             style="width:100%;margin-bottom:8px;padding:6px;font-size:.74rem;pointer-events:auto;background:var(--err)">⏸ Pause</button>
     <h3>Echtzeit-Daten</h3>
@@ -4078,8 +4265,40 @@
 <!-- ═══════════════════ FOOTER (global run + progress) ════════════════════════ -->
 <div id="footer">
   <div class="foot-row">
+    <!-- Flussweg und CAD-Modell in der Fussleiste: hier wird gestartet, also
+         gehoert die Entscheidung "WAS wird gerechnet" hierher und nicht nur in
+         einen Reiter, den man beim Starten gar nicht offen hat.
+         Die EINE Quelle bleibt `#flux_path` im Geometrie-Reiter -- dieses Feld
+         schreibt dorthin und loest sein `change` aus, statt einen zweiten
+         Zustand zu fuehren. Zwei Zustaende fuer denselben Schalter sind die
+         Stelle, an der Knopfbeschriftung und Rechnung auseinanderlaufen. -->
+    <label class="foot-sel" title="Welche Maschine gerechnet wird. Die Auswahl ist dieselbe wie im Reiter ② Geometrie.">
+      Fluss
+      <select id="foot_flux" onchange="footFlussSetzen(this.value)">
+        <option value="radial">radial</option>
+        <option value="axial">axial ⊙</option>
+      </select>
+    </label>
+    <label class="foot-sel" title="Welches CAD-Modell „🧊 CAD ansehen“ baut.">
+      CAD
+      <select id="foot_cad">
+        <option value="vollmotor">Vollmotor</option>
+        <option value="laeufer">nur Läufer</option>
+      </select>
+    </label>
     <button id="btn_cad_preview" class="foot-secondary" title="Nur Geometrie bauen und ansehen (FreeCAD/STEP), ohne Rechnung">🧊 CAD ansehen</button>
     <button id="btn_smoke" class="foot-secondary" title="Schneller Selbsttest der Rechenkette (~15 s)">🧪 Smoke-Test</button>
+    <!-- **Der Smoke-Test lief immer ohne FreeCAD.** Das ist fuer die radiale
+         Kette eine Entscheidung (15 s statt Minuten), fuer den Axialfluss aber
+         liess es genau die Stufe aus, die neu ist: `ema_axial_cad`. Gemeldet
+         als „Smoketest bei Axialfluss ist ohne CAD, ich moechte mit CAD“.
+         Darum ein sichtbarer Schalter — und bei `fluxPath = axial` steht er
+         von selbst an, solange ihn niemand von Hand umgestellt hat. -->
+    <label class="foot-sel" title="Zusätzlich wirklich in FreeCAD bauen (Vollmotor + Läufer-FEM, beim Axialfluss die Scheibe) — dauert Minuten statt Sekunden."
+           style="gap:4px">
+      <input type="checkbox" id="foot_smoke_cad"
+             onchange="this.dataset.handgesetzt='1'"/> mit CAD
+    </label>
     <button id="btn_analyse" class="start foot-start">⚙ Echte Berechnung</button>
     <button id="btn_queue" class="foot-secondary"
             title="Diese Berechnung in die Server-Warteschlange einreihen (läuft auch bei geschlossenem Browser) → Tab ⏳ Jobs">➕ Warteschlange</button>
@@ -4281,13 +4500,14 @@
 <!-- ═══════════════════ SCRIPTS ════════════════════════════════════════════════ -->
 <script>
 // ── Tab switching ──────────────────────────────────────────────────────────────
-const TABS = ['projekt','geo','betrieb','calc','live','designer','import','getriebe','em3d','oil','cfd','fx3d','doku','spraytest','ki','jobs','results','compare','agent','agenth','studio'];
+const TABS = ['projekt','geo','betrieb','calc','live','designer','import','axial','getriebe','em3d','oil','cfd','fx3d','doku','spraytest','ki','jobs','results','compare','agent','agenth','studio'];
 // tabs that keep the live preview pane (field canvas) visible on the right
 const PREVIEW_TABS = new Set(['geo','betrieb','calc','live']);
 const PANEL_OF = {
   projekt:'panel-projekt',
   geo:'panel-geo', betrieb:'panel-betrieb', calc:'panel-calc', live:'panel-live',
-  designer:'panel-designer', import:'panel-import', getriebe:'panel-getriebe',
+  designer:'panel-designer', import:'panel-import', axial:'panel-axial',
+  getriebe:'panel-getriebe',
   em3d:'panel-em3d', oil:'panel-oil',
   cfd:'panel-cfd', fx3d:'panel-fx3d', doku:'panel-doku', spraytest:'panel-spraytest', ki:'panel-ki', jobs:'panel-jobs',
   results:'tab-results', compare:'tab-compare', agent:'panel-agent',
@@ -4305,6 +4525,25 @@ const AG_RAHMEN = {pi: 'agent-rahmen', hermes: 'agent-rahmen-hermes',
                    studio: 'agent-rahmen-studio'};
 const _agSrc = k => k === 'hermes' ? '/agent?kopf=hermes'
                   : k === 'studio' ? '/studio?kopf=studio' : '/agent';
+/* Der Axialfluss-Rahmen wird wie die Agentenrahmen ERST beim ersten Oeffnen
+ * geladen, und er bekommt das aktive Projekt in der Adresse mit. Wechselt das
+ * Projekt, wird die Quelle neu gesetzt -- sonst zeigte der Reiter weiter die
+ * Scheibe eines anderen Projekts, und das saehe richtig aus. */
+function _axSrc() {
+  const pid = (window._activeProject || {}).id;
+  return "/axialfluss/" + (pid ? "?projekt=" + encodeURIComponent(pid) : "");
+}
+function axActivate() {
+  const f = document.getElementById('axial-rahmen');
+  if (!f) return;
+  const soll = _axSrc();
+  if (!f.src || !f.src.endsWith(soll)) f.src = soll;
+}
+function axNeu() {
+  const f = document.getElementById('axial-rahmen');
+  if (f) f.src = _axSrc();
+}
+
 function agActivate(kopf) {
   const k = kopf || 'pi';
   const f = document.getElementById(AG_RAHMEN[k]);
@@ -4315,6 +4554,205 @@ function agNeu(kopf) {
   const f = document.getElementById(AG_RAHMEN[k]);
   if (f) f.src = _agSrc(k);   // laedt neu; der Lauf im Server bleibt bestehen
 }
+
+/* Der Flussweg bestimmt, welche Stufen ueberhaupt laufen -- das muss am Knopf
+ * stehen, nicht erst im Protokoll, wenn Stufe 0 abweist. */
+/* Die Fussleiste schreibt in das EINE Feld und laesst es sein `change` werfen --
+ * damit laufen Knopfbeschriftung, Hinweistext, Maschinenart-Sichtbarkeit und
+ * Payload ueber genau denselben Weg wie bei einer Auswahl im Reiter. */
+function footFlussSetzen(w) {
+  const el = document.getElementById('flux_path');
+  if (!el) return;
+  el.value = w;
+  el.dispatchEvent(new Event('change'));
+}
+
+function _flussZeigen() {
+  const w = document.getElementById('flux_path')?.value || 'radial';
+  const axial = (w === 'axial');
+  // Gegenrichtung: die Fussleiste nachziehen, egal wer umgestellt hat.
+  const fs = document.getElementById('foot_flux');
+  if (fs && fs.value !== w) fs.value = w;
+  // **Die Scheibe hat ihren eigenen CAD-Erzeuger** (`ema_axial_cad`, seit dem
+  // 07.10.2026) -- hier stand bis zum 09.10.2026 das Gegenteil, und zwar an
+  // drei Stellen: ein abgeschaltetes Auswahlfeld, ein Hinweis
+  // „fuer die Scheibe gibt es keinen CAD-Aufbau“ und die Zeile
+  // „CAD und Struktur-FEM tragen ihn nicht“. Gemeldet als
+  // „Smoketest bei Axialfluss ist ohne CAD, ich moechte mit CAD“.
+  // Die Auswahl Vollmotor/Laeufer bleibt abgeschaltet, aber mit dem RICHTIGEN
+  // Grund: es gibt genau EIN Scheibenmodell, keine zwei.
+  const cs = document.getElementById('foot_cad');
+  if (cs) {
+    cs.disabled = axial;
+    cs.title = axial
+      ? 'Die Scheibe wird von ema_axial_cad gebaut (radiale Nuten, Sektor'
+        + 'magnete) — ein Modell, keine Auswahl. „🧊 CAD ansehen“ '
+        + 'und der Lauf bauen sie; ema_freecad (Zylinder mit Nuten im Mantel) '
+        + 'ist hier der falsche Erzeuger und wird nicht gerufen.'
+      : 'Welches CAD-Modell „🧊 CAD ansehen“ baut.';
+  }
+  const hint = document.getElementById('flux_hint');
+  const btn = document.getElementById('btn_analyse');
+  if (hint) hint.innerHTML = axial
+    ? 'Ringfläche, Fluss parallel zur Drehachse. Getragen: <b>analytisch</b>, '
+    + '<b>Feld</b> (abgewickelter Mehrschnitt, läuft hier mit den '
+    + 'Einstellungen aus ④ Berechnung), <b>3D-Feld</b> (anti-periodischer '
+    + 'Ringsektor, Reiter 🧲), <b>CAD</b> (die Scheibe selbst, '
+    + '<code>ema_axial_cad</code>), <b>Thermik</b> und <b>Fahrzyklus</b>. '
+    + 'Nur die <b>Struktur-FEM trägt ihn nicht</b> — sie rechnet die '
+    + 'Ringspannung eines rotierenden Rings, und die Scheibe trägt zwei '
+    + 'andere Lasten (axialer Anzug, Fliehkraft IN der Scheibenebene; '
+    + '<code>ema_axial.ruecken</code>/<code>bandage</code>). '
+    + '<b>Die Maße kommen aus dem Reiter ⊙ Axialfluss</b>, nicht von '
+    + 'hier: dieser Reiter hat kein axiales Feld.'
+    : 'Zylindrischer Luftspalt — alle Stufen.';
+  if (btn) btn.textContent = axial ? '⚙ Echte Berechnung (axial)' : '⚙ Echte Berechnung';
+  if (window._updateArtVis) window._updateArtVis();
+  _flussReiter(axial);
+}
+
+/* **Ein Flussweg, eine Geometrieseite.** ② Geometrie ist die Maske der
+ * Radialflussmaschine — Statorbohrung, Nuttiefe, Magnettasche — und
+ * ⊙ Axialfluss die der Scheibe. Beide gleichzeitig anzubieten hiess, dass
+ * man an Feldern dreht, die der gewaehlte Flussweg nicht liest; gemeldet als
+ * „wenn ich unten im Fluss radial oder axial waehle, soll nur das
+ * entsprechende Tab aktiv sein, das andere ausgeblendet“.
+ *
+ * Ausgeblendet wird der REITERKNOPF, nicht die Felder: `buildPayload` liest
+ * sie weiter aus dem DOM (Welle, Baulaenge, Umrichter), und ein halb
+ * abgeraeumtes Formular waere ein zweiter Zustand. Steht man auf dem Reiter,
+ * der verschwindet, wird auf sein Gegenstueck umgeschaltet — ein aktiver
+ * Reiter ohne Knopf waere eine Seite, von der es keinen Weg zurueck gibt.
+ */
+function _flussReiter(axial) {
+  const geo = document.getElementById('tbtn-geo');
+  const ax  = document.getElementById('tbtn-axial');
+  if (geo) geo.style.display = axial ? 'none' : '';
+  if (ax)  ax.style.display  = axial ? '' : 'none';
+  if (axial && typeof axActivate === 'function') axActivate();
+  const auf = window._activeTab;
+  if (axial && auf === 'geo')        switchTab('axial');
+  else if (!axial && auf === 'axial') switchTab('geo');
+  // Der Smoke-Test baut beim Axialfluss die Scheibe mit: ohne CAD prueft er
+  // dort genau die Stufen, die ohnehin nie strittig waren. Beim Zurueckstellen
+  // auf radial faellt der Haken wieder weg — sonst daechte der naechste
+  // 15-Sekunden-Test minutenlang nach, ohne dass jemand das verlangt hat.
+  // Von Hand umgestellt bleibt er, wie er ist (`handgesetzt`).
+  const sc = document.getElementById('foot_smoke_cad');
+  if (sc && !sc.dataset.handgesetzt) sc.checked = axial;
+  // ⊙ Die Schnittzahl des Mehrschnitts gibt es nur axial.
+  const ac = document.getElementById('axial_calc_wrap');
+  if (ac) ac.style.display = axial ? '' : 'none';
+  // ⊙ Ebenso die beiden Grenzwerte der Magnethaltung (③ Betrieb).
+  const ah = document.getElementById('ax_halt_wrap');
+  if (ah) ah.style.display = axial ? '' : 'none';
+  if (typeof _axVorschauAnstossen === 'function') _axVorschauAnstossen();
+}
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('flux_path');
+  if (el) el.addEventListener('change', _flussZeigen);
+  _flussZeigen();
+});
+
+/* ⊙ **Die Scheibe in der Vorschau — ohne eine zweite Zeichnung.**
+ *
+ * Die Leinwand `#simCanvas` steht auf ② Geometrie, ③ Betrieb,
+ * ④ Berechnung und ▶ Live-Simulation und zeichnet den radialen
+ * Querschnitt samt FDM-Feld. Bei `fluxPath = axial` ist das die falsche
+ * Maschine: ein Scheibenlaeufer ist in dieser Ebene ein Ring ohne Merkmal.
+ * Gemeldet als „das heisst auch, dass in den drei Tabs Betrieb /
+ * Berechnung / Live-Simulation die Axialflussmaschine erscheint“.
+ *
+ * Gezeichnet wird deshalb NICHT hier. Der Reiter ⊙ Axialfluss ist ein
+ * <iframe> gleichen Ursprungs; seine Leinwaende `c_front` (Draufsicht) und
+ * `c_schnitt` (Halbschnitt r–z) werden mit `drawImage` hereinübernommen.
+ * Eine zweite Zeichenfassung im Hauptfenster waere die naechste
+ * `magnetLegs`-Drift — und sie waere es an der Stelle, an der man es am
+ * wenigsten merkt, weil beide Bilder „richtig aussehen“.
+ *
+ * Angestossen, nicht gepollt: `loop()` gibt die Leinwand frei, und neu
+ * abgebildet wird nur, wenn sich am Rahmen etwas getan haben kann (Reiter-
+ * wechsel, Flusswechsel, und waehrend eine Vorschauseite offen ist einmal pro
+ * Sekunde — die Zeichnung dort haengt an Reglern, die der Mensch bewegt).
+ */
+let _axVorschauZeit = 0, _axVorschauTimer = null;
+
+function _axVorschauAnstossen() {
+  _axVorschauZeit = 0;                       // naechster Rahmen zeichnet neu
+  const axial = (document.getElementById('flux_path')?.value || 'radial') === 'axial';
+  const zeigt = axial && PREVIEW_TABS.has(window._activeTab || '');
+  // Die Echtzeitdaten dieser Leinwand gelten der radialen Maschine.
+  const ov = document.querySelector('#preview-pane .overlay');
+  if (ov) for (const k of ov.children) {
+    if (k.id === 'ov_axial') k.style.display = zeigt ? '' : 'none';
+    else if (k.id === 'ov_laeufer') { if (zeigt) k.style.display = 'none'; }
+    else k.style.display = zeigt ? 'none' : '';
+  }
+  if (_axVorschauTimer) { clearInterval(_axVorschauTimer); _axVorschauTimer = null; }
+  if (zeigt) _axVorschauTimer = setInterval(() => { _axVorschauZeit = 0; }, 1000);
+}
+
+/* Der Haken in `loop()`. Rueckgabe `true` heisst: die Leinwand ist bedient,
+ * das radiale Raster-/Loeser-/Zeichen-Dreigespann bleibt aus. */
+window._axialVorschau = function (canvas, ctx, cw, ch) {
+  if ((document.getElementById('flux_path')?.value || 'radial') !== 'axial')
+    return false;
+  const jetzt = Date.now();
+  if (jetzt - _axVorschauZeit < 900) return true;      // schon gezeichnet
+  _axVorschauZeit = jetzt;
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, cw, ch);
+  let f = document.getElementById('axial-rahmen'), w = null;
+  try { w = f && f.contentWindow; } catch (e) { w = null; }
+  const bereit = w && typeof w.zeichne === 'function'
+                 && w.document && w.document.getElementById('c_front');
+  if (!bereit) {
+    if (typeof axActivate === 'function') axActivate();
+    ctx.fillStyle = '#9bd'; ctx.font = '13px system-ui,sans-serif';
+    ctx.fillText('⊙ Axialfluss — die Zeichnung wird geladen…', 16, 30);
+    ctx.fillStyle = '#889'; ctx.font = '11px system-ui,sans-serif';
+    ctx.fillText('Sie entsteht im Reiter ⊙ Axialfluss; hier steht ihr Abbild.', 16, 50);
+    _axVorschauZeit = jetzt - 600;           // bald wieder versuchen
+    return true;
+  }
+  let bilder;
+  try {
+    w.zeichne();                             // auf den Stand der Regler bringen
+    bilder = [['Draufsicht auf den Ständer', w.document.getElementById('c_front')],
+              ['Halbschnitt r–z — Achse unten', w.document.getElementById('c_schnitt')]];
+  } catch (e) {
+    ctx.fillStyle = '#e57'; ctx.font = '12px monospace';
+    ctx.fillText('⊙ Zeichnung nicht lesbar: ' + e.message, 12, 28);
+    return true;
+  }
+  // Zwei Bilder: nebeneinander, wenn die Vorschau breiter als hoch ist,
+  // sonst uebereinander. Beide quadratisch, also entscheidet die Hoehe.
+  const quer = cw > ch * 0.95;
+  const fw = quer ? cw / 2 : cw, fh = quer ? ch : ch / 2;
+  bilder.forEach(([txt, cv], i) => {
+    if (!cv || !cv.width) return;
+    const x0 = quer ? i * fw : 0, y0 = quer ? 0 : i * fh;
+    const sk = Math.min((fw - 12) / cv.width, (fh - 26) / cv.height);
+    const bw = cv.width * sk, bh = cv.height * sk;
+    try { ctx.drawImage(cv, x0 + (fw - bw) / 2, y0 + 8 + (fh - 26 - bh) / 2, bw, bh); }
+    catch (e) { /* Rahmen gerade neu geladen */ }
+    ctx.fillStyle = '#8ab'; ctx.font = '11px system-ui,sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(txt, x0 + fw / 2, y0 + fh - 8);
+    ctx.textAlign = 'left';
+  });
+  // Die Kennzahlen daneben — aus der Zeichnung gelesen, nicht gerechnet.
+  const t = document.getElementById('ov_axial_t');
+  if (t) {
+    try {
+      const p = w.P();
+      t.innerHTML = `Scheibe Ø ${(2 * p.ro).toFixed(0)} mm · `
+        + `λ ${p.lam.toFixed(3)}<br>2p ${p.poles} · Q ${p.q} · `
+        + `${p.nSpalte} Luftspalt${p.nSpalte > 1 ? 'e' : ''} · ${p.spalt} mm<br>`
+        + `Bauform ${p.topo.toUpperCase()} · Läufer ${p.laeufer}`;
+    } catch (e) { t.textContent = '—'; }
+  }
+  return true;
+};
 
 function switchTab(name) {
   window._activeTab = name;
@@ -4335,6 +4773,10 @@ function switchTab(name) {
   if (PREVIEW_TABS.has(name)) requestAnimationFrame(() => requestAnimationFrame(() => {
     if (typeof resize === 'function') resize();
   }));
+  // ⊙ Wer auf eine Vorschauseite wechselt, soll die Maschine sehen, die
+  // gerechnet wird — beim Axialfluss also die Scheibe und nicht den
+  // radialen Querschnitt.
+  if (typeof _axVorschauAnstossen === 'function') _axVorschauAnstossen();
   // Die Bruecke laeuft nur, solange der Geometrie-Reiter offen ist: sie fragt im
   // Sekundentakt, und im Hintergrund gaebe es dafuer keinen Grund.
   if (typeof brueckeStart === 'function') {
@@ -4366,6 +4808,7 @@ function switchTab(name) {
   if (name === 'fx3d' && typeof _fx3dSyncInherited === 'function') { _fx3dSyncInherited(); _fx3dKosten(); fx3dRefreshSaved(); }
   if (name === 'spraytest' && typeof stRefresh === 'function') stRefresh();
   if (name === 'jobs' && typeof jobsActivate === 'function') jobsActivate();
+  if (name === 'axial' && typeof axActivate === 'function') axActivate();
   if (name === 'agent' && typeof agActivate === 'function') agActivate('pi');
   if (name === 'agenth' && typeof agActivate === 'function') agActivate('hermes');
   if (name === 'studio' && typeof agActivate === 'function') agActivate('studio');
@@ -5363,6 +5806,12 @@ function showFrame(n) {
   const lbl = document.getElementById('anim-angle-lbl');
   const sld = document.getElementById('anim-slider');
   const m   = _modeMeta[_fieldMode] || {};
+  // Gibt es keine Rahmen, wird auch keiner angefordert. `loadProjectById` und
+  // `loadResults` rufen `showFrame(0)` am Ende unbedingt — bei einem Axiallauf
+  // (keine Animation, s. `renderField`) stand dann `GET /field/0` mit 404 in
+  // der Konsole, und zwar bei JEDEM Laden. Ein Bild, das es nicht gibt,
+  // anzufordern ist kein Fehler des Servers.
+  if (!_totalFrames) { if (sld) { sld.value = 0; sld.disabled = true; } return; }
   if (_fieldMode === 'rotate') {
     img.src = '/field/' + _frameFlatIndex(_currentRpm, n) + '?t=' + Date.now();
     lbl.textContent = (_frameAngles[n] !== undefined ? _frameAngles[n].toFixed(1) : n) + '°';
@@ -5524,13 +5973,15 @@ window.addEventListener('load', _updateRuntimeEstimate);
 const CALC_PRESETS = {
   entwurf: {
     label: '📐 Entwurf',
-    felder: { n_frames: 12, frame_resolution: 180, fdm_resolution: 300, rpm_step: 1000,
+    felder: { n_frames: 12, frame_resolution: 180, fdm_resolution: 300,
+              axial_schnitte: 5, rpm_step: 1000,
               struct_solver: 'ccx', struct_mesh_mm: 4, struct_img_px: 1500,
               struct_video: false, struct_frames: 20 },
   },
   detail: {
     label: '🔬 Detail',
-    felder: { n_frames: 36, frame_resolution: 300, fdm_resolution: 800, rpm_step: 500,
+    felder: { n_frames: 36, frame_resolution: 300, fdm_resolution: 800,
+              axial_schnitte: 9, rpm_step: 500,
               struct_solver: 'freecad', struct_mesh_mm: 2.5, struct_img_px: 3000,
               struct_video: true, struct_frames: 48 },
   },
@@ -5648,6 +6099,7 @@ async function loadProjectById(pid) {
     renderEmCurve(data.em);
     renderPower(data.power);
     renderStress(data.structural_fem, data.structural_sweep, data.structural_sweep_chart_b64);
+    renderAxialStruktur(data.axial_struktur, data.axial_struktur_chart_b64);
     renderConnection(data.connection);
     renderDeformation(data.deformation, data.structural_fem);
     renderThermal(data.thermal);
@@ -7477,6 +7929,34 @@ function _em3dGeomSummaryHtml(p) {
   const g = p.geom || {}, axial = p.axial_len || g.axialLen;
   const designer = (document.getElementById('e3_geomsrc')?.value === 'designer');
   const srcLbl = designer ? 'Designer / Import (custom)' : 'Geometrie-Tab (parametrisch)';
+  // **Welcher 3-D-Löser läuft, hängt am Flussweg** — und das muss hier stehen,
+  // nicht erst im Protokoll. Gemeldet als „wie bekomme ich die Axialfluss-
+  // maschine nach Elmer? Geometrie Axialfluss gibt es dort nicht": der Reiter
+  // zeigte nur die Quelle (Geometrie-Tab / Designer) und verschwieg, dass eine
+  // Scheibe einen anderen Löser braucht als ein Zylinder.
+  if ((g.fluxPath || 'radial') === 'axial') {
+    return '<div style="color:#8bc34a;font-size:.8rem;line-height:1.5">'
+      + '<b>⊙ Axialfluss</b> — gerechnet wird ein <b>anti-periodischer '
+      + 'Ringsektor EINER Polteilung</b> (<code>ema_axial_em3d</code>), nicht '
+      + 'der magnetostatische Vollmotor: der baut konzentrische Zylinder und '
+      + 'wäre hier eine andere Maschine.<br>'
+      + `Scheibe Ø ${(g.axialAktivOD ?? '—')} mm · λ ${(g.axialLambda ?? '—')}`
+      + ` · 2p ${2 * (g.p || 0)} · Q ${(g.slots ?? '—')}`
+      + ` · Spalt ${(g.axialSpaltMm ?? '—')} mm · Bauform ${(g.axialBauform || '—')}`
+      // Woher diese Maße kommen, gehört dazu: sie stehen in KEINEM Feld
+      // dieses Reiters, und „ich kann die Geometrie nicht übernehmen“
+      // war genau diese fehlende Auskunft (09.10.2026).
+      + `<br><span style="color:#9ab">Maße aus ${_axQuelle === 'reiter'
+            ? '<b>Reiter ⊙ Axialfluss</b> (der gezeichneten Scheibe)'
+            : 'dem <b>Projekt</b>; was dort fehlt, ergänzt der Lauf benannt '
+              + '— den Reiter ⊙ Axialfluss einmal öffnen, dann gilt die Zeichnung'}`
+      + '</span>'
+      + '<br><span style="color:#9ab">Mitgerechnet wird der <b>Mehrschnitt</b> '
+      + 'auf derselben Geometrie — die Abweichung über dem Radius IST das '
+      + 'Ergebnis (der <code>∂/∂r</code>-Term, den der Mehrschnitt fallen '
+      + 'lässt). Netzfeinheit aus den Feldern unten, Schnittzahl und N aus '
+      + '④ Berechnung.</span></div>';
+  }
   const magLbl = g.magShape === 'custom'
     ? `custom (${(g.customLegs || []).length} Legs/Pol)` : (g.magShape || '—');
   const nbar = (() => {
@@ -9819,6 +10299,45 @@ function _renderEm3d(res) {
   const msg = document.getElementById('e3_msg');
   const box = document.getElementById('e3_results');
   if (!res) { msg.textContent = '⚠ Kein Ergebnis.'; return; }
+  // **Die Asynchronmaschine liefert hier etwas ANDERES**, und das wird auch
+  // so gezeigt: ihr 3-D-Weg ist harmonisch (`ema_em3d_harm`) und beantwortet
+  // die Frage nach dem KURZSCHLUSSRING — zweimal dasselbe Netz, einmal mit
+  // leitendem und einmal mit isolierendem Ring. Ein Feldbild und eine
+  // 2D-gegen-3D-Tabelle gibt es dort nicht; sie zu erfinden waere schlimmer
+  // als der Bericht, den der Loeser wirklich schreibt.
+  if (res.bericht) {
+    window._e3HasResult = true;
+    msg.style.color = '#6c6';
+    msg.innerHTML = '✓ 3-D harmonisch (Kurzschlussring) · '
+      + (res.mesh ? res.mesh.nodes + ' Knoten, ' + res.mesh.tets + ' Tetraeder' : '');
+    box.innerHTML =
+      '<div class="e3-card"><h4>🧲 3-D harmonisch — Asynchronmaschine</h4>'
+      + '<div class="hint" style="font-size:11px;color:#9aa;margin-bottom:6px">'
+      + 'Der Käfig braucht ein <b>zeitabhängiges</b> Feld; der magnetostatische '
+      + '3-D-Pfad kann ihn nicht darstellen. Gerechnet hat deshalb '
+      + '<code>ema_em3d_harm</code> — derselbe Knopf, der richtige Löser.</div>'
+      + '<pre style="white-space:pre;overflow-x:auto;font-size:11px;'
+      + 'line-height:1.45;margin:0">'
+      + String(res.bericht).replace(/[&<>]/g,
+          c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</pre>'
+      // **Der Browser-Betrachter gilt auch hier.** Er ist nicht an die PSM
+      // gebunden: er lädt eine schlanke .vtp der Festkörperoberfläche und eine
+      // zweite mit Feldlinien, und `ema_em3d_harm.browser_dateien` schreibt
+      // beide aus der harmonischen VTU. Was das Bild zeigt, steht dabei — eine
+      // Amplitude ist phasenunabhängig, ein Linienbild ist es nicht.
+      + (res.browser && res.browser.hinweis
+         ? '<div class="hint" style="font-size:11px;color:#9aa;margin-top:8px">'
+           + String(res.browser.hinweis).replace(/[&<>]/g,
+               c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])) + '</div>'
+         : '')
+      + '<div style="margin-top:8px">'
+      + (res.vtp_path ? '<button onclick="openBrowser3d()" style="background:#2e6a4a;width:auto;padding:6px 12px">🧊 Im Browser ansehen (3D)</button> ' : '')
+      + '<button onclick="openParaview()">🧊 In ParaView öffnen</button> '
+      + '<a href="/em3d/vtu" download>⬇ VTU laden</a></div></div>';
+    _e3PlayStop();
+    _e3ViewIdx = null; _e3SweepPoints = null;
+    return;
+  }
   window._e3HasResult = true;   // ein 3D-Lauf liegt zum Speichern vor
   _e3PlayStop();            // laufenden Player stoppen + Punkt-Caches leeren (neuer Lauf)
   _e3ViewIdx = null;        // Einzellauf: Routen liefern den Detail-/Einzelpfad (Sweep setzt danach um)
@@ -10147,7 +10666,6 @@ async function brAbzweigen(marke) {
   await brRefreshListe();
   brOeffnen(r.kennung);
 }
-
 
 
 async function brRefreshBestand() {
@@ -11132,6 +11650,29 @@ function toggleChat() {
 }
 function clearChat() { _chatHistory = []; _renderChat(); }
 
+// ── Vom gerissenen Tor in den Chat ─────────────────────────────────────────
+// Gemeldet als: „Ich brauche hier mehr Kontext oder einen konkreten Vorschlag,
+// was zu tun ist. Vielleicht auch ueber den Chat." Der Chat erdet ohnehin auf
+// dem Steckbrief des Projekts und kann nachschlagen — was ihm fehlte, ist der
+// FEHLSCHLAG. Ohne ihn fragt der Mensch „warum geht das nicht" und der Chat
+// raet.
+//
+// Die Frage wird nur EINGESETZT, nicht abgeschickt: was gefragt wird, bleibt
+// beim Menschen — dieselbe Haltung wie bei „übernehmen setzt nur das Formular".
+function _gateZumChat() {
+  const frage = window._gateChat || '';
+  if (!frage) return;
+  const p = document.getElementById('chat-panel');
+  if (p && (p.style.display === 'none' || !p.style.display)) toggleChat();
+  const feld = document.getElementById('chat-input');
+  if (feld) {
+    feld.value = frage;
+    feld.focus();
+    feld.style.height = 'auto';
+    feld.style.height = Math.min(feld.scrollHeight, 160) + 'px';
+  }
+}
+
 // Der Verlauf liegt SERVERseitig im Projekt (<projekt>/gespraeche/<kennung>.jsonl)
 // und ueberlebt das Neuladen — vorher war ein Gespraech mit dem Fenster weg.
 // Beim Oeffnen wird er nachgezogen, damit man dort weitermacht, wo man war.
@@ -11658,6 +12199,54 @@ async function pruefeUmrichter() {
   }
 }
 
+/* ⊙ Die gezeichnete Scheibe aus dem Reiter ⊙ Axialfluss holen.
+ *
+ * Der Reiter ist ein <iframe> auf `/axialfluss/` — gleicher Ursprung, also ist
+ * `werteLesen()` dort unmittelbar aufrufbar. Gelesen wird das FORMULAR der
+ * Seite und nicht ihr gerechnetes `P()`: `P()` halbiert Radien und rechnet
+ * Winkel in Bogenmaß um, und zwei Umrechnungen für dieselbe Größe sind eine zu
+ * viel (derselbe Grund steht dort über `werteLesen`).
+ *
+ * Ist der Reiter noch nicht geladen, wird er hier angestoßen und es gibt
+ * `null` zurück — dann gelten die Maße, die im Projekt stehen, und was dort
+ * fehlt, ergänzt der Server benannt (`ema_fluss.axial_ergaenzen`). Nichts wird
+ * hier gerechnet oder geraten.
+ */
+/* ⊙ Elementkennung ↔ Schemaschlüssel der beiden Haltungs-Grenzwerte.
+ * EINE Tabelle für Payload UND `applyPayload` — dasselbe Muster wie
+ * `_ART_FELDER`, und aus demselben Grund: eine zweite Aufzählung war schon
+ * einmal die Stelle, an der ein Feld gesetzt, aber nie wiederhergestellt
+ * wurde (`struct_solver`). */
+const _AX_HALT_FELDER = {ax_klebe_zul: 'axialKlebeZulMpa',
+                         ax_bandage_zul: 'axialBandageZulMpa'};
+let _axQuelle = null;          // woher die letzten axialen Maße kamen
+async function _axialGeomHolen() {
+  const f = document.getElementById('axial-rahmen');
+  let werte = null;
+  try {
+    const w = f && f.contentWindow;
+    if (w && typeof w.werteLesen === 'function') {
+      const v = w.werteLesen();
+      if (v && Object.keys(v).length) werte = v;
+    }
+  } catch (e) { werte = null; }      // Rahmen noch leer
+  if (!werte) {
+    if (typeof axActivate === 'function') axActivate();   // laden, fürs nächste Mal
+    _axQuelle = 'projekt';
+    return null;
+  }
+  try {
+    const r = await fetch('/axialfluss/geom', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ werte }) });
+    if (!r.ok) { _axQuelle = 'projekt'; return null; }
+    const d = await r.json();
+    if (!d.ok) { _axQuelle = 'projekt'; return null; }
+    _axQuelle = 'reiter';
+    return d;
+  } catch (e) { _axQuelle = 'projekt'; return null; }
+}
+
 async function buildPayload() {
   const payload = {
     // Die Leistungselektronik gehoert in `geom`, weil `ema_analysis.umrichter`
@@ -11672,7 +12261,14 @@ async function buildPayload() {
                         // Ohne diese Zeile rechnete der Browser IMMER eine PSM:
                         // `machineType` stand nur im Schema und kam nie mit.
                         machineType:       document.getElementById('machine_art')?.value
-                                           || GEOM.machineType || 'pmsm' },
+                                           || GEOM.machineType || 'pmsm',
+                        // Derselbe Grund wie bei `machineType` eine Zeile
+                        // darueber: aus GEOM allein kaeme er auch aus einer
+                        // frueheren Sitzung ueber localStorage zurueck, und
+                        // dann rechnete der Knopf eine Scheibe, die niemand
+                        // gewaehlt hat -- oder umgekehrt.
+                        fluxPath:          document.getElementById('flux_path')?.value
+                                           || GEOM.fluxPath || 'radial' },
     project_name:     document.getElementById('project_name').value || '',
     rotor_lam:        document.getElementById('sel_rotor_lam').value,
     stator_lam:       document.getElementById('sel_stator_lam').value,
@@ -11681,6 +12277,9 @@ async function buildPayload() {
     axial_len:        +document.getElementById('dim_axial').value,
     n_frames:         +document.getElementById('n_frames').value,
     fdm_resolution:   +document.getElementById('fdm_resolution').value,
+    // ⊙ Nur beim Axialfluss gelesen (`ema_axial_fdm.felder`,
+    // `ema_em3d._run_em3d_axial`); radial ignoriert ihn.
+    axial_schnitte:   +(document.getElementById('axial_schnitte')?.value || 5),
     frame_resolution: +document.getElementById('frame_resolution').value,
     field_bmax:       +(document.getElementById('field_bmax')?.value || 0),
     struct_mesh_mm:   +document.getElementById('struct_mesh_mm').value,
@@ -11735,6 +12334,27 @@ async function buildPayload() {
   if (_msEl) payload.geom.magShape = _msEl.value;
   delete payload.geom.customLegs;
   delete payload.geom.customBarriers;
+  // ⊙ **Beim Axialfluss kommen die Maße aus dem Reiter ⊙ Axialfluss.** Dieser
+  // Reiter hat kein einziges `axial*`-Feld — die Scheibe wird dort gezeichnet,
+  // und das ist bewusst so (`axialfluss/LIESMICH.md`: 643 kB Maske, drei
+  // Viertel ihrer geom-Felder bedeuten axial nichts). Nur schickte
+  // `buildPayload` deshalb `fluxPath="axial"` MIT dem radialen Vokabular und
+  // OHNE eine einzige axiale Zahl, und der Lauf starb an der ersten:
+  // „❌ FEHLER: 'axialAktivOD' fehlt" mit vollem Traceback (09.10.2026).
+  // Umgerechnet wird auf dem Server (`POST /axialfluss/geom`, aus
+  // `ema_fluss.aus_seite`) — eine zweite Zuordnungstabelle in JavaScript wäre
+  // dieselbe Falle wie die handgespiegelte `magnetLegs`.
+  if ((payload.geom.fluxPath || 'radial') === 'axial') {
+    const ax = await _axialGeomHolen();
+    if (ax) Object.assign(payload.geom, ax.geom);
+    // ⊙ Die zwei zulässigen Spannungen der Magnethaltung kommen aus
+    // ③ Betrieb und NICHT aus der Zeichenseite — sie sind Werkstoffangaben,
+    // keine Geometrie; deshalb werden sie NACH dem Zusammenführen gesetzt.
+    for (const [id, k] of Object.entries(_AX_HALT_FELDER)) {
+      const v = +(document.getElementById(id)?.value || 0);
+      if (v > 0) payload.geom[k] = v;
+    }
+  }
   // In das aktive Projekt (Projekt-Tab) hineinrechnen statt jedes Mal ein neues anzulegen.
   if (window._activeProject && _activeProject.id) payload.project_id = _activeProject.id;
   return payload;
@@ -11763,6 +12383,8 @@ function applyPayload(payload) {
 
   // geometry selects first (drive topology/pocket/connection visibility via handlers)
   // Die Maschinenart zuerst: sie blendet die Magnet-Topologie ein oder aus.
+  _setField('flux_path', G.fluxPath);
+  if (typeof _flussZeigen === 'function') _flussZeigen();
   _setField('machine_art', G.machineType);
   _setField('t_leiter', G.tLeiterC);
   // Alle art-spezifischen Felder aus EINER Tabelle zurueckschreiben -- dieselbe,
@@ -11774,6 +12396,7 @@ function applyPayload(payload) {
   if (window._ART_FELDER) {
     for (const id in window._ART_FELDER) _setField(id, G[window._ART_FELDER[id]]);
   }
+  for (const id in _AX_HALT_FELDER) _setField(id, G[_AX_HALT_FELDER[id]]);
   if (window._updateArtVis) window._updateArtVis();
   _setField('mag_shape',   G.magShape);
   _setField('pocket_mode', G.pocketMode);
@@ -12052,6 +12675,10 @@ async function startCadPreview() {
     // nicht die Form aus dem Geometrie-Tab.
     const useDesign = (window._activeTab === 'designer') && DESIGN.magnets.length;
     const payload = useDesign ? await _dsnBuildPayload() : await buildPayload();
+    // Welches Modell gebaut wird (Fussleiste). Der Vorgabewert ist der
+    // Vollmotor, also bleibt jeder bisherige Aufruf derselbe.
+    payload.cad_modell =
+      document.getElementById('foot_cad')?.value || 'vollmotor';
     const resp = await fetch('/cad_preview', {
       method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload) });
@@ -12108,12 +12735,21 @@ function _onCadDone(s) {
 async function startSmokeTest() {
   const btn = document.getElementById('btn_smoke');
   btn.disabled = true; const old = btn.textContent; btn.textContent = '⏳ Test läuft…';
+  const mitCad = !!document.getElementById('foot_smoke_cad')?.checked;
   _wfModal('🧪 Smoke-Test läuft…');
   document.getElementById('wf-body').innerHTML =
     '<div style="color:#9ab">Schneller Selbsttest der Rechenkette (Topologie, dq/MTPA, '
-    + 'FDM-Feld, Verbindung, Verformung, Skript-Erzeugung) — ohne FreeCAD, ~15 s.</div>';
+    + 'FDM-Feld, Verbindung, Verformung, Skript-Erzeugung, ⊙ Axialfluss)'
+    + (mitCad
+       ? ' — <b>mit FreeCAD</b>: Vollmotor + Läufer-FEM und die Scheibe '
+         + '(<code>ema_axial_cad</code>) werden wirklich gebaut. Das dauert Minuten.'
+       : ' — ohne FreeCAD, ~15 s. Für den echten Scheibenbau den Haken '
+         + '„mit CAD“ setzen.')
+    + '</div>';
   try {
-    const resp = await fetch('/smoke_test', { method: 'POST' });
+    const resp = await fetch('/smoke_test', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ cad: mitCad }) });
     if (!resp.ok) { const e = await resp.json();
       document.getElementById('wf-body').innerHTML =
         '<div style="color:#e88">❌ ' + escHtml(e.error || 'Start fehlgeschlagen') + '</div>';
@@ -12130,8 +12766,16 @@ function _onSmokeDone(s) {
   const ok = s.status === 'done' && s.result && s.result.ok;
   document.getElementById('wf-title').textContent = ok ? '🧪 Smoke-Test bestanden' : '🧪 Smoke-Test fehlgeschlagen';
   const sum = (s.result && s.result.summary) || (ok ? 'OK' : 'Fehler');
+  // Womit geprueft wurde, gehoert zum Ergebnis: „28 bestanden" sagt nicht, ob
+  // FreeCAD dabei war -- und genau das ist beim Axialfluss die Frage.
+  const wie = s.cad
+    ? '<b>mit FreeCAD</b> — Vollmotor, Läufer-FEM und die Scheibe '
+      + '(<code>ema_axial_cad</code>) wurden wirklich gebaut'
+    : 'ohne FreeCAD — reine Rechenkette samt ⊙ Axialfluss; der echte '
+      + 'Scheibenbau braucht den Haken „mit CAD“';
   document.getElementById('wf-body').innerHTML =
-    `<div style="font-size:.9rem;color:${ok ? '#7ec98f' : '#e88'}">${ok ? '✓' : '❌'} ${escHtml(sum)}</div>`;
+    `<div style="font-size:.9rem;color:${ok ? '#7ec98f' : '#e88'}">${ok ? '✓' : '❌'} ${escHtml(sum)}</div>`
+    + `<div style="margin-top:6px;font-size:.76rem;color:#9ab">${wie}</div>`;
 }
 
 // Generic poller for a {status,progress,log,result,error} endpoint until done/error.
@@ -12212,10 +12856,35 @@ async function pollStatus() {
       loadResults();
     } else if (s.status === 'error') {
       clearInterval(_pollTimer);
-      document.getElementById('progress-title').textContent = '❌ Analyse fehlgeschlagen';
+      const _d = s.diagnose || {};
+      // „Analyse fehlgeschlagen" allein sagt nicht, WAS gehalten hat. Der
+      // Server rechnet den Befund (`ema_diagnose`), hier steht sein Titel.
+      document.getElementById('progress-title').textContent =
+        '❌ ' + (_d.titel || 'Analyse fehlgeschlagen');
       document.getElementById('btn_analyse').disabled = false;
       document.getElementById('btn_analyse').textContent = '⚙ Analyse starten';
       _zeigeVorschlaege(s);
+      // Die Fussleiste ist 52 px hoch und `overflow:hidden` -- der Kasten wird
+      // hinter das Protokoll gehaengt und war damit zwar im DOM, aber
+      // unsichtbar. Von aussen sah das aus wie „es kommt kein Vorschlag",
+      // und genau so wurde es mehrfach gemeldet. Ein gerissenes Tor zieht die
+      // Leiste deshalb selbst auf -- so weit, dass Befund und Wege im Bild
+      // sind, und nicht weiter. Wer sie wieder zuzieht, behaelt das: gesetzt
+      // wird nur beim Fehlschlag.
+      try {
+        const f = document.getElementById('footer');
+        const b2 = document.getElementById('gate_vorschlaege');
+        if (f && b2) {
+          const soll = Math.min(Math.round(window.innerHeight * 0.62),
+                                b2.scrollHeight + 150);
+          if (f.offsetHeight < soll) {
+            f.style.height = soll + 'px';
+            if (typeof _splitRefresh === 'function') _splitRefresh();
+            window.dispatchEvent(new Event('resize'));
+          }
+          b2.scrollIntoView({ block: 'nearest' });
+        }
+      } catch (e) {}
     }
   } catch(e) { /* server busy */ }
 }
@@ -12230,64 +12899,197 @@ async function pollStatus() {
 // VORGESCHLAGEN IST NICHT GEWAEHLT: jeder Knopf traegt seinen Preis, und
 // uebernommen wird erst auf Klick — und auch dann wird nur das Formular
 // gesetzt, nicht neu gestartet. Was gebaut wird, entscheidet der Mensch.
+// Ist die Seite, die hier laeuft, noch die, die auf der Platte liegt? Ein
+// offener Reiter laedt sich nicht von selbst neu -- und dann sucht man Fehler
+// in einer Maske, die der Server laengst ersetzt hat. Dieselbe Pruefung
+// fuehren die Agentenseiten seit jeher (`seiteVeraltet`).
+let _uiStand = null;
+async function _uiStandPruefen() {
+  try {
+    const r = await fetch('/oberflaeche', { cache: 'no-store' }).then(x => x.json());
+    if (!r || !r.hash) return;
+    if (_uiStand === null) { _uiStand = r.hash; return; }
+    if (r.hash === _uiStand || document.getElementById('ui_veraltet')) return;
+    const b = document.createElement('div');
+    b.id = 'ui_veraltet';
+    b.style.cssText = 'position:fixed;left:0;right:0;top:0;z-index:9999;padding:7px 12px;'
+      + 'background:#6a4a1e;color:#ffe9c0;font-size:.82rem;text-align:center;'
+      + 'border-bottom:1px solid #a8822e';
+    b.innerHTML = 'Die Oberfläche auf dem Server hat sich geändert — diese Seite ist veraltet. '
+      + '<button onclick="location.reload(true)" style="width:auto;display:inline-block;'
+      + 'padding:2px 10px;margin-left:8px;background:#2a3a4a;color:#cfe;border:1px solid #4a6a8a;'
+      + 'border-radius:3px;cursor:pointer">neu laden</button>';
+    document.body.appendChild(b);
+  } catch (e) { /* Server aus — nicht der Moment fuer eine Warnung */ }
+}
+_uiStandPruefen();
+setInterval(_uiStandPruefen, 20000);
+
 function _zeigeVorschlaege(s) {
   const alt = document.getElementById('gate_vorschlaege');
   if (alt) alt.remove();
   const wege = s.vorschlaege || [];
-  if (!wege.length) return;
+  const diag = s.diagnose || {};
+  const hinweise = diag.hinweise || [];
+  // Auch OHNE gerechnete Wege gibt es fast immer etwas zu sagen: welche Stufe
+  // gehalten hat, warum die Vorschau trotzdem rechnet, und die Frage, mit der
+  // sich der Chat darauf ansetzen laesst. Frueher hing dieser ganze Kasten an
+  // `wege.length` — also an dem einen Tor, das Wege mitbringt.
+  if (!wege.length && !hinweise.length && !diag.chat) return;
   const box = document.createElement('div');
   box.id = 'gate_vorschlaege';
   box.style.cssText = 'margin-top:10px;background:#2a2620;border:1px solid #6a5a2e;'
                     + 'border-radius:6px;padding:10px 12px;font-size:.82rem;color:#e8dcc0';
+  // ZUERST, was gefunden wurde -- und zwar ALLES, nicht nur das Tor, das
+  // angehalten hat. Gemeldet als „wieder steht nirgends, was das Problem ist":
+  // der Laeufer zerfiel in Einzelarme, waehrend der Lauf am Daempferkaefig
+  // stand, und die Nabe kam nur als Nebensatz in einem Hinweis vor.
+  const befunde = (s.befunde && s.befunde.length) ? s.befunde
+                  : (s.befund ? [s.befund] : []);
   box.innerHTML =
-    `<div style="font-weight:600;margin-bottom:5px">Das Werkzeug hat ausgerechnet, was helfen würde</div>`
-    + (s.befund ? `<div style="font-size:.78rem;color:#c8bc9c;margin-bottom:8px;line-height:1.5">${escHtml(s.befund)}</div>` : '')
+    `<div style="font-weight:600;margin-bottom:5px">${escHtml(
+        diag.titel || 'Was passiert ist')}</div>`
+    + (befunde.length
+         ? `<div style="margin-bottom:9px">
+              <div style="font-size:.76rem;color:#e8b;letter-spacing:.04em;margin-bottom:3px">GEFUNDEN</div>`
+           + befunde.map((b, n) => `<div style="font-size:.78rem;color:#f0d2d2;line-height:1.5;
+                margin-bottom:3px;padding-left:16px;text-indent:-16px">`
+                + (n === 0 ? '\u26D4 ' : '\u26A0 ') + escHtml(b) + `</div>`).join('')
+           + (befunde.length > 1
+                ? `<div style="font-size:.72rem;color:#b5a980;margin-top:3px">
+                     \u26D4 hält den Lauf an \u00b7 \u26A0 bleibt offen, auch wenn der erste behoben ist</div>`
+                : '')
+           + `</div>`
+         : '')
+    + (wege.length ? `<div style="font-size:.76rem;color:#9cb;letter-spacing:.04em;margin-bottom:2px">DAS HILFT</div>` : '')
     + wege.map((w, i) => `
         <div style="display:flex;gap:9px;align-items:flex-start;padding:6px 0;border-top:1px solid #4a412a">
           <div style="flex:1;min-width:0">
             <div>${escHtml(w.text)}</div>
             <div style="font-size:.74rem;color:#b5a980;line-height:1.45;margin-top:2px">${escHtml(w.preis || '')}</div>
           </div>
-          ${w.schluessel ? `<button onclick="_gateUebernehmen(${i})" style="background:#5a6a3a;width:auto;padding:5px 11px;font-size:.75rem;white-space:nowrap">übernehmen</button>` : ''}
+          ${(w.schluessel || w.aenderungen) ? `<div style="display:flex;gap:5px;flex-wrap:wrap">
+            <button onclick="_gateUebernehmen(${i})" style="background:#5a6a3a;width:auto;padding:5px 11px;font-size:.75rem;white-space:nowrap">übernehmen</button>
+            <button onclick="_gateUebernehmen(${i},true)" style="background:#3a5a6a;width:auto;padding:5px 11px;font-size:.75rem;white-space:nowrap">übernehmen &amp; rechnen</button>
+          </div>` : ''}
         </div>`).join('')
-    + `<div style="font-size:.74rem;color:#b5a980;margin-top:8px;border-top:1px solid #4a412a;padding-top:6px">
-         Übernehmen setzt nur das Formular — gestartet wird nichts. Welcher Weg
-         gegangen wird, ist eine Auslegungsentscheidung.</div>`;
+    + (wege.length ? `<div style="font-size:.74rem;color:#b5a980;margin-top:8px;border-top:1px solid #4a412a;padding-top:6px">
+         „Übernehmen" setzt nur das Formular, „übernehmen &amp; rechnen" startet den
+         Lauf gleich mit. Beides erst auf Klick: welcher Weg gegangen wird,
+         bleibt eine Auslegungsentscheidung.</div>` : '')
+    // Die Hinweise tragen den Zusammenhang, nicht die Abhilfe — allen voran
+    // den, der die gemeldete Unstimmigkeit aufloest („ich kann doch einen
+    // Frame rechnen": der Vorschaupfad führt kein Tor).
+    + hinweise.map(h => `<div style="font-size:.76rem;color:#b5a980;line-height:1.5;
+         margin-top:7px;border-top:1px solid #4a412a;padding-top:6px">ℹ ${escHtml(h)}</div>`).join('')
+    + (diag.chat ? `<div style="margin-top:9px;border-top:1px solid #4a412a;padding-top:8px">
+         <button onclick="_gateZumChat()" style="background:#3a5a6a;width:auto;padding:6px 12px;font-size:.78rem">
+           💬 Im Chat besprechen</button>
+         <span style="font-size:.74rem;color:#b5a980;margin-left:8px">
+           übernimmt Befund und Maße in die Frage — nichts wird gerechnet</span></div>` : '');
+  window._gateChat = diag.chat || '';
   window._gateWege = wege;
   const ziel = document.getElementById('progress-log');
   if (ziel && ziel.parentNode) ziel.parentNode.insertBefore(box, ziel.nextSibling);
 }
 
+// Welches Eingabefeld gehoert zu diesem Schluessel? Drei Wege in dieser
+// Reihenfolge: gleicher Name (die Hauptfelder heissen wie ihr Schluessel),
+// dann die art-abhaengigen Felder aus `_ART_FELDER` — DIESELBE Tabelle, aus
+// der auch `applyPayload` liest, damit keine zweite danebensteht und beim
+// naechsten neuen Feld auseinanderlaeuft. Findet sich nichts, wird das gesagt.
+// Rueckfall, falls `window._ART_FELDER` beim Klick noch nicht steht: es wird
+// in einem spaeteren Script-Block gesetzt, und ein Knopf, der davon abhaengt,
+// ist genau dann tot, wenn man ihn braucht. Die Tabelle ist klein und aendert
+// sich selten; `window._ART_FELDER` hat weiterhin Vorrang.
+const _ART_FELDER_FALLBACK = {
+  pol_schuh_anteil:"polSchuhAnteil", pol_bedeckung:"polbedeckung",
+  pol_b_schuh:"polSchuhBreiteMm",    pol_b_kern:"polKernBreiteMm",
+  pol_d_spule:"erregerSpuleDickeMm", pol_h_spule:"erregerSpuleHoeheMm",
+  pol_kegel:"polKegelWinkelGrad",    spule_form:"erregerSpuleForm",
+  spule_fuellung:"erregerSpuleFuellung",
+  pol_befestigung:"polBefestigung",  pol_bolzen:"polBolzen",
+  pol_gewinde:"polBolzenGewinde",    daempfer:"daempferkaefig",
+  daempfer_staebe:"daempferStaebeJePol", daempfer_mat:"daempferMat",
+  rotor_type:"rotorType", rotor_bars:"rotorBars", rotor_skew:"rotorSkewSlots",
+  b_ziel:"bZielT", anker_wicklung:"armatureWinding"
+};
+function _gateFeld(schluessel) {
+  let el = document.getElementById(schluessel);
+  if (el) return el;
+  const t = Object.assign({}, _ART_FELDER_FALLBACK, window._ART_FELDER || {});
+  for (const id in t) {
+    if (t[id] !== schluessel) continue;
+    el = document.getElementById(id);
+    if (el) return el;
+  }
+  return null;
+}
+
 // Einen Vorschlag ins Formular schreiben. `ebene` sagt, wohin er gehört — der
 // Server weiß das, der Browser müsste es sonst raten.
-function _gateUebernehmen(i) {
-  const w = (window._gateWege || [])[i];
-  if (!w || !w.schluessel) return;
-  const feld = { rpm_to: 'rpm_to', rotor_lam: 'rotor_lam',
-                 rotorOD: 'rotorOD', shaftD: 'shaftD', statorID: 'statorID' }[w.schluessel];
-  let gesetzt = false;
-  const el = feld && document.getElementById(feld);
-  if (el) { el.value = w.wert; el.dispatchEvent(new Event('change', { bubbles: true })); gesetzt = true; }
-  if (w.ebene === 'geom' && typeof GEOM === 'object') { GEOM[w.schluessel] = w.wert; gesetzt = true; }
-  // Der Rotoraußendurchmesser zieht die Statorbohrung mit: statorID = rotorOD + 2·Luftspalt.
-  // Ohne das reißt beim nächsten Anlauf das Luftspalt-Tor statt der Fliehkraft,
-  // und es sähe aus, als hätte der Vorschlag nichts genützt.
-  if (w.schluessel === 'rotorOD' && typeof GEOM === 'object') {
-    const spalt = Math.max(0.1, ((+GEOM.statorID || 0) - (+document.getElementById('rotorOD')?.defaultValue || 0)) / 2) || 0.7;
-    const neu = +(w.wert + 2 * spalt).toFixed(2);
-    GEOM.statorID = neu;
-    const sid = document.getElementById('statorID');
-    if (sid) { sid.value = neu; sid.dispatchEvent(new Event('change', { bubbles: true })); }
+function _gateAnwenden(w) {
+  // Ein Weg kann MEHRERE Werte tragen (`aenderungen`) -- gerade die, die nur
+  // gemeinsam wirken. Einzeln angeboten waeren sie Knoepfe, die nichts
+  // bewirken; deshalb setzt dieser eine Klick alle.
+  const paare = w.aenderungen
+    ? Object.entries(w.aenderungen).map(([k, v]) => [k, v])
+    : (w.schluessel ? [[w.schluessel, w.wert]] : []);
+  let gesetzt = 0; const fehlt = [];
+  for (const [schl, wert] of paare) {
+    const el = _gateFeld(schl);
+    if (el) {
+      if (el.type === "checkbox") el.checked = (wert === true || +wert === 1);
+      else el.value = wert;
+      el.dispatchEvent(new Event("input",  { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      gesetzt++;
+    } else fehlt.push(schl + " = " + wert);
+    if ((w.ebene || "geom") === "geom" && typeof GEOM === "object") GEOM[schl] = wert;
+    // Der Rotoraussendurchmesser zieht die Statorbohrung mit:
+    // statorID = rotorOD + 2*Luftspalt. Ohne das reisst beim naechsten Anlauf
+    // das Luftspalt-Tor statt der Fliehkraft, und es saehe aus, als haette der
+    // Vorschlag nichts genuetzt.
+    if (schl === "rotorOD" && typeof GEOM === "object") {
+      const spalt = Math.max(0.1, ((+GEOM.statorID || 0)
+                    - (+document.getElementById("rotorOD")?.defaultValue || 0)) / 2) || 0.7;
+      const neuID = +(wert + 2 * spalt).toFixed(2);
+      GEOM.statorID = neuID;
+      const sid = document.getElementById("statorID");
+      if (sid) { sid.value = neuID; sid.dispatchEvent(new Event("change", { bubbles: true })); }
+    }
   }
-  if (typeof drawRotor === 'function') { try { drawRotor(); } catch (e) {} }
+  if (typeof drawRotor === "function") { try { drawRotor(); } catch (e) {} }
+  return { gesetzt, fehlt };
+}
+
+// Einen Vorschlag ins Formular schreiben. `ebene` sagt, wohin er gehoert — der
+// Server weiss das, der Browser muesste es sonst raten.
+function _gateUebernehmen(i, auchRechnen) {
+  const w = (window._gateWege || [])[i];
+  if (!w) return;
+  const r = _gateAnwenden(w);
   const box = document.getElementById('gate_vorschlaege');
   if (box) {
+    // GANZ NACH OBEN. Unten angehaengt verschwand sie am Ende eines langen
+    // Kastens, und von aussen sah ein geglueckter Klick aus wie gar keiner.
     const hin = document.createElement('div');
-    hin.style.cssText = 'margin-top:7px;color:#9c9;font-size:.78rem';
-    hin.textContent = gesetzt
-      ? '✓ ' + w.text + ' — ins Formular übernommen (Tab ② Geometrie / ③ Betrieb prüfen, dann neu starten).'
-      : '⚠ Feld nicht gefunden — bitte von Hand setzen: ' + w.schluessel + ' = ' + w.wert;
-    box.appendChild(hin);
+    hin.style.cssText = 'margin:-4px -6px 8px;padding:5px 8px;border-radius:4px;'
+      + 'font-size:.80rem;font-weight:600;'
+      + (r.fehlt.length ? 'background:#5a2a2a;color:#fcc' : 'background:#2a4a2a;color:#cfc');
+    hin.textContent = r.fehlt.length
+      ? '\u26A0 Feld nicht gefunden — bitte von Hand setzen: ' + r.fehlt.join(', ')
+      : (auchRechnen
+           ? '\u2713 ' + w.text + ' — übernommen, Analyse wird gestartet…'
+           : '\u2713 ' + w.text + ' — ins Formular übernommen (Tab \u2461 Geometrie / \u2462 Betrieb prüfen, dann neu starten).');
+    box.insertBefore(hin, box.firstChild);
+    box.scrollIntoView({ block: 'nearest' });
+  }
+  // Ausfuehren ist ein eigener Klick, nie eine Folge des Uebernehmens: welcher
+  // Weg gegangen wird, bleibt eine Auslegungsentscheidung. Angeboten wird er
+  // aber, statt den Menschen den Startknopf suchen zu lassen.
+  if (auchRechnen && !r.fehlt.length && typeof startAnalysis === 'function') {
+    setTimeout(() => { try { startAnalysis(); } catch (e) {} }, 60);
   }
 }
 
@@ -12303,7 +13105,8 @@ async function loadResults() {
   renderEmCurve(data.em);
   renderPower(data.power);
   renderStress(data.structural_fem, data.structural_sweep, data.structural_sweep_chart_b64);
-    renderConnection(data.connection);
+  renderAxialStruktur(data.axial_struktur, data.axial_struktur_chart_b64);
+  renderConnection(data.connection);
   renderDeformation(data.deformation, data.structural_fem);
   renderThermal(data.thermal);
   renderDriveCycle(data.drivecycle);
@@ -12641,17 +13444,35 @@ function showReportRag(pid) {
 
 function renderSummary(s) {
   if (!s) return;
+  // **`null` heisst NICHT GERECHNET und darf die Seite nicht anhalten.** Beides
+  // war hier verletzt: `s.max_safe_rpm.toLocaleString()` und
+  // `s.mass_g.toFixed(1)` griffen ungeprueft zu, und bei der SCHEIBE sind
+  // beide per Konstruktion `null` (sie traegt weder Lame-Ring noch
+  // Struktur-FEM, und ihre Masse kommt nicht aus dem Zylindermodell). Gemessen
+  // am 09.10.2026: `loadProjectById` brach mit „Fehler beim Laden: Cannot read
+  // properties of null (reading 'toLocaleString')" ab — ein fertig gerechneter
+  // Axiallauf liess sich im Browser GAR NICHT ansehen. Eine 0 einzusetzen waere
+  // der zweite Fehler: sie liest sich wie ein Messwert.
+  const z = (v, nd, suf) => (v == null ? '–' : (+v).toFixed(nd) + (suf || ''));
+  const n = (v, suf) => (v == null ? '–'
+                         : (+v).toLocaleString('de-DE') + (suf || ''));
   const html = [
-    metric('Luftspalt B_peak',   s.B_gap_T.toFixed(3) + ' T',          'analytisch'),
-    metric('Kt',                 s.Kt_Nm_per_A.toFixed(3) + ' Nm/A',   '1 Wdg/Nut'),
-    metric('Maxwell-Moment',     s.T_maxwell_Nm != null ? s.T_maxwell_Nm.toFixed(1) + ' Nm' : '–',
+    metric('Luftspalt B_peak',   z(s.B_gap_T, 3, ' T'),                'analytisch'),
+    metric('Kt',                 z(s.Kt_Nm_per_A, 3, ' Nm/A'),         '1 Wdg/Nut'),
+    metric('Maxwell-Moment',     z(s.T_maxwell_Nm, 1, ' Nm'),
                                  s.T_maxwell_Nm != null ? 'FDM' : 'Luftspalt im Raster nicht aufgelöst'),
-    metric('Maximalleistung',    s.P_max_kW != null ? s.P_max_kW.toFixed(0) + ' kW' : '–',
-                                 s.P_max_rpm != null ? 'bei ' + s.P_max_rpm.toLocaleString() + ' U/min' : 'Tab 🔄 EM-Kennlinie'),
-    metric('Max. Drehmoment',    s.T_peak_max_Nm != null ? s.T_peak_max_Nm.toFixed(0) + ' Nm' : '–',
+    metric('Maximalleistung',    z(s.P_max_kW, 0, ' kW'),
+                                 s.P_max_rpm != null ? 'bei ' + n(s.P_max_rpm) + ' U/min' : 'Tab 🔄 EM-Kennlinie'),
+    metric('Max. Drehmoment',    z(s.T_peak_max_Nm, 0, ' Nm'),
                                  'Umrichtergrenze, ungesättigt'),
-    metric('Max. Drehzahl',      s.max_safe_rpm.toLocaleString() + ' U/min', 'SF ≥ 1.5'),
-    metric('Masse Rotor',        s.mass_g.toFixed(1) + ' g',            s.rotor_lam || ''),
+    metric('Max. Drehzahl',      n(s.max_safe_rpm, ' U/min'),
+                                 s.max_safe_rpm != null ? 'SF ≥ 1.5'
+                                 : (s.structural_basis === 'scheibe'
+                                    ? 'nicht gerechnet — ⊙ Scheibenfestigkeit'
+                                    : 'nicht gerechnet')),
+    metric('Masse Rotor',        z(s.mass_g, 1, ' g'),
+                                 s.mass_g != null ? (s.rotor_lam || '')
+                                 : 'nicht gerechnet'),
     metric('Füllgrad Hairpin',   ((s.fill_factor || 0) * 100).toFixed(1) + ' %', 'Leiter/Nutquerschnitt'),
     metric('P_Fe Schätzung',     (s.P_fe_W_est || 0).toFixed(0) + ' W','Stator, Leerlauf'),
     metric('LCM Nuten/Pole',     s.lcm_slots_poles,                     'Rastmoment-Güte'),
@@ -12709,7 +13530,16 @@ function renderField(em) {
   // Field-mode selector + video links (from em.field_modes / em.videos)
   _modeMeta = {};
   const fmSel = document.getElementById('field-mode-select');
-  const modes = em.field_modes || [{mode:'rotate', label:'Rotor-Rotation'}];
+  // **Eine LEERE Liste ist etwas anderes als eine fehlende.** `undefined` heisst
+  // „Altprojekt ohne Metadaten" und bekommt den Rueckfall auf `rotate`; `[]`
+  // heisst „es wurde ausdruecklich keine Animation gerechnet", und das ist beim
+  // Axialfluss der Normalfall (die Rahmen rastern einen Zylinderschnitt, in dem
+  // eine Scheibe ein Ring ohne Merkmal ist). Der Rueckfall griff auch dort und
+  // liess den Spieler Rahmen 0 anfordern — `GET /field/0` mit 404 in der
+  // Browserkonsole bei jedem Laden eines Axialprojekts (09.10.2026).
+  const keineAnim = Array.isArray(em.field_modes) && em.field_modes.length === 0;
+  const modes = keineAnim ? []
+              : (em.field_modes || [{mode:'rotate', label:'Rotor-Rotation'}]);
   if (fmSel) {
     fmSel.innerHTML = '';
     modes.forEach(m => {
@@ -12722,7 +13552,24 @@ function renderField(em) {
   }
   renderFieldVideos(em.videos || {}, modes);
   _fieldMode = 'rotate';
-  selectFieldMode('rotate');
+  const hint = document.getElementById('field-mode-hint');
+  if (keineAnim) {
+    _totalFrames = 0;
+    const sld = document.getElementById('anim-slider');
+    if (sld) { sld.max = 0; sld.value = 0; sld.disabled = true; }
+    if (hint) hint.innerHTML =
+      '\u2299 <b>Keine Feld-Animation</b> \u2014 ihre Rahmen rastern einen '
+      + 'Zylinderschnitt, und darin ist eine Scheibe ein Ring ohne Merkmal. '
+      + 'Gezeichnet sind statt dessen der abgewickelte Schnitt und B_gap \u00fcber '
+      + 'dem Radius (Reiter \ud83d\udcca Diagramme); bewegt sieht man die Scheibe '
+      + 'im Reiter \u2299 Axialfluss.';
+    const img = document.getElementById('field-img');
+    if (img) img.removeAttribute('src');
+  } else {
+    const sld = document.getElementById('anim-slider');
+    if (sld) sld.disabled = false;
+    selectFieldMode('rotate');
+  }
 }
 
 // Ein <video>-Player je gerechnetem Feld-Modus. Die Reihenfolge folgt
@@ -13159,6 +14006,112 @@ function renderStress(fem, sweep, chartB64) {
   }).join('');
 }
 
+/* ⊙ **Was die Scheibe traegt — und was daran nicht gerechnet ist.**
+ *
+ * Gezeigt wird, was `ema_axial.anzug`/`ruecken`/`bandage` geliefert haben.
+ * Gerechnet wird hier NICHTS: jede Zahl kommt aus `results.axial_struktur`,
+ * und die beiden Urteile (`t_reicht`, `klebung_haelt`) faellt die Python-Seite.
+ * Ein zweites Urteil im Browser waere die Stelle, an der Oberflaeche und
+ * Rechnung auseinanderlaufen — und zwar bei einer Festigkeitsaussage.
+ *
+ * Die offenen Punkte stehen MIT im Bild und nicht in einer Fussnote: dass
+ * keine FEM lief, ist bei der Scheibe die Bauart und kein Mangel, dass die
+ * Fliehkraftspannung des Blechs fehlt, aber sehr wohl eine Luecke.
+ */
+function renderAxialStruktur(st, chartB64) {
+  const wrap = document.getElementById('axstr-wrap');
+  const rad  = document.getElementById('radstr-wrap');
+  if (!wrap) return;
+  if (!st) { wrap.style.display = 'none'; if (rad) rad.style.display = ''; return; }
+  wrap.style.display = '';
+  if (rad) rad.style.display = 'none';      // seine Tabellen sind hier leer
+  if (chartB64)
+    document.getElementById('axstr-img').src = 'data:image/png;base64,' + chartB64;
+
+  const rk = st.ruecken || {}, az = st.anzug || {}, bd = st.bandage || {};
+  const mm = v => (v == null ? '–' : (v * 1000).toFixed(2) + ' mm');
+  const um = v => (v == null ? '–' : (v * 1e6).toFixed(1) + ' µm');
+
+  document.getElementById('axstr-note').innerHTML =
+    '<b>Keine Struktur-FEM, und das ist die Bauart.</b> Sie vernetzt den '
+    + 'Zylinder-Rotor und lädt ihn mit Fliehkraft; die Scheibe trägt zwei '
+    + 'andere Lasten. Die <b>Hauptlast ist der axiale Anzug</b> — gemessen '
+    + '8,6 : 1 zum momentbildenden Schub —, gerechnet als '
+    + 'achssymmetrische <b>Kreisringplatte</b> (innen an der Nabe eingespannt, '
+    + 'außen frei). Die zweite zieht die Magnete <b>in der Scheibenebene</b> '
+    + 'nach außen, wo kein Blechsteg steht.';
+
+  const ok = (b) => b ? '<span class="sf-ok">✓</span>'
+                      : '<span class="sf-bad">⚠</span>';
+  const zeilen = [
+    row('Bindend', rk.bindet || '–'),
+    row('magnetisch nötig', mm(rk.t_magnetisch_m)),
+    row('aus der Durchbiegung', mm(rk.t_steifigkeit_m)),
+    row('→ Soll', mm(rk.t_soll_m)),
+  ];
+  if (st.t_ist_m != null)
+    zeilen.push(row('gezeichnet',
+      mm(st.t_ist_m) + ' ' + ok(st.t_reicht)));
+  zeilen.push(row('Durchbiegung w_max',
+    um(st.w_bei_t_ist_m != null ? st.w_bei_t_ist_m : rk.w_bei_t_soll_m)));
+  const anteil = st.w_anteil_spalt_ist != null ? st.w_anteil_spalt_ist
+                                               : rk.w_anteil_spalt;
+  if (anteil != null)
+    zeilen.push(row('… als Anteil des Luftspalts',
+      (anteil * 100).toFixed(1) + ' % ' + ok(anteil <= 0.10)
+      + ' <span style="color:#777">(zulässig 10 %)</span>'));
+  zeilen.push(row('Einspannung (Nabe)', mm(rk.nabe_r_m) + ' Radius'));
+  zeilen.push(row('axialer Anzug',
+    az.sigma_n_pa ? (az.sigma_n_pa / 1e3).toFixed(1) + ' kPa' : '–'));
+  zeilen.push(row('… Kraft je Luftspalt',
+    az.kraft_je_spalt_N ? (az.kraft_je_spalt_N / 1e3).toFixed(2) + ' kN' : '–'));
+  if (az.hebt_sich_auf)
+    zeilen.push(row('negative Steifigkeit',
+      (az.negative_steifigkeit_N_per_m / 1e6).toFixed(1) + ' MN/m'
+      + ' <span style="color:#777">(zwei Spalte heben sich nur bei mittigem '
+      + 'Ständer auf)</span>'));
+  document.getElementById('axstr-box').innerHTML = zeilen.join('');
+
+  const mz = [
+    row('Drehzahl', (st.rpm ?? '–') + ' 1/min'),
+    row('Umfangsgeschwindigkeit',
+      bd.u_aussen_m_s ? bd.u_aussen_m_s.toFixed(1) + ' m/s' : '–'),
+    row('Magnetmasse je Scheibe',
+      bd.magnetmasse_je_scheibe_kg != null
+        ? bd.magnetmasse_je_scheibe_kg.toFixed(3) + ' kg' : '–'),
+    row('Fliehkraft in der Ebene',
+      bd.kraft_gesamt_N ? (bd.kraft_gesamt_N / 1e3).toFixed(1) + ' kN' : '–'),
+    row('… je Pol',
+      bd.kraft_je_pol_N ? (bd.kraft_je_pol_N / 1e3).toFixed(2) + ' kN' : '–'),
+    row('Klebescherspannung',
+      bd.klebescherspannung_pa
+        ? (bd.klebescherspannung_pa / 1e6).toFixed(2) + ' MPa' : '–'),
+  ];
+  if (bd.klebung_haelt != null)
+    mz.push(row('Klebung hält',
+      ok(bd.klebung_haelt) + ' <span style="color:#777">(gegen '
+      + bd.klebe_zul_mpa + ' MPa zulässig)</span>'));
+  else
+    mz.push(row('Klebung hält',
+      '<span class="sf-warn">kein Urteil</span> <span style="color:#777">— '
+      + 'zulässige Scherspannung in ③ Betrieb eintragen</span>'));
+  if (bd.t_bandage_m != null)
+    mz.push(row('Bandage nötig', mm(bd.t_bandage_m)
+      + ' <span style="color:#777">(bei ' + bd.sigma_zul_mpa + ' MPa)</span>'));
+  else
+    mz.push(row('Bandage',
+      '<span style="color:#777">keine Dicke genannt — kein '
+      + 'Bandagenwerkstoff in den Tabellen</span>'));
+  document.getElementById('axstr-mag').innerHTML = mz.join('');
+
+  const offen = (st.ungeprueft || []).concat(
+    st.max_safe_rpm_grund ? ['max. sichere Drehzahl: ' + st.max_safe_rpm_grund] : []);
+  document.getElementById('axstr-offen').innerHTML = offen.length
+    ? '<b>Nicht gerechnet:</b><ul style="margin:4px 0 0 16px;padding:0">'
+      + offen.map(x => '<li>' + escHtml(x) + '</li>').join('') + '</ul>'
+    : '';
+}
+
 function renderConnection(c) {
   const wrap = document.getElementById('conn-wrap');
   if (!wrap) return;
@@ -13318,6 +14271,7 @@ function escHtml(s) {
     // `ema_maschinenart` und nennt gleich, wie weit eine Art getragen ist); eine
     // zweite Liste im HTML waere die naechste Stelle, an der Formular und
     // Rechnung auseinanderlaufen. Bis sie geladen ist, steht genau ein Eintrag
+
     // da -- die Vorgabe, mit der bisher ohnehin gerechnet wurde.
     async function _artLaden() {
       const sel = document.getElementById("machine_art");
@@ -13358,10 +14312,18 @@ function escHtml(s) {
                          pol_h_spule: "erregerSpuleHoeheMm",
                          pol_kegel: "polKegelWinkelGrad",
                          b_ziel: "bZielT",
+                         synrm_k: "synrmBarrieren",
+                         synrm_kw: "synrmIsolationsgrad",
+                         synrm_steg: "synrmStegMm",
+                         synrm_beta: "synrmBetaGrad",
+                         laeufer_nut_tiefe: "laeuferNutTiefeMm",
+                         laeufer_nut_breite: "laeuferNutBreiteMm",
+                         laeufer_steg: "laeuferStegMm",
                          rotor_type: "rotorType", rotor_bars: "rotorBars",
                          rotor_skew: "rotorSkewSlots",
                          rotor_turns: "rotorTurnsPerSlot",
                          pol_bedeckung: "polbedeckung",
+                         pol_schuh_anteil: "polSchuhAnteil",
                          pol_befestigung: "polBefestigung",
                          pol_bolzen: "polBolzen",
                          pol_gewinde: "polBolzenGewinde",
@@ -13422,17 +14384,18 @@ function escHtml(s) {
       const sel = document.getElementById("machine_art");
       const art = (sel && sel.value) || GEOM.machineType || "pmsm";
       const mitMagneten = (art === "pmsm");
-      // Beim RELUKTANZlaeufer bleibt die Topologie sichtbar: dort ist sie die
-      // Lage der Flussbarrieren und damit das Einzige, was die Maschine
-      // ausmacht -- sie auszublenden hiess, den Laeufer als „IPM ohne
-      // Magnete" stehenzulassen, ohne Griff daran. Gemeldet als „in der
-      // Reluktanzmaschine hast du einfach die Magnete entfernt".
-      const barrieren = (art === "synrm");
+      // **Der Reluktanzlaeufer haengt seit dem 20.09.2026 NICHT mehr an
+      // `magShape`.** Seine Flussbarrieren kommen aus `ema_synrm_cad` nach
+      // Auslegungsregeln (Nutteilung, Isolationsgrad, Feldlinienform) und
+      // nicht mehr aus der Magnet-Anordnung. Die Topologiegruppe hier stehen
+      // zu lassen -- und sei es unter dem Namen „Flussbarrieren (Anordnung)"
+      // -- waere ein Regler, der nichts mehr bewegt. Er wird ausgeblendet,
+      // und an seine Stelle tritt die eigene Gruppe „Flussbarrieren
+      // (Reluktanzlaeufer)".
       const topo = document.getElementById("grp_magnet_topo");
-      if (topo) topo.style.display = (mitMagneten || barrieren) ? "" : "none";
+      if (topo) topo.style.display = mitMagneten ? "" : "none";
       const topoTitel = topo && topo.querySelector(".grp-titel, h4, legend, .section-title");
-      if (topoTitel) topoTitel.textContent = barrieren
-        ? "Flussbarrieren (Anordnung)" : "Magnet-Topologie";
+      if (topoTitel) topoTitel.textContent = "Magnet-Topologie";
       // Nur die Wicklungen zeigen, die diese Bauart WIRKLICH hat. Ein
       // Ankerwerkstoff an einer Asynchronmaschine waere ein Feld ohne
       // Wirkung, und ein wirkungsloses Feld liest sich wie ein defektes.
@@ -13449,12 +14412,12 @@ function escHtml(s) {
         const opt = sel && sel.selectedOptions && sel.selectedOptions[0];
         const lbl = (opt ? opt.textContent : art);
         hin.textContent = mitMagneten ? ""
-          : barrieren
-            ? (lbl + " — ohne Magnete: dieselben gestanzten Taschen bleiben " +
-               "LEER und sind die Flussbarrieren. Ihre Lage kommt weiter aus " +
-               "der Anordnung darunter (magShape/Lagen) — ein mehrlagiger " +
-               "Reluktanzlaeufer entsteht ueber 'pmasynrm' oder 'vv'. Die " +
-               "analytische Rechnung kennt davon nur die Barrierenhoehe.")
+          : (art === "synrm")
+            ? (lbl + " — ohne Magnete. Die Flussbarrieren kommen aus den " +
+               "Auslegungsregeln (Nutteilung, Isolationsgrad, Feldlinienform), " +
+               "nicht mehr aus der Magnet-Anordnung; der Griff dafuer steht " +
+               "unter 'Flussbarrieren (Reluktanzlaeufer)'. Die analytische " +
+               "Rechnung kennt davon weiterhin nur die Barrierenhoehe.")
             : (lbl +
                " — ohne Magnete; die Magnet-Topologie entfaellt. Welche Stufen " +
                "diese Art traegt, steht in der Auswahl; der Lauf weist ab, was " +
@@ -14439,7 +15402,11 @@ function escHtml(s) {
             g.erregerSpuleHoeheMm, g.polKegelWinkelGrad,
             g.daempferkaefig, g.daempferStaebeJePol,
             g.daempferMat, g.bZielT, g.poleArcFrac, g.slotWidthRatio,
-            g.slotDepth, g.rotorBars, g.armatureWinding
+            g.slotDepth, g.rotorBars, g.armatureWinding,
+            // Der Reluktanzlaeufer und die Kaefignut in Millimetern.
+            g.synrmBarrieren, g.synrmIsolationsgrad, g.synrmStegMm,
+            g.synrmBetaGrad, g.laeuferNutTiefeMm, g.laeuferNutBreiteMm,
+            g.laeuferStegMm, g.rotorSkewSlots, g.rotorTurnsPerSlot
            ].join("|");
   }
 
@@ -14510,14 +15477,163 @@ function escHtml(s) {
       : kern;
   }
 
-  function _laeuferHinweisZeigen() {
+  // Was die Bauart ABGELEITET hat -- und ein Knopf, der es in die Felder
+  // schreibt. Gemeldet als „auch waeren vorgaben hilfreich": die
+  // Millimeterfelder tragen `0 = ableiten`, und eine 0 sagt nicht, WAS
+  // abgeleitet wurde. Gerechnet wird hier nichts; die Zahlen kommen aus
+  // `/laeuferbild` (`masse`), also aus derselben Quelle wie die Zeichnung.
+  // Eine zweite Ableitung im JavaScript waere die naechste stille Drift.
+  function _masseVorgabeZeigen() {
+    const b = _laeuferBild;
+    const gilt = b && _laeuferMarke === _laeuferMarkeBauen();
+    const liste = (gilt && Array.isArray(b.masse)) ? b.masse : [];
+    const befund = (gilt && Array.isArray(b.masse_befund)) ? b.masse_befund : [];
+    // Ein Befund ohne Weg ist eine Sackgasse — gemeldet als „ich kann damit
+    // nichts anfangen". Der Server rechnet die Wege (`ema_eesm_cad.entlastung`,
+    // jeder gegen dasselbe Tor nachgeprueft) und schickt sie mit dem Laeuferbild.
+    const vors  = (gilt && Array.isArray(b.vorschlaege)) ? b.vorschlaege : [];
+    const vhin  = (gilt && Array.isArray(b.vorschlag_hinweise)) ? b.vorschlag_hinweise : [];
+    window._laeuferVorschlaege = vors;
+    // Nur EINMAL zeigen: die Vorschlaege gelten dem Laeufer, nicht der Gruppe,
+    // in der die Meldung zufaellig steht.
+    let vorsGezeigt = false;
+    document.querySelectorAll(".masse-vorgabe").forEach(el => {
+      // Nur in der Gruppe zeigen, die zu dieser Bauart sichtbar ist.
+      const grp = el.closest(".art-feld, .input-group");
+      const sichtbar = grp && grp.offsetParent !== null;
+      if (!liste.length || !sichtbar) { el.style.display = "none"; return; }
+      const txt = liste.map(m =>
+        `${_esc(m.label)} <b>${(+m.wert).toFixed(2)}${_esc(m.einheit)}</b>` +
+        (m.gesetzt ? " (gesetzt)" : "")).join(" · ");
+      const knopf = liste.some(m => m.schluessel && !m.gesetzt)
+        ? ' <button type="button" onclick="_masseUebernehmen()" style="width:auto;' +
+          'display:inline-block;padding:1px 7px;margin-left:6px;font-size:10px;' +
+          'line-height:1.5;background:#22303f;color:#8fb;border:1px solid #3a4a5e;' +
+          'border-radius:3px;cursor:pointer">\u21A5 in die Felder</button>' : "";
+      const zeigeVors = (vors.length || vhin.length) && !vorsGezeigt;
+      if (zeigeVors) vorsGezeigt = true;
+      el.innerHTML = "Abgeleitet: " + txt + knopf
+        + (befund.length
+             ? '<div style="color:#f4a; margin-top:3px">\u26A0 '
+               + befund.map(_esc).join("<br>\u26A0 ") + "</div>"
+             : "")
+        + (zeigeVors
+             ? '<div style="margin-top:5px;border-top:1px solid #33404f;padding-top:4px">'
+               + (vors.length ? '<div style="color:#9cb;margin-bottom:2px">Das hilft:</div>' : "")
+               + vors.map((w, i) =>
+                   '<div style="margin-top:2px">\u2192 ' + _esc(w.text)
+                   + ((w.schluessel || w.aenderungen)
+                        ? ' <button type="button" onclick="_masseVorschlag(' + i + ')" '
+                          + 'style="width:auto;display:inline-block;padding:1px 7px;margin-left:6px;'
+                          + 'font-size:10px;line-height:1.5;background:#22303f;color:#8fb;'
+                          + 'border:1px solid #3a4a5e;border-radius:3px;cursor:pointer">'
+                          + '\u2713 \u00fcbernehmen</button>'
+                          + ' <button type="button" onclick="_masseVorschlag(' + i + ',true)" '
+                          + 'style="width:auto;display:inline-block;padding:1px 7px;margin-left:3px;'
+                          + 'font-size:10px;line-height:1.5;background:#1f2f3a;color:#9cf;'
+                          + 'border:1px solid #3a4a5e;border-radius:3px;cursor:pointer">'
+                          + '\u00fcbernehmen &amp; rechnen</button>' : "")
+                   + (w.preis ? '<div style="color:#8a94a0;font-size:10px;margin-left:12px">'
+                                + _esc(w.preis) + '</div>' : "")
+                   + '</div>').join("")
+               + vhin.map(h => '<div style="color:#8a94a0;margin-top:3px">\u2139 '
+                               + _esc(h) + '</div>').join("")
+               + '</div>'
+             : "");
+      el.style.display = "";
+    });
+  }
+
+  // Die abgeleiteten Werte in die Felder schreiben -- ausdruecklich auf
+  // Zuruf. Von selbst einzutragen hiesse, aus „ableiten" ein „festhalten" zu
+  // machen, ohne dass jemand es entschieden hat.
+  function _masseUebernehmen() {
+    const b = _laeuferBild;
+    if (!b || !Array.isArray(b.masse)) return;
+    let n = 0;
+    for (const m of b.masse) {
+      if (!m.schluessel) continue;
+      // EINE Feldsuche fuer beide Uebernahmen (`_gateFeld`) -- hier stand
+      // dieselbe Umkehrtabelle ein zweites Mal.
+      const el = _gateFeld(m.schluessel);
+      if (!el) continue;
+      el.value = (+m.wert).toFixed(2);
+      // Die EIGENEN Ereignisse der Maske ausloesen statt GEOM selbst zu
+      // setzen: dann laufen dieselben Handler wie beim Tippen (GEOM, Neuzeichnen,
+      // Autospeichern), und es gibt keinen zweiten Weg, der davon abweichen kann.
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      n++;
+    }
+    if (n) _masseVorgabeZeigen();
+  }
+  // Einen gerechneten Vorschlag ins Feld schreiben -- ueber DIESELBE Feldsuche
+  // wie die Tor-Vorschlaege (`_gateFeld`) und ueber die EIGENEN Ereignisse der
+  // Maske, damit dieselben Handler laufen wie beim Tippen.
+  function _masseVorschlag(i, auchRechnen) {
+    const w = (window._laeuferVorschlaege || [])[i];
+    if (!w) return;
+    // Dieselbe Anwendung wie bei den Tor-Vorschlaegen (`_gateAnwenden`) --
+    // mehrteilige Wege eingeschlossen. Eine zweite Fassung waere die naechste
+    // Stelle, an der die beiden auseinanderlaufen.
+    _gateAnwenden(w);
+    if (auchRechnen && typeof startAnalysis === "function") {
+      setTimeout(() => { try { startAnalysis(); } catch (e) {} }, 60);
+    }
+  }
+  window._masseVorschlag = _masseVorschlag;
+  window._masseUebernehmen = _masseUebernehmen;
+
+  function _esc(t) {
+    return String(t == null ? "" : t).replace(/[&<>"]/g,
+      c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  // Ein Balken ganz oben, wenn der Serverprozess aelter ist als seine Dateien.
+// Bewusst NICHT wegklickbar und bewusst nicht im Läufer-Hinweis versteckt: er
+// sagt, dass ALLES, was die Seite zeigt, aus einer alten Fassung kommt.
+function _serverVeraltetZeigen(text) {
+  let el = document.getElementById("server_veraltet");
+  if (!text) { if (el) el.remove(); return; }
+  if (!el) {
+    el = document.createElement("div");
+    el.id = "server_veraltet";
+    el.style.cssText = "position:fixed;top:0;left:0;right:0;z-index:9999;"
+      + "background:#7a2f2f;color:#ffe8e8;padding:7px 14px;font-size:.82rem;"
+      + "line-height:1.45;border-bottom:1px solid #a04040";
+    document.body.appendChild(el);
+  }
+  el.textContent = "\u26a0 " + text;
+}
+
+function _laeuferHinweisZeigen() {
+    _masseVorgabeZeigen();
+    // Die volle Beschreibung gehoert in den Reiter, wo sie umbrechen darf.
+    const bes = document.getElementById("laeufer_beschreibung");
+    if (bes) {
+      const g = _laeuferBild && _laeuferMarke === _laeuferMarkeBauen()
+                && _laeuferArt() !== "pmsm";
+      let t = g ? (_laeuferBild.fehler
+                       ? "\u26a0 Laeufer nicht zeichenbar: " + _laeuferBild.fehler
+                       : (_laeuferBild.hinweis || "")) : "";
+      bes.textContent = t;
+      bes.style.display = t ? "" : "none";
+      // **Der Server kann aelter sein als sein Code.** Python laedt ein Modul
+      // EINMAL; wer waehrend eines laufenden Servers eine Zeichendatei aendert,
+      // sieht im Browser weiter die alte Fassung — und Neuladen der SEITE hilft
+      // nicht. Zweimal am 20.09.2026 gemeldet (ein Polkern schien im CAD zu
+      // fehlen; die Reluktanzmaschine kam „wieder als PSM ohne Magnete").
+      // Der Server sagt es jetzt selbst; hier steht es, wo man hinsieht.
+      _serverVeraltetZeigen(_laeuferBild && _laeuferBild.server_veraltet);
+    }
     const el = document.getElementById("ov_laeufer");
     if (!el) return;
     const b = _laeuferBild;
     if (!b || _laeuferMarke !== _laeuferMarkeBauen() || _laeuferArt() === "pmsm") {
       el.style.display = "none"; el.textContent = ""; return;
     }
-    let txt = b.hinweis || "";
+    // Am BILD steht nur, was gezeichnet ist -- und was daran nicht stimmt.
+    let txt = b.kurz || b.zaehlung || b.hinweis || "";
     if (b.fehler) txt = "Laeufer nicht zeichenbar: " + b.fehler;
     el.dataset.voll = txt;
     el.dataset.offen = "0";
@@ -14585,7 +15701,18 @@ function escHtml(s) {
   function drawRotor() {
     const rO=(GEOM.rotorOD/2)*SCALE, rSh=(GEOM.shaftD/2)*SCALE;
     ctx.beginPath(); ctx.arc(0,0,rO,0,2*Math.PI); ctx.arc(0,0,rSh,0,2*Math.PI,true);
-    ctx.fillStyle="#7f8c8d"; ctx.fill(); ctx.strokeStyle="#95a5a6"; ctx.stroke();
+    // **Der Grund ist EISEN — und muss auch so aussehen.** Der Läufergrund war
+    // immer `#7f8c8d`, `ema_laeufer.js` malt Eisen dagegen `#2d3748`. Solange
+    // nur Magnete daraufkamen, war das eine Farbe für ein Material. Seit eine
+    // Bauart ihren ganzen Läufer aus `teile()` zeichnet, ist jede Stelle, die
+    // kein Teil abdeckt, ein HELLGRAUER Fleck neben dunklem Eisen — und liest
+    // sich als drittes Material. Gemeldet als „innerhalb des Polschuhs gibt es
+    // links und rechts einen hellgrauen Bereich … es scheint, als wäre das
+    // auch ein Metall". Wo `teile()` den Läufer beschreibt, bekommt der Grund
+    // deshalb die Eisenfarbe des Zeichners; der PSM-Pfad behält seine.
+    const _eig = !!_laeuferTeileAktiv();
+    ctx.fillStyle = _eig ? "#2d3748" : "#7f8c8d";
+    ctx.fill(); ctx.strokeStyle = _eig ? "#4a5568" : "#95a5a6"; ctx.stroke();
     ctx.beginPath(); ctx.arc(0,0,rSh,0,2*Math.PI);
     ctx.fillStyle="#222"; ctx.fill(); ctx.strokeStyle="#444"; ctx.stroke();
     // hollow-shaft bore
@@ -14776,6 +15903,15 @@ function escHtml(s) {
 
   function loop() {
     if (!cvsW || !cvsH) resize();
+    // ⊙ Beim Axialfluss bedient `_axialVorschau` die Leinwand (Abbild der
+    // Zeichnung aus dem Reiter ⊙ Axialfluss). Das radiale Dreigespann
+    // Rastern/Lösen/Zeichnen bleibt dann aus — es rästert einen
+    // Zylinderquerschnitt, und darin ist eine Scheibe ein Ring ohne Merkmal.
+    if (cvsW > 0 && cvsH > 0 && window._axialVorschau
+        && window._axialVorschau(canvas, ctx, cvsW, cvsH)) {
+      requestAnimationFrame(loop);
+      return;
+    }
     if (cvsW > 0 && cvsH > 0) {
       try {
         if (PHYS.isRunning) {

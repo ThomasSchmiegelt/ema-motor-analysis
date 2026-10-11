@@ -163,6 +163,14 @@ _WIDERSPRUCH = (
 #
 # ``mag``:  +1 / -1 = axiale Richtung der Magnetisierung dieser Lage
 # ``nut``:  von welcher Flaeche die Nut einschneidet ("unten"/"oben"/"durch")
+#: Bildhintergrund -- dieselbe Farbe wie `ema_feldbild.GRUND`, von dort geholt
+#: statt danebengeschrieben: zwei Schwarztoene in einem Projektordner faellt
+#: beim ersten Nebeneinander auf.
+try:
+    from ema_feldbild import GRUND
+except Exception:                                            # noqa: BLE001
+    GRUND = "#0d1014"
+
 _BAUFORMEN = {
     "yasa": {
         "spalte": 2, "joch": False,
@@ -239,31 +247,92 @@ def polteilungen(geom: dict, r_m: float) -> int:
         f"{r_m*1000:.1f} mm. Nutzahl oder Polzahl aendern.")
 
 
-def stapelhoehe(geom: dict) -> float:
-    """Axiale Hoehe des aktiven Stapels in **Millimetern** (ohne Luftpolster)."""
+def lagen(geom: dict) -> list:
+    """**Die axiale Schichtung -- die EINE Quelle.** Liste von Lagen, in mm.
+
+    Je Lage ``{art, kenn, z0, z1, d}``: ``art`` aus ``_BAUFORMEN[...]["stapel"]``
+    (``ruecken``/``magnet``/``spalt``/``stator``), ``kenn`` das MAGNETVORZEICHEN
+    der Lage -- der ganze Unterschied zwischen YASA (NS: beide gleichsinnig, der
+    Fluss geht axial durch den Zahn) und TORUS (NN: gegensinnig, der Fluss laeuft
+    im Staender umfangs). Wer es verliert, baut die falsche Bauform.
+
+    Sie stand bis zum 07.10.2026 **zweimal**: als Schleife in ``stapelhoehe``
+    (die nur die Summe brauchte) und als ``ema_axial_em3d._lagen`` (die die
+    Lagen selbst brauchte). Mit dem CAD waere es die dritte Fassung geworden --
+    und die Schichtung ist genau die Groesse, bei der eine Abschrift bedeutet,
+    dass Netz, Zeichnung und Hoehenangabe drei verschiedene Maschinen meinen
+    (gemessen: der erste Entwurf des Elmer-Sektors legte beim YASA zwei
+    Zahnbaender uebereinander und kam auf 90 mm, wo Mehrschnitt und Thermik
+    65 mm rechnen).
+
+    Lagen der Dicke 0 fallen heraus -- ein jochloser Staender hat kein Joch, und
+    eine Lage ohne Dicke ist keine.
+    """
     import ema_axial
 
     a = ema_axial.auslegung(geom)
-    g = geom or {}
     bf = _BAUFORMEN[a["bauform"]]
-    t_mag = a["magnet_dicke_m"] * 1000.0
-    t_spalt = a["luftspalt_m"] * 1000.0
-    t_stator = float(g.get("slotDepth", 25.0) or 25.0)
-    if bf["joch"]:
-        t_stator += _jochhoehe(geom)
-    t_ruecken = _rueckenhoehe(geom)
-    h = 0.0
-    for art, _ in bf["stapel"]:
-        h += {"ruecken": t_ruecken, "magnet": t_mag,
-              "spalt": t_spalt, "stator": t_stator}[art]
+    dicke = {"ruecken": _rueckenhoehe(geom),
+             "magnet": a["magnet_dicke_m"] * 1000.0,
+             "spalt": a["luftspalt_m"] * 1000.0,
+             "stator": statorhoehe(geom)}
+    z, aus = 0.0, []
+    for art, kenn in bf["stapel"]:
+        d = dicke[art]
+        if d <= 1e-6:
+            continue
+        aus.append({"art": art, "kenn": kenn, "z0": z, "z1": z + d, "d": d})
+        z += d
+    return aus
+
+
+def stapelhoehe(geom: dict) -> float:
+    """Axiale Hoehe des aktiven Stapels in **Millimetern** (ohne Luftpolster)."""
+    lg = lagen(geom)
+    return float(lg[-1]["z1"]) if lg else 0.0
+
+
+def statorhoehe(geom: dict) -> float:
+    """Axiale Hoehe des STAENDERS (Zahn + ggf. Joch), in Millimetern.
+
+    Sie stand inline an zwei Stellen (`stapelhoehe`, `rastere_scheibe`) und
+    jetzt an einer -- der 3-D-Sektor braucht genau dieselbe Zahl, sonst
+    vernetzt er eine andere Maschine als die, gegen die er gemessen wird.
+
+    **Zwei Schluessel fuer dieselbe Groesse**, und das ist ein Befund: hier
+    stand ``slotDepth`` (die radiale Nuttiefe), waehrend der axiale
+    Parametersatz seit dem 06.10.2026 ``axialZahnLaengeMm`` fuehrt. Beide
+    haben die Vorgabe 25, sie fielen also nur ZUFAELLIG zusammen. Vorrang hat
+    jetzt der axiale Schluessel; ``slotDepth`` bleibt der Rueckfall fuer
+    Payloads, die ihn noch nicht tragen.
+    """
+    import ema_axial
+    g = geom or {}
+    h = float(g.get("axialZahnLaengeMm") or g.get("slotDepth", 25.0) or 25.0)
+    if _BAUFORMEN[ema_axial.auslegung(g)["bauform"]]["joch"]:
+        h += _jochhoehe(g)
     return h
 
 
 def _rueckenhoehe(geom: dict) -> float:
-    """Rueckenblech [mm] -- aus ``ema_axial.ruecken``, nicht neu geschaetzt."""
+    """Rueckenblech [mm] -- das GEZEICHNETE, sonst das gerechnete.
+
+    **Befund vom 06.10.2026.** Hier stand nur ``axialRueckenMm`` als Vorgabe,
+    und den Schluessel gibt es im Schema gar nicht; gerechnet wurde deshalb
+    immer ``ema_axial.ruecken`` -- die ANFORDERUNG. Der axiale Parametersatz
+    fuehrt seit dem 06.10.2026 aber ``axialJochLaeuferMm``, also das, was
+    wirklich gezeichnet ist. Gemessen fielen die beiden auseinander: 11,10 mm
+    gerechnet gegen 13,00 mm gezeichnet, und damit meldeten Mehrschnitt
+    (61,2 mm) und Thermik (65,0 mm) zwei verschiedene Bauhoehen fuer dieselbe
+    Maschine.
+
+    Gezeichnet gewinnt -- das Feld soll die gebaute Maschine rechnen. Ob die
+    gezeichnete Dicke REICHT, sagt weiterhin ``ema_axial.ruecken``, und das ist
+    die richtige Arbeitsteilung: hier die Geometrie, dort das Urteil.
+    """
     import ema_axial
     g = geom or {}
-    vor = float(g.get("axialRueckenMm", 0) or 0.0)
+    vor = float(g.get("axialJochLaeuferMm", 0) or g.get("axialRueckenMm", 0) or 0.0)
     if vor > 0:
         return vor
     try:
@@ -275,12 +344,21 @@ def _rueckenhoehe(geom: dict) -> float:
 def _jochhoehe(geom: dict) -> float:
     """Staenderjoch [mm], wo die Bauform eines braucht (NN, AFIR, einseitig).
 
-    Bemessen wie das Rueckenblech: es fuehrt die Haelfte des Polflusses umfangs.
+    Bemessen wie das Rueckenblech: es fuehrt die Haelfte des Polflusses umfangs
+    -- und wie dort gewinnt das GEZEICHNETE (``axialJochStaenderMm``), wo es
+    gesetzt ist.
     """
     import ema_axial
+    _vor = float((geom or {}).get("axialJochStaenderMm", 0) or 0.0)
+    if _vor > 0:
+        return _vor
     a = ema_axial.auslegung(geom)
     ro, ri = a["r_aussen_m"], a["r_innen_m"]
-    phi = (eichung_magnet(geom) * a["polbedeckung"]
+    # ``eichung_magnet`` TRAEGT die Polbedeckung schon (es ist der
+    # Flussmittelwert). Sie hier noch einmal zu multiplizieren rechnete das Joch
+    # auf alpha^2 = 0,72 des Flusses, den es fuehren muss -- also 28 % zu duenn;
+    # ein zu duennes Staenderjoch saettigt (s. ``BEFUNDE.md``, 06.10.2026).
+    phi = (eichung_magnet(geom)
            * math.pi * (ro ** 2 - ri ** 2) / a["poles"])
     return max(2.0, phi / (2.0 * (ro - ri) * ema_axial.B_FE_ZUL_VORGABE) * 1000.0)
 
@@ -303,15 +381,59 @@ def eichung_magnet(geom: dict) -> float:
 
         B_gap = Br * hm / (hm + mu_r * kc * g) * alpha_i
 
-    Gemessen in ``axialfluss_scheibenprobe.py``: Permeanz 0,8325 -> 0,9573 T,
-    und der geloeste Spaltwert trifft das.
+    Gemessen in ``axialfluss_scheibenprobe.py``: Permeanz 0,8325 -> 0,9573 T.
+
+    **Diese Zahl ist ein MITTELWERT, keine Spitze und keine Grundwelle** -- das
+    ``alpha_i`` am Ende ist die Polbedeckung, also der Flussmittelwert ueber die
+    Polteilung. Sie heisst nur historisch ``eichung_magnet``; wer eine Spitze
+    oder eine Grundwelle braucht, nimmt ``eichung_magnet_spitze`` bzw.
+    ``eichung_magnet_grundwelle``. Die drei liegen um Faktor 1,00 : 1,18 : 1,46
+    auseinander, und sie zu verwechseln war der Fund vom 06.10.2026: ``schnitt``
+    pinnte die geloeste SPITZE auf diesen MITTELWERT und meldete die
+    Luftspaltgrundwelle dadurch um 45 % zu klein (s. ``BEFUNDE.md``).
+
+    Verwendet wird sie dort, wo wirklich ein Fluss gemeint ist -- Rueckenblech
+    und Staenderjoch --, und als die zu ``psi = p*(2/pi)*B*A`` passende
+    Amplitude.
+    """
+    return float(np.clip(eichung_magnet_spitze(geom) * _polbedeckung(geom),
+                         0.01, 2.0))
+
+
+def _polbedeckung(geom: dict) -> float:
+    import ema_axial
+    return float(ema_axial.auslegung(geom)["polbedeckung"])
+
+
+def eichung_magnet_spitze(geom: dict) -> float:
+    """Die SPITZE der Arbeitsgeraden [T]: ``Br * hm/(hm + mu_r*kc*g)``.
+
+    Der Flachdachwert unter dem Magneten, **ohne** Polbedeckung -- und damit der
+    einzige der drei Anker, den Modell und Loeser gleich definieren: beide
+    meinen dieselbe Stelle, die Mitte eines Magneten. Deshalb eicht ``schnitt``
+    hieran und nicht an einem Mittelwert (s. ``BEFUNDE.md``, 06.10.2026).
     """
     import ema_axial
     a = ema_axial.auslegung(geom)
     hm = a["magnet_dicke_m"] * 1000.0
     g = a["luftspalt_m"] * 1000.0
     perm = hm / (hm + EA.MU_R_MAG * KC * g)
-    return float(np.clip(EA.Br_NdFeB * perm * a["polbedeckung"], 0.01, 2.0))
+    return float(np.clip(EA.Br_NdFeB * perm, 0.01, 2.0))
+
+
+def eichung_magnet_grundwelle(geom: dict) -> float:
+    """Die GRUNDWELLE der Arbeitsgeraden [T]: ``4/pi * Spitze * sin(alpha*pi/2)``.
+
+    Die Fourier-Grundwelle der Rechteckwelle, die ein flach liegender Magnet
+    ueber die Polbedeckung ``alpha`` erzeugt. Sie ist GROESSER als die Spitze
+    (Faktor 1,24 bei alpha = 0,85) -- wer sie mit dem Mittelwert verwechselt,
+    liegt um 1,46 daneben, und genau das war der Fund vom 06.10.2026.
+
+    Nachgemessen am nutlosen Schnitt: der Loeser trifft sie auf **1,0 %**.
+    """
+    al = _polbedeckung(geom)
+    return float(4.0 / math.pi * eichung_magnet_spitze(geom)
+                 * math.sin(al * math.pi / 2.0))
 
 
 def eichung_anker(geom: dict, i_pk: float) -> float:
@@ -414,8 +536,8 @@ def rastere_scheibe(geom: dict, r_m: float, N: int = 400,
 
     t_mag = a["magnet_dicke_m"] * 1000.0
     t_spalt = a["luftspalt_m"] * 1000.0
-    t_nut = float((geom or {}).get("slotDepth", 25.0) or 25.0)
-    t_joch = _jochhoehe(geom) if bf["joch"] else 0.0
+    t_nut = statorhoehe(geom)
+    t_joch = 0.0
     t_ruecken = _rueckenhoehe(geom)
 
     lagen, y = [], y0
@@ -436,8 +558,21 @@ def rastere_scheibe(geom: dict, r_m: float, N: int = 400,
     j_ank = np.zeros((N, N))
     swr = min(0.8, max(0.2, float((geom or {}).get("slotWidthRatio", 0.5) or 0.5)))
     amp = EA.Br_NdFeB / (MU0 * EA.MU_R_MAG)
-    # Polvorzeichen: wechselt je Polteilung, mit der Polgrenze bei x = 0.
-    pol = np.floor(X / tau_p).astype(int) % 2
+    # **Der LAEUFER dreht sich mit ``rotor_winkel``.**
+    #
+    # Bis zum 06.10.2026 tat er das nicht: der Parameter erreichte nur die
+    # Staenderstroeme in ``_nuten`` (``el - rotor_winkel*p_pairs``), waehrend
+    # die Magnete an ``X % tau_p`` klebten. Gemessen stand der Schwerpunkt von
+    # ``j_magnet`` ueber eine ganze elektrische Periode auf **40,170 mm** --
+    # jeder Winkel gab dasselbe Raster. Aufgefallen ist es erst an einer
+    # Bildreihe: zwei Frames 180 Grad elektrisch auseinander sahen gleich aus.
+    #
+    # Beides zusammen ist die richtige Drehung: Laeufer UND Stromwelle wandern,
+    # der Lastwinkel bleibt stehen -- genau wie im radialen Rasterer, wo
+    # ``_rasterise`` die Pole mit ``rotor_angle`` dreht und ``_nuten``s
+    # Gegenstueck den Strom nachzieht.
+    x_rot = X - rotor_winkel * r_m * 1000.0                # mm, mitgedreht
+    pol = np.floor(x_rot / tau_p).astype(int) % 2
     vz = np.where(pol == 0, 1.0, -1.0)
 
     for lg in lagen:
@@ -447,7 +582,7 @@ def rastere_scheibe(geom: dict, r_m: float, N: int = 400,
         elif lg["art"] == "magnet":
             mu[band] = EA.MU_R_MAG
             # Polbedeckung < 1: der Magnet fuellt die Polteilung nicht ganz aus.
-            mitte = (X % tau_p) / tau_p
+            mitte = (x_rot % tau_p) / tau_p
             belegt = np.abs(mitte - 0.5) <= a["polbedeckung"] / 2.0
             My[band & belegt] = amp * lg["kenn"] * vz[band & belegt]
             mu[band & ~belegt] = 1.0
@@ -538,15 +673,37 @@ def schnitt(geom: dict, r_m: float, N: int = 400, iq: float = 0.0,
     bx_m, by_m = EA._curl_a(a_mag, lbl)
     jy, _ = _spaltlinie(sch)
     pk_m = float(np.abs(by_m[jy, :]).max())
-    b_an = eichung_magnet(geom)
-    sf_m = b_an / max(pk_m, 1e-30)
+
+    # Geeicht wird an der SPITZE DES NUTLOSEN Laufs gegen die Spitze der
+    # Arbeitsgeraden -- die eine Stelle, die Modell und Loeser gleich
+    # definieren. Die genutete Spitze taugt dafuer NICHT: ueber einem Zahn ist
+    # der Fluss gebuendelt, sie steigt um gemessene 23 %, waehrend der Fluss je
+    # Pol faellt (derselbe Befund, aus dem ``carter`` an der Grundwelle und
+    # nicht an der Spitze rechnet). Der Nutungsverlust wird damit GEMESSEN
+    # statt aus ``KC`` angenommen. Kosten: ein zweiter Loeserlauf je Schnitt.
+    b_an = eichung_magnet_spitze(geom)
+    if nuten:
+        _o = rastere_scheibe(geom, r_m, N, 0.0, 0.0, rotor_winkel, False, n_pol)
+        _ao = EA._solve_fdm(_o["mu"], _o["j_magnet"], cache=True)
+        _, _byo = EA._curl_a(_ao, EA._material_labels(_o["mu"]))
+        _jo, _ = _spaltlinie(_o)
+        pk_ref = float(np.abs(_byo[_jo, :]).max())
+    else:
+        pk_ref = pk_m
+    sf_m = b_an / max(pk_ref, 1e-30)
 
     i_pk = math.hypot(iq, id_)
     if i_pk > 1e-6:
         a_ank = EA._solve_fdm(sch["mu"], sch["j_anker"], cache=True)
         bx_a, by_a = EA._curl_a(a_ank, lbl)
         pk_a = float(np.abs(by_a[jy, :]).max())
-        sf_a = eichung_anker(geom, i_pk) / max(pk_a, 1e-30)
+        # ``eichung_anker`` ist eine GRUNDWELLENamplitude
+        # (``_analytical_Barm``: "peak fundamental MMF"), also wird die
+        # Grundwelle darauf gepinnt und nicht die Spitze.
+        _ba = np.fft.rfft(by_a[jy, :]) / len(by_a[jy, :])
+        _h1a = sch["n_polteilungen"] // 2
+        h1_a = float(2 * abs(_ba[_h1a]))
+        sf_a = eichung_anker(geom, i_pk) / max(h1_a, 1e-30)
     else:
         bx_a = by_a = np.zeros_like(bx_m)
         sf_a, pk_a = 0.0, 0.0
@@ -578,6 +735,9 @@ def schnitt(geom: dict, r_m: float, N: int = 400, iq: float = 0.0,
         "sigma_t_pa": sigma_t, "sigma_n_pa": sigma_n,
         "eichfaktor_magnet": sf_m, "eichfaktor_anker": sf_a,
         "b_an_magnet_T": b_an,
+        "eichung_art": "spitze_nutlos",
+        "b_an_magnet_grundwelle_T": eichung_magnet_grundwelle(geom),
+        "spitze_roh_genutet": pk_m, "spitze_roh_nutlos": pk_ref,
         "b_an_anker_T": eichung_anker(geom, i_pk) if i_pk > 1e-6 else 0.0,
         "nuten": nuten,
         "bn": bn, "bt": bt, "raster": sch,
@@ -741,6 +901,26 @@ def felder(geom: dict, k_schnitte: int = 5, N: int = 400, rpm: float = 1000.0,
             "Der Betriebspunkt setzt OBERFLAECHENmagnete voraus (Ld = Lq, kein "
             "Reluktanzmoment, i_d = 0). Ein vergrabener Scheibenmagnet oder ein "
             "Reluktanzlaeufer waere salient und ist nicht gerechnet.",
+            # Gemessen am 06.10.2026, als beide Feldstufen zum ersten Mal
+            # nebeneinander erreichbar waren. Dieser Satz MUSS in die Grenzen,
+            # weil der Zahlenwert sonst wie eine Messung aussieht.
+            # Diese Zeile hat am 06.10.2026 das Gegenteil behauptet, und die
+            # Begruendung war falsch. Sie sagte "B_gap(r) ist ueber N NICHT
+            # konvergiert (-12,6 / -9,5 / -6,7 / -9,7 %), Ursache ist das
+            # gleichmaessige Gitter". Die Streuung war echt, das Gitter aber
+            # nicht ihr Grund: geeicht wurde an der Spitze des GENUTETEN Feldes,
+            # und die sitzt auf einer getreppten Zahnkante, deren Lage mit N
+            # wandert -- also wanderte der Eichfaktor. Seit die Eichung am
+            # nutlosen Lauf haengt, steht die Zahl ueber N = 300/450/700 auf
+            # 1,0656 / 1,0655 / 1,0643 T, also 0,1 %. Siehe BEFUNDE.md.
+            "B_gap(r) konvergiert ueber N (gemessen 0,1 % ueber N = "
+            "300...700). Die -10 % gegen die analytische Grundwelle der "
+            "Arbeitsgeraden sind der gemessene NUTUNGSverlust, nicht ein "
+            "Netzfehler: `carter` misst an derselben Scheibe 1,096, das sind "
+            "-8,8 %. Gegengerechnet gegen die beiden unabhaengigen Wege: der "
+            "JS-Mehrschnitt (axialfluss/schnitt.js) kommt auf 1,0819 T, der "
+            "Elmer-Ringsektor (ema_axial_em3d) auf ~1,10 T -- drei Loeser "
+            "innerhalb von 3 %.",
             "BELASTBAR sind psi und B_gap(r); das MOMENT ist es nicht. Es ist "
             "das Produkt zweier unabhaengig geeichter Felder (B_n am "
             "Magnetanker, B_t ueberwiegend am Ankeranker), konvergiert ueber "
@@ -779,6 +959,95 @@ def konvergenz(geom: dict, ks=(3, 5, 9), N: int = 400, rpm: float = 1000.0,
 
 
 # ── Bilder ───────────────────────────────────────────────────────────────────
+
+def frames(geom: dict, ordner: str, n_frames: int = 12, N: int = 300,
+           rpm: float = 1000.0, last_nm: float = 0.0,
+           r_bild_m: float | None = None, melde=None) -> dict:
+    """Eine Bildreihe ueber den LAEUFERWINKEL -- die Animation der Scheibe.
+
+    Der radiale Weg hat sie seit jeher (`ema_pipeline` dreht den Laeufer durch
+    das FDM-Raster und schreibt `frames/frame_XXXX.png` plus `anim.mp4`); die
+    Scheibe hatte sie nicht, obwohl `rastere_scheibe` den Rotorwinkel laengst
+    kennt. Gezeichnet wird EIN abgewickelter Schnitt beim mittleren Radius --
+    nicht alle, denn eine Animation ueber Winkel UND Radius waere ein Bild, das
+    zwei Dinge gleichzeitig bewegt und keines davon zeigt.
+
+    **Eine elektrische Periode sind zwei Polteilungen**, mechanisch also
+    ``2*(2*pi/2p)``. Ueber eine volle mechanische Umdrehung zu laufen hiesse,
+    ``p`` mal dasselbe zu zeichnen.
+
+    Die Farbskala wird am ERSTEN Bild festgehalten und fuer alle weiteren
+    behalten. Ohne das setzt jedes Bild seine eigene Skala, und dann sieht ein
+    Feld, das sich nicht aendert, nach einem aus, das pulsiert -- derselbe
+    Grund, aus dem der 3-D-Betrachter ein „Skala fixieren" hat.
+    """
+    import os
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    import ema_axial
+
+    os.makedirs(ordner, exist_ok=True)
+    a = ema_axial.auslegung(geom)
+    r_b = r_bild_m or 0.5 * (a["r_innen_m"] + a["r_aussen_m"])
+    p_paare = max(1, int(a["poles"]) // 2)
+    periode = 2.0 * (2.0 * math.pi / max(int(a["poles"]), 2))
+
+    iq = id_ = 0.0
+    if last_nm > 0:
+        try:
+            _bp = betriebspunkt(geom, rpm, last_nm)
+            iq, id_ = _bp["i_q_A"], _bp["i_d_A"]
+        except Exception:                                            # noqa: BLE001
+            iq = id_ = 0.0
+
+    dateien, deckel = [], None
+    for k in range(max(2, int(n_frames))):
+        w = periode * k / max(2, int(n_frames))
+        sch = rastere_scheibe(geom, r_b, N, iq, id_, rotor_winkel=w)
+        lbl = EA._material_labels(sch["mu"])
+        A = EA._solve_fdm(sch["mu"], sch["j_magnet"] + sch["j_anker"], cache=True)
+        bx, by = EA._curl_a(A, lbl)
+        bmag = np.hypot(bx, by)
+        if deckel is None:
+            deckel = float(np.percentile(bmag, 99.0)) or 1.0
+        ex = [0.0, sch["seite_mm"], 0.0, sch["seite_mm"]]
+        fig, ax = plt.subplots(figsize=(7.2, 7.2), dpi=110)
+        ax.imshow(np.clip(bmag / deckel, 0, 1), origin="lower", extent=ex,
+                  cmap="magma", vmin=0.0, vmax=1.0, interpolation="bilinear")
+        ax.contour(np.linspace(0, sch["seite_mm"], N),
+                   np.linspace(0, sch["seite_mm"], N), A, 26,
+                   colors="#8fe3ff", linewidths=0.5, alpha=0.75)
+        for lg in sch["lagen"]:
+            ax.axhline(lg["y0"], color="#39506b", lw=0.6, ls=":")
+        ax.set_xlabel("Umfang abgewickelt [mm]")
+        ax.set_ylabel("axial [mm]")
+        ax.set_title(f"Axialfluss, abgewickelt bei r = {r_b*1000:.1f} mm — "
+                     f"Laeuferwinkel {math.degrees(w):.1f}\u00b0 mech "
+                     f"({math.degrees(w)*p_paare:.0f}\u00b0 el)")
+        ax.text(0.01, -0.105, "Mehrschnitt (ema_axial_fdm) \u2014 KEINE "
+                "3-D-Loesung; Skala am ersten Bild festgehalten",
+                transform=ax.transAxes, fontsize=6.5, color="#888")
+        f = os.path.join(ordner, f"frame_{k:04d}.png")
+        fig.savefig(f, bbox_inches="tight", facecolor="#0d1014")
+        plt.close(fig)
+        dateien.append(f)
+        if melde:
+            melde(k + 1, int(n_frames))
+
+    video = ""
+    try:
+        import ema_em3d
+        if ema_em3d._encode_video(ordner):
+            video = os.path.join(ordner, "anim.mp4")
+    except Exception:                                                # noqa: BLE001
+        video = ""
+    return {"ordner": ordner, "dateien": dateien, "n": len(dateien),
+            "video": video, "r_bild_m": r_b, "deckel_T_roh": deckel,
+            "periode_grad": math.degrees(periode)}
+
 
 def bilder(geom: dict, ordner: str, k_schnitte: int = 5, N: int = 360,
            rpm: float = 1000.0, last_nm: float = 0.0,
@@ -845,7 +1114,7 @@ def bilder(geom: dict, ordner: str, k_schnitte: int = 5, N: int = 360,
             "radiale Streuung an Ri/Ro nicht enthalten, Eisen linear.",
             transform=ax.transAxes, fontsize=6.5, color="#888")
     f1 = os.path.join(ordner, "feld_axial_schnitt.png")
-    fig.savefig(f1, bbox_inches="tight", transparent=True)
+    fig.savefig(f1, bbox_inches="tight", facecolor=GRUND)
     plt.close(fig)
     raus.append(f1)
 
@@ -884,7 +1153,7 @@ def bilder(geom: dict, ordner: str, k_schnitte: int = 5, N: int = 360,
             transform=ax.transAxes, fontsize=6.4, color="#c98b2e", wrap=True,
             va="top")
     f2 = os.path.join(ordner, "feld_axial_bgap_r.png")
-    fig.savefig(f2, bbox_inches="tight", transparent=True)
+    fig.savefig(f2, bbox_inches="tight", facecolor=GRUND)
     plt.close(fig)
     raus.append(f2)
     return raus

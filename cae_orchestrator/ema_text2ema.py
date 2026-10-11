@@ -85,8 +85,11 @@ SCHEMA = {
     "fluxPath":   {"kind": "enum", "opts": ["radial", "axial"], "def": "radial",
                    "geom": True, "adv": True,
                    "desc": "Flussweg: radial=zylindrischer Luftspalt (alle Stufen), "
-                           "axial=Ringflaeche/Scheibenlaeufer (KEINE Stufe traegt ihn "
-                           "heute; Plan in AXIALFLUSS.md, Befund in BEFUNDE.md)"},
+                           "axial=Ringflaeche/Scheibenlaeufer. Getragen sind `analytisch` "
+                           "(ema_axial) und `feld` (ema_axial_fdm, abgewickelter "
+                           "Mehrschnitt); `cad` und `em3d` weist Stufe 0 ab. Gezeichnet "
+                           "und uebernommen wird im Reiter ⊙ Axialfluss, gerechnet mit "
+                           "`cae_cli.py axial`"},
     # Die drei Masse, ohne die `ema_fluss.flaechen` den Ringraum nicht bilden
     # kann. `axialAktivOD` hat ausdruecklich KEINE Vorgabe aus `statorOD`:
     # dazwischen liegen Bandage, Gehaeuse und Fuegespalt, und eine erfundene
@@ -119,10 +122,85 @@ SCHEMA = {
     "axialBminMm":   {"kind": "num", "lo": 0.5, "hi": 10.0, "def": 2.0, "geom": True, "adv": True,
                       "desc": "Axialfluss: Fertigungsboden fuer Nut- und Zahnbreite am Innenrand "
                               "[mm]. Bindet lambda nach unten"},
+    # **Zwei zulaessige Spannungen, die das Werkzeug NICHT wissen kann.** In der
+    # Scheibenebene haelt den Sektormagneten kein Blechsteg -- nur Klebung oder
+    # eine Bandage am Aussenrand (s. `ema_axial.bandage`). Fuer beides fuehrt
+    # dieses Werkzeug KEINE Werkstofftabelle: `LAMINATES`, `MAGNETS` und
+    # `HAIRPIN_MATS` kennen weder Klebstoff noch Faserverbund. Ohne Zahl wird
+    # deshalb nur die KRAFT genannt und kein Querschnitt und kein Urteil
+    # erfunden; wer eine Zahl hat, traegt sie hier ein und bekommt dafuer ein
+    # Ja oder Nein. 0 heisst ausdruecklich "nicht bekannt", nicht "null fest".
+    "axialKlebeZulMpa": {"kind": "num", "lo": 0, "hi": 80.0, "def": 0, "geom": True, "adv": True,
+                         "desc": "Axialfluss: zulaessige SCHERspannung der Magnetklebung [MPa]. "
+                                 "0 = unbekannt, dann wird nur die Kraft genannt"},
+    "axialBandageZulMpa": {"kind": "num", "lo": 0, "hi": 3000.0, "def": 0, "geom": True, "adv": True,
+                           "desc": "Axialfluss: zulaessige ZUGspannung der Bandage am Aussenrand "
+                                   "[MPa]. 0 = unbekannt, dann wird keine Dicke genannt"},
     "axialBauform": {"kind": "enum", "opts": ["yasa", "afir", "torus_nn", "einseitig"],
                      "def": "yasa", "geom": True, "adv": True,
                      "desc": "Axialfluss-Bauform. Entscheidet, WO sich die Anzugskraft aufhebt: "
                              "afir am Laeufer, torus_nn/yasa am Staender, einseitig gar nicht"},
+    # Der VOLLSTAENDIGE axiale Parametersatz. Er ist auf der Zeichenseite
+    # (`axialfluss/ansicht.html`) aus der Bauart heraus entstanden und NICHT
+    # aus dem radialen abgeleitet -- das war die Vorgabe ("der Staender
+    # funktioniert doch ganz anders, den kannst du doch nicht gemeinsam
+    # verwenden"). Die Zuordnung Feldname <-> Schluessel steht an EINER Stelle:
+    # `ema_fluss.SEITE_FELDER`.
+    "axialNutBreiteMm": {"kind": "num", "lo": 0.5, "hi": 40.0, "def": 6.0,
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Nutbreite [mm], ueber dem Radius KONSTANT "
+                              "(parallelflankig). Dadurch werden die Zaehne nach aussen "
+                              "breiter und B_Zahn faellt -- kritisch ist der Innenrand"},
+    "axialZahnLaengeMm": {"kind": "num", "lo": 3.0, "hi": 120.0, "def": 25.0,
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Zahnlaenge in AXIALER Richtung [mm]. Beim "
+                              "Radialfluss waere das die Nuttiefe"},
+    "axialJochStaenderMm": {"kind": "num", "lo": 0, "hi": 80.0, "def": 12.0,
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Staenderjoch [mm], axial. 0 = jochlos (YASA); "
+                              "daraus folgt die Unterscheidung yasa/torus_nn, sie ist "
+                              "deshalb kein eigenes Feld"},
+    "axialJochLaeuferMm": {"kind": "num", "lo": 0, "hi": 80.0, "def": 13.0,
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Laeuferjoch [mm], axial. Bei DSER/AFIR entfaellt "
+                              "es grundsaetzlich -- der Fluss geht axial durch die "
+                              "Laeuferzaehne von einem Staender zum anderen"},
+    "axialWickelkopfMm": {"kind": "num", "lo": 0, "hi": 80.0, "def": 14.0,
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Wickelkopf radial [mm], innen UND aussen. Der "
+                              "INNERE bestimmt den Innenradius massgeblich, weil ihn die "
+                              "Welle begrenzt -- nicht der Platz fuer den Magneten"},
+    "axialStapel":   {"kind": "num", "lo": 1, "hi": 8, "def": 1, "int": True,
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Zahl der gestapelten Teilmaschinen "
+                              "(Stapelbauweise). Vervielfacht die Luftspalte"},
+    "axialLaeuferart": {"kind": "enum",
+                      "opts": ["sektor", "halbach", "kaefig", "eisenlos"],
+                      "def": "sektor", "geom": True, "adv": True,
+                      "desc": "Axialfluss-Laeufer: sektor = Sektormagnete flach auf der "
+                              "Scheibe; halbach = Array ohne Laeufereisen; kaefig = "
+                              "Laeuferzaehne mit Kurzschlussring (ASM); eisenlos = "
+                              "Scheibenanker, der Laeufer traegt die WICKLUNG"},
+    "axialMagSegUmfang": {"kind": "num", "lo": 1, "hi": 16, "def": 1, "int": True,
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Magnetsegmente je Pol in Umfangsrichtung "
+                              "(gegen Wirbelstromverluste; beim Halbach ist es der "
+                              "Entwurfsparameter -- die Magnetisierung dreht 180/n Grad "
+                              "je Segment)"},
+    "axialMagSegRadial": {"kind": "num", "lo": 1, "hi": 8, "def": 1, "int": True,
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Magnetsegmente ueber dem Radius. Der Polbogen "
+                              "waechst nach aussen, eine Platte ueber Ri..Ro haette sonst "
+                              "ein unguenstiges Seitenverhaeltnis"},
+    "axialMagFugeMm": {"kind": "num", "lo": 0, "hi": 10.0, "def": 1.0,
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Fuge zwischen zwei Magnetsegmenten [mm]. Eine "
+                              "RADIALE Linie, also ein fester Winkel -- die mm-Angabe "
+                              "gilt am mittleren Radius"},
+    "axialLaeuferStaebe": {"kind": "num", "lo": 0, "hi": 192, "def": 0, "int": True,
+                      "geom": True, "adv": True,
+                      "desc": "Axialfluss: Laeuferstaebe/-zaehne des Kaefiglaeufers "
+                              "(0 = ableiten nach der Auswahlregel aus ema_asm.stabzahl)"},
     "rotorBars":  {"kind": "num", "lo": 0, "hi": 120, "def": 0, "geom": True, "adv": True, "int": True,
                    "desc": "Läufernutzahl (ASM); 0 = automatisch — beim Käfig nach der Unsymmetrieregel, beim Schleifringläufer dreiteilbar"},
     "rotorType":  {"kind": "enum", "opts": ["kaefig", "schleifring"], "def": "kaefig",
@@ -396,6 +474,7 @@ GUETE = {
         "label": "Entwurf",
         "zweck": "durchspielen, entscheiden, verwerfen — Minuten statt Stunden",
         "felder": {"n_frames": 12, "frame_resolution": 180, "fdm_resolution": 300,
+                   "axial_schnitte": 5,
                    "rpm_step": 1000, "struct_solver": "ccx", "struct_mesh_mm": 4,
                    "struct_img_px": 1500, "struct_video": False,
                    "struct_frames": 20},
@@ -404,6 +483,7 @@ GUETE = {
         "label": "Detail",
         "zweck": "die Zahl, die in den Bericht geht",
         "felder": {"n_frames": 36, "frame_resolution": 300, "fdm_resolution": 800,
+                   "axial_schnitte": 9,
                    "rpm_step": 500, "struct_solver": "freecad",
                    "struct_mesh_mm": 2.5, "struct_img_px": 3000,
                    "struct_video": True, "struct_frames": 48},
@@ -523,7 +603,12 @@ def _validate(raw: dict) -> dict:
     # Ringraums ist Stufe 1 (s. AXIALFLUSS.md §3).
     for _k in ("fluxPath", "axialAktivOD", "axialLambda", "axialSpalte",
                "axialBauform", "axialSpaltMm", "axialMagnetDicke",
-               "axialPolbedeckung", "axialZahnform", "axialNabeD", "axialBminMm"):
+               "axialPolbedeckung", "axialZahnform", "axialNabeD", "axialBminMm",
+               "axialNutBreiteMm", "axialZahnLaengeMm", "axialJochStaenderMm",
+               "axialJochLaeuferMm", "axialWickelkopfMm", "axialStapel",
+               "axialLaeuferart", "axialMagSegUmfang", "axialMagSegRadial",
+               "axialMagFugeMm", "axialLaeuferStaebe",
+               "axialKlebeZulMpa", "axialBandageZulMpa"):
         if raw.get(_k) in (None, ""):
             continue
         _spec = SCHEMA[_k]

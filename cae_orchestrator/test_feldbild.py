@@ -3,11 +3,12 @@
 Was hier festgenagelt wird, ist nicht „ein Bild entstand" (das sagt schon eine
 Dateigroesse), sondern die vier Eigenschaften, an denen der Zweck haengt:
 
-  1. **Alphakanal und Durchsicht.** Die Bilder MUESSEN RGBA sein, die Ecken
-     MUESSEN durchsichtig sein, und die Deckkraft MUSS mit |B| steigen -- das
-     ist die ganze Idee („die Luft wird unsichtbar, nicht die Flaeche blass").
-     Ein Umstieg auf `savefig(facecolor=...)` faellt hier durch, nicht erst dem
-     Betrachter auf.
+  1. **Der Bildgrund und die Durchsicht.** Seit dem 06.10.2026 ist der Grund
+     SCHWARZ und die Datei deckend; die Durchsicht wird darauf VERRECHNET. Die
+     Idee bleibt („die Luft wird unsichtbar, nicht die Flaeche blass") und wird
+     weiterhin gemessen -- nur in Helligkeit statt in Alpha. Grund: eine Datei
+     mit 95 % Alpha sieht in einem gewoehnlichen Bildbetrachter weiss oder
+     kariert aus. `_leinwand(grund=None)` gibt die alte Fassung.
   2. **Ein Feldlauf fuer alle Querschnitts-Ansichten.** Vier Loesungen waeren
      vierfach teuer UND vier leicht verschiedene Felder in einer Bildreihe.
   3. **Der Schnitt nimmt Material weg.** Im Sektor darf keine Flussdichte mehr
@@ -107,23 +108,45 @@ finally:
     ema_analysis.run_em_analysis = _echt
 
 
-# ── 3) Alphakanal im fertigen PNG ───────────────────────────────────────────
-print("\n[3] Der Bildgrund ist durchsichtig")
+# ── 3) Der Bildgrund ─────────────────────────────────────────────────────────
+print("\n[3] Der Bildgrund ist SCHWARZ — und die Durchsicht steckt darin")
 
+# **Geaendert am 06.10.2026.** Bis dahin wurde der Alphakanal in die Datei
+# geschrieben: 95 % der Flaeche durchsichtig. In der rechten Agentenspalte lag
+# sie auf einem dunklen Schachbrett und sah richtig aus -- als Datei im
+# Projektordner sieht sie in jedem gewoehnlichen Bildbetrachter weiss oder
+# kariert aus, und genau so wurde sie gemeldet. Die Durchsicht bleibt, sie wird
+# nur auf SCHWARZ verrechnet: die Aussage „die Luft wird unsichtbar, nicht die
+# Flaeche blass" steht unveraendert im Bild.
 f = FB.feld_rechnen(geom, N=140)
 with tempfile.TemporaryDirectory() as tmp:
     pfad = FB.bild_linien(geom, f, os.path.join(tmp, "feld_linien.png"))
     from PIL import Image
     im = Image.open(pfad)
-    pruefe(im.mode == "RGBA", f"das PNG hat einen Alphakanal (mode={im.mode})")
-    px = np.asarray(im)
-    ecken = [px[0, 0, 3], px[0, -1, 3], px[-1, 0, 3], px[-1, -1, 3]]
-    pruefe(max(ecken) == 0, f"die vier Bildecken sind voll durchsichtig ({ecken})")
-    pruefe(float((px[..., 3] == 0).mean()) > 0.25,
-           "ein gutes Viertel der Flaeche ist durchsichtig — die Maschine steht "
-           "nicht in einem Kasten")
-    pruefe(float((px[..., 3] > 200).mean()) > 0.01,
-           "und irgendwo ist es auch deckend (Linien, Text, gesaettigtes Blech)")
+    px = np.asarray(im.convert("RGBA"))
+    pruefe(float((px[..., 3] < 250).mean()) < 0.01,
+           "die Datei ist DECKEND — sie braucht keinen dunklen Untergrund mehr")
+    ecken = [tuple(px[0, 0, :3]), tuple(px[-1, -1, :3])]
+    pruefe(all(max(c) < 40 for c in ecken),
+           f"und die Ecken sind schwarz statt durchsichtig ({ecken})")
+    # Die eigentliche Aussage: wo kein Fluss ist, ist es dunkel -- ein gutes
+    # Viertel der Flaeche. Das ist dieselbe Pruefung wie frueher, nur in
+    # HELLIGKEIT statt in Alpha gemessen.
+    hell = px[..., :3].max(axis=2)
+    pruefe(float((hell < 40).mean()) > 0.25,
+           "ein gutes Viertel ist dunkel — die Luft ist unsichtbar, die "
+           "Maschine steht nicht in einem hellen Kasten")
+    pruefe(float((hell > 200).mean()) > 0.005,
+           "und irgendwo ist es hell (Linien, Text, gesaettigtes Blech)")
+
+    # Die durchsichtige Fassung bleibt erreichbar -- die Agentenspalte hat
+    # dafuer ihre `.durchsicht`-Regel, und wer ein Bild ueberlagern will,
+    # braucht sie.
+    fig, ax = FB._leinwand(grund=None)
+    pruefe(fig.patch.get_alpha() == 0.0,
+           "`_leinwand(grund=None)` gibt weiterhin die durchsichtige Leinwand")
+    import matplotlib.pyplot as _plt
+    _plt.close(fig)
 
 
 # ── 4) Der Schnitt nimmt wirklich Material weg ──────────────────────────────
@@ -142,9 +165,13 @@ with tempfile.TemporaryDirectory() as tmp:
     p_voll = FB.bild_linien(geom, f, os.path.join(tmp, "voll.png"))
     p_schn = FB.bild_schnitt(geom, f, os.path.join(tmp, "schn.png"), sektor=sektor)
     from PIL import Image
-    a_voll = np.asarray(Image.open(p_voll))[..., 3]
-    a_schn = np.asarray(Image.open(p_schn))[..., 3]
-    pruefe(float((a_schn > 0).mean()) < float((a_voll > 0).mean()),
+    # Gemessen wird in HELLIGKEIT, nicht mehr in Alpha: seit dem 06.10.2026
+    # ist der Grund schwarz und die Datei deckend (s. [3]). Die Aussage ist
+    # dieselbe -- im weggeschnittenen Sektor darf keine Flussdichte mehr
+    # stehen --, nur das Messmittel ist ein anderes.
+    a_voll = np.asarray(Image.open(p_voll).convert("RGB")).max(axis=2)
+    a_schn = np.asarray(Image.open(p_schn).convert("RGB")).max(axis=2)
+    pruefe(float((a_schn > 40).mean()) < float((a_voll > 40).mean()),
            "das Schnittbild deckt WENIGER Flaeche ab als das volle — der Sektor "
            "ist offen, nicht uebermalt")
 

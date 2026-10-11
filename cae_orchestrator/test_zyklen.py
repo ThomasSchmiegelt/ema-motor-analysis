@@ -141,6 +141,49 @@ f = [k for k in ohne_fem["kriterien"] if k["name"] == "festigkeit"][0]
 pruefe(not f["ok"] and f["schwere"] == "hinweis",
        "eine fehlende FEM ist ein eigener Befund — null heisst nicht 'sicher'")
 
+# ⊙ Bei der SCHEIBE ist die fehlende FEM die Bauart und kein Mangel — und der
+# Satz darueber ("ruht auf der Ringformel, die die Spannungsspitzen an den
+# Stegen ueber den Magnettaschen nicht kennt") waere dort Wort fuer Wort
+# falsch: es gibt weder Ringformel noch Magnettaschen noch Stege.
+_sch = {"structural_basis": "scheibe", "axial_w_anteil_spalt": 0.062,
+        "axial_w_max_um": 62.3, "axial_anzug_kPa": 212.4,
+        "axial_magnetkraft_kN": 56.9, "axial_klebescher_MPa": 1.89}
+scheibe = ema_sicherheit.pruefen({"summary": _sch}, {})
+_sn = {k["name"]: k for k in scheibe["kriterien"]}
+pruefe("durchbiegung" in _sn and _sn["durchbiegung"]["ok"],
+       "die Scheibe bekommt ein eigenes Kriterium: 6,2 % des Luftspalts gegen "
+       "10 % zulaessig")
+pruefe("Ringformel" not in _sn["festigkeit"]["text"]
+       and "Magnettaschen" not in _sn["festigkeit"]["text"],
+       "und NICHT den Satz ueber Ringformel und Magnettaschen, die sie nicht hat")
+pruefe("Fliehkraftspannung des Blechs" in _sn["festigkeit"]["text"],
+       "benannt wird, was wirklich offen bleibt")
+pruefe(ema_sicherheit.W_ZUL_ANTEIL == __import__("ema_axial").W_ZUL_ANTEIL,
+       "die zulaessige Durchbiegung wird aus ema_axial GEHOLT, nicht abgeschrieben")
+_zuweich = ema_sicherheit.pruefen(
+    {"summary": {**_sch, "axial_w_anteil_spalt": 0.18}}, {})
+pruefe(not [k for k in _zuweich["kriterien"]
+            if k["name"] == "durchbiegung"][0]["ok"],
+       "18 % des Luftspalts reissen es — der Staender arbeitet dann gegen eine "
+       "Kraft, die mit dem Versatz waechst")
+# Ohne zulaessige Scherspannung ist die Magnethaltung ein HINWEIS, mit Angabe
+# ein echtes Kriterium. Beides gleich zu behandeln hiesse, eine fehlende
+# Angabe als bestandenen Nachweis zu lesen.
+pruefe(_sn["magnethaltung"]["schwere"] == "hinweis",
+       "ohne Angabe ist die Magnethaltung ein Hinweis und kein Nachweis")
+_mit = ema_sicherheit.pruefen(
+    {"summary": {**_sch, "axial_klebung_haelt": True,
+                 "axial_klebe_zul_MPa": 2.5}}, {})
+_mh = [k for k in _mit["kriterien"] if k["name"] == "magnethaltung"][0]
+pruefe(_mh["ok"] and "2.5 MPa zulaessig" in _mh["text"],
+       "mit Angabe wird daraus ein Urteil samt der Zahl, gegen die geprueft wurde")
+_nein = ema_sicherheit.pruefen(
+    {"summary": {**_sch, "axial_klebung_haelt": False,
+                 "axial_klebe_zul_MPa": 1.0}}, {})
+pruefe(not [k for k in _nein["kriterien"]
+            if k["name"] == "magnethaltung"][0]["ok"],
+       "und ein Nein ist ein Nein")
+
 ohne_zyklus = ema_sicherheit.pruefen({"summary": {}}, {"payload": {"rpm_to": 500}})
 fp = [k for k in ohne_zyklus["kriterien"] if k["name"] == "fahrprofil"][0]
 pruefe(not fp["ok"] and "1600" in fp["text"],

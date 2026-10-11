@@ -111,13 +111,26 @@ r = rollen(erg)
 pruefe(r.get("pol") == 2 * int(kq["poles"]),
        f"EESM: je Pol ein Schuh und ein Kern, KEIN Keil ({r.get('pol')} bei "
        f"{kq['poles']} Polen)")
-# Und es gibt keinen JOCHRING mehr: der Kern laeuft bis auf die Wellenbohrung
-# durch, die Nabe entsteht dort, wo sich zwei Polkoerper ueberdecken.
-pruefe(abs(float(kq["r_joch_aussen_mm"]) - float(kq["r_welle_mm"])) < 1e-6
-       and abs(float(kq["r_fuss_mm"]) - float(kq["r_welle_mm"])) < 1e-6
-       and not [t for t in erg["teile"] if t["form"] == "ring"],
-       f"kein Jochring: der Kern beginnt an der Welle (r_fuss "
-       f"{kq['r_fuss_mm']} = r_welle {kq['r_welle_mm']} mm)")
+# **Das Joch ist wieder ein RING, und seine Hoehe kommt aus dem FLUSS**
+# (20.09.2026). Der Zustand davor zog den Polkoerper bis auf die Bohrung durch
+# und ueberliess das Joch der Ueberdeckung der Koerper -- geometrisch ein Stern
+# und kein Kranz, und an der Vorgabemaschine gemessen 5,78 mm bei B = 4,84 T
+# gegen 1,70 T Blechgrenze. Gemeldet als „an der Welle, am Fuss des Pols,
+# links und rechts, keilartige Gebilde, auch das ist falsch".
+pruefe(float(kq["h_joch_mm"]) > 0.5
+       and abs(float(kq["r_joch_aussen_mm"])
+               - (float(kq["r_welle_mm"]) + float(kq["h_joch_mm"]))) < 1e-6
+       and abs(float(kq["r_fuss_mm"]) - float(kq["r_joch_aussen_mm"])) < 1e-6
+       and len([t for t in erg["teile"] if t["form"] == "ring"]) == 1,
+       f"ein Jochring traegt die Pole (r_fuss {kq['r_fuss_mm']} mm, Joch "
+       f"{kq['h_joch_mm']} mm, Fluss verlangt {kq['h_joch_fluss_mm']} mm)")
+# Die Hoehe ist nicht geraten: entweder genau die des Flusses, oder das Joch
+# BINDET -- dann sagt es das, statt still zu kuerzen. Bei kleiner Polzahl
+# bindet es wirklich (2p = 2 verlangt gemessen 45,33 mm bei 45 mm Bauraum).
+pruefe(abs(float(kq["h_joch_mm"]) - float(kq["h_joch_fluss_mm"])) < 1e-6
+       or bool(kq["joch_bindet"]),
+       f"die Jochhoehe folgt dem Fluss oder meldet sich als bindend "
+       f"(bindet={kq['joch_bindet']})")
 # Die Nabe wird GEMESSEN, nicht angenommen: zwei Koerper der halben Breite w,
 # deren Achsen 2*pi/poles auseinanderliegen, ueberdecken sich bis
 # w/sin(pi/poles). Liegt das unter dem Wellenradius, zerfaellt der Laeufer in
@@ -159,9 +172,130 @@ pruefe(_k2["b_kern_innen_mm"] < _k2["b_kern_aussen_mm"] * 0.95,
 pruefe(_k2["deckt_spule"] and _k2["passt"],
        f"auch kegelig gedeckt und passend (bindend: {_k2['bindend']})")
 _luft = [t for t in erg["teile"] if t["rolle"] == "luft"]
-pruefe(len(_luft) == int(kq["poles"]),
-       f"und ZWISCHEN den Polen ist Luft ({len(_luft)} Luecken) — sonst "
-       f"zeigte das Feld eine Vollscheibe unter sichtbaren Polen")
+_pol_n = int(kq["poles"])
+_achsen = sorted({round(float(t["grad"]) % (360.0 / _pol_n), 3) for t in _luft})
+pruefe(len({round(float(t["grad"]), 3) for t in _luft}) == _pol_n,
+       f"und ZWISCHEN den Polen ist Luft — auf jeder der {_pol_n} "
+       f"Zwischenpolachsen ({len(_luft)} Teile)")
+# Die Luft folgt der FLANKE des Polkoerpers, nicht einem festen Winkel: unter
+# dem Polschuh gibt der Kern die Breite vor, und die schrumpft mit dem Radius.
+# Stuende dort ein Sektor fester Oeffnung, bliebe zwischen Kernflanke und Luft
+# Laeufereisen stehen (gemessen 20.09.2026: 10,44 mm je Flanke bei r = 80 mm,
+# zwoelfmal). Geprueft wird deshalb, dass es BEIDE Baender gibt.
+#
+# Das untere Band ist seit dem 20.09.2026 ein POLYGON und kein Trapez mehr:
+# ein Trapez ist oben von einer SEHNE begrenzt, und deren Pfeilhoehe blieb als
+# geschlossener Eisenring zwischen den Polschuhen stehen (gemessen 3,93 mm).
+pruefe(any(t["form"] == "polygon" for t in _luft)
+       and any(t["form"] == "segment" for t in _luft),
+       "der Zwischenpolraum hat zwei Baender: Polygon am Kern, Sektor am Schuh")
+# **Und sie reicht LUECKENLOS vom Joch bis an den Rand.** Das ist die
+# eigentliche Pruefung dieses Blocks: gemessen wird nicht die FORM der Teile,
+# sondern was entlang eines Strahls ZWISCHEN zwei Polen wirklich im Raster
+# steht -- also das, was der Feldloeser sieht. Genau dort stand bis zum
+# 20.09.2026 ein 3,93 mm dicker Eisenring, der saemtliche Pole kurzschloss,
+# und keine Formpruefung haette ihn gefunden.
+_rr = float(kq["r_rotor_mm"])
+_schr = 2.0 * _rr / 900
+_belegt = {}
+for _t in erg["teile"]:
+    LB._stempel(_t, lambda x, y, _r=str(_t.get("rolle")): _belegt.__setitem__(
+        (int((x + _rr) / _schr), int((y + _rr) / _schr)), _r), _schr * 0.45, 0.0)
+
+
+def _rolle_bei(_r, _th):
+    _x, _y = _r * _mm.cos(_th), _r * _mm.sin(_th)
+    return _belegt.get((int((_x + _rr) / _schr), int((_y + _rr) / _schr)),
+                       "GRUNDSCHEIBE")
+
+
+_th_luft = _mm.radians(180.0 / _pol_n)            # Mitte zwischen zwei Polen
+_fremd, _rq = [], float(kq["r_joch_aussen_mm"]) + 1.0
+while _rq < _rr - 0.5:
+    if _rolle_bei(_rq, _th_luft) != "luft":
+        _fremd.append(round(_rq, 2))
+    _rq += _schr
+pruefe(not _fremd,
+       f"zwischen zwei Polen ist von {float(kq['r_joch_aussen_mm']):.1f} mm "
+       f"bis zum Rand LUECKENLOS Luft"
+       + (f" — Fremdkoerper bei r = {_fremd[0]}…{_fremd[-1]} mm "
+          f"({_rolle_bei(_fremd[0], _th_luft)})" if _fremd else ""))
+# Die Gegenprobe: in der POLMITTE steht ueber dem Joch durchgehend Poleisen.
+# Ohne sie ginge ein Laeufer, der GANZ aus Luft besteht, oben durch.
+_mitte = [_rolle_bei(_r2, 0.0) for _r2 in
+          (float(kq["r_joch_aussen_mm"]) + 2.0,
+           0.5 * (float(kq["r_joch_aussen_mm"]) + _rr), _rr - 1.0)]
+pruefe(all(x == "pol" for x in _mitte),
+       f"und in der Polmitte durchgehend Poleisen ({', '.join(_mitte)})")
+
+# **Die Erregerspule darf NICHT im Polschuh stecken** (20.09.2026). Gemeldet
+# als „innerhalb des Polschuhs gibt es links und rechts einen hellgrauen
+# Bereich, darin sind auch die Spulen eingebettet … das sollte aber auch Luft
+# sein, sonst entsteht magnetischer Kurzschluss".
+#
+# Die Spule sitzt NEBEN dem Kern und UNTER dem Schuh; ihre Ecke muss deshalb
+# unter dem Schuhboden bleiben. Geprueft wurde bis dahin gegen den Laeufer-
+# RAND (94,3 mm statt 84,98 mm), und damit steckte die Ecke gemessen 2,82 mm
+# im Schuh: bei r = 85,48 mm hatte der Leiter Eisen auf beiden Seiten UND
+# darueber — eine geschlossene Eisentasche um einen stromdurchflossenen
+# Leiter, also ein Kurzschluss seiner eigenen Durchflutung.
+#
+# Geprueft wird am RASTER und nicht an der Zahl: im ganzen Schuhband darf
+# keine einzige Kupferzelle stehen.
+_r_schuh = float(kq["r_kern_aussen_mm"])
+_kupfer_im_schuh = []
+_rq = _r_schuh + 0.2
+while _rq < _rr - 0.3:
+    _a = 0.0
+    while _a <= 180.0 / _pol_n + 1e-9:          # bis zur Zwischenpolachse
+        if _rolle_bei(_rq, _mm.radians(_a)) == "kupfer":
+            _kupfer_im_schuh.append((round(_rq, 2), round(_a, 1)))
+        _a += 0.25
+    _rq += _schr
+pruefe(not _kupfer_im_schuh,
+       f"im Polschuhband (r > {_r_schuh:.2f} mm) steht kein Kupfer"
+       + (f" — gefunden bei r = {_kupfer_im_schuh[0][0]} mm, "
+          f"{_kupfer_im_schuh[0][1]} Grad ({len(_kupfer_im_schuh)} Zellen)"
+          if _kupfer_im_schuh else ""))
+# Und die Zahl dazu, damit ein roter Test sagt, WIE weit es daneben liegt.
+_ecke = _mm.hypot(float(kq["r_spule_aussen_mm"]),
+                  max(float(kq["b_kern_aussen_mm"]),
+                      float(kq["b_kern_innen_mm"])) / 2.0
+                  + float(kq["d_spule_mm"]))
+pruefe(_ecke <= _r_schuh + 1e-6,
+       f"die Spulenecke liegt unter dem Schuhboden ({_ecke:.2f} gegen "
+       f"{_r_schuh:.2f} mm)")
+
+# **Der Laeufer ist VOLLSTAENDIG beschrieben — kein Fleck bleibt offen.**
+#
+# Die Leinwand malt zuerst eine Laeuferscheibe und legt die Teile darauf. Jede
+# Stelle, die kein Teil abdeckt, zeigt diesen Grund — und wo `teile()` den
+# ganzen Laeufer beschreibt (Joch, Pole, Zwischenpolluft, Spulen), ist das
+# immer ein Fehler. Gemeldet als „das neue dunkle Grau sollte eigentlich
+# schwarz sein": gemessen 0,88 % des Laeufers bei r = 46,79…49,88 mm, bei
+# 5…25 Grad — also weder auf der Polachse noch auf der Zwischenpolachse.
+#
+# Ursache war zweimal dieselbe: ein GERADER Abschluss an einem KREIS. Der
+# Zwischenpolraum stiess mit einer Sehne an den Jochkreis, der Polkoerper
+# ebenso — und eine Gerade beruehrt einen Kreis in genau einem Punkt.
+#
+# Geprueft wird die Eigenschaft, nicht die Zahl: KEINE Zelle ohne Teil. Die
+# uebrigen Bauarten sind ausgenommen und das ist kein Versehen — bei ASM,
+# SynRM und GSM IST der Grund das Laeufereisen (Vollscheibe mit Staeben,
+# Barrieren, Nuten), dort gehoert er hin.
+_offen = []
+_rq = float(kq["r_welle_mm"]) + 0.3
+while _rq < _rr - 0.3:
+    _a = 0.0
+    while _a <= 360.0:
+        if _rolle_bei(_rq, _mm.radians(_a)) == "GRUNDSCHEIBE":
+            _offen.append((round(_rq, 2), round(_a, 1)))
+        _a += 0.5
+    _rq += _schr * 2
+pruefe(not _offen,
+       "der Schenkelpollaeufer ist vollstaendig durch Teile beschrieben"
+       + (f" — offen bei r = {_offen[0][0]} mm, {_offen[0][1]} Grad "
+          f"({len(_offen)} Stellen)" if _offen else ""))
 
 import ema_gsm                                               # noqa: E402
 
@@ -717,6 +851,37 @@ pruefe(abs(_r.get("summe", 1.0)) < 1e-3 * max(_r.get("pos", 1), 1),
 
 
 
+# Und der ZEICHNER muss die Form auch malen -- nicht nur der Rasterer.
+# Gemessen am 20.09.2026: der Polygonzweig war beim Einbauen in `_teil`
+# verlorengegangen (das Patchskript brach vor dem Schreiben ab) und nur in
+# `_stempel` angekommen. Die Folge war eine Leinwand mit leerem Laeufer,
+# waehrend Raster, Route und Hinweistext die Barrieren fuehrten -- ein Fehler,
+# den kein Test sah, weil keiner das Malen zaehlte.
+_zt = subprocess.run(
+    ["node", "-e", """
+var global = globalThis, window = globalThis;
+%s
+var gemalt = 0;
+var ctx = new Proxy({}, {get: function(o, k) {
+  if (k === "save" || k === "restore" || k === "rotate" || k === "translate" ||
+      k === "beginPath" || k === "closePath" || k === "moveTo" ||
+      k === "lineTo" || k === "arc" || k === "fillRect" || k === "strokeRect" ||
+      k === "stroke") return function(){};
+  if (k === "fill") return function(){ gemalt++; };
+  return 0;
+}, set: function(){ return true; }});
+LAEUFER.zeichne(ctx, [{form:"polygon", grad:30, rolle:"luft",
+  punkte:[[10,0],[20,0],[20,5],[10,5]]}], 1.0);
+console.log(gemalt);
+""" % open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "ema_laeufer.js"), encoding="utf-8").read()],
+    capture_output=True, text=True, timeout=60) if _hat_node else None
+pruefe(_zt is not None and _zt.returncode == 0
+       and _zt.stdout.strip().splitlines()[-1] == "1",
+       f"der JS-Zeichner malt die Form 'polygon' wirklich "
+       f"({(_zt.stdout or _zt.stderr or '')[-60:].strip() if _zt else 'kein node'})")
+
+
 _JS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ema_laeufer.js")
 
 
@@ -729,8 +894,8 @@ var N = %d, center = %d, gs = %f, a0 = %f;
 var teile = %s;
 var grid = new Float32Array(N * N);
 LAEUFER.rastere(grid, N, center, gs, teile, a0, null, 0);
-var aus = [];
-for (var k = 0; k < grid.length; k++) if (grid[k]) aus.push(k);
+var aus = {};
+for (var k = 0; k < grid.length; k++) if (grid[k]) aus[k] = grid[k];
 console.log(JSON.stringify(aus));
 """ % (open(_JS, encoding="utf-8").read(), N, center, gs, a0,
        json.dumps(teile))
@@ -743,7 +908,8 @@ console.log(JSON.stringify(aus));
                              timeout=120)
         if aus.returncode != 0:
             return None, (aus.stderr or "")[-300:]
-        return set(json.loads(aus.stdout.strip().splitlines()[-1])), ""
+        return {int(k): float(v) for k, v in
+                json.loads(aus.stdout.strip().splitlines()[-1]).items()}, ""
     finally:
         os.unlink(pfad)
 
@@ -756,48 +922,91 @@ _js, _fehler = _js_zellen(_teile_lb, _N, _CTR, _GS, _A0)
 if _js is None:
     pruefe(False, f"JS-Rasterer nicht ausfuehrbar: {_fehler}")
 else:
-    _py = set()
+    _py = {}
 
-    def _setz(xmm, ymm):
+    def _setz(xmm, ymm, mu):
         _i = int(_CTR + xmm * _GS)
         _j = int(_CTR + ymm * _GS)
         if 0 <= _i < _N and 0 <= _j < _N:
-            _py.add(_j * _N + _i)
+            _py[_j * _N + _i] = float(mu)
 
     _n = LB.rastere(_teile_lb, _setz, 0.5 / _GS, _A0)
-    _fehlt, _zuviel = _js - _py, _py - _js
-    pruefe(_n == len([t for t in _teile_lb
-                      if t["rolle"] in LB.UNMAGNETISCH]),
-           f"Python-Rasterer stempelt alle {_n} unmagnetischen Teile")
+    _fehlt = set(_js) - set(_py)
+    _zuviel = set(_py) - set(_js)
+    # Verglichen wird Zelle UND Wert: der Wert traegt die Reihenfolge-Regel
+    # („was spaeter in der Liste steht, gewinnt"), und genau die ist der Grund,
+    # warum der Rasterer seit dem 20.09.2026 auch das Eisen stempelt.
+    _anders = sorted(k for k in set(_js) & set(_py)
+                     if abs(_js[k] - _py[k]) > 1e-6)
+    pruefe(_n == len(_teile_lb),
+           f"Python-Rasterer stempelt ALLE {_n} Teile, nicht nur die Luft")
     pruefe(not _fehlt and not _zuviel,
            f"und trifft dieselben {len(_js)} Zellen wie die JS-Fassung "
            f"(fehlen {len(_fehlt)}, zuviel {len(_zuviel)})")
+    pruefe(not _anders,
+           f"und schreibt in jede Zelle dasselbe mu — die Reihenfolge-Regel "
+           f"gilt in beiden Fassungen ({len(_anders)} Abweichungen)")
 
 # Und die Formen einzeln -- damit ein roter Test sagt, WELCHE auseinanderlaeuft.
+#
+# **Der Daempferkaefig ist ausdruecklich dabei, und er ist der Grund, warum
+# diese Liste Einstellungen und nicht nur Bauarten fuehrt.** Er ist per Vorgabe
+# AUS (`daempferkaefig: "nein"`), und damit hat der Spiegeltest die Form
+# `kreis` nie zu sehen bekommen: der JS-Rasterer kannte sie gar nicht, waehrend
+# der JS-ZEICHNER sie laengst malte und die Python-Fassung sie laengst
+# stempelte. Die Leinwand zeigte also Staebe, die im Feldraster fehlten --
+# gemeldet am 20.09.2026, und kein Test hat widersprochen, weil keiner den
+# Kaefig eingeschaltet hat. Dieselbe Sorte wie ein Test, der nicht in `main()`
+# steht: gruen, weil er schweigt.
 for _art, _kw in (("eesm", dict(p=4, shaftD=38.0)),
+                  ("eesm", dict(p=4, shaftD=38.0, daempferkaefig="ja")),
                   ("synrm", dict(p=4, shaftD=38.0)),
                   ("asm", dict(p=4, shaftD=38.0)),
                   ("gsm", dict(p=2, shaftD=38.0))):
     _g2, _L2 = geom(_art, **_kw)
-    _t2 = [t for t in LB.teile(_g2, _L2)["teile"]
-           if t["rolle"] in LB.UNMAGNETISCH]
+    _t2 = LB.teile(_g2, _L2)["teile"]
     if not _t2:
         continue
     _js2, _f2 = _js_zellen(_t2, _N, _CTR, _GS, _A0)
-    _py2 = set()
+    _py2 = {}
 
-    def _setz2(xmm, ymm, _s=_py2):
+    def _setz2(xmm, ymm, mu, _s=_py2):
         _i = int(_CTR + xmm * _GS)
         _j = int(_CTR + ymm * _GS)
         if 0 <= _i < _N and 0 <= _j < _N:
-            _s.add(_j * _N + _i)
+            _s[_j * _N + _i] = float(mu)
 
     LB.rastere(_t2, _setz2, 0.5 / _GS, _A0)
     _formen = sorted({t["form"] for t in _t2})
+    _zus = " + Daempfer" if _kw.get("daempferkaefig") == "ja" else ""
     pruefe(_js2 is not None and _js2 == _py2,
-           f"{_art}: JS und Python treffen dieselben Zellen "
+           f"{_art}{_zus}: JS und Python treffen dieselben Zellen "
            f"(Formen {', '.join(_formen)}; "
            f"{len(_js2 or [])} gegen {len(_py2)})")
+    if _kw.get("daempferkaefig") == "ja":
+        # Und der Kaefig muss im Raster auch WIRKEN -- sonst waere die
+        # Uebereinstimmung oben nur die zweier gleich unvollstaendiger
+        # Fassungen. Gemessen: die Staebe machen Poleisen zu Luft.
+        pruefe(any(t["form"] == "kreis" for t in _t2),
+               f"{_art}: der Daempferkaefig liefert kreis-Teile "
+               f"({sum(1 for t in _t2 if t['form'] == 'kreis')})")
+        _ohne = LB.teile(geom(_art, **{k: v for k, v in _kw.items()
+                                       if k != "daempferkaefig"})[0],
+                         _L2)["teile"]
+        _py3 = {}
+
+        def _setz3(xmm, ymm, mu, _s=_py3):
+            _i = int(_CTR + xmm * _GS)
+            _j = int(_CTR + ymm * _GS)
+            if 0 <= _i < _N and 0 <= _j < _N:
+                _s[_j * _N + _i] = float(mu)
+
+        LB.rastere(_ohne, _setz3, 0.5 / _GS, _A0)
+        _neu_luft = sum(1 for k, v in _py2.items()
+                        if v < 1.5 and _py3.get(k, 0.0) > 1.5)
+        pruefe(_neu_luft > 20,
+               f"{_art}: und er WIRKT im Raster — {_neu_luft} Zellen werden "
+               f"von Poleisen zu Luft")
 
 print("\n" + "=" * 62)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")

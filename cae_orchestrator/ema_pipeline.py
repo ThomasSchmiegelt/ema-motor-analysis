@@ -42,8 +42,14 @@ class AuslegungReisst(RuntimeError):
         self.hinweise = list(hinweise or [])
 
 
+#: Was ein VOLLER Lauf anfasst. `stages=None` heisst „alles", und das Tor muss
+#: dann auch alles pruefen -- sonst ginge genau der volle Lauf durch, der die
+#: Scheibe durch CAD und Struktur-FEM schickt.
+_ALLE_STUFEN = {"geometry", "field", "structural", "thermal", "drivecycle"}
+
+
 def _gate_maschinenart(data: dict, state: dict | None = None,
-                       stufe: str = "feld") -> None:
+                       stufe: str = "feld", stufen: set | None = None) -> None:
     """Tor VOR der Physik: traegt diese Pipeline die gewaehlte Maschinenart?
 
     Die ganze Rechenkette dieses Moduls -- Luftspaltfeld aus ``Br_NdFeB``,
@@ -84,7 +90,31 @@ def _gate_maschinenart(data: dict, state: dict | None = None,
     # bzw. 1,66 daneben), das Raster baut Ringe aus `hypot(X, Y)`. Zwoelf
     # solche Stellen, keine wirft einen Fehler -- BEFUNDE.md, 05.10.2026.
     import ema_fluss
-    ema_fluss.pruefe_flussweg(data or {}, stufe)
+    # Der LAUF wird beim Axialfluss nicht als Ganzes geprueft, sondern an
+    # seinen Stufen: die Scheibe traegt Feld, Thermik und Fahrzyklus, aber
+    # weder CAD noch Struktur-FEM. Den ganzen Satz abzuweisen hiesse, auch das
+    # abzuweisen, was laengst geht (s. `ema_fluss.stufen_pruefen`).
+    if stufe == "lauf" and ema_fluss.flussweg(data or {}) == "axial":
+        # **Der Lauf wird AUFGETEILT, nicht abgewiesen** (07.10.2026). Hier
+        # stand `stufen_pruefen(...)`, das wirft -- und `stages` ist aus dem
+        # Browser immer `None`, also wurde der volle Satz geprueft und JEDER
+        # Axiallauf aus der Oberflaeche brach an `geometry`/`structural` ab,
+        # obwohl Feld, Thermik und Fahrzyklus tragen. Dieselbe Lehre wie bei den
+        # Maschinenarten eine Ebene tiefer: ein Lauf, der an EINER fremden Stufe
+        # haengt, rechnet nichts, statt das zu rechnen, was geht.
+        # Die Verengung selbst macht `run_pipeline` (es besitzt `stages`); hier
+        # wird nur protokolliert, was uebersprungen wird und was es stattdessen
+        # rechnet -- stillschweigend weglassen waere schlimmer als abweisen.
+        _tr, _off = ema_fluss.stufen_aufteilen(data or {}, stufen or _ALLE_STUFEN)
+        if _off and state is not None:
+            _log(state, "\u2299 Axialfluss: " + ", ".join(sorted(_tr))
+                 + " laufen; uebersprungen " + ", ".join(sorted(_off)), 4)
+            for _o in sorted(_off):
+                _w = ema_fluss.STUFE_STATTDESSEN.get(_o)
+                if _w:
+                    _log(state, f"   \u2192 {_o}: {_w}", 4)
+    else:
+        ema_fluss.pruefe_flussweg(data or {}, stufe)
     if state is not None:
         _log(state, f"\U0001F6E1 Maschinenart: {art.label}", 4)
     if stufe == "feld":
@@ -525,6 +555,16 @@ def _gate_rotor_layout(data: dict, state: dict | None = None,
         _gate_laeufer(data, state, fatal)
         return
     chk = rotor_layout_check(geom)
+    if chk.get("flussweg") == "axial":
+        # Die Scheibe hat weder Magnettasche noch Steg gegen den Laeuferrand;
+        # was sie statt dessen haelt (Klebung, Bandage, Durchbiegung unter dem
+        # axialen Anzug), rechnet `ema_axial.bandage`/`ruecken` und nicht
+        # dieses Tor. Es sagt das, statt ein gruenes oder rotes Urteil ueber
+        # etwas Nichtvorhandenes zu faellen.
+        for z in list(chk.get("fatal", [])) + list(chk.get("warnings", [])):
+            if state is not None:
+                _log(state, "\u2139 " + z, 5)
+        return
     if state is not None:
         lay = chk["layout"]
         verdict = "OK" if chk["ok"] else "ABGELEHNT"
@@ -541,6 +581,54 @@ def _gate_rotor_layout(data: dict, state: dict | None = None,
     for w in chk.get("warnings", []):
         if state is not None:
             _log(state, "\u26A0 " + w, 5)
+
+
+def _gate_grenzen_axial(data: dict, state: dict | None, fatal: bool) -> None:
+    """Die Grenzen der SCHEIBE -- die radialen bedeuten hier nichts.
+
+    `ema_grenzen` prueft `statorID`/`rotorOD`, die Wickelkopfkrone gegen
+    `statorOD` und die Nuttiefe gegen die Statorwand. Eine Scheibe hat von
+    alledem nichts; die Werte stehen im Payload nur, weil der Schemagrundsatz
+    sie fuellt. Gemessen meldete das Tor „Luftspalt 0,700 mm ✅" fuer eine
+    Maschine mit 1,0 mm Spalt und „Stator 280,0 mm" fuer einen Ringraum von
+    260 mm -- ein gruenes Urteil ueber Masse, die es nicht gibt, und das ist
+    schlimmer als keine Pruefung.
+
+    Geprueft wird statt dessen, was die Scheibe wirklich hat: der AXIALE
+    Luftspalt gegen dieselbe Spanne, und die lambda-Schranke am Innenrand aus
+    `ema_axial.lambda_grenze` -- dort wird die Nut am Innenrand zu schmal, und
+    das ist die Grenze, die diese Bauart wirklich bindet.
+    """
+    import ema_grenzen, ema_axial
+    geom = data.get("geom") or {}
+    lo, hi = ema_grenzen.LUFTSPALT_MM
+    spalt = float(geom.get("axialSpaltMm", 1.0))
+    befunde = []
+    if not (lo <= spalt <= hi):
+        befunde.append(f"axialer Luftspalt {spalt:.3f} mm liegt ausserhalb "
+                       f"{lo}…{hi} mm")
+    try:
+        lg = ema_axial.lambda_grenze(geom)
+        lam = float(geom.get("axialLambda", 0.5774))
+        if lg.get("lambda_min") and lam < float(lg["lambda_min"]):
+            befunde.append(f"lambda {lam:.4f} unter der Zeichengrenze "
+                           f"{float(lg['lambda_min']):.4f} — am Innenrand wird "
+                           f"es nutseitig zu schmal")
+        if state is not None:
+            _log(state, "\U0001F6E1 Scheibe: axialer Luftspalt "
+                        f"{spalt:.3f} mm, lambda {lam:.4f} "
+                        f"(Grenze {float(lg.get('lambda_min', 0)):.4f})  "
+                        + ("\u2705" if not befunde else "\u274C"), 4)
+    except Exception as e:                        # noqa: BLE001
+        if state is not None:
+            _log(state, f"\u26A0 lambda-Schranke nicht gerechnet: "
+                        f"{type(e).__name__}: {e}", 4)
+    if befunde:
+        msg = "Grenzen der Scheibe verletzt: " + "; ".join(befunde)
+        if fatal:
+            raise RuntimeError(msg)
+        if state is not None:
+            _log(state, "\u26A0 " + msg, 4)
 
 
 def _gate_grenzen(data: dict, state: dict | None = None,
@@ -560,6 +648,12 @@ def _gate_grenzen(data: dict, state: dict | None = None,
     ``fatal=False``: wie bei den Rotor-Toren — beim Nachrechnen eines
     bestehenden Projekts warnen statt verweigern, denn dessen Geometrie liegt
     schon auf der Platte und wird gar nicht neu gebaut."""
+    # Die Scheibe hat ihre eigenen Grenzen -- die radialen bedeuten dort
+    # nichts (s. `_gate_grenzen_axial`).
+    import ema_fluss
+    if ema_fluss.flussweg(data.get("geom") or {}) == "axial":
+        _gate_grenzen_axial(data, state, fatal)
+        return
     import ema_grenzen
     geom = (data or {}).get("geom") or {}
     if not geom:
@@ -601,7 +695,17 @@ def _gate_rotor_stress(data: dict, state: dict | None = None,
                         LAMINATES["m270_35a"])
     tgt  = data.get("target") or {}
     nmax = float(tgt.get("n_max", data.get("rpm_to", 20000.0)))
-    st = rotor_stress_check(geom, mat, {"n_max": nmax})
+    import ema_fluss as _FL
+    try:
+        st = rotor_stress_check(geom, mat, {"n_max": nmax})
+    except _FL.FlusswegNichtUnterstuetzt as e:
+        if state is not None:
+            _log(state, "\u2139 Rotor-Festigkeit: " + str(e), 5)
+            _log(state, "   Die Scheibe traegt zwei Lasten, die dieses Tor nicht "
+                        "kennt: den axialen Anzug (Durchbiegung) und die "
+                        "Fliehkraft IN der Scheibenebene. Beide rechnet "
+                        "`cae_cli.py axial` ueber ema_axial.ruecken/bandage.", 5)
+        return
     if state is not None:
         icon = {"PASS": "\u2705", "WARN": "\u26A0\uFE0F", "FAIL": "\u274C"}[st["level"]]
         mname = mat.get("label") or "rotor"
@@ -2074,6 +2178,198 @@ def _struct_sweep_chart(sweep_fem: dict | None, sweep_analytical: list, yield_mp
     return _fig_b64(fig)
 
 
+def _axial_struktur(geom: dict, b_gap_t: float, rpm: float, lam: dict) -> dict:
+    """Was die SCHEIBE traegt — und was daran nicht gerechnet ist.
+
+    Die radiale Struktur-FEM vernetzt den ``"Rotor"``-Solid und laedt ihn mit
+    Fliehkraft; die analytische Kennlinie daneben ist die Ringspannung eines
+    rotierenden Rings. Beides geht an der Scheibe vorbei, und zwar nicht um
+    Prozente: ihre **Hauptlast ist der axiale Anzug** (gemessen 345,8 kPa
+    Normalspannung gegen 40 kPa momentbildenden Schub, also 8,6 : 1), und die
+    zweite Last zieht die Magnete **IN der Scheibenebene** nach aussen, wo kein
+    Blechsteg steht. Darum stand hier bis zum 09.10.2026 nur ein Satz, der auf
+    ``cae_cli.py axial`` verwies — ein Weg, den nur die Kommandozeile hat, ist
+    fuer den, der vor dem Bildschirm sitzt, nicht vorhanden (dieselbe Regel,
+    die dieses Repo fuer die Agentenkoepfe aufstellt).
+
+    Gerechnet wird **nichts Neues**: ``ema_axial.anzug``/``ruecken``/``bandage``
+    sind die Quelle, wie ``ema_axial_fdm.felder`` es fuer die Feldstufe ist.
+    Diese Funktion stellt sie zusammen und sagt, was fehlt.
+
+    **Eine Drehzahlgrenze faellt dabei bewusst NICHT heraus.** Der Anzug haengt
+    gar nicht an der Drehzahl (er kommt aus B_gap), und die Magnethaltung
+    braeuchte eine zulaessige Spannung fuer Klebung oder Bandage — fuer beides
+    fuehrt dieses Werkzeug keine Werkstofftabelle. Wer eine hat, traegt sie als
+    ``axialKlebeZulMpa``/``axialBandageZulMpa`` ein und bekommt ein Urteil;
+    ohne sie steht die Kraft da und kein erfundener Querschnitt.
+    """
+    import ema_axial as _AX
+
+    g = dict(geom or {})
+    kleb = float(g.get("axialKlebeZulMpa", 0) or 0.0)
+    band = float(g.get("axialBandageZulMpa", 0) or 0.0)
+    az = _AX.anzug(g, b_gap_t)
+    rk = _AX.ruecken(g, b_gap_t, lam=lam)
+    bd = _AX.bandage(g, float(rpm), sigma_zul_mpa=band, klebe_zul_mpa=kleb)
+
+    # Die GEZEICHNETE Rueckenblechdicke gegen die noetige. `axialJochLaeuferMm`
+    # ist, was im Reiter ⊙ Axialfluss steht; `t_soll_m` ist, was Fluss und
+    # Durchbiegung verlangen. Die beiden auseinanderlaufen zu lassen, ohne es
+    # zu sagen, waere eine Zeichnung, die ihre eigene Rechnung nicht kennt.
+    t_ist = float(g.get("axialJochLaeuferMm", 0) or 0.0) / 1000.0
+    reicht = (t_ist >= rk["t_soll_m"]) if t_ist > 0 else None
+    w_ist = None
+    if t_ist > 0:
+        try:
+            w_ist = _AX._platte(rk["nabe_r_m"],
+                                _AX.auslegung(g)["r_aussen_m"], t_ist,
+                                az["sigma_n_pa"], _AX.auslegung(g)["r_innen_m"],
+                                e_pa=rk.get("e_pa", 200e9),
+                                nu=rk.get("nu", 0.30))["w_max_m"]
+        except ValueError:
+            w_ist = None
+
+    ungeprueft = [
+        "Die Fliehkraftspannung der Scheibe SELBST (Ringspannung in ihrer "
+        "Ebene, Blech gegen Streckgrenze) ist nicht gerechnet — hier steht die "
+        "Last der MAGNETE auf ihrer Halterung, nicht die des Blechs auf sich.",
+        "Kein Netz, kein Loeser: die Kreisringplatte ist achssymmetrisch "
+        "geschlossen geloest (`ema_axial._platte`), kennt also weder Nuten noch "
+        "Magnettaschen noch die Nabenverschraubung.",
+        "Die Verbindung Scheibe–Nabe ist nicht bemessen; `ruecken` nimmt sie "
+        "als starre Einspannung an, und genau dort sitzt der groesste Hebel.",
+    ]
+    if not kleb:
+        ungeprueft.append(
+            "Keine zulaessige Klebescherspannung angegeben (`axialKlebeZulMpa`) "
+            "— die Scherspannung steht da, ein Urteil daruber nicht.")
+    if not band:
+        ungeprueft.append(
+            "Keine zulaessige Bandagenspannung angegeben "
+            "(`axialBandageZulMpa`) — deshalb wird keine Bandagendicke genannt.")
+
+    g_spalt = _AX.auslegung(g)["luftspalt_m"]
+    return {"anzug": az, "ruecken": rk, "bandage": bd,
+            "t_ist_m": t_ist or None, "t_reicht": reicht, "w_bei_t_ist_m": w_ist,
+            "w_anteil_spalt_ist": (w_ist / g_spalt) if w_ist else None,
+            "luftspalt_m": g_spalt,
+            "rpm": float(rpm), "ungeprueft": ungeprueft,
+            "max_safe_rpm": None,
+            "max_safe_rpm_grund": (
+                "Aus diesen beiden Lasten folgt KEINE Hoechstdrehzahl: der "
+                "Anzug haengt an B_gap und nicht an der Drehzahl, und die "
+                "Magnethaltung braucht eine zulaessige Spannung, die in keiner "
+                "Tabelle dieses Werkzeugs steht.")}
+
+
+def _axial_struktur_chart(st: dict, geom: dict) -> str:
+    """Drei Bilder: Dicke, durchgebogene Scheibe, Magnethaltung ueber n.
+
+    Das mittlere ist das eigentliche: es zeigt die Scheibe im **Schnitt**, wie
+    sie sich unter dem Anzug durchbiegt, mit dem Luftspalt als Massstab
+    daneben. Eine Durchbiegung in Mikrometern sagt niemandem etwas, solange
+    nicht danebensteht, dass der Luftspalt 1 mm ist.
+    """
+    import ema_axial as _AX
+
+    a = _AX.auslegung(geom)
+    rk, az, bd = st["ruecken"], st["anzug"], st["bandage"]
+    ro, ri = a["r_aussen_m"], a["r_innen_m"]
+    g_m = a["luftspalt_m"]
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(13.5, 3.4), facecolor="#111")
+    for ax in (ax1, ax2, ax3):
+        ax.set_facecolor("#1a1a2e")
+        ax.tick_params(colors="#888", labelsize=8)
+        for sp in ax.spines.values():
+            sp.set_color("#444")
+
+    # ① Durchbiegung ueber der Blechdicke
+    t_max = max(rk["t_soll_m"], st["t_ist_m"] or 0.0) * 1.8 + 1e-3
+    ts = np.linspace(max(0.4e-3, rk["t_soll_m"] * 0.25), t_max, 60)
+    ws = []
+    for t in ts:
+        try:
+            ws.append(_AX._platte(rk["nabe_r_m"], ro, float(t), az["sigma_n_pa"], ri,
+                                  e_pa=rk.get("e_pa", 200e9),
+                                  nu=rk.get("nu", 0.30))["w_max_m"] * 1e6)
+        except ValueError:
+            ws.append(np.nan)
+    ax1.plot(ts * 1e3, ws, color="#4fc3f7", lw=2)
+    ax1.axhline(rk["w_zul_m"] * 1e6, color="#ff7043", ls="--", lw=1.4,
+                label=f"zulaessig {rk['w_zul_m'] * 1e6:.0f} µm "
+                      f"(10 % Luftspalt)")
+    ax1.axvline(rk["t_magnetisch_m"] * 1e3, color="#9ccc65", ls=":", lw=1.4,
+                label=f"magnetisch {rk['t_magnetisch_m'] * 1e3:.1f} mm")
+    ax1.axvline(rk["t_steifigkeit_m"] * 1e3, color="#ffb74d", ls=":", lw=1.4,
+                label=f"Steifigkeit {rk['t_steifigkeit_m'] * 1e3:.1f} mm")
+    if st["t_ist_m"]:
+        ax1.axvline(st["t_ist_m"] * 1e3, color="#fff", lw=1.8,
+                    label=f"gezeichnet {st['t_ist_m'] * 1e3:.1f} mm")
+    ax1.set_yscale("log")
+    ax1.set_xlabel("Rueckenblech [mm]", color="#aaa", fontsize=8)
+    ax1.set_ylabel("Durchbiegung w_max [µm]", color="#aaa", fontsize=8)
+    ax1.set_title(f"Bindend: {rk['bindet']}", color="#ddd", fontsize=9)
+    ax1.legend(facecolor="#222", labelcolor="white", fontsize=6.5, framealpha=0.85)
+
+    # ② Die durchgebogene Scheibe im Schnitt, mit dem Luftspalt als Massstab
+    t_zeig = st["t_ist_m"] or rk["t_soll_m"]
+    try:
+        pl = _AX._platte(rk["nabe_r_m"], ro, t_zeig, az["sigma_n_pa"], ri,
+                         e_pa=rk.get("e_pa", 200e9), nu=rk.get("nu", 0.30))
+        ax2.plot(pl["r"] * 1e3, pl["w"] * 1e6, color="#4fc3f7", lw=2,
+                 label=f"w(r) bei {t_zeig * 1e3:.1f} mm")
+        ax2.fill_between(pl["r"] * 1e3, 0, pl["w"] * 1e6, color="#4fc3f7", alpha=0.18)
+    except ValueError:
+        pass
+    # Der Luftspalt ist der Massstab — aber als Linie im Bild macht er die
+    # Kurve platt, sobald die Scheibe steif ist (gemessen 62 µm gegen 1000).
+    # Dann steht er in der Ueberschrift und die Kurve bleibt lesbar; liegt die
+    # Durchbiegung in seiner Groessenordnung, wird er gezeichnet, weil DANN
+    # das Verhaeltnis die Aussage ist.
+    w_zeig = max((st["w_bei_t_ist_m"] or rk["w_bei_t_soll_m"]), rk["w_zul_m"])
+    if w_zeig > 0.25 * g_m:
+        ax2.axhline(g_m * 1e6, color="#666", lw=1.2,
+                    label=f"Luftspalt {g_m * 1e3:.2f} mm")
+    else:
+        ax2.set_ylim(0, w_zeig * 1e6 * 1.35)
+    ax2.axhline(rk["w_zul_m"] * 1e6, color="#ff7043", ls="--", lw=1.4, label="zulaessig")
+    ax2.axvline(ri * 1e3, color="#888", ls=":", lw=1)
+    ax2.axvline(ro * 1e3, color="#888", ls=":", lw=1)
+    ax2.set_xlabel("Radius [mm]  (Einspannung an der Nabe)", color="#aaa", fontsize=8)
+    ax2.set_ylabel("Durchbiegung [µm]", color="#aaa", fontsize=8)
+    ax2.set_title(f"Anzug {az['sigma_n_pa'] / 1e3:.0f} kPa = "
+                  f"{az['kraft_je_spalt_N'] / 1e3:.1f} kN je Spalt · "
+                  f"Luftspalt {g_m * 1e6:.0f} µm",
+                  color="#ddd", fontsize=9)
+    ax2.legend(facecolor="#222", labelcolor="white", fontsize=6.5, framealpha=0.85)
+
+    # ③ Magnethaltung ueber der Drehzahl — die Last waechst mit n^2
+    n_max = max(1.0, st["rpm"]) * 1.3
+    ns = np.linspace(0.0, n_max, 60)
+    tau0 = bd["klebescherspannung_pa"] / 1e6
+    taus = tau0 * (ns / st["rpm"]) ** 2 if st["rpm"] > 0 else ns * 0.0
+    ax3.plot(ns, taus, color="#ba68c8", lw=2, label="Klebescherspannung")
+    ax3.axvline(st["rpm"], color="#fff", lw=1.6,
+                label=f"Betrieb {st['rpm']:.0f} 1/min")
+    zul = bd.get("klebe_zul_mpa")
+    if zul:
+        ax3.axhline(zul, color="#ff7043", ls="--", lw=1.4,
+                    label=f"zulaessig {zul:.1f} MPa")
+    ax3.set_xlabel("Drehzahl [1/min]", color="#aaa", fontsize=8)
+    ax3.set_ylabel("Scherspannung [MPa]", color="#aaa", fontsize=8)
+    ax3.set_title(f"{bd['kraft_gesamt_N'] / 1e3:.1f} kN in der Scheibenebene"
+                  + ("" if zul else "  (kein Werkstoff hinterlegt)"),
+                  color="#ddd", fontsize=9)
+    ax3.legend(facecolor="#222", labelcolor="white", fontsize=6.5, framealpha=0.85)
+
+    fig.suptitle("⊙ Scheibenfestigkeit — KEINE FEM: Kreisringplatte "
+                 "(geschlossen) + Fliehkraft der Magnete in der Scheibenebene",
+                 color="#9ab", fontsize=8.5, y=0.995)
+    fig.tight_layout(rect=(0, 0, 1, 0.95))
+    return _fig_b64(fig)
+
+
 # ── CAD cross-section images ──────────────────────────────────────────────────
 
 def _schnittmasse(geom: dict) -> dict:
@@ -2527,6 +2823,48 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
            fontsize=7.5, framealpha=0.9, ncol=2)
 
 
+def _axial_bgap_chart(axfeld: dict, geom: dict) -> str | None:
+    """B_gap(r) der Scheibe -- die Kurve, die es radial nicht gibt.
+
+    Radial ist das Luftspaltfeld ueber dem Umfang aufgetragen; eine Scheibe hat
+    stattdessen eine Abhaengigkeit vom RADIUS, weil die Polteilung mit r waechst
+    und das Verhaeltnis Spalt/Polteilung sich um 1/lambda aendert. Genau das ist
+    die Aussage der Bauart, und sie gehoert ins Bild.
+
+    Mitgezeichnet wird die analytische GRUNDWELLE als Bezugslinie -- nicht der
+    Mittelwert: eine gemessene Grundwelle gegen einen Mittelwert zu stellen war
+    der Fehler vom 06.10.2026, und ein Bild macht ihn dauerhaft.
+    """
+    import ema_axial_fdm as _AF
+    r = axfeld.get("r_schnitte_m") or []
+    b = axfeld.get("B_gap_ueber_r_T") or []
+    if not r or len(r) != len(b):
+        return None
+    fig, ax = plt.subplots(figsize=(7.2, 4.0), dpi=110)
+    rr = [x * 1000.0 for x in r]
+    ax.plot(rr, b, "o-", color="#e8a33d", lw=1.8, ms=5,
+            label="gemessen (abgewickelter Mehrschnitt)")
+    try:
+        h1 = float(_AF.eichung_magnet_grundwelle(geom))
+        ax.axhline(h1, color="#7fd4ff", ls="--", lw=1.3,
+                   label=f"analytische Grundwelle {h1:.3f} T (ohne Nut)")
+    except Exception:                                            # noqa: BLE001
+        h1 = None
+    m = axfeld.get("B_gap_grundwelle_mittel_T")
+    if m:
+        ax.axhline(float(m), color="#8bc34a", ls=":", lw=1.3,
+                   label=f"Mittel r-gewichtet {float(m):.3f} T")
+    ax.set_xlabel("Radius [mm]")
+    ax.set_ylabel("$\\hat{B}_{n,1}$ im Luftspalt [T]")
+    ax.set_title("Luftspalt-Grundwelle ueber dem Radius (Scheibe)")
+    ax.grid(alpha=.3)
+    ax.legend(fontsize=7.5, loc="best")
+    if h1:
+        ax.set_ylim(0, max(h1, max(b)) * 1.15)
+    fig.tight_layout()
+    return _fig_b64(fig)
+
+
 def _save_cad_images(geom: dict, axial: float, out_root: str) -> dict:
     """Render motor cross-section + side view to <out_root>/cad_images/*.png."""
     out_dir = os.path.join(out_root, "cad_images")
@@ -2725,6 +3063,17 @@ def build_cad_preview(data: dict, state: dict, project_dir: str) -> dict:
     ``project_dir`` so the existing ``/open_freecad`` and ``/download_step`` routes work.
     """
     os.makedirs(os.path.join(project_dir, "cad_images"), exist_ok=True)
+    # **Die Scheibe zuerst vervollstaendigen, dann die Tore.** Die Reihenfolge
+    # ist nicht beliebig: die Tore unten lesen `geom`, und ohne `axialAktivOD`
+    # stirbt der erste axiale Zugriff mit einem Traceback statt einer Auskunft.
+    # Die Maske hat keine axialen Felder -- gezeichnet wird im Reiter
+    # ⊙ Axialfluss --, also kommt `fluxPath="axial"` regelmaessig nackt an
+    # (gemeldet am 09.10.2026). Ergaenzt wird MIT Auskunft; still zu fuellen
+    # waere der Fehler, gegen den `ema_fluss` gebaut ist.
+    import ema_fluss as _FLV
+    if _FLV.flussweg(data.get("geom") or {}) == "axial":
+        data["geom"], _erg_ax = _FLV.axial_ergaenzen(data["geom"])
+        _log_axial_ergaenzt(state, data, _erg_ax, 4, _FLV.ERGAENZT_SATZ)
     geom  = data["geom"]
     axial = float(data.get("axial_len", 80.0))
 
@@ -2732,9 +3081,76 @@ def build_cad_preview(data: dict, state: dict, project_dir: str) -> dict:
     _gate_grenzen(data, state)
     _gate_rotor_layout(data, state)
     _gate_rotor_stress(data, state)
-    _log(state, "⚙ Erzeuge Motorgeometrie in FreeCAD…", 10)
+    # **Welches Modell gebaut wird, ist jetzt waehlbar** (`cad_modell`, Auswahl
+    # in der Fussleiste, 07.10.2026). Vorher gab es genau einen Weg -- den
+    # Vollmotor -- waehrend `ema_freecad.build_em_rotor_script` fertig dalag und
+    # **keinen einzigen Aufrufer** hatte: wieder der Fall „vorhanden und
+    # unerreichbar", den dieses Repo regelmaessig findet. Die Vorgabe bleibt der
+    # Vollmotor, also aendert sich fuer jeden bestehenden Aufruf nichts.
+    _modell = str(data.get("cad_modell") or "vollmotor").lower()
     fcstd = os.path.join(project_dir, "motor.FCStd")
-    code  = build_full_motor_script(geom, axial, fcstd)
+    # **Die Scheibe hat ihren eigenen Erzeuger** (07.10.2026). Sie hier durch
+    # `build_full_motor_script` zu schicken ergaebe keine Fehlermeldung, sondern
+    # einen Zylinder mit Nuten im Mantel unter dem Namen „Axialfluss" -- genau
+    # die stille Ersatzrechnung, gegen die `ema_fluss` gebaut ist. Welcher
+    # Erzeuger gilt, sagt `ema_fluss.cad_weg` und nicht der Aufrufer.
+    import ema_fluss as _FLC
+    if _FLC.cad_weg(geom) == "scheibe":
+        import ema_axial_cad as _AC
+        _pr = _AC.pruefen(geom, axial)
+        for _b in _pr["befunde"]:
+            _log(state, f"   ! {_b}", 8)
+        if not _pr["ok"]:
+            raise RuntimeError("Scheibe nicht zeichenbar — " +
+                               " | ".join(_pr["befunde"]))
+        _t = _pr["teile"]
+        if _pr["nutbreite"].get("hinweis"):
+            _log(state, "   ⚠ " + _pr["nutbreite"]["hinweis"], 8)
+        _log(state, f"⊙ Erzeuge die SCHEIBE in FreeCAD: {len(_t['teile'])} Teile "
+                    f"({_t['n_magnet']} Magnete, {_t['slots']} Zaehne + Spulen, "
+                    f"Zahnform {_t['zahnform']}), Bauhoehe "
+                    f"{_t['hoehe_mm']:.1f} mm…", 10)
+        code = _AC.baue_skript(geom, axial, fcstd)
+        res = run_freecad_script(code, timeout=900)
+        if not res.get("cad_success"):
+            raise RuntimeError("Geometrie fehlgeschlagen: "
+                               + (res.get("stderr", "")[:300]))
+        out = {"volume_mm3": round(res.get("volume", 0), 0),
+               "n_faces": len(res.get("faces", [])),
+               "step": bool(res.get("step_path")
+                            and os.path.exists(res.get("step_path", ""))),
+               "fcstd": os.path.basename(fcstd), "modell": "scheibe",
+               "axial": _AC.messung_aus_stdout(res.get("stdout") or ""),
+               "ungeprueft": _pr["ungeprueft"]}
+        _log(state, f"✓ Scheibe: {out['n_faces']} Flaechen, "
+                    f"{out['volume_mm3']:.0f} mm³"
+                    + (" · STEP exportiert" if out["step"] else ""), 70)
+        _ax = out["axial"]
+        if _ax.get("ueberlapp") is not None:
+            _log(state, ("   ✓ " + str(_ax["ueberlapp_text"])) if not
+                 _ax["ueberlapp"] else ("   ⚠ " + str(_ax["ueberlapp_text"])), 72)
+        for _u in _pr["ungeprueft"]:
+            _log(state, f"   ℹ {_u}", 74)
+        # Das 2-D-Schnittbild zeichnet einen Zylinderquerschnitt -- fuer eine
+        # Scheibe die falsche Ebene. Lieber keines als ein irrefuehrendes.
+        out["cad_images"] = {}
+        _log(state, "   ℹ Kein 2-D-Schnittbild: `render_cross_section` zeichnet "
+                    "einen Querschnitt senkrecht zur Drehachse, und darin ist "
+                    "eine Scheibe ein Ring ohne Merkmal. Die Zeichenansichten "
+                    "liegen im Reiter ⊙ Axialfluss.", 76)
+        return out
+    if _modell == "laeufer":
+        _log(state, "⚙ Erzeuge NUR den Laeufer in FreeCAD "
+                    "(ema_freecad.build_em_rotor_script)…", 10)
+        from ema_freecad import build_em_rotor_script
+        code = build_em_rotor_script(geom, axial, fcstd)
+    else:
+        if _modell not in ("vollmotor", ""):
+            _log(state, f"⚠ CAD-Modell '{_modell}' ist hier nicht gebaut — es "
+                        f"wird der Vollmotor erzeugt.", 10)
+        _log(state, "⚙ Erzeuge Motorgeometrie in FreeCAD…", 10)
+        code = build_full_motor_script(geom, axial, fcstd)
+    out_modell = _modell if _modell in ("laeufer",) else "vollmotor"
     res   = run_freecad_script(code, timeout=300)
     if not res.get("cad_success"):
         raise RuntimeError("Geometrie fehlgeschlagen: " + (res.get("stderr", "")[:300]))
@@ -2746,6 +3162,7 @@ def build_cad_preview(data: dict, state: dict, project_dir: str) -> dict:
         "n_faces":    len(res.get("faces", [])),
         "step":       step_ok,
         "fcstd":      os.path.basename(fcstd),
+        "modell":     out_modell,
     }
     _log(state, f"✓ Geometrie: {out['n_faces']} Flächen, {vol_mm3:.0f} mm³"
                 + (" · STEP exportiert" if step_ok else ""), 70)
@@ -2916,6 +3333,27 @@ def _saettigung_summary(geom, axial_mm, perf, st_mat, rpm, last, rpm_base):
         return {}
 
 
+def _log_axial_ergaenzt(state, data, erg, pct: int, satz: str) -> None:
+    """Die ergaenzten axialen Masse ins Protokoll -- vollstaendig, aber kompakt.
+
+    Vollstaendig, weil eine Vorgabe, die man nicht liest, eine fremde Maschine
+    unter eigenem Namen ist. Kompakt, weil es bis zu 21 Schluessel sind: ein
+    nackter Payload (``/cad_preview`` per Hand, die Warteschlange) fuellt alle,
+    und 21 Protokollzeilen verdecken den Lauf, um den es geht. Ab fuenf
+    Fundstuecken stehen sie deshalb in EINER Zeile.
+    """
+    zeilen = (data.get("axial_ergaenzt") or []) or (erg or [])
+    if not zeilen:
+        return
+    if len(zeilen) <= 4:
+        for z in zeilen:
+            _log(state, f"   \u2299 ergaenzt: {z}", pct)
+    else:
+        _log(state, f"   \u2299 {len(zeilen)} axiale Masse ergaenzt: "
+                    + " \u00b7 ".join(zeilen), pct)
+    _log(state, "   \u2139 " + satz, pct)
+
+
 def run_pipeline(data: dict, state: dict, frames: list,
                   workspace: str, project_dir: str | None = None,
                   stages: set | None = None):
@@ -2938,6 +3376,31 @@ def run_pipeline(data: dict, state: dict, frames: list,
         os.makedirs(os.path.join(proj, sub), exist_ok=True)
 
     partial = stages is not None
+    # **Beim Axialfluss wird der Stufensatz VERENGT**, statt den Lauf
+    # abzuweisen (s. `_gate_maschinenart`). `stages is None` heisst "alles", und
+    # genau das ist der Fall aus dem Browser -- ohne diese Zeile liefe die
+    # Scheibe entweder in das alte Tor oder, schlimmer, durch CAD und
+    # Struktur-FEM. Der Satz wird AUSGESCHRIEBEN (nicht `None` gelassen), damit
+    # `partial` unten weiter bedeutet "der Mensch hat eine Auswahl getroffen".
+    import ema_fluss as _FLS
+    _axial_lauf = _FLS.flussweg((data or {}).get("geom") or {}) == "axial"
+    if _axial_lauf:
+        _tr, _ = _FLS.stufen_aufteilen((data or {}).get("geom") or {},
+                                       stages if stages is not None
+                                       else _ALLE_STUFEN)
+        stages = set(_tr)
+        # **Was die Maske nicht hat, wird hier ergaenzt UND benannt.** Die
+        # `axial*`-Masse werden im Reiter ⊙ Axialfluss gezeichnet; ② Geometrie
+        # hat kein einziges Feld dafuer. `buildPayload` schickte deshalb
+        # `fluxPath="axial"` ohne eine axiale Zahl, und der Lauf starb am
+        # ersten Zugriff (`'axialAktivOD' fehlt`, 09.10.2026). Der Server
+        # fuellt das schon beim Annehmen (`_axial_ergaenzen`); hier steht es
+        # noch einmal, weil die Warteschlange und `cae_cli.py` denselben
+        # Pipelineeinstieg mit einem rohen Payload benutzen -- und weil ein
+        # zweiter Aufruf nichts ergaenzt, wenn der erste es schon tat.
+        data["geom"], _erg_ax = _FLS.axial_ergaenzen(data["geom"])
+        _log_axial_ergaenzt(state, data, _erg_ax, 1, _FLS.ERGAENZT_SATZ)
+
     def _do(name: str) -> bool:
         return (stages is None) or (name in stages)
 
@@ -2947,7 +3410,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
     # nackten Traceback sieht. Im Teil-Nachrechnen wird nur gewarnt, nicht
     # abgewiesen: die Geometrie liegt dort fertig auf der Platte und wird gar nicht
     # neu gebaut — ein hartes Tor würde ein ladbares Altprojekt unrechenbar machen.
-    _gate_maschinenart(data, state, "lauf")
+    _gate_maschinenart(data, state, "lauf", stufen=stages)
     _gate_grenzen(data, state, fatal=not partial)
     _gate_rotor_layout(data, state, fatal=not partial)
     _gate_rotor_stress(data, state, fatal=not partial)
@@ -3045,7 +3508,66 @@ def run_pipeline(data: dict, state: dict, frames: list,
         # bereits (mit benanntem "Rotor"-Solid) — der else-Zweig nutzt sie für die
         # Struktur-FEM, während die EM-Analyse auf den erkannten customLegs rechnet.
         imported = bool(data.get("imported")) and os.path.exists(fcstd)
-        if _do("geometry") and not imported:
+        if _do("geometry") and not imported and _FLS.cad_weg(geom) == "scheibe":
+            # **Die Scheibe hat ihren eigenen Erzeuger** -- derselbe Knopf, der
+            # richtige Erzeuger, dieselbe Regel wie bei Feld und 3-D. Welcher
+            # gilt, sagt `ema_fluss.cad_weg` und nicht der Aufrufer; sie hier
+            # durch `build_full_motor_script` zu schicken ergaebe einen Zylinder
+            # mit Nuten im Mantel unter dem Namen „Axialfluss".
+            if True:
+                import ema_axial_cad as _ACP
+                _prc = _ACP.pruefen(geom, axial)
+                for _b in _prc["befunde"]:
+                    _log(state, f"   ! {_b}", 4)
+                if _prc["nutbreite"].get("hinweis"):
+                    _log(state, "   ⚠ " + _prc["nutbreite"]["hinweis"], 4)
+                if not _prc["ok"]:
+                    _log(state, "⊙ Scheibe NICHT gezeichnet — s. Befunde oben. "
+                                "Der Lauf rechnet ohne CAD weiter.", 4)
+                    results["geometry"] = {"ok": False,
+                                           "grund": _prc["befunde"]}
+                else:
+                    _tc = _prc["teile"]
+                    _log(state, f"⊙ Erzeuge die SCHEIBE in FreeCAD: "
+                                f"{len(_tc['teile'])} Teile ({_tc['n_magnet']} "
+                                f"Magnete, {_tc['slots']} Zaehne + Spulen, "
+                                f"Zahnform {_tc['zahnform']})…", 4)
+                    _resc = run_freecad_script(
+                        _ACP.baue_skript(geom, axial, fcstd), timeout=900)
+                    if not _resc.get("cad_success"):
+                        _log(state, "⚠ Scheibe fehlgeschlagen:\n"
+                             + (_resc.get("stderr") or "")[:400], 20)
+                        results["geometry"] = {"ok": False, "grund": "FreeCAD"}
+                    else:
+                        _mz = _ACP.messung_aus_stdout(_resc.get("stdout") or "")
+                        _vol = _resc.get("volume", 0)
+                        results["geometry"] = {
+                            "ok": True, "flussweg": "axial", "weg": "scheibe",
+                            "n_faces": len(_resc.get("faces", [])),
+                            "volume_mm3": round(_vol, 0),
+                            "n_teile": _mz.get("n_teile"),
+                            "ueberlapp": _mz.get("ueberlapp"),
+                            "ueberlapp_text": _mz.get("ueberlapp_text"),
+                            "ungueltig": _mz.get("ungueltig"),
+                            "ungeprueft": _prc["ungeprueft"]}
+                        _log(state, f"✓ Scheibe: {results['geometry']['n_faces']}"
+                                    f" Flaechen, {_vol:.0f} mm³, "
+                                    f"{_mz.get('n_teile')} Teile", 20)
+                        if _mz.get("ueberlapp_text"):
+                            _log(state, ("   ✓ " if not _mz.get("ueberlapp")
+                                         else "   ⚠ ")
+                                 + str(_mz["ueberlapp_text"]), 20)
+                        for _u in _prc["ungeprueft"]:
+                            _log(state, f"   ℹ {_u}", 21)
+                        _log(state, "   ℹ Kein 2-D-Schnittbild: "
+                                    "`render_cross_section` zeichnet einen "
+                                    "Querschnitt senkrecht zur Drehachse, und "
+                                    "darin ist eine Scheibe ein Ring ohne "
+                                    "Merkmal. Die Ansichten liegen im Reiter "
+                                    "⊙ Axialfluss.", 21)
+                        results["cad_images"] = {}
+
+        elif _do("geometry") and not imported:
             _log(state, "⚙ Erzeuge vollständige Motorgeometrie in FreeCAD...", 4)
             code  = build_full_motor_script(geom, axial, fcstd)
             res   = run_freecad_script(code, timeout=180)
@@ -3093,8 +3615,18 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 results["cad_images"] = {}
         else:
             if not os.path.exists(fcstd):
-                _log(state, "⚠ motor.FCStd fehlt — Struktur-FEM braucht die Geometrie; "
-                            "bitte einmal die volle Berechnung ausführen", 20)
+                # Fuer die Scheibe ist "einmal die volle Berechnung ausfuehren"
+                # ein falscher Rat: es gibt keinen CAD-Weg, der eine
+                # Axialflussmaschine baut, also entsteht die Datei nie.
+                if _axial_lauf:
+                    _log(state, "⊙ Kein motor.FCStd — fuer die Scheibe gibt es "
+                                "keinen CAD-Aufbau (ema_freecad zeichnet einen "
+                                "Zylinder mit Nuten im Mantel). Gezeichnet wird "
+                                "sie im Reiter ⊙ Axialfluss.", 20)
+                else:
+                    _log(state, "⚠ motor.FCStd fehlt — Struktur-FEM braucht die "
+                                "Geometrie; bitte einmal die volle Berechnung "
+                                "ausführen", 20)
             if imported:
                 _log(state, "📥 Importierte STEP-Geometrie: motor.FCStd (Rotor) wird "
                             "direkt für die Festigkeits-FEM verwendet", 21)
@@ -3108,11 +3640,106 @@ def run_pipeline(data: dict, state: dict, frames: list,
         # radial one.  perf is N-robust and the captured sf_ref is unused downstream
         # (frames self-calibrate), so raising N here is safe.
         em_n   = max(fdm_res, ema_analysis.AIRGAP_PROFILE_N)
-        _log(state, f"🔬 Berechne EM-Feld (FDM {em_n}×{em_n})...", 22)
-        em0    = ema_analysis.run_em_analysis(geom, N=em_n, rotor_angle=0.0,
-                                              axial_mm=axial)
-        sf_ref = em0["sf_ref"]   # OC calibration factor — reused for all loaded frames
-        perf   = em0["performance"]
+        # **Die SCHEIBE geht hier nicht durch, und das ist kein Mangel.**
+        # Diese Feldstufe rastert `R = hypot(X, Y)` -- einen Zylinderschnitt.
+        # Das Feld einer Scheibe rechnet `ema_axial_fdm` auf dem abgewickelten
+        # Mehrschnitt (`ema_fluss.FELDWEG_AXIAL`), erreichbar ueber
+        # `cae_cli.py axial` und den Reiter ⊙ Axialfluss. Was hier gebraucht
+        # wird, ist nur der BETRIEBSPUNKT fuer Thermik und Fahrzyklus -- und
+        # der kommt aus der Arbeitsgeraden der Scheibe, derselben Groesse, auf
+        # die auch die Zeichenseite ihr Feld eicht.
+        import ema_fluss as _FL
+        if _FL.flussweg(geom) == "axial":
+            # **Hier laeuft jetzt der Scheiben-Loeser selbst** (07.10.2026).
+            # Bis dahin nahm diese Stufe nur die Arbeitsgerade und schrieb
+            # daneben, das Feld rechne `cae_cli.py axial` -- ein Weg, den nur
+            # die Kommandozeile hat, ist fuer den, der vor dem Bildschirm
+            # sitzt, nicht vorhanden (dieselbe Regel, aus der `studie`,
+            # `zielwert` und `bericht` Verben geworden sind, nur umgekehrt).
+            # Die Einstellungen kommen aus DEMSELBEN Berechnungs-Reiter wie
+            # radial: `fdm_resolution` ist das N des abgewickelten Gitters,
+            # `axial_schnitte` die Zahl der Scheiben (Vorgabe aus
+            # `ema_text2ema.GUETE`, Entwurf 5 / Detail 9).
+            import ema_axial_fdm as _AF
+            _bgap = float(_AF.eichung_magnet(geom))
+            _ksch = max(2, int(data.get("axial_schnitte", 5) or 5))
+            _nax = max(200, int(fdm_res))
+            _log(state, f"⊙ Axialfluss: abgewickelter Mehrschnitt, "
+                        f"{_ksch} Scheiben bei N = {_nax} "
+                        f"(ema_axial_fdm.felder)…", 22)
+            # **Gerechnet wird der LEERLAUF**, und das ist keine Sparmassnahme.
+            # `B_gap_T` heisst in diesem Werkzeug ueberall das Leerlauffeld
+            # (`_analytical_Bgap`, `run_em_analysis`s `sf_ref`); eine axiale
+            # Zahl unter demselben Namen muss dasselbe meinen, sonst ist sie
+            # mit der radialen nicht vergleichbar.
+            #
+            # Gemessen am 07.10.2026, und es war beinahe ein falsches Etikett:
+            # bei 100 Nm meldete die Stufe fuer Ferrit 1,0844 T gegen 1,1225 T
+            # fuer N35 -- 3,4 %, obwohl Br um 65 % faellt. Kein Fehler, sondern
+            # die Ankerrueckwirkung: Ferrit braucht fuer dasselbe Moment 2,9x
+            # den Strom (Kt ~ Br), und dann ist das Spaltfeld ueberwiegend
+            # Ankerfeld. Im LEERLAUF skaliert es exakt mit Br (1,0656 ->
+            # 0,3690 T, also x0,346 gegen Br x0,348). Als „Nutungsverlust"
+            # beschriftet waere der Lastwert eine falsche Aussage gewesen.
+            # Das Feld AM BETRIEBSPUNKT rechnet `cae_cli.py axial --last` und
+            # der Reiter ⊙ Axialfluss, wo es auch so heisst.
+            _axfeld = None
+            try:
+                _axfeld = _AF.felder(geom, k_schnitte=_ksch, N=_nax,
+                                     rpm=float(rpm_to), last_nm=0.0,
+                                     axial_mm=axial)
+            except Exception as _e:                              # noqa: BLE001
+                _log(state, f"⚠ Scheiben-Feldstufe fehlgeschlagen "
+                            f"({type(_e).__name__}: {_e}) — der Betriebspunkt "
+                            f"kommt aus der Arbeitsgeraden, das Feld fehlt.", 23)
+            # **Der BETRIEBSPUNKT bleibt auf der Arbeitsgeraden**, und das ist
+            # Absicht, kein Versehen: `compute_performance` rechnet
+            # `psi = p*(2/pi)*B*A`, und ob dort die gemessene GRUNDWELLE oder
+            # der flussgewichtete MITTELWERT hingehoert, ist der offene Befund
+            # vom 06.10.2026 (`(2/pi)` auf einem schon gemittelten Wert, 36 %).
+            # Ihn hier nebenbei zu entscheiden hiesse, Kt und jede Temperatur
+            # jedes Axialprojekts an einer unbelegten Annahme zu verschieben.
+            # Die gemessene Zahl steht deshalb NEBEN der analytischen, nicht
+            # anstelle von ihr -- und beide tragen ihren Namen.
+            perf = ema_analysis.compute_performance(geom, _bgap, rpm_to,
+                                                    axial_mm=axial)
+            sf_ref = 1.0
+            # Die Schluessel des Rasterers werden NICHT erfunden: es gibt hier
+            # kein Netz, dessen Luftspalt man vermessen koennte. Wer sie liest,
+            # muss `.get` benutzen -- und wo das noetig ist, steht es unten.
+            em0 = {"performance": perf, "sf_ref": 1.0, "axial": True,
+                   "axfeld": _axfeld}
+            if _axfeld:
+                _bm = float(_axfeld.get("B_gap_grundwelle_mittel_T") or 0.0)
+                _h1 = float(_AF.eichung_magnet_grundwelle(geom))
+                _log(state,
+                     f"   B_gap Grundwelle GEMESSEN (Leerlauf) {_bm:.4f} T "
+                     f"(r-gewichtet ueber {_ksch} Scheiben) gegen die "
+                     f"analytische Grundwelle {_h1:.4f} T "
+                     f"({(_bm/_h1-1)*100:+.1f} % — ueberwiegend der "
+                     f"Nutungsverlust, den die Arbeitsgerade nur als "
+                     f"angenommenes KC = 1,15 kennt).", 23)
+                _log(state,
+                     f"   Der Betriebspunkt rechnet weiter mit dem MITTELWERT "
+                     f"der Arbeitsgeraden ({_bgap:.4f} T): ob in "
+                     f"`psi = p·(2/π)·B·A` eine Grundwelle oder ein Mittelwert "
+                     f"gehoert, ist ein offener Befund (BEFUNDE.md).", 23)
+                for _g in (_axfeld.get("grenzen") or []):
+                    _log(state, f"   ℹ {_g}", 23)
+            # Seit dem 07.10.2026 traegt die Scheibe ihr CAD (`ema_axial_cad`);
+            # dieser Satz sagte noch das Gegenteil, und eine stehengelassene
+            # Selbstaussage ist schlimmer als keine.
+            _log(state, "   Die Struktur-FEM laeuft nicht: sie rechnet "
+                        "Fliehkraft an einem Blechschnitt, die Hauptlast der "
+                        "Scheibe ist der axiale ANZUG. Das CAD laeuft "
+                        "(ema_axial_cad), die Festigkeit rechnet "
+                        "`cae_cli.py axial` ueber ruecken/bandage.", 23)
+        else:
+            _log(state, f"🔬 Berechne EM-Feld (FDM {em_n}×{em_n})...", 22)
+            em0    = ema_analysis.run_em_analysis(geom, N=em_n, rotor_angle=0.0,
+                                                  axial_mm=axial)
+            sf_ref = em0["sf_ref"]   # OC calibration — reused for loaded frames
+            perf   = em0["performance"]
         # **Der FDM zeichnet das Feld; die ZAHLEN kommen von der Maschinenart.**
         #
         # Gemessen am 20.09.2026 ueber alle fuenf Bauarten am frischen Payload:
@@ -3135,7 +3762,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
         # dastehen, denn dann ist jede aus DIESEM Feld abgeleitete Groesse die einer
         # etwas anderen Maschine. Die analytischen Kennwerte (B_gap, Kt) haengen
         # nicht daran -- sie kommen aus der Formel, nicht aus dem Raster.
-        if em0.get("air_gap_widened"):
+        if em0.get("air_gap_widened") and not em0.get("axial"):
             _log(state,
                  f"⚠ Luftspalt im FDM-Netz {em0['air_gap_effective_mm']:.3f} mm statt "
                  f"gezeichneter {em0['air_gap_drawn_mm']:.3f} mm — bei N={em_n} sind das "
@@ -3143,23 +3770,57 @@ def run_pipeline(data: dict, state: dict, frames: list,
                  f"beruehren sich Rotor- und Statoreisen. Feldbilder, Luftspaltprofil "
                  f"und T_maxwell gelten fuer den weiteren Spalt; B_gap und Kt nicht.", 23)
         results.setdefault("em", {})
-        results["em"].update({k: em0[k] for k in
-                              ("air_gap_drawn_mm", "air_gap_effective_mm",
-                               "air_gap_widened", "air_gap_px")})
-        airgap_b64 = _airgap_chart(em0)
-        _save_png_b64(airgap_b64, os.path.join(proj, "charts", "airgap.png"))
-        # UPDATE (not replace) so a partial re-run keeps any saved field-animation
-        # metadata (rpm_list / field_modes / videos) when the field stage is skipped.
         results.setdefault("em", {})
-        results["em"].update({
-            "performance":      perf,
-            "airgap_chart_b64": airgap_b64,
-            "B_gap_data": {
-                "theta_deg": np.degrees(em0["theta"]).tolist()[::4],
-                "Br_T":      em0["Br_gap"].tolist()[::4],
-                "Bt_T":      em0["Bt_gap"].tolist()[::4],
-            },
-        })
+        if em0.get("axial"):
+            # Kein Raster, also keine Netzmasse und KEIN Luftspaltprofil --
+            # das kommt beim Axialfluss aus dem abgewickelten Mehrschnitt
+            # (`cae_cli.py axial`). Hier etwas hinzuschreiben waere eine
+            # Kurve, die niemand gerechnet hat.
+            results["em"].update({
+                "performance": perf,
+                "flussweg": "axial",
+                "hinweis": ("Der Betriebspunkt kommt aus dem MITTELWERT der "
+                            "Arbeitsgeraden; das Feld ist gemessen und steht "
+                            "unter `axial` daneben. Welche der beiden Zahlen in "
+                            "psi gehoert, ist ein offener Befund."),
+            })
+            airgap_b64 = None
+            _ax = em0.get("axfeld")
+            if _ax:
+                # Die gemessene Kurve gehoert ins Ergebnis -- gerechnet und
+                # nicht abgelegt ist dasselbe wie nicht gerechnet. Schlank:
+                # die rohen Felder je Scheibe (`bn`, `bt`, `raster`) bleiben
+                # draussen, das sind Megabyte je Schnitt.
+                _schlank = {k: v for k, v in _ax.items() if k != "schnitte"}
+                _schlank["n_schnitte"] = len(_ax.get("schnitte") or [])
+                results["em"]["axial"] = _schlank
+                results["em"]["B_gap_gemessen_T"] = _ax.get(
+                    "B_gap_grundwelle_mittel_T")
+                results["em"]["B_gap_gemessen_art"] = "leerlauf"
+                try:
+                    airgap_b64 = _axial_bgap_chart(_ax, geom)
+                    _save_png_b64(airgap_b64,
+                                  os.path.join(proj, "charts", "airgap.png"))
+                except Exception as _e:                          # noqa: BLE001
+                    _log(state, f"⚠ Diagramm B_gap(r) nicht gezeichnet "
+                                f"({type(_e).__name__}: {_e})", 24)
+        else:
+            results["em"].update({k: em0[k] for k in
+                                  ("air_gap_drawn_mm", "air_gap_effective_mm",
+                                   "air_gap_widened", "air_gap_px")})
+            airgap_b64 = _airgap_chart(em0)
+            _save_png_b64(airgap_b64, os.path.join(proj, "charts", "airgap.png"))
+            # UPDATE (not replace) so a partial re-run keeps saved field-animation
+            # metadata (rpm_list / field_modes / videos) when field is skipped.
+            results["em"].update({
+                "performance":      perf,
+                "airgap_chart_b64": airgap_b64,
+                "B_gap_data": {
+                    "theta_deg": np.degrees(em0["theta"]).tolist()[::4],
+                    "Br_T":      em0["Br_gap"].tolist()[::4],
+                    "Bt_T":      em0["Bt_gap"].tolist()[::4],
+                },
+            })
         # ``T_maxwell_Nm`` sein darf None -- dann ist der Luftspalt im Raster
         # nicht aufgeloest (ema_analysis.setzt `T_maxwell_grund`), und genau das
         # muss anstelle einer Zahl hier stehen (Befund 08.09.2026, 17:13 Uhr).
@@ -3231,26 +3892,69 @@ def run_pipeline(data: dict, state: dict, frames: list,
             # |B| plots dress the report up far more than the line charts): one at
             # open circuit (magnet flux paths) and one at full load / max speed
             # (armature reaction). Saturated display so the iron caps at ~2 T.
-            try:
-                _emf_N = int(min(600, max(300, frame_res * 2)))
-                _b_oc = _field_frame(geom, 0.0, N=_emf_N, iq=0.0, id_=0.0,
-                                     out_px=1500, saturate=True, b_ceiling=field_bmax,
-                                     magnet_outlines=True)
-                _save_png_b64(_b_oc, os.path.join(proj, "charts", "em_field.png"))
-                _b_ld = _field_frame(geom, 0.0, N=_emf_N, iq=iq_full, id_=id_full,
-                                     rpm=rpm_ref, out_px=1500, saturate=True,
-                                     b_ceiling=field_bmax, magnet_outlines=True)
-                _save_png_b64(_b_ld, os.path.join(proj, "charts", "em_field_load.png"))
-                _log(state, f"✓ EM-Feldbilder (Leerlauf + Last) für Bericht gerendert "
-                            f"(FDM {_emf_N}²)", 74)
-            except Exception as _fe:
-                _log(state, f"⚠ EM-Feldbilder für Bericht fehlgeschlagen: {_fe}", 74)
+            # **Die Scheibe bekommt IHRE Bilder, nicht die radialen.**
+            # `_field_frame` rastert `hypot(X, Y)` -- einen Zylinderschnitt. Auf
+            # einen axialen Payload angewandt zeichnete es bis zum 07.10.2026
+            # ein Ringfeld und schrieb „em_field.png" darueber: ein Bild der
+            # falschen Maschine, und das an der Stelle, an der man die Bauart
+            # nachsieht. `ema_axial_fdm.bilder` zeichnet den abgewickelten
+            # Schnitt und B_gap(r).
+            if _axial_lauf:
+                try:
+                    import ema_axial_fdm as _AFB
+                    _bf = _AFB.bilder(geom, os.path.join(proj, "charts"),
+                                      k_schnitte=max(3, int(
+                                          data.get("axial_schnitte", 5) or 5)),
+                                      N=int(min(600, max(300, frame_res * 2))))
+                    _log(state, "⊙ Scheibenbilder gerendert: "
+                                + ", ".join(os.path.basename(str(x))
+                                            for x in (_bf or []) if x), 74)
+                except Exception as _fe:                         # noqa: BLE001
+                    _log(state, f"⚠ Scheibenbilder fehlgeschlagen: {_fe}", 74)
+                _log(state, "   ℹ Keine em_field.png: die radialen Feldbilder "
+                            "rastern einen Zylinderschnitt und zeigten fuer "
+                            "eine Scheibe die falsche Maschine.", 74)
+            if not _axial_lauf:
+              try:
+                  _emf_N = int(min(600, max(300, frame_res * 2)))
+                  _b_oc = _field_frame(geom, 0.0, N=_emf_N, iq=0.0, id_=0.0,
+                                       out_px=1500, saturate=True, b_ceiling=field_bmax,
+                                       magnet_outlines=True)
+                  _save_png_b64(_b_oc, os.path.join(proj, "charts", "em_field.png"))
+                  _b_ld = _field_frame(geom, 0.0, N=_emf_N, iq=iq_full, id_=id_full,
+                                       rpm=rpm_ref, out_px=1500, saturate=True,
+                                       b_ceiling=field_bmax, magnet_outlines=True)
+                  _save_png_b64(_b_ld, os.path.join(proj, "charts", "em_field_load.png"))
+                  _log(state, f"✓ EM-Feldbilder (Leerlauf + Last) für Bericht gerendert "
+                              f"(FDM {_emf_N}²)", 74)
+              except Exception as _fe:
+                  _log(state, f"⚠ EM-Feldbilder für Bericht fehlgeschlagen: {_fe}", 74)
 
         def _persist(bucket_key, subdir, b64):
             bucket = frames.setdefault(bucket_key, [])
             bucket.append(b64)
             _save_png_b64(b64, os.path.join(proj, subdir, f"frame_{len(bucket)-1:04d}.png"))
 
+        # **Die Feld-ANIMATION bleibt beim Axialfluss aus** -- derselbe Grund wie
+        # beim Standbild eine Ebene darueber, nur teurer: `_field_frame` rastert
+        # `hypot(X, Y)`, also einen Zylinderschnitt, und darin ist eine Scheibe
+        # ein Ring ohne Merkmal. Gemessen am Browserlauf vom 09.10.2026 kostete
+        # das 72 Rahmen x rund 9 s = **zehn Minuten fuer ein Bild der falschen
+        # Maschine**, waehrend die richtigen Bilder (abgewickelter Schnitt,
+        # B_gap(r)) unmittelbar davor schon geschrieben wurden.
+        #
+        # Es wird NICHT ersatzweise etwas gezeichnet: eine bewegte Scheibe
+        # braeuchte den abgewickelten Mehrschnitt ueber dem Rotorwinkel, und das
+        # ist eine neue Stufe und keine Reparatur. Was es gibt, steht im Satz.
+        if _axial_lauf and field_modes:
+            _log(state, "⊙ Feld-Animation uebersprungen: die Rahmen rastern "
+                        "einen Zylinderschnitt (hypot(X, Y)), und darin ist "
+                        "eine Scheibe ein Ring ohne Merkmal — 72 Rahmen der "
+                        "falschen Maschine. Gezeichnet ist statt dessen der "
+                        "abgewickelte Schnitt und B_gap ueber dem Radius "
+                        "(charts/, `ema_axial_fdm.bilder`); bewegt sieht man "
+                        "die Scheibe im Reiter ⊙ Axialfluss.", 44)
+            field_modes = []
         for mode in field_modes:
             if mode == "rotate":
                 sub = FIELD_SUBDIRS["rotate"]; _frames_raeumen(os.path.join(proj, sub))
@@ -3323,7 +4027,12 @@ def run_pipeline(data: dict, state: dict, frames: list,
         if _do("field"):
             results["em"]["field_modes"] = modes_meta
             results["em"]["videos"]      = videos
-            _log(state, f"✓ Feld-Animation fertig ({len(field_modes)} Modus/Modi, Videos: {len(videos)})", 75)
+            if _axial_lauf:
+                _log(state, "✓ Feldstufe fertig — ohne Animation (s. oben); "
+                            "die Scheibenbilder liegen in charts/", 75)
+            else:
+                _log(state, f"✓ Feld-Animation fertig ({len(field_modes)} "
+                            f"Modus/Modi, Videos: {len(videos)})", 75)
         else:
             _log(state, "↩ Feld-Animation übersprungen (bestehende Frames behalten)", 75)
 
@@ -3557,7 +4266,13 @@ def run_pipeline(data: dict, state: dict, frames: list,
             results["structural_fem"] = fem_r
         else:
             fem_r = results.get("structural_fem", {}) or {}
-            _log(state, "↩ Struktur-FEM übersprungen (bestehende Ergebnisse)", 88)
+            _log(state, "⊙ Struktur-FEM uebersprungen: sie vernetzt den "
+                        "Zylinder-Rotor und laedt ihn mit Fliehkraft. Die "
+                        "Scheibe bekommt statt dessen ihre eigenen zwei Lasten "
+                        "(axialer Anzug → Durchbiegung, Fliehkraft IN der "
+                        "Scheibenebene) — gleich unten, Abschnitt "
+                        "⊙ Scheibenfestigkeit." if _axial_lauf else
+                        "↩ Struktur-FEM übersprungen (bestehende Ergebnisse)", 88)
 
         # ── 5b. FEM deformation: burst speed + 3 high-res images + ramp video ──
         # One solve (above, at rpm_fem) is scaled by rpm² to every speed of interest.
@@ -3650,19 +4365,81 @@ def run_pipeline(data: dict, state: dict, frames: list,
             _log(state, "↩ Verformung übersprungen (bestehende Ergebnisse)", 91)
 
         # ── 6. Structural speed sweep (analytical) ────────────────────────────
-        _log(state, "📈 Strukturkennlinie über Drehzahlbereich...", 91)
-        struct_sweep = _struct_sweep(geom, mat, sweep_rpms)
-        results["structural_sweep"] = struct_sweep
-        struct_chart_b64 = _struct_sweep_chart(
-            fem_r if fem_r.get("max_von_mises_MPa") else None,
-            struct_sweep, mat["yield_mpa"]
-        )
-        _save_png_b64(struct_chart_b64, os.path.join(proj, "charts", "structural_sweep.png"))
-        results["structural_sweep_chart_b64"] = struct_chart_b64
-        max_safe_rpm = next(
-            (s["rpm"] for s in reversed(struct_sweep) if s["safety_factor"] >= SF_TARGET),
-            struct_sweep[0]["rpm"]
-        )
+        # **Die Scheibe geht hier NICHT durch** (07.10.2026). `_struct_sweep`
+        # bildet die Ringspannung eines rotierenden RINGES (Lame); auf eine
+        # Scheibe angewandt kam daraus eine „max. sichere Drehzahl", die mit der
+        # Bauform nichts zu tun hat -- und sie landete in `summary` und im
+        # Bericht. Das ist genau die stille Ersatzrechnung, gegen die
+        # `ema_fluss` gebaut ist, nur an einer Stelle, die KEIN `_do("…")`
+        # schuetzt (die billigen Grundstufen laufen immer).
+        #
+        # Was die Scheibe wirklich traegt, rechnet `ema_axial.ruecken` (axialer
+        # Anzug -> Durchbiegung) und `ema_axial.bandage` (Fliehkraft IN der
+        # Scheibenebene, die kein Blechsteg haelt). Bis zum 09.10.2026 stand
+        # hier nur ein Verweis auf `cae_cli.py axial` -- ein Weg, den nur die
+        # Kommandozeile hat, ist fuer den, der vor dem Bildschirm sitzt, nicht
+        # vorhanden. Jetzt laeuft es MIT, ueber `_axial_struktur`, das die
+        # beiden Funktionen aufruft und nichts nachbaut.
+        if _axial_lauf:
+            _log(state, "⊙ Strukturkennlinie uebersprungen: die Ringspannung "
+                        "(Lame) gilt fuer einen rotierenden Ring. Statt dessen "
+                        "rechnet die Scheibe ihre eigenen zwei Lasten:", 91)
+            results["structural_sweep"] = []
+            struct_sweep = []
+            max_safe_rpm = None
+            try:
+                _axst = _axial_struktur(geom, perf["B_gap_T"], float(rpm_to), mat)
+                _rk, _az, _bd = _axst["ruecken"], _axst["anzug"], _axst["bandage"]
+                _log(state, f"   ⊙ Anzug {_az['sigma_n_pa'] / 1e3:.1f} kPa = "
+                            f"{_az['kraft_je_spalt_N'] / 1e3:.2f} kN je Luftspalt"
+                            + (f" (zwei Spalte heben sich auf, aber nur bei "
+                               f"mittigem Staender: negative Steifigkeit "
+                               f"{_az['negative_steifigkeit_N_per_m'] / 1e6:.1f} MN/m)"
+                               if _az["hebt_sich_auf"] else ""), 91)
+                _log(state, "   ⊙ Rueckenblech: " + _rk["aussage"], 91)
+                if _axst["t_ist_m"]:
+                    _log(state, f"   {'✓' if _axst['t_reicht'] else '⚠'} "
+                                f"gezeichnet sind {_axst['t_ist_m'] * 1e3:.1f} mm"
+                                + (f" → w = {_axst['w_bei_t_ist_m'] * 1e6:.1f} µm "
+                                   f"= {_axst['w_anteil_spalt_ist'] * 100:.1f} % "
+                                   f"des Luftspalts"
+                                   if _axst["w_bei_t_ist_m"] else ""), 91)
+                _log(state, "   ⊙ Magnethaltung: " + _bd["aussage"], 92)
+                if _bd.get("klebung_haelt") is not None:
+                    _log(state, ("   ✓ Klebung haelt" if _bd["klebung_haelt"]
+                                 else "   ⛔ Klebung haelt NICHT")
+                         + f" ({_bd['klebescherspannung_pa'] / 1e6:.2f} gegen "
+                           f"{_bd['klebe_zul_mpa']:.1f} MPa zulaessig)", 92)
+                try:
+                    _b64 = _axial_struktur_chart(_axst, geom)
+                    _save_png_b64(_b64, os.path.join(proj, "charts",
+                                                     "axial_struktur.png"))
+                    _axst["chart_b64"] = _b64
+                except Exception as _ce:                         # noqa: BLE001
+                    _log(state, f"   ⚠ Scheibenbild fehlgeschlagen: {_ce}", 92)
+                for _u in _axst["ungeprueft"]:
+                    _log(state, f"   ℹ {_u}", 92)
+                results["axial_struktur"] = {k: v for k, v in _axst.items()
+                                             if k != "chart_b64"}
+                results["axial_struktur_chart_b64"] = _axst.get("chart_b64", "")
+            except Exception as _ae:                             # noqa: BLE001
+                _log(state, f"⚠ Scheibenfestigkeit fehlgeschlagen: {_ae}", 92)
+        else:
+            _log(state, "📈 Strukturkennlinie über Drehzahlbereich...", 91)
+            struct_sweep = _struct_sweep(geom, mat, sweep_rpms)
+            results["structural_sweep"] = struct_sweep
+            struct_chart_b64 = _struct_sweep_chart(
+                fem_r if fem_r.get("max_von_mises_MPa") else None,
+                struct_sweep, mat["yield_mpa"]
+            )
+            _save_png_b64(struct_chart_b64,
+                          os.path.join(proj, "charts", "structural_sweep.png"))
+            results["structural_sweep_chart_b64"] = struct_chart_b64
+            max_safe_rpm = next(
+                (s["rpm"] for s in reversed(struct_sweep)
+                 if s["safety_factor"] >= SF_TARGET),
+                struct_sweep[0]["rpm"]
+            )
         # ── Derate by the FEM result ──────────────────────────────────────────
         # The analytical Lamé rotating-disc model does NOT capture the stress
         # concentration at the thin iron bridges over the magnet pockets — the
@@ -3675,7 +4452,12 @@ def run_pipeline(data: dict, state: dict, frames: list,
         sf_fem  = fem_r.get("safety_factor")
         rpm_fem = fem_r.get("rpm")
         structural_ok = True
-        if sf_fem and rpm_fem and sf_fem > 0:
+        if max_safe_rpm is None and sf_fem and rpm_fem and sf_fem > 0:
+            # Axial: es gibt keine analytische Kennlinie, auf die derated
+            # werden koennte -- aber wenn eine FEM lief, ist ihr Wert der
+            # einzige und wird genommen statt verworfen.
+            max_safe_rpm = rpm_fem * math.sqrt(sf_fem / SF_TARGET)
+        if max_safe_rpm is not None and sf_fem and rpm_fem and sf_fem > 0:
             max_safe_rpm_fem = rpm_fem * math.sqrt(sf_fem / SF_TARGET)
             if max_safe_rpm_fem < max_safe_rpm:
                 _log(state, f"⚠ FEM derated max. sichere Drehzahl: analytisch "
@@ -3688,8 +4470,24 @@ def run_pipeline(data: dict, state: dict, frames: list,
         results["structural_ok"]      = structural_ok
         results["max_safe_rpm_fem"]   = (round(rpm_fem * math.sqrt(sf_fem / SF_TARGET))
                                          if (sf_fem and rpm_fem and sf_fem > 0) else None)
-        _log(state, f"✓ Strukturkennlinie: max. sichere Drehzahl ≈ {max_safe_rpm:.0f} U/min"
-                    f"{'' if structural_ok else ' ⚠ FEM: Versagen im Betriebsbereich'}", 93)
+        # `None` heisst NICHT gerechnet und wird so gemeldet. Eine Zahl
+        # hinzuschreiben, damit die Zeile huebsch aussieht, waere eine Aussage
+        # ueber die Festigkeit, die niemand gerechnet hat.
+        if max_safe_rpm is None:
+            _axg = (results.get("axial_struktur") or {}).get("max_safe_rpm_grund")
+            _log(state, "⊙ max. sichere Drehzahl: NICHT gerechnet. " + (
+                _axg or "Die Scheibe traegt weder Lame-Ring noch Struktur-FEM."),
+                 93)
+        else:
+            _log(state, f"✓ Strukturkennlinie: max. sichere Drehzahl ≈ "
+                        f"{max_safe_rpm:.0f} U/min"
+                        f"{'' if structural_ok else ' ⚠ FEM: Versagen im Betriebsbereich'}",
+                 93)
+        # Wo eine ZAHL gebraucht wird, um ueberhaupt weiterzurechnen (Kennfeld,
+        # Fahrzyklus), tritt die angeforderte Hoechstdrehzahl ein -- und das ist
+        # eine BETRIEBS- und keine Festigkeitsgrenze. `results["max_safe_rpm"]`
+        # bleibt `None`, damit kein Bericht daraus einen Festigkeitsbefund macht.
+        _rpm_grenze = max_safe_rpm if max_safe_rpm else float(rpm_to)
 
         # ── 6b. Shaft–core connection assessment (analytical) ─────────────────
         try:
@@ -3799,7 +4597,7 @@ def run_pipeline(data: dict, state: dict, frames: list,
                              or (results.get("connection") or {}).get("T_rated_Nm") or 0.0)
             env = ema_analysis.power_envelope(
                 geom, results.get("em_advanced") or {},
-                rpm_max=max_safe_rpm, T_rated_Nm=_T_rated)
+                rpm_max=_rpm_grenze, T_rated_Nm=_T_rated)
             results["power"] = env
             if "error" not in env:
                 env_b64 = _power_chart(env)
@@ -3825,9 +4623,15 @@ def run_pipeline(data: dict, state: dict, frames: list,
 
             def _run_one_cycle(cyc_obj: dict, veh: dict, chart_key: str) -> dict:
                 drv = ema_drivecycle.compute_drivetrain(cyc_obj, veh)
+                # Die Koerper, aus denen die Verluste kommen, haengen am
+                # Flussweg: Zylinderringe oder Kreisringscheiben. `netz`
+                # entscheidet das an EINER Stelle.
+                _vorgabe = ema_thermal.netz(geom, axial, cooling, rpm_base or 1000.0,
+                                            mat, st_mat, hp_mat, mag)[2]
                 series = ema_thermal.cycle_loss_series(
                     drv, geom, axial, perf, mat, st_mat, hp_mat, mag,
-                    cooling=cooling, rpm_base=rpm_base)
+                    cooling=cooling, rpm_base=rpm_base,
+                    massen_vorgabe=_vorgabe)
                 res = ema_drivecycle.cycle_energy(drv, series, veh,
                                                   rpm_max_zul=max_safe_rpm)
                 for _w in ([res.get("overload_warning"), res.get("speed_warning")]
@@ -3947,14 +4751,30 @@ def run_pipeline(data: dict, state: dict, frames: list,
         dtheta_s  = 2 * _m.pi / int(geom["slots"])
         fill_factor = round(_wk["fuellfaktor"], 3)
 
-        # Iron-loss estimate (Bertotti simplified, open-circuit no-load)
-        f_el      = rpm_fem * int(geom["p"]) / 60
-        R_si_m    = (geom["statorID"] / 2) / 1000
-        R_so_m    = (geom["statorOD"] / 2) / 1000
-        slot_area = slot_dep * slot_w * 1e-6   # m²
-        V_st_m3   = (_m.pi * (R_so_m**2 - R_si_m**2) * (axial / 1000) -
-                     int(geom["slots"]) * slot_area * (axial / 1000))
-        mass_st_kg = max(0.01, V_st_m3 * st_mat["density"])
+        # Iron-loss estimate (Bertotti simplified, open-circuit no-load).
+        #
+        # `rpm_fem` ist None, sobald die Strukturstufe uebersprungen wurde --
+        # also bei JEDEM Teil-Lauf, der sie nicht enthaelt. Gemessen brach der
+        # Lauf dadurch ganz am Ende ab, NACHDEM Thermik und Fahrzyklen schon
+        # gerechnet waren (radial wie axial, s. BEFUNDE.md 06.10.2026). Hier
+        # genuegt irgendeine belastbare Drehzahl, und `rpm_to` ist die, auf die
+        # sich der Rest der Zusammenfassung ohnehin bezieht.
+        _rpm_eisen = rpm_fem if rpm_fem else rpm_to
+        f_el      = _rpm_eisen * int(geom["p"]) / 60
+        import ema_fluss as _FLm
+        if _FLm.flussweg(geom) == "axial":
+            # Kreisringscheibe statt Zylinderring -- dieselbe Quelle, aus der
+            # auch das Scheiben-LPTN seine Massen nimmt.
+            import ema_axial_thermik as _ATm
+            mass_st_kg = max(0.01, _ATm.masse(geom, mat, st_mat, hp_mat,
+                                              mag)["staendereisen"])
+        else:
+            R_si_m    = (geom["statorID"] / 2) / 1000
+            R_so_m    = (geom["statorOD"] / 2) / 1000
+            slot_area = slot_dep * slot_w * 1e-6   # m²
+            V_st_m3   = (_m.pi * (R_so_m**2 - R_si_m**2) * (axial / 1000) -
+                         int(geom["slots"]) * slot_area * (axial / 1000))
+            mass_st_kg = max(0.01, V_st_m3 * st_mat["density"])
         P_fe_W    = (st_mat["specific_loss_Wkg"] *
                      (f_el / 50) * (perf["B_gap_T"] ** 2) * mass_st_kg)
 
@@ -4001,8 +4821,42 @@ def run_pipeline(data: dict, state: dict, frames: list,
             # WORAUF die Festigkeitsaussage beruht. Ohne das steht ein gruenes
             # structural_ok auch dann da, wenn die FEM gar nicht gelaufen ist —
             # gemessen der Fall in allen drei Alpenpass-Laeufen vom 27.08.
-            "structural_basis": ("fem" if fem_r.get("max_von_mises_MPa")
+            "structural_basis": ("scheibe" if _axial_lauf
+                                 else "fem" if fem_r.get("max_von_mises_MPa")
                                  else "analytisch"),
+            # ⊙ Die drei Zahlen der Scheibe im summary — denn daran haengen
+            # Steckbrief, Bericht, Ergebnisreiter und `ema_db` auf einmal; ein
+            # Kennwert, der nur in `results["axial_struktur"]` steht, ist fuer
+            # sie alle nicht da (dasselbe Argument wie bei der Saettigung).
+            **({"axial_w_max_um": round(
+                    ((results.get("axial_struktur") or {}).get("w_bei_t_ist_m")
+                     or (results.get("axial_struktur") or {})
+                     .get("ruecken", {}).get("w_bei_t_soll_m") or 0.0) * 1e6, 1),
+                "axial_w_anteil_spalt": round(
+                    ((results.get("axial_struktur") or {}).get("w_anteil_spalt_ist")
+                     or (results.get("axial_struktur") or {})
+                     .get("ruecken", {}).get("w_anteil_spalt") or 0.0), 4),
+                "axial_anzug_kPa": round(
+                    (results.get("axial_struktur") or {})
+                    .get("anzug", {}).get("sigma_n_pa", 0.0) / 1e3, 1),
+                "axial_magnetkraft_kN": round(
+                    (results.get("axial_struktur") or {})
+                    .get("bandage", {}).get("kraft_gesamt_N", 0.0) / 1e3, 2),
+                "axial_klebescher_MPa": round(
+                    (results.get("axial_struktur") or {})
+                    .get("bandage", {}).get("klebescherspannung_pa", 0.0) / 1e6, 3),
+                "axial_ruecken_bindet": (results.get("axial_struktur") or {})
+                    .get("ruecken", {}).get("bindet"),
+                # Das URTEIL gehoert dazu, nicht nur die Spannung: wer eine
+                # zulaessige Scherspannung eingetragen hat, soll es in
+                # `sicherheit` und im Steckbrief wiederfinden und nicht dort
+                # lesen, es fehle eine Angabe, die er gerade gemacht hat.
+                # `None` = keine Angabe, also ausdruecklich kein Urteil.
+                "axial_klebung_haelt": (results.get("axial_struktur") or {})
+                    .get("bandage", {}).get("klebung_haelt"),
+                "axial_klebe_zul_MPa": (results.get("axial_struktur") or {})
+                    .get("bandage", {}).get("klebe_zul_mpa"),
+               } if results.get("axial_struktur") else {}),
             "safety_factor_fem": fem_r.get("safety_factor"),
             "fem_rpm":         fem_r.get("rpm"),
             "fem_sigma_vm_MPa": fem_r.get("max_von_mises_MPa"),
@@ -4126,10 +4980,11 @@ def run_pipeline(data: dict, state: dict, frames: list,
 
         state["results"] = results
         state["status"]  = "done"
+        _rpm_satz = (f"max. sicher: {max_safe_rpm:.0f} U/min" if max_safe_rpm
+                     else "max. sichere Drehzahl: nicht gerechnet")
         _log(state,
              f"✅ Analyse abgeschlossen — "
-             f"B_gap={perf['B_gap_T']:.3f} T, "
-             f"max. sicher: {max_safe_rpm:.0f} U/min", 100)
+             f"B_gap={perf['B_gap_T']:.3f} T, " + _rpm_satz, 100)
 
     except Exception as e:
         import traceback

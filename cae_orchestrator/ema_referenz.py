@@ -85,6 +85,16 @@ QUELLEN = {
         "url": "https://www.mdpi.com/1996-1073/16/4/1657",
         "stelle": "Tab. 2 (Prototyp gegen BMW i3)",
     },
+    "moghaddam2007": {
+        "titel": ("Synchronous Reluctance Machine (SynRM) Design "
+                  "(Reza Rajabi Moghaddam)"),
+        "kennung": "MSc-Arbeit, KTH / ABB Corporate Research 2007 — diva2:753114",
+        "url": "https://www.diva-portal.org/smash/get/diva2:753114/FULLTEXT01.pdf",
+        "stelle": ("Kap. 5.1.3 (Barrierenzahl aus der Nutteilung), 5.1.4 "
+                   "(Isolationsgrad, Fig. 5.12), 6.2.1 (Endpunktwinkel), "
+                   "6.2.2 (Segmentbreiten), 8.1.3 (Moment ueber der "
+                   "Barrierenzahl) — Volltext abgerufen 20.09.2026"),
+    },
     "sheffield": {
         "titel": ("Modelling and Design of Permanent-magnet Machines for Electric "
                   "Vehicle Traction (Xiao Chen, 2015)"),
@@ -155,6 +165,33 @@ QUELLEN = {
 # Zahlen NUR aus den obigen Dokumenten. Nichts hier ist von uns gerechnet.
 
 MESSPUNKTE = [
+    # (0) Reluktanzlaeufer -- die Zahlen, auf denen `ema_synrm_cad` steht.
+    #     Staender 36 Nuten / 4 Pole, I_s = 50 A.
+    {"groesse": "SynRM_Barrieren_36N4P", "wert": 4, "einheit": "-",
+     "quelle": "moghaddam2007",
+     "zitat": ("„a rotor slots pitch for SynRM equal to or multiple of stator "
+               "slots pitch is emphasized, which means 2 or 4 barriers for a "
+               "36 slot stator\u201c (Kap. 5.1.3)")},
+    {"groesse": "SynRM_Isolationsgrad_opt_min", "wert": 0.2, "einheit": "-",
+     "quelle": "moghaddam2007",
+     "zitat": ("„a value between 0.2-0.6 seems to be an optimum value for the "
+               "average insulation ratio in the rotor\u201c (Kap. 5.1.4, Fig. 5.12)")},
+    {"groesse": "SynRM_Isolationsgrad_opt_max", "wert": 0.6, "einheit": "-",
+     "quelle": "moghaddam2007",
+     "zitat": ("„a value between 0.2-0.6 seems to be an optimum value for the "
+               "average insulation ratio in the rotor\u201c (Kap. 5.1.4, Fig. 5.12)")},
+    {"groesse": "SynRM_Moment_1_Barriere", "wert": 105.04, "einheit": "Nm",
+     "quelle": "moghaddam2007",
+     "zitat": "Max. average torque vs. number of barriers, I_s = 50 A (Kap. 8.1.3)"},
+    {"groesse": "SynRM_Moment_3_Barrieren", "wert": 150.08, "einheit": "Nm",
+     "quelle": "moghaddam2007",
+     "zitat": "Max. average torque vs. number of barriers, I_s = 50 A (Kap. 8.1.3)"},
+    {"groesse": "SynRM_Moment_5_Barrieren", "wert": 156.49, "einheit": "Nm",
+     "quelle": "moghaddam2007",
+     "zitat": ("Max. average torque vs. number of barriers, I_s = 50 A; "
+               "„increasing the number of barriers more than 5 ... will not "
+               "have any significant gain\u201c (Kap. 8.1.3)")},
+
     # (1) Speiche gegen Doppel-V -- gleicher Stator (280 mm), gleiche Baulaenge
     #     (170 mm), gleiches Moment (~400 Nm), Ferritmagnete, 48N/8P.
     {"groesse": "Ld_Speiche", "wert": 0.264, "einheit": "mH", "quelle": "sheffield",

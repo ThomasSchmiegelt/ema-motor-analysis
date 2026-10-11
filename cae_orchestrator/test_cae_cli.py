@@ -501,11 +501,32 @@ def test_fehlendes_modul_ist_kein_geometriebefund():
     nackt = re.findall(r"_die\(f?\"[^\"]*\",\s*\d\)", quelle)
     assert not nackt, f"Exit-Code als Literal statt als Konstante: {nackt}"
 
-    # (5) Und alle vier Fundstellen gehen durch DENSELBEN Helfer — vier
-    #     Abschriften waeren die, die beim naechsten Mal auseinanderlaufen.
+    # (5) Alle Fundstellen gehen durch DENSELBEN Helfer — mehrere Abschriften
+    #     waeren die, die beim naechsten Mal auseinanderlaufen.
+    #
+    # **Gepruefte wird die EIGENSCHAFT, nicht die Anzahl** (geaendert am
+    # 07.10.2026). Hier stand `rufe == 7`, und die Zahl war schon zweimal
+    # gewandert, ohne dass sich an der Sache etwas geaendert haette: 5 -> 7 mit
+    # dem zweiten Feldweg, dann 9, weil `axial` vier Fundstellen hat und
+    # `maschinenart` eine, die in der Aufzaehlung fehlte. Ein roter Test, dessen
+    # Meldung eine falsche Erwartung aufzaehlt, kostet beim naechsten Mal die
+    # Zeit, die er sparen sollte. Gemeint ist: jedes Verb, das ein schweres
+    # Modul ERST IM AUFRUF importiert, faengt seinen Fehlschlag mit diesem
+    # Helfer — und es gibt keinen zweiten.
     rufe = quelle.count("return _oertlicher_fehlschlag(e")
-    assert rufe == 4, (f"{rufe} Aufrufe statt 4 — erwartet: struktur, topopt, "
-                       f"feld2d, feld3d")
+    assert rufe >= 5, f"nur {rufe} Aufrufe — faengt ein Verb seinen Fehlschlag selbst?"
+    # Jeder lokale Fang MUSS der Helfer sein: ein `except Exception` um einen
+    # Loeser- oder Netzaufruf, das mit `_die(` endet, waere die Abschrift.
+    _verben = set()
+    for _m in re.finditer(r"_oertlicher_fehlschlag\(e", quelle):
+        _vor = quelle[:_m.start()]
+        _d = re.findall(r"^def (cmd_\w+)", _vor, re.M)
+        if _d:
+            _verben.add(_d[-1])
+    assert {"cmd_struktur", "cmd_topopt", "cmd_feld2d", "cmd_feld3d",
+            "cmd_axial"} <= _verben, (
+        f"ein Verb mit spaetem Import fehlt: {sorted(_verben)}")
+    assert "def _oertlicher_fehlschlag" in quelle, "und der Helfer ist EINER"
     print("✓ fehlendes Modul: Bedienfehler statt Geometriebefund, Interpreter "
           "genannt, echte Fehlschlaege bleiben Exit 1, keine nackten Exit-Codes")
 

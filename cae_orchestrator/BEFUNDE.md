@@ -17,6 +17,1138 @@ kann.
 
 ---
 
+## 2026-10-11 · Die Scheibe hatte keine Festigkeitsaussage — und ihr Lauf ließ sich nicht einmal ansehen
+
+**Beobachtung.** Nach der Reparatur vom 09.10. lief der Axialfluss aus der Maske
+durch, aber das Festigkeitskapitel blieb leer: Struktur-FEM und Lamé-Kennlinie
+sind für die Scheibe beide übersprungen, und darunter stand nur ein Verweis auf
+`cae_cli.py axial`. Ein Weg, den nur die Kommandozeile hat, ist für den, der vor
+dem Bildschirm sitzt, nicht vorhanden — dieselbe Regel, die dieses Repo für die
+Agentenköpfe aufstellt.
+
+**Messung.** `ema_axial.anzug`/`ruecken`/`bandage` waren gerechnet, getestet und
+hatten **keinen Aufrufer in der Pipeline**. Was sie liefern, ist keine Nuance:
+
+| | |
+|---|---:|
+| axialer Anzug (die HAUPTlast, 8,6 : 1 zum Schub) | 212,4 kPa = **7,52 kN je Luftspalt** |
+| negative Steifigkeit um die Mittellage | 30,1 MN/m |
+| Rückenblech magnetisch nötig / aus der Durchbiegung | 9,28 / **11,10 mm** (bindend: Durchbiegung) |
+| gezeichnet 13,0 mm → Durchbiegung | 62,3 µm = **6,2 % des Luftspalts** (zulässig 10 %) |
+| Magnetfliehkraft IN der Scheibenebene bei 6000 1/min | **56,9 kN**, Klebung 1,89 MPa |
+
+**Drei Fehler kamen beim Verdrahten heraus, jeder nur im Browser sichtbar:**
+
+1. **Ein fertiger Axiallauf ließ sich im Browser GAR NICHT öffnen.**
+   `renderSummary` griff ungeprüft zu: `s.max_safe_rpm.toLocaleString()` und
+   `s.mass_g.toFixed(1)`. Bei der Scheibe sind beide per Konstruktion `null`
+   (sie trägt weder Lamé-Ring noch Struktur-FEM, und ihre Masse kommt nicht aus
+   dem Zylindermodell). Gemessen: `loadProjectById` brach mit
+   `Fehler beim Laden: Cannot read properties of null (reading 'toLocaleString')`
+   ab — alle Ergebnisse unerreichbar, obwohl sie auf der Platte lagen. Eine 0
+   einzusetzen wäre der zweite Fehler gewesen: sie liest sich wie ein Messwert.
+   Jetzt „–" plus „nicht gerechnet".
+2. **`GET /field/0` → 404 bei jedem Laden.** Seit die Feld-Animation für die
+   Scheibe übersprungen wird, ist `em.field_modes` eine **leere Liste** — und
+   `renderField` fiel bei jedem falsy-Wert auf `rotate` zurück und ließ den
+   Spieler Rahmen 0 anfordern. `undefined` (Altprojekt ohne Metadaten) und `[]`
+   (ausdrücklich keine gerechnet) sind nicht dasselbe.
+3. **`ema_axial.ruecken(..., lam=…)` nahm die Blechsorte entgegen und las sie
+   nie.** Die Platte rechnete immer mit 200 GPa und ν = 0,30. Heute bewegt das
+   keine Ziffer — alle fünf Sorten tragen `E = 200000` MPa und `nu = 0,30`,
+   nachgemessen — und genau deshalb war es nicht aufgefallen; eine Signatur, die
+   etwas entgegennimmt und wegwirft, ist trotzdem eine Falle für den nächsten
+   Werkstoff. Gegenprobe im Test: ein Blech mit E = 100 GPa braucht jetzt mehr
+   Dicke.
+
+**Fundstelle.** `ema_pipeline.run_pipeline` (Stufe 6, der `_axial_lauf`-Zweig),
+`ema.html:renderSummary`/`renderField`/`showFrame`, `ema_axial.ruecken`.
+
+**Stand: behoben.** `_axial_struktur` ruft die drei Funktionen und baut
+**nichts** nach; `_axial_struktur_chart` zeichnet Dicke→Durchbiegung, die
+durchgebogene Scheibe im Schnitt und die Magnethaltung über der Drehzahl. Die
+Zahlen stehen im `summary` (und damit in Steckbrief, Bericht, `ema_db` und dem
+Ergebnisreiter), `ema_sicherheit` bekam ein eigenes Kriterium `durchbiegung`
+und sagt beim Axialfluss **nicht** mehr den Satz über „Ringformel" und
+„Spannungsspitzen an den Stegen über den Magnettaschen" — den es dort Wort für
+Wort nicht gibt.
+
+**Was ausdrücklich NICHT gerechnet wird, und warum keine Höchstdrehzahl
+herauskommt.** Der Anzug hängt an B_gap und nicht an der Drehzahl; die
+Magnethaltung bräuchte eine zulässige Spannung für Klebung oder Bandage, und
+dafür führt dieses Werkzeug **keine Werkstofftabelle** (`LAMINATES`, `MAGNETS`,
+`HAIRPIN_MATS` kennen weder Klebstoff noch Faserverbund). Wer eine hat, trägt
+sie als `axialKlebeZulMpa`/`axialBandageZulMpa` ein (Feld in ③ Betrieb) und
+bekommt ein Ja oder Nein; ohne sie steht die Kraft da und kein erfundener
+Querschnitt. Offen bleibt außerdem die **Fliehkraftspannung des Blechs gegen
+seine Streckgrenze** — hier steht die Last der MAGNETE auf ihrer Halterung,
+nicht die des Blechs auf sich selbst —, und die Verbindung Scheibe–Nabe, die
+`ruecken` als starre Einspannung annimmt und an der der größte Hebel sitzt.
+Alles drei steht als „Nicht gerechnet" unter dem Ergebnis, im Protokoll und im
+Steckbrief.
+
+---
+
+## 2026-10-09 · Der Browser konnte den Axialfluss wählen, aber nicht rechnen
+
+**Beobachtung.** „Axialfluss" in der Fußleiste gewählt, „⚙ Echte Berechnung"
+gedrückt — und im Protokollfenster stand ein nackter Traceback:
+
+```
+❌ FEHLER: 'axialAktivOD' fehlt -- fuer Axialfluss wird der AKTIVE
+Aussendurchmesser gebraucht. … Traceback: ema_pipeline.py:3284 →
+ema_axial_cad.pruefen → teile → ema_axial.auslegung:123
+```
+
+Dasselbe an der Elmer-Tür („auch geht es in Elmer nicht, ich kann die Geometrie
+nicht übernehmen") und bei „🧊 CAD ansehen".
+
+**Messung.** Der Reiter ② Geometrie hat **kein einziges `axial*`-Feld** — die
+Scheibe wird im Reiter ⊙ Axialfluss gezeichnet, und das ist Absicht
+(`axialfluss/LIESMICH.md`: 643 kB Maske, drei Viertel ihrer `geom`-Felder
+bedeuten axial nichts). `buildPayload` schickte deshalb `fluxPath="axial"` **mit
+dem radialen Vokabular und ohne eine einzige axiale Zahl**. Nachgestellt mit
+genau diesem Payload:
+
+| | vorher | nachher |
+|---|---|---|
+| `ema_fluss.flaechen` | `ValueError: 'axialAktivOD' fehlt` | 0,011266 m² |
+| `ema_axial_cad.pruefen` | derselbe Abbruch | 123 Teile, 12 Magnete, zeichenbar |
+| `POST /analyse` (Browserform) | Lauf endet an Stufe 1 | durchgelaufen, **CAD gebaut**: 46 Paare überlappfrei, 3.053.373 mm³, STEP |
+| `POST /em3d` | — | Sektor gegen Mehrschnitt −4,5 % im Mittel, 19,6 % max; 31.112 Knoten, 173.923 Tets |
+
+Zweiter, verdeckter Teil desselben Fehlers: **`ema_axial_thermik._geo` las
+`axialNutBreiteMm` roh**. Dort ist 0 keine Nut von 0 mm, sondern die Anweisung
+„aus `slotWidthRatio` ableiten" (so steht es in `AXIAL_VORGABE`, und so liest es
+`ema_axial.nutbreite_mm`, das sich selbst als **die EINE Quelle** ausweist —
+siehe den Befund vom 07.10.2026 darunter). Mit `axialNutBreiteMm = 0` starb
+deshalb `ema_axial_em3d.baue_netz` an einem Quader der Breite null:
+
+```
+Exception: Degenerate box   (gmsh.addBox, ema_axial_em3d.py:116)
+```
+
+Gemessen: b_nut **0,000 → 7,563 mm** (abgeleitet aus `slotWidthRatio` = 0,5 bei
+Q = 54); eine ausdrücklich gesetzte Nutbreite bleibt unberührt (6 mm bleiben
+6 mm). Das war die zweite Quelle für dieselbe Größe — genau die Sorte, gegen die
+`nutbreite_mm` gebaut wurde.
+
+**Fundstelle.** `ema.html:buildPayload` (schickte keine axialen Schlüssel),
+`ema_axial_thermik._geo` (`"b_nut": _zahl(geom, "axialNutBreiteMm", 6.0)`),
+`ema_fluss.axial_vorgabe` (vorhanden, aber **nur** von `cae_cli.py` gerufen —
+wieder der Fall „gerechnet und unerreichbar").
+
+**Stand: behoben, in dieser Reihenfolge.**
+
+1. **Der Browser holt die gezeichnete Scheibe.** `buildPayload` liest bei
+   `fluxPath = axial` das Formular des ⊙-Reiters (gleicher Ursprung,
+   `werteLesen()`) und lässt es über **`POST /axialfluss/geom`** umrechnen —
+   dieselbe `ema_fluss.aus_seite`, die auch „↑ ins Projekt übernehmen" benutzt.
+   Eine zweite Zuordnungstabelle in JavaScript wäre dieselbe Falle wie die
+   handgespiegelte `magnetLegs`. Gemessen schickt die Maske jetzt **22 axiale
+   Schlüssel** mit den Werten der Zeichnung.
+2. **Der Server füllt, was fehlt — und sagt es.** `ema_fluss.axial_ergaenzen`
+   ist `axial_vorgabe` mit Auskunft: es gibt zurück, WAS es gesetzt hat.
+   `server._axial_ergaenzen` hängt an vier Türen (`/analyse` über
+   `_payload_auffuellen`, `/cad_preview`, `/em3d`, `/em3d/sector`), die Pipeline
+   wiederholt es für Warteschlange und `cae_cli.py` (idempotent: ein zweiter
+   Durchgang ergänzt nichts). Jede Ergänzung steht im Protokoll, mit dem Satz,
+   dass sie ein **Ausgangspunkt und keine Auslegung** ist. Still zu füllen wäre
+   der Fehler, gegen den `ema_fluss` überhaupt gebaut ist.
+3. **Wo 0 „ableiten" heißt, sagt das Protokoll es** (`NULL_HEISST`): sonst liest
+   sich „axialNabeD = 0.0" als ergänztes Maß, und ein Nabendurchmesser von null
+   wäre keine Maschine.
+4. **`_geo` geht durch `ema_axial.nutbreite_mm`.**
+
+**Zweiter Nebenbefund, beim Nachmessen des reparierten Laufs gefunden:** die
+Feld-**Animation** war für den Axialfluss nicht abgeschaltet. Die Standbilder
+sind es seit dem 07.10.2026 (`ema_axial_fdm.bilder` statt `em_field.png`, weil
+`_field_frame` `hypot(X, Y)` rastert — einen Zylinderschnitt, in dem eine
+Scheibe ein Ring ohne Merkmal ist); die Schleife eine Ebene darunter lief
+weiter. Gemessen am Browserlauf: **72 Rahmen × ~9 s ≈ zehn Minuten für ein Bild
+der falschen Maschine**, unmittelbar nachdem die richtigen Bilder geschrieben
+worden waren. Jetzt übersprungen, mit dem Satz, was es statt dessen gibt.
+Ersetzt wird nichts: eine bewegte Scheibe bräuchte den abgewickelten
+Mehrschnitt über dem Rotorwinkel, und das ist eine neue Stufe, keine Reparatur.
+
+**Nebenbefund, mitbehoben:** die Oberfläche behauptete an drei Stellen, der
+Axialfluss trage **kein CAD** („Für die Scheibe gibt es keinen CAD-Aufbau",
+„CAD und Struktur-FEM tragen ihn nicht") — veraltet seit `ema_axial_cad`
+(07.10.2026); `STUFEN_AXIAL` führt `cad` und `em3d` längst, nur der
+Modulkopf von `ema_fluss` und die Maske sagten das Gegenteil. Ebenso der
+Smoke-Test: er lief nie mit FreeCAD und hatte **überhaupt keinen axialen
+Prüfpunkt**.
+
+---
+
+## 2026-10-07 · Zwei Schlüssel für die Nutbreite — 42 %, und 29 % auf ein Sättigungsurteil
+
+**Beobachtung.** Beim Bauen des Axialfluss-CAD gesucht, wie breit die Nut ist. Ein
+Zeichner muss sich entscheiden, und genau dabei fiel auf, dass es zwei Antworten gab.
+
+**Messung** (Vorgabe-Payload, Ro = 130 mm, Q = 48, Nutteilung aussen 17,017 mm):
+
+| Quelle | Nut aussen |
+|---|---:|
+| `slotWidthRatio` = 0,50 (der RADIALE Schlüssel, den `ema_axial.zahnform` liest) | 8,508 mm |
+| `axialNutBreiteMm` (der AXIALE Schlüssel, seit 06.10.2026 im Parametersatz) | 6,000 mm |
+
+**42 % auseinander**, und daraus fielen **B_zahn 1,312 gegen 1,014 T** am Aussenrand —
+ein Sättigungsurteil über einen Zahn, den niemand gezeichnet hat. `axialNutBreiteMm`
+war ausdrücklich dafür eingeführt worden (*„in mm statt als Verhältnis, weil die Nut
+parallelflankig ist"*), und `zahnform` las ihn nicht einmal.
+
+**Fundstelle.** `ema_axial.zahnform` (`swr = geom["slotWidthRatio"]`),
+`ema_text2ema.SCHEMA["axialNutBreiteMm"]`, `ema_axial_thermik._geo` (las schon den
+axialen Schlüssel).
+
+**Status: behoben.** `ema_axial.nutbreite_mm(geom, r)` ist die EINE Quelle, gelesen von
+`zahnform` UND vom CAD. Vorrang hat der axiale Schlüssel; ist er 0, gilt weiter
+`slotWidthRatio` und **bestehende Auslegungen bewegen sich um keine Ziffer** (im Test
+gegen 1,3125 T festgenagelt). `nutbreite_befund` nennt in jedem Ergebnis, welche
+Quelle gilt und was die andere ergeben hätte — 42 % schweigend auszutauschen wäre der
+Fehler, den diese Datei verhindern soll.
+
+**Nebenbefund, mitberichtigt:** `zahnform` rechnete die Überhöhung am Innenrand als
+`b_aussen/lambda` — eine Näherung. Exakt ist `B_zahn(r) = B_gap·τ_s(r)/(b_zahn(r)·k_fe)`
+mit `b_zahn = τ_s(r) − b_nut(r)`, und daraus fällt für den **Keilzahn** die Überhöhung
+**exakt 1,000** (die Nutteilung kürzt sich heraus — das ist die Aussage der Zahnform,
+und sie soll aus der Geometrie FALLEN, nicht gesetzt sein) und für den parallelen Zahn
+1,66 statt der genäherten 1,73.
+
+---
+
+## 2026-10-07 · Der Agent konnte keine Axialflussmaschine anlegen
+
+**Beobachtung.** Gewünscht als „eine Axialflussmaschine soll für den Agenten auch eine
+Möglichkeit sein". Nachgemessen war sie für ihn **nicht vorhanden**, in zwei Stufen.
+
+**Messung.** `SKILL.md` — die Unterlage, die der Agent als Autorität liest — enthielt
+das Wort „Axialfluss" **null** mal (alle sieben Treffer auf „axial" betrafen die
+Getriebe-Baulänge und die 2-D-Grenzen des FDM). Die Verbtabelle führte `axial` nicht,
+`maschinenart` nannte fünf Erregungsarten und keinen Flussweg, und `aufgabe`s
+`PFLICHTPUNKTE` — die Liste dessen, was vor einem Lauf feststehen muss — hatte keinen
+Punkt dafür.
+
+Und selbst wer davon wusste, kam nicht weiter:
+
+```
+$ cae_cli.py axial --frisch --set fluxPath=axial
+FEHLER: Wandmodus: Auch der kuerzeste Magnet passt nicht zwischen die Waende
+```
+
+`frischer_payload` läuft durch `ema_screen.einpassen` — die **radiale**
+Taschen-Einpassung. Eine Scheibe hat keine Magnettasche und keine Taschenwände; der
+Sektormagnet wird von Klebung oder einer Bandage am Außenrand gehalten. Dahinter lag
+die zweite Hälfte: `ema_text2ema.SCHEMA` trägt für die axialen Schlüssel `def: None`
+bzw. `0` (die Zeichenseite setzt sie ohnehin alle), ein frischer Payload war also eine
+Sammlung von Nullen, und der erste Zugriff darauf starb (`'axialAktivOD' fehlt`).
+
+**Fundstelle.** `.agents/skills/cae-orchestrator/SKILL.md`, `cae_cli.frischer_payload`,
+`cae_cli.PFLICHTPUNKTE`, `cae_cli.cmd_maschinenart`, `ema_steckbrief.maschine`.
+
+**Status: behoben.** `ema_fluss.axial_vorgabe` ist die EINE Quelle eines tragfähigen
+Startpunkts (die Maschine aus `AXIALFLUSS.md` §1, gegen die alle fünf Stufen gemessen
+sind); `frischer_payload(flussweg)` nimmt sie und **überspringt die radiale
+Einpassung**, erkannt über `_flussweg_aus_set` — der Agent soll EINEN Schlüssel kennen
+(`fluxPath`), nicht zwei Wege ihn zu setzen. `AXIAL_PFLICHT` trennt dabei die
+Schlüssel, bei denen 0 „ableiten" heißt (Joch, Nabe, Nutbreite), von denen, bei denen
+0 eine Lücke ist — daran scheiterte der erste Anlauf. Dazu: `maschinenart` nennt die
+Flusswege **zuerst** samt Weg je Stufe, `PFLICHTPUNKTE` hat den Punkt `flussweg` **vor**
+der Maschinenart (er entscheidet mehr), die Verbtabelle führt `axial` und
+`maschinenart`, `SKILL.md` hat einen eigenen Abschnitt, und der **Steckbrief** nennt
+den Flussweg in Zeile 1 des Maschinenblocks.
+
+**Und der Steckbrief beschrieb eine Scheibe als Zylindermaschine.** Er druckte
+`statorOD`/`statorID`/`Luftspalt` — im Payload einer Scheibe nur noch der Rest der
+radialen Maske — und „V-Form (IPM)" als Anordnung, weil `magShape` dort auf der
+Schemavorgabe stehenbleibt. Jetzt: Scheiben-Außendurchmesser, λ, Bauform, Spaltzahl,
+und als Anordnung die **Läuferart** (Sektormagnete / Halbach / Käfig / Scheibenanker).
+Das ist die Stelle, an der ein Agent sich orientiert; eine Falschangabe dort pflanzt
+sich in jede folgende Entscheidung fort.
+
+---
+
+## 2026-10-07 · Das Axialfluss-CAD — und vier Dinge, die FreeCAD nicht verzeiht
+
+**Beobachtung.** Gewünscht als „jetzt das CAD Modell angehen". Es gab keines: `cad` war
+die letzte Stufe, die der Axialfluss nicht trug, weil `ema_freecad` einen Zylinder mit
+Nuten in der Mantelfläche zeichnet.
+
+**Status: gebaut** (`ema_axial_cad.py`, `bau_axial.py`, `test_axial_cad.py`). Die
+Geometrie steht als **Zahlen** in `teile()` — stünde sie nur im erzeugten Skript, gäbe
+es sie genau einmal und weder ein Test noch ein Bild käme an sie heran (derselbe Fall
+wie bei `ema_wicklung.hairpin_radien` und `ema_eesm_cad`). Gelesen wird ausschließlich
+aus `ema_axial.auslegung`, `ema_axial_fdm.lagen` und der hier neu angelegten
+Python-Fassung der Stückelung.
+
+**Gemessen am fertigen Körper**, nicht an den Zahlen davor — alle Varianten:
+
+| Variante | Teile | Volumen | Durchdringung |
+|---|---:|---:|---|
+| YASA, parallel | 131 | 3.059.700 mm³ | 0 von 46 Paaren |
+| YASA, Keilzahn | 131 | 3.058.786 mm³ | 0 von 46 |
+| AFIR (zwei Ständer) | 228 | 4.439.032 mm³ | 0 von 43 |
+| TORUS NN (mit Joch) | 132 | 3.492.709 mm³ | 0 von 46 |
+| einseitig | 115 | 2.573.809 mm³ | 0 von 43 |
+| 3×2 Magnetsegmente | 291 | 3.032.399 mm³ | 0 von 46 |
+| Halbach, 4 Segmente | 227 | 3.081.218 mm³ | 0 von 46 |
+| Käfigläufer | — | — | **abgewiesen mit Grund** |
+
+Jedes Teil ein gültiger Festkörper mit Volumen > 0. Gegen die geschlossene Formel:
+Magnet 11.289 gegen 11.291 mm³ gerechnet (0,02 %), Läuferscheibe und Welle exakt, Zahn
+10.196 gegen 10.200 mm³.
+
+**Vier Dinge, die beim Bauen schiefgingen** — jedes einzeln tödlich:
+
+1. **`ViewObject` ist in `FreeCADCmd` `None`.** Ein nackter `_o.ViewObject.ShapeColor`
+   liess das **ganze** Skript scheitern: 131 Teile gebaut, keines gespeichert, Meldung
+   `'NoneType' object has no attribute 'ShapeColor'`. Die Farbe ist Zierat, der Bau
+   nicht.
+2. **Die Markerzeile trägt Anhang.** `json.loads` auf `AX_TEILE:` warf *Extra data:
+   column 8205* — FreeCAD schreibt eigene Meldungen ohne Rücksicht auf Zeilengrenzen.
+   Gelesen wird mit `raw_decode`, derselbe Fallstrick wie bei `ema_agent._zerlegen` und
+   der `\r`-Fortschrittszeile von FluidX3D.
+3. **`makeCylinder(..., angle)` läuft von 0 bis `angle`**, nicht symmetrisch um die
+   Mitte — gedreht wird daher um `th_mitte − th_halb`.
+4. **Der OCC-Fehlschlagfall.** `common().Volume` liefert bei einem gescheiterten
+   Schnitt bitgleich das Volumen eines Operanden (am Planetengetriebe gemessen); die
+   Durchdringungsprobe verwirft deshalb jeden Schnitt, der so groß ist wie ein ganzer
+   Operand, und meldet ihn als *nicht nachweisbar* statt als Durchdringung.
+
+**Was NICHT gebaut ist, steht an jeder Ausgabe** (`ungeprueft`): Lager, Gehäuse und die
+Verschraubung der Nabe (eine Konstruktionsentscheidung, keine Ableitung aus dem
+Magnetkreis); die **Bandage** (`ema_axial.bandage` rechnet die Kraft, aber ein
+Bandagenwerkstoff steht in keiner Tabelle dieses Werkzeugs); die Wicklung als Windungen
+(die Spule ist ein Volumen); und der **Verguss des jochlosen Ständers** — der YASA
+bleibt deshalb bewusst MEHRERE Festkörper. Einen Ring zu erfinden hiesse, den
+magnetischen Kurzschluss zu zeichnen, den die Bauform gerade vermeidet.
+
+**Zwei radiale Reste fielen dabei auf und sind behoben:** `_struct_sweep` lief auch
+weiter (s. Befund vom selben Tag), und die **Berichts-Feldbilder** (`em_field.png`)
+entstanden aus `_field_frame`, das `hypot(X, Y)` rastert — ein Ringfeld unter dem Namen
+der Scheibe, und das an der Stelle, an der man die Bauart nachsieht. Jetzt zeichnet
+`ema_axial_fdm.bilder` den abgewickelten Schnitt und `B_gap(r)`.
+
+**Und die Schichtung stand zweimal.** `stapelhoehe` führte die Lagenschleife für die
+Summe, `ema_axial_em3d._lagen` für die Lagen selbst; mit dem CAD wäre es die dritte
+Fassung geworden — und genau dort war der erste Entwurf des Elmer-Sektors schon einmal
+25 mm zu hoch. `ema_axial_fdm.lagen` ist jetzt die Quelle, `_lagen` eine Hülle, und
+`test_axial_cad.py` prüft, dass alle drei Leser dasselbe bekommen.
+
+---
+
+## 2026-10-07 · Aus dem Browser lief KEIN Axiallauf — das Tor prüfte den ganzen Satz
+
+**Beobachtung.** Gemeldet als „ich möchte den FDM Solver aus dem Berechnungs-Tab
+starten können". Nachgemessen war es schärfer als gefragt: ein Axiallauf aus der
+Oberfläche brach **immer** ab, und zwar bevor irgendetwas gerechnet war.
+
+**Messung.** `_gate_maschinenart` rief für den Axialfluss
+`ema_fluss.stufen_pruefen(data, stufen or _ALLE_STUFEN)` — und `stages` ist aus
+dem Browser **immer `None`** (die Auswahl gibt es nur im „Stufen nachrechnen"-
+Panel). Geprüft wurde damit der volle Satz, der `geometry` und `structural`
+enthält, und die wirft:
+
+```
+FlusswegNichtUnterstuetzt: Axialfluss: die Stufe(n) geometry, structural
+tragen ihn nicht. Getragen waeren hier: drivecycle, field, thermal.
+```
+
+Also: der Lauf wies sich selbst ab und nannte dabei korrekt die drei Stufen, die
+er hätte rechnen können. Genau diese Lehre stand eine Ebene tiefer schon
+ausgeschrieben — `_gate_maschinenart` hatte denselben Fehler bei den
+Maschinenarten (vier von fünf brachen bei 4 % ab, weil EINE Stufe woanders
+liegt) und war dafür korrigiert worden. Beim Flussweg wiederholte er sich.
+
+**Fundstelle.** `ema_pipeline._gate_maschinenart` (Zeile mit
+`stufen or _ALLE_STUFEN`), `ema_fluss.stufen_pruefen`.
+
+**Status: behoben.** `ema_fluss.stufen_aufteilen(geom, stufen)` gibt
+`(traegt, uebersprungen)` zurück; `run_pipeline` **verengt** den Stufensatz,
+statt ihn abzuweisen, und das Protokoll nennt jede übersprungene Stufe samt dem,
+was sie stattdessen rechnet (`ema_fluss.STUFE_STATTDESSEN`). `stufen_pruefen`
+bleibt unverändert für den AUSDRÜCKLICH verlangten Einzelschritt — dort ist ein
+Nein richtig.
+
+**Vier weitere Tore lagen dahinter, jedes erst nach dem vorigen sichtbar** —
+jedes hätte den Lauf einzeln getötet, und keines wäre ohne einen echten
+Durchlauf aufgefallen:
+
+1. **`estimate_saliency`** warf `_axial_tor`. Richtig war der Grund (die
+   V-Taschen-Salienz der Schemavorgabe, gemessen 2,589, hat eine Scheibe nicht),
+   falsch die Härte: **1,0 ist hier die richtige Antwort** — Oberflächenmagnete,
+   Ld = Lq, und genau das setzt `ema_axial_fdm.betriebspunkt` ohnehin voraus und
+   sagt es in seiner `grenzen`-Liste.
+2. **`_analytical_Bgap`** warf ebenfalls. Hier ist weder Werfen noch eine
+   radiale Zahl richtig, sondern **Delegieren**: `ema_axial_fdm.eichung_magnet`
+   ist die Arbeitsgerade der Scheibe, dieselbe, auf die Zeichenseite und
+   Mehrschnitt eichen. Die Abzweigung steht jetzt VOR `geom["statorID"]` — eine
+   Scheibe hat keine Statorbohrung.
+3. **`ema_thermal.compute_losses`** starb an `int(geom.get("nAx", 1))`: der
+   `.get`-Ersatzwert greift nur bei einem FEHLENDEN Schlüssel, nicht bei einem
+   vorhandenen mit dem Wert `None` — und `ema_text2ema.SCHEMA` trägt `None` für
+   jeden Eintrag, während `ema_fluss.aus_seite` die radialen Magnetschlüssel
+   überhaupt nicht setzt. Die Meldung war `⚠ Thermal-Analyse fehlgeschlagen:
+   int() argument … not 'NoneType'`, **ohne den Schlüssel zu nennen**. Damit war
+   die Thermik für den Axialfluss unerreichbar, obwohl `ema_axial_thermik` sie
+   seit dem 06.10. rechnet. Behoben über `ema_thermal._z` an zehn Stellen —
+   dieselbe Kur wie `ema_axial_thermik._zahl` einen Tag vorher, also derselbe
+   Fehler zweimal in zwei Modulen.
+4. **Die analytische Strukturkennlinie lief weiter** und meldete „max. sichere
+   Drehzahl ≈ 3000 U/min" für eine Scheibe — aus `_struct_sweep`, der
+   Ringspannung eines rotierenden RINGES (Lamé). Sie steht in `summary` und im
+   Bericht. Geschützt war sie durch **kein** `_do("structural")`, weil die
+   billigen Grundstufen immer laufen. Jetzt übersprungen, `max_safe_rpm` ist
+   `None` = *nicht gerechnet*, und wo eine Zahl zum Weiterrechnen gebraucht wird
+   (Kennfeld), tritt die angeforderte Höchstdrehzahl ein — ausdrücklich als
+   Betriebs- und nicht als Festigkeitsgrenze.
+
+---
+
+## 2026-10-07 · `ema_axial_em3d` war fertig und nur über die Kommandozeile erreichbar
+
+**Beobachtung.** Gefragt als „wie bekomme ich die Axialfluss-Maschine nach
+Elmer? Geometrie Axialfluss gibt es dort nicht."
+
+**Messung.** Zutreffend. `ema_axial_em3d` rechnete seit dem 06.10. den
+anti-periodischen Ringsektor, war gegen den Mehrschnitt gemessen (+2,5 %) und
+hatte 35 Prüfungen — erreichbar war es ausschließlich über
+`cae_cli.py axial --sektor`. Der 3-D-Reiter kannte nur zwei Geometriequellen
+(Geometrie-Tab / Designer) und keinen Flussweg; `ema_em3d.run_em3d` verzweigte
+nach **Maschinenart**, und eine Axialflussmaschine ist payloadseitig eine PSM
+(`machineType` bleibt `"pmsm"`) — sie wäre also stillschweigend in den
+magnetostatischen Vollmotorweg gelaufen, der konzentrische Zylinder baut.
+
+Dieselbe Lage und dieselbe Antwort wie bei der ASM am 20.09.2026: *derselbe
+Knopf, der richtige Löser.*
+
+**Fundstelle.** `ema_em3d.run_em3d` (Verzweigung nach `feldweg`), `ema_fluss`
+(kein 3-D-Weg geführt), `ema.html` (`_em3dGeomSummaryHtml`).
+
+**Status: behoben.** `ema_fluss.em3d_weg`/`pruefe_em3d_weg` +
+`STUFEN_AXIAL` trägt `"em3d"`; `run_em3d` prüft den **Flussweg VOR der
+Maschinenart** und ruft `_run_em3d_axial`. Gerechnet wird nicht nur der Sektor,
+sondern `vergleich` — Sektor UND Mehrschnitt auf derselben Geometrie, weil die
+Abweichung über dem Radius das Ergebnis ist und ein Sektor allein eine Zahl ohne
+Bezug. Gemessen über die Route: 25.784 Knoten, Sektor 22,5°, **+5,7 % im
+Mittel**, Randabfall innen 85 % / außen 90 %. Der Reiter sagt jetzt in der
+Geometriezusammenfassung, welcher Löser läuft, statt es zu verschweigen.
+
+---
+
+## 2026-10-07 · `build_em_rotor_script` hatte keinen Aufrufer
+
+**Beobachtung.** Beim Einrichten der CAD-Auswahl in der Fußleiste gesucht, was
+es überhaupt zu wählen gibt.
+
+**Messung.** `ema_freecad.build_em_rotor_script` (Läufer allein, 95 Zeilen) wird
+von **nirgends** gerufen — `grep` über den ganzen Baum findet nur die Definition.
+Gebaut wurde ausschließlich der Vollmotor, über `build_cad_preview`.
+
+**Fundstelle.** `ema_freecad.build_em_rotor_script`, `ema_pipeline.build_cad_preview`.
+
+**Status: erreichbar gemacht.** `build_cad_preview` nimmt `cad_modell`
+(`vollmotor` = Vorgabe, also jeder bisherige Aufruf unverändert · `laeufer`), und
+die Fußleiste wählt es. Für die Scheibe ist das Feld gesperrt und sagt warum:
+`ema_freecad` zeichnet einen Zylinder mit Nuten im Mantel, einen CAD-Aufbau der
+Axialflussmaschine gibt es nicht.
+
+---
+
+## 2026-10-06 · Die Eichung der Axialfluss-Feldstufe pinnte eine SPITZE auf einen MITTELWERT — 45 %
+
+**Beobachtung.** Der neue Elmer-Ringsektor (`ema_axial_em3d.vergleich`) wurde
+gegen den Mehrschnitt gestellt — die Gegenrechnung, für die er gebaut ist. Die
+beiden lagen **+49,0 % im Mittel und 68,1 % in der Spitze** auseinander. Das ist
+zu viel für einen Geometrieeffekt; der Faktor sah nach einer Definition aus.
+
+**Messung.** Er ist eine. `eichung_magnet` liefert die Arbeitsgerade
+
+    B = Br · hm/(hm + µr·kc·g) · alpha_i = 1,15 · 0,8325 · 0,85 = 0,8137 T
+
+— das `alpha_i` am Ende ist die Polbedeckung, also ein **flussgewichteter
+Mittelwert über die Polteilung**. `schnitt()` pinnte darauf die **SPITZE** des
+gelösten Feldes (`sf_m = b_an / max(pk_m, 1e-30)`) und meldete anschließend eine
+**GRUNDWELLE** (`b_n_grundwelle_T = 2·|k[h1]|`). Drei verschiedene Größen:
+
+| | Wert | Verhältnis |
+|---|---:|---:|
+| Mittel `Br·perm·alpha` | 0,8137 T | 1,000 |
+| Spitze `Br·perm` | 0,9573 T | 1,176 |
+| Grundwelle `4/pi·Br·perm·sin(alpha·pi/2)` | 1,1852 T | **1,457** |
+
+Nachgemessen am Schnitt bei r = 102,5 mm: `b_n_spitze_T` = 0,81374 T gegen
+`eichung_magnet` = 0,81374 T, also **auf sechs Stellen dieselbe Zahl** — die
+Spitze war wirklich auf den Mittelwert gepinnt.
+
+**Und eine zweite Hälfte, die sich dazu multipliziert.** Gepinnt wurde die Spitze
+des **genuteten** Feldes, und die ist kein Maß für den Fluss: über einem Zahn ist
+er gebündelt. Gemessen steigt die rohe Spitze durch die Nutung um **23,5 %**,
+während die rohe Grundwelle um 9,6 % **fällt**. Genau dieser Befund stand schon
+im Docstring von `carter()` zwei Funktionen weiter — *„an der Grundwelle und
+ausdrücklich **nicht an der Spitze**: … ein Carterfaktor von 0,82, also kleiner
+als eins, was es nicht geben kann"* —, und dieselbe Datei eichte trotzdem an der
+Spitze. Ein Modul, das an einer Stelle weiß, dass ein Maß untauglich ist, und es
+an der anderen als Anker nimmt.
+
+Das Verhältnis Grundwelle/Spitze trennt beides sauber:
+
+| | ohne Nut | mit Nut | Rechteck alpha=0,85 |
+|---|---:|---:|---:|
+| Grundwelle/Spitze | **1,2257** | 0,9056 | 1,2381 |
+
+Der nutlose Verlauf trifft die Fourierreihe der Rechteckwelle auf **1,0 %** —
+Löser und Wellenform sind also in Ordnung, und der ganze Fehler saß im Anker.
+
+**Fundstelle.** `ema_axial_fdm.schnitt` (Eichung), `ema_axial_fdm.eichung_magnet`
+(der mehrdeutige Rückgabewert), `ema_axial_fdm.carter` (der Docstring, der es
+schon wusste).
+
+**Status: behoben.** Drei **benannte** Anker statt eines mehrdeutigen —
+`eichung_magnet_spitze` (Flachdachwert, der einzige, den Modell und Löser gleich
+definieren), `eichung_magnet_grundwelle` (Fourier-Grundwelle) und
+`eichung_magnet` (unverändert der Mittelwert, jetzt im Docstring als solcher
+benannt, damit die vorhandenen Aufrufer Ziffer für Ziffer gleich bleiben).
+`schnitt()` eicht an der **Spitze des NUTLOSEN Begleitlaufs** gegen
+`eichung_magnet_spitze`; der Nutungsverlust wird damit **gemessen** statt aus
+`KC` angenommen. Kosten: ein zweiter Lösererlauf je Schnitt.
+
+Gemessen danach, derselbe Vergleich:
+
+| r [mm] | 3-D | Mehrschnitt alt | neu | Abw. alt | Abw. neu |
+|---:|---:|---:|---:|---:|---:|
+| 76,1 | 1,0135 | 0,8163 | 1,0794 | +24,2 % | −6,1 % |
+| 89,9 | 1,1242 | 0,7352 | 1,0775 | +52,9 % | +4,3 % |
+| 117,4 | 1,1618 | 0,7376 | 1,0623 | +57,5 % | +9,4 % |
+| | | | | **+44,9 %** | **+2,5 %** |
+
+**Der Rest ist das Ergebnis, nicht der Fehler:** die Abweichung wechselt von
+innen nach außen das Vorzeichen, weil der Mehrschnitt über r flach ist
+(1,079 → 1,062 T, −1,6 %) und das 3-D-Feld steigt (1,0135 → 1,1618 T, +14,6 %).
+Das ist genau der `d/dr`-Term, den der Mehrschnitt fallen lässt — die Größe, für
+die der Sektor gebaut wurde.
+
+**Nebenwirkung, die die Stufe besser macht.** Die Schnittkonvergenz von `psi`
+sprang vorher, weil jeder Schnitt an SEINER EIGENEN genuteten Spitze geeicht war
+und die davon abhängt, wo bei diesem Radius eine Nut gegenüber dem Magneten
+steht: der Eichfaktor sprang von Schnitt zu Schnitt. Jetzt liegt **k=2 bei 1,2 %**
+gegen k=8, wo vorher mehr als 8 % gefordert waren. `test_axial_fdm.py` hielt das
+alte Verhalten als Anforderung fest („k=2 ist deutlich zu grob") — die Erwartung
+ist nachgezogen und sagt, warum.
+
+**Die Zeichenseite hatte denselben Fehler, Zeichen für Zeichen.**
+`axialfluss/feld.js:eichung` rechnete `bAn = BR * perm * p.alpha` und
+`sf = bAn / pk` — dieselbe Verwechslung in einer zweiten Implementierung, und
+damit genau der Fall, für den dieses Repo seine JS↔Python-Spiegeltests hat. Sie
+ist mitberichtigt (nutloser Begleitlauf, Anker `BR * perm`), und der Spiegel in
+`test_fluss.py` prüft es jetzt, indem er `feld.js` **mit `node` ausführt** statt
+die Formel abzuschreiben — die Abschrift stand bis dahin dort und hätte die
+Änderung der Zeichenseite nicht sehen können.
+
+**Ein Zwischenstand, der verworfen wurde, und warum** (er sah besser aus): als
+Anker zuerst die **Grundwelle** statt der Spitze — ein Integral über die ganze
+Spaltlinie statt eines Maximums auf einer getreppten Kante, also numerisch
+ruhiger. Der Test hat es gefangen: eine Grundwelle trägt die Polbedeckung UND
+die Fugen der Magnetstückelung, der Bezugslauf trägt sie auch, und im Verhältnis
+kürzen sie sich heraus — mit 1-mm-Fugen fiel B1 nur noch von 1,1350 auf
+1,1359 T (0,1 %) statt um 11,7 %. Ein Regler, dessen Wirkung die Eichung
+wegnormiert, ist derselbe Fehler wie der Ständerstrom vor seinem Umbau. Die
+**Spitze** ist der richtige Anker, weil sie genau das misst, was die Formel
+beschreibt und nichts sonst: `Br·perm` ist der Flachdachwert unter einem
+Magneten, unabhängig von Bedeckung, Stückelung und Nutung — alle drei bleiben
+damit im gemeldeten Wert.
+
+**Was NICHT mitgeändert wurde und offen bleibt,** steht als eigener Befund
+darunter (`(2/pi)` auf einem Mittelwert).
+
+---
+
+## 2026-10-06 · Das Staenderjoch war auf alpha² bemessen — 28 % zu duenn
+
+**Beobachtung.** Beim Durchsehen aller Aufrufer von `eichung_magnet` (s. Befund
+darüber) fiel `_jochhoehe` auf.
+
+**Messung.** Dort stand
+
+    phi = eichung_magnet(geom) * a["polbedeckung"] * pi*(ro²-ri²)/poles
+
+— `eichung_magnet` **trägt die Polbedeckung schon**, sie ist ja der
+flussgewichtete Mittelwert. Noch einmal multipliziert bemisst das Joch auf
+`alpha² = 0,7225` des Flusses, den es führen muss. Am Beispiel (Ro 130 mm,
+λ 0,577, 2p 16, YASA): abgeleitetes Ständerjoch **7,889 statt 10,919 mm**, also
+28 % zu dünn.
+
+**Die Gegenprobe steckte daneben:** das Rückenblech wird von `ema_axial.ruecken`
+bemessen, das den Doppelzähler nicht hat, und kommt auf **11,102 mm**. Beide
+führen den halben Polfluss umfangs über ähnliche Fläche, müssen also beieinander
+liegen — 7,889 gegen 11,102 mm war der sichtbare Widerspruch, den niemand
+verglichen hatte. Nach der Berichtigung 10,92 gegen 11,10 mm (1,6 %).
+
+**Fundstelle.** `ema_axial_fdm._jochhoehe`.
+
+**Status: behoben**, und `test_axial_fdm.py` vergleicht Ständerjoch gegen
+Rückenblech, damit der Doppelzähler nicht zurückkommt. Betroffen war nur die
+**abgeleitete** Höhe; wo `axialJochStaenderMm` gezeichnet ist, gewinnt weiter das
+Gezeichnete, und dann ändert sich nichts.
+
+---
+
+## 2026-10-06 · `(2/pi)` auf einem schon gemittelten B — OFFEN
+
+**Beobachtung.** `ema_axial_fdm.betriebspunkt` rechnet
+
+    psi = p * (2/pi) * b_gap * a_fluss      mit b_gap = eichung_magnet(geom)
+
+Das `(2/pi)` ist der Mittelwert einer Halbsinuswelle über ihre Halbperiode, die
+Formel erwartet also eine **Amplitude** — das ist die Hauskonvention des
+Radialpfads (`psi_pm = p·(2/pi)·B_gap·R·L`, wo `B_gap` aus `_analytical_Bgap`
+amplitudenartig ist). Axial bekommt sie einen **Mittelwert**.
+
+**Messung.** Der Fluss je Pol ist `eichung_magnet · A_pol` (das IST der Mittelwert
+über die Polteilung); die Formel liefert `(2/pi)·0,8137·A = 0,518·A`, also **36 %
+weniger**. Sichtbar wird das am Verhältnis der beiden Momentwege, das die Stufe
+ohnehin ausgibt und als `widerspruch` benennt: gemessen **4,18…4,85 über 25…200 Nm**
+(16 % Spanne, also eine Normierung und keine Stromabhängigkeit).
+
+**Warum es hier nicht geändert wird.** Es bewegt `Kt`, `psi`, das Moment und jede
+daraus gerechnete Temperatur **jedes** Axialfluss-Projekts, und es greift in die
+Normierungsbrücke ein, mit der dieses Werkzeug seit jeher rechnet (eine Windung
+je Nut, `ema_asm.k_norm = pi·k_w·N_ph/p²`). Eine Berichtigung gehört gegen eine
+bekannte Maschine gemessen, nicht nebenbei mitgenommen — und still zu ändern wäre
+genau das, wogegen diese Datei existiert.
+
+**Fundstelle.** `ema_axial_fdm.betriebspunkt` (`psi = p*(2/pi)*b_gap*a_fluss`),
+`ema_axial_fdm.felder` (`T_verhaeltnis`, `widerspruch`).
+
+**Status: offen und benannt.** Die Stufe sagt es in jedem Ergebnis; `T_maxwell`
+ist der von der Eichung unabhängige Weg und der belastbarere für das Moment.
+
+---
+
+## 2026-10-06 · `dict.get(k, ersatz)` schuetzt nicht gegen ein ausdrueckliches `None`
+
+**Beobachtung.** Beim Bauen von `test_axial_em3d.py` brach die Thermik mit
+`TypeError: float() argument must be a string or a real number, not 'NoneType'`
+ab — mitten in `_geo`, und die Meldung nannte den Schlüssel nicht.
+
+**Messung.** `float(geom.get("axialNabeD", 0) or geom.get("shaftD", 60))`: der
+Ersatzwert einer `dict.get` greift nur bei einem **fehlenden** Schlüssel, nicht
+bei einem vorhandenen mit dem Wert `None`. Und `ema_text2ema.SCHEMA` trägt für
+**jeden** axialen Schlüssel `default: None` — wer einen Payload aus dem Schema
+aufbaut (wie jedes Testfile hier und `cae_cli --frisch`), bekommt Nullen. Sieben
+Stellen in `_geo` hatten dieselbe Falle.
+
+**Fundstelle.** `ema_axial_thermik._geo`.
+
+**Status: behoben** über `ema_axial_thermik._zahl(geom, schluessel, ersatz)`, das
+`None` und `""` als FEHLT behandelt — an einer Stelle statt siebenmal.
+
+---
+
+## 2026-10-06 · Der Laeufer der Scheibe drehte sich nicht — gefunden an einer Bildreihe
+
+**Beobachtung.** Auf den Wunsch nach Frames in den Projektordnern entstand eine
+Bildreihe ueber den Laeuferwinkel (`ema_axial_fdm.frames`). Zwei Frames, 180°
+elektrisch auseinander, sahen **gleich** aus.
+
+**Messung.** Der Schwerpunkt von `j_magnet` ueber eine ganze elektrische
+Periode:
+
+| Winkel mech | 0,00° | 5,62° | 11,25° | 16,88° | 22,50° |
+|---|---:|---:|---:|---:|---:|
+| Magnetschwerpunkt | 40,170 | 40,170 | 40,170 | 40,170 | 40,170 mm |
+
+Jeder Winkel gab **dasselbe Raster**. `rastere_scheibe` nimmt `rotor_winkel`
+entgegen, reicht ihn aber nur an `_nuten` weiter, wo er die Phase der
+STAENDERstroeme verschiebt; die Magnete klebten an `X % tau_p`.
+
+**Status: behoben.** `x_rot = X - rotor_winkel·r·1000` verschiebt das
+Polmuster; Laeufer und Stromwelle wandern damit zusammen und der Lastwinkel
+bleibt stehen — genau wie im radialen `_rasterise`. Nachgemessen:
+
+* nach einer **vollen** elektrischen Periode ist das Raster identisch (max|Δ| = 0),
+* nach einer **halben** (= eine Polteilung) exakt umgepolt (0 von 57.600 Zellen daneben),
+* und ein Achtel weiter sieht es anders aus.
+
+`test_axial_fdm.py` nagelt alle drei fest. **Aufgefallen ist es nur am Bild** —
+die 53 bestehenden Pruefungen liefen gruen, weil keine den Winkel bewegte.
+
+---
+
+## 2026-10-06 · Drei Bauhöhen für dieselbe Scheibe, und zwei Schlüssel für den Ständer
+
+**Beobachtung.** Beim Bau des Elmer-Ringsektors (Stufe 3) musste dessen
+Schichtung mit der des Mehrschnitts übereinstimmen — sonst vernetzt das
+3-D-Modell eine andere Maschine als die, gegen die es gemessen werden soll.
+Gemessen auf **einer** Geometrie:
+
+| | Bauhöhe |
+|---|---:|
+| `ema_axial_fdm.stapelhoehe` | 61,2 mm |
+| `ema_axial_thermik.stapelhoehe` | **65,0 mm** |
+| erster Entwurf `ema_axial_em3d._lagen` | **90,0 mm** |
+
+Drei Zahlen, drei Module. **Zwei Ursachen:**
+
+1. **Der erste Sektor-Entwurf schrieb die Schichtung ein drittes Mal auf** und
+   legte beim YASA zwei Zahnbänder übereinander (90 statt 65 mm). Die
+   kanonische Tabelle steht in `ema_axial_fdm._BAUFORMEN` und trägt zusätzlich
+   das **Magnetvorzeichen** (`kenn`) — den ganzen Unterschied zwischen YASA
+   (NS, Fluss axial durch den Zahn) und TORUS (NN, Fluss umfangs im Joch). Wer
+   sie neu schreibt, verliert das.
+2. **Zwei Schlüssel für dieselbe Größe.** Der Ständer hieß im Mehrschnitt
+   `slotDepth` (die *radiale* Nuttiefe) und im axialen Parametersatz seit dem
+   06.10.2026 `axialZahnLaengeMm`. Beide haben die Vorgabe 25 — sie fielen also
+   nur **zufällig** zusammen. Ebenso das Rückenblech: `ema_axial_fdm`
+   *rechnete* es aus dem Fluss (11,10 mm), während die Zeichenseite
+   `axialJochLaeuferMm` = 13,00 mm liefert.
+
+**Status: behoben.** `ema_axial_fdm.statorhoehe` ist die eine Quelle für die
+Ständerhöhe und bevorzugt den axialen Schlüssel; `_rueckenhoehe` und
+`_jochhoehe` nehmen das **GEZEICHNETE** vor dem gerechneten. Das ist die
+richtige Arbeitsteilung: hier die Geometrie, und ob sie reicht, sagt weiterhin
+`ema_axial.ruecken`. `ema_axial_em3d._lagen` liest `_BAUFORMEN` statt eine
+dritte Beschreibung zu führen. Danach: **65,00 / 65,00 / 65,00 mm.**
+
+---
+
+## 2026-10-06 · Der Schwerpunkt trennt den Magneten nicht von seinem Loch
+
+**Beobachtung.** Der Sektor meldete **vier** Magnete, wo es zwei gibt (eine
+Lage je Läuferscheibe).
+
+**Messung.** Eine Magnetlage besteht aus dem Ringsektor-Magneten (Bogen
+0,85·Polteilung, Ri…Ro) in einer Schicht, die radial bis in die Lufträder
+reicht. Nach `occ.fragment`:
+
+| Stück | Volumen | r | θ |
+|---|---:|---:|---:|
+| Magnet | 11 289,1 mm³ | 104,48 mm | **11,25°** |
+| Rest der Schicht | 11 267,9 mm³ | 113,31 mm | **11,25°** |
+
+Der Rest ist ein **C um den Magneten herum** — und sein Flächenschwerpunkt
+liegt auf demselben Winkel und im selben Radiusband. Die Winkelprobe
+(`|θ − α/2| ≤ Bogen/2`) erklärte deshalb beide zu Magneten.
+
+Es ist dieselbe Lektion wie in `ema_em2d_stat` („die Fläche allein genügt
+nicht: die 54 Statornuten sind flächengleich") und in `ema_em3d`
+(`single=True`, weil Magnet-Prisma und Tasche denselben COM teilen) — hier nur
+mit dem Winkel statt der Fläche.
+
+**Status: behoben.** Klassifiziert wird über die **Fragment-Karte**: `fragment`
+nennt zu jedem Eingabekörper seine Ausgabestücke, und nur den Magneten
+beansprucht der Magnet-Eingang. Dieselbe Technik wie im radialen Ein-Pol-Sektor.
+Danach 2 Magnete und 3 Nuten je Polteilung (48 Nuten / 16 Pole = 3 ✓).
+
+---
+
+## 2026-10-06 · Die Feldbilder waren Dateien mit 95 % Durchsicht
+
+**Beobachtung**, gemeldet als: *„hier ist der hintergrund durchsichtig. hat das
+einen grund? insgesamt wäre ein schwarzer hintergrund als std. besser."*
+
+Gemessen an den erzeugten PNG:
+
+| | Alphakanal | durchsichtige Fläche |
+|---|---|---:|
+| `frames_feld/` (ASM, SynRM, EESM, GSM) | ja | **94,7 %** |
+| `frames_axial/`, `frames/` (Pipeline) | nein | 0,0 % |
+
+**Es hatte einen Grund, und der Grund trägt nur die halbe Strecke.**
+`ema_feldbild` macht die Deckkraft zur Flussdichte (`durchsicht_cmap`): wo kein
+Fluss ist, ist nichts zu sehen, man schaut durch die Maschine auf das, was
+Fluss führt. `_leinwand` setzte dafür `fig.patch.set_alpha(0)`. In der rechten
+Agentenspalte liegt das Bild auf einem dunklen Schachbrett (`.kachel
+img.durchsicht`) und sieht richtig aus — **als Datei im Projektordner** liegt es
+auf dem weißen Grund des Bildbetrachters und sieht falsch aus. Dieselbe Falle,
+die `ema_agent.html` für die Kachel schon gelöst hatte, nur eine Ebene weiter.
+
+**Status: behoben, ohne die Idee aufzugeben.** `GRUND = "#0d1014"` ist die neue
+Vorgabe, die Durchsicht wird darauf VERRECHNET statt als Alphakanal in die
+Datei geschrieben. Das Bild sieht aus wie zuvor auf dem Schachbrett, die Datei
+ist aber überall richtig. `_leinwand(grund=None)` gibt die alte Fassung, und
+`_speichern` liest die Entscheidung aus der Leinwand statt sie ein zweites Mal
+zu treffen. `test_feldbild.py` misst die Aussage weiter nach — nur in
+HELLIGKEIT statt in Alpha: ein gutes Viertel der Fläche muss dunkel sein
+(„die Luft ist unsichtbar"), und der weggeschnittene Sektor muss dunkler sein
+als das volle Bild.
+
+**Zwei Dinge fielen beim Nachsehen auf und sind mitbehoben:**
+
+* Auf der FESTEN Leinwand (Bildreihe) wird alles abgeschnitten, was außerhalb
+  der Achse liegt — der Titel verlor links wie rechts Buchstaben, und eine
+  mehrzeilige Farbleistenbeschriftung war gar nicht zu sehen. Jetzt stehen die
+  Ränder von Hand (`subplots_adjust`), und der Titel ist kurz (`GSM —
+  Läuferwinkel 0,0° mech` statt des vollen Artnamens).
+* **Was die Farben bedeuten, stand nirgends** — ebenfalls gemeldet. Die Leiste
+  trug nur „Flussdichte |B| (T) — Deckkraft = |B|". Die Legende nennt jetzt
+  jede Schicht: Feldlinie (eng = viel Fluss), hell/weiß = hohe Flussdichte,
+  violett/dunkel = wenig bis kein Fluss, grau = Blechumriss (Geometrie, kein
+  Feld), rot = Magnet. Dass die Leiste ihre Farben VOLL deckend zeigt, während
+  sie es im Bild nicht sind, steht als Kommentar an der Stelle — sonst liest
+  jemand aus ihr die Deckkraft ab.
+
+---
+
+## 2026-10-06 · Eine Feldbildreihe ohne Erregung, und eine mit wackelnder Leinwand
+
+Zwei Fehler im selben neuen Weg (`ema_feldbild.frames`, die Bildreihe fuer die
+vier Arten, fuer die die Pipeline keine Frames schreibt):
+
+**1. Kein Feld.** Die erste Reihe fuer die ASM zeigte nur die GEOMETRIE:
+Farbleiste 0,00 … 0,30 T und nichts darin. Grund: eine magnetlose Maschine im
+Leerlauf hat keine Quelle — ohne Magnet und ohne Strom ist das Feld null.
+Behoben, indem der Betriebspunkt aus der ART kommt (`ema_asm.betriebspunkt`
+usw., gemessen i_q = 569 A fuer die ASM, 566/566 fuer den SynRM, 800 A fuer die
+EESM, 620 A fuer die GSM) und **nicht** aus `estimate_dq_currents`: die rechnet
+MTPA ueber eine Salienz, die auf `magnet_legs` steht und fuer diese Arten
+nichts bedeutet. Danach mittlere Bildaenderung zwischen zwei Frames 13,35 von
+255 statt 0,54.
+
+**2. Wackelnde Leinwand.** `_speichern` schneidet mit `bbox_inches="tight"` auf
+den Inhalt zu — fuer ein EINZELbild richtig, fuer eine Reihe falsch: ueber zehn
+Frames kamen zwei Breiten heraus (1411 und 1431 px, weil der Titel mit dem
+Laeuferwinkel mal drei- und mal vierstellig ist), ffmpeg machte daraus ein
+1412 px breites Video und skalierte acht von zehn Bildern. Das Wackeln sieht
+aus wie eine Bewegung der Maschine. Behoben mit `fest=True` (feste Leinwand,
+kein Zuschnitt); danach alle zehn Frames 1395 × 1395.
+
+**Und was dabei KEIN Fehler war:** eine erste Messung meldete „ASM dreht
+nicht" und „GSM dreht um −8°". Beides war der Messaufbau: der Abtastkreis lag
+bei der ASM im massiven Eisen UNTER den Kaefigstaeben, und −55,25° beim EESM
+ist bei 60° Polteilung dasselbe wie +4,75°. Dicht unter dem Laeuferrand
+gemessen drehen **alle fuenf** radialen Arten richtig (5,0° befohlen → 5,00 bis
+5,25° gemessen). Das steht hier, damit die Fehlmeldung nicht als Befund
+stehenbleibt.
+
+---
+
+## 2026-10-06 · Die EESM-Feldstufe brach an einem Rundungssplitter ab
+
+**Beobachtung.** Beim verlangten Durchlauf aller Varianten lief `cae_cli.py
+feld2d` fuer SynRM sauber durch und brach fuer die **EESM** ab:
+
+    Koerper 'rotoreisen' (2.2 mm^2 bei (0.0|0.0) mm) nicht wiedererkannt
+    -- die Zuordnung Name->Elmer-Nummer waere geraten
+    Netz: 108801 Dreiecke, 54613 Knoten, 72 Koerper
+
+Das Abweisen ist richtig: `zuordnen` erkennt eine Gruppe nach ElmerGrids
+Umnummerierung an Flaeche UND Schwerpunkt wieder, und ein 2,2-mm²-Splitter am
+Ursprung ist kein Griff. Falsch war, dass es diesen Koerper ueberhaupt gab.
+
+**Ursache.** `rotoreisen` ist eine **Restgruppe**: das Laeuferblech, soweit es
+kein Zeichenteil belegt. Beim Schenkelpollaeufer kacheln die Teile die Scheibe
+aber vollstaendig — gemessen 37 Teile (12 Polschuhe, 12 Kerne, 12 Spulen, ein
+Jochring) —, uebrig bleiben nur Rundungssplitter der Booleschen Operationen:
+**2,2 mm² bei 27.936 mm² Laeuferflaeche, also 0,008 %.** Das Blech steckt
+vollstaendig in der Gruppe `laeuferpole`.
+
+Unauffaellig blieb es, weil die anderen Bauarten einen echten Rest lassen: beim
+Kaefiglaeufer das Blech zwischen den Nuten, beim Reluktanzlaeufer das Eisen
+zwischen den Flussbarrieren.
+
+**Status: behoben.** Ein Rest unter `REST_MIN_ANTEIL` (1e-3 der Laeuferflaeche)
+wird **kein** Koerper mehr, und der Befund steht als `rest_befund` im Ergebnis
+statt zu verschwinden. Nachgemessen laeuft die EESM danach durch: Anisotropie
+1,667, Linearitaet **2,000x** (die Probe, die ein linearer Loeser bestehen
+muss), Bezugsfall glatter Laeufer 1,0002. Dass der Klirranteil dort 89 %
+erreicht, ist kein Fehler, sondern die Bauart — ausgepraegte Pole mit Luecken
+dazwischen —, und die Stufe sagt es.
+
+---
+
+## 2026-10-06 · Die Thermik kennt nur die PSM — ASM, EESM und GSM bekommen fremde Verluste
+
+**Beobachtung.** Beim verlangten Durchlauf aller Varianten (je ein Projekt, je
+`stages={"thermal","drivecycle"}`) kamen drei Zeilen **Ziffer für Ziffer
+gleich** heraus:
+
+| Variante | B_gap | T_Wicklung | P_total | WLTP |
+|---|---:|---:|---:|---:|
+| PSM | 0,630 T | 46,5 °C | 320,6 W | 14,419 kWh/100 km |
+| **ASM** | 0,800 T | **47,7 °C** | **404,3 W** | **14,456** |
+| SynRM | 0,283 T | 45,0 °C | 211,6 W | 14,371 |
+| **EESM** | 0,800 T | **47,7 °C** | **404,3 W** | **14,456** |
+| **GSM** | 0,800 T | **47,7 °C** | **404,3 W** | **14,456** |
+| Axial | 0,814 T | 44,0 °C | 191,5 W | 13,744 |
+
+Drei verschiedene Maschinen, eine Temperatur. (Dass B_gap bei allen dreien
+0,800 T ist, ist dagegen RICHTIG — es ist `geom.bZielT`, eine Vorgabe und kein
+Ergebnis.)
+
+**Ursache.** Die Thermikstufe rechnet ihre Verluste mit
+`ema_thermal.design_point_losses`, und das ist das Verlustmodell der
+**permanenterregten** Maschine: Statorkupfer über die Stromdichte,
+Statoreisen über `B_gap²·m_st`, Magnet-Wirbelstrom, Lager. Was eine ASM, eine
+EESM oder eine GSM thermisch AUSMACHT, kommt darin nicht vor. Jede Art rechnet
+es selbst (`ema_asm.verluste`, `ema_eesm.verluste`, `ema_gsm.verluste`) — nur
+liest das niemand:
+
+| Art | Thermikstufe | die Art selbst | Faktor | was fehlt |
+|---|---:|---:|---:|---|
+| ASM | 404,3 W | **797,6 W** | 2,0 | Käfig 333,8 W |
+| EESM | 404,3 W | **469,9 W** | 1,16 | Erreger 116,4 W + Schleifring 64,0 W |
+| GSM | 404,3 W | **4443,8 W** | **11,0** | Bürsten 1240,4 W, Ankerkupfer 2943,3 W |
+
+Beim Gleichstrommotor ist es **Faktor elf**: gemeldet werden 47,7 °C für eine
+Maschine, die 4,4 kW verheizt. Der Bürstenabfall allein (1240 W bei 800 A über
+zwei Kohlekontakte) ist größer als alles, was das LPTN überhaupt kennt — und er
+steht in `ema_gsm` ausgerechnet daneben.
+
+**Zweiter, kleinerer Teil: Magnetverlust ohne Magnete.** Dieselbe Rechnung wies
+ASM, EESM und GSM **9,5 W Magnet-Wirbelstromverlust** zu. `P_Mag_unseg = 0,005·P_Cu
++ 0,02·P_Fe·(f/200)²` steht auf Kupfer und Eisen und fragt nicht, ob es etwas
+gibt, worin ein Wirbelstrom fließen könnte.
+
+**Status: der kleinere Teil behoben, der größere NICHT.** `compute_losses` setzt
+`P_Mag_unseg = 0`, wo `ema_maschinenart.hole(...).hat_magnete` falsch ist —
+das ist eindeutig und kostet drei Zeilen.
+
+Die **Kopplung der artspezifischen Verluste ins LPTN ist offen**, und zwar
+bewusst: sie ist keine Verdrahtung, sondern eine Physikentscheidung. Die fünf
+Wärmequellen des Netzes sind Wicklung, Ständereisen, Läufereisen, Magnet und
+Welle; ein **Käfigverlust** gehört an den Läuferknoten, eine **Erregerwicklung**
+auch — aber sie ist eine WICKLUNG auf dem Läufer, und das Netz hat dafür keinen
+eigenen Knoten mit eigener Isolationsgrenze. Der **Bürstenverlust** entsteht am
+Kommutator, also weder im Eisen noch in der Wicklung. Das still zu verdrahten
+hieße, diese Zuordnungen im Vorbeigehen zu treffen; sie gehören erst
+entschieden, dann gebaut (`AXIALFLUSS.md`-Muster: Stufe benennen, dann bauen).
+
+**Was bis dahin gilt:** für ASM, EESM und GSM ist die Temperatur der Thermikstufe
+eine **untere Schranke** und als solche zu lesen. Die belastbaren Verlustzahlen
+stehen in `ema_asm`/`ema_eesm`/`ema_gsm` und sind über `cae_cli.py` erreichbar.
+
+---
+
+## 2026-10-06 · Ein Teil-Lauf ohne Strukturstufe bricht am Ende ab
+
+**Beobachtung.** Gefragt wurde, woher der Knopf „Echte Berechnung" weiß, ob er
+axial oder radial rechnet. Beim Nachgehen lief ein Teil-Lauf
+(`stages={"thermal","drivecycle"}`) vollständig durch — Thermik gerechnet,
+beide Fahrzyklen gerechnet, Temperaturen im Protokoll — und brach **danach** ab:
+
+    TypeError: unsupported operand type(s) for *: 'NoneType' and 'int'
+    ema_pipeline.py:4087   f_el = rpm_fem * int(geom["p"]) / 60
+
+`rpm_fem` wird erst in der **Strukturstufe** gesetzt. Wird die übersprungen,
+ist sie `None`, und der Werkstoffblock ganz am Ende rechnet damit.
+
+**Nicht axialspezifisch.** Gegengeprüft mit einem **radialen** `--frisch`-Payload
+und `stages={"thermal"}`: derselbe Abbruch. Das trifft also jedes „🔁 Stufen
+nachrechnen", das die Struktur-FEM nicht mit anhakt — und das ist der Normalfall,
+wenn man eine vergessene Thermik nachzieht.
+
+**Unauffällig blieb es,** weil der äußere Fang die Ausnahme in ein „❌ FEHLER"
+im Protokoll verwandelt, die bis dahin gerechneten Ergebnisse aber stehen lässt.
+Von außen sieht es aus wie ein Lauf, der fertig wurde und sich am Schluss
+beschwert.
+
+**Status: behoben.** `_rpm_eisen = rpm_fem if rpm_fem else rpm_to` — `rpm_to`
+ist die Drehzahl, auf die sich der Rest der Zusammenfassung ohnehin bezieht.
+Der Eisenverlust-Schätzwert `materials.P_fe_W_est` bezieht sich dann auf sie
+statt auf die FEM-Drehzahl; bei einem vollen Lauf ändert sich nichts.
+
+---
+
+## 2026-10-06 · „Echte Berechnung" konnte nicht sagen, welche Maschine sie rechnet
+
+**Beobachtung**, und die Frage war genau richtig gestellt: `ema.html` enthielt
+`fluxPath` **null** mal. Der Schlüssel existierte nur im Schema. Dass ein axial
+geladenes Projekt trotzdem axial rechnete, lag an einer einzigen Zeile in
+`applyPayload` (`for (const [k,v] of Object.entries(G)) GEOM[k] = v; // incl.
+input-less keys`) und am `{...GEOM}` in `buildPayload` — also an einem
+Durchreichen, das niemand als Entscheidung geschrieben hat.
+
+**Zwei Folgen, beide schlecht:**
+
+1. **Nichts zeigte es.** Der Knopf hieß „⚙ Echte Berechnung", und welche der
+   beiden Maschinen er rechnet, stand nirgends — bis Stufe 0 im Protokoll
+   abwies.
+2. **`GEOM` überlebt in `localStorage`.** Ein `fluxPath: "axial"` aus einer
+   früheren Sitzung bleibt damit hängen und macht den nächsten, radial
+   gemeinten Entwurf axial — dieselbe Falle, die bei `customLegs` schon einmal
+   zugeschlagen hat („nur Durchmesser übernommen, Magnete ignoriert").
+
+Es ist derselbe Befund wie bei `machineType` am 18.09.2026, dessen Behebung in
+`buildPayload` zwei Zeilen darüber steht: *„Ohne diese Zeile rechnete der
+Browser IMMER eine PSM."*
+
+**Status: behoben.** Eigenes Auswahlfeld **vor** der Maschinenart (der Flussweg
+ist die Entscheidung davor — er bestimmt, ob der Luftspalt ein Zylindermantel
+oder eine Ringfläche ist), `buildPayload` setzt ihn ausdrücklich,
+`applyPayload` stellt ihn zurück, und der Knopf heißt bei axialem Flussweg
+**„⚙ Echte Berechnung (axial)"**. Darunter steht, welche Stufen dann laufen und
+welche Stufe 0 abweist.
+
+---
+
+## 2026-10-06 · Stufe 0 prüfte an der Scheibe radiale Maße und fand sie gut
+
+**Beobachtung.** Beim ersten Pipelinelauf einer übernommenen Scheibe meldete das
+Grenzen-Tor:
+
+    🛡 Luftspalt 0.700 mm ✅
+    🛡 Wickelkopf aussen 246.4 mm gegen Stator 280.0 mm ✅
+    🛡 Nuttiefe 25.0 mm in 45.0 mm Statorwand ✅
+
+Die Maschine hat **1,0 mm** Luftspalt und einen Ringraum von **260 mm**. Die
+geprüften Werte sind die `--frisch`-Schemavorgaben, die
+`_payload_auffuellen` unter den Payload legt; auf einer Scheibe bedeuten
+`statorID`, `rotorOD`, `airGap` und `slotDepth` nichts. Ein grünes Urteil über
+Maße, die es nicht gibt, ist schlechter als keine Prüfung.
+
+Zwei weitere Tore **stürzten ab** statt zu urteilen: `_gate_rotor_layout` mit
+`KeyError: 'layout'` (für die Scheibe gibt `rotor_layout_check` kein `layout`
+zurück — sie hat keine Magnettaschen in einem Querschnitt senkrecht zur Achse),
+und `_gate_rotor_stress` ließ die `FlusswegNichtUnterstuetzt` von
+`rotor_stress_check` durch und beendete damit einen Lauf, der Thermik und
+Fahrzyklus rechnen sollte.
+
+**Status: behoben.** `_gate_grenzen_axial` prüft, was die Scheibe wirklich hat:
+den **axialen** Luftspalt gegen dieselbe Spanne `ema_grenzen.LUFTSPALT_MM` und
+die λ-Schranke am Innenrand aus `ema_axial.lambda_grenze` — dort wird die Nut
+zu schmal, und das ist die Grenze, die diese Bauart bindet (gemessen
+λ_min = 0,2351 gegen gewählte 0,5770). Die beiden Rotor-Tore fangen den
+Flussweg-Einspruch und **sagen**, wo die Scheibe statt dessen gerechnet wird
+(`ema_axial.ruecken` für die Durchbiegung unter dem axialen Anzug,
+`ema_axial.bandage` für die Fliehkraft in der Scheibenebene).
+
+---
+
+## 2026-10-06 · Die beiden Axialfluss-Stufen hatten keinen einzigen Aufrufer
+
+**Beobachtung.** `ema_axial.py` (Stufe 1, analytisch) und `ema_axial_fdm.py`
+(Stufe 2, abgewickelter Mehrschnitt) sind am 05.10.2026 gebaut und getestet
+worden — 69 bzw. 50 Prüfungen, alle grün. Beim Zusammenführen der Zeichenseite
+fiel auf, dass sie **außerhalb ihrer eigenen Tests nirgends gerufen werden**:
+`ema_pipeline` ruft sie nicht, `cae_cli.py` hatte kein Verb, `server.py` keine
+Route, `ema.html` keinen Knopf. Ein `grep` über den Baum ergibt außer
+`test_axial*.py` und einem Kommentar in `ema_rotorcheck` keinen Treffer.
+
+Das ist dieselbe Lage wie bei den Agentenläufen vor `/agent/laeufe` und bei den
+Parameterstudien vor ihrer Ablage: gerechnet und unerreichbar ist dasselbe wie
+nicht gerechnet.
+
+**Status: behoben.** Verb `cae_cli.py axial` (beide Stufen, `--stufe
+analytisch|feld|beides`), Route `POST /axialfluss/rechnen`, Reiter
+**⊙ Axialfluss** in `ema.html`. Dazu `GET /axialfluss/vorgabe` und
+`POST /axialfluss/uebernehmen` als Weg ins Projekt, und
+`ema_fluss.SEITE_FELDER` als die EINE Zuordnung Feldname ↔ Schemaschlüssel.
+
+---
+
+## 2026-10-06 · Die beiden Feldstufen widersprechen sich — und nur eine konvergiert
+
+**Beobachtung.** Mit der Zusammenführung standen zum ersten Mal zwei
+unabhängige Feldlöser auf derselben Scheibe: `ema_axial_fdm` (Python,
+quadratisches Gitter, Eisenpolsterung) und `axialfluss/schnitt.js` (JS,
+rechteckiges Gitter mit **schichtbündigen** Gitterlinien). Sie geben
+verschiedene Antworten.
+
+**Messung** (identische Geometrie: Ro 130, λ 0,577, 2p 16, Q 48, Spalt 1 mm,
+Magnet 6 mm; Arbeitsgerade analytisch **0,8137 T**):
+
+| Löser | B_gap über r [T] | Mittel | gegen analytisch |
+|---|---|---:|---:|
+| JS, schichtbündig | 0,8378 0,8322 0,8137 0,8247 0,8214 | 0,826 | **+1,5 %** |
+| Python, gleichmäßig | 0,7516 0,7158 0,7100 0,6921 0,6988 | 0,711 | **−12,6 %** |
+
+Und die entscheidende Gegenprobe — **konvergiert die Python-Stufe über N?**
+
+| N | 300 | 450 | 700 | 1000 |
+|---|---:|---:|---:|---:|
+| Mittel [T] | 0,7109 | 0,7363 | 0,7594 | 0,7350 |
+| gegen analytisch | −12,6 % | −9,5 % | −6,7 % | −9,7 % |
+
+Nein. Sie wandert ohne Richtung, und der radiale **Verlauf kippt dazu**: bei
+N = 450 steigt B_gap nach außen, bei N = 1000 fällt es. 37 s bei N = 1000, und
+die Zahl steht immer noch nicht. Der JS-Löser konvergiert auf derselben
+Geometrie monoton (8,99 → 3,86 → 3,20 → 0,43 → 0 %).
+
+**Ursache** ist die schon am selben Tag gemessene: das gleichmäßige Gitter
+lässt die dünnen Schichten (1 mm Spalt) darauf *schnappen*, und eine halbe
+Zellbreite Versatz ändert den wirksamen Spalt um Prozente.
+`ema_analysis._build_fv_matrix` rechnet mit EINER Maschenweite auf
+quadratischem Gitter — ein schichtbündiges, ungleichmäßiges y bräuchte dort
+einen eigenen Matrixaufbau. Das ist der Preis dafür, bisher den HausLöser
+unverändert benutzt zu haben, und er ist damit beziffert.
+
+**Status: gemessen und BENANNT, nicht repariert.** Der Umbau von
+`ema_axial_fdm` auf ein schichtbündiges Gitter ist der nächste Schritt und
+nicht Teil dieser Zusammenführung — still mitten im Lauf zu reparieren hieße,
+dass die Zahlen davor und danach aus zwei verschiedenen Werkzeugen stammen,
+ohne dass man es ihnen ansieht (s. `ema_werkzeugstand.py`). Statt dessen:
+
+* `ema_axial_fdm.felder` führt die Nicht-Konvergenz samt Zahlen in seiner
+  `grenzen`-Liste, also sieht sie **jeder** Aufrufer;
+* `cae_cli.py axial` schreibt bei mehr als 3 % Abweichung ausdrücklich
+  „das ist überwiegend das GITTER, nicht die Physik" darunter — ohne den Satz
+  liest sich −6,7 % wie ein Streuungs- oder Sättigungseffekt;
+* belastbar ist bis dahin der Wert des Reiters ⊙ Axialfluss.
+
+**Was dabei ÜBEREINSTIMMT, und das ist die Gegenprobe:** beide Wege eichen auf
+dieselbe Arbeitsgerade `Br·hm/(hm + µ_r·kc·g)·α`. Python rechnet 0,81370 T,
+die Zeichenseite 0,81370 T — Ziffer für Ziffer, über zwei getrennte
+Implementierungen. In `test_fluss.py` festgenagelt. Der Unterschied steckt
+also wirklich im Löser und nicht in der Modellannahme.
+
+**Zweiter Punkt, der dabei zusammenpasst:** Stufe 1 sagt für den parallelen
+Zahn `B_Zahn ~ 1/r`, also innen/außen = Ro/Ri = **1,73×**. Der JS-Mehrschnitt
+misst **1,68×**. Zwei unabhängige Wege, 3 % auseinander — die Aussage der
+Bauart trägt auf beiden.
+
+---
+
+### Nachtrag 06.10.2026, späterer Tag: **die Ursache oben ist falsch** — behoben
+
+Die gemessene Streuung war echt. Die **Begründung war es nicht.** Der Verdacht
+fiel auf das gleichmäßige Gitter, weil derselbe Befund am selben Tag für die
+JS-Seite gemessen und dort durch schichtbündige Gitterlinien behoben worden war
+— eine naheliegende Übertragung, und sie war die falsche.
+
+Wirkliche Ursache war die **Eichung**: geeicht wurde an der Spitze des
+**genuteten** Feldes, und die sitzt auf einer getreppten Zahnkante, deren Lage
+mit N wandert. Also wanderte der Eichfaktor, nicht das Feld. Dazu war der Anker
+ein Mittelwert, wo eine Spitze stand (eigener Befund weiter oben). Nach der
+Berichtigung, gleiche Geometrie, gleiche Stufe:
+
+| N | 300 | 450 | 700 |
+|---|---:|---:|---:|
+| Mittel B_gap(r) | 1,0656 T | 1,0655 T | 1,0643 T |
+
+**0,1 % über eine Verdopplung von N**, auf demselben gleichmäßigen Gitter, das
+hier als Ursache benannt war. Der Umbau auf ein schichtbündiges Gitter ist damit
+**nicht nötig** — das ist der eigentliche Wert dieses Nachtrags, denn er war als
+„nächster Schritt" vorgemerkt.
+
+**Und die drei Löser liegen jetzt beieinander** (dieselbe Scheibe, Leerlauf;
+analytische Grundwelle der Arbeitsgeraden ohne Nut 1,1852 T):
+
+| Weg | Mittel | gegen analytisch |
+|---|---:|---:|
+| `axialfluss/schnitt.js` (JS, schichtbündig) | 1,0819 T | −8,7 % |
+| `ema_axial_fdm.felder` (Python, gleichmäßig) | 1,0643 T | −10,2 % |
+| `ema_axial_em3d` (Elmer 3-D, Ringsektor) | ~1,10 T | −7,2 % |
+
+Drei unabhängige Löser innerhalb von **3 %**, und die −8…−10 % gegen die
+analytische Grundwelle sind der **gemessene Nutungsverlust**: `carter` misst an
+derselben Scheibe 1,096, also −8,8 %, wo die Arbeitsgerade mit angenommenen
+`KC = 1,15` rechnet.
+
+**Mitgezogen wurden die Stellen, an denen das Werkzeug das Alte über sich
+sagte** — eine stehengelassene Selbstaussage ist schlimmer als keine:
+`ema_axial_fdm.felder`s `grenzen`-Liste, der `⚠ … überwiegend das GITTER"`-Satz
+in `cae_cli axial` (jetzt ein `ⓘ` über die Nutung), die Monotonie-Behauptung in
+`axialfluss/pruefe.js` (gemessen ist die Konvergenz **beschränkt**, ±1,8 %, aber
+nicht monoton — die frühere Monotonie kam daher, dass ein Verhältnis zweier
+korrelierter Größen aus EINEM Lauf gemeldet wurde, was einen Teil des
+Diskretisierungsfehlers herauskürzt) und die Spiegelprüfung in `test_fluss.py`,
+die den JS-Anker **als Formel abgeschrieben** hatte und ihn jetzt mit `node` aus
+`feld.js` ausrechnen lässt.
+
+---
+
 ## 2026-10-06 · Der Ständerstrom der Ansichtsseite war ein Regler, der nichts tat
 
 **Beobachtung.** Beim Bau des Achsschnitts (`axialfluss/schnitt.js`) sollte der

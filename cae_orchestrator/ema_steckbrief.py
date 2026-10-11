@@ -330,7 +330,15 @@ KENNWERTE = ["B_gap_T", "Kt_Nm_per_A", "T_maxwell_Nm", "T_peak_max_Nm",
              # einem Projekt gerechnet ist -- und bis zum 13.09.2026 stand
              # darueber nichts, obwohl es die Grenze ist, die am staerksten mit
              # der Geometrie wandert.
-             "B_zahn_T", "B_joch_T", "B_eisen_T", "saettigung_pct"]
+             "B_zahn_T", "B_joch_T", "B_eisen_T", "saettigung_pct",
+             # ⊙ Die Scheibe traegt andere Lasten als der Zylinder, und bis zum
+             # 09.10.2026 stand im Steckbrief darueber nichts: `max_safe_rpm`
+             # und `safety_factor_fem` sind bei ihr beide `None`, der Abschnitt
+             # Festigkeit war also leer. Diese fuenf stehen nur dort, wo sie
+             # gerechnet wurden -- `_kennwerte` laesst fehlende Schluessel weg.
+             "axial_anzug_kPa", "axial_w_max_um", "axial_w_anteil_spalt",
+             "axial_ruecken_bindet", "axial_magnetkraft_kN",
+             "axial_klebescher_MPa", "axial_klebung_haelt"]
 
 
 def maschine(payload: dict, projektakte: dict) -> dict:
@@ -352,12 +360,53 @@ def maschine(payload: dict, projektakte: dict) -> dict:
         anordnung_text = TOPOLOGY_LABELS.get(str(g.get("magShape")), "")
     except Exception:                                        # noqa: BLE001
         anordnung_text = ""
+    # **Der FLUSSWEG gehoert vor die Maschinenart.** Ohne ihn beschrieb der
+    # Steckbrief eine Axialflussmaschine als Zylindermaschine: `statorOD`,
+    # `rotorOD` und der daraus gerechnete Luftspalt stehen im Payload einer
+    # Scheibe nur noch als Rest der radialen Maske, waehrend die wirklichen Masse
+    # `axialAktivOD`/`axialLambda` heissen. Wer das liest, rechnet mit der
+    # falschen Maschine weiter -- und der Steckbrief ist genau die Stelle, an der
+    # ein Agent sich orientiert.
+    try:
+        import ema_fluss as _FLSB
+        weg = _FLSB.flussweg(g)
+        weg_text = _FLSB.LABEL[weg]
+        weg_stufen = (list(_FLSB.STUFEN_AXIAL) if weg == "axial" else None)
+    except Exception:                                        # noqa: BLE001
+        weg, weg_text, weg_stufen = "radial", "Radialfluss", None
+    axial_masse = None
+    if weg == "axial":
+        # `magShape` ist bei einer Scheibe ein Rest der radialen Maske. „V-Form
+        # (IPM)" ueber einem Scheibenlaeufer zu schreiben waere eine Anordnung,
+        # die es dort nicht gibt -- die Anordnung ist die LAEUFERART.
+        _la = str(g.get("axialLaeuferart") or "sektor")
+        anordnung_text = {
+            "sektor": "Sektormagnete flach auf der Scheibe",
+            "halbach": "Halbach-Array (ohne Laeufereisen)",
+            "kaefig": "Laeuferzaehne mit Kurzschlussring (ASM)",
+            "eisenlos": "Scheibenanker (der Laeufer traegt die Wicklung)",
+        }.get(_la, _la)
+        axial_masse = {
+            "aktivOD_mm": g.get("axialAktivOD"), "lambda": g.get("axialLambda"),
+            "bauform": g.get("axialBauform"), "spalte": g.get("axialSpalte"),
+            "spalt_mm": g.get("axialSpaltMm"),
+            "magnet_dicke_mm": g.get("axialMagnetDicke"),
+            "polbedeckung": g.get("axialPolbedeckung"),
+            "zahnform": g.get("axialZahnform"),
+            "zahnlaenge_mm": g.get("axialZahnLaengeMm"),
+            "laeuferart": g.get("axialLaeuferart"),
+            "segmente": f"{g.get('axialMagSegUmfang')}x{g.get('axialMagSegRadial')}",
+        }
     p = g.get("p")
     return {
+        "flussweg": weg, "flussweg_text": weg_text,
+        "flussweg_stufen": weg_stufen, "axial": axial_masse,
         "art": art, "art_text": art_text,
         "p": p, "pole": (int(p) * 2 if isinstance(p, (int, float)) and p else None),
         "nuten": g.get("slots"),
-        "anordnung": g.get("magShape"), "anordnung_text": anordnung_text,
+        "anordnung": (g.get("axialLaeuferart") if weg == "axial"
+                      else g.get("magShape")),
+        "anordnung_text": anordnung_text,
         "statorOD_mm": g.get("statorOD"), "statorID_mm": g.get("statorID"),
         "rotorOD_mm": g.get("rotorOD"),
         "axial_mm": payload.get("axial_len") or g.get("axialLen"),
@@ -526,7 +575,31 @@ def _warnungen(sb: dict, zus: dict) -> list[str]:
     if zus.get("structural_basis") == "analytisch":
         w.append("Die Festigkeitszahl ist ANALYTISCH — die FEM ist nicht gelaufen. "
                  "Sie kennt die Spannungsspitzen an den Stegen nicht.")
-    if zus and zus.get("safety_factor_fem") is None:
+    # ⊙ Bei der Scheibe ist das Fehlen der FEM kein Mangel, sondern die Bauart:
+    # sie traegt zwei ANDERE Lasten, und die sind gerechnet. Den Satz darunter
+    # („safety_factor_fem fehlt") trotzdem stehen zu lassen hiesse, einen
+    # gerechneten Lauf als luckenhaft zu melden; weggelassen heisst es, die
+    # Luecke zu verschweigen, die wirklich bleibt. Also beides genau benennen.
+    elif zus.get("structural_basis") == "scheibe":
+        # Was offen ist, haengt daran, ob eine zulaessige Spannung angegeben
+        # wurde. „dafuer fehlt eine Angabe" zu schreiben, nachdem jemand sie
+        # gemacht hat, waere eine Warnung ueber den eigenen Lauf.
+        haelt = zus.get("axial_klebung_haelt")
+        offen = ("Die Fliehkraftspannung des Blechs gegen seine Streckgrenze"
+                 if haelt is not None else
+                 "Die Fliehkraftspannung des Blechs gegen seine Streckgrenze, "
+                 "und ob die Magnetklebung haelt (dafuer fehlt eine zulaessige "
+                 "Scherspannung, `axialKlebeZulMpa`)")
+        w.append("Axialfluss: keine Struktur-FEM und kein Lame-Ring — gerechnet "
+                 "sind der axiale Anzug (Kreisringplatte) und die Fliehkraft der "
+                 "Magnete IN der Scheibenebene"
+                 + (f"; die Klebung haelt{'' if haelt else ' NICHT'} "
+                    f"({zus.get('axial_klebescher_MPa', '?')} gegen "
+                    f"{zus.get('axial_klebe_zul_MPa', '?')} MPa zulaessig)"
+                    if haelt is not None else "")
+                 + ". OFFEN bleibt: " + offen + ".")
+    if (zus and zus.get("safety_factor_fem") is None
+            and zus.get("structural_basis") != "scheibe"):
         w.append("safety_factor_fem fehlt: das heisst 'keine FEM gerechnet', "
                  "nicht 'sicher'.")
     offen = [s["name"] for s in sb["gerechnet"] if not s["da"]]
@@ -578,13 +651,26 @@ def als_text(sb: dict, *, kurz: bool = False) -> str:
          f"  Stand    : {sb['status']}"
          + (f", angelegt {sb['angelegt'][:16].replace('T', ' ')}" if sb["angelegt"] else "")
          + (f", zuletzt {sb['geaendert'][:16].replace('T', ' ')}" if sb["geaendert"] else ""),
+         f"  Fluss    : {m['flussweg_text']}"
+         + (f" — getragen: {', '.join(m['flussweg_stufen'])}"
+            if m.get("flussweg_stufen") else ""),
          f"  Maschine : {m['art_text']}"
          + (f", {m['anordnung_text']}" if m["anordnung_text"] else "")
          + (f", {m['pole']} Pole" if m["pole"] else "")
          + (f", {m['nuten']} Nuten" if m["nuten"] else ""),
-         f"  Bauraum  : Stator-Aussen-D {_z(m['statorOD_mm'], 'mm')}, "
-         f"Bohrung {_z(m['statorID_mm'], 'mm')}, Laenge {_z(m['axial_mm'], 'mm')}, "
-         f"Luftspalt {_z(m['luftspalt_mm'], 'mm')}",
+         # Bei einer Scheibe sind `statorOD`/`statorID` nur der Rest der
+         # radialen Maske -- die wirklichen Masse heissen anders, und sie
+         # hinzuschreiben, als waeren sie der Bauraum, waere eine Falschangabe
+         # an genau der Stelle, an der ein Agent sich orientiert.
+         (f"  Bauraum  : Scheibe Aussen-D {_z((m['axial'] or {}).get('aktivOD_mm'), 'mm')}, "
+          f"lambda {_z((m['axial'] or {}).get('lambda'))}, "
+          f"Bauform {_z((m['axial'] or {}).get('bauform'))}, "
+          f"{_z((m['axial'] or {}).get('spalte'))} Luftspalt(e) "
+          f"{_z((m['axial'] or {}).get('spalt_mm'), 'mm')}"
+          if m["flussweg"] == "axial" else
+          f"  Bauraum  : Stator-Aussen-D {_z(m['statorOD_mm'], 'mm')}, "
+          f"Bohrung {_z(m['statorID_mm'], 'mm')}, Laenge {_z(m['axial_mm'], 'mm')}, "
+          f"Luftspalt {_z(m['luftspalt_mm'], 'mm')}"),
          f"  Betrieb  : {_z(m['rpm_von'])}–{_z(m['rpm_bis'])} 1/min, "
          f"{_z(m['last_nm'], 'Nm')}, Kuehlung {_z(m['kuehlung'])}"
          + (f", Zyklus {m['zyklus']}" if m["zyklus"] else ""),
@@ -719,6 +805,15 @@ def als_markdown(sb: dict) -> str:
               "  uebergeben. Fang damit an. Aendern darfst du sie -- sag dann aber,",
               "  WAS du geaendert hast und warum. Sie ist NICHT der Fall, gegen den",
               "  `--frisch` gebaut wurde."]
+    z.append(f"- Flussweg: {m['flussweg_text']} (`{m['flussweg']}`)"
+             + (f" — getragene Stufen: {', '.join(m['flussweg_stufen'])}"
+                if m.get("flussweg_stufen") else ""))
+    if m.get("axial"):
+        _ax = m["axial"]
+        z.append(f"- Scheibe: Aussen-D {_ax.get('aktivOD_mm')} mm, lambda "
+                 f"{_ax.get('lambda')}, Bauform {_ax.get('bauform')}, Zahnform "
+                 f"{_ax.get('zahnform')}, Laeuferart {_ax.get('laeuferart')}, "
+                 f"Magnetsegmente {_ax.get('segmente')}")
     z.append(f"- Maschinenart: {m['art_text']} (`{m['art']}`)")
     if m["anordnung_text"]:
         z.append(f"- Magnetanordnung: {m['anordnung_text']} (`{m['anordnung']}`)")

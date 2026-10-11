@@ -144,10 +144,35 @@ def mit_umrichtergrenze(t_thermisch: float, t_bei_strom, i_grenze: float = 0.0,
             "begrenzt_durch": bindet, "I_grenze_A": i_lim}
 
 
+def _z(geom: dict, schluessel: str, ersatz):
+    """``geom[schluessel]`` als Zahl -- und ``None`` gilt als FEHLT.
+
+    ``dict.get(k, ersatz)`` greift nur bei einem FEHLENDEN Schluessel, nicht bei
+    einem vorhandenen mit dem Wert ``None``. Und genau den tragen die Payloads
+    dieses Werkzeugs: ``ema_text2ema.SCHEMA`` hat ``default: None`` fuer jeden
+    Eintrag, und ``ema_fluss.aus_seite`` (die Axialfluss-Zeichenseite) setzt die
+    radialen Magnetschluessel ueberhaupt nicht.
+
+    Gemessen am 07.10.2026: ``_z(geom, "nAx", 1)`` warf dadurch
+    ``TypeError: int() argument ... not 'NoneType'`` MITTEN in der Verlust-
+    rechnung, und der Lauf meldete nur „Thermal-Analyse fehlgeschlagen" -- ohne
+    den Schluessel zu nennen. Fuer den Axialfluss war damit die Thermik
+    unerreichbar, obwohl ``ema_axial_thermik`` sie laengst rechnet. Derselbe
+    Fehler und dieselbe Kur wie ``ema_axial_thermik._zahl``.
+    """
+    v = (geom or {}).get(schluessel)
+    if v is None or v == "":
+        return ersatz
+    try:
+        return type(ersatz)(v) if ersatz is not None else float(v)
+    except (TypeError, ValueError):
+        return ersatz
+
+
 def _conductors_per_slot(geom: dict) -> int:
     """Conductors (radial layers) per slot, clamped to even 2..12 — matches the
     CAD hairpin generator in ema_freecad.build_full_motor_script."""
-    n = int(geom.get("conductorsPerSlot", 2))
+    n = _z(geom, "conductorsPerSlot", 2)
     return max(2, min(12, n + (n % 2)))
 
 
@@ -165,7 +190,8 @@ def copper_volume(geom: dict, axial: float) -> float:
 
 def cycle_loss_series(drv: dict, geom: dict, axial: float, perf: dict,
                       mat: dict, st_mat: dict, hp_mat: dict, mag: dict,
-                      cooling: str = "water", rpm_base: float = 0.0) -> dict:
+                      cooling: str = "water", rpm_base: float = 0.0,
+                      massen_vorgabe: dict | None = None) -> dict:
     """Per-timestep LPTN heat sources [W] for a drive cycle, anchored on physics
     (no free load torque):
 
@@ -191,7 +217,10 @@ def cycle_loss_series(drv: dict, geom: dict, axial: float, perf: dict,
 
     T_rated = rated_torque(geom, axial, cooling)
     J_rated = COOLING_RATING.get(cooling, COOLING_RATING["natural"])["J_rms_Apmm2"]
-    V_cu    = copper_volume(geom, axial)
+    # ``massen_vorgabe`` kommt von der Scheibenmaschine (``ema_axial_thermik``):
+    # dieselbe Verlustformel, andere Koerper. None = radial wie bisher.
+    V_cu    = (float(massen_vorgabe["v_kupfer_m3"]) if massen_vorgabe
+               and massen_vorgabe.get("v_kupfer_m3") else copper_volume(geom, axial))
     # Bei Betriebstemperatur, nicht bei 20 °C (s. ema_pipeline.rho_bei).
     # Lokal importiert: ema_pipeline zieht ema_thermal, auf Modulebene waere
     # das ein Zirkel.
@@ -210,7 +239,8 @@ def cycle_loss_series(drv: dict, geom: dict, axial: float, perf: dict,
 
     rpm_ref = max(1.0, float(np.sqrt(np.mean(rpm ** 2))))  # rpm_rms anchor
     ref     = compute_losses(geom, axial, rpm_ref, 0.0, 0.0,
-                             perf, mat, st_mat, hp_mat, mag)
+                             perf, mat, st_mat, hp_mat, mag,
+                             massen_vorgabe=massen_vorgabe)
     r_ratio = rpm / rpm_ref
     flux_fac = 1.0 / (1.0 + fw)                            # reduced flux in FW
     P_Fe_s  = ref["P_Fe_stator"] * r_ratio * flux_fac ** 2
@@ -235,17 +265,21 @@ def cycle_loss_series(drv: dict, geom: dict, axial: float, perf: dict,
 # ── Loss computation ─────────────────────────────────────────────────────────
 
 def compute_losses(geom: dict, axial: float, rpm: float, iq: float, id_: float,
-                   perf: dict, mat: dict, st_mat: dict, hp_mat: dict, mag: dict) -> dict:
+                   perf: dict, mat: dict, st_mat: dict, hp_mat: dict, mag: dict,
+                   massen_vorgabe: dict | None = None) -> dict:
     """Decompose total motor losses into the four LPTN heat sources.
 
     Returns {P_Cu, P_Fe_stator, P_Fe_rotor, P_Mag_eddy, P_Bearing, P_total} [W]."""
     n_slots  = int(geom["slots"])
-    R_si     = geom["statorID"] / 2 / 1000      # m
-    R_so     = geom["statorOD"] / 2 / 1000
-    R_rot    = geom["rotorOD"]  / 2 / 1000
-    R_shaft  = geom["shaftD"]   / 2 / 1000
+    # Diese vier gehen NUR in V_st/V_rot ein, und die ueberschreibt
+    # ``massen_vorgabe`` (Scheibe). Eine reine Scheibengeometrie traegt sie gar
+    # nicht, also wird hier gelesen und nicht gefordert.
+    R_si     = _z(geom, "statorID", 0.0) / 2 / 1000      # m
+    R_so     = _z(geom, "statorOD", 0.0) / 2 / 1000
+    R_rot    = _z(geom, "rotorOD", 0.0) / 2 / 1000
+    R_shaft  = _z(geom, "shaftD", 0.0) / 2 / 1000
     slot_dep = float(geom["slotDepth"]) / 1000
-    sw_ratio = float(geom.get("slotWidthRatio", 0.5))
+    sw_ratio = _z(geom, "slotWidthRatio", 0.5)
     L_st     = axial / 1000
     end_turn = 0.018                            # m, ~18 mm overhang
     L_cond   = L_st + 2 * end_turn
@@ -272,6 +306,12 @@ def compute_losses(geom: dict, axial: float, rpm: float, iq: float, id_: float,
     V_rot    = math.pi * (R_rot**2 - R_shaft**2) * L_st
     m_st     = max(0.01, V_st * st_mat["density"])
     m_ri     = max(0.01, V_rot * mat["density"])
+    # Ueberschreibbar fuer die Scheibenmaschine (``ema_axial_thermik``): dort
+    # sind die Koerper Kreisringscheiben, das Verlustmodell ist dasselbe.
+    # ``None`` = radial, Ziffer fuer Ziffer wie bisher.
+    if massen_vorgabe:
+        m_st = max(0.01, float(massen_vorgabe.get("m_stator_kg", m_st)))
+        m_ri = max(0.01, float(massen_vorgabe.get("m_rotor_kg", m_ri)))
     P_Fe_total = st_mat["specific_loss_Wkg"] * (f_el / 50) * (perf["B_gap_T"] ** 2) * m_st
     P_Fe_s   = 0.75 * P_Fe_total
     P_Fe_r   = 0.25 * P_Fe_total
@@ -280,13 +320,27 @@ def compute_losses(geom: dict, axial: float, rpm: float, iq: float, id_: float,
     # scaling quadratically with electrical frequency (eddy ∝ f²)
     f_base_ratio = (f_el / max(50, f_el))        # cap at 1 — eddy already non-trivial above f_base
     P_Mag_unseg = 0.005 * P_Cu + 0.02 * P_Fe_total * (f_el / 200)**2
+    # **Ohne Magnet kein Magnetverlust.** Gemessen am 06.10.2026 beim
+    # Variantendurchlauf: ASM, EESM und GSM bekamen 9,5 W
+    # Magnet-Wirbelstromverlust zugeschrieben -- Maschinen, die keinen Magneten
+    # haben. Die Formel steht auf `P_Cu` und `P_Fe` und fragt nicht, ob es
+    # ueberhaupt etwas gibt, worin ein Wirbelstrom fliessen koennte.
+    # (Die VIEL groessere Luecke -- Kaefig-, Erreger- und Buerstenverluste
+    # fehlen diesem Modell ganz -- steht als eigener Befund in BEFUNDE.md und
+    # ist hier NICHT behoben.)
+    try:
+        import ema_maschinenart as _MA
+        if not _MA.hole(_MA.art_code(geom)).hat_magnete:
+            P_Mag_unseg = 0.0
+    except Exception:                                   # noqa: BLE001
+        pass
 
     # Magnet segmentation: eddy loss drops ~1/n² per cut direction (axial n_ax,
     # circumferential n_circ). This holds in the resistance-limited regime, i.e.
     # while a segment is narrower than the skin depth δ; once a segment is wider
     # than δ (high frequency) further segmentation no longer follows 1/n².
-    n_ax   = max(1, int(geom.get("nAx", 1)))
-    n_circ = max(1, int(geom.get("nCirc", 1)))
+    n_ax   = max(1, _z(geom, "nAx", 1))
+    n_circ = max(1, _z(geom, "nCirc", 1))
     k_seg  = (1.0 / n_ax**2) * (1.0 / n_circ**2 if n_circ > 1 else 1.0)
     P_Mag  = P_Mag_unseg * k_seg
 
@@ -294,7 +348,7 @@ def compute_losses(geom: dict, axial: float, rpm: float, iq: float, id_: float,
     mu_mag  = 4e-7 * math.pi * float(mag.get("mu_r", 1.05))
     delta_skin_mm = (math.sqrt(rho_mag / (math.pi * f_el * mu_mag)) * 1000.0
                      if f_el > 0 else 1e9)
-    magW_mm  = float(geom.get("magWidth", 35))
+    magW_mm  = _z(geom, "magWidth", 35.0)
     w_seg_mm = min(magW_mm / n_circ, axial / n_ax)           # smallest segment dim
     seg_active = (n_ax > 1 or n_circ > 1)
     seg_warning = seg_active and (w_seg_mm > delta_skin_mm)   # δ < segment ⇒ ineffective
@@ -338,7 +392,7 @@ def compute_capacities(geom: dict, axial: float,
     R_rot     = geom["rotorOD"]  / 2 / 1000
     R_shaft   = geom["shaftD"]   / 2 / 1000
     slot_dep  = float(geom["slotDepth"]) / 1000
-    sw_ratio  = float(geom.get("slotWidthRatio", 0.5))
+    sw_ratio  = _z(geom, "slotWidthRatio", 0.5)
     L_st      = axial / 1000
     end_turn  = 0.018
 
@@ -377,7 +431,7 @@ def compute_capacities(geom: dict, axial: float,
     m_mag = V_mag_total * 7500
 
     # Shaft (steel) — hollow if shaftBoreD > 0
-    R_bore = float(geom.get("shaftBoreD", 0)) / 2 / 1000
+    R_bore = _z(geom, "shaftBoreD", 0.0) / 2 / 1000
     V_sh = math.pi * (R_shaft**2 - R_bore**2) * (L_st + 0.06)
     m_sh = V_sh * 7850
 
@@ -513,6 +567,16 @@ def build_GA(G: dict) -> tuple[np.ndarray, np.ndarray]:
     add(M,  RI, G["G_m_ri"])
     add(RI, SH, G["G_ri_sh"])
     add(SH, H,  G["G_sh_h"])
+    # Zwei Kanten, die es nur bei der SCHEIBE gibt (``ema_axial_thermik``):
+    #   * die freiliegenden Wickelkoepfe innen und aussen am Ringraum -- beim
+    #     YASA der Hauptkuehlweg, radial gibt es ihn so nicht;
+    #   * die Rueckseite der Laeuferscheibe als frei rotierende Scheibe --
+    #     radial ist der Laeufer eingeschlossen und hat gar keinen Weg nach
+    #     aussen.
+    # Vorgabe 0.0, damit der radiale Weg Ziffer fuer Ziffer derselbe bleibt --
+    # dieselbe Bauform wie `G_w_cool` fuer die CFD-Kopplung.
+    add(W,  H,  G.get("G_w_h", 0.0))
+    add(RI, H,  G.get("G_ri_h", 0.0))
     A[H, H] -= G["G_h_amb"]                     # ambient sink
     A[W, W] -= G.get("G_w_cool", 0.0)           # CFD-Spritzöl: direkter Kühlmittel-Sink an der Wicklung
     return A
@@ -625,6 +689,41 @@ def thermal_warnings(cont: dict, peak: dict | None, mag: dict) -> list[str]:
     return w
 
 
+
+def netz(geom: dict, axial: float, cooling: str, rpm: float,
+         mat: dict | None = None, st_mat: dict | None = None,
+         hp_mat: dict | None = None, mag: dict | None = None,
+         htc_oil: float = 0.0, wetted_area_m2: float = 0.0,
+         nur_leitwerte: bool = False) -> tuple:
+    """Leitwerte, Kapazitaeten und Koerper -- radial oder als Scheibe.
+
+    Die EINE Stelle, an der sich die beiden Netztopologien unterscheiden. Ohne
+    sie stuende derselbe Zweig in ``run_thermal_analysis``, in
+    ``thermal_for_cycle`` UND in ``solve_transient_series``, und der dritte
+    waere der, den beim naechsten Mal jemand vergisst.
+
+    Gibt ``(G, caps, massen_vorgabe)`` zurueck; ``caps`` ist ``None``, wenn nur
+    die Leitwerte gebraucht werden (der Zeitschritt baut sie je Drehzahl neu).
+    """
+    import ema_fluss
+    if ema_fluss.flussweg(geom) == "axial":
+        import ema_axial_thermik as AT
+        G = AT.leitwerte(geom, cooling, rpm,
+                         htc_oil=htc_oil, wetted_area_m2=wetted_area_m2)
+        if nur_leitwerte:
+            return G, None, None
+        m = AT.masse(geom, mat or {}, st_mat or {}, hp_mat or {}, mag or {})
+        vorgabe = {"m_stator_kg": m["staendereisen"],
+                   "m_rotor_kg": m["laeufereisen"],
+                   "v_kupfer_m3": m["kupfer"] / max(float((hp_mat or {}).get("rho", 8960.0)), 1.0)}
+        return G, AT.kapazitaeten(geom, mat, st_mat, hp_mat, mag), vorgabe
+    G = conductances(geom, axial, cooling, rpm,
+                     htc_oil=htc_oil, wetted_area_m2=wetted_area_m2)
+    if nur_leitwerte:
+        return G, None, None
+    return G, compute_capacities(geom, axial, mat, st_mat, hp_mat, mag), None
+
+
 def solve_transient_series(geom: dict, axial: float, caps: dict, series: dict,
                            rpm_series, t_series, cooling: str,
                            T_amb: float = 25.0, T_init=None,
@@ -650,8 +749,10 @@ def solve_transient_series(geom: dict, axial: float, caps: dict, series: dict,
     win  = np.empty(n)
     magt = np.empty(n)
     for k in range(n):
-        G = conductances(geom, axial, cooling, rpm[k],
-                         htc_oil=htc_oil, wetted_area_m2=wetted_area_m2)
+        # `netz` entscheidet radial/Scheibe -- unbedingt gerufen, damit es hier
+        # keinen zweiten Zweig gibt, den beim naechsten Mal jemand vergisst.
+        G = netz(geom, axial, cooling, rpm[k], htc_oil=htc_oil,
+                 wetted_area_m2=wetted_area_m2, nur_leitwerte=True)[0]
         A = build_GA(G)
         M_lhs = np.diag(C / dt) - A
         rhs = C / dt * Tn + P[:, k]
@@ -700,14 +801,14 @@ def thermal_for_cycle(drv: dict, cycle_result: dict, series: dict,
     for k in keys:
         P_cont[k] = round(P_cont[k], 1)
 
-    G_cont   = conductances(geom, axial, cooling, rpm_rms)
+    G_cont, caps, _ = netz(geom, axial, cooling, rpm_rms,
+                           mat, st_mat, hp_mat, mag)
     cont     = solve_steady(G_cont, P_cont, T_amb)
 
     # Seed the transient at the continuous steady state so peaks ride on top of a
     # warmed-up machine (true worst case for a repeating cycle).
     T_init   = [cont["T_winding"], cont["T_stator"], cont["T_rotor"],
                 cont["T_magnet"],  cont["T_shaft"],  cont["T_housing"]]
-    caps     = compute_capacities(geom, axial, mat, st_mat, hp_mat, mag)
     trans    = solve_transient_series(geom, axial, caps, series,
                                       drv["rpm_motor"], drv["t"], cooling, T_amb,
                                       T_init=T_init)
@@ -742,16 +843,21 @@ def thermal_for_cycle(drv: dict, cycle_result: dict, series: dict,
 
 def design_point_losses(geom: dict, axial: float, rpm: float, load_nm: float,
                         perf: dict, mat: dict, st_mat: dict, hp_mat: dict,
-                        mag: dict, cooling: str) -> dict:
+                        mag: dict, cooling: str,
+                        massen_vorgabe: dict | None = None) -> dict:
     """Losses at a standalone S1 duty point (load_nm @ rpm), copper anchored on
     current density relative to the geometry's rated torque — Kt-independent."""
     T_rated = rated_torque(geom, axial, cooling)
     J_rated = COOLING_RATING.get(cooling, COOLING_RATING["natural"])["J_rms_Apmm2"]
-    V_cu    = copper_volume(geom, axial)
+    # ``massen_vorgabe`` kommt von der Scheibenmaschine (``ema_axial_thermik``):
+    # dieselbe Verlustformel, andere Koerper. None = radial wie bisher.
+    V_cu    = (float(massen_vorgabe["v_kupfer_m3"]) if massen_vorgabe
+               and massen_vorgabe.get("v_kupfer_m3") else copper_volume(geom, axial))
     J       = J_rated * (abs(load_nm) / T_rated) * 1e6     # A/m²
     from ema_pipeline import rho_bei as _rb, leitertemperatur as _lt
     P_Cu    = _rb(hp_mat, _lt(geom)) * V_cu * J ** 2
-    base    = compute_losses(geom, axial, rpm, 0.0, 0.0, perf, mat, st_mat, hp_mat, mag)
+    base    = compute_losses(geom, axial, rpm, 0.0, 0.0, perf, mat, st_mat,
+                             hp_mat, mag, massen_vorgabe=massen_vorgabe)
     P_total = P_Cu + base["P_Fe_stator"] + base["P_Fe_rotor"] + base["P_Mag_eddy"] + base["P_Bearing"]
     return {
         "P_Cu":         round(P_Cu, 1),
@@ -797,21 +903,30 @@ def run_thermal_analysis(geom: dict, axial: float, rpm: float, load_nm: float,
     es nicht gibt, und die Magnetgrenze von 80 °C schon ueberschritten. Genau die
     Art Ergebnis, gegen die ``ema_fluss`` gebaut ist.
     """
+    # Die SCHEIBE bekommt ihr eigenes Netz, nicht das radiale mit anderen
+    # Zahlen. Bis zum 06.10.2026 stand hier eine Absage -- richtig, solange es
+    # das Netz nicht gab: am Vorgabe-Payload lief die radiale Rechnung sonst
+    # klaglos durch und meldete 68,2 / 81,8 °C fuer eine Maschine, die es nicht
+    # gibt. Geteilt bleibt der LOESER (`build_GA`/`solve_steady`), getrennt
+    # sind die Leitwerte, die Kapazitaeten und die Koerper, aus denen die
+    # Verluste kommen.
     import ema_fluss
-    if ema_fluss.flussweg(geom) == "axial":
-        raise ema_fluss.FlusswegNichtUnterstuetzt(
-            "Axialfluss: das LPTN ist ein Schalennetz von innen nach aussen "
-            "(Welle -> Laeufer -> Spalt -> Staender -> Gehaeuse). Beim YASA "
-            "sitzt der Staender ZWISCHEN zwei Scheiben und hat diesen Weg nicht, "
-            "beim AFIR liegt die Wicklung aussen. Das ist nicht die falsche "
-            "Parametrierung, sondern die falsche Netztopologie -- sie waere neu "
-            "aufzustellen (AXIALFLUSS.md, Stufe 4). Die Schubspannungsgrenze "
-            "rated_torque gilt dagegen weiter, sie geht ueber ema_fluss.")
-    losses = design_point_losses(geom, axial, rpm, load_nm,
-                                 perf, mat, st_mat, hp_mat, mag, cooling)
-    caps   = compute_capacities(geom, axial, mat, st_mat, hp_mat, mag)
-    G      = conductances(geom, axial, cooling, rpm,
-                          htc_oil=htc_oil, wetted_area_m2=wetted_area_m2)
+    axialfluss = ema_fluss.flussweg(geom) == "axial"
+    G, caps, vorgabe = netz(geom, axial, cooling, rpm, mat, st_mat, hp_mat, mag,
+                            htc_oil=htc_oil, wetted_area_m2=wetted_area_m2)
+    losses = design_point_losses(geom, axial, rpm, load_nm, perf, mat, st_mat,
+                                 hp_mat, mag, cooling, massen_vorgabe=vorgabe)
+    if axialfluss:
+        # `R_phase` kommt aus `ema_wicklung` und rechnet einen AXIAL liegenden
+        # Leiter mit Wickelkopf an beiden Stirnseiten. Auf der Scheibe laeuft
+        # der Leiter RADIAL und der Wickelkopf liegt innen UND aussen -- die
+        # Zahl waere die einer anderen Wicklung. Keine ist besser als eine
+        # falsche; `P_Cu` haengt ohnehin nicht daran (Stromdichte x
+        # Kupfervolumen, s. `design_point_losses`).
+        losses["R_phase_mOhm"] = None
+        losses["R_phase_grund"] = (
+            "nicht gerechnet: ema_wicklung legt einen axial liegenden Leiter "
+            "zugrunde; die Scheibe hat radiale Leiter und zwei Wickelkoepfe")
     steady = solve_steady(G, losses, T_amb)
     trans  = solve_transient(G, caps, losses, T_amb, t_max=t_max)
 
@@ -824,6 +939,11 @@ def run_thermal_analysis(geom: dict, axial: float, rpm: float, load_nm: float,
     }
 
     warnings = thermal_warnings(steady, None, mag)
+    if axialfluss:
+        # Was dieses Netz nicht kann, steht an JEDEM Ergebnis -- nicht nur im
+        # Modulkopf, den niemand liest, wenn er eine Temperatur sucht.
+        import ema_axial_thermik as AT
+        warnings += [f"ℹ {x}" for x in AT.grenzen(G)]
     if steady["T_housing"] > 80:
         warnings.append(f"⚠ Gehäusetemperatur {steady['T_housing']:.0f}°C — Berührungsschutz nötig")
     if abs(load_nm) > losses["T_rated_Nm"]:

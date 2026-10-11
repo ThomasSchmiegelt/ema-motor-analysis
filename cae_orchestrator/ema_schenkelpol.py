@@ -59,6 +59,7 @@ zu erfinden waere schlimmer als die Luecke.
 from __future__ import annotations
 
 import math
+import re
 
 # ── Befestigung ──────────────────────────────────────────────────────────────
 
@@ -405,3 +406,177 @@ def zeichenmasse(d: dict) -> dict:
             "teilung_mm": float(d["teilung_mm"]),
             "r_ring_mm": float(d["r_ring_mm"]),
             "steg_mm": DAEMPFER_STEG_MM}
+
+
+# ── Wenn ein Tor reisst: gerechnete Auswege ──────────────────────────────────
+
+def entlastung(geom: dict, axial_mm: float, rpm_max: float) -> dict:
+    """Konkrete Wege aus einer gerissenen Polbefestigung oder einem
+    Daempferkaefig, der nicht in den Polschuh passt.
+
+    Dieselbe Regel wie ueberall hier: **jeder Weg wird gegen DASSELBE Tor
+    nachgerechnet**, bevor ihn jemand zu sehen bekommt. Gesucht werden muss
+    wenig -- ``befestigung`` nennt die zulaessige Drehzahl und die noetige
+    Schraubenzahl bereits, weil die Fliehkraft eine geschlossene Formel ist
+    (``sigma ~ n^2``, also ``n ~ 1/sqrt(SF)``).
+
+    Returns ``{"ok", "befund", "wege", "hinweise"}``.
+    """
+    wege, hinweise, befunde = [], [], []
+
+    def _bef(g, rpm):
+        try:
+            return befestigung(g, axial_mm, rpm)
+        except Exception:                                    # noqa: BLE001
+            return None
+
+    def _daem(g):
+        try:
+            return daempferkaefig(g, axial_mm)
+        except Exception:                                    # noqa: BLE001
+            return None
+
+    def _weg(schluessel, wert, text, preis, ebene="geom"):
+        wege.append({"schluessel": schluessel, "wert": wert,
+                     "jetzt": (geom.get(schluessel) if ebene == "geom"
+                               else rpm_max),
+                     "text": text, "preis": preis, "ebene": ebene})
+
+    # ── Polbefestigung ───────────────────────────────────────────────────────
+    bef = _bef(geom, rpm_max) if rpm_max and rpm_max > 0 else None
+    if bef is not None and not bef.get("haelt"):
+        befunde.append("Polbefestigung: " + str(bef.get("grund") or ""))
+
+        # Die Drehzahl ist der staerkste Hebel und exakt aufloesbar.
+        n_zul = float(bef.get("n_zulaessig_1pmin") or 0.0)
+        if n_zul > 0:
+            n = math.floor(n_zul / 100.0) * 100.0            # sichere Seite
+            if n > 0 and n < rpm_max:
+                k = _bef(geom, n)
+                if k is not None and k.get("haelt"):
+                    _weg("rpm_to", n, f"Hoechstdrehzahl auf {n:.0f} 1/min",
+                         "weniger Drehzahl heisst weniger Eckleistung",
+                         ebene="payload")
+
+        art = str(geom.get("polBefestigung") or "schwalbenschwanz")
+        if art == "bolzen":
+            # Mehr Schrauben: die noetige Zahl steht schon da -- allerdings
+            # als ZEICHENKETTE ("10 x M10"), weil sie fuer das Protokoll
+            # gebaut ist. Die Zahl davor ist, was hier gebraucht wird.
+            _m = re.match(r"\s*(\d+)", str(bef.get("bolzen_noetig") or ""))
+            n_b = int(_m.group(1)) if _m else 0
+            if n_b > int(geom.get("polBolzen") or 2):
+                g = dict(geom, polBolzen=n_b)
+                k = _bef(g, rpm_max)
+                if k is not None and k.get("haelt"):
+                    _weg("polBolzen", n_b, f"{n_b} Schrauben je Pol statt "
+                         f"{int(geom.get('polBolzen') or 2)}",
+                         "mehr Teile, mehr Montage")
+            # Ein groesseres Gewinde.
+            gew = str(geom.get("polBolzenGewinde") or "M10")
+            reihe = sorted(BOLZEN_AS_MM2, key=lambda m: BOLZEN_AS_MM2[m])
+            if gew in reihe:
+                for groesser in reihe[reihe.index(gew) + 1:]:
+                    g = dict(geom, polBolzenGewinde=groesser)
+                    k = _bef(g, rpm_max)
+                    if k is not None and k.get("haelt"):
+                        _weg("polBolzenGewinde", groesser,
+                             f"Gewinde {groesser} statt {gew}",
+                             "mehr Platz im Polfuss noetig")
+                        break
+            # Und die andere Bauart.
+            g = dict(geom, polBefestigung="schwalbenschwanz")
+            k = _bef(g, rpm_max)
+            if k is not None and k.get("haelt"):
+                _weg("polBefestigung", "schwalbenschwanz",
+                     "Schwalbenschwanz statt Bolzen",
+                     "der Hals traegt auf Zug statt der Schraube")
+
+        if not wege:
+            hinweise.append(
+                "Keiner der gerechneten Hebel (Drehzahl, Schraubenzahl, "
+                "Gewinde, Bauart) haelt den Pol bei dieser Drehzahl — "
+                "dann binden Polmasse und Radius, also die Auslegung selbst.")
+
+    # ── Daempferkaefig ───────────────────────────────────────────────────────
+    if str(geom.get("daempferkaefig") or "nein") == "ja":
+        d = _daem(geom)
+        if d is not None and not d.get("passt"):
+            befunde.append("Daempferkaefig: " + str(d.get("grund") or ""))
+            n_ist = int(d.get("n_stab_je_pol") or 0)
+            # Gesucht wird in BEIDE Richtungen, und MEHR Staebe sind der
+            # eigentliche Hebel: der Gesamtquerschnitt je Pol liegt durch die
+            # Auslegungsregel fest, also werden weniger Staebe DICKER und
+            # passen erst recht nicht in den Schuh. Die erste Fassung lief nur
+            # abwaerts (`range(n_ist-1, 0, -1)`) und konnte deshalb nie etwas
+            # finden -- gemessen an einem 10-poligen Laeufer: 3 Staebe 5,82 mm,
+            # 2 Staebe 5,82 mm (der Deckel greift), 9 Staebe 3,36 mm.
+            # Angeboten wird die KLEINSTE Aenderung, die wirklich besteht.
+            for n in sorted(range(1, 10), key=lambda x: (abs(x - n_ist), -x)):
+                if n == n_ist:
+                    continue
+                k = _daem(dict(geom, daempferStaebeJePol=n))
+                if k is not None and k.get("passt"):
+                    _weg("daempferStaebeJePol", n,
+                         f"{n} Daempferstaebe je Pol statt {n_ist}",
+                         ("duennere Staebe bei gleichem Querschnitt"
+                          if n > n_ist else "weniger Daempfung beim Anlauf"))
+                    break
+
+            # Die Begruendung des Tors nennt drei Hebel -- „weniger
+            # Polbedeckung, ein dickerer Polschuh oder weniger
+            # Daempferquerschnitt". Zwei davon sind Parameter, und damit
+            # gehoeren sie als gerechneter Weg hierher und nicht nur in die
+            # Prosa: ein Satz, den man nicht anklicken kann, ist fuer den
+            # Platz davor dasselbe wie keiner. Gesucht wird die KLEINSTE
+            # Aenderung, die das Tor wirklich besteht.
+            _ist_schuh = float(geom.get("polSchuhAnteil") or 0.0) or 0.26
+            _a = _ist_schuh
+            while _a < 0.50 - 1e-9:
+                _a = round(min(_a + 0.02, 0.50), 4)
+                k = _daem(dict(geom, polSchuhAnteil=_a))
+                if k is not None and k.get("passt"):
+                    _weg("polSchuhAnteil", _a,
+                         f"Polschuhhoehe auf {_a:.2f} der Polhoehe "
+                         f"(war {_ist_schuh:.2f})",
+                         "dickerer Schuh, weniger Platz fuer Kern und Spule")
+                    break
+
+            try:
+                import ema_eesm as _EE
+                _ist_bed = float(_EE.polbedeckung(geom))
+            except Exception:                                # noqa: BLE001
+                _ist_bed = float(geom.get("polbedeckung") or 0.0) or 0.68
+            _b = _ist_bed
+            while _b > 0.55 + 1e-9:
+                _b = round(max(_b - 0.02, 0.55), 4)
+                k = _daem(dict(geom, polbedeckung=_b))
+                if k is not None and k.get("passt"):
+                    _weg("polbedeckung", _b,
+                         f"Polbedeckung auf {_b:.2f} (war {_ist_bed:.2f})",
+                         "schmalerer Schuh, duennere Staebe \u2014 aber auch "
+                         "mehr Erregerdurchflutung fuer dieselbe Grundwelle")
+                    break
+
+            _weg("daempferkaefig", "nein", "Daempferkaefig weglassen",
+                 "kein asynchroner Anlauf, keine Pendeldaempfung")
+
+            # Was hier NICHT hilft, gehoert dazu. Gemeldet als „vielleicht ist
+            # die Drehzahl, aber dann soll er das sagen": dieses Tor kennt die
+            # Drehzahl ueberhaupt nicht -- `daempferkaefig(geom, axial_mm)` hat
+            # sie nicht einmal als Argument. Es geht allein um Platz im
+            # Polschuh. Ohne diesen Satz sucht man an der falschen Stelle.
+            hinweise.append(
+                "Die Drehzahl spielt bei diesem Tor keine Rolle: der Daempfer "
+                "wird aus dem PLATZ im Polschuh bemessen, nicht aus der "
+                "Fliehkraft. (Die Drehzahl bindet die Polbefestigung \u2014 "
+                "die ist hier in Ordnung.)")
+            if n_ist <= 3:
+                hinweise.append(
+                    "Weniger Staebe helfen nicht: der Gesamtquerschnitt je Pol "
+                    "liegt durch die Auslegungsregel fest, weniger Staebe "
+                    "werden also dicker.")
+
+    return {"ok": not wege and not befunde,
+            "befund": befunde[0] if befunde else "",
+            "befunde": befunde, "wege": wege, "hinweise": hinweise}

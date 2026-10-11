@@ -117,6 +117,24 @@
       ctx.restore();
       return;
     }
+    if (t.form === "polygon") {
+      // Ein freier Polygonzug im gedrehten Rahmen wie Rechteck/Trapez --
+      // die Flussbarriere des Reluktanzlaeufers folgt einem Kreisbogen
+      // durch ihren q-Achsen-Radius UND ihren Endpunkt am Luftspalt
+      // (s. `ema_synrm_cad`), und das ist keine der Grundformen.
+      ctx.save();
+      ctx.rotate(t.grad * GRAD);
+      ctx.beginPath();
+      for (var pi = 0; pi < t.punkte.length; pi++) {
+        var pq = t.punkte[pi];
+        if (pi === 0) ctx.moveTo(pq[0] * s, pq[1] * s);
+        else ctx.lineTo(pq[0] * s, pq[1] * s);
+      }
+      ctx.closePath();
+      ctx.fill(); ctx.stroke();
+      ctx.restore();
+      return;
+    }
     if (t.form === "tasche") {
       // Langloch im Schenkelrahmen -- dieselbe Form wie die IPM-Tasche in
       // `drawRotor`: Ursprung am inneren Ende, um `tilt` gedreht, zwei
@@ -170,6 +188,20 @@
    * billiger als eine Umhuellende zu bilden -- es sind wenige Dutzend Teile,
    * und derselbe Ansatz steht schon im Flussbarrieren-Block von `ema.html`.
    */
+  /* Strahlverfahren -- zeichengetreu dieselbe Schleife wie
+   * `ema_laeuferbild._im_polygon`. Bei einem Punkt auf der Kante entscheidet
+   * die Reihenfolge der Vergleiche, deshalb steht sie hier so und dort so. */
+  function _imPolygon(x, y, pts) {
+    var drin = false, n = pts.length, j = n - 1;
+    for (var i = 0; i < n; i++) {
+      var xi = pts[i][0], yi = pts[i][1], xj = pts[j][0], yj = pts[j][1];
+      if (((yi > y) !== (yj > y)) &&
+          (x < (xj - xi) * (y - yi) / (yj - yi) + xi)) drin = !drin;
+      j = i;
+    }
+    return drin;
+  }
+
   function _stempel(gridMu, N, center, gs, t, a0, wert) {
     var schritt = 0.5 / Math.max(gs, 1e-9);   // eine halbe Zelle, in mm
     var i, j, r, w, a, ca, sa, x, y;
@@ -222,6 +254,52 @@
       }
       return;
     }
+    if (t.form === "kreis") {
+      // **Der Daempferstab im Polschuh.** Er fehlte hier, waehrend `_teil`
+      // ihn laengst ZEICHNET und die Python-Fassung ihn laengst STEMPELT --
+      // die Leinwand zeigte also Staebe, die im Feldraster nicht standen.
+      //
+      // Aufgefallen ist es nicht, weil der Daempferkaefig per Vorgabe AUS ist
+      // (`daempferkaefig: "nein"`): der Zelle-fuer-Zelle-Spiegeltest hat die
+      // Form `kreis` nie zu sehen bekommen. Dieselbe Sorte wie der Test, der
+      // nicht in `main()` stand -- gruen, weil er schweigt.
+      //
+      // Zeichengetreu die Schleife aus `ema_laeuferbild._stempel`: der
+      // Mittelpunkt wird um `a0` gedreht, abgetastet wird das Quadrat um ihn
+      // und genommen, was im Radius liegt.
+      ca = Math.cos(a0); sa = Math.sin(a0);
+      var gx = t.cx * ca - t.cy * sa, gy = t.cx * sa + t.cy * ca;
+      for (r = -t.r; r <= t.r + 1e-9; r += schritt) {
+        for (w = -t.r; w <= t.r + 1e-9; w += schritt) {
+          if (r * r + w * w > t.r * t.r) continue;
+          _setz(gridMu, N, Math.floor(center + (gx + r) * gs),
+                Math.floor(center + (gy + w) * gs), wert);
+        }
+      }
+      return;
+    }
+
+    if (t.form === "polygon") {
+      // Rasterung im gedrehten Rahmen wie Rechteck/Trapez, nur ist die
+      // Berandung ein Polygonzug -- die Flussbarriere folgt einer Feldlinie.
+      a = a0 + t.grad * GRAD; ca = Math.cos(a); sa = Math.sin(a);
+      var pts = t.punkte;
+      var x0 = pts[0][0], x1 = pts[0][0], y0 = pts[0][1], y1 = pts[0][1];
+      for (i = 1; i < pts.length; i++) {
+        if (pts[i][0] < x0) x0 = pts[i][0];
+        if (pts[i][0] > x1) x1 = pts[i][0];
+        if (pts[i][1] < y0) y0 = pts[i][1];
+        if (pts[i][1] > y1) y1 = pts[i][1];
+      }
+      for (r = x0; r <= x1; r += schritt) {
+        for (w = y0; w <= y1; w += schritt) {
+          if (!_imPolygon(r, w, pts)) continue;
+          _setz(gridMu, N, Math.floor(center + (r * ca - w * sa) * gs),
+                Math.floor(center + (r * sa + w * ca) * gs), wert);
+        }
+      }
+      return;
+    }
     if (t.form === "tasche") {
       a = a0 + t.grad * GRAD; ca = Math.cos(a); sa = Math.sin(a);
       var tc = Math.cos(t.tilt_grad * GRAD), ts = Math.sin(t.tilt_grad * GRAD);
@@ -247,22 +325,31 @@
   // Was magnetisch Luft IST. Kupfer und Aluminium gehoeren dazu: mu_r ~ 1.
   var UNMAGNETISCH = { luft: 1, kupfer: 1, alu: 1 };
 
-  /* Das Unmagnetische der Teile ins Raster eintragen.
+  /* Die Teile der REIHE NACH ins Raster eintragen.
    *
    * `a0` ist der Rotorwinkel: der Laeufer dreht sich, die Teile drehen mit --
    * genauso, wie es der Flussbarrieren-Block in `ema.html` seit jeher macht.
    * Gibt die Zahl der eingetragenen Teile zurueck, damit die Seite sagen kann,
    * ob ueberhaupt etwas gewirkt hat.
+   *
+   * **Was spaeter in der Liste steht, gewinnt** -- dieselbe Regel wie in
+   * `zeichne`. Frueher wurde NUR das Unmagnetische gestempelt; dann gewann im
+   * Raster immer die Luft, waehrend im Bild der Pol gewann, und aus EINER
+   * Quelle kamen zwei Laeufer. Mit der Reihenfolge als Regel ist eine
+   * Ueberlappung harmlos statt eine Fehlerquelle.
    */
-  function rastere(gridMu, N, center, gs, teile, a0, gridJ, jNut) {
+  var MU_EISEN = 500;                      // = ema_analysis.MU_R_IRON
+
+  function rastere(gridMu, N, center, gs, teile, a0, gridJ, jNut, muEisen) {
     if (!gridMu || !teile || !teile.length) return 0;
+    var mfe = (muEisen === undefined) ? MU_EISEN : +muEisen;
     var n = 0;
     for (var i = 0; i < teile.length; i++) {
       var t = teile[i];
-      if (!UNMAGNETISCH[t.rolle]) continue;
-      var f = gridJ ? +(t.durchflutung_A || 0) : 0;
+      var unmag = !!UNMAGNETISCH[t.rolle];
+      var f = (gridJ && unmag) ? +(t.durchflutung_A || 0) : 0;
       _SAMMLER = f ? {} : null;
-      _stempel(gridMu, N, center, gs, t, a0 || 0, 1);
+      _stempel(gridMu, N, center, gs, t, a0 || 0, unmag ? 1 : mfe);
       if (f) {
         var ks = Object.keys(_SAMMLER), nk = ks.length;
         // Dieselbe Rechnung wie die Staendernut in `ema.html`: dort steht je
@@ -280,5 +367,6 @@
     return n;
   }
 
-  global.LAEUFER = { zeichne: zeichne, rastere: rastere, FARBE: FARBE };
+  global.LAEUFER = { zeichne: zeichne, rastere: rastere, FARBE: FARBE,
+                     umriss: null, MU_EISEN: MU_EISEN };
 })(typeof window !== "undefined" ? window : globalThis);

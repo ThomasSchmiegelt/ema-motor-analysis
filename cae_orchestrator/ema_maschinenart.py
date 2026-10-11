@@ -171,11 +171,58 @@ ARTEN = {
         hat_laeuferwicklung=False,
         hat_schlupf=False,
         stellbarer_fluss=False,
-        stufen=("analytisch",),
+        # "cad" traegt seit dem 20.09.2026. Der Laeufer ist bis dahin als
+        # IPM-Tasche ohne Magnet gezeichnet worden ("in der reluktanzmaschine
+        # sind nur die magnete entfernt"); seit ``ema_synrm_cad`` entsteht er
+        # aus Auslegungsregeln (Barrierenzahl aus der Nutteilung, Endpunkte bei
+        # konstanter Laeufernutteilung, Form nach den Feldlinien, Dicken aus
+        # dem Isolationsgrad). Nachgemessen an einem ECHTEN FreeCAD-Bau:
+        # 24 Barrieren geschnitten, Rotor gueltig und EIN Solid, und das
+        # Volumen trifft die gezeichnete Flaeche auf **0,00 %** -- CAD,
+        # Leinwand und FDM-Raster sehen damit denselben Laeufer.
+        #
+        # "feld" traegt seit dem 20.09.2026 -- aber NICHT auf der Pipeline.
+        # Der 2-D-FDM scheidet aus: er eicht seine Amplitude auf
+        # ``_analytical_Bgap``, und die liefert fuer eine magnetlose Maschine
+        # gemessen dieselben 0,63 T wie fuer die PSM daneben; die Salienz sieht
+        # er ueberhaupt nicht, weil ``_analytical_Barm`` nur den BETRAG des
+        # Stromzeigers kennt (gemessen d/q ~ 1,0 gegen 1,72 aus dem
+        # magnetostatischen Elmer-Lauf). Belegt in BEFUNDE.md, 20.09.2026.
+        #
+        # Elmer 2-D magnetostatisch (``ema_em2d_stat``) kann es dagegen, und
+        # zwar genau richtig: diese Maschine ist magnetostatisch, ihr Moment
+        # kommt allein aus der Laeufergeometrie. Also traegt die Art die Stufe
+        # und geht einen anderen WEG -- dieselbe Unterscheidung wie bei der
+        # ASM. Das Pipelinetor fragt ``pruefe_feldweg(code, "fdm")`` und weist
+        # sie weiterhin ab, nennt aber das Werkzeug, das sie traegt.
+        # **"em3d" traegt seit dem 20.09.2026** -- und zwar nach einem
+        # DURCHGELAUFENEN Loeser, nicht nach einem gebauten Netz. Das Tor stand
+        # vorher mit der Begruendung "kein durchgelaufener Loeserlauf" zu, und
+        # das war unerledigte Arbeit und keine Begruendung.
+        #
+        # Gemessen: 103.433 Knoten, **672 Flussbarrieren-Prismen, 0 Magnete**,
+        # 54 Statornuten, Lastfeld mit Statorstroemen (3000 1/min, 20 Nm →
+        # i_q 170,0 A, i_d −101,6 A). Der Weg ist derselbe wie bei der PSM
+        # (magnetostatisch, WhitneyAV) und damit genau richtig fuer eine
+        # Maschine, deren Moment allein aus der Laeufergeometrie kommt --
+        # Magnete braucht er nicht, nur eine Quelle, und die sind hier die
+        # Staenderstroeme.
+        #
+        # **Der 2-D-Vergleich in diesem Lauf ist NICHT belastbar** und sagt es:
+        # er haelt das 3-D-Feld gegen ``run_em_analysis``, und das eicht seine
+        # Amplitude auf ``_analytical_Bgap`` -- eine Formel ohne Magnet ist
+        # fuer eine magnetlose Maschine keine. ``Kt_2D`` ist dort reines
+        # Magnetmoment, also 0 fuer diese Bauart, und wird trotzdem gedruckt.
+        # Die belastbare 2-D-Gegenrechnung ist ``feld2d`` (``ema_em2d_stat``,
+        # Anisotropie 1,719 mit dem glatten Laeufer als Bezugsfall).
+        stufen=("analytisch", "feld", "cad", "em3d"),
+        feldweg="elmer2d_stat",
         ohne_bedeutung=_PM_KENNZAHLEN,
-        hinweis=("Steht der PMa-SynRM-Anordnung geometrisch am naechsten "
-                 "(``_build_pmasynrm`` ohne Magnete), das Moment kommt aber "
-                 "ausschliesslich aus (Ld-Lq)."),
+        hinweis=("Die Flussbarrieren entstehen in ``ema_synrm_cad`` nach "
+                 "Auslegungsregeln (Moghaddam 2007), nicht mehr aus der "
+                 "Magnet-Anordnung. Das Moment kommt ausschliesslich aus "
+                 "(Ld-Lq); die analytische Kette kennt davon nur eine "
+                 "Ersatz-Barrierenhoehe."),
     ),
     "eesm": Art(
         code="eesm",
@@ -188,11 +235,48 @@ ARTEN = {
         # "cad" traegt seit dem 18.09.2026: Schenkelpollaeufer mit Erreger-
         # spulen und zwei Schleifringen, gezeichnet aus ``ema_eesm_cad``,
         # das seinerseits ``polgeometrie``/``erregung`` liest — also den
-        # Magnetkreis, der die Maschine rechnet. "feld" fehlt weiter mit
-        # Absicht: die 2-D-FDM ist reell und magnetostatisch und kann
-        # eine Gleichstrom-Erregerwicklung so wenig darstellen wie einen
-        # Kaefig.
-        stufen=("analytisch", "cad"),
+        # Magnetkreis, der die Maschine rechnet.
+        #
+        # **"feld" traegt seit dem 20.09.2026 -- aber NICHT auf der Pipeline.**
+        # Der Satz, der hier lange stand ("die 2-D-FDM kann eine Gleichstrom-
+        # Erregerwicklung so wenig darstellen wie einen Kaefig"), war in seiner
+        # ersten Haelfte falsch und in seiner zweiten richtig: eine eingepraegte
+        # GLEICHdurchflutung ist magnetostatisch exakt darstellbar -- das ist
+        # gerade der Fall, den ein magnetostatischer Loeser kann. Nicht
+        # darstellbar ist, was ZEITABHAENGIG ist (Kaefig, kommutierter Anker).
+        # Die 2-D-FDM scheidet aus einem anderen Grund aus: sie eicht ihre
+        # Amplitude auf ``_analytical_Bgap``, und die kennt keinen Erregerstrom.
+        #
+        # Gerechnet wird deshalb in ``ema_em2d_stat`` (Elmer 2-D, magneto-
+        # statisch), und das ist dieselbe Unterscheidung wie bei der ASM: die
+        # Art TRAEGT die Stufe, sie geht nur einen anderen Weg (``feldweg``).
+        # Das Pipelinetor fragt ``pruefe_feldweg(code, "fdm")`` und weist sie
+        # daher weiterhin ab -- mit dem Namen des Werkzeugs, das sie traegt.
+        #
+        # Gemessen am frischen Payload (2p = 8, 77.433 Dreiecke, 72 Koerper):
+        # Anisotropie des Schenkelpollaeufers **1,738**; Erregung 0 -> 0,000 T,
+        # Nennerregung -> 0,3418 T bei 16,1 % Klirranteil, doppelte Erregung
+        # -> 0,6837 T, also **exakt 2,000x** -- die Linearitaetsprobe, die ein
+        # linearer Loeser bestehen MUSS.
+        #
+        # **"em3d" traegt seit dem 20.09.2026 -- und zwar erst, seit ein Loeser
+        # wirklich durchgelaufen ist.** Der 3-D-Pfad zeichnete den Laeufer bis
+        # dahin aus `magnet_legs`, also aus Magneten, die es hier nicht gibt;
+        # `ema_em3d.laeufer_profile` baut ihn jetzt aus derselben
+        # `ema_laeuferbild.teile()`-Quelle wie Leinwand, Raster und CAD, und
+        # `write_sif` gibt den Erregerspulen ihre Gleichstromdichte. Gemessen
+        # am frischen Payload: 48.055 Knoten, 61 Laeuferkoerper, 12 Spulen mit
+        # +-459 A, Loeser 290 s, Orientierungspruefung 0,12 Grad gegen 3 Grad
+        # Toleranz.
+        #
+        # **Was dieser Weg NICHT gibt, ist die Amplitude**: 0,196 T in der
+        # Mittelebene gegen 0,509 T aus dem 2-D-Elmer derselben Erregung. Der
+        # 0,7-mm-Luftspalt ist in einem bezahlbaren 3-D-Netz nicht aufloesbar,
+        # und `COIL_J_SCALE` ist am STAENDER geeicht. Das steht als Warnung an
+        # jedem Lauf -- eine getragene Stufe ist keine Zusicherung ueber jede
+        # Zahl, die aus ihr faellt.
+        stufen=("analytisch", "feld", "cad", "em3d"),
+        feldweg="elmer2d_stat",
         ohne_bedeutung=_PM_KENNZAHLEN,
         hinweis=("Die einzige Art, bei der der Fluss EINGESTELLT wird -- "
                  "zweiter Freiheitsgrad im Betriebspunkt (Erregerstrom), dafuer "
@@ -272,6 +356,20 @@ def traegt(code: str, stufe: str) -> bool:
     return stufe in hole(code).stufen
 
 
+# Warum eine Stufe eine bestimmte Art NICHT traegt -- in einem Satz, an der
+# Stelle, an der die Absage entsteht. Was hier nicht steht, wird nicht behauptet.
+WARUM_NICHT = {
+    ("gsm", "em3d"): (
+        "Grund: ihre Erregerpole sitzen am STAENDER, und `ema_em3d.slot_rects` "
+        "baut dort einen genuteten Drehstromstaender — gebaut wuerde baulich "
+        "eine andere Maschine. Der LAEUFER ist seit dem 20.09.2026 netzbar "
+        "(gemessen 48.634 Knoten, 54/54 Ankernuten); es fehlt der Staender."),
+    ("gsm", "feld"): (
+        "Grund: der kommutierte Anker ist ZEITabhaengig, und die 2-D-FDM ist "
+        "reell, linear und magnetostatisch."),
+}
+
+
 def pruefe_stufe(code: str, stufe: str) -> Art:
     """Tor vor jeder Rechenstufe. Gibt die Art zurueck oder wirft.
 
@@ -282,15 +380,21 @@ def pruefe_stufe(code: str, stufe: str) -> Art:
     if stufe in art.stufen:
         return art
     kann = ", ".join(STUFEN_LABEL[s] for s in art.stufen) or "noch nichts"
+    # **„Traegt sie nicht" ist die halbe Auskunft.** Wer davorsitzt, will
+    # wissen WARUM -- sonst liest sich die Absage wie eine Luecke im Zeitplan,
+    # und man wartet auf etwas, das aus einem baulichen Grund nicht kommt.
+    warum = WARUM_NICHT.get((code, stufe), "")
     raise ArtNichtUnterstuetzt(
         f"{art.label}: die Stufe „{STUFEN_LABEL.get(stufe, stufe)}“ traegt diese "
         f"Maschinenart noch nicht. Getragen wird bisher: {kann}. "
-        f"Es wird hier bewusst NICHT ersatzweise mit PSM-Physik gerechnet.")
+        + (warum + " " if warum else "")
+        + "Es wird hier bewusst NICHT ersatzweise mit PSM-Physik gerechnet.")
 
 
 FELDWEG_WERKZEUG = {
     "fdm":          "die Pipeline (run)",
     "elmer2d_harm": "cae_cli.py feld2d  (Elmer 2-D, harmonisch)",
+    "elmer2d_stat": "cae_cli.py feld2d  (Elmer 2-D, magnetostatisch)",
 }
 
 

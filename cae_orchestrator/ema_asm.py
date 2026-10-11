@@ -282,7 +282,43 @@ def kaefig(geom: dict, axial_mm: float, j_stab_Apmm2: float = 0.0) -> dict:
         bemessung = "Tiefe/Breite"       # Stromverdraengung waere nicht mehr erfasst
     else:
         bemessung = "Stromdichte"
-    r_mitte  = r_rot - KAEFIG_STEG_MM - nuttiefe / 2.0
+    # ── Masse in MILLIMETERN ────────────────────────────────────────────────
+    #
+    # Dieselbe Regel wie beim Schenkelpol (`ema_eesm_cad`): **0 heisst „wie
+    # bisher ableiten", und ein gesetzter Wert wird GENOMMEN und nachgerechnet,
+    # nicht geklemmt.** Ein geklemmter Wert sieht fuer den Aufrufer wie ein
+    # angenommener aus -- und wer 8 mm eintraegt und 6,3 zurueckbekommt, ohne
+    # dass es jemand sagt, zeichnet die falsche Maschine (dieselbe Regel wie
+    # `cae_cli --set`). Was nicht geht, steht mit BEIDEN Zahlen in
+    # `masse_befund`.
+    masse_befund = []
+
+    def _vorgabe(schluessel, ist, name, spanne):
+        soll = float(geom.get(schluessel) or 0.0)
+        if soll <= 0.0:
+            return ist
+        if not (spanne[0] <= soll <= spanne[1]):
+            masse_befund.append(
+                f"{name}: {soll:.2f} mm liegt ausserhalb dessen, was hier "
+                f"darstellbar ist ({spanne[0]:.2f}…{spanne[1]:.2f} mm)")
+            return ist
+        return soll
+
+    steg = _vorgabe("laeuferStegMm", KAEFIG_STEG_MM, "Laeufersteg",
+                    (0.5, max(0.5, nutraum * 0.5)))
+    if abs(steg - KAEFIG_STEG_MM) > 1e-9:
+        nutraum += KAEFIG_STEG_MM - steg
+    breite = _vorgabe("laeuferNutBreiteMm", breite, "Laeufernutbreite",
+                      (0.5, 2.0 * math.pi * (r_rot - steg) / max(n_stab, 1)))
+    nuttiefe = _vorgabe("laeuferNutTiefeMm", nuttiefe, "Laeufernuttiefe",
+                        (0.5, max(0.5, nutraum)))
+    if masse_befund:
+        bemessung = "Vorgabe nicht darstellbar"
+    elif (float(geom.get("laeuferNutBreiteMm") or 0.0) > 0.0
+          or float(geom.get("laeuferNutTiefeMm") or 0.0) > 0.0):
+        bemessung = "Vorgabe"
+
+    r_mitte  = r_rot - steg - nuttiefe / 2.0
     a_stab  = breite * nuttiefe * KAEFIG_FUELLUNG                  # [mm^2]
 
     # Ringquerschnitt: uebliche Auslegung ~ Stabquerschnitt x n_stab/(2*pi*p),
@@ -293,6 +329,8 @@ def kaefig(geom: dict, axial_mm: float, j_stab_Apmm2: float = 0.0) -> dict:
         "n_stab": n_stab,
         "nuttiefe_mm": round(nuttiefe, 2),
         "stabbreite_mm": round(breite, 2),
+        "steg_mm": round(steg, 2),
+        "masse_befund": masse_befund,
         "A_stab_mm2": round(a_stab, 2),
         "A_ring_mm2": round(a_ring, 2),
         "h_joch_mm": round(h_joch, 2),

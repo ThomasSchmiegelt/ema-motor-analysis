@@ -93,26 +93,77 @@ pruefe(MA.pruefe_feldweg("pmsm", "fdm").code == "pmsm",
        "die PSM laeuft weiterhin durch die FDM")
 pruefe(MA.traegt("synrm", "analytisch") and MA.traegt("eesm", "analytisch"),
        "SynRM und EESM tragen die analytische Stufe (ema_synrm, ema_eesm)")
-pruefe(MA.traegt("eesm", "cad") and not MA.traegt("eesm", "feld")
-       and not MA.traegt("eesm", "em3d"),
-       "die EESM traegt seit dem 18.09.2026 das CAD (Schenkelpol, Erregerspulen, "
-       "zwei Schleifringe) — aber weiterhin weder Feld noch 3-D: die 2-D-FDM ist "
-       "reell und magnetostatisch und kann eine Gleichstrom-Erregerwicklung so "
-       "wenig darstellen wie einen Kaefig")
-pruefe(not any(MA.traegt("synrm", st) for st in ("feld", "cad", "em3d")),
-       "die SynRM traegt weiterhin nur die analytische Stufe — und die Tabelle "
-       "sagt es, statt es einen Lauf herausfinden zu lassen")
+pruefe(MA.traegt("eesm", "cad") and MA.traegt("eesm", "em3d"),
+       "die EESM traegt das CAD (seit 18.09.2026: Schenkelpol, Erregerspulen, "
+       "zwei Schleifringe) UND das 3-D (seit 20.09.2026: Laeuferprofile aus "
+       "`teile()`, Erregerspulen mit eingepraegter Gleichstromdichte, "
+       "durchgelaufener Elmer-Lauf)")
+pruefe(not MA.traegt("gsm", "em3d"),
+       "die GSM traegt weiterhin KEIN 3-D — ihre Erregerpole sitzen am "
+       "STAENDER, und `slot_rects` baut dort einen genuteten Drehstromstaender: "
+       "gebaut wuerde baulich eine andere Maschine")
+# **Die Feldstufe traegt seit dem 20.09.2026 -- und der Weg ist ein anderer.**
+# Der Satz, der hier stand ("kann eine Gleichstrom-Erregerwicklung so wenig
+# darstellen wie einen Kaefig"), war in seiner ersten Haelfte falsch: eine
+# eingepraegte GLEICHdurchflutung ist magnetostatisch exakt darstellbar. Was
+# nicht geht, ist Zeitabhaengiges (Kaefig, kommutierter Anker). Gerechnet wird
+# in `ema_em2d_stat`; gemessen Anisotropie 1,738 und Erregungslinearitaet
+# exakt 2,000x. Die 2-D-FDM scheidet aus einem ANDEREN Grund aus (sie eicht auf
+# `_analytical_Bgap`, die keinen Erregerstrom kennt) -- und genau das haelt das
+# Tor auseinander: `traegt` sagt ja, `pruefe_feldweg(..., "fdm")` sagt nein.
+pruefe(MA.traegt("eesm", "feld") and MA.ARTEN["eesm"].feldweg == "elmer2d_stat",
+       "die EESM traegt die Feldstufe — ueber Elmer 2-D magnetostatisch")
+try:
+    MA.pruefe_feldweg("eesm", "fdm")
+    pruefe(False, "die Pipeline weist die EESM trotzdem ab")
+except MA.ArtNichtUnterstuetzt as e:
+    pruefe("magnetostatisch" in str(e),
+           "die Pipeline weist die EESM ab und NENNT das Werkzeug, das sie traegt")
+# Die SynRM traegt seit dem 20.09.2026 das CAD -- ihr Laeufer entsteht aus
+# `ema_synrm_cad` nach Auslegungsregeln und nicht mehr als IPM-Tasche ohne
+# Magnet. Nachgemessen an einem echten FreeCAD-Bau (24 Barrieren, Rotor ein
+# gueltiger Solid, Volumen 0,00 % gegen die gezeichnete Flaeche).
+pruefe(MA.traegt("synrm", "cad") and MA.pruefe_stufe("synrm", "cad").code == "synrm",
+       "die SynRM traegt das CAD")
+# Das Feld laeuft seit dem 20.09.2026 -- aber NICHT ueber die Pipeline. Der FDM
+# eicht auf `_analytical_Bgap` (fuer eine magnetlose Maschine derselbe Wert wie
+# bei der PSM), und `_analytical_Barm` kennt nur den BETRAG des Stromzeigers --
+# die Salienz sieht er nicht (gemessen d/q ~ 1,0 gegen 1,719 aus Elmer).
+# S. BEFUNDE.md.
+pruefe(MA.traegt("synrm", "feld") and MA.ARTEN["synrm"].feldweg == "elmer2d_stat",
+       "die SynRM traegt die Feldstufe — ueber Elmer 2-D magnetostatisch")
+# **Das 3-D traegt seit dem 20.09.2026** -- nach einem DURCHGELAUFENEN Loeser
+# (103.433 Knoten, 672 Flussbarrieren-Prismen, 0 Magnete, Lastfeld mit
+# Staenderstroemen), nicht nach einem bloss gebauten Netz. Der Weg ist derselbe
+# wie bei der PSM: magnetostatisch, und genau richtig fuer eine Maschine, deren
+# Moment allein aus der Laeufergeometrie kommt.
+pruefe(MA.traegt("synrm", "em3d") and MA.ARTEN["synrm"].stufen
+       == ("analytisch", "feld", "cad", "em3d"),
+       "das 3-D traegt — nach einem durchgelaufenen Loeser, nicht nach einem "
+       "gebauten Netz")
+try:
+    MA.pruefe_feldweg("synrm", "fdm")
+    pruefe(False, "die Pipeline weist die SynRM trotzdem ab")
+except MA.ArtNichtUnterstuetzt as e:
+    pruefe("magnetostatisch" in str(e),
+           "die Pipeline weist die SynRM ab und NENNT das Werkzeug, das sie traegt")
 
 # Der Fehlertext einer NICHT getragenen Stufe muss weiterhin sagen, was statt
-# dessen geht — geprueft an der SynRM, seit die ASM das CAD traegt.
+# dessen geht. Die GSM traegt weder Feld noch 3-D und ist dafuer der Fall.
 try:
-    MA.pruefe_stufe("synrm", "cad")
+    MA.pruefe_stufe("gsm", "em3d")
     pruefe(False, "pruefe_stufe wirft fuer eine nicht getragene Stufe")
 except MA.ArtNichtUnterstuetzt as e:
     txt = str(e)
     pruefe("analytisch" in txt and "NICHT ersatzweise" in txt,
            "der Fehlertext sagt, was statt dessen geht, und dass NICHT ersatzweise "
            "mit PSM-Physik gerechnet wird")
+    # „Traegt sie nicht" ist die halbe Auskunft: ohne das WARUM liest sich die
+    # Absage wie eine Luecke im Zeitplan, und man wartet auf etwas, das aus
+    # einem baulichen Grund nicht kommt.
+    pruefe("STAENDER" in txt and "slot_rects" in txt,
+           "und er sagt den GRUND — bei der GSM sitzen die Erregerpole am "
+           "Staender, wo `slot_rects` einen genuteten Drehstromstaender baut")
 pruefe(MA.pruefe_stufe("asm", "cad").code == "asm",
        "die ASM kommt durch — der Kaefig war im Zeichner immer schon da, nur "
        "hielt dieses Tor ihn zurueck")
@@ -419,8 +470,27 @@ pruefe(len(MA.ARTEN["asm"].stufen) == len(MA.STUFEN),
 pruefe(_opt["pmsm"] == MA.ARTEN["pmsm"].label,
        "die PSM traegt alle Stufen und bekommt darum keinen Zusatz")
 for _c in ("synrm", "eesm"):
-    pruefe("getragen: analytisch" in _opt[_c] and "feld" not in _opt[_c],
-           f"'{_c}' steht mit genau seiner einen Stufe da")
+    # Beide tragen jetzt analytisch + feld + cad, aber KEIN em3d -- der Zusatz
+    # muss die Tabelle abbilden und nicht eine gemerkte Zahl.
+    _soll = MA.ARTEN[_c].stufen
+    if len(_soll) == len(MA.STUFEN):
+        # Wer ALLE Stufen traegt, bekommt keine „getragen"-Liste -- wie die
+        # PSM; seit dem 20.09.2026 gilt das auch fuer die SynRM. Der Hinweis
+        # auf den LOESERWEG bleibt trotzdem stehen, und genau das ist die
+        # Unterscheidung, um die es geht: vollstaendig heisst nicht „ueber die
+        # Pipeline".
+        pruefe("getragen:" not in _opt[_c]
+               and _opt[_c].startswith(MA.ARTEN[_c].label),
+               f"'{_c}' traegt alle Stufen und bekommt darum keine "
+               f"getragen-Liste")
+    else:
+        pruefe(all(st in _opt[_c] for st in _soll)
+               and ("em3d" in _opt[_c]) == ("em3d" in _soll),
+               f"'{_c}' steht mit genau seinen Stufen da ({', '.join(_soll)})")
+    # Und der Weg wird genannt: eine Feldstufe, die nicht ueber die Pipeline
+    # laeuft, ist fuer den, der auf den Knopf drueckt, sonst nicht auffindbar.
+    pruefe("magnetostatisch" in _opt[_c],
+           f"'{_c}' nennt das Werkzeug seiner Feldstufe")
 
 # Der Zusatz muss der Tabelle FOLGEN, nicht sie beschreiben: eine Art ohne
 # Stufen sagt das, unabhaengig von der Anzahl der Stufen ueberhaupt.
@@ -471,19 +541,76 @@ for _c in MA.ARTEN:
 
 # Was eine Bauart nicht hat, wird ausgeblendet statt wirkungslos stehenzulassen.
 pruefe('id="grp_magnet_topo"' in _html
-       and 'topo.style.display = (mitMagneten || barrieren) ? "" : "none"' in _html,
-       "die Magnet-Topologie entfaellt bei einer Art ohne Magnete — ein Regler, "
+       and 'topo.style.display = mitMagneten ? "" : "none"' in _html,
+       "die Magnet-Topologie entfaellt bei jeder Art ohne Magnete — ein Regler, "
        "der nichts bewegt, liest sich wie einer, der nicht wirkt")
-# Mit EINER Ausnahme, und sie ist keine Nachlaessigkeit: beim Reluktanzlaeufer
-# IST diese Anordnung die Maschine. Die Taschen bleiben leer, ihre Lage
-# entscheidet ueber das Salienzverhaeltnis — sie auszublenden liess den Laeufer
-# als „IPM ohne Magnete" stehen, ohne jeden Griff daran. Genau so gemeldet.
-pruefe('const barrieren = (art === "synrm");' in _html,
-       "beim Reluktanzlaeufer bleibt sie sichtbar — dort sind es die "
-       "Flussbarrieren und nicht die Magnete")
-pruefe('"Flussbarrieren (Anordnung)"' in _html,
-       "und sie heisst dort auch so, statt 'Magnet-Topologie' an einer "
-       "Maschine ohne Magnete")
+# **Auch beim Reluktanzlaeufer, und das ist seit dem 20.09.2026 neu.** Bis
+# dahin blieb die Topologiegruppe dort stehen und hiess „Flussbarrieren
+# (Anordnung)", weil die Barrieren wirklich aus `magShape` kamen — als leere
+# IPM-Taschen. Gemeldet als „in der reluktanzmaschine sind nur die magnete
+# entfernt. das ist doch nicht richtig." Seither kommen sie aus
+# `ema_synrm_cad` nach Auslegungsregeln, und dann ist der alte Regler genau
+# das, wogegen die Zeile darueber gebaut ist: einer, der nichts mehr bewegt.
+pruefe('const barrieren = (art === "synrm");' not in _html
+       and '"Flussbarrieren (Anordnung)"' not in _html,
+       "beim Reluktanzlaeufer ebenfalls — seine Barrieren haengen nicht mehr "
+       "an der Magnet-Anordnung")
+pruefe('data-arten="synrm"' in _html and 'id="synrm_k"' in _html
+       and 'id="synrm_kw"' in _html,
+       "statt dessen hat er eine eigene Gruppe (Barrierenzahl, Isolationsgrad, "
+       "Tangentialsteg, Freiwinkel)")
+# **Die Zeilen der Maske muessen ins Raster passen.** `.input-group` ist ein
+# DREIspaltiges Raster (`1fr 80px 30px`); eine Zeile aus nur Beschriftung und
+# Feld fuellt zwei Zellen, und ab der zweiten Zeile verrutscht alles um eine
+# Spalte. Gemessen am 20.09.2026: die Beschriftung „Isolationsgrad" landete in
+# der 30-px-Spalte und war abgeschnitten, das Feld darunter 214 px breit.
+# Gemeldet als „das rendering in canvas bei der parametereingabe der
+# reluktanzmaschine passt nicht". Betroffen waren alle drei Millimeter-Gruppen.
+import re as _re_lay                                         # noqa: E402
+
+
+def _gruppe_um(html, feld_id):
+    """Den `.input-group`-Block ausschneiden, in dem `feld_id` steht."""
+    i = html.index(f'id="{feld_id}"')
+    a_ = html.rindex('<div class="input-group', 0, i)
+    tiefe, j = 0, a_
+    while True:
+        auf = html.find("<div", j)
+        zu = html.find("</div>", j)
+        if zu < 0:
+            return html[a_:]
+        if 0 <= auf < zu:
+            tiefe += 1
+            j = auf + 4
+        else:
+            tiefe -= 1
+            j = zu + 6
+            if tiefe == 0:
+                return html[a_:j]
+
+
+for _fid, _name in (("synrm_k", "Flussbarrieren"),
+                    ("pol_b_schuh", "Schenkelpol in Millimetern"),
+                    ("laeufer_nut_tiefe", "Kaefiglaeufer in Millimetern")):
+    _blk = _gruppe_um(_html, _fid)
+    # Zeilen = alles zwischen der Ueberschrift und dem ersten <div>
+    _kern = _blk[_blk.index(">", _blk.index("</label>")) + 1:]
+    _kern = _kern[:_kern.index("<div")] if "<div" in _kern else _kern
+    _folge = _re_lay.findall(r"<(label|input|span)\b", _kern)
+    _zeilen = [_folge[i:i + 3] for i in range(0, len(_folge), 3)]
+    pruefe(_zeilen and all(z == ["label", "input", "span"] for z in _zeilen),
+           f"'{_name}': {len(_zeilen)} Zeilen fuellen das dreispaltige Raster "
+           f"(Beschriftung, Feld, Einheit) — sonst verrutscht ab der zweiten "
+           f"alles um eine Spalte")
+
+# Und die Beschreibung des Laeufers steht dort, wo sie umbrechen darf.
+pruefe('id="laeufer_beschreibung"' in _html
+       and 'bes.textContent = t;' in _html,
+       "die volle Laeuferbeschreibung steht im Geometrie-Reiter, nicht im "
+       "224-px-Kasten unter der Leinwand")
+pruefe('let txt = b.kurz || b.zaehlung || b.hinweis || "";' in _html,
+       "am Bild steht nur die Kurzfassung — und die Warnungen, die sie traegt")
+
 pruefe('machineType:\'machine_art\'' in _html,
        "und 'Text -> Auslegung' trifft dasselbe Feld (T2E_APPLY)")
 

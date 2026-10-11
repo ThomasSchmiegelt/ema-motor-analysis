@@ -58,7 +58,7 @@ function schnittRechnen(p, nSch, nyZiel, iter, melde) {
   }
   // EINE Eichung, an der mittleren Scheibe. S. Modulkopf.
   const km = Math.floor(nSch / 2), sm = scheiben[km];
-  const eich = eichung({ ...p, rs: sm.r }, sm.g, sm.By, sm.pkMag);
+  const eich = eichung({ ...p, rs: sm.r }, sm.g, sm.By, sm.pkMag, iter);
   for (const s of scheiben) s.sf = eich.sf;
   const g0 = scheiben[0].g;
   return { scheiben, eich, nSch, poles: p.poles, ri: p.ri, ro: p.ro,

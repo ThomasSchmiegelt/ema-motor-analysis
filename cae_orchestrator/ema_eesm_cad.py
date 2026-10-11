@@ -231,6 +231,36 @@ SPULE_UEBER_JOCH_MM = 1.0
 # und Stator", und genau so war es.
 RAND_LUFT_MM = 1.0
 
+#: Luft zwischen der Erregerspule und dem Boden des POLSCHUHS [mm].
+#:
+#: Die Spule sitzt NEBEN dem Kern und UNTER dem Schuh. Ihre Ecke muss deshalb
+#: unter dem Schuhboden bleiben -- nicht bloss unter dem Laeuferrand. Geprueft
+#: wurde bis zum 20.09.2026 gegen den Rand, und damit steckte die Ecke gemessen
+#: **2,82 mm im Polschuh**: bei r = 85,48 mm hatte der Leiter Eisen auf beiden
+#: Seiten UND darueber, sass also in einer geschlossenen Eisentasche, die seine
+#: eigene Durchflutung kurzschliesst. Gemeldet als „innerhalb des Polschuhs
+#: gibt es links und rechts einen hellgrauen Bereich, darin sind auch die
+#: Spulen eingebettet ... das sollte aber auch Luft sein, sonst entsteht
+#: magnetischer Kurzschluss".
+SPULE_SCHUH_LUFT_MM = 0.5
+
+#: Wieviel vom radialen BAURAUM (Welle bis Rand) das Joch hoechstens bekommt.
+#:
+#: Ohne Schranke frisst ein flussbemessenes Joch bei kleiner Polzahl den ganzen
+#: Laeufer: der Fluss je Pol geht mit 1/p, und bei 2p = 2 verlangt er gemessen
+#: 45,33 mm, waehrend zwischen Welle (40 mm) und Rand (85 mm) ueberhaupt nur
+#: 45 mm liegen. Uebrig blieben 12 mm Pol -- zu wenig fuer Schuh, Kern und
+#: Erregerspule, und das Ergebnis war eine Maschine, die das Werkzeug als
+#: unbaubar meldete, obwohl nicht der POL das Problem ist.
+#:
+#: Eine feste Restlaenge in Millimetern taugt dafuer nicht: sie bedeutet an
+#: einem 75-mm-Laeufer etwas anderes als an einem 300-mm-Laeufer. Der Anteil
+#: dagegen ist massstabsfrei und sagt, was er meint -- **der Pol behaelt die
+#: Mehrheit des Bauraums**. Reicht das Joch dann nicht, bindet es, und das ist
+#: ein BEFUND (`joch_bindet`) und keine stille Kuerzung: bei 2p = 2 ist ein
+#: Schenkelpollaeufer wirklich die falsche Bauform.
+JOCH_ANTEIL_MAX = 0.45
+
 
 def _spule_einpassen(a_wick_mm2: float, r_joch: float, y_kern: float,
                      r_max: float, r_deckel: float = 0.0) -> tuple:
@@ -519,9 +549,35 @@ def koerper(geom: dict, axial_mm: float) -> dict:
     anteil_pol = min(max(anteil_pol, POLHOEHE_SPANNE[0]), POLHOEHE_SPANNE[1])
     r_schuh_bezug = min(max(r_rot * (1.0 - anteil_pol), r_wel + 2.0),
                         r_rot - 2.0)
-    r_joch = r_wel                       # kein Ring: der Kern beginnt an der Welle
-    joch_bindet = False
-    h_joch = 0.0
+    # **Das Joch ist wieder ein RING -- und seine Hoehe kommt aus dem Fluss**
+    # (20.09.2026). Gemeldet als „an der Welle, am Fuss des Pols, links und
+    # rechts, keilartige Gebilde, auch das ist falsch. Das zieht sich auch in
+    # die Berechnung hinein."
+    #
+    # Der Zustand davor (19.09.2026) zog den Polkoerper bis auf die Bohrung
+    # durch und ueberliess das Joch dem, was die Koerper einander ueberdecken
+    # (`r_nabe`). Das ist geometrisch ein STERN und kein Kranz: zwischen den
+    # Polen laeuft die Luft als Keil bis fast auf die Welle. Der Entwurf war
+    # bewusst so gewaehlt und hat seinen Befund mitgeliefert -- nur faellt der
+    # an der Vorgabemaschine vernichtend aus: `h_nabe` = 5,78 mm gegen
+    # `h_joch_fluss` = 16,76 mm noetig, **B = 4,84 T gegen 1,70 T**
+    # Blechgrenze, `nabe_reicht = False`. Eine Zeichnung, die das Werkzeug im
+    # selben Atemzug als untragbar ausweist, gehoert nicht in einen Feldlauf.
+    #
+    # Die Regel ist die engste, die beides erfuellt: **das Joch ist mindestens
+    # so hoch, wie der Fluss es verlangt**, und mindestens so hoch wie das,
+    # was die Polkoerper ohnehin bilden. Der Gewinn des Umbaus vom 19.09.
+    # bleibt dabei erhalten -- das frueher feste Joch (38 % Polanteil) liess
+    # dem Pol 35,8 mm, das flussbemessene laesst ihm 47,5 mm.
+    h_joch = max(h_joch_fluss, 0.0)
+    r_joch = r_wel + h_joch
+    # Es muss noch ein Pol darueber passen; sonst bindet das Joch, und das ist
+    # ein Befund und keine stille Kuerzung.
+    r_joch_max = r_wel + JOCH_ANTEIL_MAX * max(r_rot - r_wel, 0.0)
+    joch_bindet = r_joch > r_joch_max
+    if joch_bindet:
+        r_joch = max(r_joch_max, r_wel)
+        h_joch = max(r_joch - r_wel, 0.0)
 
     h_pol = max(r_rot - r_schuh_bezug, 2.0)             # Bezug fuer die Schuhhoehe
     schuh_anteil = float(geom.get("polSchuhAnteil") or 0.0) or SCHUH_ANTEIL
@@ -563,6 +619,13 @@ def koerper(geom: dict, axial_mm: float) -> dict:
     kegel = KEGEL_VERJUENGUNG if form == "kegel" else 1.0
 
     r_max = max(r_rot - RAND_LUFT_MM, r_joch + 1.0)
+    # **Fuer die SPULE gilt eine engere Schranke als fuer den Kern.** Der Kern
+    # darf mit seiner Ecke ins Schuhband ragen -- Kern und Schuh sind dasselbe
+    # Eisen desselben Pols. Die Spule darf es nicht: dort wuerde sie von Eisen
+    # umschlossen. `r_max` bleibt deshalb der Laeuferrand (fuer den Kern),
+    # `r_spule_max` ist der Schuhboden.
+    r_spule_max = max(min(r_max, r_kern_aussen - SPULE_SCHUH_LUFT_MM),
+                      r_joch + 1.0)
     # Die Blechsorte aus der EINEN Tabelle -- vor der Schleife, weil die
     # Fluss-Schranke sie braucht.
     import ema_pipeline as _PLv
@@ -671,7 +734,7 @@ def koerper(geom: dict, axial_mm: float) -> dict:
         # (beim Kegel die Jochseite), sonst waere gerade dort die Ecke draussen.
         y_kern = max(b_kern_aussen, b_kern_innen) / 2.0
         d_neu, r_spule, spule_passt = _spule_einpassen(
-            a_wick, r_wickel_boden, y_kern, r_max, r_kern_aussen)
+            a_wick, r_wickel_boden, y_kern, r_spule_max, r_kern_aussen)
         if abs(d_neu - d_spule) < 1e-4:
             d_spule = d_neu
             break
@@ -704,7 +767,7 @@ def koerper(geom: dict, axial_mm: float) -> dict:
     r_spule = r_spule_aussen
     # Letzter Riegel: auch im Fehlerfall bleibt die gezeichnete Ecke drin.
     _y_aussen = max(b_kern_aussen, b_kern_innen) / 2.0 + d_spule
-    r_spule = min(r_spule, math.sqrt(max(r_max ** 2 - _y_aussen ** 2, 1.0)))
+    r_spule = min(r_spule, math.sqrt(max(r_spule_max ** 2 - _y_aussen ** 2, 1.0)))
     h_spule = r_spule_aussen - r_spule_innen
     d_spule_innen = d_spule                  # Rechteckspule: beide Enden gleich
 
@@ -753,7 +816,15 @@ def koerper(geom: dict, axial_mm: float) -> dict:
     # Zeichnung ist das besonders schlimm: wer 24 mm eintraegt und 21,7
     # zurueckbekommt, ohne dass es jemand sagt, zeichnet die falsche Maschine.
     # Was nicht passt, steht in `masse_befund` und macht `passt` falsch.
+    #
+    # Und es steht dort seit dem 03.10.2026 ZUSAETZLICH als Zahl
+    # (`masse_schranken`). Der Grund ist `entlastung` weiter unten: die
+    # darstellbare Spanne ist hier bereits ausgerechnet, sie wurde nur in
+    # einen deutschen Satz formatiert und danach weggeworfen. Ein Heilweg
+    # haette sie aus der Prosa zurueckparsen muessen -- genau die
+    # Fragilitaet, die dieses Werkzeug sonst ueberall vermeidet.
     masse_befund = []
+    masse_schranken = []
 
     def _vorgabe(schluessel, ist, name, spanne=None):
         soll = float(geom.get(schluessel) or 0.0)
@@ -763,6 +834,10 @@ def koerper(geom: dict, axial_mm: float) -> dict:
             masse_befund.append(
                 f"{name}: {soll:.2f} mm liegt ausserhalb dessen, was hier "
                 f"darstellbar ist ({spanne[0]:.2f}…{spanne[1]:.2f} mm)")
+            masse_schranken.append({"schluessel": schluessel, "name": name,
+                                    "ist": float(soll),
+                                    "min": float(spanne[0]),
+                                    "max": float(spanne[1])})
             return ist, True
         return soll, True
 
@@ -795,10 +870,20 @@ def koerper(geom: dict, axial_mm: float) -> dict:
     if _kw > 0.0:
         _db = 2.0 * h_kern * math.tan(math.radians(min(_kw, 45.0)))
         if _db >= b_kern_aussen - SPULE_MIN_MM:
+            # Auch hier laesst sich die Grenze schliessen statt nur zu melden:
+            # `_db = 2*h_kern*tan(kw)` muss unter `b_kern_aussen - SPULE_MIN_MM`
+            # bleiben, also ist der groesste tragbare Winkel ausrechenbar.
+            _t = (b_kern_aussen - SPULE_MIN_MM) / max(2.0 * h_kern, 1e-9)
+            _kw_max = math.degrees(math.atan(max(_t, 0.0)))
+            if _kw_max > 0.05:
+                masse_schranken.append(
+                    {"schluessel": "polKegelWinkelGrad", "name": "Kegelwinkel",
+                     "ist": float(_kw), "min": 0.0, "max": float(_kw_max),
+                     "einheit": "\u00b0"})
             masse_befund.append(
                 f"Kegelwinkel {_kw:.1f} Grad: der Kern liefe auf "
                 f"{max(b_kern_aussen - _db, 0.0):.2f} mm zusammen, bevor er das "
-                f"Joch erreicht")
+                f"Joch erreicht (hoechstens {_kw_max:.1f} Grad)")
         else:
             b_kern_innen = b_kern_aussen - _db
             kegel = b_kern_innen / max(b_kern_aussen, 1e-9)
@@ -813,19 +898,59 @@ def koerper(geom: dict, axial_mm: float) -> dict:
                                    "Spulenhoehe", (SPULE_MIN_MM, _h_max))
     if _d_gesetzt or _h_gesetzt:
         d_spule_innen = d_spule
-        r_spule_aussen = r_kern_aussen - SPULE_UNTER_SCHUH_MM
+        # Der Sitz folgt der ECKE, nicht dem Boden des Polschuhs.
+        #
+        # Hier stand `r_spule_aussen = r_kern_aussen - SPULE_UNTER_SCHUH_MM`,
+        # und das ist derselbe Radius wie die Grenze `r_spule_max`
+        # (= `r_kern_aussen - SPULE_SCHUH_LUFT_MM`, beide Konstanten 0,5 mm).
+        # Die Ecke eines Rechtecks liegt aber fuer jede halbe Breite > 0 weiter
+        # von der Achse entfernt als seine Oberkante -- die Pruefung darunter
+        # war damit fuer JEDE Spule unerfuellbar, auch fuer die duennste.
+        # Gemessen ueber 480 Geometrien mit gesetzter Spule: **0 bestanden**,
+        # dieselben Geometrien ohne Vorgabe 27 von 40. Der Zweig war also nicht
+        # streng, sondern tot, und diese Zeilen aendern deshalb keine Auslegung,
+        # die heute traegt -- es gibt keine. (BEFUNDE.md, 2026-10-03.)
+        #
+        # Gerechnet wird jetzt wie im ABGELEITETEN Weg (`_spule_einpassen`):
+        # der Sitz wird so weit heruntergenommen, dass die Ecke gerade auf der
+        # Grenze liegt. Eine Quelle fuer dieselbe Regel, zwei Aufrufer.
+        _y = max(b_kern_aussen, b_kern_innen) / 2.0 + d_spule
+        _r_ecke = math.sqrt(max(r_spule_max ** 2 - _y ** 2, 0.0))
+        r_spule_aussen = min(r_kern_aussen - SPULE_UNTER_SCHUH_MM, _r_ecke)
+
+        # Passt die Spule ueberhaupt noch zwischen Sitz und Wickelboden? Wenn
+        # nicht, ist das ein Befund und kein stilles Kuerzen -- die Regel
+        # dieses Moduls: ein geklemmter Wert sieht aus wie ein angenommener.
+        if r_spule_aussen <= r_wickel_boden + SPULE_MIN_MM:
+            _y_max = math.sqrt(max(r_spule_max ** 2
+                                   - (r_wickel_boden + SPULE_MIN_MM) ** 2, 0.0))
+            _d_max2 = _y_max - max(b_kern_aussen, b_kern_innen) / 2.0
+            if _d_max2 >= SPULE_MIN_MM:
+                masse_schranken.append(
+                    {"schluessel": "erregerSpuleDickeMm",
+                     "name": "Spulendicke (Ecke im Polschuh)",
+                     "ist": float(d_spule), "min": float(SPULE_MIN_MM),
+                     "max": float(_d_max2)})
+            masse_befund.append(
+                f"Spulendicke {d_spule:.2f} mm: damit muesste die Spule so weit "
+                f"nach innen ruecken, dass ihre Ecke unter {r_spule_max:.2f} mm "
+                f"bleibt \u2014 dort ist zwischen Wickelboden "
+                f"({r_wickel_boden:.2f} mm) und Sitz kein Platz mehr. Eine "
+                f"schmalere Spule darf weiter aussen sitzen")
         r_spule_innen = max(r_spule_aussen - h_spule, r_wickel_boden)
-        h_spule = r_spule_aussen - r_spule_innen
+        _h_moeglich = r_spule_aussen - r_spule_innen
+        if _h_gesetzt and _h_moeglich < h_spule - 1e-6:
+            masse_schranken.append(
+                {"schluessel": "erregerSpuleHoeheMm", "name": "Spulenhoehe",
+                 "ist": float(h_spule), "min": float(SPULE_MIN_MM),
+                 "max": float(max(_h_moeglich, 0.0))})
+            masse_befund.append(
+                f"Spulenhoehe {h_spule:.2f} mm: zwischen Sitz "
+                f"({r_spule_aussen:.2f} mm) und Wickelboden "
+                f"({r_wickel_boden:.2f} mm) sind nur {_h_moeglich:.2f} mm")
+        h_spule = _h_moeglich
         r_spule = r_spule_aussen
         a_wick = 2.0 * d_spule * h_spule
-        # Die Ecke muss weiterhin im Laeufer bleiben -- das ist keine
-        # Geschmacksfrage, sondern die Wand zum Staender.
-        _y = max(b_kern_aussen, b_kern_innen) / 2.0 + d_spule
-        if math.hypot(r_spule_aussen, _y) > r_max + 1e-6:
-            masse_befund.append(
-                f"Spule {d_spule:.2f} x {h_spule:.2f} mm: ihre aeussere Ecke "
-                f"laege bei {math.hypot(r_spule_aussen, _y):.2f} mm und damit "
-                f"ausserhalb des Laeufers ({r_max:.2f} mm)")
 
     b_kern = b_kern_aussen                   # was ein Zeichner liest, der nur EINE Breite kennt
 
@@ -974,6 +1099,7 @@ def koerper(geom: dict, axial_mm: float) -> dict:
         # Was von Hand gesetzt wurde und ob es geht. Leer heisst: alles
         # abgeleitet wie bisher.
         "masse_befund": list(masse_befund),
+        "masse_schranken": list(masse_schranken),
         "kegelwinkel_grad": round(math.degrees(math.atan2(
             (b_kern_aussen - b_kern_innen) / 2.0, max(h_kern, 1e-9))), 2),
         # Der Aussenradius der SPULE ist nicht der des Kerns: die Spule sitzt
@@ -1068,3 +1194,247 @@ def zeichenmasse(k: dict) -> dict:
         "d_spule_innen_mm", "d_spule_aussen_mm",
         "r_spule_innen_mm", "b_kern_spuleanfang_mm",
     )} | {"poles": int(k["poles"])}
+
+
+# Lesbare Namen der Vorgaben -- fuer Wege, die MEHRERE auf einmal setzen.
+VORGABE_NAMEN = {"erregerSpuleDickeMm": "Spulendicke",
+                 "erregerSpuleHoeheMm": "Spulenhoehe",
+                 "polKernBreiteMm": "Polkernbreite",
+                 "polSchuhBreiteMm": "Polschuhbreite",
+                 "polKegelWinkelGrad": "Kegelwinkel",
+                 "shaftD": "Wellendurchmesser"}
+
+
+def _kombi_weg(kombi, geom, einheit="mm"):
+    """Aus einer gemeinsam wirkenden Aenderung EINEN Weg machen.
+
+    Bis zum 03.10.2026 stand so etwas nur als Hinweis da („erst alle
+    zusammen") -- richtig, aber nicht ausfuehrbar: der Knopf trug genau einen
+    Schluessel. Ein Weg darf jetzt mehrere tragen (``aenderungen``), und der
+    Torwaechter darf anbieten, ihn selbst auszufuehren.
+    """
+    teile = []
+    for sl, wert in kombi.items():
+        nam = VORGABE_NAMEN.get(sl, sl)
+        teile.append(f"{nam} ableiten" if not wert
+                     else f"{nam} auf {wert:g} {einheit}".replace(" \u00b0", "\u00b0"))
+    return {"aenderungen": dict(kombi), "schluessel": "", "wert": None,
+            "jetzt": None, "ebene": "geom",
+            "text": " + ".join(teile),
+            "preis": "wirkt nur gemeinsam \u2014 einzeln reisst das Tor weiter"}
+
+
+def _nabe_wege(geom, k, _k):
+    """Was die Nabe schliesst -- gesucht, nicht geraten.
+
+    Zwei Hebel bewegen sie wirklich: ein BREITERER Polkern (die Koerper treffen
+    sich dann weiter aussen) und eine DUENNERE Welle (sie muessen sich dann
+    weniger weit innen treffen). Der Laeuferdurchmesser bewegt sie gemessen
+    gar nicht, solange die Kernbreite vorgegeben ist -- deshalb wird er auch
+    nicht angeboten. Jeder Weg wird nachgerechnet, und er muss das
+    Polteilungs-Tor zugleich halten: ein breiterer Kern kann die Spule
+    hinausdraengen.
+    """
+    wege, hinweise = [], []
+
+    def _bieten(schluessel, wert, text, preis):
+        g = dict(geom); g[schluessel] = wert
+        kk = _k(g)
+        if kk is None or not kk.get("nabe_zusammen", False) or not kk.get("passt"):
+            return False
+        wege.append({"schluessel": schluessel, "wert": wert,
+                     "jetzt": geom.get(schluessel), "text": text,
+                     "preis": preis, "ebene": "geom"})
+        return True
+
+    _b = float(geom.get("polKernBreiteMm") or 0.0) or float(k.get("b_kern_mm") or 0.0)
+    _v = _b
+    while _v < 120.0:
+        _v = round(_v + 2.0, 2)
+        if _bieten("polKernBreiteMm", _v,
+                   f"Polkernbreite auf {_v:.0f} mm (war {_b:.0f} mm)",
+                   "die Polkoerper treffen sich weiter aussen \u2014 "
+                   "weniger Platz fuer die Erregerspule"):
+            break
+
+    _d = float(geom.get("shaftD") or 0.0)
+    if _d > 0:
+        _v = _d
+        while _v > 20.0:
+            _v = round(_v - 5.0, 2)
+            if _bieten("shaftD", _v,
+                       f"Wellendurchmesser auf {_v:.0f} mm (war {_d:.0f} mm)",
+                       "mehr Bauhoehe fuer den Pol \u2014 die Welle muss das "
+                       "Moment aber noch tragen"):
+                break
+
+    # Heilt keine EINZELNE Aenderung, liegt es fast immer an einer gesetzten
+    # Vorgabe, die dem Hebel im Weg steht: ein breiterer Kern braucht Platz,
+    # den eine festgeschriebene Spulendicke nicht hergibt. Dann wird das PAAR
+    # gesucht und benannt -- und nicht ein Einzelknopf angeboten, der fuer sich
+    # nichts bewirkt.
+    kombi = {}
+    if not wege:
+        _frei = [sl for sl in ("erregerSpuleDickeMm", "erregerSpuleHoeheMm",
+                               "polSchuhBreiteMm", "polKegelWinkelGrad")
+                 if float(geom.get(sl) or 0.0) > 0.0]
+        _hebel = ([("polKernBreiteMm", v) for v in (_b + 2.0 * i for i in range(1, 26))]
+                  + [("shaftD", v) for v in (_d - 5.0 * i for i in range(1, 17))
+                     if _d > 0])
+        for schl, wert in _hebel:
+            if wert <= 0 or wert > 200.0:
+                continue
+            for sl in _frei:
+                g = dict(geom); g[schl] = round(wert, 2); g[sl] = 0.0
+                kk = _k(g)
+                if kk is not None and kk.get("nabe_zusammen") and kk.get("passt"):
+                    kombi = {schl: round(wert, 2), sl: 0.0}
+                    break
+            if kombi:
+                break
+    if kombi:
+        wege.append(_kombi_weg(kombi, geom))
+        hinweise.append(
+            "Keine EINZELNE Aenderung schliesst die Nabe: der Hebel braucht "
+            "Platz, den eine gesetzte Vorgabe festhaelt \u2014 der Weg oben "
+            "setzt beide auf einmal (0 heisst ableiten).")
+    elif not wege:
+        hinweise.append(
+            "Weder ein breiterer Polkern noch eine duennere Welle schliessen "
+            "die Nabe, ohne ein anderes Tor zu reissen \u2014 dann ist der "
+            "Laeufer fuer diese Polzahl schlicht zu klein.")
+    hinweise.append(
+        "Der Laeuferdurchmesser hilft hier NICHT: solange die Kernbreite "
+        "vorgegeben ist, bewegt er die Nabe nicht (gemessen ueber 180\u2026220 mm "
+        "unveraendert).")
+    return wege, hinweise
+
+
+# ── Wenn das Tor reisst: gerechnete Auswege ──────────────────────────────────
+
+def entlastung(geom: dict, axial_mm: float) -> dict:
+    """Konkrete Wege aus einem gerissenen Schenkelpol-Tor.
+
+    Dieselbe Haltung wie ``ema_rotorcheck.entlastung``: **jeder Weg wird gegen
+    DASSELBE Tor nachgerechnet, bevor ihn jemand zu sehen bekommt** -- einer,
+    der es erneut reissen laesst, ist keiner. Gesucht werden muss hier
+    nichts: ``koerper`` nennt zu jeder gesetzten Abmessung das darstellbare
+    Intervall (``masse_schranken``), und ``0`` heisst „ableiten".
+
+    **Ein Weg muss ALLEIN heilen.** Ein erster Entwurf prueffte gegen eine
+    Basis, in der die uebrigen verletzten Vorgaben schon auf 0 standen -- und
+    bot daraufhin „Spulenhoehe nicht vorgeben" an, obwohl in der gepruueften
+    Geometrie auch die Dicke zurueckgenommen war. Ein Knopf, der nur zusammen
+    mit einem zweiten wirkt, sich aber einzeln anbietet, ist schlimmer als
+    keiner: er sieht aus wie eine Heilung und laesst den naechsten Lauf
+    genauso reissen. Was nur gemeinsam geht, steht deshalb in ``kombi`` und
+    nicht in ``wege``.
+
+    Returns ``{"ok", "befund", "wege", "kombi", "hinweise"}``; jeder Weg traegt
+    ``{schluessel, wert, jetzt, text, preis, ebene}`` wie
+    ``ema_rotorcheck.entlastung``.
+    """
+    def _k(g):
+        try:
+            return koerper(g, axial_mm)
+        except Exception:                                    # noqa: BLE001
+            return None
+
+    k = _k(geom)
+    if k is None:
+        return {"ok": False, "befund": "Schenkelpol nicht rechenbar",
+                "befunde": ["Schenkelpol nicht rechenbar"],
+                "wege": [], "kombi": {}, "hinweise": []}
+
+    # Die NABE wird getrennt behandelt, und zwar auch dann, wenn das
+    # Polteilungs-Tor haelt. `nabe_zusammen = False` heisst nicht „knapp",
+    # sondern: die Polkoerper beruehren sich an der Bohrung ueberhaupt nicht
+    # und der Laeufer ist zehn lose Arme statt eines Bauteils. Das stand bisher
+    # als blosse Warnung im Protokoll, waehrend kleinere Befunde hart ablehnen
+    # -- gemeldet als „er sagt mir auch nicht, was faul ist".
+    if not k.get("nabe_zusammen", True):
+        nw, nh = _nabe_wege(geom, k, _k)
+        _nb = (f"Der Laeufer ist kein Bauteil: die Polkoerper beruehren sich "
+               f"an der Bohrung nicht (sie reichen bis r = {k.get('r_nabe_mm')} "
+               f"mm, die Welle beginnt bei {k.get('r_welle_mm')} mm) \u2014 er "
+               f"zerfaellt in {int(k.get('poles') or 0)} Einzelarme.")
+        if k.get("passt"):
+            return {"ok": False, "befund": _nb, "befunde": [_nb],
+                    "wege": nw, "kombi": {}, "hinweise": nh}
+    else:
+        nw, nh, _nb = [], [], ""
+
+    if k.get("passt"):
+        return {"ok": True, "befund": "", "befunde": [], "wege": [],
+                "kombi": {}, "hinweise": []}
+
+    # Alle Pol-Vorgaben, die ueberhaupt gesetzt sind. Sie sind die Hebel.
+    HEBEL = (("erregerSpuleDickeMm", "Spulendicke"),
+             ("erregerSpuleHoeheMm", "Spulenhoehe"),
+             ("polKernBreiteMm",     "Kernbreite"),
+             ("polSchuhBreiteMm",    "Polschuhbreite"),
+             ("polKegelWinkelGrad",  "Kegelwinkel"))
+    gesetzt = [(s, n) for s, n in HEBEL if float(geom.get(s) or 0.0) > 0.0]
+
+    wege, gesehen, hinweise = [], set(), []
+
+    def _bieten(schluessel, wert, text, preis):
+        marke = (schluessel, round(float(wert), 4))
+        if marke in gesehen:
+            return False
+        g = dict(geom)
+        g[schluessel] = wert
+        kk = _k(g)
+        if kk is None or not kk.get("passt"):
+            return False
+        gesehen.add(marke)
+        wege.append({"schluessel": schluessel, "wert": wert,
+                     "jetzt": geom.get(schluessel), "text": text,
+                     "preis": preis, "ebene": "geom"})
+        return True
+
+    # 1. In die genannte Spanne klemmen -- auf die sichere Seite gerundet.
+    for sch in (k.get("masse_schranken") or []):
+        ist, lo, hi = float(sch["ist"]), float(sch["min"]), float(sch["max"])
+        eh = str(sch.get("einheit") or "mm")
+        if ist > hi:
+            wert  = math.floor(hi * 100.0) / 100.0
+            preis = f"war {ist:.2f}{'' if eh == chr(176) else ' '}{eh} \u2014 mehr ist hier nicht darstellbar"
+        else:
+            wert  = math.ceil(lo * 100.0) / 100.0
+            preis = f"war {ist:.2f}{'' if eh == chr(176) else ' '}{eh} \u2014 weniger ist hier nicht darstellbar"
+        if lo - 1e-9 <= wert <= hi + 1e-9:
+            _bieten(sch["schluessel"], wert,
+                    f"{sch['name']} auf {wert:.2f}"
+                    + ("" if eh == "\u00b0" else " ") + eh,
+                    preis)
+
+    # 2. Eine einzelne Vorgabe ganz zurueckziehen.
+    for schl, name in gesetzt:
+        _bieten(schl, 0.0, f"{name} nicht vorgeben (0 = ableiten)",
+                "das Werkzeug bemisst sie aus dem Bauraum")
+
+    # 3. Heilt nichts fuer sich: was GEMEINSAM geht, wird nachgerechnet und
+    #    benannt, statt es als Einzelknopf auszugeben.
+    kombi = {}
+    if not wege and gesetzt:
+        g = dict(geom)
+        for schl, _n in gesetzt:
+            g[schl] = 0.0
+        kk = _k(g)
+        if kk is not None and kk.get("passt"):
+            kombi = {s: 0.0 for s, _n in gesetzt}
+            wege.append(_kombi_weg(kombi, geom))
+            hinweise.append(
+                "Keine EINZELNE dieser Vorgaben heilt das Tor \u2014 der Weg "
+                "oben setzt sie zusammen zurueck.")
+        else:
+            hinweise.append(
+                "Auch das Zuruecknehmen aller Pol-Vorgaben heilt dieses Tor "
+                "nicht \u2014 dann binden Polzahl, Rotordurchmesser oder "
+                "Wellendurchmesser, nicht die Spule.")
+
+    _bf = [b for b in (str(k.get("grund") or ""), _nb) if b]
+    return {"ok": not wege and not kombi and not nw,
+            "befund": _bf[0] if _bf else "", "befunde": _bf,
+            "wege": wege + nw, "kombi": kombi, "hinweise": hinweise + nh}

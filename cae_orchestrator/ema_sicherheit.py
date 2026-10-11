@@ -38,6 +38,16 @@ WICKLUNG_SPITZE_C = 200.0
 SF_ZIEL = 1.5          # geforderter Sicherheitsfaktor
 SF_VERSAGEN = 1.0      # darunter fliesst der Rotor
 
+#: ⊙ Zulaessige Durchbiegung der Laeuferscheibe als Anteil des Luftspalts.
+#: GEHOLT aus ``ema_axial.W_ZUL_ANTEIL`` und nicht abgeschrieben -- dort steht
+#: die Begruendung (bei 10 % Versatz bleiben 41 % einer Spaltkraft als
+#: destabilisierender Restschub stehen), und zwei Zahlen fuer dieselbe Grenze
+#: sind eine zu viel. Faellt der Import aus, gilt der dort dokumentierte Wert.
+try:                                                             # pragma: no cover
+    from ema_axial import W_ZUL_ANTEIL
+except Exception:                                                # noqa: BLE001
+    W_ZUL_ANTEIL = 0.10
+
 
 def _k(name, ok, text, wert=None, grenze=None, einheit="", schwere="verletzt",
        quelle=""):
@@ -165,6 +175,59 @@ def pruefen(results: dict, meta: dict | None = None) -> dict:
             krit.append(_k("festigkeit", sf >= SF_ZIEL,
                            f"FEM-Sicherheitsfaktor {sf:.2f} (gefordert {SF_ZIEL:.1f})",
                            sf, SF_ZIEL, quelle="summary.safety_factor_fem"))
+    elif basis == "scheibe":
+        # ⊙ Die SCHEIBE hat keine Struktur-FEM und braucht auch keine: ihre
+        # beiden Lasten sind andere (axialer Anzug -> Durchbiegung,
+        # Fliehkraft IN der Scheibenebene), und beide sind gerechnet. Der
+        # Satz darueber -- „ruht auf der Ringformel, die die Spannungsspitzen
+        # an den Stegen ueber den Magnettaschen nicht kennt" -- waere hier
+        # Wort fuer Wort falsch: es gibt weder Ringformel noch Magnettaschen
+        # noch Stege. Gemeldet wird deshalb, was WIRKLICH offen ist.
+        anteil = s.get("axial_w_anteil_spalt")
+        if isinstance(anteil, (int, float)) and anteil > 0:
+            krit.append(_k("durchbiegung", anteil <= W_ZUL_ANTEIL,
+                           f"Die Laeuferscheibe biegt sich unter dem axialen Anzug "
+                           f"({s.get('axial_anzug_kPa', '?')} kPa) um "
+                           f"{s.get('axial_w_max_um', '?')} um = "
+                           f"{anteil * 100:.1f} % des Luftspalts "
+                           f"(zulaessig {W_ZUL_ANTEIL * 100:.0f} %)",
+                           anteil, W_ZUL_ANTEIL,
+                           quelle="summary.axial_w_anteil_spalt"))
+        krit.append(_k("festigkeit", False,
+                       "Axialfluss: die Scheibe traegt keine Struktur-FEM, und ihre "
+                       "beiden eigenen Lasten SIND gerechnet (Anzug/Durchbiegung "
+                       "ueber die Kreisringplatte, Magnetfliehkraft in der "
+                       "Scheibenebene). Offen bleibt die Fliehkraftspannung des "
+                       "Blechs gegen seine Streckgrenze — die rechnet hier niemand",
+                       None, SF_ZIEL, schwere="hinweis",
+                       quelle="summary.structural_basis"))
+        tau = s.get("axial_klebescher_MPa")
+        haelt, zul = s.get("axial_klebung_haelt"), s.get("axial_klebe_zul_MPa")
+        if isinstance(tau, (int, float)) and tau > 0:
+            # Mit Angabe ist es ein echtes Kriterium, ohne Angabe ein Hinweis.
+            # Beides „magnethaltung" zu nennen und gleich zu behandeln waere
+            # genau die Verwechslung, gegen die `ema_sicherheit` seine Schweren
+            # fuehrt: eine fehlende Angabe ist kein bestandener Nachweis.
+            if haelt is not None and zul:
+                krit.append(_k("magnethaltung", bool(haelt),
+                               f"Die Magnete einer Scheibe ziehen mit "
+                               f"{s.get('axial_magnetkraft_kN', '?')} kN IN der "
+                               f"Scheibenebene, wo kein Blechsteg steht; die Klebung "
+                               f"traegt dabei {tau:.2f} MPa gegen {zul:.1f} MPa "
+                               f"zulaessig",
+                               tau, float(zul), "MPa",
+                               quelle="summary.axial_klebung_haelt"))
+            else:
+                krit.append(_k("magnethaltung", False,
+                               f"In der Scheibenebene haelt den Sektormagneten KEIN "
+                               f"Blechsteg: {s.get('axial_magnetkraft_kN', '?')} kN "
+                               f"ziehen nach aussen, die Klebung traegt dabei "
+                               f"{tau:.2f} MPa Scherspannung. Ob das haelt, sagt erst "
+                               f"eine zulaessige Spannung — `axialKlebeZulMpa` bzw. "
+                               f"`axialBandageZulMpa`; eine Werkstofftabelle dafuer "
+                               f"hat dieses Werkzeug nicht",
+                               tau, None, "MPa", schwere="hinweis",
+                               quelle="summary.axial_klebescher_MPa"))
     else:
         krit.append(_k("festigkeit", False,
                        f"KEINE Struktur-FEM gerechnet (Basis: {basis or 'unbekannt'}) — "

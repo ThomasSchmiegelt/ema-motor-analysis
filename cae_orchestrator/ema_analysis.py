@@ -1193,11 +1193,28 @@ def _analytical_Bgap(geom: dict) -> float:
     kc = 1.15                                              # Carter coefficient
 
     poles      = int(geom["p"]) * 2
+    # **Axial wird DELEGIERT, nicht abgewiesen** (07.10.2026). Hier stand
+    # `_axial_tor(...)` hinter dem `statorID`-Zugriff, und beides war an dieser
+    # Stelle falsch: der Lauf BRAUCHT ein Luftspaltfeld, und fuer die Scheibe
+    # gibt es das richtige -- die Arbeitsgerade `Br*hm/(hm+mu_r*kc*g)*alpha` aus
+    # `ema_axial_fdm.eichung_magnet`, dieselbe Groesse, auf die auch die
+    # Zeichenseite und der Mehrschnitt eichen. Abzuweisen hiess, jeden
+    # Axiallauf zu toeten, nachdem Feld, Betriebspunkt und Eckdrehzahl schon
+    # gerechnet waren; eine radiale Zahl zurueckzugeben waere der Fehler, gegen
+    # den das Tor gebaut war. Delegieren ist beides nicht.
+    #
+    # Die Abzweigung steht VOR `geom["statorID"]`: eine Scheibe hat keine
+    # Statorbohrung, und der Payload traegt dort nur, was die radiale Maske
+    # zufaellig noch enthaelt. Der Import ist funktionslokal, weil
+    # `ema_axial_fdm` dieses Modul selbst importiert (Ringschluss).
+    import ema_fluss as _flx
+    if _flx.flussweg(geom) == "axial":
+        import ema_axial_fdm as _axf
+        return float(_axf.eichung_magnet(geom))
+
     pole_pitch = math.pi * geom["statorID"] / poles        # [mm]
     _legs, meta = magnet_legs(geom)
     f_orient   = _orient_factor(geom)                       # 90°-rotation flux scaling
-
-    _axial_tor(geom, "_analytical_Bgap")
     if meta.is_surface:
         # Surface magnets occupy the outer rotor band (inside the OD) and face the
         # air gap directly; gap = statorID/2 - rotorOD/2 (normal mechanical gap).
@@ -1506,7 +1523,26 @@ def estimate_saliency(geom: dict) -> float:
     ≈3.2.  Topologies without a researched band (``custom``) keep the previous
     behaviour unchanged.
     """
-    _axial_tor(geom, "estimate_saliency")
+    # **Axial wird NICHT abgewiesen, sondern geantwortet** (07.10.2026).
+    # Bis dahin stand hier `_axial_tor(...)`, und das war an dieser Stelle die
+    # falsche Haertegrad: es brach jeden Axiallauf aus der Oberflaeche ab,
+    # nachdem Feld und Betriebspunkt schon gerechnet waren. Der Grund des Tors
+    # bleibt richtig -- `magnet_legs` liefert fuer einen axialen Payload die
+    # V-Schenkel der Schemavorgabe und daraus faellt die Salienz einer Tasche,
+    # die eine Scheibe nicht hat (gemessen 2,589, und ueber
+    # `estimate_dq_currents` ging daraus ein i_d in den Betriebspunkt).
+    #
+    # Nur ist "1,0" hier die RICHTIGE Antwort und nicht bloss die harmlose: die
+    # Scheibe traegt Oberflaechenmagnete, Ld = Lq, kein Reluktanzmoment. Genau
+    # das setzt `ema_axial_fdm.betriebspunkt` ohnehin voraus und sagt es in
+    # seiner `grenzen`-Liste ("ein vergrabener Scheibenmagnet oder ein
+    # Reluktanzlaeufer waere salient und ist NICHT gerechnet") -- die Auskunft
+    # steht also da, wo sie hingehoert, und muss nicht als Abbruch kommen.
+    # `_analytical_Bgap` weist weiter ab, und das ist dort richtig: eine
+    # radiale Luftspaltzahl unter axialem Namen war der Anlass des Tors.
+    import ema_fluss as _flx
+    if _flx.flussweg(geom) == "axial":
+        return 1.0
     import ema_referenz
 
     _legs, meta = magnet_legs(geom)

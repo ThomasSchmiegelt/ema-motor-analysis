@@ -67,6 +67,12 @@ METHODEN = {
     "lptn":         "6-Knoten-Waermenetzwerk, stationaer/transient",
     "zyklus":       "Fahrzyklus-Integration ueber Betriebspunkte",
     "geometrisch":  "reine Geometrie, kein Loeser",
+    # ⊙ Eigene Methode und bewusst NICHT "analytisch": die Kreisringplatte wird
+    # achssymmetrisch GELOEST (Plattengleichung auf 2001 Radiusstuetzstellen,
+    # `ema_axial._platte`), ist also kein geschlossener Ausdruck -- und sie ist
+    # erst recht nicht die Lame-Ringformel, mit der sie sonst in einem Topf laege.
+    "axial1d":      "achssymmetrisch geloeste Kreisringplatte (1-D ueber r), "
+                    "kein Netz, keine Nut, keine Magnettasche",
     "tabelle":      "Werkstofftabelle bzw. Vorgabewert",
     "abgeleitet":   "aus anderen Kennwerten gerechnet",
     "unbekannt":    "nicht zugeordnet — Register ergaenzen",
@@ -118,7 +124,47 @@ HERKUNFT: dict[str, dict] = {
     "structural_ok":    dict(einheit="",      methode="abgeleitet", detail="Toraussage der Festigkeitsstufe"),
     "structural_basis": dict(einheit="",      methode="abgeleitet",
                              detail="worauf die Festigkeitsaussage beruht: 'fem' = gerechnet, "
-                                    "'analytisch' = die FEM lieferte nichts, es gilt die Ringformel"),
+                                    "'analytisch' = die FEM lieferte nichts, es gilt die "
+                                    "Ringformel, 'scheibe' = Axialfluss, es gelten "
+                                    "Kreisringplatte + Magnetfliehkraft in der Scheibenebene"),
+
+    # ⊙ Festigkeit der SCHEIBE. Eigene Methode `axial1d`, weil es weder eine
+    # FEM noch die Ringformel ist: die Kreisringplatte ist achssymmetrisch
+    # geschlossen geloest (`ema_axial._platte`) und kennt deshalb keine Nut,
+    # keine Magnettasche und keine Nabenverschraubung. Sie als "analytisch"
+    # neben die Lame-Ringformel zu stellen hiesse, zwei verschiedene Modelle
+    # unter einem Namen zu fuehren -- genau das, wogegen diese Tabelle existiert.
+    "axial_w_max_um":   dict(einheit="µm",    methode="axial1d",
+                             detail="Durchbiegung der Laeuferscheibe unter dem axialen "
+                                    "Anzug, bei der GEZEICHNETEN Blechdicke",
+                             quelle="ema_axial.ruecken"),
+    "axial_w_anteil_spalt": dict(einheit="",  methode="axial1d",
+                             detail="dieselbe Durchbiegung als Anteil des Luftspalts; "
+                                    "zulaessig sind 10 % (ema_axial.W_ZUL_ANTEIL)",
+                             quelle="ema_axial.ruecken"),
+    "axial_anzug_kPa":  dict(einheit="kPa",   methode="analytisch",
+                             detail="axiale Normalspannung im Luftspalt (alpha*B^2/2mu0); "
+                                    "die HAUPTlast der Scheibe, 8,6 : 1 zum Schub",
+                             quelle="ema_axial.anzug"),
+    "axial_magnetkraft_kN": dict(einheit="kN", methode="analytisch",
+                             detail="Fliehkraft der Magnete EINER Scheibe in ihrer Ebene — "
+                                    "dort haelt sie kein Blechsteg",
+                             quelle="ema_axial.bandage"),
+    "axial_klebescher_MPa": dict(einheit="MPa", methode="analytisch",
+                             detail="Scherspannung in der Magnetklebung. Ein URTEIL darueber "
+                                    "braucht eine zulaessige Spannung, die in keiner "
+                                    "Werkstofftabelle dieses Werkzeugs steht",
+                             quelle="ema_axial.bandage"),
+    "axial_ruecken_bindet": dict(einheit="", methode="abgeleitet",
+                             detail="welche der beiden Forderungen die Blechdicke bindet: "
+                                    "'Fluss' oder 'Durchbiegung'"),
+    "axial_klebung_haelt": dict(einheit="", methode="abgeleitet",
+                             detail="Scherspannung gegen die ANGEGEBENE zulaessige "
+                                    "(axialKlebeZulMpa). Ohne Angabe gibt es kein Urteil, "
+                                    "und dann fehlt dieser Schluessel"),
+    "axial_klebe_zul_MPa": dict(einheit="MPa", methode="tabelle",
+                             detail="vom Menschen angegebene zulaessige Scherspannung der "
+                                    "Magnetklebung — keine Tabelle des Werkzeugs"),
     "safety_factor_fem":dict(einheit="",      methode="fem3d",
                              detail="Fliessgrenze / max(FEM-P99, Ringformel*Kt) — der bindende Torwert"),
     "fem_rpm":          dict(einheit="1/min", methode="fem3d",   detail="Drehzahl, bei der die FEM gerechnet hat"),
@@ -545,7 +591,11 @@ BERICHT_GRUPPEN = [
     ("Elektromagnetik", ["B_gap_T", "Kt_Nm_per_A", "T_maxwell_Nm", "lcm_slots_poles"]),
     ("Leistung",        ["P_max_kW", "P_max_rpm", "P_cont_max_kW", "T_peak_max_Nm"]),
     ("Festigkeit",      ["max_safe_rpm", "structural_ok", "structural_basis",
-                         "safety_factor_fem", "fem_rpm", "fem_sigma_vm_MPa"]),
+                         "safety_factor_fem", "fem_rpm", "fem_sigma_vm_MPa",
+                         "axial_w_max_um", "axial_w_anteil_spalt",
+                         "axial_anzug_kPa", "axial_magnetkraft_kN",
+                         "axial_klebescher_MPa", "axial_ruecken_bindet",
+                         "axial_klebung_haelt", "axial_klebe_zul_MPa"]),
     ("Thermik",         ["T_winding_C", "T_magnet_C", "T_housing_C", "P_total_W",
                          "cooling", "htc_source"]),
     ("Fahrzyklus",      ["cycle_name", "cycle_kWh100km", "cycle_eta",

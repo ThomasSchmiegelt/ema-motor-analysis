@@ -97,20 +97,56 @@ C_TEXT2   = "#9fb0c0"
 
 # ── Leinwand ─────────────────────────────────────────────────────────────────
 
-def _leinwand(breite: float = 6.2, hoehe: float = 6.2):
-    """Achse ohne jeden Grund -- Figur UND Achse durchsichtig."""
+#: Hintergrund der Bilder. **Schwarz ist die Vorgabe**, und zwar seit dem
+#: 06.10.2026: die Durchsicht (Deckkraft = |B|) bleibt erhalten, sie wird nur
+#: auf Schwarz VERRECHNET statt als Alphakanal in der Datei zu stehen. Eine
+#: Datei mit 95 % durchsichtiger Flaeche sieht in jedem gewoehnlichen
+#: Bildbetrachter weiss oder kariert aus -- gemeldet genau so. In der rechten
+#: Agentenspalte aendert sich dadurch nichts: dort lag sie ohnehin auf einem
+#: dunklen Schachbrett.
+GRUND = "#0d1014"
+
+
+def _leinwand(breite: float = 6.2, hoehe: float = 6.2, grund: str | None = GRUND):
+    """Leinwand mit Grund. ``grund=None`` gibt die alte, durchsichtige Fassung."""
     fig, ax = plt.subplots(figsize=(breite, hoehe))
-    fig.patch.set_alpha(0.0)
-    ax.set_facecolor("none")
+    if grund:
+        fig.patch.set_facecolor(grund)
+        fig.patch.set_alpha(1.0)
+        ax.set_facecolor(grund)
+    else:
+        fig.patch.set_alpha(0.0)
+        ax.set_facecolor("none")
     ax.axis("off")
     return fig, ax
 
 
-def _speichern(fig, pfad: str, px: int = 1400) -> str:
+def _speichern(fig, pfad: str, px: int = 1400, fest: bool = False) -> str:
+    """``fest=True``: feste Leinwandgroesse, KEIN Zuschnitt auf den Inhalt.
+
+    Fuer ein Einzelbild ist ``bbox_inches="tight"`` richtig -- es nimmt den
+    Rand weg. Fuer eine BILDREIHE ist es falsch, und das ist gemessen: ueber
+    zehn Frames kamen zwei Groessen heraus (1411 und 1431 px breit, weil der
+    Titel mit dem Laeuferwinkel mal drei- und mal vierstellig ist), ffmpeg
+    machte daraus ein 1412 px breites Video und skalierte acht von zehn
+    Bildern. Das Ergebnis wackelt -- und zwar so, dass es wie eine Bewegung
+    der Maschine aussieht.
+    """
     os.makedirs(os.path.dirname(pfad) or ".", exist_ok=True)
     dpi = max(100, int(px / fig.get_size_inches()[0]))
-    fig.savefig(pfad, dpi=dpi, transparent=True,
-                bbox_inches="tight", pad_inches=0.06)
+    # Ob durchsichtig gespeichert wird, entscheidet die LEINWAND (``_leinwand``)
+    # und nicht dieser Aufruf -- zwei Stellen waeren zwei Wahrheiten darueber,
+    # was der Hintergrund ist.
+    durchsichtig = fig.patch.get_alpha() == 0.0
+    if fest:
+        # Ohne `bbox_inches="tight"` schneidet die Leinwand hart ab: gemeldet
+        # als Titel, dem links und rechts Buchstaben fehlten. Die Raender
+        # muessen deshalb von Hand stehen -- und zwar GROSSZUEGIG, weil der
+        # Titel je nach Maschinenart verschieden lang ist.
+        fig.subplots_adjust(left=0.03, right=0.87, top=0.86, bottom=0.08)
+    fig.savefig(pfad, dpi=dpi, transparent=durchsichtig,
+                facecolor=fig.patch.get_facecolor(),
+                **({} if fest else {"bbox_inches": "tight", "pad_inches": 0.06}))
     plt.close(fig)
     return pfad
 
@@ -238,12 +274,23 @@ def _magnete(ax, geom: dict, f: dict) -> None:
 
 
 def _farbleiste(fig, im, ax) -> None:
+    """Die Leiste muss SAGEN, was die Farben bedeuten.
+
+    Sie trug nur „Flussdichte |B| (T) — Deckkraft = |B|", und das beantwortet
+    die Frage nicht: in der Leiste steht die Farbe VOLL deckend, im Bild
+    daneben ist sie es nicht, und wer die Farbskala nicht kennt, liest aus
+    schwarz-violett-orange-weiss nichts ab. Jetzt steht die Richtung dabei --
+    und dass das DUNKLE nicht „wenig Fluss im Eisen" heisst, sondern „hier ist
+    gar nichts", weil die Luft unsichtbar gemacht wird.
+    """
     cb = fig.colorbar(im, ax=ax, fraction=0.043, pad=0.02)
-    cb.set_label("Flussdichte |B|  (T)   —   Deckkraft = |B|",
-                 color=C_TEXT2, fontsize=9)
+    cb.set_label("Flussdichte |B| (T)", color=C_TEXT2, fontsize=9)
     cb.ax.tick_params(color="#55626f", labelcolor=C_TEXT2, labelsize=8)
     cb.outline.set_edgecolor("#55626f")
     cb.ax.set_facecolor("none")
+    # Die Leiste zeigt die Farben voll deckend -- im Bild sind sie es nicht.
+    # Das ist Absicht (sonst waere die Leiste unten unlesbar) und steht in der
+    # Beschriftung, damit niemand aus ihr die Deckkraft im Bild abliest.
     cb.solids.set_alpha(1.0)
 
 
@@ -260,7 +307,103 @@ def _betriebspunkt(f: dict) -> str:
 
 # ── 1) Durchsicht ────────────────────────────────────────────────────────────
 
-def bild_linien(geom: dict, f: dict, pfad: str) -> str:
+def frames(geom: dict, ordner: str, n_frames: int = 16, N: int = 420,
+           iq: float = 0.0, id_: float = 0.0, rpm: float = 3000.0,
+           last_nm: float = 0.0, melde=None) -> dict:
+    """Eine Bildreihe ueber den LAEUFERWINKEL -- fuer die Arten OHNE Feldstufe.
+
+    Die Pipeline dreht den Laeufer durch das FDM-Raster und schreibt
+    ``frames/`` -- aber nur fuer die PSM, denn fuer jede andere Art weist
+    ``ema_maschinenart.pruefe_feldweg`` die radiale FDM als FELDWEG ab. Die
+    Folge war, dass vier von sechs Projektordnern leer blieben.
+
+    Das ist hier ausdruecklich **ein Bild und keine Feldstufe**: gezeichnet
+    wird, WO der Fluss durch die gezeichnete Geometrie laeuft. Was dabei je
+    nach Art fehlt, steht IM Bild und nicht nur in diesem Docstring -- beim
+    Kaefiglaeufer die induzierten Stroeme, beim Kommutator die Umschaltung.
+    Ein Bild, das wie ein Feldbild aussieht und keines ist, waere die
+    schlimmste Variante (dieselbe Regel wie bei den Saettigungsbildern).
+
+    Eine volle mechanische Umdrehung waere ``p`` mal dasselbe; gefahren wird
+    deshalb EINE Polteilung.
+    """
+    import os
+
+    import ema_maschinenart as MA
+
+    os.makedirs(ordner, exist_ok=True)
+    code = MA.art_code(geom)
+    art = MA.hole(code)
+    p_paare = max(1, int(geom.get("p", 1)))
+    periode = math.pi / p_paare              # eine Polteilung, mechanisch
+    fuss = {
+        "fdm": "",
+        "elmer2d_harm": "KEINE Kaefigstroeme — der Loeser ist magnetostatisch; "
+                        "das quantitative Feld rechnet `cae_cli feld2d` "
+                        "(Elmer, harmonisch)",
+        "elmer2d_stat": "Bild aus der Haus-FDM; die Zahlen rechnet "
+                        "`cae_cli feld2d` (Elmer, magnetostatisch)",
+        "keiner": "KEINE Kommutierung — ein kommutierter Anker braucht einen "
+                  "zeitabhaengigen Lauf, den dieses Werkzeug nicht hat",
+    }.get(str(art.feldweg), "")
+
+    # **Ohne Erregung kein Feld.** Eine magnetlose Maschine im Leerlauf hat
+    # keine Quelle: gemessen kam fuer die ASM eine Bildreihe heraus, die nur
+    # die GEOMETRIE zeigte -- Farbleiste 0,00 … 0,30 T und nichts darin. Das
+    # Bild soll zeigen, WO der Fluss laeuft, also muss ein Strom fliessen, und
+    # der kommt aus der Art selbst (`betriebspunkt`), nicht aus
+    # `estimate_dq_currents` -- die rechnet MTPA ueber eine Salienz, die auf
+    # `magnet_legs` steht und fuer diese Arten nichts bedeutet.
+    if not art.hat_magnete and abs(iq) + abs(id_) < 1e-9:
+        try:
+            import importlib
+            _m = importlib.import_module({"asm": "ema_asm", "synrm": "ema_synrm",
+                                          "eesm": "ema_eesm",
+                                          "gsm": "ema_gsm"}[code])
+            _bp = _m.betriebspunkt(geom, float(geom.get("axialLen") or 80.0),
+                                   float(rpm), float(last_nm))
+            iq = float(_bp.get("i_q_A") or _bp.get("I_a_A") or _bp.get("I_s_A") or 0.0)
+            id_ = float(_bp.get("i_d_A") or 0.0)
+        except Exception:                                        # noqa: BLE001
+            iq = id_ = 0.0
+        if abs(iq) + abs(id_) < 1e-9:
+            fuss = (fuss + " · " if fuss else "") + \
+                   "kein Betriebspunkt gefunden — das Bild zeigt nur die Geometrie"
+
+    dateien = []
+    for k in range(max(2, int(n_frames))):
+        w = periode * k / max(2, int(n_frames))
+        f = feld_rechnen(geom, N=N, rotor_angle=w, iq=iq, id_=id_)
+        pfad = os.path.join(ordner, f"frame_{k:04d}.png")
+        # Kurzer Titel: der volle Artname ("fremderregte Gleichstrommaschine
+        # (Kommutator)") passt auf der festen Leinwand in keine Zeile und wurde
+        # gemessen links wie rechts abgeschnitten.
+        bild_linien(geom, f, pfad, fest=True,
+                    titel=f"{code.upper()} — Läuferwinkel "
+                          f"{math.degrees(w):.1f}\u00b0 mech",
+                    fussnote=fuss)
+        dateien.append(pfad)
+        if melde:
+            melde(k + 1, int(n_frames))
+
+    video = ""
+    try:
+        import ema_em3d
+        if ema_em3d._encode_video(ordner):
+            video = os.path.join(ordner, "anim.mp4")
+    except Exception:                                            # noqa: BLE001
+        video = ""
+    return {"ordner": ordner, "dateien": dateien, "n": len(dateien),
+            "video": video, "periode_grad": math.degrees(periode),
+            "art": code, "feldweg": art.feldweg, "fussnote": fuss,
+            "i_q_A": round(iq, 1), "i_d_A": round(id_, 1)}
+
+
+def bild_linien(geom: dict, f: dict, pfad: str,
+                titel: str = "", fussnote: str = "", fest: bool = False) -> str:
+    """``titel``/``fussnote`` sind fuer die Bildreihe (`frames`): dort muss der
+    Laeuferwinkel ins Bild, und was der Art an Physik fehlt ebenso -- nicht nur
+    in den Ablauftext, den beim Ansehen eines Frames niemand danebenhat."""
     fig, ax = _leinwand()
     _silhouette(ax, f)
     im = _heatmap(ax, f)
@@ -269,15 +412,25 @@ def bild_linien(geom: dict, f: dict, pfad: str) -> str:
     _magnete(ax, geom, f)
     _farbleiste(fig, im, ax)
     ax.set_aspect("equal")
-    _titel(ax, "Magnetfeldlinien — Durchsicht", _betriebspunkt(f))
+    _titel(ax, titel or "Magnetfeldlinien — Durchsicht", _betriebspunkt(f))
+    if fussnote:
+        ax.text(0.5, -0.045, fussnote, transform=ax.transAxes, ha="center",
+                va="top", fontsize=7.5, color="#e8a33d", wrap=True)
     leg = ax.legend(handles=[
-        Line2D([0], [0], color=C_LINIE, lw=1.2, label="Feldlinie (Höhenlinie von A)"),
-        Line2D([0], [0], color=C_BLECH, lw=4, alpha=0.35, label="Blech (durchscheinend)"),
-        Line2D([0], [0], color="#ff8a6a", lw=4, alpha=0.5, label="Magnet"),
-    ], loc="lower left", fontsize=8.5, framealpha=0.45, facecolor="#0e1116",
+        Line2D([0], [0], color=C_LINIE, lw=1.2,
+               label="Feldlinie — Höhenlinie von A; eng = viel Fluss"),
+        Line2D([0], [0], color="#ffd27f", lw=4,
+               label="hell/weiß — hohe Flussdichte (Zahn, Steg)"),
+        Line2D([0], [0], color="#7b2f8f", lw=4,
+               label="violett/dunkel — wenig bis kein Fluss"),
+        Line2D([0], [0], color=C_BLECH, lw=4, alpha=0.35,
+               label="grau — Blechumriss (Geometrie, kein Feld)"),
+        Line2D([0], [0], color="#ff8a6a", lw=4, alpha=0.6,
+               label="rot — Magnet (Umriss)"),
+    ], loc="lower left", fontsize=8, framealpha=0.55, facecolor="#0e1116",
         edgecolor="#3a4552", labelcolor=C_TEXT, handlelength=1.6)
     leg.set_zorder(20)
-    return _speichern(fig, pfad)
+    return _speichern(fig, pfad, fest=fest)
 
 
 # ── 2) Aufgeschnittener Querschnitt ──────────────────────────────────────────

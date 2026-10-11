@@ -776,6 +776,12 @@ L_KOMM_ANTEIL = 0.30
 LAMELLENSPALT_MM = 0.8
 
 
+# Radiale Hoehe der Kohlebuerste -- eine ZEICHENgroesse. Sie geht in keine
+# Kennzahl ein (der Buerstenverlust haengt am Kontaktabfall, nicht an der
+# Bauhoehe); handelsuebliche Buersten liegen bei 20-40 mm.
+H_BUERSTE_MM = 25.0
+
+
 def zeichenmasse(geom: dict, axial_mm: float) -> dict:
     """Alles, was der Zeichner braucht — reine Zahlen, keine Urteile.
 
@@ -812,14 +818,34 @@ def zeichenmasse(geom: dict, axial_mm: float) -> dict:
     # Die Laenge kommt aus `kommutator` -- derselben Funktion, die sie auch
     # PRUEFT. Zwei Formeln waeren ein gezeichneter Kommutator, auf den die
     # gerechnete Buerste nicht passt.
+    # **Und die BUERSTE ebenso.** Bis zum 20.09.2026 stand sie nicht hier,
+    # und der Zeichner erfand sie aus der Kommutatorlaenge
+    # (`_bb = 0.35 * l_komm`, Quader `_bb x _bb x 0.7*l_komm`). Gemessen an
+    # einem echten FreeCAD-Bau kam damit **615.887 mm^3 je Buerste** heraus,
+    # sechs davon 3,70 Mio. mm^3 -- **groesser als der ganze Staender**
+    # (1,86 Mio.), waehrend `kommutator` 8,92 x 149,55 mm rechnet. Ein
+    # gezeichneter Koerper, dessen Masse nicht aus der Funktion kommen, die
+    # ihn bemisst, ist genau die Sorte Fehler, gegen die `zeichenmasse`
+    # ueberhaupt gebaut wurde.
+    _km = None
     try:
-        l_komm = float(kommutator(geom, axial_mm, 0.0)["l_kommutator_mm"])
+        _km = kommutator(geom, axial_mm, 0.0)
+        l_komm = float(_km["l_kommutator_mm"])
     except Exception:                                        # noqa: BLE001
         l_komm = max(L_KOMM_ANTEIL * float(axial_mm), 15.0)
     d_komm = max(D_KOMM_ANTEIL * 2.0 * r_a, 2.0 * r_wel + 20.0)
 
     return {
         "poles": int(pg["poles"]),
+        # Die Buerste: Breite in Umfangsrichtung und Laenge in Achsrichtung
+        # kommen aus `kommutator` (Stromdichte am Kohlekontakt); die HOEHE ist
+        # eine reine Zeichengroesse (`H_BUERSTE_MM`) und geht in keine
+        # Rechnung ein -- sie steht deshalb als Konstante da und nicht als
+        # Formel, die so aussaehe, als waere sie gerechnet.
+        "n_buerstenarme": int(_km["n_buerstenarme"]) if _km else int(pg["poles"]),
+        "b_buerste_mm": round(float(_km["b_buerste_mm"]), 3) if _km else 8.0,
+        "l_buerste_mm": round(float(_km["l_buerste_mm"]), 3) if _km else l_komm,
+        "h_buerste_mm": round(H_BUERSTE_MM, 3),
         "r_stator_bohrung_mm": round(r_si, 3),
         "r_stator_aussen_mm": round(r_so, 3),
         "r_joch_innen_mm": round(r_joch_innen, 3),

@@ -74,9 +74,38 @@ for (const ny of [50, 70, 100, 140, 190]) {
 const letzte = reihe[reihe.length - 1].b1;
 const abw = reihe.map((r) => Math.abs(r.b1 - letzte) / letzte * 100);
 console.log("   Abweichung zum feinsten: " + abw.map((a) => a.toFixed(2) + " %").join("  "));
-pr(abw.every((a, i) => i === 0 || a <= abw[i - 1] + 1e-9),
-   "B1 konvergiert MONOTON mit dem Gitter — das tut es nur, weil die y-Linien " +
-   "auf den Schichtgrenzen liegen (mit gleichmäßigem dy streute es um ±6 %)");
+
+// Geprueft wird die Monotonie am ROHEN Lauf, nicht am geeichten Wert — und das
+// ist seit dem 06.10.2026 ein Unterschied. Vorher war der Eichfaktor eine
+// Konstante gegen die eigene Spitze, der gemeldete Wert also bis auf einen
+// Faktor der rohe; seither ist er `analytische Grundwelle x GEMESSENER
+// Nutungsverlust`, und der Verlust ist ein Verhaeltnis ZWEIER Loeserlaeufe
+// (genutet gegen nutlos). Zwei Konvergenzpfade geteilt muessen nicht monoton
+// sein, auch wenn jeder einzelne es ist. Die Gitterfrage — liegen die y-Linien
+// richtig? — haengt am rohen Lauf, und dort wird sie gestellt.
+const rohe = reihe.map((r) => r.b1 / r.e.sf);
+const rl = rohe[rohe.length - 1];
+const abwRoh = rohe.map((v) => Math.abs(v - rl) / rl * 100);
+console.log("   roh (ungeeicht), Abweichung zum feinsten: "
+            + abwRoh.map((a) => a.toFixed(2) + " %").join("  "));
+// **Gemessen ist die Konvergenz BESCHRAENKT, nicht monoton** — und die frühere
+// Monotonie war ein Artefakt. Bis zum 06.10.2026 meldete die Seite
+// `bAn_mittel x h1/pk` aus EINEM Lauf: Grundwelle und Spitze wandern mit dem
+// Gitter gemeinsam, ihr Verhältnis kürzt also einen Teil des
+// Diskretisierungsfehlers heraus und sah dadurch monotoner aus als der Löser
+// ist. Die rohe Grundwelle selbst streut 0,35 / 0,16 / 1,54 / 1,06 / 0,00 %,
+// mit einem Ausreißer bei 120x106. Die Aussage, für die es diesen Test gibt —
+// das schichtbündige Gitter hält den 1-mm-Spalt exakt, statt ihn aufs Raster
+// schnappen zu lassen — trägt weiterhin: ±1,8 % gegen die ±6 % des
+// gleichmäßigen dy. Nur „monoton" war zu viel behauptet.
+pr(Math.max(...abwRoh) < 3.0,
+   `die ROHE Grundwelle bleibt über eine 4-fache Netzverfeinerung in ${Math.max(...abwRoh).toFixed(2)} % `
+   + `— das tut sie nur, weil die y-Linien auf den Schichtgrenzen liegen (mit `
+   + `gleichmäßigem dy streute sie um ±6 %). MONOTON ist sie nicht, s. Kommentar`);
+pr(Math.max(...abw) < 3.0,
+   `und der geeichte Wert bleibt dabei in einem engen Band (${Math.max(...abw).toFixed(2)} % `
+   + `über eine 4-fache Netzverfeinerung) — er ist ein Verhältnis zweier Läufe, `
+   + `also nicht monoton, aber beschränkt`);
 
 console.log("\n— 5. Flussbilanz: geht der Fluss axial durch den Ständer? —");
 {
@@ -130,10 +159,21 @@ console.log("\n— 6. Stückzahlen: wie viele Magnete, wie viele Zähne? —");
   pr(b4 < b0 && b4 > b0 * 0.8,
      `B1 fällt mit den Fugen von ${b0.toFixed(4)} auf ${b4.toFixed(4)} T ` +
      `(${((b4 / b0 - 1) * 100).toFixed(1)} %) — der Löser sieht sie`);
-  // Die Vorgabe (ein Magnet je Pol) muss die alte Zeichnung Ziffer fuer Ziffer
-  // reproduzieren, sonst ist der Umbau nicht nur eine Erweiterung.
-  pr(Math.abs(b0 - 0.80818) < 5e-5,
-     `1×1 reproduziert den Stand vor dem Umbau: B1 ${b0.toFixed(5)} T (war 0,80818)`);
+  // Die Vorgabe (ein Magnet je Pol) muss die Zeichnung vor der Stueckelung
+  // reproduzieren, sonst ist jener Umbau nicht nur eine Erweiterung gewesen.
+  //
+  // **Der Festwert ist am 06.10.2026 von 0,80818 auf 1,12066 T gesetzt worden**,
+  // und zwar nicht weil sich die Zeichnung geaendert haette, sondern die
+  // EICHUNG: sie pinnte die Spitze des gelösten Feldes auf `Br*perm*alpha`,
+  // einen flussgewichteten MITTELWERT, und meldete davon die Grundwelle. Der
+  // Faktor 1,386 setzt sich zusammen aus 1/alpha = 1,176 (der Mittelwert stand
+  // an der Stelle einer Spitze) und 1,18 (geeicht wurde an der GENUTETEN
+  // Spitze, die durch die Bündelung über dem Zahn um 23 % über der nutlosen
+  // liegt). Gegengerechnet gegen den Elmer-Ringsektor: vorher +49 % Abweichung,
+  // danach +2,5 %. Voller Befund in `BEFUNDE.md`.
+  pr(Math.abs(b0 - 1.12066) < 5e-4,
+     `1×1 reproduziert den Stand der Stückelung: B1 ${b0.toFixed(5)} T ` +
+     `(Festwert 1,12066 — vor der Eichberichtigung am 06.10.2026 waren es 0,80818)`);
 }
 
 console.log("\n— 7. Halbach: eine Wellenlänge sind ZWEI Polteilungen —");

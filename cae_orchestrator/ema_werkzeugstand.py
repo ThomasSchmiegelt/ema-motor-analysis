@@ -84,7 +84,18 @@ PHYSIK: tuple[str, ...] = (
     "ema_wicklung.py",      # Wicklung, Widerstand, Kupfermasse
     "ema_radien.py",        # Radien und Luftspalt
     "ema_axial.py",         # Axialfluss: Ringraum, Rueckenblech, Anzug, Bandage
-    "ema_axial_fdm.py",     # Axialfluss-Feldstufe: abgewickelter Mehrschnitt
+    "ema_axial_fdm.py",     # Axialfluss-Feldstufe: abgewickelter Mehrschnitt.
+                            # Seine EICHUNG bewegt B_gap, psi und das Moment --
+                            # am 06.10.2026 um 45 % (s. BEFUNDE.md).
+    "ema_axial_em3d.py",    # Axialfluss in Elmer 3-D: der Ringsektor, mit dem
+                            # der Mehrschnitt gegengerechnet wird
+    # Die Scheiben-Geometrie bewegt keine Kennzahl DIREKT -- aber sie traegt
+    # `nutbreite_mm`s Gegenstueck: wer hier die Zahnform aendert, aendert, was
+    # gezeichnet UND was gesaettigt wird.
+    "ema_axial_cad.py",     # Axialfluss als CAD: Schichtung, Zaehne, Sektormagnete
+    # Das LPTN der Scheibe bewegt jede Temperatur und damit jedes Urteil
+    # ueber Magnet- und Wicklungsgrenze.
+    "ema_axial_thermik.py",
     "ema_fluss.py",         # Flussweg: die zwei Integrale der Luftspaltflaeche
                             # (r^1 fuer psi_pm, r^2 fuer das Moment). Eine
                             # Aenderung daran bewegt Kt UND das Dauermoment.

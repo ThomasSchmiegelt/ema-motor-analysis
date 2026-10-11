@@ -63,7 +63,12 @@ function magnetBei(p, M, x, tauP) {
  * Quelle -- dieselbe, aus der auch gezeichnet wird. Zwei Beschreibungen
  * derselben Geometrie waeren genau die Drift, gegen die `ema_laeufer.js`
  * absichtlich duenn ist. */
-function feldGitter(p, nx, ny) {
+function feldGitter(p, nx, ny, ohneNut) {
+  // `ohneNut` baut denselben Staender OHNE Nutschlitze. Das ist kein Schalter
+  // fuer den Menschen, sondern der Bezugsfall der EICHUNG: geeicht wird an der
+  // Spitze des nutlosen Feldes, weil nur die mit der Arbeitsgeraden dieselbe
+  // Groesse meint (s. `eichung`). Die Nutung wird damit GEMESSEN statt aus
+  // `KC` angenommen.
   // ny ist ein ZIEL; die wirkliche Zeilenzahl folgt aus den Schichtgrenzen.
   const lagen = stapelLagen(p).filter((l) => l.art !== "fuge");
   const hGes = lagen.reduce((a, l) => a + l.d, 0);
@@ -152,7 +157,7 @@ function feldGitter(p, nx, ny) {
                         : (lg.y1 - y < p.zahn);
         if (imSchlitz) {
           const u = x % tauS, mid = tauS / 2;
-          if (Math.abs(u - mid) <= p.bnut / 2) {
+          if (!ohneNut && Math.abs(u - mid) <= p.bnut / 2) {
             mu[k] = 1; rolle[k] = 3;
             if (iq !== 0) {
               const sIdx = Math.floor(x / tauS);
@@ -426,23 +431,81 @@ function loeseFeld(p, g, iter) {
            schritte: m.schritte + a.schritte, anker: p.last / 100, pkMag: pm };
 }
 
-/* Eichung: die Spitze der Normalkomponente in der Spaltmitte auf die
- * Arbeitsgerade. Dieselbe Groesse und dieselbe Begruendung wie im Hausloeser --
- * der rohe SOR-Wert haengt an der willkuerlichen Amplitude von J. Gibt es
- * keinen Magneten (Kaefig, Scheibenlaeufer ohne Erregung), wird NICHT geeicht,
- * und das Bild traegt dann keine Tesla-Achse, sondern eine relative. */
-function eichung(p, g, By, pkVor) {
+/* Eichung: die Spitze der Normalkomponente des NUTLOSEN Feldes auf die Spitze
+ * der Arbeitsgeraden. Dieselbe Groesse und dieselbe Begruendung wie im
+ * Hausloeser -- der rohe Loeserwert haengt an der willkuerlichen Amplitude
+ * von J. Gibt es keinen Magneten (Kaefig, Scheibenlaeufer ohne Erregung), wird
+ * NICHT geeicht, und das Bild traegt dann keine Tesla-Achse, sondern eine
+ * relative.
+ *
+ * **Zwei Dinge daran sind am 06.10.2026 berichtigt worden** (BEFUNDE.md), und
+ * beide auf dem Python-Weg genauso -- `test_fluss.py` nagelt die Anker
+ * gegeneinander fest:
+ *
+ * 1. Geeicht wird auf `BR * perm`, die **SPITZE** der Arbeitsgeraden, und
+ *    NICHT auf `BR * perm * alpha`. Das `alpha` ist die Polbedeckung, also ein
+ *    flussgewichteter MITTELWERT ueber die Polteilung; eine Spitze darauf zu
+ *    pinnen rechnete alles um den Faktor `alpha` zu klein. Gemessen lag der
+ *    Mehrschnitt dadurch 45 % unter dem Elmer-Ringsektor.
+ * 2. Gemessen wird die Spitze des **nutlosen** Feldes. Die genutete Spitze ist
+ *    kein Mass fuer den Fluss: ueber einem Zahn ist er gebuendelt, die lokale
+ *    Spitze steigt durch die Nutung um gemessene 23 %, waehrend der Fluss je
+ *    Pol faellt. Derselbe Befund steht im Hausloeser im Kopf von
+ *    `ema_axial_fdm.carter`, das aus genau diesem Grund an der Grundwelle und
+ *    ausdruecklich nicht an der Spitze rechnet.
+ *
+ * Gegenprobe, die das traegt: das nutlose Verhaeltnis Grundwelle/Spitze kommt
+ * auf 1,2257 heraus, die Fourierreihe der Rechteckwelle fordert
+ * `4/pi*sin(alpha*pi/2)` = 1,2381 -- 1,0 % auseinander. Der Loeser und die
+ * Wellenform waren also in Ordnung, der ganze Fehler sass im Anker.
+ *
+ * Kostet EINEN zusaetzlichen Loeserlauf je Eichung -- im Mehrschnitt genau
+ * einen insgesamt, weil dort ohnehin nur an der mittleren Scheibe geeicht wird.
+ */
+function eichung(p, g, By, pkVor, iter) {
   const perm = p.magd / (p.magd + MUR_MAG * KC * p.spalt);
-  const bAn = BR * perm * p.alpha;
+  // Die SPITZE der Arbeitsgeraden, ohne Polbedeckung -- und sie ist der richtige
+  // Anker, weil sie GENAU das misst, was die Formel beschreibt und nichts
+  // sonst: `Br*perm` ist der Flachdachwert unter einem Magneten, unabhaengig
+  // von Polbedeckung, Stueckelung und Nutung.
+  //
+  // Mit der GRUNDWELLE als Anker ging das schief, und der Test hat es gefangen:
+  // eine Grundwelle traegt die Polbedeckung UND die Fugen der Stueckelung,
+  // der Bezugslauf traegt sie auch, und im Verhaeltnis kuerzen sie sich heraus
+  // -- gemessen fiel B1 mit 1-mm-Fugen nur noch von 1,1350 auf 1,1359 T (0,1 %)
+  // statt um 11,7 %. Ein Regler, dessen Wirkung die Eichung wegnormiert, ist
+  // derselbe Fehler wie der Staenderstrom vor dem Umbau.
+  const bAn = BR * perm;
   const j = spaltZeile(g);
   if (j < 0) return { sf: 1, bAn: 0, geeicht: false };
-  // `pkVor` ist die Spitze des MAGNETfeldes allein (aus `loeseFeld`); ohne
-  // sie wird das uebergebene Feld gemessen -- der Leerlauffall.
-  const pk = pkVor > 0 ? pkVor : spaltSpitze(g, By, j);
-  if (pk < 1e-30) return { sf: 1, bAn: 0, geeicht: false, jGap: j };
   const hatMag = g.rolle.includes(2);
-  return hatMag ? { sf: bAn / pk, bAn, geeicht: true, jGap: j, pk }
-                : { sf: 1 / pk, bAn: 0, geeicht: false, jGap: j, pk };
+  if (!hatMag) {
+    const pk0 = pkVor > 0 ? pkVor : spaltSpitze(g, By, j);
+    return { sf: pk0 < 1e-30 ? 1 : 1 / pk0, bAn: 0, geeicht: false, jGap: j,
+             pk: pk0 };
+  }
+  // Bezugsfall: derselbe Staender ohne Nutschlitze, gleiche Aufloesung.
+  let pk = 0, nutlos = true;
+  try {
+    const g0 = feldGitter(p, g.nx, g.ny, true);
+    const j0 = spaltZeile(g0);
+    if (j0 >= 0) {
+      const m0 = loeseCG(g0, iter || 400, 1e-11, g0.J);
+      pk = spaltSpitze(g0, feldAus(g0, m0.A).By, j0);
+    }
+  } catch (e) { pk = 0; }
+  if (!(pk > 1e-30)) {
+    // Scheitert der Bezugsfall, wird die genutete Spitze genommen UND gesagt,
+    // dass die Nutung dann in der Eichung steckt statt gemessen zu sein.
+    pk = pkVor > 0 ? pkVor : spaltSpitze(g, By, j);
+    nutlos = false;
+  }
+  if (!(pk > 1e-30)) return { sf: 1, bAn: 0, geeicht: false, jGap: j, pk: 0 };
+  return { sf: bAn / pk, bAn, geeicht: true, jGap: j, pk,
+           art: nutlos ? "spitze_nutlos" : "spitze_genutet",
+           hinweis: nutlos ? null
+                  : "Bezugsfall ohne Nut nicht loesbar -- die Nutung steckt in "
+                    + "der Eichung statt gemessen zu sein" };
 }
 
 /* ---- Zeichnen ----------------------------------------------------------- */
@@ -468,7 +531,7 @@ function zeichneFeld(cv, p) {
   const loe = loeseFeld(p, g, +p.iter);
   const A = loe.A, rest = loe.relRest;
   const { Bx, By } = feldAus(g, A);
-  const e = eichung(p, g, By, loe.pkMag);
+  const e = eichung(p, g, By, loe.pkMag, +p.iter);
 
   // Bildbereich
   const pad = 32;
