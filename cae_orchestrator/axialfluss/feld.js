@@ -74,6 +74,13 @@ function feldGitter(p, nx, ny, ohneNut) {
   const hGes = lagen.reduce((a, l) => a + l.d, 0);
   const tauP = (2 * Math.PI * p.rs) / p.poles;
   const tauS = (2 * Math.PI * p.rs) / p.q;
+  // **Der Laeufer dreht sich, der Staender nicht.** `rotorVersatz` ist ein
+  // MECHANISCHER Winkel und wird hier einmal in die Bogenlaenge DIESER Scheibe
+  // umgerechnet; angewandt wird er nur dort, wo der LAEUFER steht (Magnete,
+  // Kaefignuten) -- beim Scheibenanker (`eisenlos`) traegt der STAENDER die
+  // Magnete, und der bleibt stehen. Ohne Angabe ist vx = 0 und jede bisherige
+  // Rechnung bleibt Ziffer fuer Ziffer dieselbe.
+  const vx = (+p.rotorVersatz || 0) * p.rs;
   const breite = 2 * tauP;                 // genau 2 Polteilungen = 1 el. Periode
   const dx = breite / nx;
 
@@ -183,13 +190,13 @@ function feldGitter(p, nx, ny, ohneNut) {
         if (!aktiv) { mu[k] = MUR_FE; rolle[k] = 1; continue; }
         if (p.laeufer === "kaefig") {
           const tauR = (2 * Math.PI * p.rs) / qr;
-          const u = x % tauR;
+          const u = ((x - vx) % tauR + tauR) % tauR;
           if (Math.abs(u - tauR / 2) <= p.bnut * 0.4) { mu[k] = 1; rolle[k] = 3; }
           else { mu[k] = MUR_FE; rolle[k] = 1; }
         } else if (p.laeufer === "eisenlos") {
           mu[k] = 1; rolle[k] = 3;          // blanker Leiter, kein Eisen
         } else {
-          const m = magnetBei(p, M, x, tauP);
+          const m = magnetBei(p, M, x - vx, tauP);
           if (m) { mu[k] = MUR_MAG; rolle[k] = 2;
                    Mx[k] = magAmp * m[0]; My[k] = magAmp * m[1]; }
           else { mu[k] = 1; rolle[k] = 0; }   // Fuge oder Polluecke

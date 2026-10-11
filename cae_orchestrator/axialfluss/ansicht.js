@@ -782,6 +782,66 @@ $("btn_um").addEventListener("click", () => {
   UMLAUF = requestAnimationFrame(takt);
 });
 
+/* ---- Der bewegte Rahmen fuer die Vorschau in `ema.html` ----------------
+ *
+ * Die Hauptseite zeichnet die Scheibe NICHT selbst nach — sie holt sich das
+ * Bild von hier (dieselbe Entscheidung wie beim Standbild: eine zweite
+ * Zeichenfassung waere die naechste `magnetLegs`-Drift, und zwar dort, wo man
+ * sie am wenigsten bemerkt, weil beide Bilder richtig aussehen).
+ *
+ * Geloest wird auf ZURUF und nur einmal je Geometrie (gemessen 1,0 s fuer
+ * zwoelf Laeuferstellungen); bis das steht, meldet `liveStand()` `rechnet`,
+ * damit die Vorschau es sagen kann statt stumm ein altes Bild zu zeigen.
+ */
+let _LV_CV = null, _LV_LAUFT = false, _LV_FERTIG = null, _LV_FEHLER = "";
+
+function _lvLeinwand(id, w, h) {
+  if (!_LV_CV) _LV_CV = {};
+  let c = _LV_CV[id];
+  if (!c) { c = _LV_CV[id] = document.createElement("canvas"); }
+  if (c.width !== w || c.height !== h) { c.width = w; c.height = h; }
+  return c;
+}
+
+window.liveStand = function () {
+  const p = P();
+  return { rechnet: _LV_LAUFT, fertig: !!_LV_FERTIG, fehler: _LV_FEHLER,
+           poles: p.poles, q: p.q,
+           periode_grad: livePeriode(p).per * 180 / Math.PI };
+};
+
+/* Liefert die Bilder zum LAEUFERWINKEL `theta` (mechanisch, rad) oder `null`,
+ * solange noch gerechnet wird. Der Aufrufer zeichnet sie nur noch hin. */
+window.liveRahmen = function (theta) {
+  const p = P();
+  const marke = rzMarke(p);
+  if (_LV_FERTIG && _LV_FERTIG.marke === marke) {
+    const f = _LV_FERTIG.folge;
+    const c1 = _lvLeinwand("scheibe", 460, 460);
+    const c2 = _lvLeinwand("abw", 460, 120);
+    const c3 = _lvLeinwand("kurve", 460, 150);
+    zeichneLiveScheibe(c1, p, f, theta, f.deckel);
+    zeichneLiveAbwicklung(c2, p, theta);
+    zeichneLiveKurve(c3, p, f, theta, f.deckel);
+    return [["Scheibe von vorn — B_z im Luftspalt, der Läufer dreht sich", c1],
+            ["abgewickelt — die Zähne stehen, die Magnete wandern", c2],
+            ["B_z über dem Umfang · die Marke läuft mit", c3]];
+  }
+  if (!_LV_LAUFT) {
+    _LV_LAUFT = true; _LV_FEHLER = "";
+    // Nicht blockierend: der Loeser laeuft im naechsten Takt, damit die
+    // Vorschau vorher noch „rechnet" zeichnen kann.
+    setTimeout(() => {
+      try {
+        const q = P();
+        _LV_FERTIG = { marke: rzMarke(q), folge: liveSorgen(q, LIVE_STELLUNGEN, null, rzMarke(q)) };
+      } catch (e) { _LV_FEHLER = String(e && e.message || e); }
+      _LV_LAUFT = false;
+    }, 30);
+  }
+  return null;
+};
+
 zeichne();
 
 

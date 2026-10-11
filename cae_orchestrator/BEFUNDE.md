@@ -17,6 +17,286 @@ kann.
 
 ---
 
+## 2026-10-11 · Alle fünf Maschinenarten durch Elmer, aus der MASKE — und was dabei herauskam
+
+**Beobachtung.** Gefahren wurde die Oberfläche selbst (Chromedriver auf
+`localhost:5000`), nicht die CLI: je Art im Geometrie-Reiter `machineType`
+setzen, in den Reiter 🧲 3-D-Feld wechseln, Knotenziel 30.000, Betriebspunkt
+3000 1/min / 20 Nm, `#e3_btn` drücken, `/em3d/status` lesen. Grundgeometrie das
+Bestandsformular (Stator 280 / Rotor 188,6 / Welle 60 / Spalt 0,70 mm, **2p = 16**,
+48 Nuten, L = 80 mm, `magShape = spm`).
+
+| Art | Weg | Ergebnis |
+|---|---|---|
+| PSM | `ema_em3d`, magnetostatisch | ✅ 84 s, 33.606 Knoten, B_gap 3-D 1,494 T gegen 2-D 0,837 T |
+| ASM | `ema_em3d_harm`, harmonisch | ✅ 183 s, 74.048 Knoten / 406.080 Tet, 0,2528 T, 6005 Feldlinien — **bei 20 Nm**; bei den Vorgabe-150 Nm abgewiesen |
+| SynRM | `ema_em3d`, magnetostatisch | ❌ 23 min im ersten Netzversuch, kein Fortschritt; Server musste neu gestartet werden |
+| EESM | `ema_em3d`, magnetostatisch | ❌ 877 s, ganze Selbstheil-Leiter, 3534 entartete Tetraeder — bei **2p = 6** dagegen ✅ 316 s, 33.670 Knoten |
+| GSM | — | ✅ Absage nach 13,6 s, mit Grund, Stand und dem ausdrücklichen „es wird NICHT ersatzweise mit PSM-Physik gerechnet" |
+| Axialfluss | `ema_axial_em3d`, Ringsektor | ✅ 13 s, 13.785 Knoten — aber unter falscher Überschrift und mit +100 % Abweichung (s. 5/6) |
+
+---
+
+### 1 · Das SynRM-3-D-Netz entsteht aus einem Prisma je POLYGONSEGMENT
+
+`ema_em3d.barrier_rects` (Z. 220–237) zerlegt den Barrieren-Polygonzug und legt
+für **jedes Segment** ein eigenes Rechteck-Prisma an. Gemessen bei 2p = 6:
+**336 Prismen von 0,885 mm Länge und 10,3 mm Dicke** (2 Barrieren je Pol ×
+28 Segmente × 6 Pole); bei 2p = 16 sind es **896**. Das sind stark überlappende
+Platten, 12× breiter als lang — der 2-D-Rasterer verträgt das (er stempelt),
+OCCs `fragment` macht daraus Sliver.
+
+**`build_mesh` ohne Selbstheil-Leiter, derselbe Payload, nur die Polzahl:**
+
+| 2p | Prismen | Zeit | Ausgang |
+|---:|---:|---:|---|
+| 4 | 224 | 134 s | 454 entartete Tetraeder |
+| 6 | 336 | 415 s | `Invalid boundary mesh (overlapping facets) on surface 316` |
+| 8 | 448 | 418 s | 2541 entartete Tetraeder, 4 invertiert |
+| 16 | 896 | >23 min | kein Ende in Sicht (aus der Maske) |
+
+**Feiner hilft nicht** — bei 2p = 6 mit `mag_cl` 3,89 (268 s) und 2,0 (351 s)
+derselbe `overlapping facets`-Abbruch.
+
+**Und die Decke, die genau das verhindern soll, misst die falsche Kante.**
+`_cl_decke` (Z. 3019 ff.) nimmt beim SynRM `ema_synrm_cad.barrieren(...)
+["dicke_mm"]` = 10,3 mm und deckelt `mag_cl` auf 0,8 × 10,3 = **8,24 mm**. Die
+kleinste Abmessung dieser Körper ist aber ihre **Länge**, 0,885 mm (0,8 × = 0,708
+mm) — die Decke ist um den Faktor 12 zu großzügig und greift nie.
+
+**Die Maske bietet es trotzdem an:** `ARTEN["synrm"].stufen` führt `em3d`, der
+Knopf ist frei. Die eigens dafür geschriebene Sonderabsage in `run_em3d`
+(Z. 3800–3809, „das 3-D-NETZ dieser Bauart ist gebaut und gemessen … was fehlt,
+ist ein freigegebener Löserlauf") ist dadurch **unerreichbarer Code**.
+
+**Dazu: ein hängender Netzbau ist nicht abbrechbar.** `/em3d/abort` beendet
+`ElmerSolver`; gmsh läuft im Serverprozess und wird davon nicht berührt. Der
+Lauf musste über einen Serverneustart beendet werden.
+
+### 2 · EESM: an der Polzahl, nicht am Weg
+
+Bei 2p = 16 lief der Schenkelpollaeufer **877 s** durch die ganze
+Selbstheil-Leiter — Netzqualität, Magnet-Mesh ×1,5, Zonenverhältnisse,
+Gesamtnetz ×1,8, Taschenkappen aus, Statornuten aus, Wuchtbolzen aus — und
+endete mit **3534 entarteten Tetraedern**. Derselbe Knopf, dieselbe Maschine,
+nur **2p = 6 / 36 Nuten**: Netz in zwei Vergröberungsschritten auf 33.670
+Knoten, Löser durch, **316 s**, B_gap 3-D 0,899 T gegen 2-D-FDM 0,837 T, sechs
+Bilder. Der 3-D-Weg der EESM trägt also — er trägt nur nicht die Polzahl, mit
+der das Formular dasteht. Das ist dieselbe Klasse wie der SynRM-Befund darüber
+(je Pol zwei Spulenquader plus Schuh und Kern, die mit wachsender Polzahl
+immer schmaler aneinanderrücken), und vorher gesagt wird es nirgends.
+
+### 3 · Der Ziel-Knoten-Regler wirkt auf dem ASM-Weg nicht — und seine Schätzung gilt dort nicht
+
+Gesetzt 30.000; gebaut hat `ema_em3d_harm` **74.048 Knoten / 406.080 Tetraeder**,
+zweimal (mit und ohne Ring). `_run_em3d_harmonisch` (Z. 3924 ff.) liest aus dem
+Payload nur `rpm` und `load_nm`; `target_nodes`, `mesh_cl`, `gap_cl`, `mag_cl`
+und das Auswahlfeld **Anregung** erreichen ihn nicht. Die Zeile unter dem Regler
+(„≈ 1,8 GiB RAM, ≈ 18 s Solve") beschreibt damit einen Lauf, der nicht
+stattfindet.
+
+### 4 · Reißt das ASM-Feld, nennt die Absage den falschen Ausweg
+
+Bei 3000 1/min / **150 Nm** (den Vorgabewerten der Karte „Betriebspunkt") liegen
+**1,80 % des Volumens über 20 T, größter Wert 683 T**; `ema_em3d_harm` weist ab
+— mit dem Satz „Die Feldstufe dieser Bauart trägt dann weiterhin
+`cae_cli.py feld2d`". Das schickt vom Browser weg, obwohl der Browser trägt:
+**dieselbe Geometrie, dasselbe Netz (406.080 Tetraeder), bei 20 Nm** läuft
+derselbe Knopf durch. Gegenprobe über die CLI:
+`cae_cli.py feld3d --frisch --set machineType=asm --set p=8 --set slots=48`
+baut Ziffer für Ziffer dasselbe Netz und rechnet ebenfalls durch. Gebunden hat
+der **Betriebspunkt**, und davon steht in der Absage nichts.
+`ema_asm.betriebspunkt` hält beide Lasten für erreichbar (I_s 221,3 A bei 20 Nm,
+468,9 A bei 150 Nm gegen 800 A Grenze) — die Schranke liegt also im 3-D-Modell
+und nicht in der Maschine, auch das gehört in den Text.
+
+### 5 · Das Axialfluss-Ergebnis erscheint unter der ASM-Überschrift
+
+`_renderEm3d` (`ema.html:10309`) verzweigt auf **`if (res.bericht)`** — einen
+Schlüssel, den der Axiallauf genauso trägt. Der Axialfluss bekommt dadurch den
+Kopf „🧲 3-D harmonisch — Asynchronmaschine" samt dem Satz über den Käfig, und
+`#e3_msg` meldet „✓ 3-D harmonisch (Kurzschlussring) · 13785 Knoten". Die
+Zahlen darunter sind die richtigen (die Sektor-gegen-Mehrschnitt-Tabelle), die
+Überschrift gehört einer anderen Maschine. Der Unterschied steht im Ergebnis:
+axial `art="axial"`, `source="axial_em3d"`, `flussweg`, `sektor`; ASM
+`art="asm"`, `source="em3d_harm"`, `harmonisch`.
+
+**Behoben am 11.10.2026.** `_renderEm3d` verzweigt auf
+`res.art === 'axial' || res.source === 'axial_em3d'` und gibt dem Ringsektor
+eine eigene Karte samt Sektorwinkel. Nachgemessen aus der Maske: „✓ Axialfluss-
+Ringsektor · 13.785 Knoten, 75.529 Tetraeder · ein Pol (22,5°)".
+
+### 6 · Axialfluss, TORUS-NN: Sektor und Mehrschnitt um Faktor 2 auseinander — und es ist nicht das Netz
+
+`ema_axial_em3d.vergleich` ist genau dafür gebaut, den `∂/∂r`-Term zu messen, und
+gibt seine Abweichung als Ergebnis aus. Gemessen an der Scheibe des Projekts
+(Ø 260 mm, λ 0,577, 2p 16, Q 48, Spalt 1 mm):
+
+| Bauform | Zellgrößen | Knoten | Abw. Mittel | max |
+|---|---|---:|---:|---:|
+| yasa | Reiter (12,0 / 1,5) | 13.756 | +6,2 % | 11,5 % |
+| yasa | Modul (selbst) | 99.638 | +5,6 % | 17,1 % |
+| torus_nn | Reiter (12,0 / 1,5) | 13.785 | **+100,3 %** | 129,9 % |
+| torus_nn | Modul (selbst) | 100.050 | **+99,9 %** | 131,2 % |
+
+**Auflösung ist es also nicht** — 13,8 k und 100 k Knoten geben dasselbe. Die
+beiden Wege unterscheiden sich auch nicht um einen festen Faktor: das Verhältnis
+3-D/Mehrschnitt wächst über dem Radius von **1,35 auf 2,31**. Wo die Bewegung
+herkommt, ist messbar: das **3-D-Feld ist für beide Bauformen praktisch
+gleich** (innen/Mitte/außen 0,889 / 1,138 / 0,952 T gegen yasa 0,897 / 1,154 /
+0,957 T), der **Mehrschnitt nicht** (0,657 / 0,552 / 0,483 T gegen 1,082 /
+1,066 / 1,061 T). Die Schichttabelle trägt das Bauformvorzeichen korrekt
+(`ema_axial_fdm.lagen`: yasa `kenn` 1/1, torus `kenn` 1/−1), und
+`ema_axial_em3d` liest es (Z. 250) — im Luftspaltfeld des Sektors kommt es
+trotzdem nicht an.
+
+Welcher der beiden Wege für NN danebenliegt, ist hier **nicht** entschieden.
+Festgehalten ist: für diese Bauform widersprechen sie sich um Faktor 2, und die
+Zahl wird ohne jede Plausibilitätsschranke als „die Abweichung IST das Ergebnis"
+ausgegeben — der radiale 3-D-Pfad hat dafür `_b_gap_plausibility`, dieser nicht.
+
+**Nebenbefund:** die Netzfelder des 3-D-Reiters sind radiale Vorgaben und werden
+unverändert an den Axialpfad durchgereicht (`_run_em3d_axial`, Z. 3854 f.).
+`gap_cl = 1,5 mm` ist bei 1 mm Scheibenspalt die **2,25-fache** Zelle gegenüber
+dem, was sich `ema_axial_em3d.baue_netz` selbst ausrechnet
+(`max(0,4; Spalt/1,5)` = 0,67 mm). An dieser Scheibe gemessen bewegt es wenig
+(6,2 statt 5,6 %), beschriftet ist es nicht.
+
+### 7 · Die Taschenwarnung trifft zwei Bauarten, die keine Tasche haben können
+
+Beim PSM-Lauf (`magShape="spm"`) steht im Protokoll und in der Ergebniskarte:
+„0 Magnettaschen gebaut, aber 0 als Luft zugeordnet — 3D-Rotor ohne
+Flussbarrieren" und „die Magnete sitzen im 3D-Modell in massivem Eisen, die
+2D-FDM-Lösung hat Luftkappen". Beides trifft nicht zu: ein Oberflächenmagnet hat
+per Bauart keine Tasche (`_use_pockets = _pockets and clr > 0 and bool(_interior)`,
+Z. 1479 — `_interior` ist leer), und `ema_analysis._rasterise` legt die Luftkappen
+ausdrücklich nur für `placement == "interior"` an (Z. 467), es gibt also auch
+keine Abweichung zur 2-D-Lösung. Die Bedingung (Z. 3515) schließt seit dem
+20.09.2026 die Bauarten **ohne** Magnete aus (`n_magnets > 0`), nicht aber die
+mit **oberflächlichen**; `n_pockets_want > 0` träfe beide. Es ist derselbe
+Fehler, den der Kommentar zwei Zeilen darüber beschreibt.
+
+**Und die Oberfläche hat denselben Fehler ein zweites Mal, ungeteilt.**
+`ema.html:10369` zeigt den Kasten allein an `res.mesh.n_magnets != null` und
+`n_pockets > 0`. Beim **EESM**-Lauf steht dort deshalb wörtlich „🧲 Netz:
+**0 Magnete** · keine Magnettaschen — die Magnete sitzen im 3D-Modell in
+massivem Eisen … an dieser Maschine gemessen +75 % Grundwelle · Knoten-Ziel
+erhöhen und neu rechnen" — für eine Maschine ohne einen einzigen Magneten,
+samt Handlungsempfehlung. Die Python-Seite hat diesen Fall am 20.09.2026
+ausgeschlossen (`n_magnets > 0`), die Browser-Seite nicht; `n_pockets_want > 0`
+wäre die Bedingung, die beide Seiten bräuchten.
+
+### 8 · Vor dem Lauf sagt der 3-D-Reiter nicht, welcher Löser läuft
+
+`_em3dGeomSummaryHtml` (`ema.html:7928`) hat genau einen solchen Satz, und der
+hängt am **Flussweg** (Z. 7937). Für die ASM verzweigt `run_em3d` (Z. 3791) nach
+`feldweg` in einen anderen Löser mit einem anderen Ergebnis (Ringbefund statt
+Kennwerttabelle) — das steht erst hinterher in der Ergebniskarte, drei Minuten
+später. Bei der GSM zeigt der Reiter eine gewöhnliche Zusammenfassung und einen
+freien Startknopf, obwohl das Auswahlfeld eine Zeile weiter oben „getragen:
+analytisch, cad" sagt.
+
+### 9 · Die „Live-Simulation" der Scheibe lief nicht — sie war ein Standbild
+
+**Gemeldet** als „die live simulation der axialflussmaschine funktioniert
+nicht". Das stimmte, und meine erste Prüfung hatte am Ziel vorbeigemessen: sie
+sah nach, ob ein BILD da ist, nicht ob sich etwas BEWEGT.
+
+**Messung** (Prüfsumme von `#simCanvas`, je 3 s):
+
+| | Stichproben | verschiedene Bilder |
+|---|---:|---:|
+| Axialfluss | 6 über 15 s | **1** — Pixel für Pixel dasselbe |
+| radial (Gegenprobe) | 5 über 12 s | 5 |
+
+Der Lastregler bewegte nichts, der Start/Stop-Knopf stand auf „Start", Drücken
+änderte nichts. **Ursache:** `loop()` kehrte im Axialzweig VOR `stepPhysics`,
+`rasterizeGeometry`, `solveField` und `draw` zurück; `_axialVorschau` kopierte
+einmal je Sekunde zwei fertige Leinwände per `drawImage` herüber. Kein
+Läuferwinkel, keine Zeitachse, kein Feld. Der Hinweiskasten sagte, dass die
+*Echtzeitdaten* ausgesetzt sind — dass der *Lauf* gar nicht stattfindet, sagte
+nichts, und Regler, Start/Stop und der Reitername „▶ Live-Simulation" standen
+unverändert da. Dazu verdeckte der Kasten (oben rechts) im Hochformat die obere
+rechte Ecke der Zeichnung.
+
+**Behoben am 11.10.2026 — und es ist keine gedrehte Zeichnung.** Dreht sich der
+Läufer, ändert sich die Lage Magnet gegen NUT und damit das Feld; `theta`
+verschob bisher nur den SCHNITT (`rzBei`), nicht den Läufer. `feld.js` bekam
+deshalb `rotorVersatz` — angewandt an genau den zwei Stellen, die zum Läufer
+gehören (Magnete, Käfignuten), **nicht** an den Magneten des Scheibenankers,
+die am Ständer sitzen. Bei 0 ist jede bisherige Rechnung bitgleich (nachgemessen);
+bei einer Polteilung kippt das Feld exakt das Vorzeichen.
+
+Flüssig wird es über die Wiederholung: `live.js` löst **eine Periode** in zwölf
+Läuferstellungen (gemessen **1,0 s** für alle zwölf bei 3 Ringen), danach ist
+jede Drehung Ablesen (200 Winkel < 1 ms). Die Periode ist dabei **nicht** die
+Polteilung, sondern `2π/ggT(2p, Q)` — eine Drehung bildet den Ständer nur bei
+einem Vielfachen der Nutteilung auf sich ab (16/48 → 22,5°; 10/12 → 180°, fünf
+Polteilungen).
+
+**Ein Vorzeichen war zuerst zu viel, und die Messung hat es gefunden:** am
+festen Ort muss das Feld nach einer Polteilung kippen; mit dem zusätzlichen
+`(−1)^m` kam es unverändert heraus (1,0149 statt −1,0149 T). Das gelöste Fenster
+ist zwei Polteilungen breit und in sich schon antiperiodisch — die starre
+Drehung liest von selbst am Gegenpol ab. Wer beides tut, hebt es auf.
+
+Gezeigt werden drei Bilder: die Scheibe von vorn mit `B_z` im Luftspalt, der
+abgewickelte Streifen (Zähne stehen, Magnete wandern) und `B_z(θ)` mit
+mitlaufender Marke. Die Farbskala wird **einmal** für alle Stellungen gesetzt —
+eine je Rahmen neu gewählte atmete mit der Drehung, und eine Änderung der SKALA
+sähe aus wie eine Änderung des FELDES.
+
+**Was ausdrücklich NICHT mitläuft:** Moment und Ströme. Das dq-Modell dieser
+Leinwand ist das der radialen Maschine; die Drehzahl kommt deshalb vom
+Drehzahl-Sollwert (sonst 3.000 1/min), und die **Zeitlupe steht im Bild**
+(gemessen 1 : 143) — eine Scheibe bei 3.000 1/min dreht 50-mal je Sekunde, das
+sieht niemand, und eine Anzeige ohne diesen Faktor wäre eine Aussage über eine
+Drehzahl, die sie nicht zeigt. Der Kasten sitzt jetzt unten und sein Platz wird
+von der Zeichenfläche **abgezogen** statt überzeichnet.
+
+Nachgemessen nach dem Umbau: **8 von 8** bzw. **6 von 6** verschiedene Bilder,
+Stop hält an, Start läuft weiter, keine Konsolenfehler — und das auch, ohne den
+Reiter ⊙ vorher zu öffnen.
+
+### 10 · Dasselbe über den AGENTEN — die Kette trägt, und sie trägt die falsche Aussage mit
+
+Gegenprobe über den zweiten Bedienweg: `cae_cli.py` und ein laufender PI-Kopf.
+**Die Verdrahtung ist in Ordnung** — je Art führt das richtige Verb wirklich
+durch (`feld2d synrm` 110.259 Dreiecke, Anisotropie 1,719, Bezugsfall glatter
+Läufer 1,0002; `feld2d eesm` 108.801 Dreiecke, 1,667, mit ehrlicher Warnung über
+89 % Klirranteil; `axial --sektor` 260.824 Knoten, +2,7 % gegen den Mehrschnitt,
+dazu Stufe 1 und 2 in einem Aufruf), eine Art am falschen Verb wird mit **Exit 2**
+und dem Hinweis auf das richtige abgewiesen (`feld2d pmsm`, `feld3d synrm`,
+`feld2d/feld3d gsm`), und `run em3d` für die GSM kommt über HTTP mit **Exit 1**
+samt vollständiger Begründung zurück. Ein echter Kopf (PI 0.85.1,
+`qwen-gross:latest`, Denken aus) startete gebunden ans Projekt, machte **genau
+einen** Werkzeugaufruf, las das Ergebnis, antwortete nach 63 s und legte
+`protokoll_*.md` + `ereignisse_*.jsonl` ab, über `/agent/laeufe` und
+`/agent/lauf` wieder abrufbar.
+
+**Und genau deshalb ist Befund 1 auf diesem Weg schlimmer, nicht harmloser.**
+Der Kopf antwortete wörtlich: „SynRM trägt laut Werkzeug vier Stufen … und das
+3-D-Feld. Die Feldstufen laufen über Elmer (2-D wie 3-D)." Das ist korrekt
+wiedergegeben — `ARTEN["synrm"].stufen` sagt es —, und es ist falsch. Wer dem
+Kopf glaubt, startet einen Lauf, der nicht endet.
+
+**Zwei eigene Lücken auf diesem Weg:**
+
+* `cae_cli.py maschinenart --help` nennt als Codes nur `pmsm|asm|synrm|eesm`.
+  Die **GSM fehlt**, obwohl das Verb sie vollständig beantwortet. Ein Agent liest
+  die Hilfe und schließt daraus, dass es sie nicht gibt.
+* `run em3d --dry-run` druckt den Payload und führt **kein einziges Tor** —
+  weder die Maschinenart noch das Rotor-Layout. Für alle sechs Fälle (auch GSM,
+  auch SynRM) kommt Exit 0 und ein Payload zurück. Das ist die Stelle, an der ein
+  Agent vorher nachsieht, und sie sagt nichts; `rotor-check` führt die Tore
+  wirklich, `--dry-run` nicht.
+
+**Status.** **5 und 9 behoben** (11.10.2026, s. dort). Offen bleiben 1, 2, 3, 4,
+6, 7, 8 und 10. Keiner der Punkte bewegt eine schon abgelegte Zahl; 1, 2 und 6
+sind Rechenbefunde, die übrigen Auskunft und Darstellung.
+
+---
+
 ## 2026-10-11 · Die Scheibe hatte keine Festigkeitsaussage — und ihr Lauf ließ sich nicht einmal ansehen
 
 **Beobachtung.** Nach der Reparatur vom 09.10. lief der Axialfluss aus der Maske

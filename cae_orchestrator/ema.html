@@ -183,6 +183,12 @@
     .overlay{position:absolute;top:14px;right:14px;background:rgba(20,20,20,.88);
              padding:12px;border-radius:4px;border:1px solid var(--brd);
              pointer-events:none;min-width:200px;max-width:250px}
+    /* ⊙ Beim Axialfluss ist die Leinwand das Hauptbild (eine runde Scheibe,
+       mittig) — der Kasten oben rechts deckte genau ihr Viertel zu. Er sitzt
+       dort unten und ueber die ganze Breite, und die Zeichnung laesst den
+       Platz frei (s. `_axialVorschau`). */
+    .overlay.ax-unten{top:auto;bottom:10px;left:10px;right:10px;
+                      max-width:none;min-width:0}
     .overlay h3{margin:0 0 8px;font-size:.85rem;color:var(--acc)}
     .data-row{display:flex;justify-content:space-between;font-family:monospace;
               margin-bottom:3px;font-size:.85rem}
@@ -4229,9 +4235,11 @@
       <b style="color:#8bc34a">⊙ Axialfluss</b><br>
       <span id="ov_axial_t">—</span>
       <div style="margin-top:6px;color:#889;font-size:.70rem">
-        Abbild der Zeichnung aus Reiter ⊙ Axialfluss — dieselbe
-        Zeichnung, nicht eine zweite. Die Echtzeitdaten sind ausgesetzt: sie
-        kommen aus dem radialen FDM-Modell dieser Leinwand.</div>
+        Gerechnet aus dem Reiter ⊙ Axialfluss — dieselbe Geometrie, nicht eine
+        zweite. Die Läuferstellungen einer Periode werden EINMAL gelöst, danach
+        ist Drehen nur noch Ablesen. Die Drehzahl kommt vom Drehzahl-Sollwert
+        (sonst 3.000 1/min); <b>Moment und Ströme bleiben ausgesetzt</b> — sie
+        kämen aus dem radialen dq-Modell dieser Leinwand.</div>
     </div>
     <button id="ov_play" onclick="toggleSim()"
             style="width:100%;margin-bottom:8px;padding:6px;font-size:.74rem;pointer-events:auto;background:var(--err)">⏸ Pause</button>
@@ -4676,6 +4684,11 @@ document.addEventListener('DOMContentLoaded', () => {
  * Sekunde — die Zeichnung dort haengt an Reglern, die der Mensch bewegt).
  */
 let _axVorschauZeit = 0, _axVorschauTimer = null;
+// ⊙ Der Laeuferwinkel der Vorschau und die Vorgaben fuer ihre Bewegung.
+// `_AX_UPS_SICHTBAR` ist die Zahl der Umdrehungen je Sekunde, die man
+// WIRKLICH sieht — die Zeitlupe folgt daraus und wird angezeigt.
+let _axTheta = 0, _axLetzte = 0;
+const _AX_RPM_VORGABE = 3000, _AX_UPS_SICHTBAR = 0.35;
 
 function _axVorschauAnstossen() {
   _axVorschauZeit = 0;                       // naechster Rahmen zeichnet neu
@@ -4683,13 +4696,16 @@ function _axVorschauAnstossen() {
   const zeigt = axial && PREVIEW_TABS.has(window._activeTab || '');
   // Die Echtzeitdaten dieser Leinwand gelten der radialen Maschine.
   const ov = document.querySelector('#preview-pane .overlay');
+  if (ov) ov.classList.toggle('ax-unten', zeigt);
   if (ov) for (const k of ov.children) {
     if (k.id === 'ov_axial') k.style.display = zeigt ? '' : 'none';
     else if (k.id === 'ov_laeufer') { if (zeigt) k.style.display = 'none'; }
     else k.style.display = zeigt ? 'none' : '';
   }
+  // Die Vorschau treibt sich seit dem 11.10.2026 selbst (sie LAEUFT), der
+  // frueher noetige Sekundentakt gegen ein eingefrorenes Standbild entfaellt.
   if (_axVorschauTimer) { clearInterval(_axVorschauTimer); _axVorschauTimer = null; }
-  if (zeigt) _axVorschauTimer = setInterval(() => { _axVorschauZeit = 0; }, 1000);
+  if (zeigt) _axLetzte = 0;
 }
 
 /* Der Haken in `loop()`. Rueckgabe `true` heisst: die Leinwand ist bedient,
@@ -4697,58 +4713,95 @@ function _axVorschauAnstossen() {
 window._axialVorschau = function (canvas, ctx, cw, ch) {
   if ((document.getElementById('flux_path')?.value || 'radial') !== 'axial')
     return false;
-  const jetzt = Date.now();
-  if (jetzt - _axVorschauZeit < 900) return true;      // schon gezeichnet
-  _axVorschauZeit = jetzt;
-  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, cw, ch);
   let f = document.getElementById('axial-rahmen'), w = null;
   try { w = f && f.contentWindow; } catch (e) { w = null; }
-  const bereit = w && typeof w.zeichne === 'function'
+  const bereit = w && typeof w.liveRahmen === 'function'
                  && w.document && w.document.getElementById('c_front');
   if (!bereit) {
     if (typeof axActivate === 'function') axActivate();
+    ctx.fillStyle = '#111'; ctx.fillRect(0, 0, cw, ch);
     ctx.fillStyle = '#9bd'; ctx.font = '13px system-ui,sans-serif';
     ctx.fillText('⊙ Axialfluss — die Zeichnung wird geladen…', 16, 30);
     ctx.fillStyle = '#889'; ctx.font = '11px system-ui,sans-serif';
-    ctx.fillText('Sie entsteht im Reiter ⊙ Axialfluss; hier steht ihr Abbild.', 16, 50);
-    _axVorschauZeit = jetzt - 600;           // bald wieder versuchen
+    ctx.fillText('Sie entsteht im Reiter ⊙ Axialfluss; hier läuft ihr Abbild.', 16, 50);
     return true;
   }
-  let bilder;
-  try {
-    w.zeichne();                             // auf den Stand der Regler bringen
-    bilder = [['Draufsicht auf den Ständer', w.document.getElementById('c_front')],
-              ['Halbschnitt r–z — Achse unten', w.document.getElementById('c_schnitt')]];
-  } catch (e) {
+
+  // ── Der Laeuferwinkel ─────────────────────────────────────────────────────
+  // **Die Drehzahl kommt vom Menschen, nicht aus einem Momentenmodell.** Das
+  // dq-Modell dieser Leinwand ist das der RADIALEN Maschine (psi, Ld, Lq aus
+  // `livePhysikLaden`); es auf eine Scheibe anzuwenden hiesse, Zahlen unter
+  // fremdem Namen zu zeigen. Gedreht wird deshalb mit dem Drehzahl-Sollwert
+  // bzw. der Vorgabe, und die Anzeige sagt beides.
+  const zz = (typeof window._simZustand === 'function') ? window._simZustand() : null;
+  const jetzt = performance.now();
+  const dt = Math.min(0.12, (_axLetzte ? (jetzt - _axLetzte) : 16) / 1000);
+  _axLetzte = jetzt;
+  const rpm = (zz && zz.rpmSoll > 0) ? zz.rpmSoll : _AX_RPM_VORGABE;
+  // Eine echte Scheibe bei 3000 1/min dreht 50-mal je Sekunde — unsichtbar.
+  // Die Zeitlupe ist deshalb NICHT Geschmack, sondern Bedingung dafuer, dass
+  // man ueberhaupt etwas sieht; ihr Faktor steht in der Anzeige, sonst waere
+  // das Bild eine Aussage ueber eine Drehzahl, die es nicht zeigt.
+  const sichtbarUps = _AX_UPS_SICHTBAR * ((zz && zz.tempo) || 1)
+                      * ((zz && zz.ultraSlow) ? 0.1 : 1);
+  const zeitlupe = Math.max(1, (rpm / 60) / Math.max(sichtbarUps, 1e-6));
+  if (!zz || zz.laeuft) _axTheta += 2 * Math.PI * sichtbarUps * dt;
+  _axTheta %= 2 * Math.PI;
+
+  // ── Die Bilder von der Zeichenseite holen ────────────────────────────────
+  let bilder = null, stand = null;
+  try { bilder = w.liveRahmen(_axTheta); stand = w.liveStand && w.liveStand(); }
+  catch (e) {
+    ctx.fillStyle = '#111'; ctx.fillRect(0, 0, cw, ch);
     ctx.fillStyle = '#e57'; ctx.font = '12px monospace';
     ctx.fillText('⊙ Zeichnung nicht lesbar: ' + e.message, 12, 28);
     return true;
   }
-  // Zwei Bilder: nebeneinander, wenn die Vorschau breiter als hoch ist,
-  // sonst uebereinander. Beide quadratisch, also entscheidet die Hoehe.
-  const quer = cw > ch * 0.95;
-  const fw = quer ? cw / 2 : cw, fh = quer ? ch : ch / 2;
-  bilder.forEach(([txt, cv], i) => {
-    if (!cv || !cv.width) return;
-    const x0 = quer ? i * fw : 0, y0 = quer ? 0 : i * fh;
-    const sk = Math.min((fw - 12) / cv.width, (fh - 26) / cv.height);
+  ctx.fillStyle = '#111'; ctx.fillRect(0, 0, cw, ch);
+  if (!bilder) {
+    ctx.fillStyle = '#9bd'; ctx.font = '13px system-ui,sans-serif';
+    ctx.fillText(stand && stand.fehler ? '⊙ ' + stand.fehler
+                                       : '⊙ rechnet die Läuferstellungen …', 16, 30);
+    ctx.fillStyle = '#889'; ctx.font = '11px system-ui,sans-serif';
+    ctx.fillText('Einmal je Geometrie — danach ist Drehen nur noch Ablesen.', 16, 50);
+    if (stand && stand.periode_grad)
+      ctx.fillText('Periode ' + stand.periode_grad.toFixed(1) + '° (Läufer UND Ständer)', 16, 68);
+    return true;
+  }
+
+  // Untereinander: die Vorschau ist hochkant, und die Scheibe ist rund —
+  // nebeneinander bliebe von beidem die Haelfte.
+  // Der Hinweiskasten sitzt beim Axialfluss unten; was er belegt, wird hier
+  // ABGEZOGEN statt ueberzeichnet — gemessen am Element selbst, nicht geraten.
+  const _ovEl = document.querySelector('#preview-pane .overlay.ax-unten');
+  const chN = Math.max(120, ch - (_ovEl ? _ovEl.offsetHeight + 18 : 0));
+  const anteil = [0.58, 0.16, 0.22];
+  let y = 6, bi = 0;
+  for (const [txt, cv] of bilder) {
+    if (!cv || !cv.width) continue;
+    const sk = Math.min((cw - 12) / cv.width,
+                        (chN * (anteil[bi++] || 0.2) - 18) / cv.height);
     const bw = cv.width * sk, bh = cv.height * sk;
-    try { ctx.drawImage(cv, x0 + (fw - bw) / 2, y0 + 8 + (fh - 26 - bh) / 2, bw, bh); }
-    catch (e) { /* Rahmen gerade neu geladen */ }
-    ctx.fillStyle = '#8ab'; ctx.font = '11px system-ui,sans-serif';
-    ctx.textAlign = 'center';
-    ctx.fillText(txt, x0 + fw / 2, y0 + fh - 8);
-    ctx.textAlign = 'left';
-  });
-  // Die Kennzahlen daneben — aus der Zeichnung gelesen, nicht gerechnet.
+    try { ctx.drawImage(cv, (cw - bw) / 2, y, bw, bh); } catch (e) { /* neu geladen */ }
+    y += bh + 4;
+    ctx.fillStyle = '#8ab'; ctx.font = '10px system-ui,sans-serif';
+    ctx.textAlign = 'center'; ctx.fillText(txt, cw / 2, y + 8); ctx.textAlign = 'left';
+    y += 16;
+    if (y > chN - 12) break;
+  }
+
   const t = document.getElementById('ov_axial_t');
   if (t) {
     try {
-      const p = w.P();
-      t.innerHTML = `Scheibe Ø ${(2 * p.ro).toFixed(0)} mm · `
-        + `λ ${p.lam.toFixed(3)}<br>2p ${p.poles} · Q ${p.q} · `
-        + `${p.nSpalte} Luftspalt${p.nSpalte > 1 ? 'e' : ''} · ${p.spalt} mm<br>`
-        + `Bauform ${p.topo.toUpperCase()} · Läufer ${p.laeufer}`;
+      const pp = w.P();
+      t.innerHTML = `Scheibe Ø ${(2 * pp.ro).toFixed(0)} mm · λ ${pp.lam.toFixed(3)}<br>`
+        + `2p ${pp.poles} · Q ${pp.q} · ${pp.nSpalte} Luftspalt`
+        + `${pp.nSpalte > 1 ? 'e' : ''} · ${pp.spalt} mm<br>`
+        + `Bauform ${pp.topo.toUpperCase()} · Läufer ${pp.laeufer}<br>`
+        + `<b>θ ${(_axTheta * 180 / Math.PI).toFixed(0)}°</b> bei `
+        + `<b>${Math.round(rpm).toLocaleString('de-DE')} 1/min</b>`
+        + `${(zz && !zz.laeuft) ? ' — angehalten' : ''}<br>`
+        + `Zeitlupe 1 : ${Math.round(zeitlupe).toLocaleString('de-DE')}`;
     } catch (e) { t.textContent = '—'; }
   }
   return true;
@@ -10306,16 +10359,35 @@ function _renderEm3d(res) {
   // 2D-gegen-3D-Tabelle gibt es dort nicht; sie zu erfinden waere schlimmer
   // als der Bericht, den der Loeser wirklich schreibt.
   if (res.bericht) {
+    // **Welcher Löser den Bericht geschrieben hat, sagt `art`/`source` — nicht
+    // die blosse Anwesenheit von `bericht`.** Den trägt der Axiallauf genauso,
+    // und er landete dadurch unter der Überschrift „Asynchronmaschine" samt
+    // einem Satz über den Käfig (gemessen 11.10.2026: `art="axial"`,
+    // `source="axial_em3d"`, Überschrift trotzdem ASM). Die Zahlen darunter
+    // waren die richtigen — eine Überschrift, die eine andere Maschine nennt,
+    // ist trotzdem eine falsche Auskunft.
+    const _ax = (res.art === 'axial') || (res.source === 'axial_em3d');
     window._e3HasResult = true;
     msg.style.color = '#6c6';
-    msg.innerHTML = '✓ 3-D harmonisch (Kurzschlussring) · '
-      + (res.mesh ? res.mesh.nodes + ' Knoten, ' + res.mesh.tets + ' Tetraeder' : '');
+    msg.innerHTML = (_ax ? '✓ Axialfluss-Ringsektor · ' : '✓ 3-D harmonisch (Kurzschlussring) · ')
+      + (res.mesh ? res.mesh.nodes + ' Knoten, ' + res.mesh.tets + ' Tetraeder' : '')
+      + (_ax && res.mesh && res.mesh.sektor_grad
+         ? ' · ein Pol (' + (+res.mesh.sektor_grad).toFixed(1) + '°)' : '');
     box.innerHTML =
-      '<div class="e3-card"><h4>🧲 3-D harmonisch — Asynchronmaschine</h4>'
+      '<div class="e3-card"><h4>'
+      + (_ax ? '⊙ 3-D-Ringsektor — Axialflussmaschine'
+             : '🧲 3-D harmonisch — Asynchronmaschine') + '</h4>'
       + '<div class="hint" style="font-size:11px;color:#9aa;margin-bottom:6px">'
-      + 'Der Käfig braucht ein <b>zeitabhängiges</b> Feld; der magnetostatische '
-      + '3-D-Pfad kann ihn nicht darstellen. Gerechnet hat deshalb '
-      + '<code>ema_em3d_harm</code> — derselbe Knopf, der richtige Löser.</div>'
+      + (_ax
+         ? 'Gerechnet hat <code>ema_axial_em3d</code>: EINE Polteilung als '
+           + '<b>anti-periodischer Ringsektor</b>, magnetostatisch, im Leerlauf. '
+           + 'Danebengestellt ist der abgewickelte <b>Mehrschnitt</b> auf '
+           + 'derselben Geometrie — die Abweichung über dem Radius IST das '
+           + 'Ergebnis (der <code>∂/∂r</code>-Term, den der Mehrschnitt fallen lässt).'
+         : 'Der Käfig braucht ein <b>zeitabhängiges</b> Feld; der magnetostatische '
+           + '3-D-Pfad kann ihn nicht darstellen. Gerechnet hat deshalb '
+           + '<code>ema_em3d_harm</code> — derselbe Knopf, der richtige Löser.')
+      + '</div>'
       + '<pre style="white-space:pre;overflow-x:auto;font-size:11px;'
       + 'line-height:1.45;margin:0">'
       + String(res.bericht).replace(/[&<>]/g,
@@ -14547,6 +14619,13 @@ function escHtml(s) {
       if (vs) { vs.innerText = r ? "LÄUFT" : "PAUSE"; vs.style.color = r ? "var(--ok)" : "var(--warn)"; }
     };
     window.toggleSim = () => { PHYS.isRunning = !PHYS.isRunning; window._syncSimUI(); };
+    // ⊙ Der Axialzweig der Vorschau steht AUSSERHALB dieser Kapsel und braucht
+    // trotzdem den Lauf-Zustand. Herausgereicht wird er, statt ihn dort ein
+    // zweites Mal zu fuehren — zwei Zustaende fuer denselben Knopf laufen beim
+    // ersten Sonderfall auseinander.
+    window._simZustand = () => ({ laeuft: PHYS.isRunning, omega: PHYS.omega,
+                                  rpmSoll: PHYS.rpmSet, tempo: PHYS.timeScale,
+                                  ultraSlow: PHYS.ultraSlow });
     btnPlay.onclick = window.toggleSim;
     document.getElementById("btn_reset").onclick = () => {
       PHYS.omega = PHYS.angle = PHYS.id = PHYS.iq = 0;
