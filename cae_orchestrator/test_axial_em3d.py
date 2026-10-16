@@ -229,6 +229,123 @@ if ECHT and HAT_GMSH:
 else:
     print("\n  (ohne --echt: der physikalische Teil braucht Elmer)")
 
+print("\n— 7. Die Ergebnisse im Browser, Feldlinien eingeschlossen —")
+# Gemeldet als: „die ergebnisse der 3d feld berechnung in elmer der
+# axialflussmaschine will ich auch im browser sehen. ich moechte die
+# magnetfeldlinien sehen." Der Betrachter laedt zwei Dateien; dieser Lauf hatte
+# seine VTU laengst und schrieb sie nicht.
+#
+# Der eigentliche Gegenstand hier sind die STARTPUNKTE. Das Raster in
+# `ema_em3d.export_browser_streamlines` ist fuer einen Zylinder gebaut: es
+# beginnt knapp ueber der WELLE. Eine Scheibe hat dort ein Loch, und
+# `vtkStreamTracer` verwirft Startpunkte ausserhalb des Netzes
+# STILLSCHWEIGEND -- es gaebe weniger Linien und keine Meldung.
+_netz_probe = {"ri_mm": 75.0, "ro_mm": 130.0, "hoehe_mm": 65.0, "poles": 16,
+               "r_in_mm": 55.75, "r_out_mm": 149.25, "alpha": 2 * math.pi / 16,
+               "pid": {"eisen": 1, "luft": 2},
+               "magnete": [{"phys": 3, "z": 20.0, "vz": 1.0},
+                           {"phys": 4, "z": 44.0, "vz": 1.0}]}
+_pkt = E3.browser_startpunkte(_netz_probe)
+pruefe(len(_pkt) == E3.LINIEN_RINGE * 16 * E3.LINIEN_WINKEL_JE_POL
+       * E3.LINIEN_EBENEN,
+       f"{len(_pkt)} Startpunkte = Ringe x Winkel-je-Pol x Polzahl x Ebenen")
+_r = [math.hypot(x, y) for x, y, _ in _pkt]
+_z = [q[2] for q in _pkt]
+pruefe(min(_r) >= 75.0 and max(_r) <= 130.0,
+       f"jeder liegt IM Ringraum ({min(_r):.1f} … {max(_r):.1f} mm von "
+       f"75,0 … 130,0) — keiner im Loch und keiner im Luftrand")
+pruefe(0.0 < min(_z) and max(_z) < 65.0,
+       f"und innerhalb der Stapelhoehe ({min(_z):.1f} … {max(_z):.1f} von 65,0)")
+# Ueber den VOLLEN Umfang, weil im gespiegelten Vollkranz getract wird: eine
+# Linie, die an der Periodikflaeche endet, waere der Rand des Rechengebiets
+# und kein Flusspfad.
+_th = sorted(math.atan2(y, x) % (2 * math.pi) for x, y, _ in _pkt)
+pruefe(_th[-1] - _th[0] > 2 * math.pi * 0.9,
+       f"und ueber den vollen Umfang verteilt ({math.degrees(_th[-1] - _th[0]):.0f} Grad)")
+_al = 2 * math.pi / 16
+_auf_grenze = min(abs(((t + _al / 2) % _al) - _al / 2) for t in _th)
+pruefe(_auf_grenze > 1e-6,
+       "und keiner sitzt GENAU auf einer Polgrenze des gespiegelten Kranzes")
+# **Die Gegenprobe:** das Raster des radialen Pfads faengt knapp ueber der
+# Welle an. Bei dieser Scheibe liegt das mitten im Loch.
+_r_in_radial = max(_netz_probe["r_in_mm"] + 0.1 * _netz_probe["r_out_mm"],
+                   0.15 * _netz_probe["r_out_mm"])
+pruefe(_r_in_radial < 75.0,
+       f"Gegenprobe: das radiale Raster begaenne bei r = {_r_in_radial:.1f} mm "
+       f"und damit INNERHALB von Ri = 75,0 — genau die Punkte, die der Tracer "
+       f"stillschweigend verwirft")
+
+try:
+    import numpy as _np
+    import vtk as _vtk
+    from vtk.util import numpy_support as _ns
+    HAT_VTK = True
+except Exception:                                                  # noqa: BLE001
+    HAT_VTK = False
+    print("  (ohne vtk: der Export selbst wird nicht gebaut)")
+
+if HAT_VTK:
+    # Ein synthetisches Volumengitter in MILLIMETERN -- wie die echte VTU
+    # (`schreibe_sif` setzt ausdruecklich KEIN Coordinate Scaling).
+    _nx = _ny = 15
+    _nz = 9
+    _img = _vtk.vtkImageData()
+    _img.SetDimensions(_nx, _ny, _nz)
+    _img.SetOrigin(-140.0, -140.0, 0.0)
+    _img.SetSpacing(280.0 / (_nx - 1), 280.0 / (_ny - 1), 65.0 / (_nz - 1))
+    _ap = _vtk.vtkAppendFilter()
+    _ap.SetInputData(_img)
+    _ap.Update()
+    _g = _ap.GetOutput()
+    _npt, _ncl = _g.GetNumberOfPoints(), _g.GetNumberOfCells()
+    # B zeigt AXIAL -- das ist die Richtung dieser Bauart, und der Export muss
+    # sie unveraendert durchreichen.
+    _B = _np.zeros((_npt, 3)); _B[:, 2] = 1.0
+    _a = _ns.numpy_to_vtk(_np.ascontiguousarray(_B))
+    _a.SetNumberOfComponents(3)
+    _a.SetName("magnetic flux density")
+    _g.GetPointData().AddArray(_a)
+    _gid = _ns.numpy_to_vtk(_np.full(_ncl, 1, dtype=_np.int32))
+    _gid.SetName("GeometryIds")
+    _g.GetCellData().AddArray(_gid)
+
+    _d = tempfile.mkdtemp()
+    _vtu = os.path.join(_d, "sektor.vtu")
+    _w = _vtk.vtkXMLUnstructuredGridWriter()
+    _w.SetFileName(_vtu)
+    _w.SetInputData(_g)
+    _w.Write()
+
+    _erg = E3.browser_dateien(_vtu, os.path.join(_d, "aus"), _netz_probe)
+    pruefe(bool(_erg.get("vtp")) and os.path.getsize(_erg["vtp"]) > 0,
+           "die Oberflaeche (.vtp) ist geschrieben")
+    pruefe(_erg.get("n_linien", 0) > 0,
+           f"und {_erg.get('n_linien')} Feldlinien — gezaehlt, nicht geglaubt "
+           f"(eine leere Datei ist gueltig und waere als Erfolg durchgegangen)")
+    pruefe(bool(_erg.get("lines")) and os.path.exists(_erg["lines"]),
+           "die Linien-Datei liegt da")
+    _rd = _vtk.vtkXMLPolyDataReader()
+    _rd.SetFileName(_erg["vtp"])
+    _rd.Update()
+    _bm = _ns.vtk_to_numpy(_rd.GetOutput().GetPointData().GetArray("Bmag"))
+    pruefe(abs(float(_np.median(_bm)) - 1.0) < 1e-5,
+           f"|B| kommt unveraendert an ({float(_np.median(_bm)):.6f} T "
+           f"gegen 1,000000 gesetzt)")
+    pruefe("22.5 Grad" in _erg.get("hinweis", "")
+           or "22,5" in _erg.get("hinweis", ""),
+           "der Hinweis NENNT den gerechneten Pol — gezeigt wird der "
+           "gespiegelte Vollkranz, gerechnet ist eine Polteilung")
+    pruefe("Saettigung ist nicht gerechnet" in _erg.get("hinweis", ""),
+           "und dass das Eisen linear ist — ein Bild ohne diese Grenze liest "
+           "sich wie eine Saettigungsrechnung")
+    # Und der eine Weg, auf dem die Dateien beim Browser ankommen: dieselben
+    # Schluessel wie der PSM-Lauf, also ohne eine neue Route.
+    import ema_em3d as _E3M
+    pruefe(hasattr(_E3M, "zaehle_linien"),
+           "`ema_em3d.zaehle_linien` ist die EINE Zaehlstelle — derselbe "
+           "Fallstrick trifft jeden Loeser, der diese Dateien schreibt")
+
+
 print("\n— Fingerabdruck —")
 import ema_werkzeugstand                                           # noqa: E402
 pruefe("ema_axial_em3d.py" in ema_werkzeugstand.PHYSIK,

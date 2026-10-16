@@ -1105,16 +1105,13 @@ def _zaehle_linien(vtp_pfad: str) -> int:
 
     Der Grund steht in `browser_dateien`: `vtkStreamTracer` schreibt bei
     Startpunkten ausserhalb des Netzes eine gueltige, leere Datei -- und ohne
-    diesen Zaehler meldet der Lauf dafuer Erfolg.
+    diesen Zaehler meldet der Lauf dafuer Erfolg. Gezaehlt wird in
+    `ema_em3d.zaehle_linien`, weil derselbe Fallstrick jeden Loeser trifft, der
+    diese Dateien schreibt (seit dem 11.10.2026 auch den axialen Ringsektor);
+    diese Huelle bleibt, damit Aufrufer und Test unveraendert weiterlaufen.
     """
-    try:
-        import vtk
-        r = vtk.vtkXMLPolyDataReader()
-        r.SetFileName(vtp_pfad)
-        r.Update()
-        return int(r.GetOutput().GetNumberOfLines())
-    except Exception:                                        # noqa: BLE001
-        return -1
+    import ema_em3d
+    return ema_em3d.zaehle_linien(vtp_pfad)
 
 
 def _finde_vtu(ordner: str) -> str:

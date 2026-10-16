@@ -11,7 +11,7 @@ const fs = require("fs"), vm = require("vm");
 const ctx = { console, performance: { now: () => Date.now() }, Math, Float64Array,
               Uint8Array, Number, Set, document: null };
 vm.createContext(ctx);
-for (const f of ["geometrie.js", "feld.js", "schnitt.js"])
+for (const f of ["geometrie.js", "feld.js", "schnitt.js", "live.js"])
   vm.runInContext(fs.readFileSync(__dirname + "/" + f, "utf8"), ctx, f);
 
 const BASIS = {
@@ -340,6 +340,105 @@ console.log("\n— 10. Stromwinkel β: was eine Drehzahländerung im Feld bewegt
      `${(q / leer).toFixed(2)}× statt auf 1,000× (roh war der Hub bei ±400 ` +
      `ganze 0,02 %)`);
 }
+
+console.log("\n— 10. Dreht sich der Läufer, und kippt das Feld dabei? —");
+// Der Kopf von `live.js` behauptet diese Messung ("in pruefe.js nachgemessen,
+// nicht angenommen"), und bis zum 11.10.2026 stand sie hier NICHT. Eine
+// Behauptung ueber eine Messung, die es nicht gibt, ist schlimmer als keine
+// Behauptung -- also steht sie jetzt da.
+//
+// Gemessen wird am FESTEN Ort in der Spaltmitte: nach EINER Polteilung steht
+// dort, wo ein Nordpol war, ein Suedpol. Kippt das Vorzeichen nicht, dann
+// dreht sich nichts (der erste Entwurf verschob nur den SCHNITT), und kippt es
+// zweimal, dann ist ein Vorzeichen zuviel im Spiel (der zweite Entwurf legte
+// `(-1)^m` auf die starre Drehung und hob sie damit auf).
+function bzFest(versatz, ny, iter) {
+  const pv = P({ rotorVersatz: versatz });
+  const g0 = ctx.feldGitter(pv, 8, 8);
+  const nx = Math.round(ny * (g0.breite / g0.hGes));   // haengt NICHT am Versatz
+  const g = ctx.feldGitter(pv, nx, ny);
+  const loe = ctx.loeseFeld(pv, g, iter);
+  const { By } = ctx.feldAus(g, loe.A);
+  const e = ctx.eichung(pv, g, By, loe.pkMag, iter);
+  return { b: By[e.jGap * nx + Math.round(nx * 0.25)] * e.sf, nx };
+}
+const tauPm = 2 * Math.PI / BASIS.poles;              // Polteilung, MECHANISCH
+const b0 = bzFest(0, 90, 900).b;
+const b1 = bzFest(tauPm, 90, 900).b;
+const b2 = bzFest(2 * tauPm, 90, 900).b;
+console.log(`   B_z am festen Ort: ${b0.toFixed(4)} → ${b1.toFixed(4)} → ${b2.toFixed(4)} T`);
+pr(b0 * b1 < 0, `nach EINER Polteilung kippt das Vorzeichen (${b0.toFixed(4)} → ${b1.toFixed(4)} T)`);
+pr(Math.abs(Math.abs(b1 / b0) - 1) < 0.05,
+   `und der Betrag bleibt (|B1/B0| = ${Math.abs(b1 / b0).toFixed(4)})`);
+pr(b0 * b2 > 0 && Math.abs(b2 / b0 - 1) < 0.05,
+   `nach ZWEI Polteilungen steht wieder dasselbe (${b2.toFixed(4)} T) — das Fenster ist eine volle elektrische Periode`);
+// Gegenprobe: ohne Versatz darf sich gar nichts bewegen -- sonst waere jede
+// bisherige Rechnung dieser Seite verschoben.
+const bOhne = (() => { const pv = P({}); const g0 = ctx.feldGitter(pv, 8, 8);
+  const nx = Math.round(90 * (g0.breite / g0.hGes));
+  const g = ctx.feldGitter(pv, nx, 90); const loe = ctx.loeseFeld(pv, g, 900);
+  const { By } = ctx.feldAus(g, loe.A);
+  const e = ctx.eichung(pv, g, By, loe.pkMag, 900);
+  return By[e.jGap * nx + Math.round(nx * 0.25)] * e.sf; })();
+pr(Math.abs(bOhne - b0) < 1e-12,
+   "ohne Angabe ist der Versatz 0 und die Rechnung Ziffer für Ziffer die alte");
+
+console.log("\n— 11. Die Periode: Läufer UND Ständer —");
+pr(Math.abs(ctx.livePeriode(P()).per - 2 * Math.PI / 16) < 1e-12,
+   "16 Pole / 48 Nuten: Periode = 22,5° = eine Polteilung (ggT 16)");
+pr(Math.abs(ctx.livePeriode(P({ poles: 10, q: 12 })).per - 2 * Math.PI / 2) < 1e-12,
+   "Bruchloch 10/12: Periode = 180°, NICHT die Polteilung (ggT 2) — wer die Polteilung nähme, sähe einen Sprung je Periode");
+
+console.log("\n— 12. Feldlinien = Höhenlinien von A —");
+// Gegen ein AUSRECHENBARES Feld, nicht gegen ein festgenageltes Ergebnis:
+// A = i (linear in x) hat als Höhenlinie zu lv genau die Senkrechte bei x = lv.
+function striche(nx, ny, lies, stufen, luecke) {
+  const seg = [];
+  const kctx = { beginPath() {}, stroke() {},
+                 moveTo(x, y) { this._a = [x, y]; },
+                 lineTo(x, y) { seg.push([this._a[0], this._a[1], x, y]); } };
+  ctx.liveKonturen(kctx, nx, ny, lies, (i) => i, (j, f) => j + (f || 0),
+                   stufen, luecke === undefined ? -1 : luecke);
+  return seg;
+}
+const sLin = striche(10, 8, (i) => i, [3.5]);
+pr(sLin.length === 7, `A = x, Stufe 3,5: ${sLin.length} Strecken über 8 Zeilen (7 Zellreihen)`);
+pr(sLin.every((q) => Math.abs(q[0] - 3.5) < 1e-9 && Math.abs(q[2] - 3.5) < 1e-9),
+   "und jede liegt GENAU bei x = 3,5 — eine Höhenlinie eines linearen Feldes ist eine Gerade");
+pr(striche(10, 8, (i) => i, [20]).length === 0,
+   "eine Stufe außerhalb des Wertebereichs liefert keine Strecke (statt einer am Rand)");
+const sDiag = striche(10, 8, (i, j) => i + j, [6]);
+pr(sDiag.length > 0 && sDiag.every((q) => Math.abs((q[0] + q[1]) - 6) < 1e-9
+                                       && Math.abs((q[2] + q[3]) - 6) < 1e-9),
+   `A = x+y, Stufe 6: alle ${sDiag.length} Strecken liegen auf x+y = 6`);
+// Die Lücke: an der Umbruchspalte darf KEINE Strecke entstehen.
+pr(striche(10, 8, (i) => i, [3.5], 3).length === 0,
+   "an der Umbruchspalte wird nichts gezeichnet — dort sind die Nachbarn keine Nachbarn");
+
+console.log("\n— 13. Und die Linien laufen mit dem Läufer —");
+const folge = ctx.liveSorgen(P(), 4, null, "pruefe");
+pr(folge.aDeckel > 0 && isFinite(folge.aDeckel),
+   `der Höhenlinien-Deckel steht EINMAL fest (${folge.aDeckel.toExponential(2)}) — je Rahmen neu gewählt atmete die Linienzahl mit der Drehung`);
+pr(folge.aspekt > 0.1 && folge.aspekt < 20,
+   `das Seitenverhältnis der Abwicklung ist ${folge.aspekt.toFixed(3)} (maßstäblich gezeichnet, nicht gequetscht)`);
+const _pA = P();
+function linienBild(th) {
+  const { erg } = ctx.liveBei(folge, th);
+  const kR = Math.floor(erg.nSch / 2), sc = erg.scheiben[kR], g = sc.g;
+  const iSh = ctx.liveVersatz(folge, th, g.nx);
+  const q = (i) => ((i - iSh) % g.nx + g.nx) % g.nx;
+  const st = [];
+  for (let k = 0; k < 6; k++) st.push(((k + 0.5) / 6) * folge.aDeckel,
+                                      -((k + 0.5) / 6) * folge.aDeckel);
+  return striche(g.nx, g.ny, (i, j) => sc.A[j * g.nx + q(i)], st);
+}
+const L0 = linienBild(0), L1 = linienBild(folge.per / 4);
+const gleich = L0.length === L1.length
+  && L0.every((q, i) => q.every((v, k) => Math.abs(v - L1[i][k]) < 1e-9));
+pr(L0.length > 20 && L1.length > 20,
+   `es gibt überhaupt Linien (${L0.length} bzw. ${L1.length} Strecken)`);
+pr(!gleich, "und sie sind bei zwei Läuferstellungen VERSCHIEDEN — genau das war am Standbild falsch");
+
 
 console.log(`\n${ok} bestanden, ${fehl} fehlgeschlagen`);
 process.exit(fehl ? 1 : 0);

@@ -818,13 +818,18 @@ window.liveRahmen = function (theta) {
   if (_LV_FERTIG && _LV_FERTIG.marke === marke) {
     const f = _LV_FERTIG.folge;
     const c1 = _lvLeinwand("scheibe", 460, 460);
-    const c2 = _lvLeinwand("abw", 460, 120);
+    // Die Abwicklung wird MASSSTAEBLICH gezeichnet, also bekommt sie die Hoehe,
+    // die ihr Seitenverhaeltnis verlangt (gedeckelt, damit sie der Scheibe
+    // nicht den Platz nimmt). Eine feste Hoehe quetschte den 1-mm-Luftspalt
+    // und mit ihm die Winkel der Feldlinien.
+    const hAbw = Math.max(150, Math.min(400, Math.round(460 / (f.aspekt || 1.2))));
+    const c2 = _lvLeinwand("abw", 460, hAbw);
     const c3 = _lvLeinwand("kurve", 460, 150);
     zeichneLiveScheibe(c1, p, f, theta, f.deckel);
-    zeichneLiveAbwicklung(c2, p, theta);
+    zeichneLiveAbwicklung(c2, p, f, theta);
     zeichneLiveKurve(c3, p, f, theta, f.deckel);
-    return [["Scheibe von vorn — B_z im Luftspalt, der Läufer dreht sich", c1],
-            ["abgewickelt — die Zähne stehen, die Magnete wandern", c2],
+    return [["Scheibe von vorn — B_z AUS der Ebene heraus (darum keine Linien)", c1],
+            ["abgewickelt — die Feldlinien, exakt: Höhenlinien von A", c2],
             ["B_z über dem Umfang · die Marke läuft mit", c3]];
   }
   if (!_LV_LAUFT) {

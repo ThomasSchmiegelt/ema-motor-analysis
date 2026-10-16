@@ -38,11 +38,23 @@ geaendert. Belegt in ``axialfluss_scheibenprobe.py`` (400x400, Grundwelle
 Der eine Trick, ohne den es nicht geht
 ---------------------------------------
 
-Das Fenster ist **genau ganzzahlig viele Polteilungen** breit, mit der Polgrenze
-bei x = 0. Dann ist das hauseigene Dirichlet ``A = 0`` am Seitenrand die
-RICHTIGE Bedingung (``A ~ sin(pi*x/tau)`` hat dort Nullen) und nicht nur eine
-weit genug entfernte -- es braucht kein periodisches Verfahren und keinen
-zweiten Loeser.
+Das Fenster ist **genau ganzzahlig (und geradzahlig) viele Polteilungen** breit.
+In x ist es damit **wirklich periodisch**: die linke und die rechte Spalte sind
+Nachbarn derselben Maschine, und genau so wird seit dem 16.10.2026 geloest
+(``_solve_fdm(..., periodisch_x=True)``, eine Maskenzeile im hauseigenen
+Matrixbauer -- kein zweiter Loeser).
+
+**Vorher stand hier Dirichlet ``A = 0`` am Seitenrand** mit der Begruendung,
+``A ~ sin(pi*x/tau)`` habe dort Nullen. Das war falsch herum: bei Polgrenze auf
+x = 0 ist A dort EXTREM und nicht null -- die Nullen von A liegen in den
+Polmitten. ``A = const`` auf einer senkrechten Linie heisst ``B_x = 0``, also
+kein Umfangsfluss; erzwungen wurde das ausgerechnet an der Polgrenze, wo der
+Umfangsfluss im Joch sein Maximum hat. Gemessen (mit dichtem Rand, s.
+``POLSTER_MU_R``): 11,8 % Schwankung der Grundwelle ueber eine Laeuferdrehung
+und 7,4 % ueber die Fensterbreite. Mit Periodizitaet bleibt davon die Nutung
+uebrig. Solange die Polsterung Eisen war, war der Fehler weich -- der Fluss wich
+ins Polstereisen aus; beides gehoerte deshalb zusammen repariert
+(``BEFUNDE.md``, 16.10.2026).
 
 Zwei Dinge, die der quadratische Gitterzwang erzwingt
 -----------------------------------------------------
@@ -52,29 +64,36 @@ Maschenweite; das Gebiet muss also quadratisch sein und gleich feiner Teilung in
 beiden Richtungen folgen. Daraus folgt zweierlei, und beides ist Modellwahl, die
 hier ausgesprochen wird statt stillschweigend zu wirken:
 
-* **Nach oben und unten wird mit EISEN aufgefuellt**, bis das Gebiet quadratisch
-  ist -- nicht mit Luft. Das war der erste Entwurf und er war falsch, und zwar
-  messbar: mit Luftpolsterung haengt das Ergebnis an der FENSTERBREITE, weil mit
-  dem Quadrat auch das Luftvolumen waechst und der Fluss hinaus streut. Gemessen
-  bei r = 102,5 mm und gleicher Maschenweite::
+* **Nach oben und unten wird mit einer FLUSS-SPERRE aufgefuellt**, bis das
+  Gebiet quadratisch ist (``POLSTER_MU_R``, s. dort) -- weder mit Luft noch mit
+  Eisen. Beide waren einmal da, und beide waren messbar falsch:
 
-      Polteilungen   Fenster   Luft je Seite   B1
-          2           80,5 mm      7,7 mm     0,86410 T
-          4          161,0 mm     47,9 mm     0,84730 T   (-1,94 %)
-          6          241,5 mm     88,2 mm     0,83494 T   (-1,46 %)
-          8          322,0 mm    128,4 mm     0,82445 T   (-1,26 %)
+  *Luft* (erster Entwurf) laesst den Fluss hinausstreuen, und weil mit dem
+  Quadrat auch das Luftvolumen waechst, haengt das Ergebnis an der
+  FENSTERBREITE -- gemessen bei r = 102,5 mm 0,86410 / 0,84730 / 0,83494 /
+  0,82445 T ueber 2 / 4 / 6 / 8 Polteilungen, fallend ohne zu konvergieren.
+  Die noetige Fensterbreite springt mit dem Radius, also sprang das Ergebnis
+  mitten im Ringraum mit.
 
-  Es konvergiert nicht -- es faellt weiter, weil mehr Luft mehr Streuweg ist.
-  Und das war nicht harmlos: die noetige Fensterbreite SPRINGT mit dem Radius
-  (innen ist die Polteilung kleiner), also sprang mit ihr das Ergebnis, und die
-  Schnittreihe war dadurch nicht monoton -- k = 4 lag weiter von k = 8 entfernt
-  als k = 2. Das sah nach einem Verfahren aus, das nicht konvergiert.
+  *Eisen* (bis 16.10.2026) hat den Fehler ins Gegenteil verkehrt: der Rueckweg
+  lag dann DRAUSSEN. Gemessen liefen bei der gezeichneten Rueckendicke 71,9 %
+  des Rueckflusses durch die Polsterung, und das gezeichnete Rueckenblech
+  bewegte deshalb **keine einzige Stelle** -- 4 bis 40 mm, Ziffer fuer Ziffer
+  dasselbe Ergebnis. Der Satz, der hier stand ("das zusaetzliche Eisen fuehrt
+  keinen Fluss"), war genau falsch herum.
 
-  Mit Eisen ist die Polsterung **wirkungslos**: jenseits des Joches gibt es
-  keine Quelle, das zusaetzliche Eisen fuehrt keinen Fluss, und ``A = 0`` darauf
-  sagt genau das, was ein Joch tut -- es schliesst den Fluss ein. Die
-  Fensterbreite faellt damit aus dem Ergebnis heraus, und das ist nachgemessen
-  (``test_axial_fdm.py``).
+  Die *Sperre* sagt aus, was ein Joch TUT: der Rueckfluss schliesst sich im
+  gezeichneten Eisen. Damit faellt die Fensterbreite wirklich heraus (gemessen
+  0,37 % ueber Faktor 4 statt 7,4 %), und das Rueckenblech wirkt wieder
+  (+4,1 % von 4 auf 40 mm an der Vorgabemaschine). **Was der lineare FDM
+  weiterhin nicht zeigt, ist die Saettigung**: ein zu duennes Rueckenblech wird
+  hier reluktanzwirksam, nicht gesaettigt -- ob es dick genug ist, sagt
+  ``ema_axial.ruecken``.
+
+  Dass beides zusammen repariert werden musste, ist der Kern: die Eisen-
+  polsterung hat den Fehler der Seitenbedingung (s. oben) WEICH gemacht. Allein
+  umgestellt, stieg die Schwankung ueber die Laeuferstellung von 2,0 auf
+  11,8 %. Nachgemessen in ``test_axial_fdm.py``.
 * **Ist der Stapel HOEHER als zwei Polteilungen breit**, wird das Fenster auf
   mehr Polteilungen verbreitert, bis es passt. Das kostet Aufloesung bei festem
   N (die Polteilung bekommt weniger Bildpunkte) und wird deshalb im Ergebnis
@@ -111,6 +130,53 @@ KC = 1.15
 #: Mindestbreite des Fensters in Polteilungen. Zwei sind eine volle elektrische
 #: Periode -- die kleinste Breite, in der Magnet- UND Strombelag periodisch sind.
 POLTEILUNGEN_MIN = 2
+
+#: **Was ausserhalb des Stapels steht -- eine FLUSS-SPERRE, kein Eisen.**
+#:
+#: Das Gebiet muss quadratisch sein (``_build_fv_matrix`` legt ``cid`` als
+#: ``(N, N)`` an), der Stapel ist aber flach: bei der Vorgabemaschine 65 mm in
+#: einem 215-mm-Fenster. Die drei Fuellungen, alle an derselben Maschine
+#: gemessen (YASA, r = 102,5 mm, nutlos, rohe Spaltgrundwelle):
+#:
+#: ========================  ==================  ================
+#: Polsterung                Rueckenblech 4->40  Fluss ausserhalb
+#: ========================  ==================  ================
+#: Eisen (bis 16.10.2026)       **+0,0 %**          **59,1 %**
+#: Luft                           +4,0 %               2,3 %
+#: Sperre (hier)                  +4,1 %               1,9 %
+#: ========================  ==================  ================
+#:
+#: (N = 400, Vorgabemaschine, MIT der periodischen Seitenbedingung. Ohne sie
+#: standen hier +22,5 / +23,2 % -- das war der Randfehler und nicht das
+#: Rueckenblech. Die beiden Reparaturen gehoeren zusammen.)
+#:
+#: **Luft und Sperre liegen jetzt auf 0,1 % zusammen** -- nachdem die
+#: Seitenbedingung stimmt, ist die Wahl fast gleichgueltig geworden. Die Sperre
+#: bleibt, weil sie die Annahme AUSSPRICHT (der Rueckfluss schliesst sich im
+#: gezeichneten Eisen) und den Reststreuweg nach aussen ganz schliesst; dass es
+#: nur noch 0,1 % sind, steht hier, damit niemand ihr mehr zuschreibt.
+#:
+#: Mit EISEN lag der Rueckweg draussen: bei der gezeichneten Dicke liefen 59,1 %
+#: des Rueckflusses durch die Polsterung (mit der alten Seitenbedingung 71,9 %,
+#: bei 4 mm Ruecken 89,5 %), und das gezeichnete
+#: Rueckenblech bewegte deshalb **keine einzige Stelle** -- zehnfache Dicke,
+#: Ziffer fuer Ziffer dasselbe Ergebnis. Der Modulkopf behauptete das Gegenteil
+#: ("das zusaetzliche Eisen fuehrt keinen Fluss"); siehe ``BEFUNDE.md``,
+#: 16.10.2026.
+#:
+#: Die Sperre sagt stattdessen aus, was ein Joch TUT: der Rueckfluss schliesst
+#: sich **im gezeichneten Eisen**, nach aussen tritt nichts. Das ist eine
+#: Annahme -- in Wirklichkeit streut ein wenig --, aber eine bezifferte: mit
+#: Luft statt Sperre treten 0,7 % aus und B1 aendert sich um 0,06 %.
+#:
+#: **Der Wert ist ein GRENZFALL und kein gedrehter Knopf.** Gemessen ueber
+#: 1e-2 / 1e-3 / 1e-4 / 1e-5 stimmt das Ergebnis auf sieben Stellen ueberein
+#: (1,121225 T viermal) -- unterhalb von ~1e-2 ist die Sperre dicht und es
+#: passiert nichts mehr. 1e-3 liegt in der Mitte dieses Plateaus, weit weg von
+#: der Kante UND weit weg von schlechter Kondition. ``test_axial_fdm.py`` misst
+#: genau diese Unempfindlichkeit, damit aus dem Grenzfall nicht unbemerkt eine
+#: Stellschraube wird.
+POLSTER_MU_R = 1e-3
 
 #: Wieviele Bildpunkte der Luftspalt mindestens bekommt. Darunter ist er nicht
 #: aufgeloest und der Spaltwert liest das Eisen -- derselbe Befund wie
@@ -292,12 +358,8 @@ def stapelhoehe(geom: dict) -> float:
     return float(lg[-1]["z1"]) if lg else 0.0
 
 
-def statorhoehe(geom: dict) -> float:
-    """Axiale Hoehe des STAENDERS (Zahn + ggf. Joch), in Millimetern.
-
-    Sie stand inline an zwei Stellen (`stapelhoehe`, `rastere_scheibe`) und
-    jetzt an einer -- der 3-D-Sektor braucht genau dieselbe Zahl, sonst
-    vernetzt er eine andere Maschine als die, gegen die er gemessen wird.
+def zahnlaenge(geom: dict) -> float:
+    """Laenge EINES Zahns in Millimetern -- und damit die Tiefe EINER Nut.
 
     **Zwei Schluessel fuer dieselbe Groesse**, und das ist ein Befund: hier
     stand ``slotDepth`` (die radiale Nuttiefe), waehrend der axiale
@@ -305,12 +367,51 @@ def statorhoehe(geom: dict) -> float:
     haben die Vorgabe 25, sie fielen also nur ZUFAELLIG zusammen. Vorrang hat
     jetzt der axiale Schluessel; ``slotDepth`` bleibt der Rueckfall fuer
     Payloads, die ihn noch nicht tragen.
+
+    **Eigene Funktion seit dem 16.10.2026**, und der Grund ist ein Befund:
+    ``rastere_scheibe`` reichte ``statorhoehe`` als Schnitttiefe an ``_nuten``
+    weiter -- und ``statorhoehe`` traegt seit dem 06.10.2026 das Joch mit. Die
+    Nut schnitt damit durch das Joch hindurch; jede Bauform mit Joch hatte im
+    Feldmodell keines (gemessen: torus_nn 0,0 mm von 12,0, afir 0,5 von 12,0,
+    einseitig 0,0 von 12,0). Siehe ``BEFUNDE.md``, 16.10.2026.
+    """
+    g = geom or {}
+    return float(g.get("axialZahnLaengeMm") or g.get("slotDepth", 25.0) or 25.0)
+
+
+def _zahnlagen(bauform: str) -> int:
+    """Wieviele ZAHNBAENDER der Staender dieser Bauform traegt: 1 oder 2.
+
+    Abgelesen am ``kenn`` der Staenderlage und nicht danebengeschrieben --
+    ``"beide"`` heisst beidseitig genutet (TORUS-NN: Zaehne auf beiden
+    Stirnflaechen, Joch dazwischen), alles andere einseitig. ``"durch"`` ist
+    der jochlose YASA-Staender: EIN Zahnband ueber die volle Hoehe.
+    """
+    for art, kenn in _BAUFORMEN[bauform]["stapel"]:
+        if art == "stator":
+            return 2 if kenn == "beide" else 1
+    return 1
+
+
+def statorhoehe(geom: dict) -> float:
+    """Axiale Hoehe des STAENDERS (Zaehne + ggf. Joch), in Millimetern.
+
+    Sie stand inline an zwei Stellen (`stapelhoehe`, `rastere_scheibe`) und
+    jetzt an einer -- der 3-D-Sektor braucht genau dieselbe Zahl, sonst
+    vernetzt er eine andere Maschine als die, gegen die er gemessen wird.
+
+    **Beidseitig genutet heisst ZWEI Zahnbaender** (16.10.2026): ein TORUS-NN
+    traegt Zaehne auf beiden Stirnflaechen und das Joch dazwischen, ist also
+    ``2*Zahn + Joch`` hoch. Vorher stand hier ``Zahn + Joch``, und die Nut
+    wurde von beiden Seiten ueber die volle Bandhoehe geschnitten -- uebrig
+    blieben Zahnsaeulen ohne Joch, und die Luftspalt-Grundwelle brach um
+    Faktor 10 ein. Fuer die uebrigen Bauformen aendert sich nichts.
     """
     import ema_axial
-    g = geom or {}
-    h = float(g.get("axialZahnLaengeMm") or g.get("slotDepth", 25.0) or 25.0)
-    if _BAUFORMEN[ema_axial.auslegung(g)["bauform"]]["joch"]:
-        h += _jochhoehe(g)
+    bf = ema_axial.auslegung(geom or {})["bauform"]
+    h = _zahnlagen(bf) * zahnlaenge(geom)
+    if _BAUFORMEN[bf]["joch"]:
+        h += _jochhoehe(geom)
     return h
 
 
@@ -536,23 +637,26 @@ def rastere_scheibe(geom: dict, r_m: float, N: int = 400,
 
     t_mag = a["magnet_dicke_m"] * 1000.0
     t_spalt = a["luftspalt_m"] * 1000.0
-    t_nut = statorhoehe(geom)
-    t_joch = 0.0
+    # Die Bandhoehe kommt aus ``statorhoehe`` (der EINEN Quelle, aus der auch
+    # ``lagen``/CAD/3-D lesen); die Nut schneidet dagegen nur EINEN Zahn tief.
+    # Dass das zwei verschiedene Zahlen sind, ist der Befund vom 16.10.2026.
+    t_zahn = zahnlaenge(geom)
     t_ruecken = _rueckenhoehe(geom)
 
     lagen, y = [], y0
     for art, kenn in bf["stapel"]:
         d = {"ruecken": t_ruecken, "magnet": t_mag, "spalt": t_spalt,
-             "stator": t_nut + t_joch}[art]
+             "stator": statorhoehe(geom)}[art]
         lagen.append({"art": art, "kenn": kenn, "y0": y, "y1": y + d})
         y += d
 
     Y, X = np.meshgrid(np.arange(N) / sc, np.arange(N) / sc, indexing="ij")
 
-    # Die Polsterung ist EISEN, nicht Luft (s. Modulkopf): sie setzt die
-    # aeusserste Eisenlage bis an den Rand fort, fuehrt selbst keinen Fluss und
-    # macht das Ergebnis damit unabhaengig von der Fensterbreite.
-    mu = np.full((N, N), EA.MU_R_IRON)
+    # Die Polsterung ist eine FLUSS-SPERRE (s. ``POLSTER_MU_R``): sie laesst den
+    # Rueckfluss im gezeichneten Eisen und nicht daneben. Bis zum 16.10.2026
+    # stand hier ``EA.MU_R_IRON``, und dann lief der groessere Teil des
+    # Rueckflusses durch die Polsterung statt durch das Rueckenblech.
+    mu = np.full((N, N), POLSTER_MU_R)
     mu[(Y >= lagen[0]["y0"]) & (Y < lagen[-1]["y1"])] = 1.0
     My = np.zeros((N, N))
     j_ank = np.zeros((N, N))
@@ -595,12 +699,20 @@ def rastere_scheibe(geom: dict, r_m: float, N: int = 400,
             # dieser Nut (``carter``). Er ist kein Testschalter: ohne Bezugsfall
             # ist eine gemessene Nutwirkung keine.
             if nuten:
-                _nuten(mu, j_ank, band, X, Y, lg, tau_s, swr, t_nut, seite,
+                _nuten(mu, j_ank, band, X, Y, lg, tau_s, swr, t_zahn, seite,
                        r_m, iq, id_, rotor_winkel, N, a)
 
-    # J = curl M = dMy/dx  (Mx = 0) -- derselbe Ansatz wie im radialen Rasterer
-    j_mag = np.zeros((N, N))
-    j_mag[:, 1:-1] = (My[:, 2:] - My[:, :-2]) / 2.0
+    # J = curl M = dMy/dx  (Mx = 0) -- derselbe Ansatz wie im radialen Rasterer,
+    # aber **umlaufend**: das Fenster ist in x periodisch (s. Modulkopf), die
+    # erste und die letzte Spalte sind Nachbarn.
+    #
+    # Mit ``j_mag[:, 1:-1] = (My[:, 2:] - My[:, :-2])/2`` blieben die beiden
+    # Randspalten auf null -- und genau dorthin faellt der Polwechsel, wenn der
+    # Laeufer gerade so steht (Laeuferwinkel 0 ist der Normalfall: jedes
+    # Standbild, jeder erste Frame). Der halbe Ersatz-Flaechenstrom fehlte
+    # dann, gemessen B1 0,6102 statt 1,1356 T -- ein Einbruch um 46 %, der NUR
+    # bei dieser einen Stellung auftrat und sich damit wie Physik las.
+    j_mag = (np.roll(My, -1, axis=1) - np.roll(My, 1, axis=1)) / 2.0
     return {"mu": mu, "j_magnet": j_mag, "j_anker": j_ank, "lagen": lagen,
             "sc": sc, "seite_mm": seite, "n_polteilungen": n_pol,
             "tau_p_mm": tau_p, "tau_s_mm": tau_s,
@@ -608,9 +720,13 @@ def rastere_scheibe(geom: dict, r_m: float, N: int = 400,
             "bauform": a["bauform"], "n_spalte": a["n_spalte"]}
 
 
-def _nuten(mu, j_ank, band, X, Y, lg, tau_s, swr, t_nut, seite_mm,
+def _nuten(mu, j_ank, band, X, Y, lg, tau_s, swr, t_zahn, seite_mm,
            r_m, iq, id_, rotor_winkel, N, a):
     """Nuten als Luft, dazu der dreiphasige Nutstrom.
+
+    ``t_zahn`` ist die Laenge EINES Zahns, also die Tiefe EINER Nut -- NICHT
+    die Hoehe des Staenderbandes. Der Unterschied ist das Joch, und wer hier
+    die Bandhoehe uebergibt, schneidet es weg (``BEFUNDE.md``, 16.10.2026).
 
     Die Strombelegung ist **zeichengetreu** die des radialen Rasterers
     (``ema_analysis._rasterise``, Block „Stator slots"):
@@ -633,9 +749,9 @@ def _nuten(mu, j_ank, band, X, Y, lg, tau_s, swr, t_nut, seite_mm,
         nut = np.abs(X - x_m) <= swr * tau_s / 2.0
         tiefe = np.zeros_like(band)
         if von_oben:
-            tiefe |= (Y >= lg["y1"] - t_nut)
+            tiefe |= (Y >= lg["y1"] - t_zahn)
         if von_unten:
-            tiefe |= (Y <= lg["y0"] + t_nut)
+            tiefe |= (Y <= lg["y0"] + t_zahn)
         m = band & nut & tiefe
         if not m.any():
             continue
@@ -669,7 +785,7 @@ def schnitt(geom: dict, r_m: float, N: int = 400, iq: float = 0.0,
     sch = rastere_scheibe(geom, r_m, N, iq, id_, rotor_winkel, nuten, n_pol)
     lbl = EA._material_labels(sch["mu"])
 
-    a_mag = EA._solve_fdm(sch["mu"], sch["j_magnet"], cache=True)
+    a_mag = EA._solve_fdm(sch["mu"], sch["j_magnet"], cache=True, periodisch_x=True)
     bx_m, by_m = EA._curl_a(a_mag, lbl)
     jy, _ = _spaltlinie(sch)
     pk_m = float(np.abs(by_m[jy, :]).max())
@@ -684,7 +800,7 @@ def schnitt(geom: dict, r_m: float, N: int = 400, iq: float = 0.0,
     b_an = eichung_magnet_spitze(geom)
     if nuten:
         _o = rastere_scheibe(geom, r_m, N, 0.0, 0.0, rotor_winkel, False, n_pol)
-        _ao = EA._solve_fdm(_o["mu"], _o["j_magnet"], cache=True)
+        _ao = EA._solve_fdm(_o["mu"], _o["j_magnet"], cache=True, periodisch_x=True)
         _, _byo = EA._curl_a(_ao, EA._material_labels(_o["mu"]))
         _jo, _ = _spaltlinie(_o)
         pk_ref = float(np.abs(_byo[_jo, :]).max())
@@ -694,7 +810,7 @@ def schnitt(geom: dict, r_m: float, N: int = 400, iq: float = 0.0,
 
     i_pk = math.hypot(iq, id_)
     if i_pk > 1e-6:
-        a_ank = EA._solve_fdm(sch["mu"], sch["j_anker"], cache=True)
+        a_ank = EA._solve_fdm(sch["mu"], sch["j_anker"], cache=True, periodisch_x=True)
         bx_a, by_a = EA._curl_a(a_ank, lbl)
         pk_a = float(np.abs(by_a[jy, :]).max())
         # ``eichung_anker`` ist eine GRUNDWELLENamplitude
@@ -1008,7 +1124,7 @@ def frames(geom: dict, ordner: str, n_frames: int = 12, N: int = 300,
         w = periode * k / max(2, int(n_frames))
         sch = rastere_scheibe(geom, r_b, N, iq, id_, rotor_winkel=w)
         lbl = EA._material_labels(sch["mu"])
-        A = EA._solve_fdm(sch["mu"], sch["j_magnet"] + sch["j_anker"], cache=True)
+        A = EA._solve_fdm(sch["mu"], sch["j_magnet"] + sch["j_anker"], cache=True, periodisch_x=True)
         bx, by = EA._curl_a(A, lbl)
         bmag = np.hypot(bx, by)
         if deckel is None:
@@ -1049,46 +1165,28 @@ def frames(geom: dict, ordner: str, n_frames: int = 12, N: int = 300,
             "periode_grad": math.degrees(periode)}
 
 
-def bilder(geom: dict, ordner: str, k_schnitte: int = 5, N: int = 360,
-           rpm: float = 1000.0, last_nm: float = 0.0,
-           r_bild_m: float | None = None) -> list:
-    """Zwei Bilder nach ``<ordner>`` -- Schnitt und ``B_gap(r)``.
+def schnitt_figur(geom: dict, r_b_m: float, N: int = 360,
+                  iq: float = 0.0, id_: float = 0.0):
+    """Der abgewickelte Schnitt als matplotlib-Figur — |B| und die FELDLINIEN.
 
-    Sie liegen in ``charts/``, weil die rechte Spalte **beider** Agentenkoepfe
-    dort ueber die Aenderungszeit nachsieht (``ema_agent.bilder_im_projekt``) --
-    kein zweiter Meldeweg, dieselbe Entscheidung wie bei ``ema_feldbild``.
+    Herausgeloest aus ``bilder``, weil ausser dem Lauf auch die **Einzelbild-
+    Vorschau** (`/preview_field`) ihn braucht. Die zeichnete bis zum 11.10.2026
+    fuer eine Scheibe den radialen Querschnitt samt RADIALER Magnete -- ein Bild
+    der falschen Maschine, und zwar an der Stelle, an der man schnell nachsieht,
+    ob die Geometrie stimmt. Eine zweite Zeichenfassung dafuer waere die
+    naechste `magnetLegs`-Drift; also gibt es diese eine.
 
-    ``B_gap(r)`` ist die Kurve, die es radial nicht gibt: dort ist sie eine
-    Konstante, axial entscheidet sie die Auslegung. Und in BEIDEN Bildern steht,
-    dass sie aus einem Mehrschnitt kommen und nicht aus einer 3-D-Loesung -- ein
-    Bild, das wie ein Feldbild aussieht und keines ist, waere die schlimmste
-    Variante (dieselbe Regel wie bei den Saettigungsbildern).
+    Die Hoehenlinien von A SIND hier die Feldlinien: der Schnitt loest
+    ``B = rot(A e_r)`` in dieser Ebene (dieselbe Begruendung wie in
+    ``axialfluss/live.js``).
     """
-    import os
-
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    import ema_axial
-
-    os.makedirs(ordner, exist_ok=True)
-    a = ema_axial.auslegung(geom)
-    r_b = r_bild_m or 0.5 * (a["r_innen_m"] + a["r_aussen_m"])
-    raus = []
-
-    iq = id_ = 0.0
-    if last_nm > 0:
-        try:
-            _bp = betriebspunkt(geom, rpm, last_nm)
-            iq, id_ = _bp["i_q_A"], _bp["i_d_A"]
-        except Exception:                                            # noqa: BLE001
-            iq = id_ = 0.0
-
-    # ── 1. der abgewickelte Schnitt ──────────────────────────────────────────
-    sch = rastere_scheibe(geom, r_b, N, iq, id_)
+    sch = rastere_scheibe(geom, r_b_m, N, iq, id_)
     lbl = EA._material_labels(sch["mu"])
-    A = EA._solve_fdm(sch["mu"], sch["j_magnet"] + sch["j_anker"], cache=True)
+    A = EA._solve_fdm(sch["mu"], sch["j_magnet"] + sch["j_anker"], cache=True, periodisch_x=True)
     bx, by = EA._curl_a(A, lbl)
     bmag = np.hypot(bx, by)
     ex = [0.0, sch["seite_mm"], 0.0, sch["seite_mm"]]
@@ -1106,30 +1204,69 @@ def bilder(geom: dict, ordner: str, k_schnitte: int = 5, N: int = 360,
     ax.axhline(sch["lagen"][-1]["y1"], color="#39506b", lw=0.6, ls=":")
     ax.set_xlabel("Umfang abgewickelt [mm]")
     ax.set_ylabel("axial [mm]")
-    ax.set_title(f"Axialfluss, abgewickelter Schnitt bei r = {r_b*1000:.1f} mm\n"
+    ax.set_title(f"Axialfluss, abgewickelter Schnitt bei r = {r_b_m*1000:.1f} mm\n"
                  f"{sch['bauform']}, {sch['n_polteilungen']} Polteilungen, "
                  f"{'Last' if (abs(iq)+abs(id_)) > 0.1 else 'Leerlauf'}",
                  fontsize=9)
     ax.text(0.01, -0.105, "Mehrschnitt (ema_axial_fdm) — KEINE 3-D-Loesung; "
-            "radiale Streuung an Ri/Ro nicht enthalten, Eisen linear.",
+            "radiale Streuung an Ri/Ro nicht enthalten, Eisen linear. "
+            "Die hellen Linien sind Hoehenlinien von A, also die Feldlinien.",
             transform=ax.transAxes, fontsize=6.5, color="#888")
-    f1 = os.path.join(ordner, "feld_axial_schnitt.png")
-    fig.savefig(f1, bbox_inches="tight", facecolor=GRUND)
-    plt.close(fig)
-    raus.append(f1)
+    return fig, sch
 
-    # ── 2. B_gap ueber dem Radius ────────────────────────────────────────────
-    f = felder(geom, k_schnitte=k_schnitte, N=N, rpm=rpm, last_nm=last_nm)
-    rr = [r * 1000.0 for r in f["radien_m"]]
+
+def bgap_figur(f: dict, geom: dict):
+    """``B_gap(r)`` als Figur — die Kurve, die es radial nicht gibt.
+
+    **Es gab diese Zeichnung ZWEIMAL**, und das ist der Grund, aus dem sie im
+    Browser nie ankam: `ema_pipeline._axial_bgap_chart` war eine zweite,
+    eigenstaendige Fassung, die den Schluessel ``r_schnitte_m`` las -- den
+    ``felder`` nicht liefert (dort heisst er ``radien_m``). Sie gab deshalb
+    IMMER ``None`` zurueck, seit es sie gibt, und ``charts/airgap.png`` wurde
+    beim Axiallauf nie geschrieben. Gemessen am Lauf vom 11.10.2026.
+
+    Zugleich war die hiesige Fassung diejenige mit der **falschen Bezugslinie**:
+    sie stellte die gemessene GRUNDWELLE gegen ``eichung_magnet``, also gegen
+    einen flussgewichteten MITTELWERT -- genau die Verwechslung, die am
+    06.10.2026 als Befund aufgeschrieben wurde. Die Bezugslinie ist jetzt
+    ``eichung_magnet_grundwelle``; beides zusammengelegt kann nur noch EINE
+    Fassung falsch sein.
+    """
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    import ema_axial
+
+    r = f.get("radien_m")
+    b = f.get("B_gap_ueber_r_T")
+    if not r or not b or len(r) != len(b):
+        # **Kein stilles `None`.** Genau das hat den Schluesselfehler oben
+        # monatelang verdeckt: eine Zeichenfunktion, die bei fehlenden Daten
+        # nichts sagt, sieht von aussen wie eine aus, die nichts zu zeichnen
+        # hatte.
+        raise ValueError(
+            f"B_gap(r) nicht zeichenbar: radien_m={len(r or [])}, "
+            f"B_gap_ueber_r_T={len(b or [])} — erwartet gleich lang und nicht leer.")
+    a = ema_axial.auslegung(geom)
+    rr = [x * 1000.0 for x in r]
     fig, ax = plt.subplots(figsize=(7.2, 3.6), dpi=130)
-    ax.plot(rr, f["B_gap_ueber_r_T"], "o-", color="#e8a33d", lw=1.6,
+    ax.plot(rr, b, "o-", color="#e8a33d", lw=1.6, ms=5,
             label="Grundwelle, geloest (Mehrschnitt)")
-    ax.axhline(eichung_magnet(geom), color="#7fd4ff", ls="--", lw=1.2,
-               label="analytisch (Stufe 1), konstant")
+    try:
+        h1 = float(eichung_magnet_grundwelle(geom))
+        ax.axhline(h1, color="#7fd4ff", ls="--", lw=1.2,
+                   label=f"analytische Grundwelle {h1:.3f} T (ohne Nut)")
+    except Exception:                                            # noqa: BLE001
+        h1 = None
+    m = f.get("B_gap_grundwelle_mittel_T")
+    if m:
+        ax.axhline(float(m), color="#8bc34a", ls=":", lw=1.2,
+                   label=f"Mittel r-gewichtet {float(m):.3f} T")
     ax.axvspan(a["r_innen_m"] * 1000, a["r_aussen_m"] * 1000, color="#2b3a4a",
                alpha=0.25, zorder=0)
     ax.set_xlabel("Radius [mm]")
-    ax.set_ylabel("$B_{gap}$ Grundwelle [T]")
+    ax.set_ylabel("$\\hat{B}_{n,1}$ im Luftspalt [T]")
     ax.set_title(f"Luftspaltfeld ueber dem Ringraum — die Kurve, die es radial "
                  f"nicht gibt\nlambda = {a['lambda']:.4f}, "
                  f"Spalt/Polteilung aendert sich um "
@@ -1152,6 +1289,51 @@ def bilder(geom: dict, ordner: str, k_schnitte: int = 5, N: int = 360,
             "— s. BEFUNDE.md, 05.10.2026.",
             transform=ax.transAxes, fontsize=6.4, color="#c98b2e", wrap=True,
             va="top")
+    return fig
+
+
+def bilder(geom: dict, ordner: str, k_schnitte: int = 5, N: int = 360,
+           rpm: float = 1000.0, last_nm: float = 0.0,
+           r_bild_m: float | None = None) -> list:
+    """Zwei Bilder nach ``<ordner>`` -- Schnitt und ``B_gap(r)``.
+
+    Sie liegen in ``charts/``, weil die rechte Spalte **beider** Agentenkoepfe
+    dort ueber die Aenderungszeit nachsieht (``ema_agent.bilder_im_projekt``) --
+    kein zweiter Meldeweg, dieselbe Entscheidung wie bei ``ema_feldbild``.
+
+    Gezeichnet wird in ``schnitt_figur`` / ``bgap_figur``; hier wird nur
+    gespeichert. Der Lauf, die Vorschau und der Bericht sollen dasselbe Bild
+    bekommen und nicht drei aehnliche.
+    """
+    import os
+
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+
+    import ema_axial
+
+    os.makedirs(ordner, exist_ok=True)
+    a = ema_axial.auslegung(geom)
+    r_b = r_bild_m or 0.5 * (a["r_innen_m"] + a["r_aussen_m"])
+    raus = []
+
+    iq = id_ = 0.0
+    if last_nm > 0:
+        try:
+            _bp = betriebspunkt(geom, rpm, last_nm)
+            iq, id_ = _bp["i_q_A"], _bp["i_d_A"]
+        except Exception:                                            # noqa: BLE001
+            iq = id_ = 0.0
+
+    fig, _ = schnitt_figur(geom, r_b, N, iq, id_)
+    f1 = os.path.join(ordner, "feld_axial_schnitt.png")
+    fig.savefig(f1, bbox_inches="tight", facecolor=GRUND)
+    plt.close(fig)
+    raus.append(f1)
+
+    f = felder(geom, k_schnitte=k_schnitte, N=N, rpm=rpm, last_nm=last_nm)
+    fig = bgap_figur(f, geom)
     f2 = os.path.join(ordner, "feld_axial_bgap_r.png")
     fig.savefig(f2, bbox_inches="tight", facecolor=GRUND)
     plt.close(fig)

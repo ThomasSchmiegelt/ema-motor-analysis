@@ -71,8 +71,14 @@ pruefe(A.shape == (240, 240) and np.isfinite(A).all(),
 A2 = EA._solve_fdm(sch["mu"], 2.0 * sch["j_magnet"], cache=False)
 pruefe(abs(abs(A2).max() / abs(A).max() - 2.0) < 1e-9,
        f"Linearitaetsprobe J -> 2J: {abs(A2).max()/abs(A).max():.6f}x (soll 2)")
-pruefe(set(np.unique(np.round(sch["mu"], 3))) <= {1.0, EA.MU_R_MAG, EA.MU_R_IRON},
-       "mu traegt nur Luft, Magnet und Eisen aus ema_analysis — keine eigenen Werte")
+pruefe(set(np.unique(np.round(sch["mu"], 3)))
+       <= {1.0, EA.MU_R_MAG, EA.MU_R_IRON, round(AF.POLSTER_MU_R, 3)},
+       "mu traegt nur Luft, Magnet und Eisen aus ema_analysis — plus die "
+       "Flusssperre der Polsterung, und die ist eine RANDbedingung und kein "
+       "Werkstoff (ein vierter WERKSTOFF waere ein Befund)")
+pruefe(AF.POLSTER_MU_R < 1.0,
+       f"und die Sperre ist undurchlaessiger als Luft (mu_r = "
+       f"{AF.POLSTER_MU_R:g}) — mit Eisen lief der Rueckfluss daneben")
 
 print("\n— 2. Das Fenster: ganzzahlig, geradzahlig, hoch genug —")
 
@@ -257,11 +263,84 @@ pruefe(all(e["T_Nm"] * kv["reihe"][-1]["T_Nm"] > 0 for e in kv["reihe"]),
        "und das Moment behaelt ueber alle k sein Vorzeichen")
 
 b_n = [AF.schnitt(G, R_M, N=150 * n, n_pol=n)["b_n_grundwelle_T"] for n in (2, 4, 8)]
-pruefe(max(abs(b - b_n[0]) / b_n[0] for b in b_n) < 0.02,
-       f"und die Fensterbreite faellt weitgehend heraus: "
+pruefe(max(abs(b - b_n[0]) / b_n[0] for b in b_n) < 0.01,
+       f"und die Fensterbreite faellt heraus: "
        + ", ".join(f"{b:.4f}" for b in b_n)
        + f" T ueber Faktor 4 ({max(abs(b-b_n[0])/b_n[0] for b in b_n)*100:.2f} %) "
-         f"— mit LUFT statt Eisen gepolstert waren es 4,6 %")
+         f"— mit Dirichlet am Seitenrand statt Periodizitaet waren es 7,4 %")
+
+
+print("\n— Die Seitenbedingung ist PERIODISCH, und das ist messbar —")
+
+# Befund vom 16.10.2026. Drei Eigenschaften, die eine richtige Seitenbedingung
+# haben MUSS und eine falsche nicht hat. Geprueft wird jede einzeln, damit ein
+# roter Test sagt, WELCHE kaputt ist.
+
+# (1) Die Laeuferstellung darf die Grundwelle nicht bewegen -- ausser durch die
+#     Nutung. Mit Dirichlet am Seitenrand und dichter Polsterung waren es
+#     11,8 % ueber eine Polteilung.
+_tau = 2 * math.pi * R_M / AX.auslegung(G)["poles"]
+_wb = [AF.schnitt(G, R_M, N=300, rotor_winkel=k / 8 * _tau / R_M)["b_n_grundwelle_T"]
+       for k in range(9)]
+_sw = (max(_wb) - min(_wb)) / (sum(_wb) / len(_wb))
+pruefe(_sw < 0.02,
+       f"B1 ueber eine Polteilung Drehung: {_sw*100:.1f} % Schwankung "
+       f"({min(_wb):.4f}…{max(_wb):.4f} T) — das ist die Nutung, nicht der Rand")
+
+# (2) Und die Stellung 0 ist dabei kein Sonderfall. Sie war einer: der
+#     Ersatz-Flaechenstrom kam aus einer zentralen Differenz OHNE Umlauf, die
+#     beiden Randspalten blieben null -- und genau dorthin faellt der
+#     Polwechsel bei Winkel 0. Gemessen B1 0,6102 statt 1,1356 T, also -46 %,
+#     und zwar NUR bei dieser einen Stellung. Das ist die Stellung jedes
+#     Standbildes und jedes ersten Frames.
+pruefe(abs(_wb[0] - sum(_wb[1:-1]) / len(_wb[1:-1])) / _wb[0] < 0.02,
+       f"Laeuferwinkel 0 liegt im Feld der anderen ({_wb[0]:.4f} T gegen "
+       f"{sum(_wb[1:-1])/len(_wb[1:-1]):.4f} T im Mittel) — der Ersatzstrom "
+       f"laeuft um")
+
+# (3) Das gezeichnete Rueckenblech muss WIRKEN. Mit Eisenpolsterung tat es das
+#     nicht: zehnfache Dicke, Ziffer fuer Ziffer dasselbe Ergebnis.
+#
+#     Gemessen wird an einer Maschine, an der es BINDET. Die Prueflaeufer-
+#     geometrie oben hat 16 Pole, und dort ist der Fluss je Pol so klein, dass
+#     schon 4 mm Eisen reluktanzseitig genuegen (gemessen -0,1 %, nicht
+#     monoton) -- das ist Physik und kein Mangel. Ueber der Polzahl:
+#     4 Pole +10,9 % · 6 Pole +4,1 % · 8 Pole +1,6 % · 16 Pole -0,1 %.
+#
+#     Was der lineare FDM weiterhin NICHT zeigt, ist die Saettigung: ein zu
+#     duennes Rueckenblech wird hier nur reluktanzwirksam, nicht gesaettigt.
+#     Ob es dick genug ist, sagt ``ema_axial.ruecken`` (bei 16 Polen 13,1 mm
+#     noetig -- also genau der Fall, den dieses Modell nicht sieht).
+_g_rb = geom(p=3)
+_rb = [AF.schnitt(dict(_g_rb, axialJochLaeuferMm=w), R_M, N=400)["b_n_grundwelle_T"]
+       for w in (4, 13, 40)]
+pruefe(all(_rb[i] < _rb[i + 1] for i in range(len(_rb) - 1)),
+       f"ein dickeres Rueckenblech gibt mehr Feld: "
+       + " < ".join(f"{b:.4f}" for b in _rb) + " T")
+pruefe((_rb[-1] / _rb[0] - 1) > 0.02,
+       f"und zwar messbar: {(_rb[-1]/_rb[0]-1)*100:+.1f} % von 4 auf 40 mm "
+       f"— mit Eisen als Polsterung waren es +0,0 %")
+
+# (4) Der Wert der Sperre ist ein GRENZFALL. Haengt das Ergebnis daran, ist aus
+#     der Randbedingung eine Stellschraube geworden.
+_alt_mu = AF.POLSTER_MU_R
+try:
+    _sp = []
+    for _mur in (1e-2, 1e-4):
+        AF.POLSTER_MU_R = _mur
+        _sp.append(AF.schnitt(G, R_M, N=300)["b_n_grundwelle_T"])
+finally:
+    AF.POLSTER_MU_R = _alt_mu
+pruefe(abs(_sp[1] - _sp[0]) / _sp[0] < 1e-3,
+       f"POLSTER_MU_R 1e-2 gegen 1e-4: {_sp[0]:.6f} / {_sp[1]:.6f} T — "
+       f"die Sperre ist dicht, ihr Zahlenwert ist keine Stellschraube")
+
+# (5) Und der RADIALE Pfad bekommt davon nichts ab.
+pruefe(EA._build_fv_matrix(np.ones((8, 8)))[1][:, 0].sum() == 0,
+       "ohne Flagge bleibt die erste Spalte Dirichlet — der Radialpfad rechnet "
+       "unveraendert (test_fdm_golden.py nagelt ihn fest)")
+pruefe(EA._build_fv_matrix(np.ones((8, 8)), True)[1][:, 0].sum() == 6,
+       "mit Flagge ist sie Unbekannte und wickelt auf die letzte um")
 pruefe(AF.felder(G, k_schnitte=3, N=288)["fenster_einheitlich"]
        == AF.felder(G, k_schnitte=7, N=288)["fenster_einheitlich"],
        "alle Schnitte teilen dieselbe Fensterbreite, und sie haengt nicht an k "
@@ -412,6 +491,46 @@ pruefe(abs(_sm["eichfaktor_magnet"] - _so["eichfaktor_magnet"])
        "Nutungsverlust in der Eichung versteckt statt gemessen")
 pruefe(_sm.get("eichung_art") == "spitze_nutlos",
        "und das Ergebnis sagt, WORAN geeicht wurde")
+
+print("\n— Die Nut schneidet NICHT durch das Joch —")
+
+# Befund vom 16.10.2026: ``rastere_scheibe`` reichte ``statorhoehe`` (Zahn PLUS
+# Joch) als Schnitttiefe an ``_nuten`` weiter -- jede Bauform mit Joch hatte im
+# Feldmodell keines, und bei TORUS-NN (beidseitig genutet) blieben nur
+# Zahnsaeulen uebrig: Grundwelle Faktor 10 zu klein, Klirranteil 3,0.
+#
+# Geprueft wird am RASTER und nicht an einer Hoehenangabe: eine Lage, die es
+# laut ``lagen()`` gibt, kann im ``mu`` trotzdem weggeschnitten sein -- genau
+# das war der Fehler.
+for _bf in ("yasa", "torus_nn", "afir", "einseitig"):
+    _gb = dict(G, axialBauform=_bf)
+    _ab = AX.auslegung(_gb)
+    _rb = 0.5 * (_ab["r_aussen_m"] + _ab["r_innen_m"])
+    _sb = AF.rastere_scheibe(_gb, _rb, 400, 0.0, 0.0, 0.0, True)
+    _st = [l for l in _sb["lagen"] if l["art"] == "stator"][0]
+    _j0, _j1 = int(_st["y0"] * _sb["sc"]), int(_st["y1"] * _sb["sc"])
+    _eisen = (_sb["mu"][_j0:_j1, :] > 1.5).mean(axis=1)   # Eisenanteil je Zeile
+    _voll = float((_eisen > 0.99).sum() / _sb["sc"])      # volles Eisen = Joch
+    _soll = AF._jochhoehe(_gb) if AF._BAUFORMEN[_ab["bauform"]]["joch"] else 0.0
+    pruefe(abs(_voll - _soll) <= 1.5,
+           f"{_bf}: {_voll:.1f} mm durchgehendes Eisen im Staender gegen "
+           f"{_soll:.1f} mm Joch")
+    # Und die Bandhoehe folgt der Zahl der Zahnbaender.
+    _nz = AF._zahnlagen(_ab["bauform"])
+    pruefe(abs(AF.statorhoehe(_gb)
+               - (_nz * AF.zahnlaenge(_gb) + _soll)) < 1e-9,
+           f"{_bf}: Staender = {_nz} x Zahn + Joch "
+           f"= {AF.statorhoehe(_gb):.1f} mm")
+
+# Die Bauform, an der es sichtbar wurde: ohne Joch bricht die Polwelle ein.
+_gt = dict(G, axialBauform="torus_nn")
+_at = AX.auslegung(_gt)
+_stt = AF.schnitt(_gt, 0.5 * (_at["r_aussen_m"] + _at["r_innen_m"]), N=400)
+pruefe(_stt["b_n_grundwelle_T"] > 0.5 and _stt["klirranteil"] < 1.0,
+       f"TORUS-NN traegt eine Polwelle: B1 {_stt['b_n_grundwelle_T']:.4f} T, "
+       f"Klirr {_stt['klirranteil']:.3f} — ohne Joch waren es 0,0922 T "
+       f"bei Klirr 3,04")
+
 
 # Das Staenderjoch: alpha darf genau EINMAL eingehen.
 _gj = dict(G, axialJochStaenderMm=0)

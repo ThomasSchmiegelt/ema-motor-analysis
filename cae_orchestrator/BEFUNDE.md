@@ -17,6 +17,642 @@ kann.
 
 ---
 
+## 2026-10-16 · Axialfluss: die seitliche Randbedingung war Dirichlet, wo sie periodisch sein muss — und der Ersatzstrom lief nicht um
+
+**Beobachtung.** Beim Umstellen der Polsterung (Befund darunter) sprang die
+Grundwelle plötzlich mit der Läuferstellung: 11,8 % über eine Polteilung, wo
+vorher 2,0 % standen. Die Polsterung war nicht die Ursache, sondern der
+Vorhang: das Eisen daneben hatte einen Randfehler weich gemacht.
+
+**Der Fehler.** Der Modulkopf begründete Dirichlet `A = 0` am Seitenrand mit
+*„`A ~ sin(pi*x/tau)` hat dort Nullen"*. Das ist herum vertauscht. Liegt die
+**Polgrenze** bei x = 0 — und dort liegt sie, `pol = floor(x/tau_p) % 2` —,
+dann ist A dort **extremal** und nicht null; die Nullen von A liegen in den
+Polmitten. Und `A = const` auf einer senkrechten Linie heißt `B_x = 0`, also
+**kein Umfangsfluss** — erzwungen ausgerechnet an der Polgrenze, wo der
+Umfangsfluss im Joch sein Maximum hat.
+
+**Messung.** Grundwelle B1 bei r = 102,5 mm, Vorgabemaschine, mit Fluss-Sperre
+als Polsterung (ohne sie ist der Fehler weich und damit unsichtbar):
+
+| | Dirichlet (vorher) | periodisch (jetzt) |
+|---|---:|---:|
+| über eine Läuferdrehung | 11,8 % | **0,6 %** (= die Nutung) |
+| über die Fensterbreite 2/4/8 | 7,4 % | **0,37 %** |
+| Polmitte statt Polgrenze am Rand | 0,06 % bei n = 2/4 | — |
+
+Die dritte Zeile war die Probe: schiebt man den Läufer um eine halbe
+Polteilung, sodass eine **Polmitte** auf dem Rand liegt, stimmen n = 2 und
+n = 4 auf 0,06 % überein. Genau dort ist `A = 0` die richtige Symmetrie, denn
+dort ist der Umfangsfluss wirklich null. Das ist aber nur EINE Läuferstellung —
+für die anderen braucht es Periodizität.
+
+**Zweiter Fehler, erst dadurch sichtbar.** Mit periodischem Rand brach B1 bei
+Läuferwinkel **0** auf 0,6102 statt 1,1356 T ein (−46 %), und nur dort. Der
+Ersatz-Flächenstrom kam aus einer zentralen Differenz ohne Umlauf
+(`j_mag[:, 1:-1] = (My[:, 2:] - My[:, :-2])/2`) — die beiden Randspalten
+blieben **null**, und genau dorthin fällt der Polwechsel bei Winkel 0. Das ist
+die Stellung jedes Standbildes und jedes ersten Frames.
+
+**Fundstelle.** `ema_analysis._build_fv_matrix` (Dirichlet auf allen vier
+Rändern), `ema_axial_fdm.rastere_scheibe` (`j_mag`), Modulkopf-Abschnitt „Der
+eine Trick, ohne den es nicht geht".
+
+**Status: behoben am 16.10.2026.** `_build_fv_matrix(mu, periodisch_x=True)` —
+eine Maskenzeile, das `np.roll` darunter wickelt ohnehin um; in y bleibt
+Dirichlet und hält das System positiv definit. Die Flagge geht in den
+LU-Cache-Schlüssel ein (dasselbe `mu` periodisch und nicht periodisch sind zwei
+Faktorisierungen). **Vorgabe aus — der Radialpfad rechnet Ziffer für Ziffer
+weiter** (`test_fdm_golden.py` grün). `j_mag` läuft jetzt mit `np.roll` um.
+Wächter: `test_axial_fdm.py`, Abschnitt „Die Seitenbedingung ist PERIODISCH".
+
+---
+
+## 2026-10-16 · Axialfluss, Mehrschnitt: die Eisenpolsterung führt den Rückfluss — und der gezeichnete Rücken wirkt dadurch gar nicht
+
+**Beobachtung.** Gemeldet als Frage zum Feldbild: *„bei einer Simulation der afm
+sollten die magnetlinien doch immer in richtung der Achse fließen oder habe ich
+da einen Denkfehler"*. Kein Denkfehler, aber auch nicht ganz: **axial ist der
+Spaltdurchtritt, umfangs der Rückweg**. Im Bild des abgewickelten Schnitts
+(`schnitt_figur`) läuft der Rückweg jedoch nicht im gezeichneten Rückenblech,
+sondern in großen Schleifen durch die **Polsterung** — das Eisen, mit dem das
+Fenster auf Quadratform aufgefüllt wird. Der Modulkopf behauptet das Gegenteil
+(`ema_axial_fdm.py:73`): „Mit Eisen ist die Polsterung **wirkungslos**: jenseits
+des Joches gibt es keine Quelle, das zusätzliche Eisen führt keinen Fluss".
+
+**Messung.** Vorgabe-Payload, YASA, r = 102,5 mm, N = 400, Leerlauf, nutlos.
+Rückfluss je Band über ΔA (A ist die Stromfunktion, also ist die Differenz der
+Fluss dazwischen):
+
+| Rücken gezeichnet | rohe Spaltspitze | Φ im Rücken | Φ in der Polsterung | Anteil Polsterung |
+|---:|---:|---:|---:|---:|
+| 4 mm | 758327,1 | 1,578e7 | 1,344e8 | **89,5 %** |
+| 8 mm | 758327,1 | 2,952e7 | 1,206e8 | 80,3 % |
+| **13 mm (gezeichnet)** | 758327,1 | 4,226e7 | 1,079e8 | **71,9 %** |
+| 25 mm | 758327,1 | 6,722e7 | 8,291e7 | 55,2 % |
+| 40 mm | 758327,1 | 9,202e7 | 5,812e7 | 38,7 % |
+
+**Gegenprobe mit LUFT als Polsterung** (nur `mu` außerhalb des Stapels auf 1
+gesetzt, sonst identisch): Anteil Polsterung 2,8 / 1,2 / 0,7 / 0,3 / 0,2 %, und
+die rohe Spaltspitze bewegt sich dann wirklich — 723969 → 755867 über
+4 → 40 mm (**+4,4 %**). Mit Eisen steht sie auf allen fünf Dicken **Ziffer für
+Ziffer gleich**.
+
+Die Folge am fertigen Kennwert, über `schnitt()` (also mit Eichung):
+
+| `axialJochLaeuferMm` | B1 Spalt | Spitze | σ_t | Klirr |
+|---:|---:|---:|---:|---:|
+| 4 / 8 / 13 / 25 / 40 mm | 1,12336 T | 1,25838 T | −158,93 Pa | 0,5337 |
+
+Zehnfache Dicke, **keine einzige Stelle Unterschied**. Das Feldmodell sieht ein
+unendlich dickes Rückenblech; ein zu dünnes kann es nicht melden. `ema_axial`
+bemisst den Rücken weiterhin richtig (`ruecken`, 11,10 mm nötig gegen 13,00 mm
+gezeichnet) — nur rechnet die Feldstufe daneben.
+
+**Fundstelle.** `ema_axial_fdm.py:555-556` (`mu` wird mit `MU_R_IRON` vorbelegt,
+nur der Stapel selbst auf 1 gesetzt — alles außerhalb bleibt Eisen) und die
+Behauptung dazu in `ema_axial_fdm.py:73`.
+
+**Einordnung.** Die Entscheidung für Eisen ist begründet und gemessen (mit Luft
+hängt B1 an der Fensterbreite, Modulkopf Zeilen 60-71) — falsch ist nur der
+Satz, sie sei wirkungslos. Der Preis ist beziffert: die Spaltamplitude ist
+ohnehin auf `eichung_magnet_spitze` geeicht, verloren geht also nicht die Höhe,
+sondern die **Empfindlichkeit** gegenüber Rücken und Joch (4,4 % über das
+geprüfte Band) und die Lesbarkeit des Feldbildes. Der radiale Pfad hat dieselbe
+Lektion schon gelernt und blendet seine Polsterung im Bild aus
+(`_field_frame`, Maske bei r > 1,02·statorOD/2, CLAUDE.md „Outside-stator
+masking") — der axiale zeichnet sie mit.
+
+**Status: behoben am 16.10.2026** — aber nicht allein. Der erste Versuch,
+nur die Polsterung umzustellen (`POLSTER_MU_R`, eine Fluss-Sperre statt Eisen),
+machte etwas anderes schlechter: die Schwankung der Grundwelle über eine
+Läuferdrehung stieg von 2,0 auf **11,8 %**. Die Eisenpolsterung hatte einen
+zweiten Fehler weich gemacht — die seitliche Randbedingung (eigener Befund
+darunter). Erst beide zusammen ergeben ein stimmiges Modell:
+
+| | Rücken 4→40 mm | Fluss außerhalb | Fensterbreite 2/4/8 | Läuferdrehung |
+|---|---:|---:|---:|---:|
+| Eisen (vorher) | +0,0 % | 59,1 % | 0,34 % | 2,0 % |
+| Sperre, alte Randbed. | +18,9 % | 0,0 % | 10,6 % | 11,8 % |
+| **Sperre + periodisch** | **+4,1 %** | **1,9 %** | **0,37 %** | **0,6 %** |
+
+Die +4,1 % sind die ehrliche Zahl; die +18,9 % des Zwischenstands waren der
+Randfehler und nicht das Rückenblech. Gegenprobe: mit LUFT statt Sperre kommen
+unter derselben Randbedingung +4,0 % heraus — die Wahl ist nach der
+Randreparatur fast gleichgültig geworden, und das steht bei `POLSTER_MU_R`.
+
+Am Vorgabe-Payload bewegt sich B1 dadurch um −0,2 % (1,1234 → 1,1212 T): das
+gezeichnete Rückenblech ist dick genug. Spürbar wird es, wo es das nicht ist —
+bei 4 Polen −10,9 % gegenüber einem unendlich dicken. **Sättigung zeigt der
+lineare FDM weiterhin nicht**; ob der Rücken dick genug ist, sagt
+`ema_axial.ruecken`.
+
+Verwandt und **weiterhin offen**: der „Luftrand" des 3-D-Ringsektors ist Eisen
+(Befund E vom 11.10.2026) — derselbe Fehler eine Dimension höher, und am
+16.10.2026 an den exportierten Feldlinien nachgemessen (s. unten).
+
+---
+
+## 2026-10-16 · Axialfluss: die Nut schneidet durch das Ständerjoch — jede Bauform mit Joch hat im Feldmodell keines
+
+**Beobachtung.** Beim Nachmessen des Befundes darüber: in `torus_nn`, `afir` und
+`einseitig` steht im Raster **kein zusammenhängendes Ständerjoch**. Die Nuten
+werden so tief geschnitten wie das ganze Ständerband hoch ist.
+
+**Messung.** Vorgabe-Payload, N = 400, Nutbreite 50 %. „Voll eisern" = Rasterzeilen
+mit 100 % Eisen über dem Umfang, also das Joch:
+
+| Bauform | Ständerband | Zahn + Joch | davon voll eisern | erwartet |
+|---|---:|---|---:|---:|
+| yasa | 25,0 mm | 25,0 + 0,0 | 0,0 mm | 0,0 mm ✔ |
+| torus_nn | 37,0 mm | 25,0 + 12,0 | **0,0 mm** | 12,0 mm ✗ |
+| afir | 37,0 mm | 25,0 + 12,0 | **0,5 mm** | 12,0 mm ✗ |
+| einseitig | 37,0 mm | 25,0 + 12,0 | **0,0 mm** | 12,0 mm ✗ |
+
+Was es kostet (rohe Spaltwelle, Joch nachträglich ins `mu` zurückgesetzt, sonst
+identisch): `afir` Grundwelle **+0,9 %**, `einseitig` **+0,8 %** — klein, weil
+die Eisenpolsterung (Befund darüber) für das fehlende Joch einspringt. Der eine
+Befund **maskiert** den anderen.
+
+**`torus_nn` ist der Fall, in dem es nicht klein bleibt.** Dort heißt
+`kenn = "beide"`, die Nut wird also von BEIDEN Seiten über die volle Bandhöhe
+geschnitten — übrig bleiben nur die Zahnsäulen, kein Joch. Gemessen gegen YASA
+bei sonst gleicher Maschine:
+
+| | rohe Spitze | rohe Grundwelle | Klirr |
+|---|---:|---:|---:|
+| yasa | 9,968e5 | 8,898e5 | 0,534 |
+| torus_nn | 1,062e6 | **8,815e4** | **3,037** |
+
+Faktor **10 weniger Grundwelle bei dreifachem Klirranteil** — die Polwelle ist
+praktisch weg, übrig ist Nutwelligkeit. Nach der Eichung steht das als
+B1 = 0,092…0,171 T im Ergebnis (gegen 1,123 T bei YASA), und es wandert mit der
+Jochdicke, sieht also nach einem gerechneten Zusammenhang aus.
+
+**Und man kommt mit EINER Eingabe dorthin.** `ema_fluss.aus_seite:678-681`
+schaltet YASA → TORUS-NN, sobald `axialJochStaenderMm > 0,5` ist. Wer im Reiter
+⊙ Axialfluss ein Ständerjoch einträgt — die naheliegende Handlung, wenn man ein
+Joch haben will — bekommt eine Bauform, deren Joch das Feldmodell wegschneidet.
+
+**Fundstelle.**
+
+* `ema_axial_fdm.py:539-540` — `t_nut = statorhoehe(geom)` und `t_joch = 0.0`.
+  `statorhoehe` **enthält das Joch** seit dem 06.10.2026 (`:313`,
+  `h += _jochhoehe(g)`). Die Bandhöhe `t_nut + t_joch` stimmt deshalb weiter,
+  aber `t_nut` ist zugleich die **Schnitttiefe** der Nut — das Joch ist aus der
+  einen Variablen in die andere gerutscht. Der Entwurf meinte sichtbar
+  `t_nut` = Zahn, `t_joch` = Joch.
+* `ema_axial_fdm.py:636,638` — `tiefe |= (Y >= lg["y1"] - t_nut)` bzw.
+  `(Y <= lg["y0"] + t_nut)`.
+* Bei `"beide"` kommt dazu, dass `statorhoehe` nur `Zahn + Joch` rechnet, ein
+  beidseitig genuteter Ständer aber `Zahn + Joch + Zahn` hoch ist.
+* Gezeichnet wird das Joch sehr wohl: `ema_axial_cad.py:212` ruft
+  `AF._jochhoehe` selbst — CAD und Feld meinen also verschiedene Maschinen.
+
+**Status: behoben am 16.10.2026.** `zahnlaenge()` ist jetzt eine eigene Größe
+(die Schnitttiefe EINER Nut), `statorhoehe()` rechnet `_zahnlagen() * Zahn +
+Joch`, und `rastere_scheibe` gibt `_nuten` die Zahnlänge statt der Bandhöhe.
+Nachgemessen am Raster:
+
+| Bauform | Joch erwartet | vorher | nachher |
+|---|---:|---:|---:|
+| yasa | 0,0 mm | 0,0 ✔ | 0,0 ✔ |
+| torus_nn | 12,0 mm | 0,0 | **11,7** |
+| afir | 12,0 mm | 0,5 | **12,5** |
+| einseitig | 12,0 mm | 0,0 | **11,9** |
+
+TORUS-NN: B1 0,0922 → **1,0675 T**, Klirranteil 3,04 → **0,46**. Sein
+Ständerband ist jetzt 62 mm statt 37 (2 × Zahn + Joch) — das wandert über
+`lagen()` in Thermik, CAD und den 3-D-Sektor mit, die alle dieselbe Quelle
+lesen. afir/einseitig +0,9 / +0,8 %. YASA Ziffer für Ziffer unverändert.
+Wächter: `test_axial_fdm.py`, Abschnitt „Die Nut schneidet NICHT durch das
+Joch" — gemessen wird am **Raster** und nicht an einer Höhenangabe, denn eine
+Lage, die es laut `lagen()` gibt, kann im `mu` trotzdem weggeschnitten sein.
+
+---
+
+## 2026-10-12 · `run em3d --from-project`: die Schrägung kommt im 3D-Lauf nicht an
+
+**Beobachtung.** Auslegung mit `skew_deg=10` (Runde 3 — Rastmoment 73,6 % →
+46,9 % durch die Schrägung). Die 3D-Gegenprobe des selben Projekts lief
+**ohne** Schrägung: `results.json/em3d` meldet `skew_deg: 0.0,
+skew_segments: 1`, während der Design-Payload 10° trägt. Der Berichtstext
+der Kette notiert zwar „Schrägung im 3D-Modell nicht vorhanden", kann sie
+aber nicht kennen — er beschreibt einen Zustand, der aus dem Payload nicht
+hervorgeht.
+
+**Messung.**
+
+| | Projekt 20261012_160155 |
+|---|---|
+| Design (ausgeführt) | `skew_deg: 10` (Ausgang `run analyse`; Log 16:10) |
+| `meta.json.payload` (persistiert) | top-level: **nicht vorhanden**; `geom.skew_deg: 10` — der Wert ist in den `geom`-Block verlegt |
+| em3d aus `--from-project` (16:10) | `skew_deg: 0.0`, `skew_segments: 1`, 6 Magnete, B_gap 3D 0.751 T |
+| `run em3d --set skew_deg=10` | Log `skew_deg: 0 → 10` — `apply_sets/_locate` legt es **wieder in `geom`** (Schema), top-level bleibt leer; em3d-Ergebnis weiterhin `skew_deg: 0.0`, Mesh „wiederverwendet" |
+| `run em3d --payload-file` mit **top-level** `skew_deg=10` | `skew_deg: 10.0`, `skew_segments: 4` (6 × 4 = 24 Magnete im Mesh), B_gap 3D 0.307 T, Phasenversatz +9.8° (erklärt durch die Staffelung 4×2.5°) |
+
+**Fundstelle.**
+
+* `ema_em3d.py:444,573` — liest `opts.get("skew_deg")` **top-level** aus; das
+  `geom`-Nest schaut es nicht an. Bei 0 baut es ein ungeschrägtes Mesh
+  (`skew_segments: 1`).
+* `cae_cli.py:581` (`_locate` in `apply_sets`) — `skew_deg` ist im
+  `geom`-Schema; die `--set`-Zuweisung wird deshalb in `geom` abgelegt —
+  genau dort, wo der Konsument nicht hinsieht. Der `--set`-Mechanismus
+  kann den Mangel also nicht heben; nur ein `--payload-file` mit
+top-level-Schlüssel.
+* Die Persistenz in `meta.json` verlegt den Wert bereits beim ersten
+  Speichern in `geom` — der em3d-Aufruf hatte nie einen top-levelWert,
+  und der Mesh-Cache ("Geometrie unverändert") verwertete die `--set`-Nachlieferung
+  dann auch nicht, weil die in `geom` landete.
+
+**Status: offen — nicht repariert.** Die em3d-Zahlen des Erstlaufs
+(B_gap 3D 0.751 T) stammen aus dem **ungeschrägten** 3D-Lauf; das ist für
+die Grundwelle vertretbar (Schrägung breitet vor allem Oberwellen aus),
+aber vollständig ist es nicht. Der geschrägte 3D-Lauf (0.307 T bei
+Paketmitte) ist danach in `results.json/em3d` nachgetragen,
+Phasenorientierung in beiden Längen übereinstimmend (−0.7° bzw. +9.8°
+mit Erklärung). Die Behebung gehört an `ema_em3d` (auch `geom.skew_deg`
+lesen) oder an die Persistenz (Schlüsselposition stabil halten) — nicht
+in den Aufruf.
+
+---
+
+## 2026-10-12 · Detail-Lauf über `--from-project` rechnete Pkw-WLTP neben dem Lastspiel — die Lastspiel-Bindung übersteht den Knoten nicht
+
+**Beobachtung.** Endstand einer Auslegung (Mähwerk, Lastspiel `maehwerk_80cm`,
+3000 1/min · 8 Nm Dauer · 14 Nm Spitzen) als Detail-Lauf fortgesetzt:
+`cae_cli.py run analyse --from-project 20261012_154005 --guete detail`.
+Der neue Lauf (20261012_154518) trug zusätzlich einen
+**Fahrzeugzyklus WLTP3B mit 1600 kg, 10163 1/min, η=−1381 %** — eine Maschine,
+es gibt sie nicht, auf einer Welle, die keinen Weg fährt. Die Quelle des Projekts
+zeigte korrekt "Lastspiel (csv)"; der Detail-Lauf zeigte "Fahrzeugzyklus (WLTP3B)".
+Ein Lastspiel mit 8 Nm Dauer lastet keinen 1600-kg-Pkw — und genau dieser
+Pkw-Zyklus auf einer Maschine, die kein Pkw ist, ist die Fallgrube, die
+AGENTS.md benennt.
+
+**Messung.**
+
+| Projekt | Aufruf | Logzeile | Knoten-Payload |
+|---|---|---|---|
+| 20261012_154005 (Runde 3) | `--frisch --zyklus maehwerk_80cm` | `⚙ Lastspiel (Lastspiel (csv))` — korrekt | `cycle: lastspiel`, `cycle_csv:` **fehlt**, `vehicle: 1600 kg` |
+| 20261012_154518 (Detail) | `--from-project 154005 --guete detail` | zusätzlich `🚗 Zyklus (WLTP3B) … 0.7 km · 0.01 kWh/100km · η−1381 %`, `T_winding=654°C` | `cycle: lastspiel`, `cycle_csv:` **fehlt**, `vehicle: 1600 kg` |
+
+Die ausgeführte und die gespeicherte Payload sind nicht dieselbe: der Lauf
+rechnet mit `cycle_csv` (1807 Zeichen Inline-CSV, `ema_zyklen.holen`), und die
+gespeicherten Knoten (153221, 154005, 154518 — alle drei) tragen
+`cycle: lastspiel` **ohne** `cycle_csv`, aber **mit** dem
+`vehicle`-Block der Schemavorgabe. Was ausführt, kommt nicht an; was nicht
+dorthin gehören sollte, bleibt stehen.
+
+**Fundstelle.**
+
+* `ema_zyklen.anwenden` (`ema_zyklen.py:387`) — der einzige Schreiber von
+  `payload["cycle_csv"]`; wird nur aufgerufen, wenn der Aufruf das Flag
+  `--zyklus` trägt (`cae_cli.py:713–720`).
+* `ema_projekt.knoten_setzen` (`ema_projekt.py:344–383`) — speichert den
+  Payload aus dem Manifest (`m["inputs"]["payload"]`), nicht den
+  ausgeführten; das Manifest trägt die Schemavorgaben (darin
+  `vehicle` 1600 kg), und `cycle_csv` ist in keinem der drei Knoten.
+* `ema_pipeline.py:4812–4831` — der gefährliche Zweig: bei
+  `cycle in ("csv","lastspiel") and cycle_csv` wird die CSV gelesen; **ist
+  `cycle_csv` leer, fällt der Lauf in die `else`-Klausel und rechnet
+  `ema_drivecycle.wltp_class3()` mit dem `vehicle`-Block.** Stillschweigend.
+  Default ist ohnehin `cycle="wltp3"` (`ema_pipeline.py:3538`).
+
+**Status: offen — nicht repariert.** Die Behebung ist zweigeteilt und
+berührt beide Seiten der Pipeline: (1) der ausgeführte Payload ist der zu
+speichernde (oder der Knoten trägt neben der `cycle`-Art den Zyklus-Namen und
+`--from-project` wendet ihn neu an — `ema_zyklen.anwenden` ist dafür schon
+da); (2) `cycle ∈ {csv, lastspiel}` mit leerem `cycle_csv` ist ein harter
+Fehler statt eines Rückfalls auf einen fremden Fahrzeugzyklus. Bis dahin:
+**jeder** `analyse`-Aufruf, der auf einem Projekt aufsetzt, trägt das
+`--zyklus`-Flag selbst — ein `--from-project` ohne Flag ist für einen
+Lastspiel- oder CSV-Zyklus nicht verlässlich. Die WLTP-Zahlen in 20261012_154518
+sind für den Bericht nicht verwendbar; der Lastspiel-Block und alle
+anderen Stufe desselben Projekts sind identisch mit 154005.
+
+---
+
+## 2026-10-12 · Der Axialfluss-FDM im Browser: Einzelbild zeichnete die falsche Maschine, der volle Lauf zeigte nichts
+
+**Gemeldet.** *„der fdm Solver bei der Axialfluss geht immer noch [nicht]. Es
+geht eine Einzelbildberechnung. aber dann werden auch radialmagnete mit
+berechnet. Das ist ganz einfach falsch. Auch wenn ich ein ganzen durchlauf
+berechnen will, bekomme ich keine darstellung wie bei einer psm. gar nichts."*
+
+Beide Hälften stimmen, und es waren **vier** voneinander unabhängige Defekte.
+Gemeinsam ist ihnen ein Muster: jeder einzelne ist eine Stelle, an der etwas
+GERECHNET und dann nicht ausgeliefert wurde.
+
+---
+
+### A · `render_preview_frame` kannte den Flussweg nicht · **behoben**
+
+**Messung.** `ema_pipeline.render_preview_frame` enthielt die Zeichenkette
+`flux`/`axial` **null mal**. Es ruft unbedingt `ema_analysis.run_em_analysis`
+und `_field_frame`, also `_rasterise` über `hypot(X, Y)` mit
+`ema_topology.magnet_legs` — einen Zylinderquerschnitt mit RADIALEN Magneten.
+Auf einen axialen Payload angewandt zeichnete die Vorschau eine IPM-Maschine,
+die es nicht gibt, und zwar an der Stelle, an der man schnell nachsieht, ob die
+Geometrie stimmt.
+
+**Fundstelle.** `ema_pipeline.py`, `render_preview_frame`; Route
+`POST /preview_field`; Knopf `#btn_preview` im Reiter ▶ Live-Simulation.
+
+**Stand.** Behoben: `_axial_preview_frame` zeichnet denselben abgewickelten
+Schnitt wie der Lauf (`ema_axial_fdm.schnitt_figur`) beim mittleren Radius, mit
+den Höhenlinien von A als Feldlinien. Gemessen: 557 kB PNG, B_gap 0,5745 T bei
+r = 102,5 mm, `torus_nn`, 2 Polteilungen, Betriebspunkt i_q = 178,4 A. Die
+Bildunterschrift nennt den Radius — ein abgewickelter Schnitt ohne ihn ist keine
+Aussage, weil Pol- und Nutteilung mit r wachsen.
+
+---
+
+### B · Das Diagramm `B_gap(r)` gab es ZWEIMAL, und die ausgelieferte Fassung las einen Schlüssel, den es nicht gibt · **behoben**
+
+**Messung.** `ema_pipeline._axial_bgap_chart` las `axfeld["r_schnitte_m"]`.
+`ema_axial_fdm.felder` liefert den Radiusvektor als **`radien_m`**. Der
+Schlüssel fehlte also immer, die Funktion gab in ihrer zweiten Zeile `None`
+zurück, `charts/airgap.png` wurde beim Axiallauf **nie** geschrieben, und der
+Untertab 📈 Luftspalt blieb leer. Nachgemessen am Lauf vom 11.10.2026:
+`charts/` enthielt `axial_struktur · connection · em_curve ·
+feld_axial_bgap_r · feld_axial_schnitt · power · thermal` — kein `airgap.png`.
+
+**Die Ursache ist die Doppelung, nicht der Tippfehler.** Dieselbe Kurve wurde an
+zwei Stellen unabhängig gezeichnet, und die beiden liefen auseinander: die
+Fassung in `ema_axial_fdm.bilder` lief und stellte die gemessene Grundwelle
+gegen `eichung_magnet`, einen flussgewichteten **Mittelwert** — genau die
+Verwechslung, die am 06.10.2026 als Befund aufgeschrieben wurde. Die Fassung mit
+der richtigen Bezugslinie war die, die nie lief.
+
+**Stand.** Behoben: eine Fassung (`ema_axial_fdm.bgap_figur`), Bezugslinie
+`eichung_magnet_grundwelle`, und sie **wirft** bei fehlenden Daten statt leer
+zurückzukommen — ein stilles `None` hat genau das hier verdeckt.
+
+---
+
+### C · Derselbe Schlüsselfehler im 3-D-Vergleich, dort von einem Rückfall verdeckt · **behoben**
+
+**Messung.** `ema_axial_em3d.vergleich` las
+`viele.get("r_schnitte_m") or np.linspace(r3[0], r3[-1], len(...))`. Der erste
+Zweig griff nie; verglichen wurde gegen eine **gleichmäßig über den Ringraum
+gelegte Ersatzachse** statt gegen die wirklichen Schnittradien (Scheibenmitten
+bei `ri + (ro−ri)·(k+0,5)/k`).
+
+**Das ist der schlimmere der beiden.** Bei B war das Ergebnis ein fehlendes
+Bild — sichtbar. Hier war es eine Kurve, die richtig aussieht.
+
+**Stand.** Behoben: `radien_m` wird gelesen, und bei fehlender oder
+unpassender Achse kommt ein benannter Fehlschlag statt einer geratenen.
+
+---
+
+### D · Die Scheiben-Animation existierte und wurde nie gerufen · **behoben**
+
+**Messung.** `ema_axial_fdm.frames` dreht den Läufer durch den abgewickelten
+Schnitt, schreibt `frame_XXXX.png` und kodiert `anim.mp4` — vollständig, seit
+dem 07.10.2026. Aufrufer: `cae_cli.py` an zwei Stellen, **sonst niemand**. Die
+Pipeline übersprang die Animation statt dessen mit dem Satz, eine bewegte
+Scheibe „bräuchte den abgewickelten Mehrschnitt über dem Rotorwinkel, und das
+ist eine neue Stufe und keine Reparatur" — die Stufe war zu dem Zeitpunkt
+bereits geschrieben. Ein Knopf, den nur die CLI hat, ist für den Browser nicht
+vorhanden; das ist hier sonst überall die Regel.
+
+**Zweiter Fund an derselben Stelle:** der Übersprung lag **hinter** dem radialen
+Referenzlauf (`run_em_analysis` bei `frame_res`, mit Sättigungsdurchgang). Der
+lief für die Scheibe also voll durch, nur um den Farbdeckel eines Bildes zu
+setzen, das nie gezeichnet wurde.
+
+**Stand.** Behoben: die Pipeline ruft `ema_axial_fdm.frames`, füllt die
+Frame-Puffer, setzt `rpm_list`/`frames_per_rpm`/`frame_angle_deg`/`videos` wie
+der radiale Weg — der vorhandene Player und der Video-Knopf bedienen sie ohne
+Änderung. Die Winkelachse ist die **elektrische Periode** (zwei Polteilungen),
+nicht `pole_pitch`: über eine ganze Umdrehung wäre es p-mal dasselbe Bild. Der
+radiale Referenzlauf entfällt für die Scheibe.
+
+---
+
+### E · Gezeichnet und nicht ausgeliefert · **behoben**
+
+**Messung.** Nach dem Lauf vom 11.10.2026 lagen `feld_axial_schnitt.png` und
+`feld_axial_bgap_r.png` in `charts/` — und **kein** `results`-Schlüssel nannte
+sie. `results["em"]` trug `airgap_chart_b64 = None`, `frames = None`,
+`rpm_list = None`, `field_modes = []`. Der Ergebnis-Reiter kann nur zeigen, was
+ihm jemand nennt; der Untertab ⚡ EM-Feld blieb deshalb leer. Auch bei
+funktionierendem Diagramm hätte der axiale Zweig `airgap_chart_b64` nicht
+gesetzt — das tat nur der radiale `else`.
+
+**Stand.** Behoben: `airgap_chart_b64`, `axial_schnitt_b64` und
+`axial_bgap_bild_b64` gehen ins Ergebnis, und `renderField` zeigt für den
+Axialfluss einen eigenen Block (abgewickelter Schnitt, B_gap(r), die Grenze der
+Mehrschnitt-Stufe im Klartext) über dem nun ebenfalls gefüllten Player.
+
+---
+
+## 2026-10-11 (abends) · Die Axialfluss-Ergebnisse im Browser — und der Luftrand, der Eisen ist
+
+**Gemeldet.** *„die ergebnisse der 3d feld berechnung in Elmer der
+axialflussmaschine will ich auch im Browser sehen. Ich möchte die
+Magnetfeldlinien sehen. das gilt auch für die Live simulation. da möchte ich
+auch magnetfeldlinien sehen."*
+
+---
+
+### A · Der Axiallauf schrieb keine Browser-Dateien · **behoben**
+
+**Beobachtung.** Der fertige Axiallauf zeigte im Reiter 🧲 eine
+Kennwerttabelle und sonst nichts: `ui_nach.bilder` = 0, kein Feldbild, kein
+eingebetteter Betrachter, keine Feldlinien — während derselbe Knopf für die PSM
+sechs Bilder und den 3-D-Betrachter liefert.
+
+**Messung.** Die VTU lag die ganze Zeit auf der Platte
+(`<projekt>/axial_em3d/results/case_t0001.vtu`, 13.785 Knoten). Was fehlte, war
+der Schritt von ihr zu den beiden Dateien, die `vtk.js` lädt — dieselbe Lücke
+wie beim harmonischen ASM-Lauf am 20.09.2026 und mit derselben Antwort.
+
+**Fundstelle.** `ema_axial_em3d.browser_dateien` (neu) ·
+`ema_em3d._run_em3d_axial` · `ema_em3d.export_browser_streamlines`.
+
+**Stand.** Behoben. Drei Dinge waren dabei inhaltlich und nicht technisch:
+
+1. **Gezeigt wird der Vollkranz, nicht der Sektor.** Gerechnet ist eine
+   Polteilung (22,5°); ein Tortenstück von 22,5° ist nichts, woran man eine
+   Maschine erkennt, und eine Feldlinie, die an der Periodikfläche aufhört,
+   sähe aus wie ein Ende des Flusses. Gespiegelt wird mit dem **vorhandenen**
+   `ema_em3d._pattern_full_motor` — die Symmetrie des Axialsektors ist dieselbe
+   wie die des radialen Ein-Pol-Sektors (Drehung um z, anti-periodisch).
+2. **Die Startpunkte der Feldlinien mussten zur Scheibe passen.** Das Raster in
+   `export_browser_streamlines` ist für einen Zylinder gebaut und beginnt knapp
+   über der WELLE: gemessen bei r = 70,7 mm, während der Ringraum dieser
+   Scheibe erst bei Ri = 75 mm anfängt. `vtkStreamTracer` verwirft Startpunkte
+   außerhalb des Netzes **stillschweigend** — es gäbe weniger Linien und keine
+   Meldung. `export_browser_streamlines` nimmt jetzt `seeds=` entgegen; das
+   Tracen, die Abbruchschwelle und das Abschneiden bleiben an EINER Stelle.
+3. **Gezählt statt geglaubt.** `ema_em3d.zaehle_linien` (aus
+   `ema_em3d_harm._zaehle_linien` herausgehoben, die jetzt dorthin delegiert) —
+   derselbe Fallstrick trifft jeden Löser, der diese Dateien schreibt.
+
+Gemessen danach über die Maske: 12,0 s Lauf, **4800 Feldlinien aus 2400
+Startpunkten**, `browser.vtp` 7,6 MB, `browser_lines.vtp` 7,2 MB, beide über die
+BESTEHENDEN Routen `/em3d/vtp` und `/em3d/streamlines` (HTTP 200) — keine neue
+Route. Betrachter 1014 × 480 px, Farbskala |B| 0,14 … 2,42 T.
+
+---
+
+### B · Der Knopf „🧊 Im Browser ansehen" war im Berichtszweig TOT · **behoben**
+
+**Beobachtung.** Beim Verdrahten von (A) erschien der Knopf sofort — und tat
+nichts. Kein Bild, kein Fehler in der Konsole.
+
+**Messung.** `_renderEm3d` hat zwei Zweige. Der Betrachter-RAHMEN
+(`#e3_viewer3d`) samt Bedienleiste (`#e3_clipbar` mit Feldlinien-Schalter,
+Dichteregler, Schnittebene, Ansichtsknöpfen) wurde **nur im PSM-Zweig** gebaut;
+der Zweig für `res.bericht` zeichnete den Knopf, aber nicht den Rahmen, den
+`openBrowser3d()` sucht — und die Funktion kehrt in ihrer zweiten Zeile zurück
+(`const div = …; if (!div) return;`). Nachgemessen über die Maske:
+`document.querySelector('#e3_viewer3d canvas')` = `null`,
+`document.getElementById('e3_lines_on')` = nicht vorhanden.
+
+**Das betrifft nicht nur den Axialfluss.** Derselbe Zweig bedient die
+**harmonische Asynchronmaschine**, deren Browser-Dateien am 20.09.2026
+ausdrücklich dafür gebaut wurden („die Ergebnisse sollen im Browser dargestellt
+werden, auch die 3D Ergebnisse wie Feldlinien"). Geschrieben wurden sie — der
+Weg in den Betrachter fehlte seither.
+
+**Fundstelle.** `ema.html` `_renderEm3d`, Berichtszweig.
+
+**Stand.** Behoben. Das Markup liegt jetzt in `_e3BetrachterHtml()` und wird von
+beiden Zweigen gerufen; eine zweite Abschrift wäre dieselbe Falle noch einmal.
+Gemessen danach: Betrachter 1014 × 480 px, Feldlinien-Schalter vorhanden und
+wirksam.
+
+---
+
+### C · Die Live-Simulation hat Feldlinien — in der ABWICKLUNG · **gebaut**
+
+**Beobachtung.** Die Vorschau zeigte drei Bilder (Scheibe, Abwicklung, Kurve),
+alle ohne Feldlinien. Die Abwicklung war ausdrücklich „gezeichnet, nicht
+gelöst".
+
+**Entscheidung und ihr Grund.** Die Feldlinien stehen jetzt in der Abwicklung,
+und zwar nicht als Zugeständnis an den verfügbaren Platz: der Schnitt löst
+`B = rot(A·e_r)` in genau dieser θ-z-Ebene, also **SIND** die Höhenlinien von A
+dort die Feldlinien — exakt, ohne Nachintegrieren eines abgetasteten
+Vektorfeldes, ohne Startpunktwahl, ohne Schrittweite.
+
+**Auf der Scheibe von vorn gibt es keine, und das ist eine Aussage über das
+Modell.** Eine Scheibe trägt per Konstruktion keine Radialkomponente (derselbe
+Grund, aus dem `rzBei` sein Bild aus Bz und Bt baut); in der Stirnansicht liegen
+in der Ebene aber gerade Br und Bt. Linien gäbe es dort nur, indem man Br
+erfindet — und ein erfundenes Linienbild ist schlimmer als keines, weil niemand
+es nachmisst. Das Bild sagt es selbst, statt die Lücke stillschweigend zu
+lassen.
+
+**Fundstelle.** `axialfluss/live.js` (`liveKonturen`, `liveVersatz`,
+`zeichneLiveAbwicklung`), `axialfluss/ansicht.js`, `ema.html`.
+
+**Stand.** Gebaut. Drei Dinge daran sind gemessen und nicht geraten:
+
+* **Die Höhenlinienwerte stehen EINMAL fest** (`folge.aDeckel`), wie die
+  Farbskala und aus demselben Grund: je Rahmen neu gewählt änderte sich die
+  Zahl der Linien mit der Drehung, und dann sähe eine Änderung der SKALA aus wie
+  eine Änderung des FELDES. Gleich viele Linien heißen gleich viel Fluss
+  zwischen ihnen — das ist der ganze Grund, warum man ein Linienbild lesen kann.
+* **Gezeichnet wird maßstäblich.** Der Streifen war 460 × 120 px bei einem
+  Seitenverhältnis von 1,20 — ein 1 mm dicker Luftspalt in 65 mm Bauhöhe sähe
+  darin wie 10 % der Maschine aus, und Feldlinien in einem verzerrten Bild
+  treffen die falschen Winkel.
+* **Struktur und Feld kommen aus EINEM Array** (`g.rolle` und `s.A` am selben
+  Gitter). Eine daneben gezeichnete Geometrie könnte gegen das Feld verrutschen,
+  und beide Bilder sähen richtig aus.
+
+Gemessen im Browser: **8 von 8** verschiedenen Bildern über 13 s, 496…656
+Bildpunkte in der Linienfarbe je Rahmen (die Linien sind da UND sie bewegen
+sich), bei Stop 1 von 3 — es steht dann still. Keine Konsolenfehler.
+
+---
+
+### D · `live.js` berief sich auf eine Messung, die es nicht gab · **berichtigt**
+
+**Beobachtung.** Der Modulkopf schrieb über die Antiperiodizität „in
+`pruefe.js` nachgemessen, nicht angenommen". In `pruefe.js` stand dazu **nichts**
+(null Treffer auf `rotorVersatz`). Die Messung war im Bauen von Hand gemacht und
+nicht festgehalten worden.
+
+**Warum das zählt.** Eine Behauptung über eine Messung, die es nicht gibt, ist
+schlechter als keine Behauptung: sie lädt dazu ein, sich darauf zu verlassen.
+
+**Stand.** Berichtigt — die Messung steht jetzt da (`pruefe.js`, Abschnitt 10).
+Gemessen am festen Ort in der Spaltmitte: **0,5821 → −0,5821 → 0,5821 T** über
+zwei Polteilungen, Betragsverhältnis 1,0000. Dass es *exakt* kippt und nicht nur
+näherungsweise, ist die richtige Erwartung und kein Verdacht: das Fenster ist
+zwei Polteilungen breit, eine Verschiebung um eine Polteilung bildet das Gitter
+auf sich selbst ab. Dazu die Gegenprobe, dass ohne Angabe nichts passiert
+(Ziffer für Ziffer die alte Rechnung). `pruefe.js` 27 → 42 Prüfungen.
+
+---
+
+### E · Der „Luftrand" des Axialsektors ist EISEN · **offen**
+
+**Beobachtung.** Beim Nachsehen der exportierten Oberfläche fiel auf, dass das
+Eisen bis r = 149,2 mm reicht, obwohl die Scheibe bei Ro = 130 mm endet.
+
+**Messung.** Körperweise aus der VTU (Radien je `GeometryIds`):
+
+| Body | Bedeutung | r_min | r_max |
+|---|---|---:|---:|
+| 1 | Eisen | 55,8 | 149,2 |
+| 3, 4 | Magnete | 75,0 | 130,0 |
+
+Ri = 75,0 · Ro = 130,0 · r_in = 55,75 · r_out = 149,25 (`RAND_ANTEIL` = 0,35).
+
+**Das widerspricht dem Modulkopf.** Dort steht: *„Deshalb bekommt das Modell
+hier Luftränder innen und außen (`RAND_ANTEIL`), und genau in ihnen steht das,
+was der Mehrschnitt nicht hat."* Gebaut wird etwas anderes: `baue_netz` legt
+**jede Schicht über den vollen Bereich `[r_in, r_out]`** an, und die Zuordnung
+entscheidet am **Volumenschwerpunkt** (`im_ring = ri <= r <= ro`). Eine
+Jochschicht wird von nichts radial zerschnitten, bleibt also EIN Stück, dessen
+Schwerpunktradius bei 109,6 mm liegt — mitten im Ring — und wird Eisen. Nur die
+Magnetschichten (vom Magnetsektor zerschnitten) und der Spalt werden Luft. Die
+Jochfläche des Modells ist damit **1,70-mal** so groß wie die der Scheibe.
+
+**Wirkung, gemessen** (`RAND_ANTEIL` je Lauf gesetzt, Modul unverändert):
+
+| Bauform | Luftrand | Jochfläche | Knoten | B₃D Mitte | Abw. ggü. Mehrschnitt |
+|---|---:|---:|---:|---:|---:|
+| YASA | 35 % | ×1,70 | 25.784 | 1,1601 T | +5,7 % |
+| YASA | 2 % | ×1,04 | 16.877 | 1,1528 T | +6,2 % |
+| TORUS-NN | 35 % | ×1,70 | 26.014 | 1,1439 T | +100,6 % |
+| TORUS-NN | 2 % | ×1,04 | 17.005 | 0,9377 T | +65,9 % |
+
+**Was daraus folgt — und was NICHT.** Der Überstand ist bei YASA fast
+wirkungslos (0,6 % auf B₃D) und bei TORUS-NN groß (18 %), und das ist
+physikalisch stimmig: YASA hat kein Ständerjoch, der Fluss geht axial durch den
+Zahn; TORUS-NN führt ihn **umfangs im Ständerjoch** — also gerade durch den
+Körper, der 1,70-fach zu groß ist.
+
+**Er erklärt die offene +100 %-Abweichung (Befund 6) aber NUR ZUM TEIL**: ohne
+Überstand bleiben +65,9 %. Was er erklärt, ist etwas anderes und war bisher
+rätselhaft — dass der 3-D-Sektor für YASA und TORUS-NN **fast dasselbe** Feld
+lieferte (1,1601 gegen 1,1439 T, 1,4 % auseinander), während der Mehrschnitt sie
+klar trennt (1,0661 gegen 0,5518 T). Ohne den Überstand trennt der 3-D-Sektor
+sie auch: 1,1528 gegen 0,9377 T, also 19 % statt 1,4 %. **Das überzählige Eisen
+hat den Unterschied zwischen den beiden Bauformen verdeckt.**
+
+**Fundstelle.** `ema_axial_em3d.baue_netz`, Schritt 1 (Schichten über
+`[r_in, r_out]`) und Schritt 4 (Zuordnung am Schwerpunkt), Modulkopf
+`RAND_ANTEIL`.
+
+**Status: offen, ausdrücklich nicht repariert.** Die Behebung ist absehbar (die
+Schichten bei Ri und Ro zerschneiden und die Stücke außerhalb als Luft
+zuordnen), sie verschiebt aber **jede** axiale 3-D-Zahl und gehört deshalb nicht
+nebenbei in einen Umbau der Anzeige. Bis dahin gilt: der axiale 3-D-Sektor
+überschätzt das Feld dort, wo der Fluss im JOCH umfangs läuft, und die
+Scheibenbilder zeigen einen Kranz, der radial breiter ist als die Maschine.
+
+---
+
 ## 2026-10-11 · Alle fünf Maschinenarten durch Elmer, aus der MASKE — und was dabei herauskam
 
 **Beobachtung.** Gefahren wurde die Oberfläche selbst (Chromedriver auf

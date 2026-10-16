@@ -616,6 +616,170 @@ def grenzen(netz: dict) -> list:
     ]
 
 
+#: Startpunkte der Feldlinien: Ringe x Winkel JE POL x axiale Ebenen. Der
+#: Winkelwert ist bewusst je Pol angegeben und nicht als Gesamtzahl -- eine
+#: 4-polige und eine 32-polige Scheibe sollen gleich dicht aussehen.
+LINIEN_RINGE, LINIEN_WINKEL_JE_POL, LINIEN_EBENEN = 5, 3, 10
+
+
+def browser_startpunkte(netz: dict, ringe: int = LINIEN_RINGE,
+                        je_pol: int = LINIEN_WINKEL_JE_POL,
+                        ebenen: int = LINIEN_EBENEN) -> list:
+    """Wo die Feldlinien der SCHEIBE anfangen -- und warum nicht dort, wo radial.
+
+    `ema_em3d.export_browser_streamlines` verteilt seine Startpunkte ueber
+    Ringe vom Wellenrand bis zum Statoraussenrand und ueber die BauLAENGE. Das
+    ist die Geometrie eines Zylinders. Bei der Scheibe liegt der Ringraum
+    zwischen Ri und Ro, die „Laenge" ist die STAPELHOEHE, und innerhalb von Ri
+    ist gar keine Maschine -- jeder Startpunkt dort faellt aus dem Netz, und
+    `vtkStreamTracer` sagt das nicht, er traced schlicht weniger Linien.
+
+    Gesetzt wird ueber den vollen Umfang, weil die Linien im GESPIEGELTEN
+    Vollkranz getract werden (`ema_em3d._pattern_full_motor`) und nicht im
+    Sektor: eine Feldlinie, die an der Periodikflaeche endet, waere kein
+    Flusspfad, sondern der Rand des Rechengebiets.
+
+    Ueber die Hoehe wird gleichmaessig gesaet, nicht nur in die Spaltmitte:
+    der Flusspfad der Scheibe laeuft axial durch Magnet, Spalt und Zahn und
+    schliesst sich UMFANGS im Joch -- wer nur im Spalt saet, sieht die eine
+    Haelfte und nicht die andere.
+    """
+    ri, ro = float(netz["ri_mm"]), float(netz["ro_mm"])
+    hoehe = float(netz["hoehe_mm"])
+    poles = max(1, int(netz["poles"]))
+    n_th = max(poles, poles * max(1, int(je_pol)))
+    ringe = max(1, int(ringe))
+    ebenen = max(1, int(ebenen))
+    saum = 0.06 * (ro - ri)
+    pkt = []
+    for iz in range(ebenen):
+        z = hoehe * (0.03 + 0.94 * (iz / max(ebenen - 1, 1) if ebenen > 1 else 0.5))
+        for ir in range(ringe):
+            r = (ri + saum) + ((ro - saum) - (ri + saum)) * (
+                ir / max(ringe - 1, 1) if ringe > 1 else 0.5)
+            for ia in range(n_th):
+                # Auf die halbe Teilung versetzt, damit kein Startpunkt GENAU
+                # auf einer Periodikflaeche des gespiegelten Kranzes sitzt.
+                a = 2.0 * math.pi * (ia + 0.5) / n_th
+                pkt.append((r * math.cos(a), r * math.sin(a), z))
+    return pkt
+
+
+def browser_dateien(vtu_pfad: str, out_dir: str, netz: dict, log=None) -> dict:
+    """Aus der Sektor-VTU dieselben Browser-Dateien wie beim PSM-Pfad.
+
+    Gemeldet als: *„die ergebnisse der 3d feld berechnung in elmer der
+    axialflussmaschine will ich auch im browser sehen. ich moechte die
+    magnetfeldlinien sehen."* Und der Lauf gab dafuer bis zum 11.10.2026
+    **gar nichts** her: `ui_nach.bilder` war 0, es gab eine Kennwerttabelle und
+    sonst nichts -- waehrend der radiale Lauf daneben sechs Bilder und den
+    eingebetteten 3-D-Betrachter zeigte. Die VTU lag die ganze Zeit auf der
+    Platte; was fehlte, war der Schritt von ihr zu den zwei Dateien, die der
+    Betrachter laedt. Dieselbe Luecke und dieselbe Antwort wie beim
+    harmonischen ASM-Lauf (`ema_em3d_harm.browser_dateien`).
+
+    Drei Dinge muss dieser Adapter leisten, und alle drei sind inhaltlich:
+
+    1. **Gezeigt wird der VOLLE KRANZ, nicht der Sektor.** Gerechnet wird EINE
+       Polteilung (hier 22,5 Grad); ein Tortenstueck von 22,5 Grad ist aber
+       nichts, woran man eine Maschine erkennt, und eine Feldlinie, die an der
+       Periodikflaeche aufhoert, saehe aus wie ein Ende des Flusses. Gespiegelt
+       wird mit `ema_em3d._pattern_full_motor` -- 2p Kopien, je um k*alpha
+       gedreht, B mitgedreht und mit `(-1)^k` gewendet. Das ist **dieselbe**
+       Symmetrie wie beim radialen Ein-Pol-Sektor (Drehung um z, antiperiodisch),
+       deshalb wird sie hier nicht neu geschrieben.
+
+    2. **Die Startpunkte muessen zur Scheibe passen** -- s. `browser_startpunkte`.
+
+    3. **Fest steht, was der Betrachter als Festkoerper stehenlaesst:** Eisen
+       und Magnete, Luft heraus. Die Zuordnung liegt in `netz["pid"]` /
+       `netz["magnete"]`; `GeometryIds` schreibt die `case.sif` mit.
+    """
+    import ema_em3d
+
+    def _sag(t):
+        if log:
+            try:
+                log(t)
+            except Exception:                                # noqa: BLE001
+                pass
+
+    gitter = ema_em3d._read_grid(vtu_pfad)
+    bname = ema_em3d._b_array_name(gitter)
+    if not bname:
+        raise RuntimeError("Die Ergebnisdatei enthaelt keine Flussdichte — "
+                           "MagnetoDynamicsCalcFields hat nicht gerechnet.")
+
+    poles = max(1, int(netz["poles"]))
+    tags = {
+        # Eisen UND Magnete sind der Festkoerper; die Luft (Nut, Spalt, Rand,
+        # Deckel) faellt heraus, sonst zeigt der Betrachter einen Klotz.
+        "bodies": {"rotor": int(netz["pid"]["eisen"])} if netz["pid"].get("eisen") else {},
+        "magnets": [{"phys": int(m["phys"])} for m in (netz.get("magnete") or [])],
+        # `r_so` ist hier der AUSSERE LUFTRAND und nicht Ro: an ihm haengen
+        # Schrittweite, Verfolgungslaenge und die Abschneidegrenze, und der
+        # seitliche Austritt in genau diesen Rand ist der Effekt, fuer den es
+        # diesen Sektor ueberhaupt gibt (s. RAND_ANTEIL).
+        "dims": {"r_shaft": float(netz.get("r_in_mm") or 0.0),
+                 "r_rot": float(netz["ri_mm"]),
+                 "r_si": float(netz["ri_mm"]),
+                 "r_so": float(netz["r_out_mm"])},
+        "L": float(netz["hoehe_mm"]),
+        "alpha": float(netz["alpha"]),
+        "poles": poles,
+    }
+
+    voll = ema_em3d._pattern_full_motor(gitter, tags)
+    _sag(f"Vollkranz gespiegelt: {poles} Polteilungen "
+         f"({math.degrees(netz['alpha']):.1f} Grad je Kopie)")
+
+    os.makedirs(out_dir, exist_ok=True)
+    erg = {}
+
+    try:
+        erg["vtp"] = ema_em3d.export_browser_vtp(
+            voll, bname, tags, os.path.join(out_dir, "browser.vtp"))
+        _sag("Browser-Oberflaeche geschrieben (Farbe = |B|)")
+    except Exception as e:                                   # noqa: BLE001
+        erg["vtp_fehler"] = f"{type(e).__name__}: {e}"
+        _sag(f"\u26a0 Browser-Oberflaeche nicht geschrieben: {e}")
+
+    try:
+        pkt = browser_startpunkte(netz)
+        erg["n_startpunkte"] = len(pkt)
+        lp = ema_em3d.export_browser_streamlines(
+            voll, bname, tags, os.path.join(out_dir, "browser_lines.vtp"),
+            seeds=pkt)
+        # Gezaehlt wird, was WIRKLICH drin steht -- s. `ema_em3d.zaehle_linien`.
+        n = ema_em3d.zaehle_linien(lp)
+        erg["n_linien"] = n
+        if n <= 0:
+            erg["lines_fehler"] = (
+                "keine einzige Feldlinie getract — die Startpunkte liegen "
+                "ausserhalb des Netzes oder das Feld ist ueberall unter der "
+                "Abbruchschwelle")
+            _sag("\u26a0 Feldlinien: NULL Linien getract — Datei verworfen")
+            try:
+                os.remove(lp)
+            except OSError:
+                pass
+        else:
+            erg["lines"] = lp
+            _sag(f"Feldlinien geschrieben: {n} Linien aus {len(pkt)} Startpunkten")
+    except Exception as e:                                   # noqa: BLE001
+        erg["lines_fehler"] = f"{type(e).__name__}: {e}"
+        _sag(f"\u26a0 Feldlinien nicht geschrieben: {e}")
+
+    erg["hinweis"] = (
+        f"Gerechnet ist EIN Pol ({math.degrees(netz['alpha']):.1f} Grad), "
+        f"anti-periodisch gekoppelt; gezeigt wird der daraus gespiegelte "
+        f"Vollkranz ({poles} Pole). Die Farbe ist |B| im Leerlauf, lineares "
+        f"Eisen (mu_r = {MU_R_IRON:.0f}) — Saettigung ist nicht gerechnet. "
+        f"Schraegung, ungleiche Pole und Unwucht sind in einem Pol nicht "
+        f"darstellbar und stehen deshalb auch nicht im Bild.")
+    return erg
+
+
 def vergleich(geom: dict, work_dir: str, k_schnitte: int = 7, N: int = 300,
               lc_mm: float = 0.0, lc_spalt_mm: float = 0.0, melde=None) -> dict:
     """**Der eigentliche Zweck:** Mehrschnitt gegen 3-D, auf EINER Geometrie.
@@ -637,8 +801,23 @@ def vergleich(geom: dict, work_dir: str, k_schnitte: int = 7, N: int = 300,
     f3 = drei["feld"]
     r3 = np.array(f3["r_mm"]) / 1000.0
     b3 = np.array(f3["B_gap_T"])
-    r2 = np.array(viele.get("r_schnitte_m") or
-                  np.linspace(r3[0], r3[-1], len(viele["B_gap_ueber_r_T"])))
+    # **Der Radiusvektor wird GELESEN, nicht erfunden.** Hier stand bis zum
+    # 11.10.2026 `viele.get("r_schnitte_m") or np.linspace(...)` -- und
+    # `felder` liefert den Vektor unter `radien_m`. Der erste Zweig griff also
+    # NIE, und verglichen wurde gegen eine gleichmaessig ueber den Ringraum
+    # gelegte Ersatzachse statt gegen die wirklichen Schnittradien (die als
+    # Scheibenmitten bei `ri + (ro-ri)*(k+0.5)/k` liegen). Derselbe
+    # Schluesselfehler stand in `ema_pipeline._axial_bgap_chart`, wo er das
+    # Diagramm ganz verschwinden liess; hier hat ihn der Rueckfall verdeckt.
+    # Ein stiller Rueckfall auf eine geratene Achse ist schlimmer als ein
+    # Fehlschlag: die Kurve sieht richtig aus.
+    _r2 = viele.get("radien_m")
+    if not _r2 or len(_r2) != len(viele["B_gap_ueber_r_T"]):
+        return {"ok": False, "drei": drei,
+                "grund": (f"Mehrschnitt ohne brauchbare Radiusachse: "
+                          f"radien_m={len(_r2 or [])}, "
+                          f"B_gap_ueber_r_T={len(viele['B_gap_ueber_r_T'])}")}
+    r2 = np.array(_r2, dtype=float)
     b2 = np.array(viele["B_gap_ueber_r_T"])
     # Auf das 3-D-Gitter interpolieren -- die Schnittzahl ist klein, das
     # Abtastgitter nicht.

@@ -519,7 +519,7 @@ def _rasterise(geom: dict, N: int, rotor_angle: float = 0.0,
 
 # ── FDM solver ────────────────────────────────────────────────────────────────
 
-def _build_fv_matrix(mu: np.ndarray):
+def _build_fv_matrix(mu: np.ndarray, periodisch_x: bool = False):
     """Assemble the variable-ν Poisson operator −∇·(ν∇A) on a uniform grid.
 
     Finite-volume 5-point stencil with harmonic-mean face conductivities
@@ -528,11 +528,31 @@ def _build_fv_matrix(mu: np.ndarray):
     definite matrix over the interior unknowns plus the interior mask.  A global
     scale factor (the omitted h²) is irrelevant — the caller calibrates the
     air-gap peak to the analytical value, so only the field *pattern* matters.
+
+    **`periodisch_x` (16.10.2026) — nur der Axialfluss braucht es.**  Dort ist
+    das Fenster ein abgewickelter Zylinderschnitt über ganzzahlig vielen
+    Polteilungen, also in x **wirklich periodisch**: die linke und die rechte
+    Spalte sind Nachbarn.  Dirichlet A = 0 dort erzwingt stattdessen
+    B_x = 0 — und genau an der Polgrenze ist der Umfangsfluss im Joch am
+    größten.  Gemessen kostete das (mit dichtem Rand) 11,8 % Schwankung der
+    Grundwelle über eine Läuferdrehung und 7,4 % über die Fensterbreite; mit
+    Periodizität bleibt davon die Nutung übrig.  Siehe ``BEFUNDE.md``,
+    16.10.2026.
+
+    Umgesetzt wird es durch die Maske: in x zählen ALLE Spalten als Unbekannte,
+    und das `np.roll` unten verbindet die letzte mit der ersten — es wickelt
+    ohnehin um, bisher war nur die Maske davor.  In y bleibt Dirichlet, und das
+    hält das System positiv definit (ohne eine festgehaltene Kante wäre A nur
+    bis auf eine Konstante bestimmt).  Vorgabe aus: der Radialpfad rechnet
+    Ziffer für Ziffer weiter wie bisher (``test_fdm_golden.py``).
     """
     N  = mu.shape[0]
     nu = 1.0 / mu.astype(np.float64)
     interior = np.zeros((N, N), bool)
-    interior[1:-1, 1:-1] = True
+    if periodisch_x:
+        interior[1:-1, :] = True
+    else:
+        interior[1:-1, 1:-1] = True
     nint = int(interior.sum())
     cid = -np.ones((N, N), dtype=np.int64)
     cid[interior] = np.arange(nint)
@@ -555,7 +575,7 @@ def _build_fv_matrix(mu: np.ndarray):
 
 
 def _solve_fdm(mu: np.ndarray, J: np.ndarray, iters: int | None = None,
-               cache: bool = True) -> np.ndarray:
+               cache: bool = True, periodisch_x: bool = False) -> np.ndarray:
     """Solve ∇·(ν∇A) = −J exactly via a cached direct sparse factorisation.
 
     SuperLU factorises −∇·(ν∇A) once per permeability map and back-substitutes
@@ -565,6 +585,12 @@ def _solve_fdm(mu: np.ndarray, J: np.ndarray, iters: int | None = None,
     Falls back to the iterative defect-correction SOR if SciPy is unavailable.
     The `iters` argument is accepted for backwards compatibility and ignored
     by the direct path.
+
+    `periodisch_x` reicht die periodische Seitenbedingung an
+    `_build_fv_matrix` durch (Axialfluss, s. dort).  Sie geht in den
+    Cache-Schlüssel ein — dasselbe `mu` periodisch und nicht periodisch sind
+    zwei verschiedene Faktorisierungen, und ein gemeinsamer Schlüssel gäbe
+    stillschweigend die falsche zurück.
 
     `cache=False` factorises without storing the result — for a `mu` that cannot
     recur by construction (the saturation fixed-point's intermediates), where
@@ -582,10 +608,10 @@ def _solve_fdm(mu: np.ndarray, J: np.ndarray, iters: int | None = None,
             f"({_DIRECT_N_MAX}); für höhere Auflösung wird pyamg benötigt "
             f"(pip install pyamg).")
 
-    key = (N, hash(mu.tobytes())) if cache else None
+    key = (N, hash(mu.tobytes()), periodisch_x) if cache else None
     cached = _LU_CACHE.get(key) if cache else None
     if cached is None:
-        M, interior = _build_fv_matrix(mu)
+        M, interior = _build_fv_matrix(mu, periodisch_x)
         lu = _spla.splu(M)
         if cache:
             _LU_CACHE[key] = (lu, interior)

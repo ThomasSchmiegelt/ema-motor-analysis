@@ -2863,14 +2863,27 @@ def _clip_streamlines(poly, r_lim, z_lo, z_hi):
     return out
 
 
-def export_browser_streamlines(grid, bname, tags, out_path):
+def export_browser_streamlines(grid, bname, tags, out_path, seeds=None):
     """Tracet Magnetfeldlinien (B-Vektor) durch das Volumennetz und schreibt sie als
     schlanke Polylinien-.vtp (eingefärbt nach |B|) für den vtk.js-Browser-Viewer.
 
     Seeds: ein Punkteraster im Band Welle→Stator-OD, verteilt über MEHRERE axiale Ebenen
     (nicht nur z=L/2), sodass die Flusspfade den 3D-Körper füllen und Endeffekte/Skew
     sichtbar werden. Streamlines werden serverseitig getraced (das große Volumennetz bleibt
-    auf dem Server), nur die dünnen Linien gehen in den Browser."""
+    auf dem Server), nur die dünnen Linien gehen in den Browser.
+
+    ``seeds`` (Liste von (x, y, z)) ersetzt genau dieses Raster und sonst nichts.
+    Gebraucht wird das vom **Axialfluss**: dessen Netz ist EIN Ringsektor von
+    wenigen Grad (`ema_axial_em3d`), und das Raster hier verteilt seine
+    Startpunkte ueber den vollen Umfang -- 35 von 36 Winkelschritten lagen
+    ausserhalb des Netzes, und `vtkStreamTracer` verwirft sie **stillschweigend**
+    (dieselbe Falle, aus der in `ema_em3d_harm` schon einmal eine gueltige
+    LEERE Datei samt Erfolgsmeldung entstand -- deshalb `zaehle_linien`). Das
+    Tracen selbst, die Abbruchschwelle, die Schrittweiten und das Abschneiden
+    sind dagegen massstabs- und geometriefrei und bleiben hier: eine zweite
+    Fassung davon waere die Stelle, an der die beiden Bauarten im Browser
+    auseinanderlaufen.
+    """
     import vtk
     from vtk.util import numpy_support as ns
 
@@ -2900,17 +2913,21 @@ def export_browser_streamlines(grid, bname, tags, out_path):
     # damit die Feldlinien den 3D-Körper füllen statt in einer Ebene zu kleben. Bewusst eher
     # DICHT exportiert (kleine Datei, Linien sind schlank), weil der Browser-Slider die Linien
     # nur clientseitig AUSDÜNNT — die hier erzeugte Anzahl ist die Obergrenze („viele").
-    n_rings, n_ang, n_z = 7, 36, 12
-    z_lo, z_hi = 0.03 * L, 0.97 * L               # über die (nahezu) volle Stapellänge verteilt
-    seeds = vtk.vtkPoints()
-    for iz in range(n_z):
-        z = z_lo + (z_hi - z_lo) * iz / max(n_z - 1, 1) if n_z > 1 else L / 2.0
-        for ir in range(n_rings):
-            r = r_in + (r_out - r_in) * ir / max(n_rings - 1, 1)
-            for ia in range(n_ang):
-                a = 2.0 * np.pi * ia / n_ang
-                seeds.InsertNextPoint(r * np.cos(a), r * np.sin(a), z)
-    seed_pd = vtk.vtkPolyData(); seed_pd.SetPoints(seeds)
+    seed_pts = vtk.vtkPoints()
+    if seeds is not None:
+        for q in seeds:
+            seed_pts.InsertNextPoint(float(q[0]), float(q[1]), float(q[2]))
+    else:
+        n_rings, n_ang, n_z = 7, 36, 12
+        z_lo, z_hi = 0.03 * L, 0.97 * L           # über die (nahezu) volle Stapellänge verteilt
+        for iz in range(n_z):
+            z = z_lo + (z_hi - z_lo) * iz / max(n_z - 1, 1) if n_z > 1 else L / 2.0
+            for ir in range(n_rings):
+                r = r_in + (r_out - r_in) * ir / max(n_rings - 1, 1)
+                for ia in range(n_ang):
+                    a = 2.0 * np.pi * ia / n_ang
+                    seed_pts.InsertNextPoint(r * np.cos(a), r * np.sin(a), z)
+    seed_pd = vtk.vtkPolyData(); seed_pd.SetPoints(seed_pts)
 
     tracer = vtk.vtkStreamTracer()
     tracer.SetInputData(grid)
@@ -2954,6 +2971,26 @@ def export_browser_streamlines(grid, bname, tags, out_path):
 
     _write_vtp(poly, out_path)
     return out_path
+
+
+def zaehle_linien(vtp_pfad: str) -> int:
+    """Wieviele Polylinien stehen WIRKLICH in der Datei? (-1 = nicht lesbar)
+
+    **Geschrieben ist nicht gezeichnet.** `vtkStreamTracer` wirft nicht, wenn
+    kein einziger Startpunkt im Netz liegt -- er schreibt eine gueltige, LEERE
+    Datei. Gemessen am harmonischen Weg: 0 Linien, 2209 Byte, und der Lauf
+    meldete „Feldlinien geschrieben". Die Pruefung gehoert deshalb neben den
+    Export und nicht in den jeweiligen Aufrufer: sonst hat sie der naechste
+    Loeser, der Browser-Dateien schreibt, wieder nicht.
+    """
+    try:
+        import vtk
+        r = vtk.vtkXMLPolyDataReader()
+        r.SetFileName(vtp_pfad)
+        r.Update()
+        return int(r.GetOutput().GetNumberOfLines())
+    except Exception:                                        # noqa: BLE001
+        return -1
 
 
 def _charts_saver(project_dir):
@@ -3874,6 +3911,32 @@ def _run_em3d_axial(payload: dict, geom: dict, axial: float,
            "mesh": {"nodes": netz.get("knoten"), "tets": netz.get("tets"),
                     "sektor_grad": (netz.get("alpha") or 0.0) * 180.0 / math.pi},
            "bericht": _axial_em3d_bericht(v)}
+
+    # **Die Ergebnisse gehoeren in den Browser, Feldlinien eingeschlossen.**
+    # Der Betrachter im Reiter 🧲 ist nicht an die PSM gebunden -- er laedt eine
+    # schlanke .vtp der Festkoerperoberflaeche (nach |B| eingefaerbt) und eine
+    # zweite mit Feldlinien. Dieser Lauf hatte seine VTU laengst und zeigte
+    # trotzdem NUR eine Kennwerttabelle (gemessen 11.10.2026: `bilder` = 0);
+    # was fehlte, war der Schritt von der VTU zu diesen zwei Dateien.
+    # `ema_axial_em3d.browser_dateien` spiegelt dafuer den Polsektor zum
+    # Vollkranz und setzt die Startpunkte in den RINGRAUM der Scheibe.
+    browser = {}
+    if drei.get("vtu"):
+        try:
+            browser = AX3.browser_dateien(drei["vtu"], work, netz,
+                                          log=lambda t: log("  " + str(t)))
+        except Exception as e:                               # noqa: BLE001
+            browser = {"fehler": f"{type(e).__name__}: {e}"}
+            log(f"  \u26a0 Browser-Dateien nicht erzeugt: {e}")
+    res["browser"] = browser
+    # **Dieselben Schluessel wie beim PSM-Lauf** -- `vtp_path`/`lines_path`.
+    # `/em3d/vtp` und `/em3d/streamlines` bedienen den Axiallauf damit ohne eine
+    # einzige neue Route; eine zweite waere die Stelle, an der die Bauarten im
+    # Browser auseinanderlaufen (dasselbe Argument wie beim harmonischen Lauf).
+    if browser.get("vtp"):
+        res["vtp_path"] = browser["vtp"]
+    if browser.get("lines"):
+        res["lines_path"] = browser["lines"]
     for g in (v.get("grenzen") or []):
         log(f"  \u2139 {g}", 3)
     log(f"\u2713 Sektor gegen Mehrschnitt: "

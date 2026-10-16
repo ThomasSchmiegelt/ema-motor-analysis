@@ -1802,6 +1802,72 @@ PREVIEW_N_MAX_DIRECT = 2500   # direct splu ceiling on a ~32 GB host (~15 GB pea
 PREVIEW_N_MAX_AMG    = 6000   # pyamg AMG ceiling (~5–6 GB at 5000, ~8–9 GB at 6000)
 
 
+def _axial_preview_frame(data: dict, geom: dict) -> dict:
+    """Ein Einzelbild der SCHEIBE: der abgewickelte Schnitt beim mittleren Radius.
+
+    Dieselbe Zeichnung wie im Lauf (`ema_axial_fdm.schnitt_figur`), damit
+    Vorschau und Ergebnis nicht zwei Bilder derselben Maschine zeigen.
+
+    Was zurueckkommt, traegt dieselben Schluessel wie der radiale Weg
+    (`png_b64`, `B_gap_T`, `iq`, `id`, `rpm`, `N`) -- die Anzeige im Browser ist
+    eine. Dazu `flussweg: "axial"` und `radius_mm`, denn ein abgewickelter
+    Schnitt OHNE den Radius, bei dem er liegt, ist keine Aussage: Polteilung und
+    Nutteilung wachsen mit r, der kritische Punkt sitzt am INNENrand.
+    """
+    import base64 as _b64p
+    import io as _iop
+
+    import ema_axial_fdm as _AFP
+
+    N       = int(data.get("frame_resolution", data.get("fdm_resolution", 360)))
+    N       = max(160, min(900, N))      # der Schnitt ist ein eigenes Gitter
+    rpm     = float(data.get("rpm", data.get("rpm_from", 3000.0)))
+    last_nm = float(data.get("load_nm", 0.0) or 0.0)
+
+    a = __import__("ema_axial").auslegung(geom)
+    r_b = 0.5 * (a["r_innen_m"] + a["r_aussen_m"])
+
+    iq = id_ = 0.0
+    bp_grund = ""
+    if last_nm > 0:
+        try:
+            bp = _AFP.betriebspunkt(geom, rpm, last_nm)
+            iq, id_ = float(bp["i_q_A"]), float(bp["i_d_A"])
+        except Exception as e:                                   # noqa: BLE001
+            bp_grund = f"{type(e).__name__}: {e}"
+
+    fig, sch = _AFP.schnitt_figur(geom, r_b, N, iq, id_)
+    buf = _iop.BytesIO()
+    fig.savefig(buf, format="png", bbox_inches="tight", facecolor=_AFP.GRUND)
+    try:
+        import matplotlib.pyplot as _plt
+        _plt.close(fig)
+    except Exception:                                            # noqa: BLE001
+        pass
+    png = _b64p.b64encode(buf.getvalue()).decode()
+
+    # Die Zahl kommt aus DIESEM Schnitt, nicht aus der analytischen Stufe 1:
+    # ein Bild und eine Zahl nebeneinander muessen dieselbe Rechnung meinen.
+    try:
+        b_gap = float(_AFP.schnitt(geom, r_b, N, iq, id_)["b_n_grundwelle_T"])
+    except Exception:                                            # noqa: BLE001
+        b_gap = float(_AFP.eichung_magnet_grundwelle(geom))
+    return {"png_b64": png, "B_gap_T": round(b_gap, 4),
+            "iq": round(iq, 1), "id": round(id_, 1), "rpm": rpm, "N": N,
+            "out_px": None, "rotor_angle_deg": 0.0,
+            "flussweg": "axial", "radius_mm": round(r_b * 1000.0, 1),
+            "bauform": sch.get("bauform"),
+            "polteilungen": sch.get("n_polteilungen"),
+            "hinweis": ("Abgewickelter Schnitt beim mittleren Radius "
+                        f"(r = {r_b*1000:.1f} mm) — Mehrschnitt-Stufe, KEINE "
+                        "3-D-Loesung. Die hellen Linien sind Hoehenlinien von A, "
+                        "also die Feldlinien."
+                        + (f" ⚠ Betriebspunkt nicht gerechnet: {bp_grund}"
+                           if bp_grund else "")
+                        + ("" if last_nm > 0 else " Leerlauf (keine Last gesetzt).")),
+            }
+
+
 def render_preview_frame(data: dict) -> dict:
     """Render exactly ONE field frame for a quick visual preview.
 
@@ -1820,6 +1886,24 @@ def render_preview_frame(data: dict) -> dict:
     """
     geom    = data["geom"]
     mag     = MAGNETS.get(data.get("magnet", "ndfeb_n35"), MAGNETS["ndfeb_n35"])
+
+    # ── Die Scheibe bekommt IHREN Schnitt ────────────────────────────────────
+    # **Hier stand kein einziges Wort ueber den Flussweg**, und das ist der
+    # ganze Fehler: alles darunter rastert ueber `ema_analysis._rasterise`, also
+    # `hypot(X, Y)` und `ema_topology.magnet_legs` -- einen Zylinderquerschnitt
+    # mit RADIALEN Magneten. Auf einen axialen Payload angewandt zeichnete die
+    # Vorschau damit eine IPM-Maschine, die es nicht gibt; gemeldet als „es geht
+    # eine Einzelbildberechnung, aber dann werden auch Radialmagnete mit
+    # berechnet. Das ist ganz einfach falsch."
+    #
+    # Gezeichnet wird statt dessen derselbe abgewickelte Schnitt, den der Lauf
+    # und der Bericht zeigen (`ema_axial_fdm.schnitt_figur`) -- eine zweite
+    # Zeichenfassung waere die naechste Stelle, an der die beiden auseinander
+    # laufen, ohne dass es jemand sieht.
+    import ema_fluss as _FLSP        # lokal: `run_pipeline` importiert es selbst
+    if _FLSP.flussweg(geom) == "axial":
+        return _axial_preview_frame(data, geom)
+
     N       = int(data.get("frame_resolution", data.get("fdm_resolution", 200)))
     n_max   = PREVIEW_N_MAX_AMG if ema_analysis._HAVE_PYAMG else PREVIEW_N_MAX_DIRECT
     if N > n_max:
@@ -2823,45 +2907,24 @@ def render_cross_section(geom: dict, ax, *, beschriftung: bool = True) -> None:
            fontsize=7.5, framealpha=0.9, ncol=2)
 
 
-def _axial_bgap_chart(axfeld: dict, geom: dict) -> str | None:
-    """B_gap(r) der Scheibe -- die Kurve, die es radial nicht gibt.
+def _axial_bgap_chart(axfeld: dict, geom: dict) -> str:
+    """``B_gap(r)`` der Scheibe als base64-PNG — gezeichnet in ``ema_axial_fdm``.
 
-    Radial ist das Luftspaltfeld ueber dem Umfang aufgetragen; eine Scheibe hat
-    stattdessen eine Abhaengigkeit vom RADIUS, weil die Polteilung mit r waechst
-    und das Verhaeltnis Spalt/Polteilung sich um 1/lambda aendert. Genau das ist
-    die Aussage der Bauart, und sie gehoert ins Bild.
+    **Hier stand bis zum 11.10.2026 eine ZWEITE Fassung dieser Zeichnung**, und
+    sie hat nie ein Bild geliefert: sie las ``axfeld["r_schnitte_m"]``, waehrend
+    ``ema_axial_fdm.felder`` den Radiusvektor unter ``radien_m`` zurueckgibt.
+    Der Schluessel fehlte also immer, die Funktion gab ``None`` zurueck, und
+    ``charts/airgap.png`` wurde beim Axiallauf nie geschrieben — im
+    Ergebnis-Reiter blieb der Luftspalt-Untertab leer. Gemeldet als „auch wenn
+    ich einen ganzen Durchlauf berechnen will, bekomme ich keine Darstellung wie
+    bei einer PSM. gar nichts."
 
-    Mitgezeichnet wird die analytische GRUNDWELLE als Bezugslinie -- nicht der
-    Mittelwert: eine gemessene Grundwelle gegen einen Mittelwert zu stellen war
-    der Fehler vom 06.10.2026, und ein Bild macht ihn dauerhaft.
+    Zwei Fassungen derselben Kurve sind die Ursache, nicht der Tippfehler;
+    deshalb gibt es jetzt nur noch eine (`ema_axial_fdm.bgap_figur`), und die
+    **wirft**, statt leer zurueckzukommen.
     """
     import ema_axial_fdm as _AF
-    r = axfeld.get("r_schnitte_m") or []
-    b = axfeld.get("B_gap_ueber_r_T") or []
-    if not r or len(r) != len(b):
-        return None
-    fig, ax = plt.subplots(figsize=(7.2, 4.0), dpi=110)
-    rr = [x * 1000.0 for x in r]
-    ax.plot(rr, b, "o-", color="#e8a33d", lw=1.8, ms=5,
-            label="gemessen (abgewickelter Mehrschnitt)")
-    try:
-        h1 = float(_AF.eichung_magnet_grundwelle(geom))
-        ax.axhline(h1, color="#7fd4ff", ls="--", lw=1.3,
-                   label=f"analytische Grundwelle {h1:.3f} T (ohne Nut)")
-    except Exception:                                            # noqa: BLE001
-        h1 = None
-    m = axfeld.get("B_gap_grundwelle_mittel_T")
-    if m:
-        ax.axhline(float(m), color="#8bc34a", ls=":", lw=1.3,
-                   label=f"Mittel r-gewichtet {float(m):.3f} T")
-    ax.set_xlabel("Radius [mm]")
-    ax.set_ylabel("$\\hat{B}_{n,1}$ im Luftspalt [T]")
-    ax.set_title("Luftspalt-Grundwelle ueber dem Radius (Scheibe)")
-    ax.grid(alpha=.3)
-    ax.legend(fontsize=7.5, loc="best")
-    if h1:
-        ax.set_ylim(0, max(h1, max(b)) * 1.15)
-    fig.tight_layout()
+    fig = _AF.bgap_figur(axfeld, geom)
     return _fig_b64(fig)
 
 
@@ -3801,6 +3864,14 @@ def run_pipeline(data: dict, state: dict, frames: list,
                     airgap_b64 = _axial_bgap_chart(_ax, geom)
                     _save_png_b64(airgap_b64,
                                   os.path.join(proj, "charts", "airgap.png"))
+                    # **Und in das Ergebnis, nicht nur auf die Platte.** Das
+                    # Bild wurde gezeichnet (sobald der Schluesselfehler weg
+                    # war) und landete trotzdem nirgends: der Zweig hier setzte
+                    # `airgap_chart_b64` nie, das tat nur der radiale `else`.
+                    # Gezeichnet und nicht ausgeliefert ist dasselbe wie nicht
+                    # gezeichnet — der Untertab 📈 Luftspalt blieb leer.
+                    results["em"]["airgap_chart_b64"] = airgap_b64
+                    _log(state, "✓ B_gap(r) gezeichnet (Untertab 📈 Luftspalt)", 24)
                 except Exception as _e:                          # noqa: BLE001
                     _log(state, f"⚠ Diagramm B_gap(r) nicht gezeichnet "
                                 f"({type(_e).__name__}: {_e})", 24)
@@ -3865,22 +3936,31 @@ def run_pipeline(data: dict, state: dict, frames: list,
 
         modes_meta = []
         videos = {}
+
         if field_modes:   # skip the extra reference solve entirely when no field work
-            # vmax for a consistent colormap across all frames (from loaded base field)
-            # Erste Drehzahl des Bandes als Betriebspunkt (das ist der Frame,
-            # gegen den der Farbdeckel gesetzt wird), Eckdrehzahl als Eckdrehzahl.
-            _iq0, _id0 = ema_analysis.estimate_dq_currents(
-                geom, float(sweep_rpms[0]), load_nm,
-                b_gap_t=perf["B_gap_T"], rpm_base=rpm_base)
-            # saturate=True like the frames themselves — sonst leitet der Farbdeckel
-            # aus einem LINEAREN Feld ab, das im Rotor 3…18 T zeigt (µr=500 ohne
-            # Sättigungsknie), und die Frames werden gegen eine Skala normiert, die
-            # es in der gezeigten Lösung gar nicht gibt.
-            _em_ref = ema_analysis.run_em_analysis(
-                geom, N=frame_res, rotor_angle=0.0, iq=_iq0, id_=_id0, saturate=True)
-            _B_ref  = _em_ref["B_mag"]
-            # consistent display ceiling for all frames; user override wins
-            vmax_ref = field_bmax if field_bmax > 0 else _field_vmax(_B_ref)
+            # **Der Farbdeckel-Referenzlauf gilt nur radial.** Er rastert
+            # `hypot(X, Y)` und setzte fuer die Scheibe die Skala eines Bildes,
+            # das nie gezeichnet wird — bei `frame_res` ein voller FDM-Lauf
+            # samt Saettigungsdurchgang fuer nichts. Die Scheiben-Animation
+            # haelt ihre Skala selbst am ersten Bild fest
+            # (`ema_axial_fdm.frames`), sie braucht ihn nicht.
+            vmax_ref = field_bmax if field_bmax > 0 else 0.0
+            if not _axial_lauf:
+                # vmax for a consistent colormap across all frames (from loaded base field)
+                # Erste Drehzahl des Bandes als Betriebspunkt (das ist der Frame,
+                # gegen den der Farbdeckel gesetzt wird), Eckdrehzahl als Eckdrehzahl.
+                _iq0, _id0 = ema_analysis.estimate_dq_currents(
+                    geom, float(sweep_rpms[0]), load_nm,
+                    b_gap_t=perf["B_gap_T"], rpm_base=rpm_base)
+                # saturate=True like the frames themselves — sonst leitet der Farbdeckel
+                # aus einem LINEAREN Feld ab, das im Rotor 3…18 T zeigt (µr=500 ohne
+                # Sättigungsknie), und die Frames werden gegen eine Skala normiert, die
+                # es in der gezeigten Lösung gar nicht gibt.
+                _em_ref = ema_analysis.run_em_analysis(
+                    geom, N=frame_res, rotor_angle=0.0, iq=_iq0, id_=_id0, saturate=True)
+                _B_ref  = _em_ref["B_mag"]
+                # consistent display ceiling for all frames; user override wins
+                vmax_ref = field_bmax if field_bmax > 0 else _field_vmax(_B_ref)
 
             # Reference operating point for the standstill modes (max speed, full load)
             rpm_ref = float(rpm_to)
@@ -3902,18 +3982,96 @@ def run_pipeline(data: dict, state: dict, frames: list,
             if _axial_lauf:
                 try:
                     import ema_axial_fdm as _AFB
+                    # Betriebspunkt MITGEBEN: ohne ihn zeichnete das Standbild
+                    # den Leerlauf, waehrend die Animation daneben unter Last
+                    # lief — zwei Bilder derselben Maschine an verschiedenen
+                    # Punkten, und nur die Bildunterschrift sagte es.
                     _bf = _AFB.bilder(geom, os.path.join(proj, "charts"),
                                       k_schnitte=max(3, int(
                                           data.get("axial_schnitte", 5) or 5)),
-                                      N=int(min(600, max(300, frame_res * 2))))
+                                      N=int(min(600, max(300, frame_res * 2))),
+                                      rpm=float(rpm_ref), last_nm=float(load_nm))
                     _log(state, "⊙ Scheibenbilder gerendert: "
                                 + ", ".join(os.path.basename(str(x))
                                             for x in (_bf or []) if x), 74)
+                    # **Die Bilder muessen auch im Ergebnis ANKOMMEN.** Sie
+                    # lagen seit dem 07.10.2026 in `charts/`, wurden aber von
+                    # keinem `results`-Schluessel genannt — der Ergebnis-Reiter
+                    # kann nur zeigen, was ihm jemand nennt, und der Untertab
+                    # ⚡ EM-Feld blieb deshalb leer. Gemeldet als „gar nichts".
+                    import base64 as _b64m
+                    for _schl, _dat in (("axial_schnitt_b64",
+                                         "feld_axial_schnitt.png"),
+                                        ("axial_bgap_bild_b64",
+                                         "feld_axial_bgap_r.png")):
+                        _pf = os.path.join(proj, "charts", _dat)
+                        if os.path.isfile(_pf):
+                            with open(_pf, "rb") as _fh:
+                                results["em"][_schl] = _b64m.b64encode(
+                                    _fh.read()).decode()
                 except Exception as _fe:                         # noqa: BLE001
                     _log(state, f"⚠ Scheibenbilder fehlgeschlagen: {_fe}", 74)
                 _log(state, "   ℹ Keine em_field.png: die radialen Feldbilder "
                             "rastern einen Zylinderschnitt und zeigten fuer "
-                            "eine Scheibe die falsche Maschine.", 74)
+                            "eine Scheibe die falsche Maschine. Gezeigt wird "
+                            "statt dessen der abgewickelte Schnitt.", 74)
+                # ── Und die Scheibe bekommt IHRE Animation ───────────────
+                # **Es gab sie laengst.** `ema_axial_fdm.frames` dreht den
+                # Laeufer durch den abgewickelten Schnitt, schreibt
+                # `frame_XXXX.png` und kodiert das mp4 -- gerufen hat sie nur
+                # `cae_cli.py`. Im Browser stand statt dessen ein Satz, die
+                # Animation sei „eine neue Stufe und keine Reparatur"; die
+                # Stufe war zu dem Zeitpunkt schon geschrieben. Gemeldet als
+                # „auch wenn ich einen ganzen Durchlauf berechnen will,
+                # bekomme ich keine Darstellung wie bei einer PSM. gar nichts."
+                try:
+                    _subr = FIELD_SUBDIRS["rotate"]
+                    _dirr = os.path.join(proj, _subr)
+                    _frames_raeumen(_dirr)
+                    frames["rotate"] = []
+                    _log(state, f"⊙ Scheiben-Animation: {n_frames} Laeufer"
+                                f"stellungen ueber EINE elektrische Periode…", 75)
+                    _fr = _AFB.frames(
+                        geom, _dirr, n_frames=n_frames,
+                        N=int(min(600, max(240, frame_res))),
+                        rpm=float(rpm_ref), last_nm=float(load_nm),
+                        melde=lambda k, n: _log(state, f"  Scheibe [{k}/{n}]",
+                                                75 + 3.0 * k / max(n, 1)))
+                    import base64 as _b64f
+                    for _fp in _fr.get("dateien") or []:
+                        with open(_fp, "rb") as _fh:
+                            frames["rotate"].append(
+                                _b64f.b64encode(_fh.read()).decode())
+                    # **Die Winkelachse ist die elektrische Periode**, nicht
+                    # `pole_pitch`: ueber eine ganze Umdrehung waere es p-mal
+                    # dasselbe Bild.
+                    _per = float(_fr.get("periode_grad") or 0.0)
+                    _ad = [round(_per * k / max(n_frames, 1), 1)
+                           for k in range(len(frames["rotate"]))]
+                    _rb = round(float(_fr.get("r_bild_m") or 0.0) * 1000.0, 1)
+                    results["em"].update({
+                        "frames_per_rpm": len(frames["rotate"]),
+                        "rpm_frame_count": len(frames["rotate"]),
+                        "frame_angle_deg": _ad,
+                        "rpm_list": [int(rpm_ref)],
+                        "n_frames": len(frames["rotate"]),
+                        "axial_frames_r_mm": _rb})
+                    modes_meta.append({
+                        "mode": "rotate",
+                        "label": f"Läuferdrehung (abgewickelt bei r = {_rb:.0f} mm)",
+                        "frames_per_rpm": len(frames["rotate"]),
+                        "rpm_list": [int(rpm_ref)],
+                        "sweep_label": "Läuferwinkel [° mech]",
+                        "sweep_values": _ad})
+                    if _fr.get("video"):
+                        videos["rotate"] = os.path.join(_subr, "anim.mp4")
+                    _log(state, f"✓ Scheiben-Animation: {len(frames['rotate'])} "
+                                f"Bilder ueber {_per:.1f}° mechanisch"
+                                + (" + anim.mp4" if _fr.get("video") else ""), 78)
+                except Exception as _ae:                         # noqa: BLE001
+                    _log(state, f"⚠ Scheiben-Animation fehlgeschlagen "
+                                f"({type(_ae).__name__}: {_ae})", 78)
+
             if not _axial_lauf:
               try:
                   _emf_N = int(min(600, max(300, frame_res * 2)))
@@ -3935,27 +4093,10 @@ def run_pipeline(data: dict, state: dict, frames: list,
             bucket.append(b64)
             _save_png_b64(b64, os.path.join(proj, subdir, f"frame_{len(bucket)-1:04d}.png"))
 
-        # **Die Feld-ANIMATION bleibt beim Axialfluss aus** -- derselbe Grund wie
-        # beim Standbild eine Ebene darueber, nur teurer: `_field_frame` rastert
-        # `hypot(X, Y)`, also einen Zylinderschnitt, und darin ist eine Scheibe
-        # ein Ring ohne Merkmal. Gemessen am Browserlauf vom 09.10.2026 kostete
-        # das 72 Rahmen x rund 9 s = **zehn Minuten fuer ein Bild der falschen
-        # Maschine**, waehrend die richtigen Bilder (abgewickelter Schnitt,
-        # B_gap(r)) unmittelbar davor schon geschrieben wurden.
-        #
-        # Es wird NICHT ersatzweise etwas gezeichnet: eine bewegte Scheibe
-        # braeuchte den abgewickelten Mehrschnitt ueber dem Rotorwinkel, und das
-        # ist eine neue Stufe und keine Reparatur. Was es gibt, steht im Satz.
-        if _axial_lauf and field_modes:
-            _log(state, "⊙ Feld-Animation uebersprungen: die Rahmen rastern "
-                        "einen Zylinderschnitt (hypot(X, Y)), und darin ist "
-                        "eine Scheibe ein Ring ohne Merkmal — 72 Rahmen der "
-                        "falschen Maschine. Gezeichnet ist statt dessen der "
-                        "abgewickelte Schnitt und B_gap ueber dem Radius "
-                        "(charts/, `ema_axial_fdm.bilder`); bewegt sieht man "
-                        "die Scheibe im Reiter ⊙ Axialfluss.", 44)
-            field_modes = []
-        for mode in field_modes:
+        # Die radialen Modi bleiben beim Axialfluss aus: `_field_frame` rastert
+        # einen Zylinderschnitt, und darin ist eine Scheibe ein Ring ohne
+        # Merkmal. Ihre Animation steht oben und ist schon gelaufen.
+        for mode in (field_modes if not _axial_lauf else []):
             if mode == "rotate":
                 sub = FIELD_SUBDIRS["rotate"]; _frames_raeumen(os.path.join(proj, sub))
                 frames["rotate"] = []
@@ -4018,7 +4159,8 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 _log(state, f"✓ Last-Rampe: {n_frames} Frames", 72)
 
         # Encode each frame set to mp4 (ffmpeg) for download
-        for mode in field_modes:
+        # (die Scheibe kodiert ihr mp4 in `ema_axial_fdm.frames` selbst)
+        for mode in (field_modes if not _axial_lauf else []):
             key = "react" if mode == "current_angle" else ("load" if mode == "load_ramp" else "rotate")
             sub = FIELD_SUBDIRS[key]
             vid = _make_video(os.path.join(proj, sub))
@@ -4028,8 +4170,10 @@ def run_pipeline(data: dict, state: dict, frames: list,
             results["em"]["field_modes"] = modes_meta
             results["em"]["videos"]      = videos
             if _axial_lauf:
-                _log(state, "✓ Feldstufe fertig — ohne Animation (s. oben); "
-                            "die Scheibenbilder liegen in charts/", 75)
+                _log(state, f"✓ Feldstufe fertig — Scheiben-Animation "
+                            f"({len(frames.get('rotate') or [])} Bilder"
+                            + (", Video" if videos.get("rotate") else "")
+                            + "), Schnitt und B_gap(r) im Ergebnis-Reiter", 75)
             else:
                 _log(state, f"✓ Feld-Animation fertig ({len(field_modes)} "
                             f"Modus/Modi, Videos: {len(videos)})", 75)

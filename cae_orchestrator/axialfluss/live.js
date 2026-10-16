@@ -40,6 +40,29 @@
  * beides tut, ist `2*pi/ggT(2p, Q)`. Bei 2p=16/Q=48 ist das genau eine
  * Polteilung; bei einer Bruchlochwicklung ist es mehr, und wer dort die
  * Polteilung naehme, saehe einen Sprung je Periode.
+ *
+ * Wo die FELDLINIEN stehen -- und wo nicht
+ * ----------------------------------------
+ * Gemeldet als: *„das gilt auch fuer die Live simulation. da moechte ich auch
+ * magnetfeldlinien sehen."* Sie stehen in der **Abwicklung**, und zwar nicht
+ * als Zugestaendnis, sondern weil das die eine Ebene ist, in der sie EXAKT
+ * sind: der Schnitt loest `B = curl(A e_r)` in der theta-z-Ebene, und dort
+ * sind die Hoehenlinien von A die Feldlinien -- kein Nachintegrieren eines
+ * abgetasteten Vektorfeldes, keine Startpunktwahl, keine Schrittweite.
+ *
+ * **Auf der Scheibe von vorn gibt es keine**, und das ist eine Aussage ueber
+ * das Modell und nicht ueber die Zeichnung: eine Scheibe traegt per
+ * Konstruktion KEINE Radialkomponente (derselbe Grund, aus dem `rzBei` sein
+ * Bild aus Bz und Bt baut). In der Stirnansicht liegen in der Ebene aber
+ * gerade Br und Bt -- Linien liessen sich dort nur zeichnen, indem man Br
+ * erfindet. Gezeigt wird deshalb B_z, also das Feld AUS der Ebene heraus, und
+ * die Beschriftung sagt es.
+ *
+ * **Die Hoehenlinienwerte stehen EINMAL fest** (`aDeckel`), wie die Farbskala
+ * und aus demselben Grund: je Rahmen neu gewaehlt aendert sich die Zahl der
+ * Linien mit der Drehung, und dann saehe eine Aenderung der SKALA aus wie eine
+ * Aenderung des FELDES. Gleich viele Linien heissen gleich viel Fluss zwischen
+ * ihnen -- das ist der ganze Grund, warum man ein Linienbild lesen kann.
  */
 "use strict";
 
@@ -88,9 +111,27 @@ function liveSorgen(p, nPos, melde, marke) {
       for (let a = 0; a < 120; a++)
         deckel = Math.max(deckel, Math.abs(
           _liveBz(e, k, a * 2 * Math.PI / 120, p.poles)));
+  // Der Deckel der HOEHENLINIEN -- dieselbe Ueberlegung wie bei der Farbskala
+  // (s. Modulkopf): einmal fest, sonst waechst und schrumpft die Zahl der
+  // Linien mit der Drehung und das Bild erzaehlt etwas ueber die Skala statt
+  // ueber das Feld. Gemessen wird am MITTLEREN Schnitt, weil die Abwicklung
+  // ihn zeigt.
+  let aDeckel = 0;
+  const kM = Math.floor(rahmen[0].nSch / 2);
+  for (const e of rahmen)
+    for (const v of e.scheiben[kM].A) {
+      const q = Math.abs(v); if (q > aDeckel) aDeckel = q;
+    }
+  const gM = rahmen[0].scheiben[kM].g;
   _LIVE = { rahmen, nPos, per, tauP, mP, poles: p.poles,
             ri: p.ri, ro: p.ro, welle: p.welle,
-            deckel: deckel > 1e-6 ? deckel : 1 };
+            deckel: deckel > 1e-6 ? deckel : 1,
+            aDeckel: aDeckel > 1e-30 ? aDeckel : 1,
+            // Das Seitenverhaeltnis der Abwicklung. Sie wird MASSSTAEBLICH
+            // gezeichnet: ein 1 mm dicker Luftspalt in einem 3,8:1 gequetschten
+            // Streifen saehe wie 10 % der Bauhoehe aus, und Feldlinien in einem
+            // verzerrten Bild treffen die falschen Winkel.
+            aspekt: gM.breite / gM.hGes };
   _LIVE_MARKE = m;
   return _LIVE;
 }
@@ -149,6 +190,14 @@ function zeichneLiveScheibe(cv, p, folge, theta, deckel) {
   ctx.fillText(`B_z in der Spaltmitte · ${nS} Ringe`, 8, 14);
   ctx.textAlign = "right";
   ctx.fillText(`rot ±${deckel.toFixed(2)} T blau`, W - 8, 14);
+  // **Warum hier keine Feldlinien stehen, steht hier.** Eine Scheibe traegt
+  // keine Radialkomponente; in DIESER Ebene liegen aber gerade Br und Bt.
+  // Linien gaebe es nur, indem man Br erfindet -- und ein erfundenes
+  // Linienbild ist schlimmer als keines, weil man es nicht nachmisst.
+  ctx.textAlign = "center"; ctx.fillStyle = "#6f7785";
+  ctx.fillText("Feldlinien: in der Abwicklung (hier steht B_z senkrecht zur Ebene)",
+               W / 2, H - 7);
+  ctx.textAlign = "left";
 }
 
 /* ---- B_z ueber dem Umfang, mit mitlaufender Marke ---------------------- */
@@ -181,48 +230,159 @@ function zeichneLiveKurve(cv, p, folge, theta, deckel) {
   ctx.fillText(`0 … 360°`, W - 6, H - 5);
 }
 
-/* ---- Der abgewickelte Streifen, mit dem WANDERNDEN Laeufer -------------
+/* ---- Hoehenlinien von A = die Feldlinien, als Streckenzug ---------------
  *
- * Das ist das Bild, an dem man die Drehung ueberhaupt erkennt: die Zaehne
- * stehen, die Magnete wandern. In der Draufsicht sind 16 Pole bei 22,5°
- * Periode kaum auseinanderzuhalten, hier ist es offensichtlich.
+ * Marching Squares, und zwar als STRECKEN und nicht als Punktwolke: die
+ * Fassung in `feld.js` setzt je Kreuzung ein 1-px-Rechteck (`ctx.rect`), was
+ * fuer ein Standbild reicht, in einer laufenden Anzeige aber flimmert und bei
+ * schraegen Linien ausfranst.
  *
- * Gezeichnet, nicht geloest — die Feldaussage steht in den beiden anderen
- * Bildern, und das sagt die Beschriftung auch.
+ * `lies(i, j)` gibt A am Knoten (i, j) -- die Entkopplung ist Absicht: der
+ * Aufrufer kann damit eine starr gedrehte Spalte liefern, ohne dass hier etwas
+ * von Drehung wissen muss.
+ *
+ * `luecke` ist die eine Spalte, an der die starre Drehung im Fenster umbricht;
+ * dort sind die beiden Nachbarn KEINE Nachbarn, und eine Linie darueber waere
+ * erfunden. Beide Seiten tragen dort den Dirichlet-Wert 0, Hoehenlinien
+ * ungleich 0 kreuzen also ohnehin nicht -- ausgenommen wird sie trotzdem,
+ * weil „trifft hier zufaellig nicht zu" keine Begruendung ist.
  */
-function zeichneLiveAbwicklung(cv, p, theta) {
-  const ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
-  ctx.fillStyle = "#101216"; ctx.fillRect(0, 0, W, H);
-  const TAU2 = 2 * Math.PI;
-  const rs = p.rs || (p.ri + p.ro) / 2;
-  const tauP = TAU2 * rs / p.poles, tauS = TAU2 * rs / p.q;
-  const breite = 2 * tauP, s = W / breite;
-  const X = (u) => u * s;
-  const hZ = Math.round(H * 0.34), hSp = Math.max(2, Math.round(H * 0.07));
-  const yZ = Math.round(H * 0.08), yM = yZ + hZ + hSp, hM = Math.round(H * 0.26);
-
-  ctx.fillStyle = "#49525f"; ctx.fillRect(0, yZ, W, hZ);          // Staenderzahn
-  ctx.fillStyle = "#101216";
-  for (let i = -1; (i + 0.5) * tauS < breite + tauS; i++) {       // Nuten: STEHEN
-    const u = (i + 0.5) * tauS;
-    ctx.fillRect(X(u - p.bnut / 2), yZ, s * p.bnut, hZ);
+function liveKonturen(ctx, nx, ny, lies, X, Y, stufen, luecke) {
+  for (const lv of stufen) {
+    ctx.beginPath();
+    for (let j = 0; j < ny - 1; j++)
+      for (let i = 0; i < nx - 1; i++) {
+        if (i === luecke) continue;
+        const a = lies(i, j), b = lies(i + 1, j),
+              c = lies(i + 1, j + 1), d = lies(i, j + 1);
+        const pk = [];
+        if ((a < lv) !== (b < lv)) pk.push([X(i + (lv - a) / (b - a)), Y(j, 0)]);
+        if ((b < lv) !== (c < lv)) pk.push([X(i + 1), Y(j, (lv - b) / (c - b))]);
+        if ((d < lv) !== (c < lv)) pk.push([X(i + (lv - d) / (c - d)), Y(j + 1, 0)]);
+        if ((a < lv) !== (d < lv)) pk.push([X(i), Y(j, (lv - a) / (d - a))]);
+        if (pk.length === 2) {
+          ctx.moveTo(pk[0][0], pk[0][1]); ctx.lineTo(pk[1][0], pk[1][1]);
+        } else if (pk.length === 4) {
+          // Sattelpunkt: zwei Strecken, Paarung willkuerlich aber stetig.
+          ctx.moveTo(pk[0][0], pk[0][1]); ctx.lineTo(pk[3][0], pk[3][1]);
+          ctx.moveTo(pk[1][0], pk[1][1]); ctx.lineTo(pk[2][0], pk[2][1]);
+        }
+      }
+    ctx.stroke();
   }
-  ctx.fillStyle = "#e8a33d"; ctx.globalAlpha = 0.22;              // Luftspalt
-  ctx.fillRect(0, yZ + hZ, W, hSp); ctx.globalAlpha = 1;
+}
 
-  // Der Laeufer WANDERT -- derselbe Versatz, mit dem auch geloest wird.
-  const vx = theta * rs;
-  const M = magnetSegmente(p);
-  ctx.fillStyle = "#39414c"; ctx.fillRect(0, yM, W, hM);
-  for (let pol = -2; pol * tauP < breite + 2 * tauP; pol++)
-    for (const sg of M.seg) {
-      const u0 = (pol + sg.u0) * tauP + (vx % tauP) - tauP, w = sg.breit * tauP;
-      if (u0 >= breite || u0 + w <= 0) continue;
-      const my = magnetRichtung(p, pol + Math.floor(vx / tauP), sg.k, M.nU, M.hal)[1];
-      ctx.fillStyle = Math.abs(my) < 0.3 ? "#8e44ad" : my > 0 ? "#c0392b" : "#2e6fb7";
-      ctx.fillRect(X(Math.max(0, u0)), yM,
-                   s * (Math.min(breite, u0 + w) - Math.max(0, u0)), hM);
+/* Welche GELOESTE Spalte zeigt die Anzeige an der Stelle `i`?
+ *
+ * Die starre Drehung um `dreh` ist im Fenster eine Verschiebung um ganze
+ * Spalten. Gerundet wird dabei auf die Zelle -- und das ist kein Zugestaendnis:
+ * `dreh` ist immer ein Vielfaches der Periode und innerhalb einer Periode
+ * KONSTANT, die fluessige Bewegung kommt aus den geloesten Stellungen. Ein
+ * halber Zellversatz einmal je Periode ist unsichtbar und bewegt keinen Wert.
+ */
+function liveVersatz(folge, theta, nx) {
+  const { dreh } = liveBei(folge, theta);
+  const thW = 2 * (2 * Math.PI / folge.poles);
+  return ((Math.round((dreh / thW) * nx) % nx) + nx) % nx;
+}
+
+/* ---- Der abgewickelte Streifen: GELOEST, mit Feldlinien -----------------
+ *
+ * Das ist das Bild, an dem man die Drehung ueberhaupt erkennt (die Zaehne
+ * stehen, die Magnete wandern) -- und seit dem 11.10.2026 auch das, in dem die
+ * FELDLINIEN stehen. Vorher war es gezeichnet und nicht geloest; gemeldet
+ * wurde genau das: *„da moechte ich auch magnetfeldlinien sehen."*
+ *
+ * Es ist die richtige Stelle dafuer und nicht die bequemste: der Schnitt loest
+ * `B = curl(A e_r)` in DIESER Ebene, also sind die Hoehenlinien von A hier die
+ * Feldlinien -- exakt, nicht nachintegriert. Auf der Scheibe von vorn gibt es
+ * keine (s. Modulkopf).
+ *
+ * **Gezeichnet wird massstaeblich**, nicht auf die Leinwand gequetscht: der
+ * Luftspalt ist 1 mm in 65 mm Bauhoehe, und in einem 3,8:1 gestreckten
+ * Streifen saehe er wie 10 % der Maschine aus -- Feldlinien darin traefen die
+ * falschen Winkel, und gerade an ihrem Winkel liest man ab, wo Fluss quer
+ * laeuft statt durch.
+ *
+ * **Struktur und Feld kommen aus EINEM Array** (`g.rolle` bzw. `s.A`, beide am
+ * selben Gitter): eine daneben gezeichnete Geometrie koennte gegen das Feld
+ * verrutschen, und das waere die stille Sorte Fehler -- beide Bilder sehen
+ * richtig aus.
+ */
+function zeichneLiveAbwicklung(cv, p, folge, theta) {
+  const ctx = cv.getContext("2d"), W = cv.width, H = cv.height;
+  ctx.fillStyle = "#0c0e12"; ctx.fillRect(0, 0, W, H);
+  const { erg } = liveBei(folge, theta);
+  const kR = Math.floor(erg.nSch / 2), sc = erg.scheiben[kR], g = sc.g;
+  const nx = g.nx, ny = g.ny;
+  const iSh = liveVersatz(folge, theta, nx);
+  const q = (i) => ((i - iSh) % nx + nx) % nx;     // Anzeige -> geloeste Spalte
+  // Die Spalte, an der die Verschiebung umbricht (s. `liveKonturen`).
+  let luecke = -1;
+  for (let i = 0; i < nx - 1; i++) if (q(i + 1) !== (q(i) + 1) % nx) { luecke = i; break; }
+
+  // Massstaeblich und zentriert einpassen.
+  const pad = 14, obR = 13;
+  const sk = Math.min((W - 2 * pad) / g.breite, (H - pad - obR) / g.hGes);
+  const x0 = (W - sk * g.breite) / 2, y0 = H - (H - obR - sk * g.hGes) / 2;
+  const X = (i) => x0 + sk * i * g.dx;             // Knoten -> Bildpunkt
+  const Yk = (z) => y0 - sk * z;
+  const Y = (j, f) => Yk(g.yc[j] + (f || 0) * (g.yc[Math.min(j + 1, ny - 1)] - g.yc[j]));
+
+  // ── 1. Die Struktur, Spalte fuer Spalte aus `rolle` ─────────────────────
+  // Zusammengefasst in Laeufe: eine Schicht ist ueber viele Zeilen dasselbe
+  // Material, und ein Rechteck je Zelle waere bei 59x52 Zellen je Rahmen
+  // dreitausend Aufrufe fuer ein Bild, das aus acht Baendern besteht.
+  // Gedaempft: die Struktur ist hier die Kulisse, die Linien sind die Aussage.
+  const FARBE = ["#0c0e12", "#3f4752", null, "#7a5631"];   // Luft, Eisen, Magnet, Leiter
+  for (let i = 0; i < nx; i++) {
+    const qi = q(i), xA = X(i), xB = X(i + 1);
+    let j0 = 0;
+    const kenn = (j) => {
+      const k = j * nx + qi, r = g.rolle[k];
+      if (r !== 2) return "r" + r;
+      const my = g.My[k];
+      return "m" + (Math.abs(my) < 1e-12 ? 0 : my > 0 ? 1 : -1);
+    };
+    let akt = kenn(0);
+    for (let j = 1; j <= ny; j++) {
+      const nk = j < ny ? kenn(j) : null;
+      if (nk === akt) continue;
+      let f;
+      if (akt[0] === "m")
+        f = akt === "m1" ? "#8e3b31" : akt === "m-1" ? "#2d5a86" : "#6d4a86";
+      else f = FARBE[+akt.slice(1)] || "#0c0e12";
+      ctx.fillStyle = f;
+      ctx.fillRect(xA, Yk(g.yk[j]), Math.ceil(xB - xA) + 0.5,
+                   sk * (g.yk[j] - g.yk[j0]));
+      j0 = j; akt = nk;
     }
+  }
+
+  // ── 2. Die Schichtgrenzen, damit der Spalt ablesbar bleibt ─────────────
+  ctx.strokeStyle = "rgba(190,205,225,.22)"; ctx.lineWidth = 1;
+  for (const b of g.bnd) {
+    ctx.beginPath();
+    ctx.moveTo(X(0), Yk(b.y0)); ctx.lineTo(X(nx), Yk(b.y0)); ctx.stroke();
+  }
+
+  // ── 3. Die Feldlinien ──────────────────────────────────────────────────
+  // Die Stufen stehen EINMAL fest (`folge.aDeckel`, s. Modulkopf): gleich
+  // viele Linien heissen gleich viel Fluss zwischen ihnen, und nur deshalb
+  // laesst sich ein Linienbild ueberhaupt lesen.
+  const NST = 9, stufen = [];
+  for (let k = 0; k < NST; k++) {
+    const u = ((k + 0.5) / NST) * folge.aDeckel;
+    stufen.push(u, -u);
+  }
+  ctx.strokeStyle = "#8fe3ff"; ctx.lineWidth = 1.1; ctx.globalAlpha = 0.9;
+  liveKonturen(ctx, nx, ny, (i, j) => sc.A[j * nx + q(i)], X, Y, stufen, luecke);
+  ctx.globalAlpha = 1;
+
+  // Kurz halten: was das Bild IST, steht in der Bildunterschrift der Vorschau;
+  // hier steht nur, was man sonst nirgends ablesen kann.
   ctx.fillStyle = "#8a93a3"; ctx.font = "10px system-ui"; ctx.textAlign = "left";
-  ctx.fillText(`abgewickelt bei r = ${rs.toFixed(0)} mm · Zähne stehen, Magnete wandern`, 6, 11);
+  ctx.fillText(`r = ${sc.r.toFixed(0)} mm · Zähne stehen, Magnete wandern`, 6, 10);
+  ctx.textAlign = "right";
+  ctx.fillText(`${2 * NST} Feldlinien · feste Stufen`, W - 6, 10);
 }
