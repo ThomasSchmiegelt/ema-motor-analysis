@@ -536,6 +536,39 @@ pruefe(PV._bewerte(dict(BASIS, geom=weit), 12000.0, 5000.0, 120.0).get("ok") in 
        "und wird trotzdem bewertet statt abgelehnt — das Band ist kein Tor")
 
 
+print("\n— Alle Maschinenarten, und der Axialfluss wird BENANNT statt vorgefuehrt —")
+
+# Die Achse zieht ihre Optionen aus `ema_maschinenart.ARTEN` und nicht aus einer
+# Handliste -- sonst fehlt die naechste neue Art genau dort, wo man sie
+# vergleichen will. Gemessen am 16.10.2026 stand in der SKILL.md noch
+# "PSM/ASM/SynRM/EESM", waehrend die Achse laengst alle fuenf fuehrte.
+import ema_maschinenart as _MA
+_arten = PV.ACHSEN["maschinenart"]["werte"](BASIS)
+pruefe(set(_arten) == set(_MA.ARTEN),
+       f"die Achse fuehrt alle {len(_MA.ARTEN)} Maschinenarten "
+       f"({', '.join(sorted(_arten))}) — aus EINER Quelle")
+
+# Und der Axialfluss: der Paarvergleich ist radial und sagt das, statt
+# vierundzwanzigmal das Taschentor reissen zu lassen. Ein Nein mit Begruendung
+# ist ein Ergebnis; vierundzwanzig gleiche Gatterzeilen schicken die Suche zur
+# eigenen Geometrie statt zum Werkzeug.
+import ema_fluss as _F
+_ax = _F.axial_ergaenzen(dict(BASIS["geom"], fluxPath="axial"))
+_ax = _ax[0] if isinstance(_ax, tuple) else _ax
+try:
+    PV.vergleiche(dict(BASIS, geom=_ax), achsen=["kuehlung"])
+    pruefe(False, "ein Axialfluss-Payload wird abgewiesen")
+except PV.AxialNichtVerglichen as _e:
+    _t = str(_e)
+    pruefe(True, "ein Axialfluss-Payload wird abgewiesen")
+    pruefe("axial --stufe" in _t and "maschinenart" in _t,
+           "und die Absage nennt, was statt dessen geht")
+    pruefe(str(len(PV.ACHSEN)) in _t,
+           f"samt der Zahl der Achsen, die radial sind ({len(PV.ACHSEN)})")
+except Exception as _e:                                            # noqa: BLE001
+    pruefe(False, f"erwartet AxialNichtVerglichen, bekam {type(_e).__name__}")
+
+
 print("\n" + "=" * 60)
 print(f"{_n_ok} bestanden, {_n_bad} fehlgeschlagen")
 sys.exit(1 if _n_bad else 0)

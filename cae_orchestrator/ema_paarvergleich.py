@@ -392,6 +392,10 @@ def _setz_laenge(p, wert):
     p["axial_len"] = float(wert)
 
 
+class AxialNichtVerglichen(ValueError):
+    """Der Paarvergleich ist radial -- und sagt das, statt es vorzufuehren."""
+
+
 ACHSEN = {
     # Die erste aller Entscheidungen: woher kommt der Luftspaltfluss ueberhaupt.
     # Sie steht vorn, weil sie ueber die Bedeutung fast aller uebrigen Achsen
@@ -1304,6 +1308,36 @@ def vergleiche(basis: dict, achsen: list | None = None, n_max: float | None = No
     """Alle Achsen durchspielen und je Achse jede Option gegen jede stellen."""
     if not basis.get("geom"):
         raise ValueError("Der Paarvergleich braucht einen Payload mit geom.")
+
+    # **Der Axialfluss wird hier NICHT verglichen, und das wird gesagt.**
+    #
+    # Jede dieser Achsen beschreibt einen Zylinder: Magnetanordnung in einem
+    # Querschnitt, Nutbreite je Nutteilung, Wellendurchmesser, Flussbarrieren.
+    # Eine Scheibe hat davon nichts, und der schnelle Bewerter rechnet sie auch
+    # nicht -- `_bewerte_pmsm` geht durch `ema_optimize._eval_geom`, und das
+    # ist der radiale Weg.
+    #
+    # Gemessen lief es vorher so: das Taschentor wies JEDE Option ab, mit
+    # vierundzwanzig gleichlautenden Zeilen „Axialfluss: dieses Tor prueft
+    # Magnettaschen in einem Querschnitt". Das ist nicht falsch -- es ist nur
+    # die Auskunft des Tores und nicht die der Lage. Wer sie liest, sucht den
+    # Fehler bei seiner Geometrie statt beim Werkzeug.
+    import ema_fluss
+    if ema_fluss.flussweg(basis.get("geom") or {}) == "axial":
+        raise AxialNichtVerglichen(
+            "Der Paarvergleich traegt den Axialfluss nicht. Alle "
+            f"{len(ACHSEN)} Achsen beschreiben einen Zylinder (Magnetanordnung "
+            "im Querschnitt, Nutbreite je Nutteilung, Wellendurchmesser, "
+            "Flussbarrieren), und der schnelle Bewerter dahinter rechnet "
+            "radial.\n\nWas statt dessen geht:\n"
+            "  cae_cli.py axial --stufe analytisch   Ringraum, Anzug, Ruecken, "
+            "Bandage, Dauermoment\n"
+            "  cae_cli.py axial --stufe feld         B_gap(r) im abgewickelten "
+            "Mehrschnitt\n"
+            "  cae_cli.py studie --param <name>      EINEN axialen Parameter "
+            "durchfahren\n"
+            "  cae_cli.py maschinenart               welcher Flussweg welche "
+            "Stufe traegt")
     namen = achsen or list(ACHSEN)
     unbekannt = [n for n in namen if n not in ACHSEN]
     if unbekannt:
