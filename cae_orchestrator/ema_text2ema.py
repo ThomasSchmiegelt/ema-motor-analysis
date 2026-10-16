@@ -100,9 +100,15 @@ SCHEMA = {
     "axialLambda":  {"kind": "num", "lo": 0.05, "hi": 0.98, "def": 0.5774, "geom": True, "adv": True,
                      "desc": "Axialfluss: Teilungsverhaeltnis lambda = Ri/Ro "
                              "(0,5774 = 1/sqrt(3), der klassische Wert bei endlichem Strombelag)"},
-    "axialSpalte":  {"kind": "num", "lo": 1, "hi": 8, "def": 2, "geom": True, "adv": True, "int": True,
-                     "desc": "Axialfluss: Zahl der Luftspalte (1 = einseitig, 2 = AFIR/TORUS/YASA, "
-                             "mehr = mehrstufig)"},
+    "axialSpalte":  {"kind": "num", "lo": 0, "hi": 8, "def": 0, "geom": True, "adv": True, "int": True,
+                     "desc": "Axialfluss: Zahl der Luftspalte -- ABGELEITET, kein "
+                             "Eingabewert. Sie folgt der Bauform (einseitig 1, "
+                             "AFIR/TORUS/YASA 2, mal axialStapel); 0 ist die Vorgabe "
+                             "und heisst genau das. Ein widersprechender Wert wird "
+                             "UEBERSTIMMT und gemeldet (Rueckgabeschluessel "
+                             "'spalte_korrigiert'): bis 16.10.2026 gewann der "
+                             "gespeicherte Schluessel, und 'axialBauform=einseitig' "
+                             "ergab zwei Luftspalte (s. BEFUNDE.md)"},
     "axialSpaltMm":  {"kind": "num", "lo": 0.2, "hi": 5.0, "def": 1.0, "geom": True, "adv": True,
                       "desc": "Axialfluss: Luftspalt [mm] -- eine AXIALE Strecke, nicht die "
                               "Differenz zweier Radien"},

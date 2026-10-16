@@ -3178,6 +3178,25 @@ def _pv_achsen() -> str:
 _PV_ACHSEN = _pv_achsen()
 
 
+def _av_achsen() -> str:
+    """Die AXIALEN Achsen -- derselbe weiche Weg wie `_pv_achsen`.
+
+    Weich, weil dieser Hilfetext beim Bauen des Parsers entsteht: ein
+    Importfehler duerfte nicht die ganze CLI nehmen, nur weil ein Hilfetext
+    nicht vollstaendig ist.
+    """
+    try:
+        from ema_axial_vergleich import ACHSEN
+        return ", ".join(ACHSEN)
+    except Exception:                                        # noqa: BLE001
+        return ("bauform, lambda, polzahl, nutzahl, zahnform, magnetwerkstoff, "
+                "magnetdicke, luftspalt, polbedeckung, zahnlaenge, "
+                "rueckenblech, stapel, kuehlung, blech")
+
+
+_AV_ACHSEN = _av_achsen()
+
+
 def _payload_fuer_lauf(args):
     """Payload laden, ``--set`` anwenden, Geometrie pruefen. Gemeinsam fuer
     ``studie`` und ``zielwert`` — zwei Abschriften waeren zwei Vorstellungen
@@ -3819,6 +3838,48 @@ def cmd_screen(args) -> int:
     return 0 if erg["brauchbar"] else 1
 
 
+def _paarvergleich_axial(args, payload) -> int:
+    """Der axiale Zweig des Verbs ``paarvergleich`` (``ema_axial_vergleich``).
+
+    Dieselbe Ausgabeform wie radial -- Rangliste, Achsen, Paare -- und dieselbe
+    Exitregel: 0, wenn mindestens eine Achse zwei baubare Optionen hat.
+    ``--n_max``/``--last``/``--web`` gibt es hier nicht: die Fliehkraft der
+    Scheibe rechnet ``ema_axial.bandage`` aus ``--rpm``, ein gemeinsames
+    Lastmoment kennt diese Stufe nicht (sie gibt das DAUERmoment aus), und
+    einen Mindeststeg hat eine Scheibe nicht. Wer sie trotzdem setzt, bekommt
+    das gesagt statt stillschweigend ueberhoert zu werden.
+    """
+    import ema_axial_vergleich as AV
+
+    ueberhoert = [n for n, v in (("--n_max", args.n_max), ("--last", args.last),
+                                 ("--web", args.web)) if v is not None]
+    if ueberhoert:
+        print(f"Hinweis: {', '.join(ueberhoert)} gilt nur radial und wird hier "
+              f"nicht gelesen (s. _paarvergleich_axial).", file=sys.stderr)
+
+    achsen = None
+    if args.achsen:
+        achsen = [a.strip() for a in args.achsen.split(",") if a.strip()]
+        unbekannt = [a for a in achsen if a not in AV.ACHSEN]
+        if unbekannt:
+            return _die(f"Unbekannte axiale Achse(n): {', '.join(unbekannt)}. "
+                        f"Bekannt: {', '.join(AV.ACHSEN)}", EXIT_USAGE)
+    try:
+        erg = AV.vergleiche(payload, achsen=achsen, rpm=args.rpm)
+    except ValueError as e:
+        return _die(str(e), EXIT_USAGE)
+
+    text = AV.als_text(erg, paare=not args.ohne_paare, max_paare=args.max_paare)
+    if getattr(args, "json", False):
+        emit(erg, args)
+    else:
+        print(text)
+    brauchbar = any(sum(1 for o in a["optionen"] if o.get("ok")) >= 2
+                    for a in erg["achsen"].values())
+    _ablegen(args, "paarvergleich", text, daten=erg, ok=brauchbar)
+    return EXIT_OK if brauchbar else EXIT_REMOTE
+
+
 def cmd_paarvergleich(args) -> int:
     """Die Gestaltungsentscheidungen gegeneinanderstellen, BEVOR gezeichnet wird.
 
@@ -3851,6 +3912,19 @@ def cmd_paarvergleich(args) -> int:
     echo_sets(applied)
     if not payload.get("geom"):
         return _die("Keine Geometrie im Payload — paarvergleich braucht geom.", EXIT_USAGE)
+
+    # **EIN Verb, zwei Flusswege** -- Muster `feld2d`/`ema_maschinenart.feldweg`.
+    # Welcher Satz Achsen gilt, entscheidet der Flussweg und nicht der
+    # Aufrufer: die vierundzwanzig radialen Achsen beschreiben einen Zylinder
+    # (Magnetanordnung im Querschnitt, Nutbreite je Nutteilung,
+    # Wellendurchmesser, Flussbarrieren), und ihr schneller Bewerter rechnet
+    # ueber `ema_optimize._eval_geom` Zylinderringe mal Blechpaketlaenge. Eine
+    # Scheibe hat davon nichts. Bis zum 16.10.2026 sagte das Verb hier nur ab
+    # (`AxialNichtVerglichen`) -- richtig, aber ohne Antwort: die Entscheidungen
+    # VOR der Zeichnung gibt es axial genauso, sie heissen nur anders.
+    import ema_fluss as _F
+    if _F.flussweg(payload.get("geom") or {}) == "axial":
+        return _paarvergleich_axial(args, payload)
 
     import ema_paarvergleich as PV
 
@@ -4806,9 +4880,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="neutraler Grundpayload aus den Schemavorgaben, ohne Altprojekt "
                         "— der richtige Start fuer eine NEUE Auslegung")
     s.add_argument("--achsen",
-                   help="nur diese Achsen, mit Komma. Vorgabe: alle. Bekannt: " + _PV_ACHSEN)
+                   help="nur diese Achsen, mit Komma. Vorgabe: alle. Bekannt (radial): "
+                        + _PV_ACHSEN + ". Bei fluxPath=axial gilt der AXIALE Satz "
+                        "(" + _AV_ACHSEN + ") — welcher, entscheidet der Flussweg")
     s.add_argument("--n_max", type=float, default=None,
-                   help="Hoechstdrehzahl fuer das Fliehkrafttor (Vorgabe: aus dem Payload)")
+                   help="Hoechstdrehzahl fuer das Fliehkrafttor (Vorgabe: aus dem Payload) "
+                        "— nur radial")
     s.add_argument("--rpm", type=float, default=None,
                    help="Drehzahl des gemeinsamen Betriebspunkts (Vorgabe: rpm_from)")
     s.add_argument("--last", type=float, default=None,

@@ -565,6 +565,16 @@ except PV.AxialNichtVerglichen as _e:
            "und die Absage nennt, was statt dessen geht")
     pruefe(str(len(PV.ACHSEN)) in _t,
            f"samt der Zahl der Achsen, die radial sind ({len(PV.ACHSEN)})")
+    # Seit dem 16.10.2026 ist die Absage keine Sackgasse mehr: das VERB
+    # verzweigt nach dem Flussweg und nimmt axial `ema_axial_vergleich`.
+    # Dieses Modul bleibt radial — aber es muss den Weg nennen, sonst liest
+    # sich ein „geht hier nicht“ wie ein „geht gar nicht“.
+    pruefe("ema_axial_vergleich" in _t,
+           "… und seit dem 16.10.2026 auch den axialen Paarvergleich selbst")
+    import ema_axial_vergleich as _AV
+    pruefe(_AV.vergleiche(dict(BASIS, geom=_ax),
+                          achsen=["bauform"])["achsen"]["bauform"]["optionen"],
+           "und der rechnet denselben Payload wirklich durch")
 except Exception as _e:                                            # noqa: BLE001
     pruefe(False, f"erwartet AxialNichtVerglichen, bekam {type(_e).__name__}")
 

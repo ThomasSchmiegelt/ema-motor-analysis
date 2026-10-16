@@ -393,7 +393,16 @@ def _setz_laenge(p, wert):
 
 
 class AxialNichtVerglichen(ValueError):
-    """Der Paarvergleich ist radial -- und sagt das, statt es vorzufuehren."""
+    """DIESER Achsensatz ist radial -- und sagt das, statt es vorzufuehren.
+
+    Seit dem 16.10.2026 ist das keine Sackgasse mehr: das Verb
+    ``cae_cli.py paarvergleich`` verzweigt nach ``ema_fluss.flussweg`` und
+    nimmt fuer die Scheibe ``ema_axial_vergleich`` (Muster ``feld2d`` /
+    ``ema_maschinenart.Art.feldweg``). Diese Ausnahme bleibt trotzdem stehen
+    und wird hier weiter geworfen: wer dieses Modul direkt ruft, bekommt
+    gesagt, dass seine vierundzwanzig Achsen einen Zylinder beschreiben --
+    und wo der Weg fuer die Scheibe liegt.
+    """
 
 
 ACHSEN = {
@@ -1330,6 +1339,10 @@ def vergleiche(basis: dict, achsen: list | None = None, n_max: float | None = No
             "im Querschnitt, Nutbreite je Nutteilung, Wellendurchmesser, "
             "Flussbarrieren), und der schnelle Bewerter dahinter rechnet "
             "radial.\n\nWas statt dessen geht:\n"
+            "  cae_cli.py paarvergleich              das VERB verzweigt nach "
+            "dem Flussweg und nimmt axial `ema_axial_vergleich` (14 eigene "
+            "Achsen: Bauform, lambda, Zahnform, Rueckenblech, Stapel, …)\n"
+            "  ema_axial_vergleich.vergleiche(payload)   dasselbe aus Python\n"
             "  cae_cli.py axial --stufe analytisch   Ringraum, Anzug, Ruecken, "
             "Bandage, Dauermoment\n"
             "  cae_cli.py axial --stufe feld         B_gap(r) im abgewickelten "

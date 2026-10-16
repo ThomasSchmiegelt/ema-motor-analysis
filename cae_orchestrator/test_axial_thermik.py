@@ -85,11 +85,46 @@ pruefe(abs(h1 - _nu * AT.K_LUFT / ro) < 1e-9,
        "h = Nu k/Ro mit Nu = 0,015 Re^0,8 (Cobb/Saunders, Dorfman)")
 
 print("\n— 4. Die Bauform bewegt das Netz —")
+# Gehebelt wird ueber die BAUFORM und nicht ueber `axialJochStaenderMm`:
+# seit dem 16.10.2026 entscheidet die Bauform, ob es ein Staenderjoch GIBT
+# (`_hat_staenderjoch`, dieselbe Quelle wie `ema_axial_fdm.statorhoehe`).
+# Vorher las `_geo` den Schluessel roh und gab auch dem jochlosen YASA 12 mm
+# Eisen -- Feldmodell und Massemodell meinten damit zwei verschiedene
+# Maschinen. Den Schluessel an einer YASA zu setzen tut jetzt nichts, und das
+# ist der Sinn der Sache.
 _yasa = AT.leitwerte(G, "natural", 3000.0)
-_torus = AT.leitwerte({**G, "axialJochStaenderMm": 12.0}, "natural", 3000.0)
+_torus = AT.leitwerte({**G, "axialBauform": "torus_nn"}, "natural", 3000.0)
 pruefe(_torus["G_si_h"] > _yasa["G_si_h"],
        f"mit Staenderjoch waechst das Randband {_yasa['G_si_h']:.1f} → "
        f"{_torus['G_si_h']:.1f} W/K — jochlos hat das Eisen fast keinen Weg")
+pruefe(abs(AT.leitwerte({**G, "axialJochStaenderMm": 40.0},
+                        "natural", 3000.0)["G_si_h"] - _yasa["G_si_h"]) < 1e-9,
+       "und ein Jochmass an einer JOCHLOSEN Bauform bewegt nichts — die "
+       "Bauform entscheidet, nicht der Schluessel")
+# **Und die Schichtung kommt aus EINER Quelle.** Bis zum 16.10.2026 fuehrte
+# dieses Modul Zahnlaenge, Staenderjoch und Rueckenblech selbst, mit eigenen
+# Vorgabezahlen und ohne die Bauform zu fragen: gemessen meldeten Feld und
+# Masse fuer dieselbe Maschine 100,92 gegen 65,00 mm (torus_nn), 98,84 gegen
+# 71,00 (afir), 55,92 gegen 45,00 (einseitig). Nur YASA stimmte ueberein — die
+# Bauform, an der entwickelt wurde. Zwei Bauhoehen sind zwei Maschinen.
+import ema_axial_fdm as AF
+for _bf in AF._BAUFORMEN:
+    _g = {**G, "axialBauform": _bf}
+    pruefe(abs(AT.stapelhoehe(_g) * 1000.0 - AF.stapelhoehe(_g)) < 1e-9,
+           f"{_bf}: Thermik und Feldmodell meinen dieselbe Bauhoehe "
+           f"({AF.stapelhoehe(_g):.2f} mm)")
+# Gestapelte Teilmaschinen kennt `lagen` nicht — die traegt diese Seite.
+pruefe(abs(AT.stapelhoehe({**G, "axialStapel": 3})
+           - 3.0 * AT.stapelhoehe(G)) < 1e-9,
+       "drei gestapelte Teilmaschinen sind dreimal so hoch")
+# Beidseitig genutet heisst ZWEI Zahnbaender — und zwei Nutfuellungen.
+_t_nn = AT.leitwerte({**G, "axialBauform": "torus_nn"}, "natural", 3000.0)
+pruefe(_t_nn["_axial"]["zahnlagen"] == 2
+       and abs(_t_nn["_axial"]["A_nutwand_m2"]
+               - 2.0 * _yasa["_axial"]["A_nutwand_m2"]) < 1e-9,
+       "TORUS-NN traegt zwei Zahnbaender, also die doppelte Nutwand "
+       f"({_t_nn['_axial']['A_nutwand_m2']:.3f} m^2)")
+
 _eins = AT.leitwerte({**G, "axialBauform": "einseitig"}, "natural", 3000.0)
 pruefe(_eins["G_ri_h"] < _yasa["G_ri_h"],
        f"eine Laeuferscheibe statt zweier halbiert die Rueckseite "

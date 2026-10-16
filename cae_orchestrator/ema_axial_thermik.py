@@ -123,6 +123,42 @@ def _zahl(geom: dict, schluessel: str, ersatz: float) -> float:
         return float(ersatz)
 
 
+def _dicken(geom: dict) -> dict:
+    """Zahn, Staenderjoch, Rueckenblech und Zahnbaender -- aus EINER Quelle.
+
+    **Befund vom 16.10.2026.** Dieses Modul fuehrte alle drei Dicken selbst
+    (``_zahl(geom, "axialZahnLaengeMm", 25.0)``, ``…"axialJochStaenderMm", 12.0``,
+    ``…"axialJochLaeuferMm", 13.0``) und wusste dabei nichts von der Bauform.
+    ``ema_axial_fdm`` entscheidet sie seit dem 06./16.10.2026 anders, und zwar
+    in drei Punkten:
+
+    * ein **jochloser** Staender (YASA) hat kein Joch -- hier bekam er 12 mm
+      Eisen, das es nicht gibt;
+    * wo die Bauform eines braucht, wird es **aus dem Fluss bemessen**
+      (``_jochhoehe``, gemessen 10,92 mm) statt aus einer Vorgabezahl;
+    * **beidseitig genutet heisst ZWEI Zahnbaender** (TORUS-NN) -- hier zaehlte
+      eines.
+
+    Gemessen war die Folge die Bauhoehe derselben Maschine: Feld 100,92 mm
+    gegen Thermik 65,00 (torus_nn), 98,84 gegen 71,00 (afir), 55,92 gegen
+    45,00 (einseitig). Nur YASA stimmte ueberein -- die Bauform, an der
+    entwickelt wurde. Zwei Bauhoehen sind zwei Maschinen, und die Masse haengt
+    an jeder dieser Dicken.
+
+    Also gelesen statt gerechnet: ``ema_axial_fdm`` ist die Quelle, aus der
+    auch Mehrschnitt, 3-D-Sektor und CAD ihre Schichtung nehmen.
+    """
+    import ema_axial_fdm as _AF
+    bf = ema_axial.auslegung(geom or {})["bauform"]
+    return {
+        "l_zahn": _AF.zahnlaenge(geom) / 1000.0,
+        "joch_s": (_AF._jochhoehe(geom) / 1000.0
+                   if _AF._BAUFORMEN[bf]["joch"] else 0.0),
+        "joch_r": _AF._rueckenhoehe(geom) / 1000.0,
+        "zahnlagen": _AF._zahnlagen(bf),
+    }
+
+
 def _geo(geom: dict) -> dict:
     """Die Masse der Scheibe in Metern -- einmal gerechnet, von beiden gelesen."""
     a = ema_axial.auslegung(geom, None)
@@ -131,13 +167,19 @@ def _geo(geom: dict) -> dict:
     _nd = _zahl(geom, "axialNabeD", 0.0) or _zahl(geom, "shaftD", 60.0)
     r_nabe = max(_nd / 2000.0, 1e-3)
     h_wk = _zahl(geom, "axialWickelkopfMm", 14.0) / 1000.0
+    _d = _dicken(geom)
     return {
         "a": a, "ro": ro, "ri": ri,
         "A_ring_m2": math.pi * (ro * ro - ri * ri),
         "q": int(a["slots"]),
-        "l_zahn": _zahl(geom, "axialZahnLaengeMm", 25.0) / 1000.0,
-        "joch_s": _zahl(geom, "axialJochStaenderMm", 12.0) / 1000.0,
-        "joch_r": _zahl(geom, "axialJochLaeuferMm", 13.0) / 1000.0,
+        # Die drei Dicken kommen aus `ema_axial_fdm` und nicht aus eigenen
+        # Vorgabezahlen -- s. `_dicken`.
+        "l_zahn": _d["l_zahn"],
+        "joch_s": _d["joch_s"],
+        "joch_r": _d["joch_r"],
+        # Wieviele ZAHNBAENDER der Staender traegt (TORUS-NN: zwei, Zaehne auf
+        # beiden Stirnflaechen). Es verdoppelt Zahneisen UND Nutkupfer.
+        "zahnlagen": _d["zahnlagen"],
         # **Nicht `axialNutBreiteMm` roh.** Dort ist 0 keine Nut von 0 mm,
         # sondern die Anweisung „aus `slotWidthRatio` ableiten" -- genau so
         # steht es in `AXIAL_VORGABE` und so liest es `ema_axial.nutbreite_mm`,
@@ -174,18 +216,22 @@ def masse(geom: dict, mat: dict, st_mat: dict, hp_mat: dict, mag: dict) -> dict:
     q, l_zahn, joch_s = G["q"], G["l_zahn"], G["joch_s"]
     joch_r, b_nut, h_wk = G["joch_r"], G["b_nut"], G["h_wk"]
     d_mag, n_rot, n_st = G["d_mag"], G["n_rotor"], G["n_stator"]
+    # **Beidseitig genutet heisst ZWEI Zahnbaender** (TORUS-NN) -- und zwei
+    # Zahnbaender tragen zwei Nutfuellungen. Das Feldmodell rechnet seit dem
+    # 16.10.2026 so (``ema_axial_fdm.statorhoehe``), die Masse zaehlte eines.
+    n_zl = G["zahnlagen"]
 
     # Nutvolumen: die Nut ist parallelflankig, ihre Breite haengt also NICHT am
     # Radius -- das Volumen ist schlicht b*(ro-ri)*l_zahn je Nut.
-    v_nut = q * b_nut * (ro - ri) * l_zahn
+    v_nut = q * b_nut * (ro - ri) * l_zahn * n_zl
     # Wickelkopf innen UND aussen: zwei Toren um den Ringraum.
     v_wk = (2.0 * math.pi * ro * h_wk * l_zahn
-            + 2.0 * math.pi * max(ri - h_wk, 1e-4) * h_wk * l_zahn)
+            + 2.0 * math.pi * max(ri - h_wk, 1e-4) * h_wk * l_zahn) * n_zl
     rho_cu = float(hp_mat.get("rho", 8960.0))
     m_cu = (v_nut * 0.45 + v_wk * 0.35) * rho_cu          # Fuellgrade als Annahme
 
     rho_fe = float(st_mat.get("rho", 7650.0))
-    v_zahn = (A_ring * l_zahn - v_nut) * n_st
+    v_zahn = (A_ring * l_zahn * n_zl - v_nut) * n_st
     v_joch_s = A_ring * joch_s * n_st
     m_st = (v_zahn + v_joch_s) * rho_fe
 
@@ -210,17 +256,22 @@ def masse(geom: dict, mat: dict, st_mat: dict, hp_mat: dict, mag: dict) -> dict:
 
 
 def stapelhoehe(geom: dict) -> float:
-    """Axiale Baulaenge [m] -- dieselbe Schichtung, aus der die Seite zeichnet."""
-    a = ema_axial.auslegung(geom, None)
-    l_zahn = _zahl(geom, "axialZahnLaengeMm", 25.0) / 1000.0
-    joch_s = _zahl(geom, "axialJochStaenderMm", 12.0) / 1000.0
-    joch_r = _zahl(geom, "axialJochLaeuferMm", 13.0) / 1000.0
-    d_mag = a["magnet_dicke_m"]
-    g = a["luftspalt_m"]
-    n_st = 2 if a["bauform"] == "afir" else 1
-    n_rot = 2 if a["bauform"] in ("yasa", "torus_nn") else 1
-    h = n_st * (l_zahn + joch_s) + n_rot * (d_mag + joch_r) + a["n_spalte"] * g
-    return h * max(1, int(geom.get("axialStapel", 1)))
+    """Axiale Baulaenge [m] -- **aus ``ema_axial_fdm.lagen``, nicht nachgebaut**.
+
+    Hier stand die Schichtung ein zweites Mal als Summe, und sie lief
+    auseinander: ``ema_axial_fdm.lagen`` ist seit dem 07.10.2026 ausdruecklich
+    die EINE Quelle (ihr Docstring nennt den Fall, in dem ein nachgebauter
+    Stapel beim YASA zwei Zahnbaender uebereinanderlegte). Gemessen am
+    16.10.2026 meldeten die beiden fuer dieselbe Maschine 100,92 gegen
+    65,00 mm (torus_nn), 98,84 gegen 71,00 (afir), 55,92 gegen 45,00
+    (einseitig) -- s. ``_dicken``.
+
+    ``lagen`` kennt den **Stapel** gestapelter Teilmaschinen nicht; den traegt
+    diese Funktion weiter, wie schon vorher.
+    """
+    import ema_axial_fdm as _AF
+    h = _AF.stapelhoehe(geom) / 1000.0
+    return h * max(1, int((geom or {}).get("axialStapel", 1) or 1))
 
 
 def kapazitaeten(geom: dict, mat: dict, st_mat: dict, hp_mat: dict,
@@ -258,21 +309,22 @@ def leitwerte(geom: dict, cooling: str, rpm: float,
     q, l_zahn, joch_s = m["q"], m["l_zahn"], m["joch_s"]
     joch_r, h_wk, spalt = m["joch_r"], m["h_wk"], m["spalt"]
     n_sp, n_rot = a["n_spalte"], m["n_rotor"]
+    n_zl = m["zahnlagen"]      # Zahnbaender: TORUS-NN ist beidseitig genutet
 
     # 1. Wicklung -> Staendereisen: Nutisolierung. Die Nut laeuft RADIAL, ihre
     #    Wand ist also (ro-ri) lang und l_zahn hoch -- zwei Flanken je Nut.
-    A_nutwand = q * 2.0 * (ro - ri) * l_zahn
+    A_nutwand = q * 2.0 * (ro - ri) * l_zahn * n_zl
     G_w_si = min(TH.K_INS * A_nutwand / TH.T_INS_M, 100.0)
 
     # 2. Wicklung -> Gehaeuse ueber die freiliegenden WICKELKOEPFE. Der Weg, den
     #    es radial so nicht gibt, und beim YASA der Hauptweg.
     A_wk = (2.0 * math.pi * (ro + h_wk) * l_zahn
-            + 2.0 * math.pi * max(ri - h_wk, 1e-3) * l_zahn)
+            + 2.0 * math.pi * max(ri - h_wk, 1e-3) * l_zahn) * n_zl
     G_w_h = H_VERGUSS * A_wk
 
     # 3. Staendereisen -> Gehaeuse: nur das schmale Randband. Bei jochlosem
     #    YASA ist das fast nichts, und das ist die Aussage der Bauform.
-    A_rand = 2.0 * math.pi * ro * (l_zahn + joch_s) * m["n_stator"]
+    A_rand = 2.0 * math.pi * ro * (l_zahn * n_zl + joch_s) * m["n_stator"]
     G_si_h = H_RAND * A_rand
 
     # 4. Ueber den Luftspalt auf die Magnete. Kleines Spaltverhaeltnis
@@ -318,6 +370,7 @@ def leitwerte(geom: dict, cooling: str, rpm: float,
         "_axial": {
             "A_ring_m2": A_ring, "A_nutwand_m2": A_nutwand, "A_wickelkopf_m2": A_wk,
             "A_staenderrand_m2": A_rand, "A_rueckseite_m2": A_rueck,
+            "zahnlagen": n_zl,
             "A_gehaeuse_m2": A_geh, "Re_scheibe": re_sch, "h_scheibe_Wm2K": h_sch,
             "scheibe_art": art, "spalt_zuschlag": zuschlag,
             "spaltverhaeltnis": spalt / ro, "bauform": a["bauform"],

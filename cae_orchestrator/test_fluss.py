@@ -590,5 +590,46 @@ pruefe(abs(_b0 - _AX.nutbreite_mm(_g, F.flaechen(_g, 25.0)["r_aussen_m"] * 1000.
 pruefe(abs(_AT._geo({**_g, "axialNutBreiteMm": 6.0})["b_nut"] * 1000.0 - 6.0) < 1e-9,
        "eine gesetzte Nutbreite bleibt dabei unberuehrt (6 mm bleiben 6 mm)")
 
+
+print("\n— Die Spaltzahl FOLGT der Bauform —")
+# Befund vom 16.10.2026: `masse_axial` nahm `axialSpalte` aus dem Payload und
+# fiel nur ersatzweise auf die Bauform zurueck. Abgeleitet wurde der Schluessel
+# aber allein in `aus_seite` (der Zeichenseite) -- wer `axialBauform` direkt
+# setzt (`cae_cli --set`, der Agent, `axial_vorgabe`), bekam die Spaltzahl des
+# VORIGEN Standes: `einseitig` mit zwei Luftspalten, also doppeltes Moment und
+# ein Anzug, der sich laut Modell aufhebt, obwohl er es gerade nicht tut.
+_soll = {"yasa": 2, "torus_nn": 2, "afir": 2, "einseitig": 1}
+for _bf, _n in _soll.items():
+    _f = F.flaechen({**_g, "axialBauform": _bf}, 25.0)
+    pruefe(_f["n_spalte"] == _n,
+           f"{_bf}: {_f['n_spalte']} Luftspalt(e) — aus der Bauform, "
+           f"nicht aus dem Schluessel")
+pruefe(F.flaechen({**_g, "axialBauform": "yasa", "axialStapel": 3},
+                  25.0)["n_spalte"] == 6,
+       "gestapelt vervielfacht sie sich (3 x YASA = 6 Luftspalte)")
+# Ein widersprechender gespeicherter Wert wird UEBERSTIMMT **und gemeldet** --
+# nicht stillschweigend uebergangen und nicht abgewiesen (abweisen traefe jeden
+# Altpayload, der die Zahl noch traegt; das Werkzeug hat sie selbst
+# hineingeschrieben).
+_w = F.flaechen({**_g, "axialBauform": "einseitig", "axialSpalte": 2}, 25.0)
+pruefe(_w["n_spalte"] == 1 and _w["spalte_korrigiert"] == (2, 1),
+       f"ein widersprechender Payloadwert wird ueberstimmt und gemeldet: "
+       f"{_w['spalte_korrigiert']}")
+pruefe(F.flaechen({**_g, "axialBauform": "yasa", "axialSpalte": 2},
+                  25.0)["spalte_korrigiert"] is None,
+       "ein UEBEREINSTIMMENDER Wert meldet nichts — eine Meldung ohne "
+       "Abweichung liest sich wie ein Fehler")
+# Und die Meldung erreicht den, der davorsitzt: sie steht in der Uebersicht,
+# die das Verb `axial` druckt.
+_t = _AX.uebersicht({**_g, "axialBauform": "einseitig", "axialSpalte": 2},
+                    1.0, 3000.0, 25.0)
+pruefe("widerspricht der Bauform" in _t,
+       "… und sie steht in ema_axial.uebersicht — geschrieben und "
+       "unerreichbar waere dasselbe wie nicht geschrieben")
+pruefe("axialSpalte" not in F.AXIAL_VORGABE,
+       "AXIAL_VORGABE traegt den Schluessel gar nicht mehr — ein Vorgabewert "
+       "waere ein gespeicherter Stand, der der naechsten Bauformwahl "
+       "widerspricht")
+
 print(f"\n{_ok} bestanden, {_fehl} fehlgeschlagen")
 sys.exit(1 if _fehl else 0)

@@ -459,13 +459,35 @@ def masse_axial(geom: dict) -> dict:
             f"Ri/Ro; bei lambda -> 1 verschwindet der Ringraum, bei lambda -> 0 "
             f"wird das Wickelfenster am Innenrand null.")
     bauform = axial_bauform(g)
-    n = int(g.get("axialSpalte", 0) or 0) or AXIAL_BAUFORMEN[bauform]["spalte"]
+    # **Die Spaltzahl FOLGT der Bauform, sie wird nicht daneben eingestellt.**
+    #
+    # Hier stand `int(g.get("axialSpalte")) or AXIAL_BAUFORMEN[...]["spalte"]`:
+    # der gespeicherte Schluessel gewann gegen die Bauform. Abgeleitet wurde er
+    # aber nur in `aus_seite` (der Zeichenseite) -- wer `axialBauform` direkt
+    # setzt, also `cae_cli --set`, der Agent und jeder Payload aus
+    # `axial_vorgabe`, bekam die Spaltzahl des VORIGEN Standes.
+    #
+    # Gemessen am 16.10.2026: `--set axialBauform=einseitig` ergab **2**
+    # Luftspalte statt einem -- also die doppelte Ringflaeche, das doppelte
+    # Moment und einen Anzug, der sich laut Modell aufhebt, obwohl eine
+    # einseitige Maschine ihn gerade NICHT aufhebt (`hebt_sich_auf` liest
+    # `n_spalte > 1`). Ueber die Zeichenseite war dieselbe Maschine richtig.
+    # Siehe `BEFUNDE.md`, 16.10.2026.
+    stapel = max(1, int(g.get("axialStapel", 1) or 1))
+    n = AXIAL_BAUFORMEN[bauform]["spalte"] * stapel
+    n_key = int(g.get("axialSpalte", 0) or 0)
+    # Ein widersprechender gespeicherter Wert wird UEBERSTIMMT und GEMELDET --
+    # nicht abgewiesen. Abweisen traefe jeden Altpayload, der die Zahl noch
+    # traegt (das Werkzeug hat sie selbst hineingeschrieben), und stilles
+    # Uebergehen waere der Fehler von vorhin mit umgekehrtem Vorzeichen.
+    korrigiert = (n_key, n) if (n_key and n_key != n) else None
     if n < 1:
         raise ValueError(f"'axialSpalte' = {n}: eine Maschine ohne Luftspalt "
                          f"hat kein Luftspaltfeld.")
     ro = d_a / 2.0 / 1000.0
     return {"r_aussen_m": ro, "r_innen_m": lam * ro, "lambda": lam,
             "n_spalte": n, "bauform": bauform,
+            "spalte_korrigiert": korrigiert,
             "label": AXIAL_BAUFORMEN[bauform]["label"],
             "anzug": AXIAL_BAUFORMEN[bauform]["anzug"],
             "ringflaeche_m2": n * math.pi * (ro ** 2 - (lam * ro) ** 2)}
@@ -509,6 +531,7 @@ def flaechen(geom: dict, axial_mm: float | None = None) -> dict:
         "a_moment_m3": n * (ro ** 3 - ri ** 3) / 3.0,
         "r_aussen_m": ro, "r_innen_m": ri, "lambda": m["lambda"],
         "n_spalte": n, "bauform": m["bauform"], "baulaenge_m": L,
+        "spalte_korrigiert": m["spalte_korrigiert"],
         "hinweis": ("Zwei verschiedene Integrale ueber denselben Ringraum: "
                     "der Fluss waechst mit r^1, das Moment mit r^2. Ein "
                     "Ersatzradius kann nur eines von beiden treffen."),
@@ -637,9 +660,11 @@ BAUFORM_TOPO = {"einseitig": "eser", "afir": "dser",
                 "yasa": "esdr", "torus_nn": "esdr"}
 
 #: Zahl der magnetisch wirksamen Luftspalte je Teilmaschine, AUS der Bauform.
-#: ``axialSpalte`` bleibt als Schluessel bestehen (``flaechen`` liest ihn), wird
-#: hier aber gesetzt statt unabhaengig eingestellt -- sonst stuenden Bauform und
-#: Spaltzahl nebeneinander und koennten sich widersprechen.
+#: ``masse_axial`` rechnet sie seit dem 16.10.2026 **immer** hieraus; der
+#: Schluessel ``axialSpalte`` wird von ``aus_seite`` nur noch MITgeschrieben
+#: (damit ein abgelegter Payload sie lesbar traegt) und gewinnt nirgends mehr.
+#: Vorher gewann er, und genau dann standen Bauform und Spaltzahl nebeneinander
+#: und widersprachen sich -- s. ``BEFUNDE.md``, 16.10.2026.
 BAUFORM_SPALTE = {"einseitig": 1, "afir": 2, "yasa": 2, "torus_nn": 2}
 
 
@@ -721,7 +746,10 @@ AXIAL_VORGABE = {
     "axialAktivOD": 260.0,        # aktiver Aussendurchmesser (NICHT statorOD)
     "axialLambda": 0.577,         # Ri/Ro -- nahe am Momentoptimum des freien Rings
     "axialBauform": "yasa",       # zwei Spalte, jochloser Staender
-    "axialSpalte": 2,             # folgt der Bauform (BAUFORM_SPALTE)
+    # `axialSpalte` steht hier mit Absicht NICHT: sie folgt der Bauform
+    # (BAUFORM_SPALTE x axialStapel) und wird in `masse_axial` abgeleitet. Als
+    # Vorgabewert waere sie ein gespeicherter Stand, der der naechsten
+    # Bauformwahl widerspricht -- genau der Befund vom 16.10.2026.
     "axialSpaltMm": 1.0,
     "axialMagnetDicke": 6.0,
     "axialPolbedeckung": 0.85,

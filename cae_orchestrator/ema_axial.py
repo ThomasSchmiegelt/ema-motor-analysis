@@ -132,6 +132,11 @@ def auslegung(geom: dict, axial_mm: float | None = None) -> dict:
     aus = {
         "r_aussen_m": ro, "r_innen_m": ri, "lambda": f["lambda"],
         "n_spalte": n, "bauform": f["bauform"], "poles": poles, "slots": q,
+        # Die Spaltzahl folgt der Bauform; wo ein gespeicherter Wert ihr
+        # widersprach, wurde er ueberstimmt -- und das muss MITREISEN, sonst
+        # rechnet dieses Modul richtig und niemand erfaehrt, dass der Payload
+        # etwas anderes sagte (s. ema_fluss.masse_axial, BEFUNDE.md 16.10.2026).
+        "spalte_korrigiert": f.get("spalte_korrigiert"),
         "luftspalt_m": spalt, "polbedeckung": alpha,
         "a_fluss_m2": f["a_fluss_m2"], "a_moment_m3": f["a_moment_m3"],
         # Ringflaeche EINES Luftspalts -- die Flaeche, auf der der Anzug wirkt.
@@ -627,6 +632,10 @@ def uebersicht(geom: dict, b_gap_t: float, rpm: float = 0.0,
          f"  Zahn       {zf['aussage']}",
          f"  Anzug      {az['aussage']}",
          f"  Ruecken    {rk['aussage']}"]
+    if a.get("spalte_korrigiert"):
+        alt_n, neu_n = a["spalte_korrigiert"]
+        z.insert(1, f"  ! Spaltzahl {alt_n} im Payload widerspricht der Bauform "
+                    f"{a['bauform']} -- gerechnet wird mit {neu_n}")
     if rpm > 0:
         z.append(f"  Bandage    {bandage(geom, rpm)['aussage']}")
     z.append(f"  T_dauer    {moment(geom, 40.0, axial_mm):.1f} Nm bei 40 kPa (water)")

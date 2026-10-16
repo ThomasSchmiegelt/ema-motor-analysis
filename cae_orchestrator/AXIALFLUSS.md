@@ -339,7 +339,9 @@ Abnahme gemessen: `test_axial.py` **69/69**, `test_fluss.py` 35/35, dazu `test_r
 
 Entstanden ist `ema_axial.py` mit `auslegung`, `lambda_grenze`, `zahnform`, `anzug`, `_platte`, `ruecken`, `bandage`, `moment`, `uebersicht`. Umgebaut: `compute_performance` und `rated_torque` gehen durch `ema_fluss.flaechen`. Neue Tore: `rotor_layout_check`, `rotor_stress_check` und `ema_saettigung.bewerten` weisen Axialfluss ab und **nennen die Funktion, die es rechnet** — statt eine Ringspannung auf eine Scheibe oder eine gekürzte Nutteilung auf zwei Radien anzuwenden.
 
-**Was NICHT getragen ist:** `screen`, `paarvergleich`, `steckbrief` und `sicherheit` sind radial verdrahtet (Zylindervolumen, Magnettaschen, LPTN-Schalennetz). Sie gehören zur analytischen Stufe, aber nicht zu `ema_axial`, und sie sind **nicht** axial gebaut — wer sie braucht, baut sie; bis dahin ist `ema_axial.uebersicht` die Auskunft.
+**`paarvergleich` trägt ihn seit dem 16.10.2026** — nicht über die radialen Achsen, sondern über `ema_axial_vergleich` mit vierzehn eigenen (`bauform`, `lambda`, `zahnform`, `rueckenblech`, `stapel`, …). Das VERB verzweigt nach `ema_fluss.flussweg`, das Modul `ema_paarvergleich` bleibt radial und sagt das weiterhin. Gerechnet wird dort **keine eigene Physik**: die Zahlen kommen aus `ema_axial` und `ema_axial_thermik`, die Tore sind `lambda_grenze`/`zahnform`/`ruecken`.
+
+**Was NICHT getragen ist:** `screen`, `steckbrief` und `sicherheit` sind radial verdrahtet (Zylindervolumen, Magnettaschen, LPTN-Schalennetz). Sie gehören zur analytischen Stufe, aber nicht zu `ema_axial`, und sie sind **nicht** axial gebaut — wer sie braucht, baut sie; bis dahin ist `ema_axial.uebersicht` die Auskunft.
 
 **Was entsteht.** `ema_axial.py` — und zwar nach der Hausregel, dass jede Größe
 sagt, welche Grenze bindet:

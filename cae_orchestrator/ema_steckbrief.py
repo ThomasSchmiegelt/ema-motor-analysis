@@ -386,9 +386,20 @@ def maschine(payload: dict, projektakte: dict) -> dict:
             "kaefig": "Laeuferzaehne mit Kurzschlussring (ASM)",
             "eisenlos": "Scheibenanker (der Laeufer traegt die Wicklung)",
         }.get(_la, _la)
+        # Die Spaltzahl wird ABGELEITET (aus der Bauform mal dem Stapel) und
+        # nicht aus dem Payload gelesen -- dort kann ein ueberholter Wert
+        # stehen, den `ema_fluss.masse_axial` seit dem 16.10.2026 ueberstimmt.
+        # Den Steckbrief die ueberstimmte Zahl drucken zu lassen hiesse, die
+        # eine Stelle, die sagt WAS gerechnet wurde, etwas anderes sagen zu
+        # lassen als die Rechnung.
+        try:
+            import ema_fluss as _FLX
+            _spalte = _FLX.masse_axial(g)["n_spalte"]
+        except Exception:                                        # noqa: BLE001
+            _spalte = g.get("axialSpalte")
         axial_masse = {
             "aktivOD_mm": g.get("axialAktivOD"), "lambda": g.get("axialLambda"),
-            "bauform": g.get("axialBauform"), "spalte": g.get("axialSpalte"),
+            "bauform": g.get("axialBauform"), "spalte": _spalte,
             "spalt_mm": g.get("axialSpaltMm"),
             "magnet_dicke_mm": g.get("axialMagnetDicke"),
             "polbedeckung": g.get("axialPolbedeckung"),

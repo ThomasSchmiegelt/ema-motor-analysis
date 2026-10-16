@@ -17,6 +17,161 @@ kann.
 
 ---
 
+## 2026-10-16 · Axialfluss: die Spaltzahl stand im Payload statt in der Bauform
+
+**Beobachtung.** Beim ersten Lauf des neuen axialen Paarvergleichs
+(`ema_axial_vergleich`) lieferte die Bauform-Achse für **jede** der vier
+Bauformen dasselbe Dauermoment. Die einseitige Maschine hat aber nur einen
+Luftspalt; ihr Moment muss die Hälfte sein.
+
+**Messung.** `--set axialBauform=einseitig` ergab **2** Luftspalte statt
+einem — also die doppelte Ringfläche, das doppelte Moment, und
+`hebt_sich_auf = True`, obwohl ein einseitiger Aufbau den Anzug gerade nicht
+aufhebt (`ema_axial.anzug` liest `n_spalte > 1`). Über die **Zeichenseite**
+war dieselbe Maschine richtig.
+
+**Die Ursache.** `ema_fluss.masse_axial` las
+
+```python
+n = int(g.get("axialSpalte", 0) or 0) or AXIAL_BAUFORMEN[bauform]["spalte"]
+```
+
+— der gespeicherte Schlüssel gewann, die Bauform war nur der Rückfall.
+Abgeleitet wurde `axialSpalte` aber ausschließlich in `ema_fluss.aus_seite`,
+also auf dem Weg über die Zeichenseite. Wer `axialBauform` direkt setzt —
+`cae_cli --set`, der Agent, jeder Payload aus `axial_vorgabe`, die
+Vergleichsachse — bekam die Spaltzahl des **vorigen** Standes. Und
+`AXIAL_VORGABE` trug `axialSpalte: 2` als Vorgabewert, war also selbst die
+Quelle des Widerspruchs.
+
+**Behoben.** `n = AXIAL_BAUFORMEN[bauform]["spalte"] * axialStapel`; der
+Schlüssel ist aus `AXIAL_VORGABE` heraus und im Schema auf `lo = 0, def = 0`
+(„0 = folgt der Bauform"). Ein widersprechender gespeicherter Wert wird
+**überstimmt und gemeldet** (`spalte_korrigiert = (alt, neu)` durch
+`flaechen` → `ema_axial.auslegung` → eine Zeile in `uebersicht`), nicht
+abgewiesen: abweisen träfe jeden Altpayload, der die Zahl noch trägt — das
+Werkzeug hat sie selbst hineingeschrieben. Ein zwischenzeitlich eingebauter
+harter `ValueError` ist aus genau dem Grund wieder verworfen worden.
+
+**Gemessen danach** (Vorgabe-Payload, Kühlung water):
+
+| Bauform | Spalte | T_dauer [Nm] | Masse [kg] | hebt auf |
+|---|---:|---:|---:|---|
+| yasa | 2 | 297,2 | 29,00 | ja |
+| torus_nn | 2 | 297,2 | 40,14 | ja |
+| afir | 2 | 297,2 | 33,65 | ja |
+| einseitig | **1** | **148,6** | 24,36 | **nein** |
+
+**Fundstelle.** `ema_fluss.masse_axial`/`flaechen`/`AXIAL_VORGABE`,
+`ema_text2ema.SCHEMA["axialSpalte"]`, `ema_axial.auslegung`/`uebersicht`.
+**Status:** behoben, Wächter in `test_fluss.py` (alle vier Bauformen, Stapel,
+Überstimmen samt Meldung, Gegenprobe ohne Abweichung).
+
+---
+
+## 2026-10-16 · Axialfluss: Thermik und Feldmodell meinten zwei verschiedene Bauhöhen
+
+**Beobachtung.** Beim selben ersten Lauf bewegte die Bauform-Achse auch die
+**Masse** nicht. Eine TORUS-NN hat ein Umfangsjoch im Ständer, eine YASA
+nicht; das muss wiegen.
+
+**Die Ursache.** `ema_axial_thermik` führte Zahnlänge, Ständerjoch und
+Rückenblech **selbst** (`_zahl(geom, "axialZahnLaengeMm", 25.0)`,
+`…"axialJochStaenderMm", 12.0`, `…"axialJochLaeuferMm", 13.0`) und fragte die
+Bauform dabei nicht. `ema_axial_fdm` entscheidet sie seit dem 06./16.10.2026
+anders, in drei Punkten:
+
+* ein **jochloser** Ständer (YASA) hat kein Joch — hier bekam er 12 mm Eisen,
+  das es nicht gibt;
+* wo die Bauform eines braucht, wird es **aus dem Fluss bemessen**
+  (`_jochhoehe`, gemessen 10,92 mm) statt aus einer Vorgabezahl;
+* **beidseitig genutet heißt zwei Zahnbänder** (TORUS-NN, seit dem
+  16.10.2026) — hier zählte eines.
+
+**Messung** (Bauhöhe derselben Maschine, Feld gegen Masse):
+
+| Bauform | `ema_axial_fdm` | `ema_axial_thermik` |
+|---|---:|---:|
+| yasa | 65,00 mm | 65,00 mm |
+| torus_nn | **100,92 mm** | 65,00 mm |
+| afir | **98,84 mm** | 71,00 mm |
+| einseitig | **55,92 mm** | 45,00 mm |
+
+Nur YASA stimmte überein — die Bauform, an der entwickelt worden war. Die
+Bauhöhe geht in Wellen- und Gehäusemasse ein, die Jochdicke in das
+Ständereisen, die Zahnbandzahl in Zahneisen **und** Nutkupfer; zwei Bauhöhen
+sind zwei Maschinen.
+
+**Behoben.** `ema_axial_thermik._dicken` liest die drei Dicken aus
+`ema_axial_fdm` (`zahnlaenge`, `_jochhoehe` nur wenn `_BAUFORMEN[bf]["joch"]`,
+`_rueckenhoehe`) und `stapelhoehe` delegiert an `ema_axial_fdm.stapelhoehe`
+statt die Schichtung ein zweites Mal zu summieren — `lagen` weist sich seit
+dem 07.10.2026 ausdrücklich als die eine Quelle aus. `_zahnlagen` verdoppelt
+beim TORUS-NN Nutkupfer, Zahneisen, Nutwand und Wickelkopffläche.
+
+**Gemessen danach** (Randband Ständer → Gehäuse / Gesamtmasse): yasa
+30,6 W/K / 25,43 kg · torus_nn **74,6** / **36,38** · afir **88,0** / **29,99**
+· einseitig **44,0** / **21,69**.
+
+**Fundstelle.** `ema_axial_thermik._dicken`/`_geo`/`masse`/`leitwerte`/
+`stapelhoehe`. **Status:** behoben, Wächter in `test_axial_thermik.py`
+(Bauhöhe Feld = Thermik für jede Bauform, Stapel, doppelte Nutwand bei
+TORUS-NN).
+
+---
+
+## 2026-10-16 · Der axiale Paarvergleich: drei Achsen bewegten nichts, zwei davon zu Unrecht
+
+**Beobachtung.** Der erste vollständige Lauf von `ema_axial_vergleich` zeigte
+drei Achsen mit durchweg gleichen Zeilen: Nutzahl, Magnetwerkstoff,
+Blechsorte.
+
+**Messung und Ursache.**
+
+* **Magnetwerkstoff:** viermal dasselbe `B_gap = 0,8137 T`, von NdFeB N35 bis
+  Ferrit Y30. `ema_axial_fdm.eichung_magnet_spitze` rechnet
+  `EA.Br_NdFeB * hm/(hm + EA.MU_R_MAG*kc*g)` — über die **Modul-Globalen** von
+  `ema_analysis`, genau wie `run_pipeline` und `ema_paarvergleich._setz_magnet`.
+  Der Payload-Schlüssel allein erreicht sie nicht. Nach dem Umsetzen (eng um
+  den Aufruf, Rücksetzen im `finally`): N35 0,9573 T, Ferrit Y30 0,3319 T,
+  N42/N50 sättigen den Zahn.
+* **Blechsorte:** `ema_axial.zahnform(geom, b_gap, b_sat_t=None)` fiel auf
+  seine Modulvorgabe **1,70 T** zurück, weil niemand `B_sat_T` übergab — die
+  Achse wirkt aber *ausschließlich* über diese eine Zahl. Jetzt übergeben;
+  M250-35A (1,65 T) fällt als einzige aus, und das **ist** das Ergebnis der
+  Achse. Ebenso bekommt `ema_axial.ruecken` das Läuferblech für E und nu.
+* **Nutzahl:** hier kürzt sich die Nutteilung wirklich heraus — aber nur,
+  wenn `axialNutBreiteMm = 0` ist, die Breite also ein **Anteil** der Teilung
+  ist (`slotWidthRatio`); dann ist `B_zahn = B_gap/((1-swr)*k_fe)`
+  nutzahlunabhängig und `q*b_nut` konstant. Steht dort ein **Millimetermaß**
+  (die Nut ist parallelflankig), bewegt die Nutzahl den Zahn sehr wohl:
+  gemessen 1,211 bis 1,653 T über 24…54 Nuten. Ein fester Erklärungssatz wäre
+  in einem der beiden Fälle eine Behauptung gegen die Messung gewesen.
+
+**Was daraus folgte.** Eine flache Achse wird jetzt **benannt** — dieselbe
+Regel wie `ema_paramstudy.wirkungslos_grund` und aus demselben Grund: eine
+Tabelle mit sechs gleichen Zeilen sieht nach einem Rechenfehler aus und ist
+meistens keiner, und wo doch, soll es auffallen. `vergleiche` setzt
+`wirkungslos`, wenn bei **mindestens zwei baubaren** Optionen keine gezählte
+Kennzahl sich bewegt, und hängt den Grund an; steht keiner da, ist das selbst
+die Auskunft. Dafür musste `_spannweite` Spannen von 0,0 % **weglassen** —
+eingetragen war das Dict nie leer und die Erkennung blind.
+
+**Zwei Dinge, die weiterhin falsch wären, wenn man sie zählte** und deshalb als
+Notiz unter ihrer Achse stehen: `MAGNETS` führt weder Dichte noch Preis je
+Sorte und `PREISE_EUR_KG["magnet"]` ist **ein** Betrag für alle — Ferrit kommt
+in Masse und Kosten genauso heraus wie NdFeB, und gerade der Preis ist sein
+Grund. `LAMINATES` führt keine Dichte, die Blechsorte bewegt also auch die
+Masse nicht. Beides ist eine Lücke der **Tabellen**, nicht der Rechnung; sie
+hier mit Literaturwerten zu füllen hieße, Zahlen zu erfinden, die der radiale
+Pfad nicht hat.
+
+**Fundstelle.** `ema_axial_vergleich.bewerte`/`_spannweite`/`vergleiche`/
+`ACHSEN`. **Status:** behoben bzw. benannt, Wächter in
+`test_axial_vergleich.py` (27 Prüfungen).
+
+---
+
 ## 2026-10-16 · Axialfluss: die seitliche Randbedingung war Dirichlet, wo sie periodisch sein muss — und der Ersatzstrom lief nicht um
 
 **Beobachtung.** Beim Umstellen der Polsterung (Befund darunter) sprang die

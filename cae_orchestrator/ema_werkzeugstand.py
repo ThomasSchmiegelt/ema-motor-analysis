@@ -96,6 +96,11 @@ PHYSIK: tuple[str, ...] = (
     # Das LPTN der Scheibe bewegt jede Temperatur und damit jedes Urteil
     # ueber Magnet- und Wicklungsgrenze.
     "ema_axial_thermik.py",
+    # Der axiale Paarvergleich entscheidet keine Zahl selbst -- aber er ist
+    # die Stufe, auf der eine Bauform GEWAEHLT wird, und seine Tore
+    # (lambda_grenze/zahnform/ruecken) bestimmen, welche Option ueberhaupt
+    # erscheint. Eine Aenderung daran bewegt also, was danach gerechnet wird.
+    "ema_axial_vergleich.py",
     "ema_fluss.py",         # Flussweg: die zwei Integrale der Luftspaltflaeche
                             # (r^1 fuer psi_pm, r^2 fuer das Moment). Eine
                             # Aenderung daran bewegt Kt UND das Dauermoment.
