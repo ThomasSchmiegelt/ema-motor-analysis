@@ -1436,7 +1436,33 @@ def compute_performance(geom: dict, B_gap: float, rpm: float = 1000.0,
     R_gap   = _fl.get("r_fluss_m", 0.0)                              # m, nur radial
 
     # Flux linkage (normalised, 1 turn per slot assumed)
-    psi_pm  = p * (2 / math.pi) * B_gap * A_fluss
+    #
+    # **Der ``(2/pi)``-Term setzt eine GRUNDWELLENAMPLITUDE voraus.** Er ist der
+    # Mittelwert einer halben Sinuswelle ueber ihre Amplitude; eingesetzt in
+    # ``Phi = (2/pi)*B*tau_p*L`` ist das der Grundwellenfluss je Pol, und nur so
+    # geht die Hausbruecke ``ema_asm.k_norm = pi*k_w*N_ph/p^2`` auf (nachgemessen
+    # am 16.10.2026: ``psi_haus*k_norm / psi_phys`` = **1,0000** mit der
+    # Grundwelle, 0,6866 mit dem Flussmittelwert).
+    #
+    # Axial kam hier bis zum 16.10.2026 der **Flussmittelwert** herein:
+    # ``_analytical_Bgap`` delegiert fuer die Scheibe an
+    # ``ema_axial_fdm.eichung_magnet``, und das ist ausdruecklich
+    # ``Spitze * alpha``. ``formfaktor_grundwelle`` bringt ihn auf die
+    # Grundwelle -- MULTIPLIKATIV, damit der Faktor auch auf ein gemessenes
+    # ``B_gap`` wirkt, statt es durch einen analytischen Wert zu ersetzen.
+    # Siehe ``BEFUNDE.md``, 16.10.2026.
+    #
+    # **Radial bleibt Ziffer fuer Ziffer unberuehrt** (``B_1 = B_gap``). Dort
+    # ist die Lage eine andere und ungeklaert: ``run_em_analysis`` pinnt die
+    # SPITZE des geloesten Feldes auf ``_analytical_Bgap``, und die geloeste
+    # Grundwelle landet damit nahe daran (gemessen SPM 0,956x, V-Form 0,570x).
+    # Das hier mitzuaendern wuerde jedes abgelegte Projekt verschieben und ist
+    # eine Entscheidung und keine Reparatur; der Befund steht in ``BEFUNDE.md``.
+    B_1 = B_gap
+    if _fl["flussweg"] == "axial":
+        import ema_axial_fdm as _axf
+        B_1 = B_gap * _axf.formfaktor_grundwelle(geom)
+    psi_pm  = p * (2 / math.pi) * B_1 * A_fluss
     omega_e = rpm * 2 * math.pi / 60 * p
     emf_pk  = psi_pm * omega_e
     emf_rms = emf_pk / math.sqrt(2)
@@ -1468,6 +1494,10 @@ def compute_performance(geom: dict, B_gap: float, rpm: float = 1000.0,
 
     return {
         "B_gap_T":          round(B_gap, 3),
+        # Die Grundwellenamplitude, aus der psi wirklich gebildet wurde. Radial
+        # ist sie B_gap; axial steht hier, was der Formfaktor daraus gemacht hat
+        # -- sonst liest sich psi wie aus B_gap gerechnet, und es ist es nicht.
+        "B1_T":             round(B_1, 3),
         "psi_pm_Wb":        round(psi_pm, 4),
         "emf_peak_V":       round(emf_pk, 1),
         "emf_rms_V":        round(emf_rms, 1),

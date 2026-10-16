@@ -210,12 +210,28 @@ SPALT_PX_MIN = 3.0
 #: wie bei ``ema_leistung``, das den Widerspruch zwischen ``rated_torque`` und dem
 #: LPTN ueber die Kennlinie schreibt statt ihn aufzuloesen. Befund in
 #: ``BEFUNDE.md``, 05.10.2026.
-_WIDERSPRUCH = (
-    "WIDERSPRUCH im Werkzeug: T_maxwell (geloeste Schubspannung) und T_aus_Kt "
-    "(1,5*p*psi*i_q) liegen um den Faktor ~3 auseinander, ueber den Strom nahezu "
-    "konstant -- also ein Normierungsunterschied (psi auf 1 Windung/Nut, "
-    "_analytical_Barm auf N_ph = slots/3; vgl. ema_asm.k_norm). Welcher Bezug "
-    "gilt, entscheidet Stufe 3 und nicht ein Korrekturfaktor.")
+def _widerspruch_text(verhaeltnis: float) -> str:
+    """Der Normierungswiderspruch -- mit der GEMESSENEN Zahl, nicht mit einer alten.
+
+    Hier stand eine Konstante, und darin „Faktor ~3, ueber den Strom nahezu
+    konstant". Beides war am 16.10.2026 nicht mehr wahr: gemessen 42,9 / 26,2 /
+    14,8 / 14,8 ueber 25 / 50 / 100 / 200 Nm. Die Zahl ist seit den
+    Feldreparaturen desselben Tages gewandert (die Grundwelle stieg stark), und
+    oberhalb von ~100 Nm steht sie nur deshalb still, weil der Strom dann an
+    der Umrichtergrenze klemmt -- die Konstanz ist dort ein Anschlag und kein
+    Befund.
+
+    Eine Warnung, die eine falsche Zahl nennt, ist schlechter als eine ohne
+    Zahl: wer sie liest, glaubt, den Abstand zu kennen. Das Verhaeltnis steht
+    ohnehin als ``T_verhaeltnis`` im Ergebnis; es wird jetzt eingesetzt.
+    """
+    return (f"WIDERSPRUCH im Werkzeug: T_maxwell (geloeste Schubspannung) und "
+            f"T_aus_Kt (1,5*p*psi*i_q) liegen um den Faktor {verhaeltnis:.1f} "
+            f"auseinander -- ein Normierungsunterschied (psi auf 1 Windung/Nut, "
+            f"_analytical_Barm auf N_ph = slots/3; vgl. ema_asm.k_norm). "
+            f"Welcher Bezug gilt, entscheidet Stufe 3 und nicht ein "
+            f"Korrekturfaktor. Klemmt der Strom an der Umrichtergrenze, steht "
+            f"die Zahl still, ohne dass sich etwas geklaert haette.")
 
 
 # ── Schichtung: welche Bauform welchen Stapel hat ────────────────────────────
@@ -537,6 +553,31 @@ def eichung_magnet_grundwelle(geom: dict) -> float:
                  * math.sin(al * math.pi / 2.0))
 
 
+def formfaktor_grundwelle(geom: dict) -> float:
+    """Grundwellenamplitude / Flussmittelwert der Polwelle: ``(4/pi)*sin(a*pi/2)/a``.
+
+    **Wofuer es den Faktor gibt.** Die Flussverkettung dieses Werkzeugs steht in
+    der Form ``psi = p*(2/pi)*B*A_fluss`` (``ema_analysis.compute_performance``,
+    ``betriebspunkt``). Der Term ``(2/pi)`` ist der Mittelwert einer halben
+    Sinuswelle ueber ihre AMPLITUDE -- er setzt also voraus, dass ``B`` eine
+    **Grundwellenamplitude** ist. Eingesetzt wurde axial ``eichung_magnet``, und
+    das ist ausdruecklich der **Flussmittelwert** (``Spitze * alpha``). Damit
+    stand dort ``(2/pi) * Mittelwert``, und das ist weder der Gesamtfluss je Pol
+    noch der Grundwellenfluss -- s. ``BEFUNDE.md``, 16.10.2026.
+
+    Der Faktor ist reine Fourier-Arithmetik und keine Modellwahl: fuer die
+    Rechteckwelle der Breite ``alpha*tau_p`` ist die Grundwellenamplitude
+    ``(4/pi)*Spitze*sin(alpha*pi/2)`` und der Mittelwert ``Spitze*alpha``.
+
+    **Er wird MULTIPLIZIERT und ersetzt nichts.** So wirkt er auch auf ein
+    gemessenes ``B`` -- er ist eine Formeigenschaft der Polwelle, keine
+    Eichgroesse. Bei ``alpha = 1`` sind es ``4/pi = 1,2732``, bei
+    ``alpha = 0,85`` **1,4565**.
+    """
+    al = max(1e-6, min(1.0, _polbedeckung(geom)))
+    return float(4.0 / math.pi * math.sin(al * math.pi / 2.0) / al)
+
+
 def eichung_anker(geom: dict, i_pk: float) -> float:
     """Analytisches Ankerfeld [T] -- ueber ``ema_analysis._analytical_Barm``.
 
@@ -584,13 +625,24 @@ def betriebspunkt(geom: dict, rpm: float, last_nm: float,
     a_fluss = f["a_fluss_m2"]
     p = max(1, int((geom or {}).get("p", 3) or 3))
     b_gap = eichung_magnet(geom)
-    psi = p * (2.0 / math.pi) * b_gap * a_fluss
+    # **Die Groesse im (2/pi)-Term ist eine GRUNDWELLENAMPLITUDE.** Hier stand
+    # `b_gap` -- der Flussmittelwert aus `eichung_magnet` --, und damit war
+    # dieses psi weder der Gesamtfluss je Pol noch der Grundwellenfluss.
+    # Gemessen am Vorgabe-Payload (alpha = 0,85, mittlerer Schnitt): direkt
+    # integriert 81,27 mWb/m, Grundwellenfluss 75,00, gerechnet wurden 51,74 --
+    # also genau 2/pi des Gesamtflusses. Der eigene Loeser desselben Moduls
+    # (`felder`) rechnet psi seit jeher aus `b_n_grundwelle_T`: die beiden
+    # Stufen gaben damit zwei verschiedene Kt fuer dieselbe Maschine.
+    # Siehe `BEFUNDE.md`, 16.10.2026.
+    b1 = b_gap * formfaktor_grundwelle(geom)
+    psi = p * (2.0 / math.pi) * b1 * a_fluss
     kt = max(1.5 * p * psi, 1e-9)
     i_lim = float(EA.umrichter(geom).get("i_max_1t", 800.0))
     i_q = max(min(float(last_nm) / kt, i_lim), 0.0)
     return {
         "i_q_A": i_q, "i_d_A": 0.0,
-        "Kt_Nm_per_A": kt, "psi_Wb": psi, "B_gap_T": b_gap,
+        "Kt_Nm_per_A": kt, "psi_Wb": psi, "B_gap_T": b_gap, "B1_T": b1,
+        "formfaktor_grundwelle": formfaktor_grundwelle(geom),
         "i_grenze_A": i_lim, "am_anschlag": i_q >= i_lim - 1e-9,
         "salienz": 1.0,
         "hinweis": ("Oberflaechenmagnete flach auf der Scheibe: Ld = Lq, kein "
@@ -1004,7 +1056,8 @@ def felder(geom: dict, k_schnitte: int = 5, N: int = 400, rpm: float = 1000.0,
         "T_aus_Kt_Nm": 1.5 * p * psi * iq if iq else 0.0,
         "T_verhaeltnis": (abs(t_nm) / abs(1.5 * p * psi * iq)
                           if iq and abs(psi) > 1e-30 else None),
-        "widerspruch": _WIDERSPRUCH if iq else "",
+        "widerspruch": (_widerspruch_text(abs(t_nm) / abs(1.5 * p * psi * iq))
+                        if iq and abs(1.5 * p * psi * iq) > 1e-12 else ""),
         "alle_spalte_aufgeloest": all(s["spalt_aufgeloest"] for s in schnitte),
         "fenster_polteilungen": [s["n_polteilungen"] for s in schnitte],
         "schnitte": schnitte,
@@ -1041,7 +1094,8 @@ def felder(geom: dict, k_schnitte: int = 5, N: int = 400, rpm: float = 1000.0,
             "das Produkt zweier unabhaengig geeichter Felder (B_n am "
             "Magnetanker, B_t ueberwiegend am Ankeranker), konvergiert ueber "
             "der Schnittzahl nicht und steht ausserdem im Normierungs"
-            "widerspruch zu 1,5*p*psi*i_q (Faktor ~3). Beides in BEFUNDE.md.",
+            "widerspruch zu 1,5*p*psi*i_q (die gemessene Zahl steht als "
+            "T_verhaeltnis im Ergebnis). Beides in BEFUNDE.md.",
             "Das Gebiet ist quadratisch (Gitterzwang) und wird mit EISEN "
             "gepolstert. Die verbleibende Abhaengigkeit von der Fensterbreite "
             "ist gemessen 1,3 % auf B1 ueber einen Faktor 4; alle Schnitte "

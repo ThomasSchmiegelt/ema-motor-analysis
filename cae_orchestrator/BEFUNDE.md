@@ -17,6 +17,135 @@ kann.
 
 ---
 
+## 2026-10-16 · Das `(2/pi)` in der Flussverkettung stand auf einem MITTELWERT — axial
+
+**Beobachtung.** Seit dem 06.10.2026 steht als offener Punkt in `AXIALFLUSS.md`
+und in jedem Bericht über diese Arbeit: *das `(2/pi)` in `betriebspunkt` wird
+auf einen schon gemittelten Wert angewandt; das bewegt Kt und jede Temperatur
+jedes Axialprojekts und gehört gegen eine bekannte Maschine gemessen.* Hier
+ist die Messung.
+
+**Was der Term voraussetzt.** `psi = p*(2/pi)*B*A_fluss` steht an zwei Stellen
+(`ema_analysis.compute_performance:1439`, `ema_axial_fdm.betriebspunkt`). Das
+`(2/pi)` ist der Mittelwert einer halben Sinuswelle über ihre **Amplitude**:
+`Phi = (2/pi)*B1*tau_p*L` ist der Grundwellenfluss je Pol. Der Term setzt also
+voraus, dass `B` eine **Grundwellenamplitude** ist. Eingesetzt wurde axial
+`eichung_magnet`, und dessen eigener Docstring sagt: *„Diese Zahl ist ein
+MITTELWERT, keine Spitze und keine Grundwelle"* (`Spitze * alpha`).
+
+**Messung 1 — am gelösten Verlauf, ohne jede Konvention.** Vorgabe-Payload,
+alpha = 0,85, mittlerer Schnitt, 600 Punkte, Polteilung 107,37 mm:
+
+| | mWb/m je Pol | |
+|---|---:|---|
+| direkt integriert (Gesamtfluss) | **81,27** | = `B_mittel * tau_p`, per Definition exakt |
+| `(2/pi)*B1*tau_p` (Grundwellenfluss) | **75,00** | 0,923 × Gesamtfluss — die Oberwellen, die keine verteilte Wicklung verkettet |
+| `(2/pi)*B_mittel*tau_p` ← gerechnet | **51,74** | 0,6366 × Gesamtfluss, also **genau 2/pi** |
+
+Der gerechnete Wert ist **weder** der Gesamtfluss **noch** der
+Grundwellenfluss.
+
+**Messung 2 — das Werkzeug trägt seinen eigenen Maßstab.** `ema_asm.k_norm =
+pi*k_w*N_ph/p^2` rechnet die Hauskonvention auf die Physik um; sie ist über die
+**Momenterhaltung** hergeleitet und in `test_maschinenart.py` nachgerechnet.
+Gegen `psi_phys = k_w*N_ph*Phi_grundwelle`:
+
+| `psi_haus * k_norm / psi_phys` | |
+|---|---:|
+| mit dem Flussmittelwert | 0,6866 |
+| mit der Grundwelle | **1,0000** |
+
+Die Brücke geht nur mit der Grundwelle auf. Das ist die stärkere Probe als
+jede Fremdmaschine: das Werkzeug widerspricht sich selbst.
+
+**Messung 3 — die beiden Stufen desselben Moduls gaben zwei Kt.** Der
+Modulkopf von `felder` lädt ausdrücklich dazu ein: *„Stufe 1 rechnet sie mit
+einem analytischen B_gap, Stufe 2 mit einem gelösten B1(r). Kommt dabei etwas
+anderes heraus, ist das eine Aussage über die Formel und nicht über die
+Summation."* Über 13 Geometrien (Polbedeckung, Polzahl, Spalt, Magnetdicke,
+Nutzahl, lambda, alle vier Bauformen), `psi_gemessen / psi_analytisch`:
+
+| | Spanne | Streubreite |
+|---|---|---:|
+| mit dem Flussmittelwert | 1,095 … **1,499** | 37 % |
+| mit der Grundwelle | 0,860 … 0,946 | **10 %** |
+
+Und das Restglied läuft monoton mit dem **gemessenen** Carterfaktor
+(`carter()`: 1,048 … 1,126) — wo mehr Nutung gemessen wird, bleibt die gelöste
+Grundwelle weiter unter der idealen Rechteckwelle. Was übrig bleibt, ist also
+Nutung und Streuung, die die Arbeitsgerade nicht kennt: ein physikalischer
+Effekt, kein Formelfehler.
+
+**Behoben.** `ema_axial_fdm.formfaktor_grundwelle(geom) = (4/pi)*sin(a*pi/2)/a`
+— reine Fourier-Arithmetik der Rechteckwelle, keine Modellwahl — wird
+**multipliziert** und ersetzt nichts, wirkt also auch auf ein gemessenes `B`.
+Angewandt an beiden Stellen: in `betriebspunkt` und in
+`compute_performance` (dort nur im axialen Zweig). `B1_T` steht neben
+`B_gap_T` im Ergebnis, damit psi nicht so aussieht, als käme es aus `B_gap`.
+
+**Das bewegt jedes Axialprojekt.** Vorgabe-Payload bei alpha = 0,85
+(Formfaktor 1,4565):
+
+| | vorher | nachher |
+|---|---:|---:|
+| Kt | 0,0790 | **0,1150** (+45,6 %) |
+| EMK Spitze | 16,5 V | **24,0 V** |
+| Eckdrehzahl | 33.591 | **23.094 1/min** (−31 %) |
+| i_q bei 50 Nm | 634,6 A | **435,7 A** |
+
+Bei alpha = 1,0 sind es 4/pi = +27,3 %. `P_Cu` bewegt sich **nicht**: der
+Kupferverlust kommt aus Stromdichte × Kupfervolumen und nicht aus i_q (so
+gebaut, s. `ema_thermal`). Betroffen sind damit Moment je Ampere, Gegen-EMK,
+Feldschwächung und das Kriterium `umrichter` in `ema_sicherheit`.
+
+**Was NICHT angefasst ist, und warum.** Radial steht dieselbe Formel, und
+`_analytical_Bgap` liefert für Oberflächenmagnete ebenfalls `Br*perm*alpha`,
+also einen Mittelwert. Dort ist die Lage aber **eine andere**:
+`run_em_analysis` pinnt die **Spitze** des gelösten Feldes auf genau diesen
+Wert, und die gelöste Grundwelle landet damit nahe daran — gemessen SPM
+**0,956×**, V-Form 0,570×. Ob das eine richtige Konvention ist oder eine
+Folge der Eichung, ist hier **nicht entschieden**; es mitzuändern würde jedes
+abgelegte radiale Projekt verschieben, und das ist eine Entscheidung und keine
+Reparatur. Steht als offener Punkt.
+
+**Die Fremdmaschine fehlt weiterhin, und das wird gesagt.** Gesucht wurde eine
+veröffentlichte Axialflussmaschine mit vollständiger Geometrie **und**
+gemessener Leerlauf-EMK. Erreichbar war davon keine, die zur modellierten
+Bauform passt: MDPI und EPJ antworten mit 403, der NREL-Server ist von hier
+nicht auflösbar, und die eine frei abrufbare Arbeit mit Prototyp und Messung
+(Juan de Santiago Ochoa, Uppsala, diva2:436792, Tab. 4.1: Ro 150 / Ri 110 mm,
+14 Polpaare, Magnet 10 mm, Br 1,2 T) ist eine **kernlose**
+Schwungradmaschine mit **16 mm** Luftspalt — ohne Zähne, ohne Nuten, ohne
+Carter. Sie würde das Modell an seiner Topologie messen und nicht an diesem
+Term. Die drei Messungen oben sind dafür nicht der Ersatz, sondern die
+schärfere Probe: zwei davon sind Arithmetik, die dritte ist der eigene Löser.
+Eine passende Fremdmaschine bleibt offen.
+
+**Was die Reparatur NICHT bessert, und das gehört dazu.** Der alte Eintrag vom
+06.10.2026 nannte als Symptom das Verhältnis der beiden Momentwege
+(`T_verhaeltnis`, „gemessen 4,18…4,85"). Das wird durch diese Reparatur nicht
+kleiner, sondern bei kleinem Moment **größer** — der Nenner `1,5*p*psi*i_q`
+schrumpft, weil i_q mit dem größeren Kt sinkt. Es war nie derselbe Befund: das
+Momentverhältnis ist der seit jeher getrennt benannte Widerspruch um
+`T_maxwell` (zwei unabhängig geeichte Felder), und der Modulkopf sagt dazu
+weiterhin „BELASTBAR sind psi und B_gap(r); das MOMENT ist es nicht".
+
+**Nebenbefund, mitbehoben:** die Warnung selbst nannte „Faktor ~3, über den
+Strom nahezu konstant". Beides stimmt nicht mehr — gemessen **42,9 / 26,2 /
+14,8 / 14,8** über 25 / 50 / 100 / 200 Nm; die Zahl ist mit den
+Feldreparaturen desselben Tages gewandert, und ab ~100 Nm steht sie nur still,
+weil der Strom an der Umrichtergrenze klemmt (ein Anschlag, kein Befund). Eine
+Warnung mit einer falschen Zahl ist schlechter als eine ohne: wer sie liest,
+glaubt den Abstand zu kennen. `_widerspruch_text` setzt jetzt die **gemessene**
+ein, die ohnehin als `T_verhaeltnis` im Ergebnis steht.
+
+**Fundstelle.** `ema_axial_fdm.formfaktor_grundwelle`/`betriebspunkt`/
+`_widerspruch_text`, `ema_analysis.compute_performance`. **Status:** axial
+behoben, Wächter in `test_axial_fdm.py` (85 → 99 Prüfungen); radial und die
+Fremdmaschine offen.
+
+---
+
 ## 2026-10-16 · Axialfluss: die Spaltzahl stand im Payload statt in der Bauform
 
 **Beobachtung.** Beim ersten Lauf des neuen axialen Paarvergleichs
@@ -1703,7 +1832,7 @@ Gezeichnete, und dann ändert sich nichts.
 
 ---
 
-## 2026-10-06 · `(2/pi)` auf einem schon gemittelten B — OFFEN
+## 2026-10-06 · `(2/pi)` auf einem schon gemittelten B — BEHOBEN am 16.10.2026
 
 **Beobachtung.** `ema_axial_fdm.betriebspunkt` rechnet
 
@@ -1730,8 +1859,17 @@ genau das, wogegen diese Datei existiert.
 **Fundstelle.** `ema_axial_fdm.betriebspunkt` (`psi = p*(2/pi)*b_gap*a_fluss`),
 `ema_axial_fdm.felder` (`T_verhaeltnis`, `widerspruch`).
 
-**Status: offen und benannt.** Die Stufe sagt es in jedem Ergebnis; `T_maxwell`
-ist der von der Eichung unabhängige Weg und der belastbarere für das Moment.
+**Status: behoben am 16.10.2026** (eigener Eintrag oben). Gemessen wurde es
+dann doch nicht an einer Fremdmaschine, sondern an drei Dingen, die schärfer
+sind: am direkt integrierten Fluss des gelösten Verlaufs, an der Hausbrücke
+`k_norm` (sie geht nur mit der Grundwelle auf, 1,0000 gegen 0,6866) und am
+eigenen Löser desselben Moduls, dessen `psi` seit jeher aus der Grundwelle
+kommt. `formfaktor_grundwelle` bringt den Mittelwert auf die Grundwelle, an
+beiden Stellen. Die vermutete Richtung dieses Eintrags stimmte; die Begründung
+„`_analytical_Bgap` ist amplitudenartig" war dagegen nur zur Hälfte richtig —
+für Oberflächenmagnete ist auch sie `Br*perm*alpha`, und warum der radiale Pfad
+damit trotzdem trägt, steht im neuen Eintrag. `T_maxwell` bleibt der von der
+Eichung unabhängige Weg.
 
 ---
 

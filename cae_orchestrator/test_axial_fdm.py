@@ -541,5 +541,74 @@ pruefe(abs(_hj / _hr - 1.0) < 0.25,
        f"beieinander ({abs(_hj/_hr-1)*100:.1f} %) — beide fuehren den halben "
        f"Polfluss umfangs. Mit alpha^2 standen 7,89 gegen 11,10 mm")
 
+
+print("\n— Das (2/pi) steht auf einer GRUNDWELLENAMPLITUDE, nicht auf einem Mittel —")
+# Befund vom 16.10.2026. `psi = p*(2/pi)*B*A` -- das (2/pi) ist der Mittelwert
+# einer halben Sinuswelle ueber ihre AMPLITUDE, der Term setzt also eine
+# Grundwellenamplitude voraus. Eingesetzt wurde `eichung_magnet`, und das ist
+# ausdruecklich der Flussmittelwert. Gemessen am geloesten Verlauf war das
+# Ergebnis weder der Gesamtfluss je Pol noch der Grundwellenfluss, sondern
+# genau 2/pi des Gesamtflusses.
+
+# (1) Der Formfaktor ist reine Fourier-Arithmetik und faellt mit der
+#     vorhandenen Grundwellen-Eichung zusammen -- keine zweite Quelle.
+for _al in (0.60, 0.70, 0.85, 1.00):
+    _g = geom(axialPolbedeckung=_al)
+    _ff = AF.formfaktor_grundwelle(_g)
+    pruefe(abs(AF.eichung_magnet(_g) * _ff
+               - AF.eichung_magnet_grundwelle(_g)) < 1e-12,
+           f"alpha {_al:.2f}: Formfaktor {_ff:.4f} = Grundwelle / Mittel")
+pruefe(abs(AF.formfaktor_grundwelle(geom(axialPolbedeckung=1.0))
+           - 4.0 / math.pi) < 1e-12,
+       "bei voller Polbedeckung ist er genau 4/pi = 1,2732")
+
+# (2) Die Brueckenprobe -- die schaerfste, weil das Werkzeug seinen eigenen
+#     Massstab traegt: `ema_asm.k_norm` ist ueber die Momenterhaltung
+#     hergeleitet und rechnet die Hauskonvention auf die Physik um. Sie geht
+#     NUR mit der Grundwelle auf (gemessen 1,0000 gegen 0,6866).
+import ema_asm as _ASM
+_g = geom(axialPolbedeckung=0.85)
+_a = AX.auslegung(_g, None)
+_fl = F.flaechen(_g, None)
+_p = _a["poles"] // 2
+_phi_gw = (2.0 / math.pi) * AF.eichung_magnet_grundwelle(_g) * math.pi * _fl["a_fluss_m2"] / _p
+_psi_phys = _ASM.K_W * (_a["slots"] / 3.0) * _phi_gw
+_psi_haus = AF.betriebspunkt(_g, 3000.0, 1.0)["psi_Wb"]
+pruefe(abs(_psi_haus * _ASM.k_norm(_g) / _psi_phys - 1.0) < 1e-9,
+       f"psi_haus * k_norm / psi_phys = "
+       f"{_psi_haus * _ASM.k_norm(_g) / _psi_phys:.6f} — die Hausbruecke geht "
+       f"auf; mit dem Flussmittelwert stand dort 0,6866")
+
+# (3) Die beiden Stufen desselben Moduls meinen dasselbe psi. `felder` bildet
+#     es seit jeher aus `b_n_grundwelle_T`; was bleibt, ist Nutung und
+#     Streuung, die die Arbeitsgerade nicht kennt (~10 %).
+for _name, _auf in (("Vorgabe", {}), ("alpha 0,70", {"axialPolbedeckung": 0.70}),
+                    ("einseitig", {"axialBauform": "einseitig"})):
+    _g = geom(**_auf)
+    _bp = AF.betriebspunkt(_g, 3000.0, 1.0)
+    _fe = AF.felder(_g, k_schnitte=3, N=300, rpm=3000.0, last_nm=0.0)
+    _v = _fe["psi_Wb"] / _bp["psi_Wb"]
+    pruefe(0.80 <= _v <= 1.05,
+           f"{_name}: geloestes psi / analytisches psi = {_v:.4f} "
+           f"(mit dem Mittelwert waeren es {_v * AF.formfaktor_grundwelle(_g):.4f})")
+    # Gegenprobe: mit dem Mittelwert LAEGE es ausserhalb.
+    pruefe(not (0.80 <= _v * AF.formfaktor_grundwelle(_g) <= 1.05),
+           f"{_name}: … und mit dem Mittelwert laege es ausserhalb — der "
+           f"Waechter kann den Fehler also sehen")
+
+# (4) `compute_performance` wendet ihn axial an und RADIAL NICHT.
+_ga = geom()
+_pa = EA.compute_performance(_ga, AF.eichung_magnet(_ga), 3000.0,
+                             _ga.get("axialLen"))
+pruefe(abs(_pa["B1_T"] - round(AF.eichung_magnet_grundwelle(_ga), 3)) < 1e-9,
+       f"axial: B1 {_pa['B1_T']} T steht neben B_gap {_pa['B_gap_T']} T — "
+       f"psi sieht sonst aus, als kaeme es aus B_gap")
+import cae_cli as _CLI
+_gr = _CLI.frischer_payload()["geom"]
+_pr = EA.compute_performance(_gr, 0.65, 3000.0, 80.0)
+pruefe(_pr["B1_T"] == _pr["B_gap_T"] == 0.65,
+       "radial: B1 = B_gap, der Faktor wirkt dort NICHT — jede abgelegte "
+       "radiale Rechnung bleibt Ziffer fuer Ziffer dieselbe")
+
 print(f"\n{_ok} bestanden, {_fehl} fehlgeschlagen")
 sys.exit(1 if _fehl else 0)
