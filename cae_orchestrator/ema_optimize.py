@@ -357,6 +357,22 @@ def _baubar(geom) -> dict:
         # Ein Tor, das selbst scheitert, darf keinen Bewerter mitreissen — aber
         # es darf auch nicht als „baubar" durchgehen.
         return {"baubar": None, "baubar_grund": f"nicht pruefbar: {type(e).__name__}"}
+    if tor.get("flussweg") == "axial":
+        # **Nicht „unbaubar" -- nicht ZUSTAENDIG.** Dieser ganze Bewerter
+        # rechnet Zylinderringe mal Blechpaketlaenge; fuer eine Scheibe ist er
+        # kein ungenaues Modell, sondern ein anderes. `baubar=False` bleibt
+        # trotzdem richtig (jede unzulaessige Loesung rangiert unter jeder
+        # zulaessigen), nur sagte der Grund bis zum 16.10.2026 etwas ueber
+        # Magnettaschen, die es dort nicht gibt -- und `leistung` brach damit
+        # mit „nicht baubar: Axialfluss: dieses Tor prueft Magnettaschen …" ab.
+        # Derselbe Befund wie im 3-D-Pfad, eine Etage tiefer.
+        return {"baubar": False, "baubar_art": "flussweg",
+                "baubar_grund":
+                    "Axialfluss: dieser schnelle Bewerter rechnet die "
+                    "ZYLINDERmaschine (Ringe mal Blechpaketlaenge). Die "
+                    "Scheibe rechnet `cae_cli.py axial` (Stufe 1 analytisch, "
+                    "Stufe 2 abgewickelter Mehrschnitt); verglichen wird sie "
+                    "mit `paarvergleich` ueber `ema_axial_vergleich`."}
     if tor.get("ok"):
         return {"baubar": True, "baubar_grund": ""}
     grund = (tor.get("fatal") or tor.get("warnings") or ["Layouttor nicht bestanden"])[0]

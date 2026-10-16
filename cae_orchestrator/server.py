@@ -437,7 +437,8 @@ def _em3d_finish_error(e):
             import ema_maschinenart as _MA
             import ema_em3d as _E3
             _sauber = isinstance(e, (_MA.ArtNichtUnterstuetzt,
-                                     getattr(_E3, "LayoutUngueltig", ())))
+                                     getattr(_E3, "LayoutUngueltig", ()),
+                                     getattr(_E3, "FlusswegFalsch", ())))
         except Exception:                                    # noqa: BLE001
             pass
         _em3d_state["error"] = str(e)
@@ -1288,8 +1289,9 @@ def em3d_preview():
         return "", 200
     if _em3d_state["status"] == "running":
         return jsonify({"error": "3D-Job läuft bereits"}), 409
-    data = request.get_json(force=True) or {}
+    data = _axial_ergaenzen(request.get_json(force=True) or {})
     proj_dir, proj_id = _em3d_project_dir(data)
+    _em3d_abort["v"] = False
     _em3d_state.update({"status": "running", "progress": 0, "log": [],
                         "result": None, "error": None})
 
@@ -1304,11 +1306,12 @@ def em3d_preview():
             res["project_id"] = proj_id
             _em3d_state.update({"result": res, "status": "done", "progress": 100})
         except Exception as e:
-            import traceback
-            _em3d_state["error"] = str(e)
-            _em3d_state["log"].append("⚠ " + str(e))
-            _em3d_state["log"].append(traceback.format_exc()[:600])
-            _em3d_state["status"] = "error"
+            # **Dieselbe Abschlussbehandlung wie die uebrigen em3d-Wege.**
+            # Diese Route fuehrte ihre eigene -- also ohne die Unterscheidung
+            # „begruendetes Nein gegen Absturz", und ein sauberer Befund (die
+            # Maschinenart traegt die Stufe nicht, der Flussweg gehoert
+            # woandershin) stand hier mit sechs Zeilen Python darunter.
+            _em3d_finish_error(e)
 
     threading.Thread(target=_worker, daemon=True).start()
     return jsonify({"status": "started", "project_id": proj_id}), 202
@@ -1408,12 +1411,13 @@ def em3d_submodel():
         return jsonify({"error": elmer_runner.INSTALL_HINT, "need_install": True}), 503
     if _em3d_state["status"] == "running":
         return jsonify({"error": "3D-Berechnung läuft bereits"}), 409
-    data = request.get_json(force=True) or {}
+    data = _axial_ergaenzen(request.get_json(force=True) or {})
     if not data.get("roi_box"):
         return jsonify({"error": "Kein Verfeinerungsgebiet (roi_box) angegeben"}), 400
 
     proj_dir, proj_id = _em3d_project_dir(data)
 
+    _em3d_abort["v"] = False
     _em3d_state.update({"status": "running", "progress": 0, "log": [],
                         "result": None, "error": None})
 
@@ -1430,11 +1434,11 @@ def em3d_submodel():
             _em3d_state["status"] = "done"
             _em3d_state["progress"] = 100
         except Exception as e:
-            import traceback
-            _em3d_state["error"] = str(e)
-            _em3d_state["log"].append("⚠ " + str(e))
-            _em3d_state["log"].append(traceback.format_exc()[:600])
-            _em3d_state["status"] = "error"
+            # Gemeinsamer Abschluss (s. /em3d/preview): sonst steht unter einem
+            # begruendeten Nein ein Traceback, und die vierte Abschrift derselben
+            # sechs Zeilen waere die vierte Gelegenheit, sie auseinanderlaufen
+            # zu lassen.
+            _em3d_finish_error(e)
 
     threading.Thread(target=_worker, daemon=True).start()
     return jsonify({"status": "started", "project_id": proj_id}), 202

@@ -2246,7 +2246,10 @@
       <button id="e3_abort" onclick="abortEm3d()" style="background:#a33;display:none"
         title="Laufende 3D-Berechnung abbrechen — beim Drehzahlband/Sweep werden die bis dahin gerechneten Punkte behalten und lassen sich speichern; danach neu startbar">⛔ Abbrechen</button>
     </div>
-    <div style="font-size:.74rem;color:#8a9;margin-top:6px;line-height:1.4">
+    <!-- Der Text wird von `_e3AxialKarte` (oberflaeche/feld3d.js) gesetzt: beim
+         Axialfluss führt dieser Knopf auf den axialen Ringsektor, und das
+         Knoten-Kontingent darunter gilt dort nicht. -->
+    <div id="e3_sector_hint" style="font-size:.74rem;color:#8a9;margin-top:6px;line-height:1.4">
       🔁 <b>Pol-Berechnung</b>: nutzt die Maschinensymmetrie — nur eine Pol-Teilung („Tortenstück")
       wird gerechnet (anti-periodisch exakt gekoppelt) und zum vollen Motor gespiegelt, mit
       <b>gestufter Verfeinerung</b> (Luftspalt am feinsten, dann Magnete + Flussbarrieren + Nuten,

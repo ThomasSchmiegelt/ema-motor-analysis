@@ -275,9 +275,14 @@ def kennlinie(payload: dict, rpms=None, N: int = 140, melde=None) -> dict:
                          + str(m0.get("stimmig_grund") or "Radien passen nicht"),
                 "stimmig": False}
     if m0.get("baubar") is False:
-        return {"error": "nicht baubar: " + str(m0.get("baubar_grund") or
-                                                 "Layouttor verletzt"),
-                "baubar": False}
+        # „nicht baubar" ist das Urteil ueber eine ZEICHNUNG. Wo der Bewerter
+        # gar nicht zustaendig ist (Scheibenlaeufer), waere es das falsche
+        # Wort -- `baubar_art` sagt, welcher der beiden Faelle vorliegt.
+        _vor = ("Dieses Werkzeug ist hier nicht zustaendig: "
+                if m0.get("baubar_art") == "flussweg" else "nicht baubar: ")
+        return {"error": _vor + str(m0.get("baubar_grund") or
+                                    "Layouttor verletzt"),
+                "baubar": False, "baubar_art": m0.get("baubar_art") or "layout"}
     n_sicher = float(m0.get("max_safe_rpm") or 0.0)
 
     if rpms is None:

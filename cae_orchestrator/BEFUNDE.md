@@ -17,6 +17,143 @@ kann.
 
 ---
 
+## 2026-10-16 · Die Scheibe lief in das Layouttor der Zylindermaschine — in vier 3-D-Einstiegen
+
+**Beobachtung.** Gemeldet aus dem Reiter 🧲, Knopf „🔁 Schnelle Pol-Berechnung
+(Symmetrie)", bei gesetztem `fluxPath = "axial"`:
+
+> ⚠ Die Geometrie faellt durch das Rotor-Layouttor — das ist ein Fehler der
+> ZEICHNUNG, nicht des Netzes, und kein Netzbau behebt ihn: · Axialfluss:
+> dieses Tor prueft Magnettaschen in einem Querschnitt senkrecht zur Drehachse
+> und Stege gegen den Rotorrand — **eine Scheibe hat beides nicht.** […]
+> Abhilfe: die genannte Tasche kleiner/weiter aussen setzen, die Welle
+> duenner, oder — wenn es so gemeint ist — `geom.layoutFreigabe` setzen.
+
+Die Meldung widerspricht sich in sich: sie verwirft eine Zeichnung und sagt im
+selben Atemzug, dass sie daran nichts prüfen kann. Die drei angebotenen
+Abhilfen bedeuten an einem Scheibenläufer nichts.
+
+**Die Absage war der harmlose Teil — gefährlich war die Freigabe.**
+`_build_sector_mesh` setzt konzentrische Zylinder um die Drehachse und
+schneidet Magnete aus `magnet_legs` hinein. Ein Axialpayload trägt die
+radialen Schemavorgaben weiter mit; gemessen am frischen Payload mit
+`fluxPath=axial`:
+
+| | Payload (radial) | gezeichnete Scheibe |
+|---|---:|---:|
+| Außendurchmesser | `statorOD` 280 mm | `axialAktivOD` **260 mm** |
+| Läufer | `rotorOD` 188,6 mm | — (Scheibe) |
+| Welle | `shaftD` 60 mm | — |
+
+Mit `layoutFreigabe=true` wäre daraus klaglos ein 280-mm-Zylinder mit sechs
+V-Magneten entstanden, und nichts am Ergebnis hätte gesagt, dass es zu einer
+anderen Maschine gehört. Das ist dieselbe Lage wie bei einer Bauart ohne
+Magnete (Befund vom 20.09.2026), nur eine Ebene höher: dort entscheidet die
+**Maschinenart**, hier der **Flussweg** — und der Axialfluss ist payloadseitig
+eine PSM, kommt also an der Artabfrage vorbei.
+
+**Gemessen: vier Einstiege, einer gemeldet.** `run_em3d` verzweigt seit dem
+07.10.2026 richtig (`ema_fluss.flussweg` vor der Maschinenart). Die vier
+anderen Wege in denselben Netzbauer taten es nicht und landeten alle über
+`_tor_layout` → `ema_rotorcheck.rotor_layout_check` in derselben Layoutabsage:
+
+| Einstieg | Route / Knopf | vorher |
+|---|---|---|
+| `run_em3d_sector` | `/em3d/sector`, „🔁 Pol-Berechnung" | Layoutabsage |
+| `run_em3d_sweep` | `/em3d_sweep`, Drehzahlband | Layoutabsage |
+| `run_em3d_refine` | `/em3d/submodel`, ROI | Layoutabsage |
+| `render_model_preview` | `/em3d/preview`, „🧊 3D-Modell ansehen" | Layoutabsage |
+
+**Derselbe Fehler eine Etage tiefer:** `cae_cli.py rotor-check` meldete für
+dieselbe Scheibe **„Layout ABGELEHNT" mit Exit 1**, während zehn Zeilen
+darunter das Fliehkrafttor denselben Fall sauber als ℹ führt und sagt, was
+statt dessen rechnet (`ema_axial.ruecken`/`bandage`). Eine Ausgabe, die oben
+verwirft, was sie unten gar nicht beurteilt, ist schlechter als keine — und
+ein Agent liest den Exit-Code.
+
+**Behoben.**
+
+* Neuer Typ `ema_em3d.FlusswegFalsch` (**kein** `LayoutUngueltig` — sonst böte
+  `ema_diagnose` Knöpfe für Taschenlage und Wellendurchmesser an) und
+  `_tor_flussweg(geom, was, statt)`. Es steht als erste Zeile in `_tor_layout`,
+  also **vor** der Maschinenart und an dem einen Punkt, durch den
+  `_build_mesh_capped` **und** `_build_sector_mesh` beide gehen: kein Netzbauer
+  kann eine Scheibe mehr als Zylinder bauen, auch wenn an einer Tür die
+  Abzweigung fehlt.
+* **`layoutFreigabe` öffnet diese Tür ausdrücklich nicht.** Eine Freigabe
+  heißt „ich kenne das Risiko dieser Zeichnung"; hier gibt es kein Risiko
+  abzuwägen, sondern nur das falsche Modell.
+* Sweep, ROI-Verfeinerung und Modellvorschau sagen zusätzlich, **was für die
+  Scheibe an ihre Stelle tritt** (Feldstufe `ema_axial_fdm` für die Last,
+  `mesh_cl`/`gap_cl` für die Feinheit, Reiter ⊙ Axialfluss für die Zeichnung).
+* **Die Pol-Berechnung wird nicht abgewiesen, sondern geführt.** Was sie
+  verspricht — eine Polteilung, anti-periodisch gekoppelt, zum vollen Kranz
+  gespiegelt — IST der axiale 3-D-Weg; `run_em3d_sector` verzweigt deshalb wie
+  `run_em3d` auf `_run_em3d_axial`. Derselbe Knopf, der richtige Löser.
+  Gemessen über diesen Knopf (frischer Payload, `fluxPath=axial`, k = 3,
+  N = 300): **253.545 Knoten, Sektor 60,0° (ein Pol von 2p = 6), +1,9 % im
+  Mittel gegen den Mehrschnitt**, Randabfall innen 81 % / außen 85 % — und
+  über die Route `/em3d/sector` ebenso, mit einem Payload, der **keine einzige
+  axiale Zahl** trug (`_axial_ergaenzen` füllt sie benannt auf).
+  Das `node_budget_pct` steuert die Zielsuche des *radialen* Sektornetzes und
+  wird **gemeldet statt überhört** (Muster `paarvergleich --n_max`).
+* `cae_cli.py rotor-check` führt für den Axialfluss „Layout: NICHT zuständig"
+  und lässt es weder in das Urteil noch in den Exit-Code eingehen —
+  `layout_ok is None` zählt wie jedes andere nicht geführte Tor.
+* Oberfläche (`oberflaeche/feld3d.js`, `_e3AxialKarte`): die Modellvorschau
+  wird für die Scheibe gesperrt (sie rendert das radiale Vollmodell und hat
+  dort kein Gegenstück), der Hinweistext der Pol-Berechnung und das
+  Knoten-Kontingent folgen dem Flussweg. Das ist **Auskunft, keine Sicherung**
+  — die sitzt im Server, sonst wären `cae_cli.py` und die Job-Warteschlange
+  ungeschützt.
+
+**Derselbe Befund eine Etage tiefer, beim Nachmessen gefunden und
+mitbehoben:** `ema_optimize._baubar` ruft dasselbe Layouttor, und der schnelle
+Bewerter ist der gemeinsame Kern von `leistung`, `ausreizen`, `studie`,
+`zielwert` und der KI-Vorsortierung. Gemessen gab er für eine Scheibe
+`baubar=False` mit genau demselben Magnettaschen-Text, und
+`cae_cli.py leistung --set fluxPath=axial` brach damit ab als
+**„nicht baubar: Axialfluss: dieses Tor prueft Magnettaschen …"**. Das Urteil
+ist richtig (dieser Bewerter rechnet Zylinderringe mal Blechpaketlänge, eine
+Scheibe gehört dort nicht hinein, und jede unzulässige Lösung muss unter jeder
+zulässigen rangieren) — die **Begründung** war es nicht. `_baubar` nennt jetzt
+den Grund und den Weg (`cae_cli.py axial`, `paarvergleich` über
+`ema_axial_vergleich`) und setzt `baubar_art="flussweg"`; `ema_leistung`
+schreibt darüber „Dieses Werkzeug ist hier nicht zuständig" statt „nicht
+baubar" — *unbaubar* ist ein Urteil über eine Zeichnung, und hier wird keine
+beurteilt.
+
+**Nebenbefund, mitbehoben: drei Tests in `test_em3d.py` standen unter `main()`
+und liefen nie.** Genau der Fall, den dieselbe Datei am 20.09.2026 schon
+einmal festhält („ein Test, der nie läuft, ist grün, weil er schweigt").
+Einer davon, `test_tor_nennt_den_weg_der_wirklich_traegt`, war seit dem
+20.09.2026 **rot**: er erwartete für die EESM weiterhin eine Absage, während
+`laeufer_profile` den Schenkelpolläufer längst baut und `write_sif` der
+Erregerwicklung ihre Gleichstromdichte gibt. Alle drei stehen jetzt in
+`main()`, der veraltete Zweig ist auf das gemessene Verhalten berichtigt
+(EESM geht durch, **mit** der Wickelkopf-Einschränkung; ASM → `feld3d`,
+GSM → kein 3-D-Weg).
+
+**Fundstellen.** `ema_em3d.FlusswegFalsch` / `_tor_flussweg` / `_tor_layout` /
+`run_em3d_sector` / `run_em3d_sweep` / `run_em3d_refine` /
+`render_model_preview`; `cae_cli.py` (Verb `rotor-check`); `server.py`
+(`_em3d_finish_error`, `_sauber`; dazu `/em3d/preview` und `/em3d/submodel`,
+die ihre **eigene** Fehlerbehandlung samt Traceback führten statt
+`_em3d_finish_error` — unter einem begründeten Nein standen dort sechs Zeilen
+Python; beide ergänzen jetzt auch `_axial_ergaenzen`, wie die übrigen
+em3d-Türen); `ema_optimize._baubar`; `ema_leistung`; `ema_diagnose.diagnose`
+(Zweig `FlusswegFalsch`); `oberflaeche/feld3d.js` (`_e3AxialKarte`);
+`ema.html` (`#e3_sector_hint`).
+
+**Nicht angefasst.** `ema_rotorcheck.rotor_layout_check` gibt für den
+Axialfluss weiterhin `ok=False` mit `flussweg="axial"` zurück — ein „OK" wäre
+dort schlimmer als ein Nein (so steht es seit jeher in seinem Docstring), und
+alle Aufrufer werten das Feld jetzt aus. Eine **3-D-Modellvorschau für die
+Scheibe** gibt es nicht; die Scheibe ist im Reiter ⊙ Axialfluss gezeichnet,
+und die gerechneten 3-D-Ansichten liefert der Lauf. **Status: BEHOBEN.**
+
+---
+
 ## 2026-10-16 · Das `(2/pi)` in der Flussverkettung stand auf einem MITTELWERT — axial
 
 **Beobachtung.** Seit dem 06.10.2026 steht als offener Punkt in `AXIALFLUSS.md`

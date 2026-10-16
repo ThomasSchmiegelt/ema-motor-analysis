@@ -3012,9 +3012,31 @@ def cmd_rotor_check(args) -> int:
     zeilen.append("Grenzen (Luftspalt · Wickelkopf · Nuttiefe):")
     zeilen.append(ema_grenzen.als_text(gr))
     zeilen.append("")
-    if chk["ok"]:
+    # **Die Scheibe wird hier weder angenommen noch abgelehnt.** Dieses Tor
+    # sucht Magnettaschen in einem Querschnitt senkrecht zur Drehachse und
+    # misst Stege gegen den Laeuferrand; ein Scheibenlaeufer hat beides nicht,
+    # und `rotor_layout_check` sagt das auch (``flussweg == "axial"``, ein
+    # ``fatal`` damit niemand es als gruenes Urteil liest).
+    #
+    # Nur machte dieses Verb daraus „Layout ABGELEHNT" **mit Exit 1** --
+    # waehrend zehn Zeilen tiefer das Fliehkrafttor denselben Fall sauber als
+    # ℹ meldet und sagt, was statt dessen rechnet. Eine Ausgabe, die in ihrer
+    # oberen Haelfte eine Zeichnung verwirft, die sie in der unteren gar nicht
+    # beurteilt, ist schlechter als keine; und ein Agent liest den Exit-Code.
+    # Gemeldet am 16.10.2026 zusammen mit demselben Fehler im 3-D-Pfad.
+    layout_ok = True
+    if chk.get("flussweg") == "axial":
+        layout_ok = None                       # nicht zustaendig, nicht beurteilt
+        zeilen.append("Layout: NICHT zustaendig (Axialfluss)")
+        zeilen += ["  \u2139 " + m for m in
+                   (list(chk.get("fatal") or []) + list(chk.get("warnings") or []))]
+        zeilen.append("  Geprueft wird die Scheibe mit `cae_cli.py axial` "
+                      "(Bandage, Rueckenblech, Durchbiegung unter dem axialen "
+                      "Anzug) \u2014 das ist keine Aussage ueber die Zeichnung.")
+    elif chk["ok"]:
         zeilen.append("Layout OK — keine Kollision, Stege ueber Grenze, Taschen im Ring.")
     else:
+        layout_ok = False
         zeilen.append("Layout ABGELEHNT:")
         zeilen += ["  ✗ " + m for m in chk["fatal"]]
 
@@ -3111,7 +3133,9 @@ def cmd_rotor_check(args) -> int:
                       f"Aussage ueber die Bauart.")
 
     chk["grenzen"] = gr
-    ok = bool(chk["ok"]) and bool(gr["ok"]) and fliehkraft_ok and laeufer_ok
+    # ``layout_ok is None`` heisst „nicht zustaendig" und zaehlt wie jedes
+    # andere nicht gefuehrte Tor hier weder dafuer noch dagegen.
+    ok = (layout_ok is not False) and bool(gr["ok"]) and fliehkraft_ok and laeufer_ok
     emit(chk, args)
     text = "\n".join(zeilen)
     print("ERGEBNIS:")

@@ -83,9 +83,57 @@ async function adoptEm3dGeom() {
   try {
     _em3dGeomPayload = await _em3dBuildGeomPayload();
     sum.innerHTML = _em3dGeomSummaryHtml(_em3dGeomPayload);
+    _e3AxialKarte((_em3dGeomPayload.geom || {}).fluxPath === 'axial');
   } catch (e) {
     _em3dGeomPayload = null;
     sum.innerHTML = '<span style="color:#e57">⚠ ' + escHtml(e.message) + '</span>';
+  }
+}
+
+/* Was in dieser Karte für eine SCHEIBE gilt — und was nicht.
+ *
+ * Der Server entscheidet das seit dem 16.10.2026 selbst (`ema_em3d._tor_flussweg`
+ * und die Abzweigung in `run_em3d_sector`), und so muss es auch sein: eine Maske,
+ * die den falschen Knopf nur ausgraut, schützt `cae_cli.py` und die
+ * Job-Warteschlange nicht. Hier steht deshalb nur, was man VOR dem Klick wissen
+ * will — gemeldet wurde genau die umgekehrte Reihenfolge: erst klicken, dann eine
+ * Layoutabsage lesen, deren Abhilfen an einer Scheibe nichts bedeuten.
+ *
+ * Die „Pol-Berechnung" wird NICHT gesperrt: was sie verspricht, ist beim
+ * Axialfluss der normale Weg, sie landet jetzt dort. Gesperrt wird die
+ * Modellvorschau, denn die rendert das radiale Vollmodell und hat für die
+ * Scheibe kein Gegenstück — die ist im Reiter ⊙ Axialfluss gezeichnet. */
+function _e3AxialKarte(axial) {
+  const pbtn = document.getElementById('e3_pbtn');
+  if (pbtn) {
+    pbtn.disabled = !!axial;
+    pbtn.style.opacity = axial ? 0.45 : '';
+    pbtn.title = axial
+      ? 'Für eine Scheibe nicht sinnvoll: die Vorschau rendert das radiale '
+        + 'Vollmodell. Gezeichnet ist die Scheibe im Reiter ⊙ Axialfluss; die '
+        + 'gerechneten 3-D-Ansichten liefert „🧲 3D-Feld berechnen".'
+      : 'Baut nur das 3D-Netz und rendert die Modellansichten — ohne Elmer.';
+  }
+  const hint = document.getElementById('e3_sector_hint');
+  if (hint) {
+    hint.innerHTML = axial
+      ? '🔁 <b>Pol-Berechnung</b>: beim <b>Axialfluss</b> ist das der normale '
+        + 'Weg — der Knopf führt auf denselben anti-periodischen Ringsektor '
+        + 'EINER Polteilung (<code>ema_axial_em3d</code>) wie „🧲 3D-Feld '
+        + 'berechnen". Das Knoten-Kontingent darunter steuert das <i>radiale</i> '
+        + 'Sektornetz und bleibt hier ohne Wirkung; die Feinheit der Scheibe '
+        + 'kommt aus Netz-/Luftspaltzellgröße.'
+      : '🔁 <b>Pol-Berechnung</b>: nutzt die Maschinensymmetrie — nur eine '
+        + 'Pol-Teilung („Tortenstück") wird gerechnet (anti-periodisch exakt '
+        + 'gekoppelt) und zum vollen Motor gespiegelt, mit <b>gestufter '
+        + 'Verfeinerung</b> (Luftspalt am feinsten, dann Magnete + '
+        + 'Flussbarrieren + Nuten, dann grob). v1: Leerlauf, ohne Skew/Last.';
+  }
+  const bud = document.getElementById('e3_node_budget');
+  if (bud) {
+    bud.disabled = !!axial;
+    const lbl = bud.closest('label');
+    if (lbl) lbl.style.opacity = axial ? 0.45 : '';
   }
 }
 
@@ -775,6 +823,12 @@ async function _pollEm3d(isPreview) {
   const logEl = document.getElementById('e3_log');
   const enable = () => { ['e3_btn','e3_pbtn','e3_sbtn','e3_secbtn'].forEach(id => {
                          const el=document.getElementById(id); if(el)el.disabled=false; });
+                         // Was der Flussweg sperrt, bleibt gesperrt: sonst gibt
+                         // ein beendeter Lauf die Modellvorschau fuer die
+                         // Scheibe wieder frei, obwohl sie dort das radiale
+                         // Vollmodell rendern wuerde.
+                         _e3AxialKarte(((_em3dGeomPayload || {}).geom || {})
+                                       .fluxPath === 'axial');
                          _e3ShowAbort(false); };
   try {
     const s = await fetch('/em3d/status').then(x => x.json());

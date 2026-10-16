@@ -622,6 +622,14 @@ def main():
     test_zellgroesse_an_der_geometrie_gedeckelt()
     test_harmonische_browserdateien()
     test_rueckweg_zum_letzten_guten_netz()
+    # Drei Tests standen bis zum 16.10.2026 unter `main()` und wurden deshalb
+    # nie gerufen -- derselbe Fall, den der Kommentar oben schon einmal
+    # festhaelt, und einer von ihnen (`..._weg_der_wirklich_traegt`) war seit
+    # dem 20.09.2026 rot, ohne dass es jemand erfuhr.
+    test_magnetlose_bauart_bekommt_keine_magnete()
+    test_synrm_bekommt_seine_flussbarrieren()
+    test_tor_nennt_den_weg_der_wirklich_traegt()
+    test_scheibe_gehoert_nicht_in_den_zylinderpfad()
     print("\nALLE EM3D-MESH-TESTS BESTANDEN ✅  (Elmer-Solve separat, sobald installiert)")
 
 
@@ -678,14 +686,24 @@ def test_tor_nennt_den_weg_der_wirklich_traegt():
     g = _geom("v")
     # Der Reluktanzlaeufer geht durch -- dieser Pfad ist magnetostatisch.
     E3._tor_layout(dict(g, machineType="synrm"))
+    # **Und der Schenkelpol ebenfalls, seit dem 20.09.2026.** Dieser Test stand
+    # bis zum 16.10.2026 nicht in `main()` und hat die Aenderung deshalb nie
+    # gemeldet: er erwartete fuer `eesm` weiterhin eine Absage, waehrend
+    # `laeufer_profile` den Laeufer laengst baut und `write_sif` der
+    # Erregerwicklung ihre Gleichstromdichte gibt (gemessen 18/18 Teile,
+    # 12 Spulen mit +-459 A). Ein Test, der nie laeuft, ist gruen, weil er
+    # schweigt -- derselbe Befund wie am 20.09.2026 eine Zeile ueber `main()`.
+    _w = E3._tor_layout(dict(g, machineType="eesm"))
+    assert any("Wickelkoep" in x for x in _w), \
+        "der Schenkelpol geht durch, aber MIT der Wickelkopf-Einschraenkung"
     for art, erwartet in (("asm", "feld3d"),
-                          ("eesm", "keinen 3-D-Weg"),
                           ("gsm", "keinen 3-D-Weg")):
         try:
             E3._tor_layout(dict(g, machineType=art))
             assert False, f"{art} muesste abgewiesen werden"
         except MA.ArtNichtUnterstuetzt as e:
             assert erwartet in str(e), f"{art}: {e}"
+    print("\u2713 Das Tor nennt je Bauart den Weg, der wirklich traegt")
 
 
 def _ok(bed, text):
@@ -764,6 +782,112 @@ def test_zellgroesse_an_der_geometrie_gedeckelt():
        "sie wird vor JEDEM Netzbau angewandt, nicht nur im Zielregler")
     print("✓ Zellgroesse an der Geometrie gedeckelt "
           "(Zielregler laeuft nicht an duennen Merkmalen vorbei)")
+
+
+def test_scheibe_gehoert_nicht_in_den_zylinderpfad():
+    """Der Axialfluss faellt nicht mehr ins Layouttor -- er wird GEFUEHRT.
+
+    Gemeldet am 16.10.2026 aus der „Pol-Berechnung": die Scheibe lief in
+    ``_tor_layout``, dort in ``rotor_layout_check``, und das gibt fuer den
+    Axialfluss ein ``fatal`` zurueck -- mit einem Text, der im selben Atemzug
+    sagt, dass dieses Tor an einer Scheibe nichts zu pruefen hat, und mit
+    Abhilfen („die genannte Tasche kleiner/weiter aussen setzen, die Welle
+    duenner"), die dort nichts bedeuten.
+
+    Die Absage war dabei der harmlose Teil. Gefaehrlich war die angebotene
+    Freigabe: ``layoutFreigabe`` haette den Netzbauer weiterlaufen lassen, und
+    der setzt konzentrische Zylinder nach den RADIALEN Schemavorgaben, die ein
+    Axialpayload weiter mittraegt (gemessen Stator \u00d8 280 / Laeufer
+    \u00d8 188,6 mm gegen eine gezeichnete Scheibe von \u00d8 260 mm).
+    """
+    import cae_cli
+    import ema_fluss
+    import ema_em3d as E
+
+    p = cae_cli.frischer_payload()
+    p["geom"]["fluxPath"] = "axial"
+    g, _erg = ema_fluss.axial_ergaenzen(p["geom"])
+    p["geom"] = g
+    assert ema_fluss.flussweg(g) == "axial"
+
+    # 1. Eigener Typ, eigene Begruendung -- und NICHT der Layoutbefund.
+    try:
+        E._tor_layout(g, {})
+        assert False, "die Scheibe muesste hier abgewiesen werden"
+    except E.FlusswegFalsch as e:
+        txt = str(e)
+    _ok("ema_axial_em3d" in txt and "ringsektor" in txt.lower(),
+        "das Tor nennt den Weg, der die Scheibe wirklich rechnet")
+    _ok("Tasche" not in txt and "Welle duenner" not in txt,
+        "und KEINE Abhilfe, die an einer Scheibe nichts bedeutet")
+    _ok(not isinstance(E.FlusswegFalsch("x"), E.LayoutUngueltig),
+        "es ist kein Layoutbefund -- `ema_diagnose` darf keine Taschenknoepfe "
+        "anbieten")
+
+    # 2. Die Gegenprobe, die den eigentlichen Schaden festnagelt: eine
+    #    Freigabe darf diese Tuer NICHT oeffnen.
+    try:
+        E._tor_layout(dict(g, layoutFreigabe=True), {})
+        assert False, "layoutFreigabe haette den falschen Zylinder gebaut"
+    except E.FlusswegFalsch:
+        pass
+    _ok(True, "`layoutFreigabe` oeffnet sie nicht -- hier gibt es kein Risiko "
+              "abzuwaegen, nur das falsche Modell")
+
+    # 3. Radial bleibt unberuehrt: das neue Tor ist dort ein No-op.
+    _ok(E._tor_flussweg(_geom("v")) is None,
+        "fuer die Zylindermaschine tut das Tor nichts")
+
+    # 4. Jeder Einstieg in den radialen 3-D-Pfad ist gedeckt -- gemeldet wurde
+    #    nur einer von vieren.
+    for name, ruf in (
+            ("Betriebspunkt-Sweep",
+             lambda: E.run_em3d_sweep(dict(p, sweep=[{"rpm": 1000, "load_nm": 10}]),
+                                      "/tmp")),
+            ("ROI-Verfeinerung",
+             lambda: E.run_em3d_refine(dict(p, roi_box={"xmin": 0, "xmax": 1,
+                                                        "ymin": 0, "ymax": 1,
+                                                        "zmin": 0, "zmax": 1}),
+                                       "/tmp")),
+            ("Modellvorschau", lambda: E.render_model_preview(p, "/tmp"))):
+        import elmer_runner as _ER
+        _vorher = _ER.ELMER_OK
+        _ER.ELMER_OK = True                 # der Flussweg entscheidet vor Elmer
+        try:
+            ruf()
+            assert False, f"{name}: die Scheibe muesste abgewiesen werden"
+        except E.FlusswegFalsch as e:
+            assert "ema_axial" in str(e) or "axial" in str(e), f"{name}: {e}"
+        finally:
+            _ER.ELMER_OK = _vorher
+        _ok(True, f"{name}: abgewiesen, mit dem Weg der traegt")
+
+    # 5. Die Pol-Berechnung wird nicht abgewiesen, sondern GEFUEHRT: was sie
+    #    verspricht (eine Polteilung, anti-periodisch, zum Kranz gespiegelt),
+    #    IST der axiale 3-D-Weg. Geprueft wird, dass sie dort landet und dabei
+    #    kein Gmsh anfasst.
+    gerufen = {}
+    _ax, _sek = E._run_em3d_axial, E._build_sector_mesh
+    import elmer_runner as _ER
+    _vorher = _ER.ELMER_OK
+    try:
+        E._run_em3d_axial = lambda *a, **k: gerufen.setdefault("axial", True) or {"ok": 1}
+        E._build_sector_mesh = lambda *a, **k: gerufen.setdefault("zylinder", True)
+        _ER.ELMER_OK = True
+        prot = []
+        E.run_em3d_sector(dict(p, node_budget_pct=60),
+                          "/tmp", progress_cb=lambda m, q=None: prot.append(m))
+    finally:
+        E._run_em3d_axial, E._build_sector_mesh = _ax, _sek
+        _ER.ELMER_OK = _vorher
+    _ok(gerufen.get("axial") and not gerufen.get("zylinder"),
+        "die Pol-Berechnung landet beim axialen Ringsektor, nicht im "
+        "Zylinderkeil")
+    _ok(any("Knoten-Kontingent" in m for m in prot),
+        "und sagt, dass das Knoten-Kontingent dort nicht wirkt, statt es zu "
+        "ueberhoeren")
+    print("\u2713 Die Scheibe wird aus dem Zylinderpfad gefuehrt, nicht "
+          "abgelehnt")
 
 
 if __name__ == "__main__":

@@ -418,6 +418,17 @@ def diagnose(exc, payload=None, log=None) -> dict:
                 _gesehen.add(x); _h.append(x)
         erg["hinweise"] = _h
 
+    elif typ == "FlusswegFalsch":
+        # **Kein Layoutbefund, also auch keine Layoutvorschlaege.** Bis zum
+        # 16.10.2026 fiel der Axialfluss in den Zweig darunter und bekam
+        # „die Zeichnung des Laeufers ist ungueltig" samt Knoepfen fuer
+        # Taschenlage und Wellendurchmesser -- an einer Scheibe bedeutet
+        # keiner davon etwas. Die Ausnahme traegt den Weg schon im Text;
+        # einen zweiten hier zu rechnen hiesse, ihn an zwei Stellen zu pflegen.
+        erg.update(tor="flussweg",
+                   titel="Dieser Weg gehoert der Zylindermaschine",
+                   wege=[])
+
     elif typ in ("LayoutUngueltig", "AuslegungReisst"):
         w, _h = _wege_layout(payload)
         erg.update(tor="layout", titel="Die Zeichnung des Laeufers ist ungueltig",

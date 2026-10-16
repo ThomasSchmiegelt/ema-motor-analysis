@@ -496,6 +496,78 @@ class LayoutUngueltig(ValueError):
     """
 
 
+class FlusswegFalsch(ValueError):
+    """Dieser 3-D-Pfad gehoert der ZYLINDERmaschine -- die Scheibe hat ihren eigenen.
+
+    Kein Zeichenfehler und kein Netzproblem: ``_build_mesh_once`` und
+    ``_build_sector_mesh`` setzen konzentrische Zylinder um die Drehachse und
+    schneiden Magnete aus ``magnet_legs`` hinein. Eine Axialflussmaschine
+    laeuft dort nicht etwa ungenau durch, sondern als eine ANDERE Maschine --
+    dieselbe Lage wie bei einer Bauart ohne Magnete, nur eine Ebene hoeher.
+
+    Gemessen am 16.10.2026 an einem Axialpayload: der traegt die radialen
+    Schemavorgaben weiter mit (``statorOD`` 280, ``rotorOD`` 188,6, ``shaftD``
+    60 mm), waehrend die gezeichnete Scheibe ``axialAktivOD`` 260 mm hat. Der
+    Netzbauer haette daraus klaglos einen 280-mm-Zylinder mit sechs V-Magneten
+    gebaut, und nichts an dem Ergebnis haette gesagt, dass es zu einer anderen
+    Maschine gehoert.
+
+    **``layoutFreigabe`` oeffnet diese Tuer ausdruecklich NICHT.** Eine
+    Freigabe heisst „ich kenne das Risiko dieser Zeichnung" -- hier gibt es
+    kein Risiko abzuwaegen, sondern nur das falsche Modell. Bis zum 16.10.2026
+    fiel der Axialfluss statt dessen in ``_tor_layout``s Layoutabsage, deren
+    Abhilfen („die genannte Tasche kleiner/weiter aussen setzen, die Welle
+    duenner") fuer eine Scheibe nichts bedeuten und deren Freigabe genau in den
+    falschen Zylinder gefuehrt haette.
+    """
+
+
+AXIAL_WEG = ("Gerechnet wird die Scheibe in 3-D als anti-periodischer "
+             "RINGSEKTOR einer Polteilung (`ema_axial_em3d`) — im Browser "
+             "der Knopf „3-D-Feld berechnen“ im Reiter 🧲, "
+             "auf der Kommandozeile `cae_cli.py axial --sektor`. Derselbe Lauf "
+             "stellt den Sektor gegen den abgewickelten Mehrschnitt; die "
+             "Abweichung ueber dem Radius IST sein Ergebnis.")
+
+
+def _tor_flussweg(geom: dict, was: str = "", statt: str = "") -> None:
+    """Stufe 0 VOR Stufe 0: gehoert diese Maschine ueberhaupt in diesen Pfad?
+
+    ``was``   nennt den Einstieg, der abgewiesen wird (eine Nominalphrase).
+    ``statt`` sagt, was fuer die Scheibe an seine Stelle tritt; ohne Angabe
+              steht dort der allgemeine Weg (``AXIAL_WEG``).
+
+    Geprueft wird der **Flussweg vor der Maschinenart** — aus demselben
+    Grund wie in ``run_em3d``: eine Axialflussmaschine ist payloadseitig eine
+    PSM (``machineType`` bleibt "pmsm"), die Artabfrage laesst sie also durch.
+
+    Scheitert der Import von ``ema_fluss``, wird NICHT abgewiesen: ein Tor, das
+    an seinem eigenen Import scheitert, darf keinen Lauf anhalten.
+    """
+    try:
+        import ema_fluss as _FLT
+        _weg = _FLT.flussweg(geom or {})
+    except Exception:                                        # noqa: BLE001
+        return
+    if _weg != "axial":
+        return
+    _g = geom or {}
+    _mass = ""
+    try:
+        _mass = (" (im Payload stehen weiter die radialen Schemavorgaben: "
+                 f"Stator Ø {float(_g['statorOD']):g}, Laeufer Ø "
+                 f"{float(_g['rotorOD']):g} mm — die gezeichnete Scheibe "
+                 f"hat Ø {float(_g['axialAktivOD']):g} mm)")
+    except Exception:                                        # noqa: BLE001
+        pass
+    raise FlusswegFalsch(
+        "⊙ Axialfluss: " + (was or "dieser 3-D-Pfad")
+        + " baut konzentrische Zylinder um die Drehachse und schneidet die "
+          "Magnete aus `magnet_legs` hinein. Fuer eine Scheibe ist das nicht "
+          "ungenau, sondern eine ANDERE Maschine" + _mass + ". "
+        + (statt or AXIAL_WEG))
+
+
 class _DegenerateMeshError(RuntimeError):
     """Das Netz wurde gebaut, enthält aber entartete Tetraeder (Sliver), auf denen der Elmer-
     Löser still scheitern würde. Getrennter Typ, damit ``build_mesh`` NICHT die (hier hilfreichen)
@@ -3018,6 +3090,16 @@ def render_model_preview(payload: dict, project_dir: str, progress_cb=None) -> d
                                     "mesh_cl", "gap_cl", "mag_cl", "mag_grow",
                                     "airbox_factor", "hex_mesh")
             if k in payload}
+    # Ohne diese Abfrage liefe die Vorschau in `_tor_layout` -- also mit
+    # derselben Auskunft, aber ohne zu sagen, wo die Scheibe statt dessen zu
+    # sehen ist. Ein Tor, das nur absagt, schickt die Suche ins Leere.
+    _tor_flussweg(
+        geom, "die 3-D-Modellvorschau",
+        "Gezeichnet ist die Scheibe im Reiter ⊙ Axialfluss (Stirnansicht "
+        "und Schnitt, ohne Netz und ohne Loeser); die gerechneten "
+        "3-D-Ansichten samt Feldlinien liefert der Lauf selbst — "
+        + AXIAL_WEG)
+
     work = os.path.join(project_dir, "em3d"); os.makedirs(work, exist_ok=True)
     _log("🔧 Baue 3D-Mesh (Gmsh)…", 15)
     tags, _ = _build_mesh_capped(geom, axial, opts, os.path.join(work, "motor3d.msh"), log=_log)
@@ -3238,6 +3320,15 @@ def _tor_layout(geom: dict, opts: dict | None = None, log=None) -> list:
 
     Gibt die nicht-fatalen Befunde als Warnungen zurueck.
     """
+    # ── Noch davor: ist es ueberhaupt dieser FLUSSWEG? ───────────────
+    #
+    # Der Rueckhalt fuer alle Einstiege auf einmal: ``_build_mesh_capped``
+    # und ``_build_sector_mesh`` gehen beide hier durch, also kann kein
+    # Netzbauer eine Scheibe als Zylinder bauen, auch wenn an einer Tuer die
+    # Abzweigung fehlt. Und er steht VOR der Maschinenart, weil der
+    # Axialfluss sie passieren wuerde (payloadseitig eine PSM).
+    _tor_flussweg(geom)
+
     # ── Zuerst: ist es ueberhaupt DIESE Maschine? ────────────────────────
     #
     # Dieser Pfad baut den Laeufer aus `magnet_legs` -- also Magnete, und sonst
@@ -4111,6 +4202,16 @@ def run_em3d_sweep(payload: dict, project_dir: str, progress_cb=None, cancel_cb=
                   or geom.get("axialLen") or 120.0)
     base_opts = _em3d_opts(payload)
 
+    # Die Scheibe hat hier nichts zu variieren: ihr 3-D-Weg rechnet den
+    # LEERLAUF (keine Staenderstroeme) -- nur dort unterscheiden sich Sektor
+    # und Mehrschnitt in der Geometrie und sonst in nichts.
+    _tor_flussweg(
+        geom, "der Betriebspunkt-Sweep",
+        "Der axiale Ringsektor (`ema_axial_em3d`) rechnet den LEERLAUF, hat "
+        "also ueber Drehzahl und Last nichts zu variieren -- was an der Last "
+        "haengt, rechnet die Feldstufe des Laufs (`ema_axial_fdm`, "
+        "abgewickelter Mehrschnitt) bzw. `cae_cli.py axial --stufe feld`.")
+
     points = payload.get("sweep") or []
     if not points:
         raise RuntimeError("Kein Betriebspunkt im Sweep (payload['sweep'] ist leer).")
@@ -4320,6 +4421,12 @@ def run_em3d_refine(payload: dict, project_dir: str, progress_cb=None) -> dict:
     geom = payload.get("geom", payload)
     axial = float(payload.get("axial_len") or payload.get("axialLen")
                   or geom.get("axialLen") or 120.0)
+    _tor_flussweg(
+        geom, "die ROI-Verfeinerung",
+        "Sie dreht an den Zellgroessen des radialen VOLLmodells. Die Feinheit "
+        "des axialen Ringsektors stellt man im selben Reiter ueber `mesh_cl` "
+        "und `gap_cl` ein; ein eigenes Verfeinerungsgebiet hat er nicht.")
+
     roi = payload.get("roi_box") or payload.get("roi")
     if not roi:
         raise ValueError("Kein Verfeinerungsgebiet (roi_box) angegeben")
@@ -4971,6 +5078,42 @@ def run_em3d_sector(payload: dict, project_dir: str, progress_cb=None) -> dict:
         raise RuntimeError(ER.INSTALL_HINT)
     geom = payload.get("geom", payload)
     axial = float(payload.get("axial_len") or payload.get("axialLen") or geom.get("axialLen") or 120.0)
+
+    # **Der Knopf „Schnelle Pol-Berechnung" traegt die Scheibe -- er fuehrt sie
+    # dorthin, wo sie hingehoert.**
+    #
+    # Was er verspricht, IST der axiale 3-D-Weg: EINE Polteilung, anti-periodisch
+    # gekoppelt, zum vollen Kranz gespiegelt. Nur baut `_build_sector_mesh` dafuer
+    # einen Zylinderkeil und schneidet Magnete aus `magnet_legs` hinein -- fuer
+    # eine Scheibe eine andere Maschine (gemessen 16.10.2026: der Axialpayload
+    # traegt weiter Stator Ø 280 / Laeufer Ø 188,6 mm, waehrend die
+    # gezeichnete Scheibe Ø 260 mm hat).
+    #
+    # Gemeldet wurde das als Layoutabsage mitten im Netzbau: `_tor_layout` rief
+    # `rotor_layout_check`, das fuer den Axialfluss ein `fatal` zurueckgibt, und
+    # dessen Abhilfen („die genannte Tasche kleiner/weiter aussen setzen, die
+    # Welle duenner") bedeuten an einer Scheibe nichts -- der Befund sagte im
+    # selben Atemzug, dass dieses Tor hier gar nichts zu pruefen hat. Und die
+    # angebotene Freigabe haette in genau den falschen Zylinder gefuehrt.
+    #
+    # Also dieselbe Antwort wie in `run_em3d` (ASM, Axialfluss): derselbe Knopf,
+    # der richtige Loeser. Der Flussweg entscheidet, nicht der Aufrufer.
+    import ema_fluss as _FLS
+    if _FLS.flussweg(geom) == "axial":
+        _log("⊙ Axialfluss: die Pol-Berechnung IST hier der normale Weg "
+             "— EINE Polteilung als anti-periodischer Ringsektor "
+             "(`ema_axial_em3d`), gegen den abgewickelten Mehrschnitt "
+             "gerechnet.", 2)
+        # Gemeldet statt ueberhoert (Muster `paarvergleich --n_max`): das
+        # Kontingent steuert die Zielsuche des RADIALEN Sektornetzes; der
+        # axiale Weg nimmt seine Feinheit aus `mesh_cl`/`gap_cl`.
+        if payload.get("node_budget_pct") not in (None, "", 100, 100.0):
+            _log("   ℹ Das Knoten-Kontingent gilt nur fuer das radiale "
+                 "Sektornetz und bleibt hier ohne Wirkung — die Feinheit "
+                 "des Ringsektors kommt aus `mesh_cl`/`gap_cl` im selben "
+                 "Reiter.", 2)
+        return _run_em3d_axial(payload, geom, axial, project_dir, _log)
+
     opts = _em3d_opts(payload)
     work = os.path.join(project_dir, "em3d"); os.makedirs(work, exist_ok=True)
 
