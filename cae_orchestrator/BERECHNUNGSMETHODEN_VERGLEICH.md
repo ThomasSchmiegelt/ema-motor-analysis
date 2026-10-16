@@ -20,6 +20,7 @@ Industrie-Standardwerkzeugen **Abaqus** (allgemeine FEA) und **Ansys Motor-CAD**
 |---|---|---|---|
 | **Elektromagnetik** | 2D-**Finite-Differenzen** (FDM), magnetostatisch, linear + optionale B-H-Sättigung; analytische Drehmoment-/EMK-Kennwerte | (kein nativer Nieder­frequenz-EM-Solver; gekoppelt mit Maxwell/Opera) | 2D-**FEA** (magnetostatisch + transient) + Analytik, der Branchen­standard |
 | **Elektromagnetik (3D, optional)** | echtes 3D-**FEM** (Elmer, magnetostatisch, linear), Endeffekte + Schrägung, 2D-vs-3D-Vergleich — on-demand neben dem 2D-Pfad | Kopplung mit Maxwell 3D | Maxwell **3D** als separates, kostenpflichtiges Zusatzmodul |
+| **Elektromagnetik (Axialfluss)** | 2D-FDM im **abgewickelten Mehrschnitt** (k tangentiale Ebenen über dem Ringraum, seitlich periodisch), dazu ein anti-periodischer **Elmer-3-D-Ringsektor** als Gegenrechnung | — | Motor-CAD rechnet Axialfluss nicht; dafür gibt es Maxwell 3D |
 | **Festigkeit (Rotor)** | 3D-**FEM** linear-elastisch (CalculiX), Fliehkraft, ein Lastfall, lineare Tets; analytischer Lamé-Fallback | 3D-**FEM** voll nichtlinear (Plastizität, Kontakt, Ermüdung, Modal/NVH) | Analytik + **FEA**-Rotorspannung |
 | **Thermik** | 6-Knoten-**LPTN** (stationär + transient) | 3D-**FE-Wärmeleitung**/CHT | detailliertes **LPTN** (Branchenstandard) + CFD-kalibrierte Korrelationen |
 | **Welle-Nabe-Verbindung** | **analytisch** (Lamé-Schrumpfsitz / Keilwelle / Polygon) | 3D-FEM mit Kontakt + Vorspannung | analytisch + FEA |
@@ -117,6 +118,28 @@ AC-/Proximity-Verluste).
 aber in Materialmodell und Zeitauflösung bewusst einfacher als ein kommerzieller
 3D-Transient-Löser — ein Validierungs-/Detailwerkzeug **neben**, nicht **statt** dem
 schnellen 2D-Pfad.
+
+### 2.4b Axialfluss — abgewickelter Mehrschnitt (`ema_axial_fdm.py`)
+
+**Verfahren.** Derselbe FDM-Löser, andere Ebene. Eine Scheibenmaschine lässt sich
+nicht im r–z-Schnitt rechnen (dort liegt der Polwechsel in der Invarianzrichtung —
+das Modell hätte **kein Moment**); lösbar ist die tangentiale θ–z-Ebene im Abstand r.
+Weil Pol- und Nutteilung mit dem Radius wachsen, wird sie an **k Radien** gelöst
+(Entwurf 5, Detail 9) und über r¹ bzw. r² zu Fluss und Moment aufsummiert.
+
+**Ränder.** Seitlich periodisch (links und rechts sind Nachbarn derselben Maschine),
+oben und unten eine Fluss-Sperre, die den Rückfluss im gezeichneten Eisen hält.
+Gemessen bleibt davon: 0,6 % Schwankung über eine Läuferdrehung, 0,37 % über die
+Fensterbreite, und die gezeichnete Rückendicke wirkt wieder (+4,1 % von 4 auf 40 mm).
+
+**Gegenrechnung.** `ema_axial_em3d` vernetzt EINE Polteilung als anti-periodischen
+Ringsektor in Elmer — die Abweichung zum Mehrschnitt ist mit +2,5 % im Mittel genau
+der radiale Term, den die Abwicklung fallen lässt. Der Sektor hat einen offenen
+Befund (sein „Luftrand" ist Eisen).
+
+**Grenzen.** Lineares Eisen (keine Sättigung), keine radiale Streuung an Ri/Ro im
+Mehrschnitt, kein zeitabhängiger Lauf. Gegenüber Motor-CAD fehlt der Vergleich ganz:
+Axialfluss ist dort nicht abgedeckt.
 
 ### 2.5 System / Fahrzyklus (`ema_drivecycle.py`)
 

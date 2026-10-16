@@ -8,7 +8,7 @@ Browser-basiertes Werkzeug zur Auslegung und Analyse elektrischer Maschinen — 
 
 ## Bedienoberfläche
 
-Die Oberfläche (`ema.html`) ist ein **Workflow mit Tabs**: ① Projekt · ② Geometrie · ③ Betrieb & Material · ④ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · 🧲 3D-Feld · 💧 Spritzöl-Kühlung · 📊 FEM-Ergebnisse · ⚖ Vergleich. **Tab ① Projekt** ist der zentrale Einstiegspunkt: Projekt anlegen/öffnen, organisatorische Angaben + Notizen, projektspezifische Wissens-Dokumente, PDF-Bericht und gespeicherte 3D-Läufe laufen dort zusammen (es gibt keinen separaten „Bericht"-Tab mehr). Rechts läuft eine **persistente Live-Vorschau** (Motorquerschnitt + Magnetfeld, mit Pause-Knopf), die Trennlinien zwischen Eingaben/Vorschau und über dem Footer sind **ziehbar**, und ein globaler **Analyse-starten-Footer** zeigt den Fortschritt. Weitere Komfortfunktionen:
+Die Oberfläche (`ema.html` + `oberflaeche/*.js`) ist ein **Workflow mit Tabs**: ① Projekt · ② Geometrie *oder* ⊙ Axialfluss · ③ Betrieb & Material · ④ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · ⚙ Getriebe · 🧲 3D-Feld · 💧 Spritzöl-Kühlung · 🌊 OpenFOAM · 🌀 FluidX3D · 🧪 Spray-Test · 📝 Bericht · 🧠 KI-Training · ⏳ Jobs · 📊 FEM-Ergebnisse · ⚖ Vergleich · 🤖/🪽/📱 Agent. **Tab ① Projekt** ist der zentrale Einstiegspunkt: Projekt anlegen/öffnen, organisatorische Angaben + Notizen, projektspezifische Wissens-Dokumente, PDF-Bericht und gespeicherte 3D-Läufe laufen dort zusammen (es gibt keinen separaten „Bericht"-Tab mehr). Rechts läuft eine **persistente Live-Vorschau** (Motorquerschnitt + Magnetfeld, mit Pause-Knopf), die Trennlinien zwischen Eingaben/Vorschau und über dem Footer sind **ziehbar**, und ein globaler **Analyse-starten-Footer** zeigt den Fortschritt. Weitere Komfortfunktionen:
 
 - **🧠 Text → Auslegung** – Anwendung in Worten beschreiben, das LLM leitet einen vollständigen, validierten Parametersatz ab (`ema_text2ema.py`), optional gestützt auf Referenzmaschinen aus der lokalen Wissensbasis (RAG).
 - **🎨 Designer + 🤖 KI entwerfen** – freies Zeichnen einer Rotor-Halbpol-Geometrie (Magnete + Flussbarrieren) auf einer Canvas, oder ein LLM entwirft komplette Maschinen aus einer Beschreibung + Bereichsvorgaben (Statorbohrung, Länge, Welle, Luftspalt) samt automatischer Qualitäts-Vorsortierung und Regenerierung schlechter Entwürfe (`ema_design_ai.py`).
@@ -32,6 +32,7 @@ Die Oberfläche (`ema.html`) ist ein **Workflow mit Tabs**: ① Projekt · ② G
 
 Die Benutzeroberfläche (`ema.html`) erlaubt die vollständige parametrische Beschreibung des Motors — **oder** das freie Zeichnen im Designer-Tab:
 
+- **Flussweg:** **radial** (Vorgabe) oder **axial** (Scheibenläufer). Die Wahl steht in der Fußleiste, wo auch gestartet wird, und sie tauscht die Geometriemaske: radial ② Geometrie, axial ⊙ Axialfluss. Axial getragen sind vier Bauformen (YASA, TORUS-NN, AFIR, einseitig) mit eigener Feldstufe, CAD, Thermik, Scheibenfestigkeit und Elmer-3-D — s. den Abschnitt Axialflussmaschine weiter unten.
 - **Maschinenart:** PSM (Vorgabe) · ASM (Käfig- oder Schleifringläufer) · SynRM · EESM (Schenkelpolläufer) · GSM (Gleichstrommaschine mit Anker, Kommutator und Erregerpolen am STÄNDER). Die Auswahl nennt gleich, **wie weit** eine Art getragen ist — eine nicht getragene Stufe wird abgewiesen, nicht genähert. Alle artspezifischen Parameter (Stabzahl, Läuferbauform, Schrägung, Polbedeckung, Polbefestigung, Dämpferkäfig, Ankerwicklung, Erregerspule …) sitzen in demselben Abschnitt.
 - **Stator:** Außen-/Innendurchmesser, Nutzahl, Nuttiefe, Blechpaketlänge
 - **Rotor:** Außendurchmesser, Wellendurchmesser, Polpaarzahl, optional Hohlwelle
@@ -61,6 +62,42 @@ Eigener 2D-FDM-Feldsolver (numpy + scipy), Auflösung im UI wählbar (100–800 
 - Permanentmagnete als äquivalente Oberflächenströme modelliert
 - Skalierung des FDM-Ergebnisses auf physikalische Tesla-Werte via analytischer Luftspaltfeld-Formel
 - Berechnet: B_gap, Flussverkettung, Gegen-EMK, Drehmoment (Ld/Lq-Salienz, MTPA), Ummagnetisierungsverluste, Stromwärmeverluste, Wirkungsgrad
+
+### 3b. Axialflussmaschine — der Scheibenläufer (`ema_fluss.py` / `ema_axial*.py`)
+
+Zweiter Flussweg neben dem radialen, mit **eigenem Parametersatz** (22 Schlüssel) und
+eigener Zeichenseite (Reiter ⊙, `axialfluss/`). Vier Bauformen: **YASA** (zwei Läufer,
+jochloser Ständer — Vorgabe), **TORUS-NN** (Umfangsjoch im Ständer), **AFIR** (zwei
+Ständer, ein Läufer) und **einseitig**. Welche es ist, folgt aus der Zeichnung und steht
+nicht als zweites Feld daneben.
+
+Was gerechnet wird — und womit:
+
+| Stufe | Modul | Verfahren |
+|---|---|---|
+| Auslegung | `ema_axial` | Ringraum, jede Größe nennt die bindende Grenze |
+| Feld | `ema_axial_fdm` | **abgewickelter Mehrschnitt**: k Scheiben über dem Ringraum, je eine θ–z-Ebene durch den unveränderten Haus-Löser |
+| Thermik | `ema_axial_thermik` | eigenes LPTN — eine Scheibe hat eine andere *Topologie*, nicht nur andere Zahlen |
+| Festigkeit | `ema_axial.anzug/ruecken/bandage` | Durchbiegung der Scheibe, Magnethaltung, magnetischer Anzug |
+| CAD | `ema_axial_cad` | Scheibe, Magnetsegmente, Zähne |
+| 3-D | `ema_axial_em3d` | anti-periodischer Elmer-Ringsektor als **Gegenrechnung** zum Mehrschnitt |
+
+**Warum ein Mehrschnitt und keine einzelne Ebene:** eine Ebene *durch die Achse* bräuchte
+Invarianz in θ — und genau dort liegt der Polwechsel; ein r–z-Modell stellt eine Maschine
+**ohne Pole** dar. Lösbar ist die tangentiale Ebene im Abstand r (der abgewickelte
+Zylinderschnitt), und deren Invarianzrichtung gilt nur *lokal*: Pol- und Nutteilung
+wachsen mit dem Radius. Deshalb mehrere Schnitte und keine einzige Ebene.
+
+**Wohin die Feldlinien laufen** (die Frage, an der drei Fehler aufgefallen sind): **axial**
+durch Magnet, Luftspalt und Zahn — **umfangs** zurück, bei YASA im Rückenblech des
+Läufers, bei TORUS-NN im Ständerjoch. Gemessen als Anteil |B| axial zu umfangs: Magnet 8,9
+· Spalt 7,1 · Zahn 12,2 · Rückenblech 0,11. „Immer axial“ wäre also nur die halbe Antwort.
+
+**Grenzen, die mitlaufen:** das Eisen ist linear (keine Sättigung — ob ein Blech dick genug
+ist, sagt `ema_axial.ruecken`, nicht das Feldbild), die radiale Streuung an Ri/Ro fehlt im
+Mehrschnitt (dafür gibt es die 3-D-Gegenrechnung, gemessen +2,5 % im Mittel), und der
+3-D-Ringsektor hat einen **offenen Befund**: sein „Luftrand“ ist Eisen (`BEFUNDE.md`,
+11.10.2026) — im Ständer laufen die exportierten Feldlinien dadurch radial statt axial.
 
 ### 4. Elektromagnetische Feldberechnung — echtes 3D-FEM (Elmer) (`ema_em3d.py` / `elmer_runner.py`)
 
@@ -323,12 +360,16 @@ python test_cae_cli.py    # --set gegen ein gestelltes Schema (+ Drift-Test gege
 
 ```
 server.py               Flask-Backend — REST-API + statisches Datei-Serving
-ema.html                Browser-UI (Vanilla JS, kein Build-Schritt nötig)
+ema.html                Browser-UI: Markup + CSS (kein Build-Schritt nötig)
+oberflaeche/*.js        das JavaScript dazu, 16 Dateien in fester Ladereihenfolge
+                        (s. oberflaeche/LIESMICH.md — klassische Skripte, ein
+                        gemeinsamer Gueltigkeitsbereich, kein Modulsystem)
+ema_seite.py            Markup + Skripte als EIN Text — fuer alles, was die Seite LIEST
 ema_pipeline.py         Pipeline-Orchestrierung (Geometrie → EM → Thermik → FEM)
 ema_freecad.py          FreeCAD-Skriptgenerierung (Rotor, Stator, Hairpins, FEM)
 ema_analysis.py         2D-FDM-Elektromagnet-Feldsolver (numpy)
 ema_thermal.py          Stationäres LPTN-Wärmemodell (6 Knoten)
-ema_topology.py         Magnet-Platzierung (einzige Quelle, gespiegelt im JS von ema.html)
+ema_topology.py         Magnet-Platzierung (einzige Quelle, gespiegelt in oberflaeche/sim.js)
 ema_drivecycle.py       Fahrzyklen (WLTP-3b, Vollgas, Anhänger einstellbar, CSV)
 ema_compare.py          Variantenvergleich (bis zu 10 Projekte, Overlay-Charts)
 ema_report.py           LLM → Markdown → pandoc → PDF-Bericht (+ Vergleichsbericht)
@@ -341,6 +382,13 @@ ema_design_ai.py        KI-gestützte Komplettauslegung (Designer-Pfad, RAG-gest
 ema_design_optimize.py  Per-Magnet-Feinoptimierung eines gezeichneten Entwurfs
 ema_step_import.py      STEP-Import eines fertigen Motors (Klassifikation + Magnet-Erkennung)
 ema_em3d.py             Echte 3D-Magnetfeldberechnung (Elmer FEM): Mesh, SIF, Sweeps, Sektor/ROI
+ema_fluss.py            Flussweg radial/axial — die EINE Weiche samt Stufenaufteilung
+ema_axial.py            Axialfluss Stufe 1: Ringraum auslegen, jede Groesse nennt ihre Grenze
+ema_axial_fdm.py        Axialfluss Stufe 2: abgewickelter Mehrschnitt durch den Haus-Loeser
+ema_axial_cad.py        Axialfluss: Scheibe, Magnetsegmente, Zaehne als FreeCAD-Skript
+ema_axial_thermik.py    Axialfluss: eigenes LPTN (Scheibentopologie, nicht das radiale)
+ema_axial_em3d.py       Axialfluss: anti-periodischer Elmer-Ringsektor als Gegenrechnung
+axialfluss/             die Zeichenseite des ⊙-Reiters (eigenstaendig, auch ueber file://)
 elmer_runner.py         Elmer-Subprozess-Wrapper (ElmerGrid/ElmerSolver)
 ema_projekt.py          Projektakte (project.json) — Status/Verlauf/Verknüpfungen/RAG/Anhänge
 ema_rag.py              Lokale Wissensbasis (RAG), global + pro Projekt

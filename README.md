@@ -105,6 +105,52 @@ Two sources, kept strictly apart:
 No model is trained here. "Learned" means: derived from the tool's own stock and
 available next time.
 
+## Two flux paths — radial and axial
+
+The five machine types below are one axis; the **flux path** is the other, and it sits
+in the footer where you start a run. **Axial** swaps the geometry tab for ⊙ Axialfluss
+with its own parameter set (22 keys) and its own drawing page — a disc rotor is not a
+radial motor with different numbers: *its stator works differently*. Four
+arrangements: **YASA** (two rotors, yokeless stator), **TORUS-NN** (circumferential
+yoke), **AFIR** (two stators) and single-sided.
+
+It is solved by the same in-house solver in a **different plane**. A plane through the
+axis is out — the pole change lies in its invariance direction, and the model would
+have no torque. What is solvable is the tangential plane at radius r, the unrolled
+cylinder cut; because pole and slot pitch grow with the radius it is solved at several
+radii and summed with r¹ and r² weights. An anti-periodic **Elmer ring sector** checks
+it (+2.5 % on average — exactly the radial term the unrolling drops), and there is a
+separate thermal network (a disc has a different *topology*, not just different
+numbers), a separate strength calculation and its own CAD.
+
+### Three defects, found by one question
+
+The question was: *"in a simulation of the axial-flux machine shouldn't the field lines
+always run along the axis — or am I thinking about this wrong?"* Not wrong, but not the
+whole story either: **axial** is the gap crossing, **circumferential** is the return
+path (in the rotor back iron for YASA, in the stator yoke for TORUS-NN). Measuring it
+turned up three things of the same shape — *something sitting where it does not
+belong*:
+
+1. **The slot was cut through the stator yoke.** The cut depth passed in was the height
+   of the whole stator band, and that includes the yoke. Every arrangement with a yoke
+   had none in the field model (TORUS-NN 0.0 of 12.0 mm). Its air-gap fundamental:
+   **0.0922 → 1.0675 T**, distortion 3.04 → 0.46.
+2. **The lateral boundary condition was Dirichlet where it must be periodic.** `A = 0`
+   along a vertical line means *no circumferential flux* — enforced at the pole
+   boundary, which is exactly where it peaks in the yoke. On top of that the equivalent
+   sheet current did not wrap, which collapsed the fundamental by 46 % **at rotor angle
+   0 only** — the position of every still image.
+3. **The padding of the square window was iron.** 59 % of the return flux therefore ran
+   *beside* the drawn back iron, whose thickness moved not one digit over 4…40 mm.
+
+Together: variation over one rotor turn 2.0 → **0.6 %**, over the window width
+0.34 → **0.37 %**, and the drawn back iron matters again (+0.0 → **+4.1 %**). The first
+attempt — swapping only the padding — made it **worse** (11.8 % over rotor position):
+the iron had been masking the boundary error. All measured, all written up in
+`cae_orchestrator/BEFUNDE.md`, and a fourth finding stays **open**: the same mistake
+one dimension up, the "air boundary" of the 3-D ring sector is iron.
+
 ## Five machine types — and how far each is actually carried
 
 The tool grew as a PMSM with hairpins, and that assumption sat in six modules rather

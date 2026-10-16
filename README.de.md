@@ -348,6 +348,55 @@ Fließtext geklaubt.
 **Gerechnet wird weiterhin ausschließlich lokal.** Es wird nichts hochgeladen und keine
 Rechenaufgabe ausgelagert.
 
+## Zwei Flusswege — radial und axial
+
+Die fünf Maschinenarten darüber sind die eine Achse; der **Flussweg** ist die andere,
+und er steht in der Fußleiste, wo auch gestartet wird. **Axial** tauscht die
+Geometriemaske gegen den Reiter ⊙ Axialfluss mit eigenem Parametersatz (22 Schlüssel)
+und eigener Zeichenseite — denn ein Scheibenläufer ist kein radialer Motor mit anderen
+Zahlen: *sein Ständer funktioniert anders*. Vier Bauformen: **YASA** (zwei Läufer, ein
+jochloser Ständer), **TORUS-NN** (Umfangsjoch), **AFIR** (zwei Ständer) und
+**einseitig**.
+
+Gerechnet wird mit demselben Haus-Löser in einer **anderen Ebene**. Eine Ebene durch
+die Achse scheidet aus — dort liegt der Polwechsel in der Invarianzrichtung, und das
+Modell hätte kein Moment. Lösbar ist die tangentiale Ebene im Abstand r, der
+abgewickelte Zylinderschnitt; weil Pol- und Nutteilung mit dem Radius wachsen, wird sie
+an mehreren Radien gelöst und über r¹ bzw. r² aufsummiert. Daneben rechnet ein
+anti-periodischer **Elmer-Ringsektor** gegen (+2,5 % im Mittel — genau der radiale
+Term, den die Abwicklung fallen lässt), es gibt eine eigene Thermik (eine Scheibe hat
+eine andere Topologie, nicht nur andere Zahlen), eine eigene Festigkeitsrechnung
+(Durchbiegung, Magnethaltung, magnetischer Anzug) und ein eigenes CAD.
+
+### Drei Fehler, gefunden durch eine Frage
+
+Gefragt wurde: *„bei einer Simulation der AFM sollten die Magnetfeldlinien doch immer
+in Richtung der Achse fließen — oder habe ich da einen Denkfehler?"* Kein Denkfehler,
+aber auch nicht ganz: **axial** ist der Spaltdurchtritt, **umfangs** der Rückweg (bei
+YASA im Rückenblech, bei TORUS-NN im Ständerjoch). Beim Nachmessen fielen drei Dinge
+auf, die alle dieselbe Form haben — *etwas steht da, wo es nicht hingehört*:
+
+1. **Die Nut schnitt durch das Ständerjoch.** Als Schnitttiefe wurde die Höhe des
+   ganzen Ständerbandes übergeben, und die trägt das Joch mit. Jede Bauform mit Joch
+   hatte im Feldmodell keines (TORUS-NN 0,0 von 12,0 mm). Seine Luftspalt-Grundwelle:
+   **0,0922 → 1,0675 T**, Klirranteil 3,04 → 0,46.
+2. **Die seitliche Randbedingung war Dirichlet, wo sie periodisch sein muss.**
+   `A = 0` auf einer senkrechten Linie heißt *kein Umfangsfluss* — erzwungen an der
+   Polgrenze, wo er im Joch sein Maximum hat. Dazu lief der Ersatz-Flächenstrom nicht
+   um, was **nur bei Läuferwinkel 0** die Grundwelle um 46 % einbrechen ließ: der
+   Stellung jedes Standbilds.
+3. **Die Polsterung des quadratischen Fensters war Eisen.** Damit lagen 59 % des
+   Rückflusses *neben* dem gezeichneten Rückenblech, und dessen Dicke bewegte über
+   4…40 mm keine einzige Stelle.
+
+Zusammen: Schwankung über eine Läuferdrehung 2,0 → **0,6 %**, über die Fensterbreite
+0,34 → **0,37 %**, und das gezeichnete Rückenblech wirkt wieder (+0,0 → **+4,1 %**).
+Der erste Versuch, nur die Polsterung umzustellen, machte es **schlechter** (11,8 %
+über die Läuferdrehung) — das Eisen hatte den Randfehler weich gemacht. Alles
+gemessen, alles in `cae_orchestrator/BEFUNDE.md`, und ein vierter Befund bleibt
+**offen**: derselbe Fehler eine Dimension höher, der „Luftrand" des 3-D-Ringsektors
+ist Eisen.
+
 ## Fünf Maschinenarten — und wie weit jede wirklich getragen ist
 
 Das Werkzeug ist als PSM mit Hairpins gewachsen, und diese Annahme stand in sechs

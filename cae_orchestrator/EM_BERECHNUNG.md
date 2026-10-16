@@ -21,6 +21,7 @@ Code verstehen, erweitern oder debuggen wollen.
 11. [Schlüsselkonstanten und Materialien](#11-schlüsselkonstanten-und-materialien)
 12. [Bekannte Einschränkungen und Näherungen](#12-bekannte-einschränkungen)
 13. [Echte 3D-Feldberechnung — Elmer FEM (`ema_em3d.py`)](#13-echte-3d-feldberechnung)
+14. [Axialfluss — der abgewickelte Mehrschnitt (`ema_axial_fdm.py`)](#14-axialfluss--der-abgewickelte-mehrschnitt)
 
 ---
 
@@ -28,8 +29,10 @@ Code verstehen, erweitern oder debuggen wollen.
 
 Die E-Maschinen-Pipeline ist eine vollständig lokale CAE-Kette für
 **Interior-Permanent-Magnet-(IPM)-Motoren**. Es gibt **eine** Flask-Anwendung
-(`server.py`) mit **einer** Single-Page-Browser-UI (`ema.html`, Vanilla JS, kein
-Build-Schritt). Es gibt **keine** separaten Streamlit-Apps und kein `bridge.py`
+(`server.py`) mit **einer** Single-Page-Browser-UI (`ema.html` plus
+`oberflaeche/*.js`, Vanilla JS, kein Build-Schritt — die Seite tragt Markup und
+Stil, das JavaScript liegt seit dem 16.10.2026 daneben in sechzehn klassischen
+Skripten mit festgelegter Ladereihenfolge, s. `oberflaeche/LIESMICH.md`). Es gibt **keine** separaten Streamlit-Apps und kein `bridge.py`
 mehr (frühere Architekturvarianten) — der Einstiegspunkt ist ausschließlich
 `server.py`, gestartet über `./start.sh`.
 
@@ -107,8 +110,10 @@ drivecycle}` auf einem bereits existierenden Projekt (`POST
 
 ### `ema.html` (Browser-UI)
 
-Eine eigenständige HTML-Seite mit JavaScript, die ein interaktives
-Geometrie-Formular bereitstellt. Der Nutzer stellt alle Motor-Parameter ein und
+Eine eigenständige HTML-Seite, die ein interaktives Geometrie-Formular
+bereitstellt; ihr JavaScript liegt in `oberflaeche/*.js` daneben. Bei
+**Flussweg axial** tritt an die Stelle des Geometrie-Reiters die eigene
+Zeichenseite `axialfluss/` mit ihrem eigenen Parametersatz (s. Abschnitt 14). Der Nutzer stellt alle Motor-Parameter ein und
 klickt „CAD Export (Python)". Die Seite sendet ein JSON-Objekt per `fetch` an
 `http://localhost:5000/geom`.
 
@@ -859,3 +864,76 @@ keine Bewegungssimulation/Transiente (der Drehzahlsweep ist eine Folge statische
 Arbeitspunkte, keine echte Zeitintegration). Ausführliche Architekturdetails
 (Gotchas, Tagging-Feinheiten, UI-Bedienung) stehen in `CLAUDE.md` und
 `NUTZUNGSANLEITUNG.md` (Tab „🧲 3D-Feld").
+
+---
+
+## 14. Axialfluss — der abgewickelte Mehrschnitt
+
+**Dateien:** `ema_fluss.py` (die Weiche radial/axial), `ema_axial.py` (Stufe 1,
+Auslegung), `ema_axial_fdm.py` (Stufe 2, Feld), `ema_axial_em3d.py` (Gegenrechnung
+in Elmer 3-D).
+
+### 14.1 Welche Ebene — und welche ausdrücklich nicht
+
+Der Haus-FDM löst `A_z` mit **einer** Komponente senkrecht zur Ebene; das setzt
+Invarianz in dieser Richtung voraus. Daran entscheidet sich alles:
+
+| Ebene | Invarianzrichtung | trägt die Pole? | gilt für |
+|---|---|---|---|
+| r–θ | z („unendlich lang") | ja | Radialfluss |
+| r–z (**durch die Achse**) | **θ** | **nein** | — |
+| θ–z (tangential bei r) | r (lokal) | ja | **Axialfluss** |
+
+Eine Ebene durch die Achse verlangt Invarianz in θ — und genau dort liegt der
+Polwechsel. Ein r–z-Modell stellt eine Maschine **ohne Pole** dar: es gibt Streuung
+und mittleren Flusspfad, aber **kein Moment**. Das ist der naheliegende Irrweg.
+
+Lösbar ist die um 90° gekippte Ebene, aber **tangential im Abstand r** — der
+abgewickelte Zylinderschnitt. Dort ist die Invarianzrichtung r, und die gilt nur
+**lokal**: Pol- und Nutteilung wachsen mit dem Radius, das Verhältnis
+Spalt/Polteilung ändert sich über dem Ringraum um 1/λ (gemessen 1,73). Deshalb
+**mehrere Schnitte** und keine einzige Ebene; Fluss und Moment werden über sie mit
+den Gewichten r¹ bzw. r² aufsummiert — denselben, mit denen Stufe 1 rechnet.
+
+### 14.2 Das Fenster und seine Ränder
+
+Das Fenster ist **geradzahlig ganzzahlig viele Polteilungen** breit (`polteilungen`
+erzwingt zusätzlich ganze Nutteilungen) und quadratisch, weil der Haus-Matrixbauer
+mit einer Maschenweite rechnet.
+
+- **Seitlich (x = Umfang): periodisch.** Die linke und die rechte Spalte sind
+  Nachbarn derselben Maschine — `_solve_fdm(..., periodisch_x=True)`, eine
+  Maskenzeile im hauseigenen Bauer. Dirichlet `A = 0` dort hieße `B_x = 0`, also
+  **kein Umfangsfluss**, erzwungen ausgerechnet an der Polgrenze, wo der
+  Umfangsfluss im Joch sein Maximum hat (bis 16.10.2026 stand genau das da; es
+  kostete 11,8 % Schwankung über eine Läuferdrehung).
+- **Oben und unten: eine Fluss-Sperre** (`POLSTER_MU_R`), mit der das Gebiet auf
+  Quadratform aufgefüllt wird. Sie sagt aus, was ein Joch tut: der Rückfluss
+  schließt sich **im gezeichneten Eisen**. Mit Eisen als Polsterung liefen 59 % des
+  Rückflusses daneben, und die gezeichnete Rückendicke bewegte dann über 4…40 mm
+  keine einzige Stelle; mit Luft hängt das Ergebnis an der Fensterbreite.
+
+Nachgemessen (Vorgabemaschine, N = 400): Läuferdrehung **0,6 %** (= die Nutung),
+Fensterbreite über Faktor 4 **0,37 %**, Rückenblech 4 → 40 mm **+4,1 %**.
+
+### 14.3 Eichung
+
+Wie radial wird das rohe FDM-Ergebnis auf einen analytischen Anker skaliert — hier
+auf die **Spitze eines nutlosen Begleitlaufs** (`eichung_magnet_spitze`). Die
+genutete Spitze taugt dafür nicht: über einem Zahn ist der Fluss gebündelt, sie
+steigt um gemessene 23 %, während der Fluss je Pol fällt. Der Nutungsverlust wird
+damit **gemessen** statt aus einem Carterfaktor angenommen. Drei benannte Anker
+stehen nebeneinander (Spitze · Grundwelle · flussgewichteter Mittelwert) — sie
+liegen 1,00 : 1,18 : 1,46 auseinander, und sie zu verwechseln war ein Befund.
+
+### 14.4 Was dieser Weg nicht gibt
+
+Keine **Sättigung** (lineares Eisen, `MU_R_IRON`) — ob ein Blech dick genug ist,
+sagt `ema_axial.ruecken` und nicht das Feldbild. Keine **radiale Streuung** an Ri
+und Ro und keine radialen Stromkomponenten im Wickelkopf: jeder Schnitt rechnet, als
+setze sich seine Geometrie radial unendlich fort. Dafür gibt es `ema_axial_em3d`,
+den anti-periodischen Elmer-Ringsektor — gemessen +2,5 % im Mittel, mit
+Vorzeichenwechsel von innen nach außen, also genau der `d/dr`-Term, für den er
+gebaut wurde. Dieser Sektor hat einen **offenen Befund**: sein „Luftrand" ist Eisen
+(`BEFUNDE.md`, 11.10.2026), die Jochfläche dadurch 1,70-fach zu groß, und die
+exportierten Feldlinien laufen im Ständer radial statt axial.

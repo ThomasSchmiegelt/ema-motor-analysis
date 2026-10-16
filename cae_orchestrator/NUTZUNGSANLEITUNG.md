@@ -47,7 +47,8 @@ unten ein **Footer** mit drei Workflow-Buttons und der Fortschrittsanzeige.
 
 | Element | Funktion |
 |---|---|
-| **Tabs** | ① Projekt · ② Geometrie · ③ Betrieb & Material · ④ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · 🧲 3D-Feld · 💧 Spritzöl-Kühlung · 📊 FEM-Ergebnisse · ⚖ Vergleich |
+| **Tabs** | ① Projekt · ② Geometrie **oder** ⊙ Axialfluss · ③ Betrieb & Material · ④ Berechnung · ▶ Live-Simulation · 🎨 Designer · 📥 STEP-Import · ⚙ Getriebe · 🧲 3D-Feld · 💧 Spritzöl-Kühlung · 🌊 OpenFOAM · 🌀 FluidX3D · 🧪 Spray-Test · 📝 Bericht · 🧠 KI-Training · ⏳ Jobs · 📊 FEM-Ergebnisse · ⚖ Vergleich · 🤖 PI · 🪽 Hermes · 📱 Studio |
+| **Flussweg** (Fußleiste) | **radial** oder **axial** — die Wahl tauscht die Geometriemaske: radial zeigt ② Geometrie, axial ⊙ Axialfluss. Sie steht dort, wo auch gestartet wird, denn sie entscheidet, WAS gerechnet wird |
 | **Vorschau-Spalte** (rechts) | dreht den Motor live und zeigt das Feld; sichtbar auf den Eingabe-Tabs, ausgeblendet bei Projekt/Ergebnissen/Vergleich |
 | **⏸ Pause** (in der Vorschau) | stoppt/startet die Rotor-Drehung — von jedem Eingabe-Tab aus erreichbar |
 | **Vertikaler Splitter** | Trennlinie zwischen Eingaben und Vorschau ziehen → Vorschaubreite ändern (Canvas skaliert live mit) |
@@ -294,6 +295,56 @@ getragene Rechenstufe wird abgewiesen, nicht genähert.
 | **↺ Vorschau aktualisieren** | Live-Querschnittsbild neu berechnen (bei manueller Parameteränderung) |
 | **🧠 Aus Beschreibung ableiten** | Öffnet „Text → Auslegung" (siehe Abschnitt 4) |
 | **📚 Wissensbasis** | Öffnet die RAG-Verwaltung (siehe Abschnitt 4) |
+
+---
+
+### Tab ⊙ Axialfluss (Scheibenläufer)
+
+Erscheint anstelle von **② Geometrie**, sobald in der Fußleiste der Flussweg
+**axial** gewählt ist. Eine Axialflussmaschine ist kein radialer Motor mit
+anderen Zahlen — ihr Ständer funktioniert anders —, deshalb hat sie einen
+eigenen Parametersatz und eine eigene Zeichenseite.
+
+**Bauform wählen.** Vier werden getragen:
+
+| Bauform | Aufbau | wo der Fluss umfangs zurückläuft |
+|---|---|---|
+| **YASA** (Vorgabe) | 2 Läufer, 1 jochloser Ständer | im **Rückenblech der Läufer** |
+| **TORUS-NN** | 2 Läufer, 1 Ständer **mit** Umfangsjoch | im **Ständerjoch** |
+| **AFIR** | 2 Ständer, 1 Läufer | Wicklung außen, gut kühlbar |
+| **einseitig** | 1 Luftspalt | Anzugskraft liegt unausgeglichen am Lager |
+
+YASA und TORUS-NN unterscheiden sich nur durch das **Ständerjoch**: trägst du
+`axialJochStaenderMm` ein, wird aus YASA ein TORUS-NN. Das ist kein zweites
+Feld, sondern eine Folge der Zeichnung.
+
+**Was gerechnet wird.** Feld (abgewickelter Mehrschnitt, k Scheiben über dem
+Ringraum), Thermik (eigenes Scheiben-LPTN), Scheibenfestigkeit, CAD und auf
+Zuruf die 3-D-Gegenrechnung in Elmer. Was eine Axialmaschine **nicht** trägt,
+wird übersprungen und benannt — nicht genähert.
+
+**Zwei Zahlen, die man kennen sollte:**
+
+- **Zahl der Schnitte** (④ Berechnung, `axial_schnitte`): Entwurf 5, Detail 9.
+  Darunter wird die Kurve B_gap(r) grob, darüber kostet sie nur Zeit.
+- **Die Scheibenfestigkeit** meldet die Durchbiegung als Anteil des Luftspalts
+  (gemessen 6,2 % bei 10 % zulässig). Es fällt dabei **keine Höchstdrehzahl**
+  an, und der Grund steht dabei: der magnetische Anzug hängt nicht an der
+  Drehzahl, und für die Magnethaltung gibt es keine Werkstofftabelle — trägst
+  du eine zulässige Spannung in ③ Betrieb ein, bekommst du ein Ja oder Nein.
+
+**Wohin die Feldlinien laufen.** Durch Magnet, Luftspalt und Zahn **axial**,
+zurück **umfangs** (bei YASA im Rückenblech, bei TORUS-NN im Ständerjoch).
+„Immer axial" ist also nur die halbe Antwort — und wenn ein Bild etwas anderes
+zeigt, lohnt ein Blick in `BEFUNDE.md`: genau diese Frage hat dort schon drei
+Fehler zutage gefördert.
+
+**Grenzen, die mitlaufen.** Das Eisen ist linear (keine Sättigung — ob ein
+Blech dick genug ist, sagt die Auslegung, nicht das Feldbild); die radiale
+Streuung an Innen- und Außenrand fehlt im Mehrschnitt, dafür gibt es die
+3-D-Gegenrechnung (+2,5 % im Mittel). Der 3-D-Ringsektor hat einen **offenen
+Befund**: sein „Luftrand" ist Eisen, und im Ständer laufen die exportierten
+Feldlinien dadurch radial statt axial.
 
 ---
 
