@@ -129,6 +129,32 @@ function _e3AxialKarte(axial) {
         + 'Verfeinerung</b> (Luftspalt am feinsten, dann Magnete + '
         + 'Flussbarrieren + Nuten, dann grob). v1: Leerlauf, ohne Skew/Last.';
   }
+  // **Das Drehzahlband kann es fuer die Scheibe nicht geben, also wird es
+  // nicht angeboten.** Der axiale Ringsektor rechnet den Leerlauf -- er hat
+  // ueber Drehzahl und Last nichts zu variieren. Gemeldet wurde genau die
+  // umgekehrte Reihenfolge: erst rechnen lassen, dann eine Absage lesen.
+  const sw = document.getElementById('e3_sweep_card');
+  if (sw) {
+    let hin = document.getElementById('e3_sweep_axial');
+    if (!hin) {
+      hin = document.createElement('div');
+      hin.id = 'e3_sweep_axial';
+      hin.style.cssText = 'font-size:.78rem;color:#8bc34a;line-height:1.5;'
+                        + 'background:#16161c;border:1px solid #2e2e36;'
+                        + 'border-radius:6px;padding:8px 11px;margin-bottom:8px';
+      sw.insertBefore(hin, sw.firstChild);
+    }
+    hin.style.display = axial ? '' : 'none';
+    hin.innerHTML = '⊙ <b>Axialfluss</b> — kein Drehzahlband: der Ringsektor '
+      + '(<code>ema_axial_em3d</code>) rechnet den <b>Leerlauf</b> und hat über '
+      + 'Drehzahl und Last nichts zu variieren. Was an der Last hängt, rechnet '
+      + 'die <b>Feldstufe des Laufs</b> (<code>ema_axial_fdm</code>, '
+      + 'abgewickelter Mehrschnitt) bzw. <code>cae_cli.py axial --stufe feld</code>.';
+    for (const id of ['e3_sbtn', 'e3_sweep_table']) {
+      const el = document.getElementById(id);
+      if (el) { el.style.opacity = axial ? 0.4 : ''; if ('disabled' in el) el.disabled = !!axial; }
+    }
+  }
   const bud = document.getElementById('e3_node_budget');
   if (bud) {
     bud.disabled = !!axial;
@@ -847,7 +873,17 @@ async function _pollEm3d(isPreview) {
       }
       enable(); return;
     }
-    if (s.status === 'error') { msg.style.color='#e57'; msg.textContent = '⚠ ' + (s.error || 'Fehlgeschlagen'); enable(); return; }
+    if (s.status === 'error') {
+      // Steht die Begruendung schon im Protokoll darunter (ein begruendetes
+      // Nein -- Maschinenart, Flussweg, Layout), dann nicht noch einmal in
+      // voller Laenge daneben: gemeldet als derselbe Absatz zweimal.
+      const doppelt = (s.log || []).some(z => s.error && z.includes(s.error));
+      msg.style.color = doppelt ? '#fb0' : '#e57';
+      msg.textContent = doppelt
+        ? 'ℹ Nicht gerechnet — die Begründung steht im Protokoll darunter.'
+        : '⚠ ' + (s.error || 'Fehlgeschlagen');
+      enable(); return;
+    }
   } catch (e) {}
   setTimeout(() => _pollEm3d(isPreview), 1500);
 }

@@ -593,6 +593,64 @@ function tabelle(p) {
  */
 let RZ = null, RZ_MARKE = "", UMLAUF = 0, RZ_TIMER = 0;
 
+/* ---- Der Feldlauf: GEMERKT und ENTPRELLT -------------------------------
+ *
+ * Der Kommentar an der Aufrufstelle sagte, das Feld werde „nur auf Zuruf"
+ * gerechnet, „sonst haengt die Maske bei jedem Tastendruck". Der Zuruf ist
+ * das Haekchen `feldAn` -- und das steht per Vorgabe AN. Damit galt genau der
+ * Satz, gegen den der Kommentar geschrieben war: `zeichne()` haengt an
+ * `input` JEDES Feldes, und jeder Tastendruck loeste einen vollen CG-Lauf aus.
+ *
+ * Gemessen am Vorgabe-Entwurf (ny = 110, 132x110 = 15.312 Zellen, ein
+ * Magnetlauf + der nutlose Eichlauf): **207 ms im Leerlauf, 235 ms unter
+ * Last**; bei ny = 160 sind es 387 ms, bei ny = 220 eine volle Sekunde. Eine
+ * dreistellige Zahl zu tippen kostete also rund 0,6 s stehende Oberflaeche,
+ * und ein gezogener Regler feuert laufend. Dagegen kostet ALLES andere in
+ * `zeichne()` zusammen gut eine Millisekunde (gemessen: draufsicht 1,05 ms
+ * bei 867 Canvas-Aufrufen, halbschnitt 0,07, abwicklung 0,06, tabelle 0,04)
+ * -- das Verhaeltnis ist 170 : 1, es gibt also genau eine Stelle zu heilen.
+ *
+ * Dieselbe Loesung wie beim Mehrschnitt eine Ebene tiefer (`rzAnstossen`):
+ * die Zeichnungen bleiben sofort, der Loeser wartet, bis die Eingabe steht,
+ * und was sich nicht geaendert hat, wird nicht neu gerechnet. Die Pause ist
+ * kuerzer als dort (260 statt 420 ms), weil ein Scheibenlauf das Dreifache
+ * kostet und das Bild hier das eigentliche Ergebnis ist.
+ */
+let FELD_MARKE = "", FELD_TIMER = 0;
+const FELD_PAUSE_MS = 260;
+
+/* Woran das Feldbild haengt. `rs` gehoert dazu und `rzN` NICHT: gerechnet
+ * wird EINE abgewickelte Scheibe am Schnittradius, nicht der Mehrschnitt.
+ * Der Schnittwinkel `theta` steht ebenfalls nicht darin -- er liest nur ab. */
+function feldMarke(p) {
+  return JSON.stringify([p.topo, p.laeufer, p.stapel, p.ro, p.ri, p.poles, p.q,
+    p.bnut, p.spalt, p.zahn, p.jochS, p.jochR, p.magd, p.alpha, p.welle,
+    p.magSegU, p.magSegR, p.magFuge, p.qr, p.last, p.beta, p.netz, p.iter,
+    p.rs, p.rotorVersatz || 0]);
+}
+
+function feldAnstossen(p) {
+  if (FELD_MARKE === feldMarke(p)) return;   // dasselbe Feld -- das Bild gilt
+  clearTimeout(FELD_TIMER);
+  feldWartenZeigen();
+  FELD_TIMER = setTimeout(() => {
+    const q = P();
+    if (!q.feldAn) return;
+    zeichneFeld($("c_feld"), q);
+    FELD_MARKE = feldMarke(q);
+  }, FELD_PAUSE_MS);
+}
+
+/* Ein veraltetes Feld stehenzulassen waere schlechter als eine Pause: es
+ * gehoert zu anderen Zahlen als denen, die daneben schon stehen. */
+function feldWartenZeigen() {
+  const cv = $("c_feld"); if (!cv) return;
+  const ctx = cv.getContext("2d");
+  ctx.fillStyle = "#101216"; ctx.fillRect(0, 0, cv.width, cv.height);
+  ctx.fillStyle = "#8a93a3"; ctx.font = "15px system-ui"; ctx.textAlign = "center";
+  ctx.fillText("rechnet das Feld \u2026", cv.width / 2, cv.height / 2);
+}
+
 function rzMarke(p) {
   return JSON.stringify([p.topo, p.laeufer, p.stapel, p.ro, p.ri, p.poles, p.q,
     p.bnut, p.spalt, p.zahn, p.jochS, p.jochR, p.magd, p.alpha, p.welle,
@@ -728,10 +786,9 @@ function zeichne() {
   halbschnitt($("c_schnitt"), p);
   abwicklung($("c_abw"), p);
   tabelle(p);
-  // Das Feld kostet Rechenzeit und wird deshalb nur auf Zuruf gerechnet --
-  // sonst haengt die Maske bei jedem Tastendruck.
   $("fig_feld").style.display = p.feldAn ? "" : "none";
-  if (p.feldAn) zeichneFeld($("c_feld"), p);
+  if (p.feldAn) feldAnstossen(p);
+  else clearTimeout(FELD_TIMER);
   for (const id of ["fig_rz", "fig_scheibe", "fig_zahn"])
     $(id).style.display = p.rzAn ? "" : "none";
   if (p.rzAn) rzAnstossen(p);
@@ -947,7 +1004,9 @@ async function rechnen() {
   // soll es auch nicht erfinden -- sie bekommt es als Messwert uebergeben.
   const p = P();
   if (!p.feldAn) { pSagt("erst „Feld rechnen“ einschalten — Stufe 1 braucht B_gap", true); return; }
+  clearTimeout(FELD_TIMER);                 // ausdruecklicher Zuruf: nicht warten
   const e = zeichneFeld($("c_feld"), p);
+  FELD_MARKE = feldMarke(p);                // gerechnet ist gerechnet
   if (!e || !e.e || !e.e.geeicht) {
     pSagt("ohne Magnet gibt es kein geeichtes B_gap", true); return;
   }
