@@ -127,6 +127,7 @@ def baue_netz(geom: dict, msh_pfad: str, lc_mm: float = 0.0,
     doppelt so teuer und sagten dasselbe.
     """
     import gmsh
+    import ema_axial_fdm as AF
     import ema_axial_thermik as AT
 
     g = AT._geo(geom)
@@ -158,13 +159,39 @@ def baue_netz(geom: dict, msh_pfad: str, lc_mm: float = 0.0,
         gmsh.model.add("axialsektor")
         occ = gmsh.model.occ
 
-        # 1. Die Schichten, jede ueber den VOLLEN Radiusbereich inkl. Rand.
-        #    Was Eisen ist und was Luft, entscheidet die Zuordnung spaeter am
-        #    Schwerpunkt -- gebaut wird erst einmal die Schichtung.
+        # 1. Die Schichten -- ueber den AKTIVEN Ringraum [ri, ro], nicht
+        #    darueber hinaus.
+        #
+        #    **Befund vom 11.10.2026, behoben am 16.10.2026.** Hier stand
+        #    `[r_in, r_out]`, also Schicht samt Luftrand in EINEM Stueck, und
+        #    die Zuordnung in Schritt 4 entscheidet am Volumenschwerpunkt. Eine
+        #    Jochschicht wird von nichts radial zerschnitten, bleibt also ein
+        #    Stueck, dessen Schwerpunktradius mitten im Ring liegt (gemessen
+        #    109,6 mm) -- und wurde Eisen. Das Eisen reichte damit von
+        #    r = 55,8 bis 149,2 mm, wo die Scheibe bei Ri = 75 / Ro = 130
+        #    endet, und die Jochflaeche war **1,70-fach** zu gross.
+        #
+        #    Das ist kein Schoenheitsfehler: in dem Ueberstand steht ein
+        #    radialer Rueckweg offen, den es nicht gibt. An den exportierten
+        #    Feldlinien eines Laufs gemessen liefen sie im Staender zu
+        #    0,56-0,63 **radial** statt axial -- gemeldet als "im Bereich der
+        #    Spulen scheinen die Magnetfeldlinien wie bei einer
+        #    Radialflussmaschine zu laufen". Es ist derselbe Fehler wie die
+        #    Eisenpolsterung des Mehrschnitts (``ema_axial_fdm.POLSTER_MU_R``),
+        #    eine Dimension hoeher: Eisen, wo Luft hingehoert.
         stuecke, kennung = [], []
         for lg in lagen:
-            v = _sektor(occ, r_in, r_out, lg["z0"], lg["d"], 0.0, alpha_pol)
+            v = _sektor(occ, ri, ro, lg["z0"], lg["d"], 0.0, alpha_pol)
             stuecke.append(v); kennung.append(lg["art"])
+
+        # 1b. Der Luftrand innen und aussen, ueber die ganze Stapelhoehe --
+        #     als EIGENE Koerper. Er traegt die radiale Streuung, den einen
+        #     Effekt, fuer den es diesen Sektor gibt; als Teil der Schicht
+        #     trug er statt dessen den Rueckfluss.
+        for r_a, r_b in ((r_in, ri), (ro, r_out)):
+            if r_b - r_a > 0.05:
+                stuecke.append(_sektor(occ, r_a, r_b, 0.0, hoehe, 0.0, alpha_pol))
+                kennung.append("rand")
         if deckel > 0.05:
             stuecke.append(_sektor(occ, r_in, r_out, -deckel, deckel, 0.0, alpha_pol))
             kennung.append("deckel")
@@ -182,18 +209,46 @@ def baue_netz(geom: dict, msh_pfad: str, lc_mm: float = 0.0,
             magnete.append(_sektor(occ, ri, ro, lg["z0"], lg["d"], mag_a0, mag_w))
 
         # 3. Die Nuten: parallelflankige Quader, radial gelegt, in jedem
-        #    Zahnband. Nur die, die in diese Polteilung fallen.
+        #    ZAHNBAND. Nur die, die in diese Polteilung fallen.
+        #
+        #    **Die Nut ist so tief wie EIN Zahn, nicht wie das Staenderband.**
+        #    Hier stand `lg["d"]`, also die ganze Bandhoehe -- und die traegt
+        #    das Joch mit. Der Staender hatte damit keines, genau wie im
+        #    Mehrschnitt vor dem 16.10.2026 (`ema_axial_fdm._nuten`); gesehen
+        #    wurde es erst, als der Luftrand nicht mehr Eisen war und als
+        #    Ersatz-Rueckweg ausfiel: TORUS-NN fiel auf B_3d 0,4966 T gegen
+        #    1,0660 T aus dem Mehrschnitt. Ein Fehler, den ein zweiter Fehler
+        #    verdeckt -- dieselbe Paarung wie Polsterung und Seitenbedingung
+        #    eine Ebene tiefer.
+        #
+        #    Welche Flaeche genutet ist, sagt `kenn` der Staenderlage, und die
+        #    Zahnlaenge kommt aus `ema_axial_fdm.zahnlaenge` -- derselben
+        #    Quelle, aus der `statorhoehe` das Band zusammensetzt. Zwei
+        #    Zahlen dafuer waeren zwei verschieden hohe Staender.
         tau_s = 2.0 * math.pi / q
+        t_zahn = AF.zahnlaenge(geom)
         nuten = []
         for lg in lagen:
             if lg["art"] != "stator":
                 continue
-            k = 0
-            while k * tau_s < alpha_pol + tau_s:
-                th = (k + 0.5) * tau_s
-                if -1e-9 <= th <= alpha_pol + 1e-9:
-                    nuten.append(_nut_box(occ, b_nut, ri, ro, lg["z0"], lg["d"], th))
-                k += 1
+            kenn = lg.get("kenn")
+            if kenn == "durch":                      # jochloser Staender (YASA)
+                baender = [(lg["z0"], lg["d"])]
+            elif kenn == "beide":                    # beidseitig genutet, Joch mittig
+                baender = [(lg["z0"], t_zahn), (lg["z1"] - t_zahn, t_zahn)]
+            elif kenn == "oben":                     # Zaehne oben, Joch darunter
+                baender = [(lg["z1"] - t_zahn, t_zahn)]
+            else:                                    # "unten": Zaehne unten
+                baender = [(lg["z0"], t_zahn)]
+            for z0, dz in baender:
+                if dz <= 1e-6:
+                    continue
+                k = 0
+                while k * tau_s < alpha_pol + tau_s:
+                    th = (k + 0.5) * tau_s
+                    if -1e-9 <= th <= alpha_pol + 1e-9:
+                        nuten.append(_nut_box(occ, b_nut, ri, ro, z0, dz, th))
+                    k += 1
 
         occ.synchronize()
         if melde:

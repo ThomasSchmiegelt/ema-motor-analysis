@@ -644,12 +644,50 @@ hat den Unterschied zwischen den beiden Bauformen verdeckt.**
 `[r_in, r_out]`) und Schritt 4 (Zuordnung am Schwerpunkt), Modulkopf
 `RAND_ANTEIL`.
 
-**Status: offen, ausdrücklich nicht repariert.** Die Behebung ist absehbar (die
-Schichten bei Ri und Ro zerschneiden und die Stücke außerhalb als Luft
-zuordnen), sie verschiebt aber **jede** axiale 3-D-Zahl und gehört deshalb nicht
-nebenbei in einen Umbau der Anzeige. Bis dahin gilt: der axiale 3-D-Sektor
-überschätzt das Feld dort, wo der Fluss im JOCH umfangs läuft, und die
-Scheibenbilder zeigen einen Kranz, der radial breiter ist als die Maschine.
+**Status: behoben am 16.10.2026** — und die Reparatur hat einen zweiten Fehler
+freigelegt, den dieser hier verdeckt hatte.
+
+Ausgelöst wurde es von einem Bild: *„ich habe immer noch das Gefühl, dass das
+nicht richtig ist — im Bereich der Spulen scheinen die Magnetfeldlinien wie bei
+einer Radialflussmaschine zu laufen."* An den exportierten Feldlinien eines
+Laufs nachgemessen (219.334 Linienabschnitte, Richtung je Abschnitt in
+axial/radial/umfangs zerlegt) war das genau so:
+
+| z-Band | Lage | axial | radial | umfangs |
+|---|---|---:|---:|---:|
+| Rückenblech | Rückweg | 0,22 | 0,35 | **0,77** ✔ |
+| Magnet + Spalt | Durchtritt | **0,90** ✔ | 0,18 | 0,17 |
+| **Ständer** | Zähne/Nuten | 0,31–0,39 | **0,56–0,63** | 0,29–0,43 |
+
+Im Überstand stand ein radialer Rückweg offen, den es nicht gibt.
+
+**Die Reparatur, in zwei Teilen.** (1) `baue_netz` baut die Schichten jetzt über
+`[ri, ro]`, und der Luftrand ist ein **eigener Körper** über die Stapelhöhe —
+die Zuordnung am Schwerpunkt erklärt ihn damit von selbst zu Luft. (2) Danach
+fiel auf, dass die Nut auch hier **durch das Joch** schneidet (`lg["d"]`, die
+ganze Bandhöhe, statt einer Zahnlänge) — derselbe Fehler wie in
+`ema_axial_fdm._nuten`, nur bisher vom Eisenrand überdeckt, der als
+Ersatz-Rückweg einsprang. `kenn` entscheidet jetzt über die Zahnbänder, und die
+Zahnlänge kommt aus `ema_axial_fdm.zahnlaenge` — derselben Quelle.
+
+**Gemessen** (Elmer, Vorgabemaschine, k = 5, N = 300, Abweichung des
+3-D-Ringsektors gegen den Mehrschnitt):
+
+| Bauform | vorher | nur Rand repariert | Rand **und** Joch |
+|---|---:|---:|---:|
+| YASA | 2,47 % | 1,91 % | **1,91 %** |
+| TORUS-NN | 5,52 % | **−55,77 %** | **1,64 %** |
+
+Die mittlere Spalte ist der Beleg für die Paarung: allein repariert fiel
+TORUS-NN auf B₃D 0,4966 T gegen 1,0660 T aus dem Mehrschnitt, weil ihm nun
+Rand **und** Joch fehlten. YASA ist von Teil (2) unberührt — sein Ständer ist
+jochlos (`kenn = "durch"`), und das ist die Gegenprobe.
+
+Am Feldbild nachgemessen: Festkörper jetzt **75,1…130,0 mm** (vorher
+55,8…149,2), Ständer **axial 0,60–0,90** statt radial, Rückenblech umfangs
+0,82–0,89. Wächter: `test_axial_em3d.py` — das Eisen endet am Ringraum, die
+Luft füllt den Rand, auf Zahnhöhe steht Luft im Ringraum und auf Jochhöhe
+keine, und beidseitig genutet heißt doppelt so viele Nutkörper.
 
 ---
 

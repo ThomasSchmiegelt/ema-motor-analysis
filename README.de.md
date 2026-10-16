@@ -393,9 +393,17 @@ Zusammen: Schwankung über eine Läuferdrehung 2,0 → **0,6 %**, über die Fens
 0,34 → **0,37 %**, und das gezeichnete Rückenblech wirkt wieder (+0,0 → **+4,1 %**).
 Der erste Versuch, nur die Polsterung umzustellen, machte es **schlechter** (11,8 %
 über die Läuferdrehung) — das Eisen hatte den Randfehler weich gemacht. Alles
-gemessen, alles in `cae_orchestrator/BEFUNDE.md`, und ein vierter Befund bleibt
-**offen**: derselbe Fehler eine Dimension höher, der „Luftrand" des 3-D-Ringsektors
-ist Eisen.
+gemessen, alles in `cae_orchestrator/BEFUNDE.md`.
+
+Ein vierter Befund hatte dieselbe Form, eine Dimension höher: der „Luftrand" des
+3-D-Ringsektors war **Eisen**, das Modell also radial breiter als die Maschine
+(55,8…149,2 mm gegen Ri/Ro 75/130). An den Feldlinien eines echten Laufs gemessen
+liefen sie im Ständer zu 0,56–0,63 **radial** — genau das, was im Bild auffiel.
+Behoben, und die Reparatur legte prompt den nächsten frei: die Nut schnitt auch dort
+durch das Joch, bisher verdeckt vom Eisenrand, der als Ersatz-Rückweg einsprang.
+Gemessen gegen den Mehrschnitt: YASA 2,47 → **1,91 %**, TORUS-NN 5,52 → **1,64 %** —
+und dazwischen, mit nur der halben Reparatur, −55,77 %. Das ist der Beleg für die
+Paarung.
 
 ## Fünf Maschinenarten — und wie weit jede wirklich getragen ist
 

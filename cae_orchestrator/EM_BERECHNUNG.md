@@ -934,6 +934,10 @@ und Ro und keine radialen Stromkomponenten im Wickelkopf: jeder Schnitt rechnet,
 setze sich seine Geometrie radial unendlich fort. Dafür gibt es `ema_axial_em3d`,
 den anti-periodischen Elmer-Ringsektor — gemessen +2,5 % im Mittel, mit
 Vorzeichenwechsel von innen nach außen, also genau der `d/dr`-Term, für den er
-gebaut wurde. Dieser Sektor hat einen **offenen Befund**: sein „Luftrand" ist Eisen
-(`BEFUNDE.md`, 11.10.2026), die Jochfläche dadurch 1,70-fach zu groß, und die
-exportierten Feldlinien laufen im Ständer radial statt axial.
+gebaut wurde. Bis zum 16.10.2026 trug er dabei einen eigenen Fehler: sein „Luftrand"
+war Eisen (die Schichten wurden über den vollen Radiusbereich gebaut und am Schwerpunkt
+zugeordnet), die Jochfläche dadurch 1,70-fach zu groß — und im Überstand stand ein
+radialer Rückweg offen, den es nicht gibt. Behoben, zusammen mit der Nut, die auch hier
+durch das Joch schnitt; gemessen gegen den Mehrschnitt 1,9 % (YASA) und 1,6 %
+(TORUS-NN) gegen vorher 2,5 % und 5,5 %, und die Feldlinien laufen im Ständer wieder
+axial (0,60–0,90 gegen vorher 0,31–0,39).

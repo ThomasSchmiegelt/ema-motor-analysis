@@ -149,7 +149,14 @@ Together: variation over one rotor turn 2.0 → **0.6 %**, over the window width
 attempt — swapping only the padding — made it **worse** (11.8 % over rotor position):
 the iron had been masking the boundary error. All measured, all written up in
 `cae_orchestrator/BEFUNDE.md`, and a fourth finding stays **open**: the same mistake
-one dimension up, the "air boundary" of the 3-D ring sector is iron.
+one dimension up: the "air boundary" of the 3-D ring sector was **iron**, so the model
+was radially wider than the machine (55.8…149.2 mm against Ri/Ro 75/130). Measured on
+the streamlines of a real run, they went 0.56–0.63 **radial** in the stator — exactly
+what showed up in the picture. Fixed, and the fix promptly exposed the next one: the
+slot cut through the yoke there too, until now masked by the iron margin standing in as
+a return path. Measured against the multi-slice: YASA 2.47 → **1.91 %**, TORUS-NN
+5.52 → **1.64 %** — and in between, with only half the repair, −55.77 %. That is the
+evidence for the pairing.
 
 ## Five machine types — and how far each is actually carried
 

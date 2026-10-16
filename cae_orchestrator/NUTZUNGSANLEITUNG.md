@@ -342,9 +342,9 @@ Fehler zutage gefördert.
 **Grenzen, die mitlaufen.** Das Eisen ist linear (keine Sättigung — ob ein
 Blech dick genug ist, sagt die Auslegung, nicht das Feldbild); die radiale
 Streuung an Innen- und Außenrand fehlt im Mehrschnitt, dafür gibt es die
-3-D-Gegenrechnung (+2,5 % im Mittel). Der 3-D-Ringsektor hat einen **offenen
-Befund**: sein „Luftrand" ist Eisen, und im Ständer laufen die exportierten
-Feldlinien dadurch radial statt axial.
+3-D-Gegenrechnung (1,9 % im Mittel). Bis zum 16.10.2026 war der „Luftrand" des
+3-D-Ringsektors Eisen — die Feldlinien liefen im Ständer dadurch radial statt
+axial; das ist behoben.
 
 ---
 

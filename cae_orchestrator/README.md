@@ -96,8 +96,9 @@ Läufers, bei TORUS-NN im Ständerjoch. Gemessen als Anteil |B| axial zu umfangs
 **Grenzen, die mitlaufen:** das Eisen ist linear (keine Sättigung — ob ein Blech dick genug
 ist, sagt `ema_axial.ruecken`, nicht das Feldbild), die radiale Streuung an Ri/Ro fehlt im
 Mehrschnitt (dafür gibt es die 3-D-Gegenrechnung, gemessen +2,5 % im Mittel), und der
-3-D-Ringsektor hat einen **offenen Befund**: sein „Luftrand“ ist Eisen (`BEFUNDE.md`,
-11.10.2026) — im Ständer laufen die exportierten Feldlinien dadurch radial statt axial.
+3-D-Ringsektor hatte bis zum 16.10.2026 einen Befund, der genau das verfälschte: sein
+„Luftrand“ war Eisen, und im Ständer liefen die Feldlinien dadurch **radial** statt axial.
+Behoben — Abweichung gegen den Mehrschnitt jetzt 1,9 % (YASA) und 1,6 % (TORUS-NN).
 
 ### 4. Elektromagnetische Feldberechnung — echtes 3D-FEM (Elmer) (`ema_em3d.py` / `elmer_runner.py`)
 

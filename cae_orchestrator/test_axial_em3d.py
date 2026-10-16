@@ -143,6 +143,97 @@ else:
                f"und die Luft reicht darueber hinaus "
                f"({netz['r_in_mm']:.1f}…{netz['r_out_mm']:.1f} mm) — ohne das "
                f"saesse die Randbedingung auf dem Eisen")
+        # **Das Eisen endet am Ringraum.** Befund E vom 11.10.2026: die
+        # Schichten wurden ueber `[r_in, r_out]` gebaut und am Schwerpunkt
+        # zugeordnet -- eine Jochschicht blieb EIN Stueck, dessen Schwerpunkt
+        # mitten im Ring liegt, und wurde Eisen. Das Eisen reichte damit von
+        # 55,8 bis 149,2 mm, wo die Scheibe bei 75/130 endet (Jochflaeche
+        # x1,70), und im Ueberstand stand ein radialer Rueckweg offen, den es
+        # nicht gibt.
+        #
+        # Geprueft wird am fertigen NETZ und nicht an der Bauanweisung: die
+        # Bauanweisung sah schon vorher richtig aus, falsch war erst die
+        # Zuordnung danach.
+        import gmsh as _g
+        _g.initialize(interruptible=False)
+        try:
+            _g.option.setNumber("General.Terminal", 0)
+            _g.open(netz["msh"])
+            def _radien(pid):
+                _, kn = _g.model.mesh.getNodesForPhysicalGroup(3, pid)
+                xs, ys = kn[0::3], kn[1::3]
+                rr = [math.hypot(x, y) for x, y in zip(xs, ys)]
+                return (min(rr), max(rr)) if rr else (0.0, 0.0)
+            r_eisen = _radien(netz["pid"]["eisen"])
+            r_luft = _radien(netz["pid"]["luft"])
+        finally:
+            _g.finalize()
+        pruefe(r_eisen[0] >= netz["ri_mm"] - 0.5
+               and r_eisen[1] <= netz["ro_mm"] + 0.5,
+               f"das EISEN endet am Ringraum: {r_eisen[0]:.1f}…{r_eisen[1]:.1f} mm "
+               f"gegen Ri/Ro {netz['ri_mm']:.1f}/{netz['ro_mm']:.1f} — vorher "
+               f"reichte es bis {netz['r_out_mm']:.1f} mm")
+        pruefe(r_luft[0] <= netz["r_in_mm"] + 0.5
+               and r_luft[1] >= netz["r_out_mm"] - 0.5,
+               f"und die LUFT fuellt den Rand aus ({r_luft[0]:.1f}…"
+               f"{r_luft[1]:.1f} mm) — sonst haette das Gebiet ein Loch")
+
+        # **Die Nut schneidet auch hier nicht durch das Joch.** Dasselbe wie
+        # in `ema_axial_fdm`, eine Ebene hoeher -- und hier verdeckt vom
+        # Eisenrand, solange es ihn gab: TORUS-NN fiel erst auf B_3d 0,4966 T
+        # gegen 1,0660 T aus dem Mehrschnitt, als der Rand Luft wurde.
+        #
+        # Pruefstein ist die LUFT: im Ringraum auf Jochhoehe darf keine stehen
+        # (dort ist das Joch massiv), auf Zahnhoehe muss welche stehen (dort
+        # sind die Nuten). Das ist unabhaengig von der Netzfeinheit -- eine
+        # Nut, die da waere, haette Knoten; eine Winkeldeckung dagegen zaehlt
+        # bei 6-mm-Zellen vor allem leere Faecher.
+        def _luft_im_ring(msh, pid_luft, z0, z1, ri_, ro_):
+            g_ = __import__("gmsh")
+            g_.initialize(interruptible=False)
+            try:
+                g_.option.setNumber("General.Terminal", 0)
+                g_.open(msh)
+                _, kn = g_.model.mesh.getNodesForPhysicalGroup(3, pid_luft)
+            finally:
+                g_.finalize()
+            n = 0
+            for i in range(0, len(kn), 3):
+                x, y, z = kn[i], kn[i + 1], kn[i + 2]
+                if z0 <= z <= z1 and (ri_ + 3.0) <= math.hypot(x, y) <= (ro_ - 3.0):
+                    n += 1
+            return n
+
+        _nut_zahl = {}
+        for _bf in ("yasa", "torus_nn"):
+            with tempfile.TemporaryDirectory() as td2:
+                _n2 = E3.baue_netz(dict(G, axialBauform=_bf),
+                                   os.path.join(td2, "m.msh"),
+                                   lc_mm=6.0, lc_spalt_mm=1.2)
+                _nut_zahl[_bf] = _n2["n_nut_sektor"]
+                _st = [l for l in _n2["lagen"] if l["art"] == "stator"][0]
+                _zahn = AF.zahnlaenge(G)
+                # auf halber Zahnhoehe: dort MUSS Luft stehen (die Nut)
+                _zz = _st["z0"] + 0.5 * _zahn
+                _in_zahn = _luft_im_ring(_n2["msh"], _n2["pid"]["luft"],
+                                         _zz - 1.0, _zz + 1.0,
+                                         _n2["ri_mm"], _n2["ro_mm"])
+                pruefe(_in_zahn > 0,
+                       f"{_bf}: auf Zahnhoehe steht Luft im Ringraum "
+                       f"({_in_zahn} Knoten) — die Nut ist da")
+                if _bf == "torus_nn":
+                    _zj = 0.5 * (_st["z0"] + _zahn + _st["z1"] - _zahn)
+                    _in_joch = _luft_im_ring(_n2["msh"], _n2["pid"]["luft"],
+                                             _zj - 1.0, _zj + 1.0,
+                                             _n2["ri_mm"], _n2["ro_mm"])
+                    pruefe(_in_joch == 0,
+                           f"torus_nn: auf Jochhoehe (z = {_zj:.1f} mm) steht "
+                           f"KEINE Luft im Ringraum ({_in_joch} Knoten) — das "
+                           f"Joch ist massiv")
+        pruefe(_nut_zahl["torus_nn"] == 2 * _nut_zahl["yasa"],
+               f"beidseitig genutet heisst doppelt so viele Nutkoerper: "
+               f"{_nut_zahl['torus_nn']} gegen {_nut_zahl['yasa']}")
+
         pruefe(netz["lc_spalt_mm"] < netz["lc_mm"],
                f"der Spalt ist feiner vernetzt als der Rest "
                f"({netz['lc_spalt_mm']:.2f} gegen {netz['lc_mm']:.2f} mm)")
