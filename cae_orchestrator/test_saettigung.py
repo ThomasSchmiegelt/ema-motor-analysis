@@ -200,7 +200,8 @@ pruefe("und erzeugt die Bilder nach charts/",
 # derselbe Fehler an einem Tag. Diese Pruefungen sind das Gegenmittel.
 print("\n[7b] Ergebnisreiter und Bericht")
 import os                                                         # noqa: E402
-_html = open("ema.html", encoding="utf-8").read()
+import ema_seite
+_html = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 pruefe("renderSummary hat eine Saettigungskachel",
        "saettigung_pct" in _html and "renderSummary" in _html)
 pruefe("und sie sagt, woher die Zahl kommt",

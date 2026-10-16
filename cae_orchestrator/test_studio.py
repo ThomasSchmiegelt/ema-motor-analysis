@@ -26,6 +26,7 @@ import sys
 
 import ema_agent
 import ema_beitrag
+import ema_seite
 
 HIER = os.path.dirname(os.path.abspath(__file__))
 
@@ -590,7 +591,7 @@ def test_studio_seite_gehoert_dem_studio_kopf():
 
 
 def test_studio_reiter_in_der_oberflaeche():
-    h = open(os.path.join(HIER, "ema.html"), encoding="utf-8").read()
+    h = ema_seite.quelltext()   # Markup + oberflaeche/*.js
     assert "switchTab('studio')" in h and 'id="panel-agent-studio"' in h
     assert "'studio'" in h.split("const TABS =")[1].split("]")[0]
     assert "agent-rahmen-studio" in h
@@ -783,7 +784,7 @@ def test_alle_drei_koepfe_stehen_in_JEDER_layoutregel():
     die Menge aus DREI Regeln besteht und nur eine nachgezogen wurde. Dieser
     Test prueft deshalb jede einzeln.
     """
-    h = open(os.path.join(HIER, "ema.html"), encoding="utf-8").read()
+    h = ema_seite.quelltext()   # Markup + oberflaeche/*.js
     koepfe = ("#panel-agent", "#panel-agent-hermes", "#panel-agent-studio")
 
     # Die drei Regeln am Merkmal ihrer rechten Seite finden — nicht an einer

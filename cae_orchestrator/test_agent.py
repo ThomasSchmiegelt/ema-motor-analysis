@@ -272,7 +272,8 @@ except ImportError as e:
 
 print("\n8. Der Agent haengt als eigener Reiter in der Hauptoberflaeche")
 _hier = os.path.dirname(os.path.abspath(__file__))
-_ema = io.open(os.path.join(_hier, "ema.html"), encoding="utf-8").read()
+import ema_seite
+_ema = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 pruefe("switchTab('agent')" in _ema and "id=\"tbtn-agent\"" in _ema,
        "die Reiterleiste hat einen Knopf 🤖 PI")
 pruefe("switchTab('agenth')" in _ema and "id=\"tbtn-agenth\"" in _ema,

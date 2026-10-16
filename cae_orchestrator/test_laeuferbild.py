@@ -449,7 +449,8 @@ else:
 
 print("\n5. Die Teile werden auch BENUTZT")
 
-html = open(os.path.join(HIER, "ema.html"), encoding="utf-8").read()
+import ema_seite
+html = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 pruefe('src="/ema_laeufer.js"' in html,
        "die Seite laedt den Zeichner")
 pruefe('fetch("/laeuferbild"' in html,

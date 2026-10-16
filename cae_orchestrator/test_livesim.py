@@ -23,7 +23,8 @@ import tempfile
 sys.path.insert(0, ".")
 
 FEHLER = []
-HTML = open("ema.html", encoding="utf-8").read()
+import ema_seite
+HTML = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 
 
 def pruefe(name, bed, zusatz=""):

@@ -460,8 +460,8 @@ print("\n— 9. Bedienbar: Fussleiste, CAD-Wahl, 3-D-Verzweigung —")
 import inspect
 import re as _re
 
-_html = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                          "ema.html"), encoding="utf-8").read()
+import ema_seite
+_html = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 
 # Die Fussleiste traegt beide Auswahlfelder -- dort wird gestartet, also gehoert
 # die Entscheidung "WAS wird gerechnet" dorthin und nicht nur in einen Reiter,

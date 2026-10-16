@@ -513,8 +513,8 @@ print("\nDie Maschinenart erreicht den Browser")
 # `buildPayload` schickte ihn nicht mit, also rechnete der Browser IMMER eine
 # PSM, auch nachdem ASM, EESM und GSM zeichenbar geworden sind. Ein Knopf, den
 # nur die CLI hat, ist fuer den, der vor der Oberflaeche sitzt, nicht vorhanden.
-_html = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "ema.html"),
-             encoding="utf-8").read()
+import ema_seite
+_html = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 
 pruefe('id="machine_art"' in _html,
        "der Geometrie-Reiter hat ein Auswahlfeld 'Maschinenart'")

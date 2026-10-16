@@ -129,12 +129,29 @@ PHYSIK: tuple[str, ...] = (
 # den ganzen Reiter auf -- der Browser fuhr die alte Seite, und nichts sagte es.
 # Der Server meldet den Stand jetzt in der Arbeitsanzeige mit; aendert er sich,
 # waehrend eine Seite offen ist, sagt sie es EINMAL.
-OBERFLAECHE: tuple[str, ...] = (
-    "ema.html",             # die Hauptmaske -- seit 04.10.2026 mit drin
-    "ema_studio.html",      # Studio-Seite
-    "ema_agent.html",       # Schreibtischseite (PI/Hermes)
-    "agent_gemein.js",      # das gemeinsame Verhalten beider
-)
+#
+# Seit dem 16.10.2026 liegt das JavaScript der Hauptmaske in `oberflaeche/`
+# (vorher zwei <script>-Bloecke mit zusammen 11.568 Zeilen IN `ema.html`).
+# Die Liste wird deshalb NICHT von Hand gefuehrt, sondern aus der Seite
+# gelesen -- `ema_seite.skriptnamen()` nimmt die `<script src>`-Folge, und
+# damit ist eine neue Datei an genau EINER Stelle einzutragen.
+def _oberflaeche_dateien() -> tuple[str, ...]:
+    fest = ("ema.html",             # die Hauptmaske -- seit 04.10.2026 mit drin
+            "ema_studio.html",      # Studio-Seite
+            "ema_agent.html",       # Schreibtischseite (PI/Hermes)
+            "agent_gemein.js",      # das gemeinsame Verhalten beider
+            "ema_laeufer.js")       # der Zeichner fuer Laeufer ohne Magnete
+    try:
+        import ema_seite
+        skripte = tuple("oberflaeche/" + n for n in ema_seite.skriptnamen())
+    except Exception:
+        # Lieber eine unvollstaendige Liste als gar kein Fingerabdruck: ohne
+        # ihn saehe eine geaenderte Seite aus wie eine unveraenderte.
+        skripte = ()
+    return fest + skripte
+
+
+OBERFLAECHE: tuple[str, ...] = _oberflaeche_dateien()
 
 _HIER = os.path.dirname(os.path.abspath(__file__))
 _GIT_SEK = 30.0
@@ -156,7 +173,9 @@ _WEITERE: tuple[str, ...] = ("server.py", "ema_diagnose.py", "ema_eesm_cad.py",
 #: Stelle kostet die naechste halbe Stunde Fehlersuche.
 _AUSGELIEFERT: tuple[str, ...] = ("ema.html", "ema_laeufer.js",
                                   "ema_mobil.html", "ema_studio.html",
-                                  "ema_agent.html", "agent_gemein.js")
+                                  "ema_agent.html", "agent_gemein.js"
+                                  ) + tuple(n for n in OBERFLAECHE
+                                            if n.startswith("oberflaeche/"))
 
 
 def _datei_hash(pfad: str) -> str | None:

@@ -235,7 +235,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
 print("\n5. Die Seite: beide Richtungen, und das Formular hat Vorrang")
 _hier = os.path.dirname(os.path.abspath(__file__))
-_html = open(os.path.join(_hier, "ema.html"), encoding="utf-8").read()
+import ema_seite
+_html = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 _srv = open(os.path.join(_hier, "server.py"), encoding="utf-8").read()
 pruefe('@app.route("/project/<pid>/stand")' in _srv,
        "der Server liefert den Stand ueber eine eigene, billige Route")

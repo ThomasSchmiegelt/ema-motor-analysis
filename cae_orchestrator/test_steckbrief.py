@@ -35,6 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import cae_cli
 import ema_agent
+import ema_seite
 import ema_steckbrief as SB
 
 _ok = _bad = 0
@@ -473,7 +474,7 @@ pruefe("gibt es nicht." in quelle_srv,
        "ein Agentenstart auf ein Projekt, das es nicht gibt, wird abgewiesen "
        "statt einen Scheinordner anzulegen")
 
-ema = open(os.path.join(HIER, "ema.html"), encoding="utf-8").read()
+ema = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 pruefe("dsnAnAgent" in ema and "/agent/vorgabe" in ema,
        "der Designer hat den Uebergabeknopf")
 pruefe("brief: notes" in ema,
@@ -768,7 +769,7 @@ except ValueError:
 # Die Oberflaeche hatte die Tabelle zuerst. Zwei Kopien laufen auseinander --
 # also wird die JS-Kopie gegen die Python-Tabelle festgenagelt, genau wie
 # test_topology.py es fuer die Topologien tut.
-ema = open(os.path.join(HIER, "ema.html"), encoding="utf-8").read()
+ema = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 js = ema[ema.index("const CALC_PRESETS"):]
 js = js[:js.index("};") + 2]
 for stufe, felder in (("entwurf", e), ("detail", dt)):

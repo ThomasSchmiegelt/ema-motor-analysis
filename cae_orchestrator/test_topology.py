@@ -44,7 +44,7 @@ import ema_topology as T
 from ema_screen import WAND_BAUFORMEN as T_WAND_BAUFORMEN
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-EMA_HTML = os.path.join(HERE, "ema.html")
+import ema_seite                       # Markup + oberflaeche/*.js an EINER Stelle
 TOL = 0.1   # mm geometric tolerance
 
 # Base geometry: rotor small enough that surface magnets fit (statorID/2=95).
@@ -167,7 +167,7 @@ def test_hollow_shaft_keeps_rotor_bore():
 # ── JS ↔ Python mirror ──────────────────────────────────────────────────────
 
 def _extract_js_mirror():
-    src = open(EMA_HTML, encoding="utf-8").read()
+    src = ema_seite.quelltext()
     a = src.find("// <<MIRROR-START>>")
     b = src.find("// <<MIRROR-END>>")
     if a < 0 or b < 0:

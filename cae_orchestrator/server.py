@@ -131,6 +131,33 @@ def index():
     return send_from_directory(os.path.dirname(__file__), "ema.html")
 
 
+OBERFLAECHE_DIR = os.path.join(os.path.dirname(__file__), "oberflaeche")
+
+
+@app.route("/oberflaeche/<path:datei>")
+def oberflaeche_datei(datei: str):
+    """Die Skripte der Maske (frueher EIN <script>-Block in ``ema.html``).
+
+    Muster wie ``/axialfluss/<datei>``: nur was wirklich als Datei im Ordner
+    liegt, und nur ein harmloser Name -- der Pfad kommt aus der Seite, aber
+    gepraeft wird er hier. ``Cache-Control: no-cache`` wie bei
+    ``ema_laeufer.js``: nach einer Aenderung soll ein Neuladen genuegen, und
+    ``ema_werkzeugstand`` sagt der offenen Seite ohnehin, wann das noetig ist.
+
+    Die feste Regel ``/oberflaeche`` (der Fingerabdruck) gewinnt gegen diese:
+    Flask ordnet Regeln ohne Platzhalter vorne ein.
+    """
+    import re
+    sicher = os.path.basename(datei)
+    if not re.fullmatch(r"[A-Za-z0-9_.-]+", sicher or ""):
+        return jsonify({"error": "ungueltiger Name"}), 403
+    if not os.path.isfile(os.path.join(OBERFLAECHE_DIR, sicher)):
+        return jsonify({"error": "nicht gefunden"}), 404
+    antwort = send_from_directory(OBERFLAECHE_DIR, sicher)
+    antwort.headers["Cache-Control"] = "no-cache"
+    return antwort
+
+
 @app.route("/oberflaeche")
 def oberflaeche_stand():
     """Der Fingerabdruck der ausgelieferten Oberflaeche.

@@ -482,7 +482,8 @@ pruefe("getriebe" not in D.DEFAULT_VEHICLE,
 
 print("\n15. Reiter und Route — EINE Kette, nicht zwei")
 _hier = os.path.dirname(os.path.abspath(__file__))
-_html = open(os.path.join(_hier, "ema.html"), encoding="utf-8").read()
+import ema_seite
+_html = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 _srv = open(os.path.join(_hier, "server.py"), encoding="utf-8").read()
 _cli = open(os.path.join(_hier, "cae_cli.py"), encoding="utf-8").read()
 pruefe("'getriebe'" in _html.split("const TABS = ")[1].split("]")[0]

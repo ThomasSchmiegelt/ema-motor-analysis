@@ -3,7 +3,8 @@
 Der wichtigste Test ist ``test_legs_js_gegen_python``: Handy und Schreibtisch zeichnen
 in derselben Konvention, rechnen die Zeichnung aber in ZWEI Umsetzungen in
 ``customLegs`` um — einmal JavaScript in ``ema_mobil.html``, einmal Python in
-``ema_mobil.py``, beide zeichengetreu aus ``ema.html:5570-5590``. Laufen die
+``ema_mobil.py``, beide zeichengetreu aus dem Halbpol-Spiegel in
+``oberflaeche/designer.js`` (``_dsnBuildPayload``). Laufen die
 auseinander, liefert dieselbe Zeichnung stillschweigend zwei verschiedene Maschinen,
 und beide Ergebnisse sehen plausibel aus. Genau das faengt der Test ab.
 
@@ -122,7 +123,7 @@ def test_geom_aus_entwurf():
     check("customLegs vorhanden", len(g["customLegs"]) == 5)
     check("Barrieren werden gespiegelt", len(g["customBarriers"]) == 2)
     check("gespiegelte Barriere hat negative y", g["customBarriers"][1]["pts"][0][1] == -3)
-    # Der Grund steht in ema.html:5598-5602: parametrische Sperren wuerden ZUSAETZLICH
+    # Der Grund steht in oberflaeche/designer.js: parametrische Sperren wuerden ZUSAETZLICH
     # zur gezeichneten Geometrie erscheinen.
     check("parametrische Flusssperren und Wuchtbohrungen abgeschaltet",
           g["genFluxBarrierQ"] is False and g["genFluxBarrierD"] is False

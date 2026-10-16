@@ -230,7 +230,8 @@ with tempfile.TemporaryDirectory() as tmp:
 
 # ── 8. Oberflaeche und Agenten ──────────────────────────────────────────────
 print("\n[8] Anschluss")
-_html = open("ema.html", encoding="utf-8").read()
+import ema_seite
+_html = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 for feld in ("inv_vdc", "inv_imax", "inv_anzahl", "inv_topologie", "inv_bezug"):
     pruefe(f"die Maske hat {feld}", f'id="{feld}"' in _html)
 pruefe("buildPayload schreibt sie nach geom", "inverterAnzahl:" in _html)

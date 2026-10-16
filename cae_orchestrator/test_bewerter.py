@@ -149,8 +149,8 @@ quelle = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
                            "ema_thermal.py"), encoding="utf-8").read()
 pruefe('perf.get("T_maxwell_Nm") or 0.0' in quelle,
        "die Lagerreibung rechnet mit 0, statt an None zu scheitern")
-html = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "ema.html"), encoding="utf-8").read()
+import ema_seite
+html = ema_seite.quelltext()   # Markup + oberflaeche/*.js
 pruefe("s.T_maxwell_Nm != null" in html, "die Oberflaeche ruft kein toFixed auf null")
 pruefe("document.getElementById('opt-obj-metric').value = 'Kt';" in html,
        "und die Zielwertsuche steht nicht mehr auf einer Kennzahl, die es "

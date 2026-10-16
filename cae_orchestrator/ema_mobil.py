@@ -309,7 +309,7 @@ def basis_geom() -> dict:
     liest auch bei ``magShape:"custom"`` parametrische Werte (gemessen an einem
     ``KeyError: 'magThick'``). Der Schreibtischpfad faellt das nicht auf, weil er die
     gezeichneten Werte ueber eine bereits vollstaendige ``GEOM`` legt
-    (``ema.html:5593`` — ``{ ...GEOM, statorOD: ... }``).
+    (``oberflaeche/designer.js:_dsnBuildPayload`` — ``{ ...GEOM, statorOD: ... }``).
 
     Die Vorgaben kommen aus ``ema_text2ema.SCHEMA`` — derselben Quelle wie die
     Eingabemasken. Keine zweite Vorgabetabelle.
@@ -353,7 +353,8 @@ def pruefe_anfrage(data: dict) -> tuple[dict, str | None]:
     # Werte (gemessen: KeyError 'magThick'), und der Handy-Client kennt nur die elf
     # Felder, die er anzeigt. Hier statt im Client, damit JEDER Aufrufer geschuetzt ist
     # — der Schreibtischpfad kommt nicht in die Lage, weil er die gezeichneten Werte
-    # ueber eine bereits vollstaendige GEOM legt (``ema.html:5593``).
+    # ueber eine bereits vollstaendige GEOM legt
+    # (``oberflaeche/designer.js:_dsnBuildPayload``).
     geom = {**basis_geom(), **geom}
 
     punkte = data.get("punkte")
@@ -471,7 +472,7 @@ def rechne_punkte(anfrage: dict):
 def legs_aus_halbpol(magnete: list, eps_off: float = 0.5, eps_ang: float = 2.0) -> list:
     """Halbpol → voller Pol: an der d-Achse spiegeln, deckungsgleiche Legs entdoppeln.
 
-    **Zeichengetreu aus ``ema.html:5570-5590`` übernommen.** Das ist der einzige Ort, an
+    **Zeichengetreu aus ``oberflaeche/designer.js:_dsnBuildPayload`` übernommen.** Das ist der einzige Ort, an
     dem Handy und Schreibtisch auseinanderlaufen könnten, ohne dass es auffällt: gleiche
     Zeichnung, andere Legs, andere Maschine, plausibel aussehendes Ergebnis.
     ``test_mobil.py`` nagelt die Gleichheit an einem Festwert fest.
@@ -504,7 +505,7 @@ def legs_aus_halbpol(magnete: list, eps_off: float = 0.5, eps_ang: float = 2.0) 
 
 
 def barrieren_aus_halbpol(barrieren: list) -> list:
-    """Wie ``legs_aus_halbpol``, für die Flusssperren (``ema.html:5591-5595``)."""
+    """Wie ``legs_aus_halbpol``, für die Flusssperren (derselbe Spiegel)."""
     aus = []
     for b in barrieren or []:
         pts = [[float(x), float(y)] for x, y in (b.get("pts") or [])]
@@ -521,7 +522,7 @@ def geom_aus_entwurf(entwurf: dict) -> dict:
 
     Die parametrischen Flusssperren und die Wuchtbohrungen werden ausdrücklich
     abgeschaltet — sie würden sonst zusätzlich zur gezeichneten Geometrie erscheinen
-    (dieselbe Begründung wie in ``ema.html:5598-5602``).
+    (dieselbe Begründung wie in ``oberflaeche/designer.js``).
     """
     masse = dict(entwurf.get("masse") or {})
     geom = basis_geom()          # vollstaendig; pruefe_anfrage fuellt zusaetzlich auf
