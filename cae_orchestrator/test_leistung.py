@@ -164,10 +164,17 @@ import glob                                                      # noqa: E402
 import json                                                      # noqa: E402
 _kand = sorted(glob.glob(os.path.expanduser("~/cae_projekte/*/meta.json")))
 _pl = None
+# **Eine RADIALE Auslegung, ausdruecklich.** Genommen wurde bis zum
+# 17.10.2026 das neueste Projekt mit Payload -- und sobald das eine Scheibe
+# war (seit dem 09.10. legt der Axialfluss-Reiter welche an), antwortete
+# `ema_leistung` voellig richtig „dieses Werkzeug ist hier nicht zustaendig"
+# und der Test war rot. Das war ein Fehler der Probe, nicht des Werkzeugs:
+# geprueft werden soll der Widerspruch zwischen `rated_torque` und dem LPTN,
+# und der ist eine Aussage ueber die Zylindermaschine.
 for _m in reversed(_kand):
     try:
         _d = json.load(open(_m, encoding="utf-8")).get("payload") or {}
-        if _d.get("geom"):
+        if _d.get("geom") and (_d["geom"].get("fluxPath") or "radial") != "axial":
             _pl = _d
             break
     except Exception:                                            # noqa: BLE001

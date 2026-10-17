@@ -793,6 +793,76 @@ def _json_atomar(pfad: str, daten) -> None:
     os.replace(tmp, pfad)
 
 
+def eingaben_sichern(proj: str, data: dict, state: dict | None = None) -> bool:
+    """Den EINGABEpayload sofort ablegen -- bevor irgendetwas gerechnet wird.
+
+    **Gemessener Anlass (17.10.2026).** ``meta.json`` -- und damit der Payload,
+    aus dem ``/project/<id>/template`` das Formular wiederherstellt -- entstand
+    ausschliesslich im Speicherblock am ENDE von ``run_pipeline``. Reisst
+    vorher irgendetwas (ein Tor, FreeCAD, der Loeser, ein Abbruch, ein
+    Serverneustart), oder war es nie mehr als eine CAD-Vorschau, dann steht der
+    Projektordner da **ohne eine einzige Eingabe**: ``/template`` liefert
+    ``geom: {}``, ``applyPayload`` schreibt nichts, und die Maske zeigt ihre
+    Vorgaben. Gemeldet als „immer wenn ich ein gespeichertes Projekt aufrufe,
+    erscheint der Default-Geometriestand".
+
+    Gezaehlt im Bestand: **224 von 369 Projekten haben keine ``meta.json``** --
+    also knapp zwei Drittel. Darunter 47 ``*_cad_vorschau``-Ordner (die konnten
+    es nie haben) und reihenweise benannte Auslegungen, bei denen jemand Maße
+    eingetragen hat und sie nun nicht mehr findet.
+
+    Geschrieben wird **nur, was der Mensch eingegeben hat**, und eine
+    vorhandene Datei wird ERGAENZT, nicht ersetzt: nach einem gerechneten Lauf
+    traegt sie Kennwerte, Werkstofflabel und ``rpm_range``, und die darf ein
+    spaeterer Vorschauklick nicht wegnehmen. Der Speicherblock am Ende
+    ueberschreibt sie danach ohnehin mit dem vollen Satz.
+
+    ``results.json`` entsteht hier ausdruecklich NICHT -- ein Projekt mit
+    Eingaben und ohne Ergebnis ist genau das, und jede Liste liest den
+    Unterschied an dieser Datei ab.
+    """
+    try:
+        pfad = os.path.join(proj, "meta.json")
+        meta = {}
+        if os.path.isfile(pfad):
+            try:
+                with open(pfad, encoding="utf-8") as f:
+                    meta = json.load(f) or {}
+            except (OSError, ValueError):
+                meta = {}
+        geom = dict((data or {}).get("geom") or {})
+        meta.setdefault("created",
+                        datetime.datetime.now().isoformat(timespec="seconds"))
+        meta["label"] = (meta.get("label")
+                         or (data or {}).get("project_name", "")
+                         or os.path.basename(proj))
+        meta["geom"] = geom
+        if (data or {}).get("axial_len") is not None:
+            meta["axial_len"] = data.get("axial_len")
+        for schl in ("load_nm", "cooling", "T_ambient", "rpm_step"):
+            if (data or {}).get(schl) is not None:
+                meta[schl] = data.get(schl)
+        try:
+            meta["rpm_range"] = (f"{int(float(data['rpm_from']))}–"
+                                 f"{int(float(data['rpm_to']))} U/min")
+        except (KeyError, TypeError, ValueError):
+            pass
+        # Derselbe Filter wie im Speicherblock: ``cycle_csv`` ist eine
+        # Einmal-Nutzlast (hunderte Zeilen) und gehoert in keine Vorlage.
+        meta["payload"] = {k: v for k, v in (data or {}).items()
+                           if k != "cycle_csv"}
+        _json_atomar(pfad, meta)
+        if state is not None:
+            _log(state, f"💾 Eingaben gesichert ({len(geom)} Geometriewerte) — "
+                        f"das Projekt ist ab jetzt als Vorlage ladbar, auch "
+                        f"wenn dieser Lauf scheitert", 2)
+        return True
+    except Exception as e:                                   # noqa: BLE001
+        if state is not None:
+            _log(state, f"⚠ Eingaben nicht gesichert ({type(e).__name__}: {e})", 2)
+        return False
+
+
 def _save_png_b64(b64: str, path: str) -> None:
     """Decode a base64 PNG string and write to disk."""
     if not b64:
@@ -3140,6 +3210,11 @@ def build_cad_preview(data: dict, state: dict, project_dir: str) -> dict:
     geom  = data["geom"]
     axial = float(data.get("axial_len", 80.0))
 
+    # Auch die reine Vorschau sichert die Eingaben: 47 der 224 Projekte ohne
+    # `meta.json` heissen `*_cad_vorschau` -- sie konnten nie eine haben, weil
+    # dieser Weg den Speicherblock von `run_pipeline` gar nicht erreicht.
+    eingaben_sichern(project_dir, data, state)
+
     _gate_maschinenart(data, state, "cad")
     _gate_grenzen(data, state)
     _gate_rotor_layout(data, state)
@@ -3473,6 +3548,16 @@ def run_pipeline(data: dict, state: dict, frames: list,
     # nackten Traceback sieht. Im Teil-Nachrechnen wird nur gewarnt, nicht
     # abgewiesen: die Geometrie liegt dort fertig auf der Platte und wird gar nicht
     # neu gebaut — ein hartes Tor würde ein ladbares Altprojekt unrechenbar machen.
+    # **Die Eingaben zuerst auf die Platte, dann die Tore.** Ein Tor, das
+    # reisst, ist genau der Fall, in dem der Mensch seine Maße behalten will --
+    # und bis zum 17.10.2026 war es der Fall, in dem er sie verlor (s.
+    # `eingaben_sichern`). Im TEIL-Nachrechnen nicht: dort liegt der Payload
+    # per Definition schon da (`results.json` wurde geladen), und ihn vor einem
+    # moeglichen Fehlschlag durch den gerade halb eingestellten zu ersetzen
+    # waere eine Verschlechterung.
+    if not partial:
+        eingaben_sichern(proj, data, state)
+
     _gate_maschinenart(data, state, "lauf", stufen=stages)
     _gate_grenzen(data, state, fatal=not partial)
     _gate_rotor_layout(data, state, fatal=not partial)
@@ -4024,53 +4109,124 @@ def run_pipeline(data: dict, state: dict, frames: list,
                 # Stufe war zu dem Zeitpunkt schon geschrieben. Gemeldet als
                 # „auch wenn ich einen ganzen Durchlauf berechnen will,
                 # bekomme ich keine Darstellung wie bei einer PSM. gar nichts."
-                try:
-                    _subr = FIELD_SUBDIRS["rotate"]
-                    _dirr = os.path.join(proj, _subr)
-                    _frames_raeumen(_dirr)
-                    frames["rotate"] = []
-                    _log(state, f"⊙ Scheiben-Animation: {n_frames} Laeufer"
-                                f"stellungen ueber EINE elektrische Periode…", 75)
-                    _fr = _AFB.frames(
-                        geom, _dirr, n_frames=n_frames,
-                        N=int(min(600, max(240, frame_res))),
-                        rpm=float(rpm_ref), last_nm=float(load_nm),
-                        melde=lambda k, n: _log(state, f"  Scheibe [{k}/{n}]",
-                                                75 + 3.0 * k / max(n, 1)))
-                    import base64 as _b64f
-                    for _fp in _fr.get("dateien") or []:
-                        with open(_fp, "rb") as _fh:
-                            frames["rotate"].append(
-                                _b64f.b64encode(_fh.read()).decode())
-                    # **Die Winkelachse ist die elektrische Periode**, nicht
-                    # `pole_pitch`: ueber eine ganze Umdrehung waere es p-mal
-                    # dasselbe Bild.
-                    _per = float(_fr.get("periode_grad") or 0.0)
-                    _ad = [round(_per * k / max(n_frames, 1), 1)
-                           for k in range(len(frames["rotate"]))]
-                    _rb = round(float(_fr.get("r_bild_m") or 0.0) * 1000.0, 1)
-                    results["em"].update({
-                        "frames_per_rpm": len(frames["rotate"]),
-                        "rpm_frame_count": len(frames["rotate"]),
-                        "frame_angle_deg": _ad,
-                        "rpm_list": [int(rpm_ref)],
-                        "n_frames": len(frames["rotate"]),
-                        "axial_frames_r_mm": _rb})
-                    modes_meta.append({
-                        "mode": "rotate",
-                        "label": f"Läuferdrehung (abgewickelt bei r = {_rb:.0f} mm)",
-                        "frames_per_rpm": len(frames["rotate"]),
-                        "rpm_list": [int(rpm_ref)],
-                        "sweep_label": "Läuferwinkel [° mech]",
-                        "sweep_values": _ad})
-                    if _fr.get("video"):
-                        videos["rotate"] = os.path.join(_subr, "anim.mp4")
-                    _log(state, f"✓ Scheiben-Animation: {len(frames['rotate'])} "
-                                f"Bilder ueber {_per:.1f}° mechanisch"
-                                + (" + anim.mp4" if _fr.get("video") else ""), 78)
-                except Exception as _ae:                         # noqa: BLE001
-                    _log(state, f"⚠ Scheiben-Animation fehlgeschlagen "
-                                f"({type(_ae).__name__}: {_ae})", 78)
+                # **Und seit dem 17.10.2026 alle DREI Darstellungsarten.**
+                # Angehakt waren `current_angle`/`load_ramp` schon immer
+                # (zwei Haekchen in ④ Berechnung); gerechnet wurden sie nur
+                # radial, denn die Schleife darunter laeuft
+                # `if not _axial_lauf`. Still uebersprungen heisst: der
+                # Mensch hakt an, wartet, und bekommt ein Ergebnis, das von
+                # dem ohne Haekchen nicht zu unterscheiden ist. Gemeldet als
+                # „auch wird das Feld-Darstellung … nicht gerechnet".
+                _AX_SUB = {"rotate": "rotate", "current_angle": "react",
+                           "load_ramp": "load"}
+                _AX_ACHSE = {"rotate": ("Läuferwinkel [° mech]", "rotate"),
+                             "current_angle": ("β [°]", "react"),
+                             "load_ramp": ("Last [%]", "load")}
+                for _art in field_modes:
+                    if _art not in _AX_SUB:
+                        continue
+                    _key = _AX_SUB[_art]
+                    try:
+                        _subr = FIELD_SUBDIRS[_key]
+                        _dirr = os.path.join(proj, _subr)
+                        _frames_raeumen(_dirr)
+                        frames[_key] = []
+                        _log(state, f"⊙ Scheibe, {_AFB.ARTEN_BILD[_art]}: "
+                                    f"{n_frames} Bilder…", 75)
+                        _fr = _AFB.frames(
+                            geom, _dirr, n_frames=n_frames,
+                            N=int(min(600, max(240, frame_res))),
+                            rpm=float(rpm_ref), last_nm=float(load_nm),
+                            art=_art,
+                            melde=lambda k, n: _log(state, f"  Scheibe [{k}/{n}]",
+                                                    75 + 3.0 * k / max(n, 1)))
+                        if _fr.get("grund"):
+                            # Keine Bildreihe, und der Grund steht da statt
+                            # eines leeren Ordners (Last 0 -> kein Strom).
+                            _log(state, f"   ℹ {_fr['grund']}", 76)
+                            continue
+                        import base64 as _b64f
+                        for _fp in _fr.get("dateien") or []:
+                            with open(_fp, "rb") as _fh:
+                                frames[_key].append(
+                                    _b64f.b64encode(_fh.read()).decode())
+                        _rb = round(float(_fr.get("r_bild_m") or 0.0) * 1000.0, 1)
+                        # **Die Winkelachse ist die elektrische Periode**,
+                        # nicht `pole_pitch`: ueber eine ganze Umdrehung waere
+                        # es p-mal dasselbe Bild. Bei den beiden
+                        # Stillstandsarten faehrt statt dessen der Strom, und
+                        # die Achse kommt aus `frames` selbst.
+                        _werte = [float(x) for x in (_fr.get("werte") or [])]
+                        _achse, _ = _AX_ACHSE[_art]
+                        if _art == "rotate":
+                            _per = float(_fr.get("periode_grad") or 0.0)
+                            results["em"].update({
+                                "frames_per_rpm": len(frames[_key]),
+                                "rpm_frame_count": len(frames[_key]),
+                                "frame_angle_deg": _werte,
+                                "rpm_list": [int(rpm_ref)],
+                                "n_frames": len(frames[_key]),
+                                "axial_frames_r_mm": _rb})
+                            modes_meta.append({
+                                "mode": "rotate",
+                                "label": f"Läuferdrehung (abgewickelt bei "
+                                         f"r = {_rb:.0f} mm)",
+                                "frames_per_rpm": len(frames[_key]),
+                                "rpm_list": [int(rpm_ref)],
+                                "sweep_label": _achse,
+                                "sweep_values": _werte})
+                            _log(state, f"✓ Scheiben-Animation: "
+                                        f"{len(frames[_key])} Bilder ueber "
+                                        f"{_per:.1f}° mechanisch"
+                                        + (" + anim.mp4" if _fr.get("video")
+                                           else ""), 78)
+                        else:
+                            modes_meta.append({
+                                "mode": _art,
+                                "label": (f"{_AFB.ARTEN_BILD[_art]} "
+                                          f"(abgewickelt bei r = {_rb:.0f} mm, "
+                                          f"{math.hypot(float(_fr.get('i_q_A') or 0), float(_fr.get('i_d_A') or 0)):.0f} A)"),
+                                "frames": len(frames[_key]),
+                                "sweep_label": _achse,
+                                "sweep_values": _werte})
+                            _log(state, f"✓ Scheibe, {_AFB.ARTEN_BILD[_art]}: "
+                                        f"{len(frames[_key])} Bilder"
+                                        + (" + anim.mp4" if _fr.get("video")
+                                           else ""), 78)
+                        if _fr.get("video"):
+                            videos[_key] = os.path.join(_subr, "anim.mp4")
+                    except Exception as _ae:                     # noqa: BLE001
+                        _log(state, f"⚠ Scheibe, {_art} fehlgeschlagen "
+                                    f"({type(_ae).__name__}: {_ae})", 78)
+                # **Das DREHZAHLBAND bewegt die Scheibenbilder nicht, und das
+                # ist gemessen.** Radial faehrt die Rotationsreihe
+                # `rpm_from…rpm_to` ab, weil `estimate_dq_currents` oberhalb
+                # der Eckdrehzahl einen Feldschwaechstrom aufbaut und jedes
+                # Band seinen eigenen Betriebspunkt hat.
+                # `ema_axial_fdm.betriebspunkt` kennt die Drehzahl GAR NICHT:
+                # es rechnet `i_q = T/Kt` und `i_d = 0` (Oberflaechenmagnete,
+                # keine Salienz) und prueft keine Spannungsgrenze. Gemessen am
+                # Vorgabe-Payload gibt es bei 500 und bei 30.000 1/min Ziffer
+                # fuer Ziffer dieselben 489,8 A -- obwohl die Eckdrehzahl bei
+                # 12.920 liegt. Ein Band waere also n gleiche Bilder, und das
+                # waere schlimmer als keines: es sieht nach einer Messung aus.
+                # Der fehlende Teil ist die Feldschwaechung der Scheibe; sie
+                # steht als Befund in `BEFUNDE.md` (17.10.2026) und wird hier
+                # NICHT nebenbei erfunden -- sie verschiebt jeden Strom, jede
+                # Temperatur und jeden Verlust jedes Axialprojekts.
+                if len(sweep_rpms) > 1:
+                    _log(state,
+                         f"   ℹ Drehzahlband {int(min(sweep_rpms))}–"
+                         f"{int(max(sweep_rpms))} 1/min: die Bildreihe laeuft "
+                         f"bei EINER Drehzahl ({rpm_ref:.0f} 1/min). "
+                         f"`ema_axial_fdm.betriebspunkt` hat keinen "
+                         f"Drehzahlterm (i_q = T/Kt, i_d = 0, keine "
+                         f"Spannungsgrenze) — gemessen derselbe Strom bei 500 "
+                         f"wie bei 30.000 1/min; {len(sweep_rpms)} Baender "
+                         f"waeren {len(sweep_rpms)} gleiche Bilder. Die "
+                         f"fehlende Feldschwaechung steht in BEFUNDE.md. Die "
+                         f"analytische EM-Kennlinie darunter faehrt das Band "
+                         f"sehr wohl ab.", 78)
 
             if not _axial_lauf:
               try:
@@ -4170,10 +4326,17 @@ def run_pipeline(data: dict, state: dict, frames: list,
             results["em"]["field_modes"] = modes_meta
             results["em"]["videos"]      = videos
             if _axial_lauf:
+                # Alle gerechneten Arten NENNEN, nicht nur die Drehung: wer
+                # zwei Haken gesetzt hat, soll beide in der Abschlusszeile
+                # wiederfinden (und die Null, wenn eine ausfiel).
+                _zus = ", ".join(
+                    f"{_m.get('label', _m['mode'])}: "
+                    f"{_m.get('frames_per_rpm') or _m.get('frames') or 0} Bilder"
+                    for _m in modes_meta)
                 _log(state, f"✓ Feldstufe fertig — Scheiben-Animation "
-                            f"({len(frames.get('rotate') or [])} Bilder"
-                            + (", Video" if videos.get("rotate") else "")
-                            + "), Schnitt und B_gap(r) im Ergebnis-Reiter", 75)
+                            f"({_zus or 'keine'}; "
+                            f"{len(videos)} Video(s)), Schnitt und B_gap(r) "
+                            f"im Ergebnis-Reiter", 75)
             else:
                 _log(state, f"✓ Feld-Animation fertig ({len(field_modes)} "
                             f"Modus/Modi, Videos: {len(videos)})", 75)

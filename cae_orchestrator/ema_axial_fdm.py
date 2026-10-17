@@ -826,13 +826,23 @@ def _spaltlinie(sch: dict, welcher: int = 0) -> tuple:
 
 def schnitt(geom: dict, r_m: float, N: int = 400, iq: float = 0.0,
             id_: float = 0.0, rotor_winkel: float = 0.0,
-            nuten: bool = True, n_pol: int | None = None) -> dict:
+            nuten: bool = True, n_pol: int | None = None,
+            bilddaten: bool = False) -> dict:
     """EINE Scheibe: rastern, mit dem HAUS-Loeser loesen, getrennt eichen.
 
     Zwei Loesungen auf DEMSELBEN ``mu`` -- Magnet und Anker --, also eine
     Faktorisierung und eine Ruecksubstitution: der LU-Cache des Hauses greift
     hier genauso wie radial, weil er nach ``(N, hash(mu))`` schluesselt und
     ``mu`` nicht am Strom haengt.
+
+    ``bilddaten=True`` gibt zusaetzlich die GEEICHTEN Flaechen ``A``/``bx``/
+    ``by`` heraus -- dieselbe Summe, aus der die Kennwerte entstehen, nur nicht
+    auf die Spaltlinie reduziert. Sie ist die eine Quelle fuer jedes Bild
+    dieses Moduls (``schnitt_figur``, ``frames``); ohne sie rechnete jedes
+    Bild seine eigene Loesung, und genau dabei ist die Eichung verloren
+    gegangen (s. ``BEFUNDE.md``, 17.10.2026). Opt-in, weil ``felder`` den
+    Schnitt k-mal aufsammelt und drei ``(N, N)``-Felder je Schnitt in
+    ``results.json`` landen wuerden.
     """
     sch = rastere_scheibe(geom, r_m, N, iq, id_, rotor_winkel, nuten, n_pol)
     lbl = EA._material_labels(sch["mu"])
@@ -909,6 +919,14 @@ def schnitt(geom: dict, r_m: float, N: int = 400, iq: float = 0.0,
         "b_an_anker_T": eichung_anker(geom, i_pk) if i_pk > 1e-6 else 0.0,
         "nuten": nuten,
         "bn": bn, "bt": bt, "raster": sch,
+        # **Die geeichte Summe, nicht die rohe.** Die beiden Anteile brauchen
+        # Eichfaktoren, die um Faktor ~1340 auseinanderliegen (gemessen
+        # 1,19e-6 gegen 1,60e-3); roh addiert traegt der Anker ein
+        # Tausendstel seines Gewichts, und das Bild zeigt den Leerlauf, auch
+        # wenn Volllast darueber steht.
+        **({"A": a_mag * sf_m + (a_ank * sf_a if i_pk > 1e-6 else 0.0),
+            "bx": bx_m * sf_m + bx_a * sf_a,
+            "by": by_m * sf_m + by_a * sf_a} if bilddaten else {}),
     }
 
 
@@ -1130,26 +1148,103 @@ def konvergenz(geom: dict, ks=(3, 5, 9), N: int = 400, rpm: float = 1000.0,
 
 # ── Bilder ───────────────────────────────────────────────────────────────────
 
+#: **Die drei Darstellungsarten der Animation -- dieselben Namen wie radial.**
+#: ``ema_pipeline`` fuehrt sie seit jeher als ``field_modes``, und die Maske
+#: hat dafuer zwei Haekchen. Die Scheibe kannte bis zum 17.10.2026 nur
+#: ``rotate``, und die beiden anderen wurden STILL uebersprungen: angehakt,
+#: nicht gerechnet, kein Wort darueber. Gemeldet als „auch wird das
+#: Feld-Darstellung Ankerrueckwirkung / Last-Rampe nicht gerechnet".
+#:
+#: Darstellbar sind sie, weil ``rastere_scheibe`` den Strombelag aus ``iq``
+#: UND ``id_`` aufbaut (eine Zeile: ``id_*cos(el) - iq*sin(el)``) -- der
+#: Stromwinkel ist dort also schon enthalten, es hat ihn nur niemand
+#: durchgefahren.
+#: Die Beschriftungen tragen Umlaute, obwohl der Rest dieses Moduls
+#: umschrieben ist: sie stehen in der Auswahlliste des Ergebnis-Reiters NEBEN
+#: den radialen ("Rotor-Rotation", "Stromwinkel (Ankerrueckwirkung)") und im
+#: Bildtitel.
+ARTEN_BILD = {
+    "rotate": "Läuferdrehung",
+    "current_angle": "Ankerrückwirkung (Läufer steht, Stromwinkel β)",
+    "load_ramp": "Last-Rampe (Läufer steht, Last 0→Volllast)",
+}
+
+
+def _bildpunkte(geom: dict, art: str, n_frames: int, periode: float,
+                iq: float, id_: float) -> list:
+    """Die Punktliste EINER Darstellungsart: (iq, id_, Winkel, Beschriftung).
+
+    Hier und nicht im Zeichner, damit alle drei Arten dieselbe Loesung,
+    dieselbe Eichung und dieselbe festgehaltene Farbskala benutzen. Was sie
+    unterscheidet, sind drei Zahlen je Bild -- und nur die stehen hier.
+    """
+    n = max(2, int(n_frames))
+    i_s = math.hypot(iq, id_)
+    punkte = []
+    if art == "current_angle":
+        # beta von 0 (rein momentbildend) bis 90 Grad (rein feldschwaechend),
+        # BETRAG konstant: nur so ist das Bild eine Aussage ueber den Winkel
+        # und nicht ueber die Stromhoehe.
+        for k in range(n):
+            b = (math.pi / 2.0) * k / (n - 1)
+            punkte.append((i_s * math.cos(b), -i_s * math.sin(b), 0.0,
+                           f"Stromwinkel beta {math.degrees(b):.1f}\u00b0",
+                           round(math.degrees(b), 1)))
+    elif art == "load_ramp":
+        for k in range(n):
+            fr = k / (n - 1)
+            punkte.append((fr * iq, fr * id_, 0.0,
+                           f"Last {fr*100:.0f} %", round(fr * 100)))
+    else:
+        for k in range(n):
+            w = periode * k / n
+            punkte.append((iq, id_, w,
+                           f"Laeuferwinkel {math.degrees(w):.1f}\u00b0 mech",
+                           round(math.degrees(w), 1)))
+    return punkte
+
+
 def frames(geom: dict, ordner: str, n_frames: int = 12, N: int = 300,
            rpm: float = 1000.0, last_nm: float = 0.0,
-           r_bild_m: float | None = None, melde=None) -> dict:
-    """Eine Bildreihe ueber den LAEUFERWINKEL -- die Animation der Scheibe.
+           r_bild_m: float | None = None, melde=None,
+           art: str = "rotate") -> dict:
+    """Eine Bildreihe der Scheibe -- Laeuferwinkel, Stromwinkel oder Last.
 
-    Der radiale Weg hat sie seit jeher (`ema_pipeline` dreht den Laeufer durch
+    Der radiale Weg hat das seit jeher (`ema_pipeline` dreht den Laeufer durch
     das FDM-Raster und schreibt `frames/frame_XXXX.png` plus `anim.mp4`); die
-    Scheibe hatte sie nicht, obwohl `rastere_scheibe` den Rotorwinkel laengst
-    kennt. Gezeichnet wird EIN abgewickelter Schnitt beim mittleren Radius --
-    nicht alle, denn eine Animation ueber Winkel UND Radius waere ein Bild, das
-    zwei Dinge gleichzeitig bewegt und keines davon zeigt.
+    Scheibe hatte es nicht, obwohl `rastere_scheibe` Rotorwinkel UND
+    Stromwinkel laengst kennt. Gezeichnet wird EIN abgewickelter Schnitt beim
+    mittleren Radius -- nicht alle, denn eine Animation ueber Winkel UND
+    Radius waere ein Bild, das zwei Dinge gleichzeitig bewegt und keines davon
+    zeigt.
 
     **Eine elektrische Periode sind zwei Polteilungen**, mechanisch also
     ``2*(2*pi/2p)``. Ueber eine volle mechanische Umdrehung zu laufen hiesse,
-    ``p`` mal dasselbe zu zeichnen.
+    ``p`` mal dasselbe zu zeichnen. Bei den beiden Stillstandsarten steht der
+    Laeufer, dort faehrt statt dessen der Strom.
+
+    **Gezeichnet wird die GEEICHTE Loesung** (`schnitt(..., bilddaten=True)`),
+    und das ist seit dem 17.10.2026 der eigentliche Unterschied: hier stand
+    ein eigener Loeserlauf auf ``j_magnet + j_anker``, also die ROHE Summe.
+    Die beiden Anteile brauchen aber Eichfaktoren, die um Faktor ~1340
+    auseinanderliegen (gemessen 1,19e-6 gegen 1,60e-3) -- derselbe Befund, aus
+    dem `run_em_analysis` radial getrennt eicht. Roh addiert trug der Anker
+    ein Tausendstel seines Gewichts: das Bild bewegte sich von Leerlauf auf
+    Volllast um **0,006 %**, war also ein Leerlaufbild mit „Last" darueber,
+    und eine Last-Rampe darauf waere eine Reihe gleicher Bilder gewesen.
+    Richtig geeicht steigt die Spaltspitze 1,384 -> 2,486 T (+80 %).
+
+    **Es kostet Faktor 2,0** (gemessen 166 -> 331 ms je Bild bei N = 200,
+    507 -> 1007 ms bei N = 300, ohne das Zeichnen): die Eichung braucht den
+    NUTLOSEN Begleitlauf, und dessen ``mu`` ist ein anderes -- dort hilft der
+    LU-Cache nicht, waehrend der Ankerlauf sich die Faktorisierung des
+    Magnetlaufs teilt.
 
     Die Farbskala wird am ERSTEN Bild festgehalten und fuer alle weiteren
     behalten. Ohne das setzt jedes Bild seine eigene Skala, und dann sieht ein
     Feld, das sich nicht aendert, nach einem aus, das pulsiert -- derselbe
-    Grund, aus dem der 3-D-Betrachter ein „Skala fixieren" hat.
+    Grund, aus dem der 3-D-Betrachter ein „Skala fixieren" hat. Bei der
+    Last-Rampe ist das doppelt wichtig: ihr erstes Bild IST der Leerlauf.
     """
     import os
 
@@ -1164,6 +1259,7 @@ def frames(geom: dict, ordner: str, n_frames: int = 12, N: int = 300,
     r_b = r_bild_m or 0.5 * (a["r_innen_m"] + a["r_aussen_m"])
     p_paare = max(1, int(a["poles"]) // 2)
     periode = 2.0 * (2.0 * math.pi / max(int(a["poles"]), 2))
+    art = art if art in ARTEN_BILD else "rotate"
 
     iq = id_ = 0.0
     if last_nm > 0:
@@ -1172,40 +1268,54 @@ def frames(geom: dict, ordner: str, n_frames: int = 12, N: int = 300,
             iq, id_ = _bp["i_q_A"], _bp["i_d_A"]
         except Exception:                                            # noqa: BLE001
             iq = id_ = 0.0
+    # **Die beiden Stillstandsarten ohne Strom sind keine Bildreihe.** Ohne
+    # Last ist der Stromwinkel an einem Strom von 0 A gemessen und die Rampe
+    # faehrt von 0 auf 0 -- n gleiche Bilder. Das wird GESAGT, nicht
+    # stillschweigend gezeichnet.
+    if art in ("current_angle", "load_ramp") and (abs(iq) + abs(id_)) < 0.1:
+        return {"ordner": ordner, "dateien": [], "n": 0, "video": "",
+                "r_bild_m": r_b, "art": art, "periode_grad": 0.0,
+                "grund": (f"{ARTEN_BILD[art]}: ohne Last gibt es keinen "
+                          f"Statorstrom, den man durchfahren koennte "
+                          f"(last_nm = {last_nm:g} Nm, i_q = {iq:.1f} A). "
+                          f"Die Reihe waere {max(2, int(n_frames))} gleiche "
+                          f"Bilder.")}
 
-    dateien, deckel = [], None
-    for k in range(max(2, int(n_frames))):
-        w = periode * k / max(2, int(n_frames))
-        sch = rastere_scheibe(geom, r_b, N, iq, id_, rotor_winkel=w)
-        lbl = EA._material_labels(sch["mu"])
-        A = EA._solve_fdm(sch["mu"], sch["j_magnet"] + sch["j_anker"], cache=True, periodisch_x=True)
-        bx, by = EA._curl_a(A, lbl)
-        bmag = np.hypot(bx, by)
+    punkte = _bildpunkte(geom, art, n_frames, periode, iq, id_)
+    dateien, deckel, werte = [], None, []
+    for k, (f_iq, f_id, w, lbl_txt, wert) in enumerate(punkte):
+        sn = schnitt(geom, r_b, N, f_iq, f_id, rotor_winkel=w, bilddaten=True)
+        sch = sn["raster"]
+        A, bmag = sn["A"], np.hypot(sn["bx"], sn["by"])
         if deckel is None:
             deckel = float(np.percentile(bmag, 99.0)) or 1.0
         ex = [0.0, sch["seite_mm"], 0.0, sch["seite_mm"]]
         fig, ax = plt.subplots(figsize=(7.2, 7.2), dpi=110)
         ax.imshow(np.clip(bmag / deckel, 0, 1), origin="lower", extent=ex,
                   cmap="magma", vmin=0.0, vmax=1.0, interpolation="bilinear")
-        ax.contour(np.linspace(0, sch["seite_mm"], N),
-                   np.linspace(0, sch["seite_mm"], N), A, 26,
+        ax.contour(np.linspace(0, sch["seite_mm"], sch["N"]),
+                   np.linspace(0, sch["seite_mm"], sch["N"]), A, 26,
                    colors="#8fe3ff", linewidths=0.5, alpha=0.75)
         for lg in sch["lagen"]:
             ax.axhline(lg["y0"], color="#39506b", lw=0.6, ls=":")
         ax.set_xlabel("Umfang abgewickelt [mm]")
         ax.set_ylabel("axial [mm]")
-        ax.set_title(f"Axialfluss, abgewickelt bei r = {r_b*1000:.1f} mm — "
-                     f"Laeuferwinkel {math.degrees(w):.1f}\u00b0 mech "
-                     f"({math.degrees(w)*p_paare:.0f}\u00b0 el)")
-        ax.text(0.01, -0.105, "Mehrschnitt (ema_axial_fdm) \u2014 KEINE "
-                "3-D-Loesung; Skala am ersten Bild festgehalten",
+        _zus = (f" ({math.degrees(w)*p_paare:.0f}\u00b0 el)"
+                if art == "rotate" else
+                f" bei {math.hypot(f_iq, f_id):.0f} A")
+        ax.set_title(f"Axialfluss, abgewickelt bei r = {r_b*1000:.1f} mm \u2014 "
+                     f"{lbl_txt}{_zus}")
+        ax.text(0.01, -0.105, f"{ARTEN_BILD[art]} \u00b7 Mehrschnitt "
+                f"(ema_axial_fdm) \u2014 KEINE 3-D-Loesung; getrennt geeichtes "
+                f"Magnet- und Ankerfeld, Skala am ersten Bild festgehalten",
                 transform=ax.transAxes, fontsize=6.5, color="#888")
         f = os.path.join(ordner, f"frame_{k:04d}.png")
         fig.savefig(f, bbox_inches="tight", facecolor="#0d1014")
         plt.close(fig)
         dateien.append(f)
+        werte.append(wert)
         if melde:
-            melde(k + 1, int(n_frames))
+            melde(k + 1, len(punkte))
 
     video = ""
     try:
@@ -1216,7 +1326,8 @@ def frames(geom: dict, ordner: str, n_frames: int = 12, N: int = 300,
         video = ""
     return {"ordner": ordner, "dateien": dateien, "n": len(dateien),
             "video": video, "r_bild_m": r_b, "deckel_T_roh": deckel,
-            "periode_grad": math.degrees(periode)}
+            "art": art, "werte": werte, "i_q_A": iq, "i_d_A": id_,
+            "periode_grad": math.degrees(periode) if art == "rotate" else 0.0}
 
 
 def schnitt_figur(geom: dict, r_b_m: float, N: int = 360,
@@ -1238,10 +1349,15 @@ def schnitt_figur(geom: dict, r_b_m: float, N: int = 360,
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    sch = rastere_scheibe(geom, r_b_m, N, iq, id_)
-    lbl = EA._material_labels(sch["mu"])
-    A = EA._solve_fdm(sch["mu"], sch["j_magnet"] + sch["j_anker"], cache=True, periodisch_x=True)
-    bx, by = EA._curl_a(A, lbl)
+    # **Dieselbe geeichte Loesung wie die Kennwerte** (`bilddaten=True`).
+    # Hier stand ein eigener Lauf auf der ROHEN Summe `j_magnet + j_anker`;
+    # der Ankeranteil braucht aber einen ~1340-fachen Eichfaktor, trug also
+    # ein Tausendstel seines Gewichts, und das „Last"-Bild war eines vom
+    # Leerlauf (s. `frames` und `BEFUNDE.md`, 17.10.2026).
+    sn = schnitt(geom, r_b_m, N, iq, id_, bilddaten=True)
+    sch = sn["raster"]
+    A, bx, by = sn["A"], sn["bx"], sn["by"]
+    N = sch["N"]
     bmag = np.hypot(bx, by)
     ex = [0.0, sch["seite_mm"], 0.0, sch["seite_mm"]]
 

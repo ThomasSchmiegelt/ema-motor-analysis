@@ -150,6 +150,10 @@ function _flussReiter(axial) {
   // ⊙ Die Schnittzahl des Mehrschnitts gibt es nur axial.
   const ac = document.getElementById('axial_calc_wrap');
   if (ac) ac.style.display = axial ? '' : 'none';
+  // ⊙ Was die drei Feld-Darstellungsarten axial bedeuten (und was das
+  // Drehzahlband dort NICHT bewegt) — am Haekchen, nicht nur im Protokoll.
+  const fh = document.getElementById('fm_axial_hinweis');
+  if (fh) fh.style.display = axial ? '' : 'none';
   // ⊙ Ebenso die beiden Grenzwerte der Magnethaltung (③ Betrieb).
   const ah = document.getElementById('ax_halt_wrap');
   if (ah) ah.style.display = axial ? '' : 'none';

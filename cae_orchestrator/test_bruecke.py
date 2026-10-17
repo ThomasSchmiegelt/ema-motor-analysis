@@ -266,6 +266,65 @@ pruefe("gelöscht wird nichts" in _html,
        "und der Rueckfrage steht dabei, dass nichts geloescht wird")
 
 
+# ── Die Eingaben entstehen VOR dem Rechnen (17.10.2026) ─────────────────────
+# Gemessener Anlass: 224 von 369 Projektordnern hatten keine `meta.json`, weil
+# sie ausschliesslich im Speicherblock am ENDE von `run_pipeline` entstand --
+# ein gerissenes Tor, ein Loeserfehler oder eine reine CAD-Vorschau liessen den
+# Ordner ohne eine einzige Eingabe zurueck, und das Formular zeigte beim
+# naechsten Oeffnen seine Vorgaben. Das ist der gemeldete
+# „Default-Geometriestand". Geprueft wird hier die Eigenschaft, auf die es
+# ankommt: was auf der Platte steht, muss ein Formular wieder fuellen koennen.
+
+print("\n— Eingaben vor dem Rechnen —")
+
+import cae_cli as _CLI                                        # noqa: E402
+import ema_pipeline as _PP                                    # noqa: E402
+
+_d = tempfile.mkdtemp()
+_pl = _CLI.frischer_payload()
+_pl["project_name"] = "Probe"
+_pl["cycle_csv"] = "0,0\n1,1\n"
+pruefe(_PP.eingaben_sichern(_d, _pl, None) is True,
+       "eingaben_sichern legt meta.json an")
+_mt = json.load(open(os.path.join(_d, "meta.json"), encoding="utf-8"))
+pruefe(len((_mt.get("payload") or {}).get("geom") or {}) > 50,
+       f"… mit dem vollen Geometriesatz "
+       f"({len(_mt['payload']['geom'])} Schluessel) — genau dem, den "
+       f"/project/<id>/template liest")
+pruefe("cycle_csv" not in _mt["payload"],
+       "die Einmal-Nutzlast cycle_csv bleibt draussen (wie im Speicherblock)")
+pruefe(not os.path.exists(os.path.join(_d, "results.json")),
+       "und results.json entsteht NICHT - Eingaben da, nichts gerechnet "
+       "bleibt an dieser Datei ablesbar")
+
+# Eine vorhandene meta.json wird ERGAENZT. Nach einem gerechneten Lauf traegt
+# sie Werkstofflabel und Kennwerte; ein spaeterer Vorschauklick darf die nicht
+# wegnehmen.
+_mt["materials"] = {"rotor": "M270-35A"}
+_mt["n_frames"] = 36
+json.dump(_mt, open(os.path.join(_d, "meta.json"), "w", encoding="utf-8"))
+_PP.eingaben_sichern(_d, dict(_pl, project_name="Probe 2"), None)
+_m2 = json.load(open(os.path.join(_d, "meta.json"), encoding="utf-8"))
+pruefe(_m2.get("materials") == {"rotor": "M270-35A"} and _m2.get("n_frames") == 36,
+       "ein zweiter Aufruf laesst Werkstoffe und Bildzahl eines gerechneten "
+       "Laufs stehen")
+pruefe(_m2.get("label") == "Probe",
+       "und die Beschriftung des ersten Aufrufs bleibt — nicht jeder "
+       "Vorschauklick umbenennt das Projekt")
+
+# **Gerufen wird sie auch wirklich** -- und zwar VOR den Toren. Ein Tor, das
+# reisst, ist genau der Fall, in dem der Mensch seine Masse behalten will.
+_q = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                       "ema_pipeline.py"), encoding="utf-8").read()
+_i_sich = _q.index("eingaben_sichern(proj, data, state)")
+_i_tor = _q.index('_gate_maschinenart(data, state, "lauf"')
+pruefe(_i_sich < _i_tor,
+       "run_pipeline sichert die Eingaben VOR dem ersten Tor")
+pruefe("eingaben_sichern(project_dir, data, state)" in _q,
+       "und build_cad_preview tut es auch — 47 der 224 Ordner ohne meta.json "
+       "hiessen `*_cad_vorschau`")
+
+
 print("\n" + "=" * 62)
 print(f"{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

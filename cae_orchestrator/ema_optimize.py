@@ -328,7 +328,7 @@ def _saettigung(geom, axial, perf, iq, id_, st_mat) -> dict:
                 "B_sat": None, "saettigung": None, "engstelle": ""}
 
 
-def _baubar(geom) -> dict:
+def _baubar(geom, axial_mm=None, rpm_to=None) -> dict:
     """Laesst sich diese Zeichnung ueberhaupt bauen? — das Layouttor in Millisekunden.
 
     Gemessener Anlass (13.09.2026, s. ``BEFUNDE.md``): eine Polpaar-Studie ueber
@@ -373,10 +373,47 @@ def _baubar(geom) -> dict:
                     "Scheibe rechnet `cae_cli.py axial` (Stufe 1 analytisch, "
                     "Stufe 2 abgewickelter Mehrschnitt); verglichen wird sie "
                     "mit `paarvergleich` ueber `ema_axial_vergleich`."}
-    if tor.get("ok"):
-        return {"baubar": True, "baubar_grund": ""}
-    grund = (tor.get("fatal") or tor.get("warnings") or ["Layouttor nicht bestanden"])[0]
-    return {"baubar": False, "baubar_grund": str(grund)[:200]}
+    if not tor.get("ok"):
+        grund = (tor.get("fatal") or tor.get("warnings")
+                 or ["Layouttor nicht bestanden"])[0]
+        return {"baubar": False, "baubar_grund": str(grund)[:200]}
+    # **Und das Tor der MASCHINENART, dasselbe, das der Lauf fuehrt.**
+    # ``rotor_layout_check`` prueft Magnettaschen, und ein Kaefig-,
+    # Schenkelpol- oder Ankerlaeufer hat keine: fuer die vier magnetlosen
+    # Bauarten war ``baubar = True`` hier also eine Aussage ueber Taschen, die
+    # es nicht gibt -- leer bestanden. Genau dieser Fehler stand am 19.09.2026
+    # schon einmal in ``cae_cli.py rotor-check`` („Layout OK" mit Exit 0,
+    # waehrend der Lauf dieselbe Maschine an der Polbefestigung abwies), und
+    # die Abhilfe ist dieselbe: das Tor der Pipeline RUFEN statt eine zweite
+    # Fassung daneben zu halten.
+    if axial_mm:
+        try:
+            import ema_pipeline as _PL
+            # **Die Drehzahl MUSS mit.** Das Tor liest `rpm_to` und rechnet
+            # die Polbefestigung nur, wenn sie > 0 ist -- ohne sie haette
+            # dieser Aufruf genau den Teil uebersprungen, um den es geht
+            # (gemessen: ein 2-x-M6-Schenkelpol ging ohne `rpm_to` als
+            # „baubar" durch).
+            _PL._gate_laeufer({"geom": geom, "axial_len": float(axial_mm),
+                               "rpm_to": float(rpm_to or 0.0)},
+                              None, fatal=True)
+        except Exception as e:                               # noqa: BLE001
+            # Das Tor sagt Nein auf ZWEI Weisen, und beide heissen Nein:
+            # ``AuslegungReisst`` (Flussbarrieren, Schenkelpol, Kaefig -- mit
+            # gerechneten Entlastungswegen) und ein nacktes ``RuntimeError``
+            # (der GSM-Zweig: Ankerwicklung, Kommutator, Kommutierung; dort
+            # ist der Umbau auf ``AuslegungReisst`` nie passiert, s.
+            # BEFUNDE.md). Nur ``RuntimeError`` zu ignorieren hiesse, die
+            # Gleichstrommaschine als die einzige ungeprueft durchzulassen.
+            # Jeder ANDERE Fehlertyp ist ein nicht pruefbares Tor und wird als
+            # solcher gemeldet, nicht als „baubar".
+            if type(e).__name__ in ("AuslegungReisst", "RuntimeError"):
+                return {"baubar": False, "baubar_art": "laeufer",
+                        "baubar_grund": str(e)[:200]}
+            return {"baubar": None,
+                    "baubar_grund": f"Laeufertor nicht pruefbar: "
+                                    f"{type(e).__name__}: {str(e)[:80]}"}
+    return {"baubar": True, "baubar_grund": ""}
 
 
 def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
@@ -401,6 +438,44 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
                                             axial_mm=axial)
         perf = em["performance"]
         rpm_t   = op["rpm_thermal"]
+        # **Der Betriebspunkt der MASCHINENART, nicht der des FDM.**
+        #
+        # Gemessen am 17.10.2026 ueber alle fuenf Bauarten am frischen
+        # Payload: dieser Bewerter gab fuenfmal Ziffer fuer Ziffer dasselbe
+        # heraus -- ``Kt`` 0,0410 Nm/A und ``B_gap`` 0,6300 T --, waehrend der
+        # Betriebspunkt der Art 0,041 / 0,052 / 0,018 / 0,052 / 0,0968 Nm/A
+        # sagt (PSM / ASM / SynRM / EESM / GSM). Beim Reluktanzlaeufer war die
+        # Studie damit um Faktor **2,3 zu hoch**, bei der Gleichstrommaschine
+        # um **2,4 zu niedrig** -- und es war nicht zu sehen, denn eine Kurve
+        # mit falschem Niveau sieht aus wie eine Kurve.
+        #
+        # Die Ursache ist dieselbe wie am 20.09.2026 eine Etage tiefer im
+        # Rasterer: ``run_em_analysis`` eicht seine Amplitude auf
+        # ``_analytical_Bgap``, und die rechnet aus ``Br_NdFeB`` und
+        # ``magThick``. Eine Formel ohne Magnet ist fuer eine magnetlose
+        # Maschine keine. Die Pipeline hat dafuer seit jenem Tag
+        # ``_perf_der_art``; dieser Bewerter -- der Kern von Parameterstudie,
+        # Zielwertsuche, ``screen``, ``leistung``, ``ausreizen`` und der
+        # Vorsortierung der KI-Entwuerfe -- rief sie nicht. Gerufen wird
+        # jetzt genau SIE und keine zweite Fassung daneben.
+        #
+        # Fuer die PSM aendert sich nichts (``quelle = "fdm"``, derselbe Wert
+        # Ziffer fuer Ziffer); fuer die vier anderen verschieben sich Kt,
+        # B_gap und jeder daraus gerechnete Strom -- in die richtige Richtung.
+        #
+        # **Was NICHT mitwandert, steht in ``perf_quelle``:** Verluste und
+        # Temperaturen unten kommen weiter aus ``ema_thermal`` auf dem
+        # PSM-Weg (Magnetwirbelstrom statt Kaefig-, Erreger- oder
+        # Buerstenverlust). Das ist eine benannte Grenze und keine stille.
+        perf_quelle = "fdm"
+        try:
+            import ema_pipeline as _PA
+            perf, perf_quelle = _PA._perf_der_art(
+                {}, geom, axial, rpm_t, op["load_nm"], perf)
+        except Exception:                                    # noqa: BLE001
+            # Ein Betriebspunkt, der selbst scheitert, darf den Bewerter nicht
+            # mitreissen -- aber er darf auch nicht als geprueft durchgehen.
+            perf_quelle = "fdm (Art nicht gerechnet)"
         iq, id_ = ema_analysis.estimate_dq_currents(
             geom, rpm_t, op["load_nm"], b_gap_t=perf["B_gap_T"], rpm_base=op["rpm_base"])
 
@@ -444,7 +519,8 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
                 "erreichbar":   False,
                 "grund":        erb.get("grund", ""),
                 "T_moeglich_Nm": erb.get("T_moeglich_Nm"),
-                **_baubar(geom),
+                "perf_quelle":  perf_quelle,
+                **_baubar(geom, axial, max(sweep_rpms) if sweep_rpms else None),
                 **_stimmig(geom),
                 **_wickelbar(geom),
             }
@@ -470,7 +546,12 @@ def _eval_geom(geom, axial, mats, op, cooling, T_amb, sweep_rpms, N=140):
             "T_magnet":     round(Tn["T_magnet"], 1),
             "T_winding":    round(Tn["T_winding"], 1),
             "P_total":      round(losses["P_total"], 1),
-            **_baubar(geom),
+            # Woher Kt und B_gap kommen -- "fdm" oder das Modul der Bauart.
+            # Ohne diese Angabe ist nicht zu sehen, ob eine Kurve auf dem
+            # Betriebspunkt ihrer Maschinenart steht oder auf dem eines
+            # Magneten, den die Maschine nicht hat.
+            "perf_quelle":  perf_quelle,
+            **_baubar(geom, axial, max(sweep_rpms) if sweep_rpms else None),
             **_stimmig(geom),
             **_wickelbar(geom),
             **_saettigung(geom, axial, perf, iq, id_, st_mat),

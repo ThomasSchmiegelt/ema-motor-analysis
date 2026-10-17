@@ -610,5 +610,77 @@ pruefe(_pr["B1_T"] == _pr["B_gap_T"] == 0.65,
        "radial: B1 = B_gap, der Faktor wirkt dort NICHT — jede abgelegte "
        "radiale Rechnung bleibt Ziffer fuer Ziffer dieselbe")
 
+print("\n— Die drei Darstellungsarten und ihre EICHUNG (17.10.2026) —")
+
+# (1) Es gibt genau drei, und ihre Namen sind die des radialen Wegs.
+pruefe(set(AF.ARTEN_BILD) == {"rotate", "current_angle", "load_ramp"},
+       f"ARTEN_BILD traegt genau die drei `field_modes` des radialen Wegs: "
+       f"{sorted(AF.ARTEN_BILD)}")
+
+# (2) Die Punktliste je Art -- gepruefte Groesse ist, WAS sich bewegt.
+_gb = geom()
+_per = 2.0 * (2.0 * math.pi / 16.0)        # 2p = 8 -> 16 Pole? nein: p=8 -> 16
+_pkt = {a: AF._bildpunkte(_gb, a, 5, _per, 400.0, -100.0)
+        for a in AF.ARTEN_BILD}
+pruefe(all(len(v) == 5 for v in _pkt.values()),
+       "je Art genau n_frames Punkte")
+pruefe(len({(p[0], p[1]) for p in _pkt["rotate"]}) == 1
+       and len({p[2] for p in _pkt["rotate"]}) == 5,
+       "rotate: der STROM steht, der Winkel faehrt")
+pruefe(len({p[2] for p in _pkt["current_angle"]}) == 1
+       and abs(math.hypot(*_pkt["current_angle"][0][:2])
+               - math.hypot(*_pkt["current_angle"][-1][:2])) < 1e-9
+       and _pkt["current_angle"][-1][1] < _pkt["current_angle"][0][1],
+       "current_angle: der Winkel STEHT, der Strombetrag bleibt gleich und "
+       "dreht von q nach d — sonst waere es eine Aussage ueber die Stromhoehe")
+pruefe(abs(_pkt["load_ramp"][0][0]) < 1e-12
+       and abs(_pkt["load_ramp"][-1][0] - 400.0) < 1e-9,
+       "load_ramp: faengt bei 0 A an und endet beim Betriebsstrom")
+
+# (3) **Die Eichung.** Das Bild muss auf Last reagieren; roh addiert tut es das
+#     nicht. Beides wird gemessen, damit der Test den Fehler SEHEN kann.
+_bp = AF.betriebspunkt(_gb, 3000.0, 100.0)
+_iq = _bp["i_q_A"]
+_s0 = AF.schnitt(_gb, R_M, 200, 0.0, 0.0, bilddaten=True)
+_s1 = AF.schnitt(_gb, R_M, 200, _iq, 0.0, bilddaten=True)
+_p0 = float(np.percentile(np.hypot(_s0["bx"], _s0["by"]), 98))
+_p1 = float(np.percentile(np.hypot(_s1["bx"], _s1["by"]), 98))
+pruefe(_p1 / _p0 - 1.0 > 0.05,
+       f"geeicht: |B| p98 steigt von Leerlauf auf {_iq:.0f} A um "
+       f"{(_p1/_p0-1)*100:.1f} % (1,0 % waere die Nachweisgrenze)")
+pruefe(_s1["eichfaktor_anker"] / max(_s1["eichfaktor_magnet"], 1e-30) > 100,
+       f"… und der Grund: die Eichfaktoren liegen um Faktor "
+       f"{_s1['eichfaktor_anker']/_s1['eichfaktor_magnet']:.0f} auseinander")
+# Gegenprobe mit der ROHEN Summe -- so stand es bis zum 17.10.2026 im Zeichner.
+_r0 = AF.rastere_scheibe(_gb, R_M, 200, 0.0, 0.0)
+_r1 = AF.rastere_scheibe(_gb, R_M, 200, _iq, 0.0)
+_q = []
+for _r in (_r0, _r1):
+    _A = EA._solve_fdm(_r["mu"], _r["j_magnet"] + _r["j_anker"], cache=True,
+                       periodisch_x=True)
+    _bx, _by = EA._curl_a(_A, EA._material_labels(_r["mu"]))
+    _q.append(float(np.percentile(np.hypot(_bx, _by), 98)))
+pruefe(abs(_q[1] / _q[0] - 1.0) < 0.01,
+       f"Gegenprobe: roh addiert bewegt dieselbe Last das Bild um "
+       f"{(_q[1]/_q[0]-1)*100:.3f} % — ein Leerlaufbild, "
+       f"ueber dem Last steht")
+
+# (4) Ohne Last gibt es KEINE Bildreihe, dafuer den Grund.
+import tempfile as _tf
+_leer = AF.frames(_gb, _tf.mkdtemp(), n_frames=3, N=160, rpm=3000.0,
+                  last_nm=0.0, art="load_ramp")
+pruefe(_leer["n"] == 0 and "ohne Last" in _leer.get("grund", ""),
+       "load_ramp ohne Last: 0 Bilder und der Grund, statt 3 gleicher Bilder")
+
+# (5) **Das Drehzahlband bewegt den Betriebspunkt der Scheibe NICHT.** Der
+#     Grund, aus dem die Bildreihe bei EINER Drehzahl laeuft -- festgenagelt,
+#     damit es auffaellt, wenn die Feldschwaechung nachgetragen wird.
+_i = [AF.betriebspunkt(_gb, r, 100.0)["i_q_A"] for r in (500, 3000, 30000)]
+pruefe(max(_i) - min(_i) < 1e-9,
+       f"betriebspunkt hat keinen Drehzahlterm: i_q bei 500/3000/30000 1/min "
+       f"= {_i[0]:.3f} A (Eckdrehzahl "
+       f"{EA.eckdrehzahl(_gb, AF.eichung_magnet(_gb)):.0f}) — ein Band waere "
+       f"n gleiche Bilder (BEFUNDE.md 17.10.2026)")
+
 print(f"\n{_ok} bestanden, {_fehl} fehlgeschlagen")
 sys.exit(1 if _fehl else 0)

@@ -1285,6 +1285,23 @@
       <label style="grid-column:1/-1;display:flex;gap:6px;align-items:center;cursor:pointer">
         <input type="checkbox" id="fm_load_ramp"/> Last-Rampe (Rotor steht, Last 0→Volllast)
       </label>
+      <!-- ⊙ Beide Arten rechnet die Scheibe seit dem 17.10.2026 wirklich
+           (`ema_axial_fdm.frames(art=…)`); vorher waren sie anhakbar und
+           wurden still übersprungen. Was sie dort NICHT tut, ist das
+           Drehzahlband abfahren, und der Grund ist gemessen und steht hier,
+           statt dass jemand im Protokoll danach sucht. -->
+      <small id="fm_axial_hinweis" style="display:none;grid-column:1/-1;
+             font-size:.7rem;color:#b9933f;line-height:1.35;margin-top:4px">
+        ⊙ <b>Axialfluss:</b> alle drei Arten werden gerechnet — am
+        abgewickelten Mehrschnitt beim mittleren Radius, mit getrennt
+        geeichtem Magnet- und Ankerfeld. Die Bildreihe läuft dabei bei
+        <b>einer</b> Drehzahl (oberes Bandende): der Betriebspunkt der Scheibe
+        (<code>ema_axial_fdm.betriebspunkt</code>) hat keinen Drehzahlterm —
+        <code>i_q = T/Kt</code>, <code>i_d = 0</code>, keine Spannungsgrenze,
+        gemessen derselbe Strom bei 500 wie bei 30.000 1/min. Ein Band wären
+        also gleiche Bilder. Die <i>analytische</i> EM-Kennlinie fährt es sehr
+        wohl ab; die fehlende Feldschwächung steht in <code>BEFUNDE.md</code>.
+      </small>
     </div>
     <div class="input-group" style="grid-column:1/-1;font-size:.74rem;color:#aaa;margin-top:6px;line-height:1.3">
       <span style="grid-column:1/-1">⏱ Geschätzte Laufzeit:<br/>

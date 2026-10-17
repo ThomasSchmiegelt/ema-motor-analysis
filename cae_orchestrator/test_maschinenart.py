@@ -677,5 +677,61 @@ pruefe(_pg1["b_pol_mm"] > _pg0["b_pol_mm"],
        f"{_pg0['b_pol_mm']} auf {_pg1['b_pol_mm']} mm breit")
 
 
+# ── Der gemeinsame BEWERTER kennt die Maschinenart (17.10.2026) ─────────────
+# `ema_optimize._eval_geom` ist der Kern von Parameterstudie, Zielwertsuche,
+# `screen`, `leistung`, `ausreizen`, Magnet-Feinoptimierer und der
+# Vorsortierung der KI-Entwuerfe. Er gab fuenfmal dieselben PSM-Zahlen heraus
+# (Kt 0,0410 / B_gap 0,630 fuer JEDE Art), weil er `_perf_der_art` nicht rief.
+# Geprueft wird gegen DIE Funktion, nicht gegen festgenagelte Zahlen: so sagt
+# ein roter Test "die beiden Wege sind auseinandergelaufen" und nicht "eine
+# Zahl hat sich geaendert".
+
+print("\n7. Der gemeinsame Bewerter und die Maschinenart")
+
+import ema_optimize as _OPT                                   # noqa: E402
+
+_mats = (ema_pipeline.LAMINATES["m270_35a"], ema_pipeline.LAMINATES["m270_35a"],
+         ema_pipeline.HAIRPIN_MATS["cu_etp"], ema_pipeline.MAGNETS["ndfeb_n35"])
+_op = {"rpm_thermal": 3000.0, "load_nm": 5.0, "rpm_base": 3000.0}
+_werte = {}
+for _art in ("pmsm", "asm", "synrm", "eesm", "gsm"):
+    _g = _basis(_art)["geom"]
+    _m = _OPT._eval_geom(_g, 80.0, _mats, _op, "water", 25.0,
+                         [1000, 3000, 6000], N=140)
+    _em = ema_analysis.run_em_analysis(_g, N=140, rotor_angle=0.0, axial_mm=80.0)
+    _soll, _q = ema_pipeline._perf_der_art({}, _g, 80.0, 3000.0, 5.0,
+                                           _em["performance"])
+    _werte[_art] = (_m.get("Kt"), _m.get("B_gap"), _m.get("perf_quelle"))
+    pruefe(abs(_m["Kt"] - round(_soll["Kt_Nm_per_A"], 4)) < 1e-9
+           and abs(_m["B_gap"] - round(_soll["B_gap_T"], 4)) < 1e-9,
+           f"{_art}: der Bewerter nimmt den Betriebspunkt der Art "
+           f"(Kt {_m['Kt']}, B_gap {_m['B_gap']}) aus {_q}")
+    pruefe(_m.get("perf_quelle") == _q,
+           f"{_art}: und `perf_quelle` sagt, woher die Zahl kommt "
+           f"({_m.get('perf_quelle')})")
+
+pruefe(_werte["pmsm"][2] == "fdm",
+       "die PSM bleibt beim FDM-Wert — jede abgelegte PSM-Rechnung ist Ziffer "
+       "fuer Ziffer dieselbe")
+pruefe(len({_werte[a][0] for a in _werte}) >= 4,
+       "und die fuenf Arten liefern nicht mehr dieselbe Zahl: "
+       + ", ".join(f"{a} {_werte[a][0]}" for a in _werte))
+
+# Das Tor der Maschinenart gilt im Bewerter mit -- und es braucht die
+# DREHZAHL. Ohne `rpm_to` rechnet `_gate_laeufer` die Polbefestigung gar
+# nicht, und ein 2-x-M6-Schenkelpol ging im ersten Anlauf als "baubar" durch.
+_ge = dict(_basis("eesm")["geom"], polBefestigung="bolzen", polSchrauben=2,
+           polGewinde="M6")
+pruefe(_OPT._baubar(_ge, 80.0, 20000.0).get("baubar") is False,
+       "der Bewerter weist einen Schenkelpol ab, dessen Befestigung bei "
+       "20.000 1/min nicht haelt (Tor der Maschinenart, nicht Magnettaschen)")
+pruefe(_OPT._baubar(_ge, 80.0, None).get("baubar") is not False,
+       "… und ohne Drehzahl kann er es NICHT wissen — die Gegenprobe, dass "
+       "`rpm_to` wirklich durchgereicht werden muss")
+pruefe(_OPT._baubar(_basis("gsm")["geom"], 80.0, 20000.0).get("baubar") is False,
+       "und die GSM an der Umfangsgeschwindigkeit des Kommutators — obwohl "
+       "ihr Zweig nacktes RuntimeError wirft und kein AuslegungReisst")
+
+
 print(f"\n{_ok} bestanden, {_bad} fehlgeschlagen")
 sys.exit(1 if _bad else 0)

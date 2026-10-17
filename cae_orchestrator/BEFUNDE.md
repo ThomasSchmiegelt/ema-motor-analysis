@@ -17,6 +17,298 @@ kann.
 
 ---
 
+## 2026-10-17 · Die Eingaben entstanden erst am Lauf**ende** — 224 von 369 Projekten haben keine
+
+**Beobachtung.** Gemeldet als:
+
+> ich hbae das gefühl das die geometrie bei den maschinen nicht abgespeichert
+> wird. immer wenn ich ein gepichertes projekt aufrufe, erscheint der default
+> geometrie stand.
+
+**Messung.** `meta.json` — und damit `meta["payload"]`, aus dem
+`/project/<id>/template` das Formular wiederherstellt — wurde ausschließlich im
+Speicherblock am **Ende** von `run_pipeline` geschrieben
+(`ema_pipeline.py`, „Persist project metadata + results to disk"). Gezählt über
+`~/cae_projekte`:
+
+| | Zahl |
+|---|---:|
+| Projektordner | 369 |
+| **ohne `meta.json`** | **224** (61 %) |
+| davon mit Eingaben in `project.json` (`inputs.payload`) | **0** |
+
+Das heißt: für knapp zwei Drittel aller Projekte ist die Geometrie **nicht
+wiederherstellbar**, und sie war es nie — `/template` antwortet dort
+`{"payload": {"geom": {}}, "reconstructed": true}`, `applyPayload` schreibt
+nichts, und die Maske zeigt ihre Vorgaben. Genau das ist der gemeldete
+„Default-Geometriestand".
+
+Betroffen ist jeder Weg, der den Speicherblock nicht erreicht: eine gerissene
+Stufe 0, ein Fehlschlag in FreeCAD oder im Löser, ein Abbruch, ein
+Serverneustart — und der häufigste Fall, die **reine CAD-Vorschau**
+(`build_cad_preview` hat keinen Speicherblock; 47 der 224 Ordner heißen
+`*_cad_vorschau`). `ema_projekt.init` legt `project.json` von Anfang an, aber
+`inputs.payload` füllt erst `record_run`, also ebenfalls erst am Ende.
+
+**Fundstelle.** `ema_pipeline.run_pipeline` (Speicherblock), `build_cad_preview`
+(keiner), `ema_projekt.record_run`.
+
+**Status: behoben.** `ema_pipeline.eingaben_sichern(proj, data, state)` legt
+`meta.json` mit dem Eingabepayload ab, **bevor** irgendetwas gerechnet wird —
+gerufen in `run_pipeline` (vor den Toren, also auch wenn eines reißt) und in
+`build_cad_preview`. Eine vorhandene Datei wird **ergänzt, nicht ersetzt**
+(nach einem gerechneten Lauf trägt sie Werkstofflabel und `rpm_range`, und das
+darf ein späterer Vorschauklick nicht wegnehmen); `results.json` entsteht dabei
+ausdrücklich nicht, damit „Eingaben da, nichts gerechnet" weiterhin an dieser
+Datei ablesbar bleibt. Im Teil-Nachrechnen wird nicht vorab geschrieben: dort
+liegt der Payload per Definition schon da, und ihn vor einem möglichen
+Fehlschlag durch den halb eingestellten zu ersetzen wäre eine
+Verschlechterung. `record_run` diffe weiter gegen
+`project.json`s `inputs.payload` — die wird absichtlich **nicht** vorab gesetzt,
+sonst wäre `changed_inputs` jeder Evolutionsstufe leer.
+
+**Was NICHT behoben ist:** die 224 Altprojekte. Ihre Eingaben stehen in keiner
+Datei (nachgeprüft: weder `meta.json` noch `inputs.payload` noch `datasheet`),
+sind also nicht rekonstruierbar. Wo `motor.FCStd` liegt, ließe sich die
+Geometrie *messen* (`ema_step_import.derive_geom` tut das für STEP) — das wäre
+eine eigene Arbeit und steht hier als offener Punkt, nicht als Zusage.
+
+---
+
+## 2026-10-17 · Die Scheibenbilder waren Leerlaufbilder mit „Last" darüber — die Eichung fehlte
+
+**Beobachtung.** Beim Nachmessen für die beiden fehlenden Feld-Darstellungsarten
+(Befund darunter) gefunden, nicht gemeldet: `ema_axial_fdm.frames` und
+`schnitt_figur` lösten **selbst**, auf der rohen Summe
+`j_magnet + j_anker`, und zeichneten `|rot A|` daraus.
+
+**Messung.** Die beiden Anteile brauchen Eichfaktoren, die um Faktor **1343**
+auseinanderliegen — `schnitt` rechnet sie längst getrennt aus (dieselbe
+Aufteilung, aus der radial `run_em_analysis` seine Magnet- und Ankereichung
+bezieht):
+
+| | Eichfaktor |
+|---|---:|
+| Magnet (`sf_m`) | 1,188·10⁻⁶ |
+| Anker (`sf_a`) | 1,596·10⁻³ |
+
+Roh addiert trägt der Anker damit ein Tausendstel seines Gewichts. Gemessen am
+Projekt `20261016_203313_261016` (torus_nn, 2p = 8, 100 Nm):
+
+| | roh (bis 17.10.) | geeicht |
+|---|---:|---:|
+| \|B\| p98, Leerlauf → Volllast | 1 864 997 → 1 865 108 (**+0,006 %**) | 2,216 → 2,507 T (**+13 %**) |
+| Spaltspitze `b_n_spitze_T` | — | 1,384 → **2,486 T** (+80 %) |
+
+Die Animation zeigte also den Leerlauf, auch wenn „Last" im Titel stand — und
+eine Last-Rampe darauf wäre eine Reihe gleicher Bilder gewesen.
+
+**Fundstelle.** `ema_axial_fdm.frames`, `ema_axial_fdm.schnitt_figur` (eigener
+`_solve_fdm`-Lauf auf `j_magnet + j_anker`), gegen `ema_axial_fdm.schnitt`
+(getrennte Eichung).
+
+**Was es kostet, und das wird gesagt:** die Eichung braucht einen zweiten
+Löserlauf je Bild — den **nutlosen** Begleitlauf, an dessen Spitze geeicht wird
+(`schnitt`, Eichung `spitze_nutlos`). Sein `mu` ist ein anderes, also hilft der
+LU-Cache dort nicht, während der Ankerlauf sich die Faktorisierung des
+Magnetlaufs teilt. Gemessen ohne das Zeichnen: **166 → 331 ms je Bild bei
+N = 200, 507 → 1007 ms bei N = 300, also Faktor 2,0.** Die Entwurfsvoreinstellung
+(12 Bilder) kostet damit ~4 s statt ~2 s; das ist der Preis dafür, dass im Bild
+die Last zu sehen ist.
+
+**Status: behoben.** `schnitt(..., bilddaten=True)` gibt die **geeichte** Summe
+`A`/`bx`/`by` heraus und ist damit die eine Quelle für Kennwerte UND Bild;
+`frames` und `schnitt_figur` lösen nicht mehr selbst. Opt-in, weil `felder`
+den Schnitt k-mal aufsammelt und drei `(N, N)`-Felder je Schnitt sonst in
+`results.json` landen würden. Die Einzelbild-Vorschau (`/preview_field`) hängt
+an `schnitt_figur` und ist mitbehoben.
+
+---
+
+## 2026-10-17 · Ankerrückwirkung und Last-Rampe: angehakt, nicht gerechnet, nichts gesagt
+
+**Beobachtung.** Gemeldet als:
+
+> bei der axialflussfaschine kann ich kein drehzahlband im fdm solver rechnen
+> auch wird das „Feld-Darstellung (Rotor-Rotation immer aktiv):
+> Ankerrückwirkung (Rotor steht, Stromwinkel β) / Last-Rampe (Rotor steht,
+> Last 0→Volllast)" nicht gerechnet.
+
+**Messung.** Beides stimmt, und zwar aus zwei verschiedenen Gründen.
+
+*(1) Die beiden Darstellungsarten.* `ema_pipeline` führt die drei Modi als
+`field_modes`; ihre Schleife steht zweimal als
+`for mode in (field_modes if not _axial_lauf else [])`. Beim Axialfluss waren
+die Haken also wirkungslos — **ohne eine Zeile im Protokoll**, und
+`results["em"]["field_modes"]` trug nur `rotate`. Anhaken, warten, und ein
+Ergebnis bekommen, das von dem ohne Haken nicht zu unterscheiden ist.
+
+Darstellbar sind sie, und das war von Anfang an so: `rastere_scheibe` baut den
+Strombelag aus `iq` **und** `id_` auf (`id_*cos(el) - iq*sin(el)`) — der
+Stromwinkel steckt dort längst, es hat ihn nur niemand durchgefahren.
+
+*(2) Das Drehzahlband.* Hier ist „geht nicht" die richtige Antwort, und sie ist
+gemessen. `ema_axial_fdm.betriebspunkt` hat **keinen Drehzahlterm**: es rechnet
+`i_q = T/Kt`, setzt `i_d = 0` (Oberflächenmagnete, keine Salienz, MTPA ist
+i_d = 0) und prüft **keine Spannungsgrenze**. Am Projekt
+`20261016_203313_261016` bei 100 Nm:
+
+| Drehzahl [1/min] | 500 | 1 000 | 3 000 | 6 000 | 12 000 | 30 000 |
+|---|---:|---:|---:|---:|---:|---:|
+| i_q [A] | 489,828 | 489,828 | 489,828 | 489,828 | 489,828 | 489,828 |
+| i_d [A] | 0 | 0 | 0 | 0 | 0 | 0 |
+
+Ziffer für Ziffer derselbe Strom — obwohl die Eckdrehzahl dieser Maschine bei
+**12 920 1/min** liegt (`ema_analysis.eckdrehzahl`), oberhalb also
+Feldschwächung einsetzen MUSS. Eine Bildreihe über das Band wäre damit *n*
+gleiche Bilder, und das ist schlimmer als keine: sie sieht nach einer Messung
+aus.
+
+**Fundstelle.** `ema_pipeline` (die beiden `if not _axial_lauf`-Schleifen),
+`ema_axial_fdm.betriebspunkt` (kein `rpm` im Rumpf außer in der Signatur).
+
+**Status: zur Hälfte behoben, zur Hälfte offen.**
+* `ema_axial_fdm.frames(..., art=…)` rechnet jetzt alle drei Arten
+  (`ARTEN_BILD`), auf **einer** Lösung, **einer** Eichung und **einer**
+  festgehaltenen Farbskala; `_bildpunkte` liefert je Art nur die drei Zahlen je
+  Bild (iq, id, Winkel). Die Pipeline fährt sie in die Unterordner
+  `frames`/`frames_react`/`frames_load`, also durch dieselben Routen
+  (`/field/<mode>/<n>`, `/project/<id>/video/<mode>`) wie radial. Ohne Last
+  gibt es **keine** Bildreihe und dafür den Grund (`grund`), statt *n* gleicher
+  Bilder.
+* Die **Feldschwächung der Scheibe** bleibt offen. Sie nachzutragen heißt, eine
+  Spannungsgrenze und damit `i_d < 0` oberhalb der Eckdrehzahl einzuführen —
+  das verschiebt jeden Strom, jeden Verlust und jede Temperatur jedes
+  Axialprojekts und ist keine Nebenbei-Änderung. Bis dahin steht der Grund am
+  Haken (`#fm_axial_hinweis` in ④ Berechnung) und im Protokoll des Laufs,
+  statt dass das Band stillschweigend nichts tut.
+
+---
+
+## 2026-10-17 · Der schnelle Bewerter rechnete für alle fünf Maschinenarten dieselbe Maschine
+
+**Beobachtung.** Gefragt als:
+
+> parameterstudien habe ich nicht überprüft. greifen die parameterstudien auch
+> bei reluktanz, synchronmaschine, gsm und eesm?
+
+Sie griffen — und gaben für jede Bauart die Kennwerte einer PSM aus.
+
+**Messung.** `ema_optimize._eval_geom` ist der gemeinsame Bewertungskern von
+Parameterstudie, Zielwertsuche, Magnet-Feinoptimierer, `screen`, `leistung`,
+`ausreizen` und der Vorsortierung der KI-Entwürfe. Er enthielt **null** Treffer
+auf `machineType`. Am frischen Payload, nur `geom.machineType` umgestellt:
+
+| Art | `_eval_geom` Kt | B_gap | Betriebspunkt der Art (Kt) | B_gap | Quelle |
+|---|---:|---:|---:|---:|---|
+| PSM | 0,0410 | 0,630 | 0,0410 | 0,630 | `fdm` |
+| ASM | 0,0410 | 0,630 | **0,0520** | 0,800 | `ema_asm` |
+| SynRM | 0,0410 | 0,630 | **0,0180** | 0,283 | `ema_synrm` |
+| EESM | 0,0410 | 0,630 | **0,0520** | 0,800 | `ema_eesm` |
+| GSM | 0,0410 | 0,630 | **0,0968** | 0,800 | `ema_gsm` |
+
+Fünfmal Ziffer für Ziffer dasselbe. Beim Reluktanzläufer lag die Studie damit um
+Faktor **2,3 zu hoch**, bei der Gleichstrommaschine um **2,4 zu niedrig** — und
+man sah es nicht, denn eine Kurve mit falschem Niveau sieht aus wie eine Kurve.
+
+Die Ursache ist dieselbe wie am 20.09.2026 eine Etage tiefer im Rasterer:
+`run_em_analysis` eicht seine Amplitude auf `_analytical_Bgap`, und die rechnet
+aus `Br_NdFeB` und `magThick`. Die Pipeline hat dafür seit jenem Tag
+`_perf_der_art`; dieser Bewerter rief sie nicht.
+
+**Zweiter Teil: das Tor der Maschinenart fehlte ebenfalls.** `_baubar` rief
+`rotor_layout_check` — die Prüfung der **Magnettaschen**. Ein Käfig-,
+Schenkelpol- oder Ankerläufer hat keine, also war `baubar = True` dort eine
+Aussage über etwas, das es nicht gibt: leer bestanden. Genau dieser Fehler stand
+am 19.09.2026 schon einmal in `cae_cli.py rotor-check`.
+
+**Fundstelle.** `ema_optimize._eval_geom`, `ema_optimize._baubar`;
+`ema_pipeline._perf_der_art` und `ema_pipeline._gate_laeufer` als die
+vorhandenen, nicht gerufenen Gegenstücke.
+
+**Status: behoben, mit einer benannten Grenze.** `_eval_geom` ruft
+`_perf_der_art` — **sie**, nicht eine zweite Fassung daneben — und führt
+`perf_quelle` in den Kennwerten mit; `_baubar` ruft `_gate_laeufer` mit
+`rpm_to` (ohne die Drehzahl rechnet das Tor die Polbefestigung gar nicht, und
+ein 2×M6-Schenkelpol ging im ersten Anlauf als „baubar" durch). Kosten ~1,5 ms
+je Punkt neben einem FDM-Lauf. Gegengeprüft: bei 20 000 1/min weist der
+Bewerter den Schenkelpol jetzt mit 467,7 kN je Pol ab (SF 0,16 statt 1,3) und
+die GSM mit 128,4 m/s Umfangsgeschwindigkeit gegen 40 m/s. Die PSM bleibt
+Ziffer für Ziffer unberührt (`quelle = "fdm"`).
+
+**Was NICHT mitwandert, und das steht in `perf_quelle`:** Verluste und
+Temperaturen kommen weiter aus `ema_thermal` auf dem PSM-Weg
+(Magnetwirbelstrom statt Käfig-, Erreger- oder Bürstenverlust), und der Strom
+aus `estimate_dq_currents` (PSM-MTPA) statt aus `ema_asm.betriebspunkt`s
+`hypot(i_mag, i_q)`. Für die ASM fehlt damit der Magnetisierungsstrom in
+`P_total`, für die GSM der Bürstenabfall (am gemessenen Auslegungspunkt
+**1488,6 W gegen 793,9 W** Ankerkupfer — also der größere Posten). Das ist der
+nächste Schritt und keine Zusage.
+
+**Nebenbefund.** Der GSM-Zweig von `_gate_laeufer` wirft noch nacktes
+`RuntimeError` (Ankerwicklung, Kommutator, Kommutierung), während alle anderen
+Zweige längst `AuslegungReisst` mit gerechneten Entlastungswegen werfen — die
+Kette aus `server._run` → `e.wege` → Knöpfe in der Oberfläche bedient die
+Gleichstrommaschine deshalb nicht. `_baubar` liest beide Formen als Nein; der
+Umbau des Zweigs selbst steht offen.
+
+---
+
+## 2026-10-16 · Der Axialfluss-Reiter rechnete bei jedem Tastendruck — 207 ms gegen 1,2 ms Zeichnen
+
+*Nachgetragen am 17.10.2026: behoben war das mit `f19d1be`, aber weder hier noch
+in `CLAUDE.md` festgehalten — und ein Befund, der nur in einer Commit-Meldung
+steht, ist für den nächsten Leser nicht vorhanden.*
+
+**Beobachtung.** Gemeldet als „das Aendern der Werte im Tab Axialfluss geht sehr
+zaeh", dazu die doppelte Absage beim Drehzahlband.
+
+**Messung.** Der Kommentar an der Aufrufstelle sagte, das Feld werde „nur auf
+Zuruf" gerechnet, „sonst haengt die Maske bei jedem Tastendruck" — nur **ist**
+der Zuruf das Häkchen `feldAn`, und das steht per Vorgabe an. `zeichne()` hängt
+an `input` jedes Feldes, also lief bei jedem Zeichen ein voller CG-Lauf.
+
+Gemessen am Vorgabe-Entwurf (ny = 110, 132×110 = 15 312 Zellen, Magnetlauf +
+nutloser Eichlauf):
+
+| | Leerlauf | unter Last |
+|---|---:|---:|
+| ny = 110 | **207 ms** | 235 ms |
+| ny = 160 | 387 ms | — |
+| ny = 220 | 1000 ms | — |
+
+Alles andere in `zeichne()` zusammen kostet gut eine Millisekunde (mit gezählten
+Canvas-Aufrufen: Draufsicht 1,05 ms bei 867 Aufrufen, Halbschnitt 0,07,
+Abwicklung 0,06, Tabelle 0,04) — **Verhältnis 170 : 1**, also genau eine Stelle
+zu heilen. Eine dreistellige Zahl zu tippen kostete ~0,6 s stehende Oberfläche,
+ein gezogener Regler feuert laufend.
+
+**Fundstelle.** `axialfluss/ansicht.js`, `zeichne()` → Feldlauf an `input`.
+
+**Status: behoben** (`f19d1be`), nach dem Muster einer Ebene tiefer
+(`rzAnstossen` beim Mehrschnitt): `feldMarke` merkt, woran das Bild hängt
+(`rs` gehört dazu, `rzN` und `theta` nicht — der Winkel liest nur ab),
+`feldAnstossen` entprellt mit `FELD_PAUSE_MS = 260` und zeigt bis dahin
+„rechnet das Feld …" statt eines veralteten Feldes, das zu anderen Zahlen
+gehört. Die Zeichnungen bleiben sofort. `rechnen()` ist der ausdrückliche
+Zuruf: es rechnet sofort und setzt den Merker, damit der entprellte Lauf es
+nicht gleich noch einmal tut. **Offen:** die 260 ms sind am gemessenen
+Rechenaufwand gewählt und im Browser nicht nachgefühlt — fühlt es sich träge
+an, ist `FELD_PAUSE_MS` die eine Stellschraube.
+
+**Zwei Kleinigkeiten derselben Meldung, mitbehoben.** Das **Drehzahlband** wird
+für die Scheibe nicht mehr angeboten: es kann sie nicht geben, weil der axiale
+Ringsektor den Leerlauf rechnet und über Drehzahl und Last nichts zu variieren
+hat — die Karte ist gesperrt und trägt die Begründung, statt den Lauf erst
+starten zu lassen (gemeldet wurde genau die umgekehrte Reihenfolge). Und
+dieselbe Begründung stand **zweimal** da (einmal in voller Länge rot im
+Meldefeld, einmal als ℹ im Protokoll); steht sie im Protokoll, zeigt das
+Meldefeld nur noch einen Einzeiler. *Nicht zu verwechseln mit dem Drehzahlband
+der FDM-Animation in ④ Berechnung — das ist der Befund vom 17.10.2026, und dort
+ist der Grund ein anderer (`betriebspunkt` ohne Drehzahlterm).*
+
+---
+
 ## 2026-10-16 · Die Scheibe lief in das Layouttor der Zylindermaschine — in vier 3-D-Einstiegen
 
 **Beobachtung.** Gemeldet aus dem Reiter 🧲, Knopf „🔁 Schnelle Pol-Berechnung
