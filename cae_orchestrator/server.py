@@ -5260,6 +5260,21 @@ def param_schema():
         # trotzdem als „noch nicht getragen" da. Genau die Art Etikett, das
         # nicht widerspricht und falsch ist.
         "machineType": _art_optionen(),
+        # Der Rechensatz der Festigkeit waehlt die PHYSIK, nicht die Guete:
+        # verschmiert gegen Mehrkoerper unterscheidet sich am Tor um Faktor
+        # 1,9. Nackte Codes sagen das nicht, und diese Beschriftung liest der
+        # Agent ueber ``/param_schema`` genauso wie der Mensch im Formular.
+        "struct_solver": _opts(list(T2E.STRUKTUR_LOESER), labelmap={
+            "freecad": "FreeCAD + CalculiX, nur Rotoreisen (Magnetlast verschmiert)",
+            "ccx": "eigener Satz, Polsektor, CalculiX",
+            "z88": "eigener Satz, Vollrotor, Z88Aurora",
+            "aster": "eigener Satz, Vollrotor, Code Aster",
+            "beide": "eigener Satz, Vollrotor, CalculiX und Z88",
+            "alle": "eigener Satz, Vollrotor, alle drei Loeser",
+            "kontakt": "MEHRKOERPER raeumlich: Blech UND Magnete, Kontakt an "
+                       "Anlageflaechen (Minuten)",
+            "kontakt_eben": "MEHRKOERPER eben: ein Querschnitt, Dicke = "
+                            "Paketlaenge (Sekunden, loest die Anlagen auf)"}),
     }
     # geom vs. obere Ebene kommt aus dem Schema selbst (``spec["geom"]``). Frueher stand
     # die Menge hier ein zweites Mal von Hand — ein neuer Schluessel war dann im Schema
@@ -5837,7 +5852,8 @@ def struktur_eigen():
     os.makedirs(proj, exist_ok=True)
     try:
         aus = P._struktur_eigener_satz(geom, mat, rpm, proj, solver, mesh,
-                                       {"log": [], "progress": 0})
+                                       {"log": [], "progress": 0},
+                                       magnet_code=d.get("magnet"))
     except Exception as e:                                  # noqa: BLE001
         return jsonify({"error": f"{type(e).__name__}: {e}"}), 500
 

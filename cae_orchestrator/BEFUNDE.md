@@ -17,6 +17,580 @@ kann.
 
 ---
 
+## 2026-10-23 (e) · Die Umbenennung einer Methode liess `guete` die halbe FEM nicht mehr sehen
+
+**Beobachtung.** `test_db.py` wurde rot, nachdem `safety_factor_fem` von der
+Methode `fem3d` auf das dimensionsoffene `fem` umgestellt wurde (2026-10-23 (b):
+`kontakt_eben` rechnet eine EBENE Scheibe, und `fem3d` daran ist ein Etikett, das
+nicht widerspricht und falsch ist). Die Umstellung war an EINER Stelle
+mitgezogen — `importiere_projekt` schreibt Loeser, Netz und Status nur an
+FEM-Kennwerte —, an der zweiten nicht.
+
+**Messung.** `ema_db.guete` filtert `k["methode"] == "fem3d"`. Am Halbfall des
+Tests (Feld gerechnet, Festigkeit nicht geliefert) fiel `fem_erwartet` damit von
+**2 auf 1**, `fem_loeser` und `fem_aufloesung` auf den Rest. Das ist genau die
+Zahl, an der ein Lauf OHNE Festigkeit von einem mit unterschieden wird — der
+Zweck dieser Funktion.
+
+**Fundstelle.** `ema_db.guete` (Vergleich auf eine Zeichenkette),
+`ema_db.importiere_projekt`.
+
+**Stand.** Behoben. `ema_db.FEM_METHODEN` ist die EINE Liste, beide Stellen lesen
+sie, und `_METHODE_KURZ` benennt die neue Marke, statt sie als `fem` in die
+Steckbrief-Tabelle zu schreiben. Nebenbei nachgetragen: `B_gap_last_T` und
+`saettigung_engstelle` standen in **keinem** Register — der Test „alle
+vorkommenden Kennwerte sind im Register" war deshalb schon vor diesem Stand rot.
+Das erste ist nicht `B_gap_T`: jenes ist das Leerlauffeld der Magnete, dieses das
+resultierende am Betriebspunkt, und die Saettigungsaussage haengt an diesem.
+
+---
+
+## 2026-10-23 (d) · Der MAGNETKÖRPER war im räumlichen Lauf nie aufgelöst — seine Spannung kam um Faktor 2 zu niedrig heraus
+
+**Beobachtung.** Der ebene Lauf gab am Magneten konvergiert **16,4 MPa**
+Hauptzugspannung (P99), der räumliche **7,18**. Faktor 2,3 ist zu viel, um es
+durchgehen zu lassen — entweder rechnet einer von beiden falsch, oder einer ist
+nicht aufgelöst. Nachgesehen: `ema_kontakt.baue` legt genau **ein**
+Verfeinerungsfeld, eine Distance→Threshold auf die **Pad-Flächen** — und die
+liegen auf der **Eisenseite**. Der Magnetkörper selbst blieb damit auf dem
+Grundmaß: bei 6 mm Netz trägt ein 6 mm dicker Magnet etwa zwei Elemente über
+seine Dicke. Ein C3D4 ist ein Element konstanter Dehnung, also das steifste,
+das es gibt; zwei davon über die Dicke können die örtliche Biegung an einer
+3-mm-Anlage nicht abbilden, und zu steif heißt **zu wenig Spannung**.
+
+**Messung.** Dieselbe Geometrie, dieselben Anlagen, Anlagennetz konstant
+1,25 mm — verfeinert wird **nur der Magnetkörper** (`mesh_magnet_mm`, neu):
+
+| Magnetnetz [mm] | 6,0 (= Grundnetz) | 3,0 | 2,0 |
+|---|---:|---:|---:|
+| Elemente im Magneten | 33.153 | 64.768 | 172.932 |
+| **Magnet Zug P99** [MPa] | 7,18 | 11,01 | **13,46** |
+| Magnet Zug max [MPa] | 12,71 | 20,34 | 23,92 |
+| Magnetvolumen [mm³] | 243.292 | 243.292 | 243.292 |
+| Eisen P99 [MPa] | 219,5 | 219,8 | 219,8 |
+| Eisen Mittel je Volumen [MPa] | 45,31 | 45,34 | **45,39** |
+| ccx [s] | 309 | 344 | 528 |
+
+**Die Kontrolle ist die wichtigere Hälfte der Messung.** Über die ganze Reihe
+bewegt sich das Eisen um **0,18 %** (45,31 → 45,39), das Eisen-P99 um 0,14 %
+und das Magnetvolumen um **keine Stelle** — die Verfeinerung tut also genau
+das, was sie behauptet, und nichts sonst. Die Magnetzahl steigt dabei
+**monoton um 87 %** (7,18 → 11,01 → 13,46) und läuft in die Richtung, die der
+ebene Lauf unabhängig belegt. Damit ist die 2-D/3-D-Abweichung **erklärt**: sie
+war Auflösung, kein Modellunterschied — und die Richtung war vorher bekannt,
+denn ein zu steifes Element kann die Spannung nur unterschätzen.
+
+**Was folgt, und das ist die eigentliche Auskunft.** Der räumliche Lauf kann
+den Magneten **nicht bezahlbar** auflösen: bei 2 mm Magnetnetz stehen
+172.932 Elemente im Magneten (5,2-fach) und 528 s auf der Uhr, und mit
+13,46 MPa fehlen immer noch **18 %** zu den 16,4, die der ebene Lauf belegt.
+Die Reihe ist bei 2 mm nicht konvergiert, nur unterwegs. Der ebene Lauf
+erreicht die Zahl bei 10.672 Knoten in 6,6 s,
+und dort ist sie **dreifach belegt** (CPE3 fein 16,50 · CPE6 grob 16,07 · CPS6
+mittel 16,55 MPa — drei Wege, die sich in Elementgrad, Netz UND ebenem Zustand
+unterscheiden, auf 3 %). **Für eine Aussage über den Magneten ist der ebene
+Lauf also nicht die billigere, sondern die einzige belastbare Wahl.**
+
+**Und die Vorgabe bleibt die alte** (`mesh_magnet_mm=None` = wie `mesh_mm`),
+damit jeder gespeicherte Lauf Ziffer für Ziffer derselbe bleibt — nachgeprüft:
+die Reihe bei 6,0 reproduziert die dokumentierten 219,5 / 45,31 / 12,71 / 7,18
+und 158.676 Tetraeder exakt. Eine zu optimistische Zahl darf aber nicht
+schweigend dastehen: `structural_fem.magnet.aufloesung` sagt es, das Protokoll
+warnt, die Ergebniskarte zeigt es bernsteinfarben, und der Bericht führt die
+Zeile „Vorbehalt zur Magnetspannung" **in** der Tabelle — nicht als Fußnote,
+weil die Zahl sonst wie jede andere gerechnete daneben gelesen wird. Gemessen
+heißt das SF **11 statt ~5**.
+
+**Fundstelle.** `ema_kontakt.baue` (Constant-Feld auf die Magnetvolumen, über
+`Min` mit dem Pad-Feld kombiniert), `ema_kontakt.KontaktNetz.netz_magnet_mm`,
+`cae_cli.py struktur --mesh-magnet`, `ema_pipeline._struktur_kontakt`
+(Warnung + `magnet.aufloesung`), `ema_report._single_md_tables`,
+`oberflaeche/ergebnis.js`.
+
+**Stand.** Behoben im Sinne von *messbar und benannt*. Nicht behoben ist die
+Physik der Wahl: wer den Magneten räumlich rechnen will, zahlt dafür mit einem
+Netz, das auf dieser Maschine nicht konvergiert (gemessen 18 % Rest bei 528 s
+und 5,2-facher Elementzahl) — deshalb steht die Empfehlung auf dem ebenen
+Lauf, und `konvergenz(3)["magnet_nicht_belastbar"]` sagt es an der Kennzahl.
+
+---
+
+## 2026-10-23 (c) · CalculiX meldet eine TEILLAST als Ergebnis — Exit 0, gültige `.frd`, Zahlen um Faktor 8 zu niedrig
+
+**Beobachtung.** Beim Vermessen des ebenen Laufs 2. Ordnung kam bei 2,0/0,6 mm
+Netz heraus:
+
+```
+dehnung 2  2.0/0.6  40.008 Knoten  FeMax 56,8  FeP99 27,9  MitV 6,24  MgP99 3,64
+dehnung 2  3.0/1.0  21.799 Knoten  FeMax 459,0 FeP99 263,2 MitV 49,76 MgP99 16,07
+```
+
+Das **feinere** Netz lieferte ein Achtel der Spannung. `ccx` beendete sich mit
+**0**, schrieb eine `.frd` mit gültigem DISP-Block und eine `.dat` mit
+Elementspannungen — `ema_deck.loese_ccx` meldete deshalb `solver_status: "OK"`.
+
+**Messung.** Die `.sta` des Laufs endet bei
+
+```
+     1         14     1U   15  0.136418E+00  0.136418E+00  0.325888E-04
+```
+
+also **Schrittzeit 0,136 von 1,0**. ccx halbiert das Inkrement, wenn die
+Kontaktiteration nicht konvergiert, lief in das Inkrementlimit (`*STEP, INC=200`)
+und gab auf — die Spannungen in der `.dat` gehören zu **13,6 % der Fliehkraft**.
+Verhältnis der Mittelwerte 6,24/49,76 = 0,125, also genau die erreichte Last.
+Die durchgelaufenen Läufe enden alle bei `0.100000E+01`.
+
+**Warum das die gefährlichste Sorte Fehler ist.** Das Ergebnis ist der *Form*
+nach vollständig plausibel: ein zusammenhängendes Spannungsfeld, Spitze an der
+Anlagenkante, Magnet unter Zug, Blech unter Ringspannung — nur um den Faktor der
+erreichten Last zu klein. Es sieht nicht wie ein Fehlschlag aus, sondern wie
+eine **besonders gute Maschine**: Sicherheitsfaktor 12 statt 1,5. Ein Tor, das
+auf dieser Zahl sitzt, winkt sie durch.
+
+**Es betrifft nicht nur die zweite Ordnung.** `loese_ccx` ist der gemeinsame
+Löseraufruf für `ema_deck`, `ema_kontakt` (räumlich und eben) und `ema_topopt`.
+Bei einem *linearen Lauf ohne Kontakt* läuft der Schritt in einem Inkrement
+durch, und die Lücke fällt nie auf — genau deshalb hat sie den Mehrkörperlauf
+überlebt, der erst seit dem 22.10.2026 existiert.
+
+**Offener Punkt, der daraus folgt.** Die räumliche Konvergenzreihe vom
+22.10.2026 (c) wurde **ohne** diesen Wächter gemessen, und zwei ihrer Spalten
+springen in genau dem Muster, das eine Teillast erzeugt: σ max
+527,4 / 726,2 / 851,1 / **505,0** und Magnet Zug max
+46,93 / 16,19 / **24,15** / 12,71. Als Singularität gedeutet ist das richtig
+möglich — als Teillast aber auch, und die Rohdaten jener vier Läufe sind nicht
+mehr vorhanden. **Die Reihe ist nachzumessen**, bevor jemand die Sprünge als
+Eigenschaft des Netzes erklärt; `konvergenz(3)` nennt den Vorbehalt.
+
+**Fundstelle.** `ema_deck.loese_ccx` (prüfte nur `.frd` + DISP-Block),
+`ema_deck._ccx_schrittzeit` (neu, Spalte 6 der `.sta`).
+
+**Stand.** Behoben. `loese_ccx` gibt `solver_status: "TEILLAST"` samt erreichtem
+Anteil und dem Satz, dass die Spannungen kein Ergebnis sind; `schrittzeit`
+reist bei JEDEM Lauf mit, auch bei den gelungenen. **Keine Auskunft ist kein
+Fehlschlag** — nicht jeder Satz schreibt eine `.sta`, und ein Wert, den es nicht
+gibt, darf keinen gültigen Lauf abweisen. Test: `test_kontakt.py` [4c].
+Nebenbefund: damit ist auch gesagt, dass CPE6 am feineren Netz mit diesem
+Kontakt **nicht rechenbar** ist — das steht in `grenzen(2)`, statt eine Zahl
+daraus zu machen.
+
+---
+
+## 2026-10-23 (b) · Der ebene Lauf — und zwei Kennzahlen, die gegeneinander laufen
+
+**Beobachtung.** Angemerkt wurde, dass sich der Mehrkörperfall auch
+**zweidimensional** rechnen ließe. Das ist richtig, und zwar aus einem Grund,
+der im Modell schon stand: der Lastfall ist planar (die Fliehkraft liegt im
+Querschnitt), und der räumliche Lauf hält **beide Stirnflächen in z** fest —
+das *ist* der ebene Verzerrungszustand. Die dritte Dimension kostet ~126.000
+Tetraeder und trägt nichts bei, was die Scheibe nicht auch sagt.
+
+**Messung (ebene Reihe, fünf echte Läufe, 12.000 1/min).**
+
+| Netz (Grund/Anlage) [mm] | 6,0/1,25 | 3,0/1,0 | 2,0/0,6 | 1,5/0,4 | 1,0/0,3 |
+|---|---:|---:|---:|---:|---:|
+| Knoten | 3.061 | 5.947 | 10.672 | 17.256 | 34.391 |
+| ccx [s] | 1,9 | 3,2 | 6,6 | 10,5 | 29,0 |
+| σ **max** [MPa] | 358,2 | 368,4 | 399,4 | 429,0 | 475,6 |
+| σ P99 **je Element** [MPa] | 237,6 | 235,3 | 220,4 | 215,8 | 212,5 |
+| σ P99 **je Volumen** [MPa] | 181,8 | 173,9 | 185,3 | 189,2 | 197,3 |
+| Mittel **je Volumen** [MPa] | 46,98 | 48,27 | 48,73 | 49,01 | 49,25 |
+| Magnet Zug P99 [MPa] | 11,43 | 13,56 | 15,56 | 16,01 | 16,50 |
+| Eisenvolumen [10⁶ mm³] | 1,740 | 1,740 | 1,740 | 1,739 | 1,739 |
+
+Zum räumlichen Lauf am feinsten Netz (6/1,25): Mittel je Volumen **45,31**
+gegen 49,25 MPa, Eisenvolumen 1,743 gegen 1,739·10⁶ mm³ (**0,2 %**) — die
+unabhängige Gegenprobe, dass beide denselben Körper beschreiben. Rechenzeit
+~286 s gegen 29 s.
+
+**Der eigentliche Befund ist aber einer über die KENNZAHL.** Die beiden P99
+laufen **gegeneinander**: der elementgewichtete fällt (237,6 → 212,5), der
+volumengewichtete steigt (181,8 → 197,3). Der Grund ist derselbe, der 2026-10-22 (c)
+schon für den *Mittelwert* notiert wurde, nur in der anderen Richtung: eine
+Verfeinerung legt viele kleine Elemente in die heiße Zone, die damit
+**übervertreten** ist, während das Volumen-Hundertstel die Spitze erst auflöst.
+Dass die räumliche Reihe (2026-10-22 (c)) den elementgewichteten P99 als
+„gesetzt" auswies, war deshalb zum Teil die **Aufhebung zweier Netzeffekte** —
+mit vier Punkten und ohne die Volumengewichtung war das nicht zu sehen.
+Belastbar ist die **Klammer** (am feinsten Netz 197…213 MPa), nicht eine der
+beiden Zahlen; konvergiert ist das Mittel je Volumen (+0,5 % im letzten
+Schritt).
+
+**Und der ELEMENTGRAD bewegt das Gate stärker als das Netz.** CPE6 am groben
+Netz (3,0/1,0) gegen CPE3 am selben Netz: σ P99 je Element **263,2** gegen
+235,3 MPa, je Volumen 201,8 gegen 173,9, Mittel je Volumen 49,76 gegen 48,27.
+Das Blech-P99 ist also keine konvergierte Größe — es hängt zum Teil an der
+Singularität an der Anlagenkante, und ein besseres Element löst die **besser
+auf** statt sie wegzurechnen; der Sicherheitsfaktor kippt dadurch von 1,54 auf
+**1,29**, also über die Gate-Schwelle 1,3. Konvergiert sind das
+volumengewichtete Mittel (1,5 % über beide Grade) und die **Hauptzugspannung im
+Magneten**: CPE6 am groben Netz liefert 16,07 MPa, wofür CPE3 ein sechsfach
+feineres Netz braucht (16,50) — zwei unabhängige Wege auf dieselbe Zahl.
+
+**Zwei Fallen bei der zweiten Ordnung, beide gemessen.** (1) Gmsh projiziert die
+Mittenknoten auf die Geometrie, und auf den gekrümmten Taschenkappen kippt dabei
+ein Element um: ccx brach mit *nonpositive jacobian determinant in element 7760*
+ab — das sah wie ein Kontaktproblem aus und war ein Netzproblem
+(`Mesh.SecondOrderLinear = 1`). (2) Danach brach die **Kontaktiteration** nach
+288 s mit *too many cutbacks* ab: die Mittenknoten einer quadratischen Kante
+tragen eine andere Lastaufteilung als die Ecken. Mit
+`TYPE=NODE TO SURFACE` konvergiert derselbe Fall in 13,4 s. Die beiden
+Elementgrade rechnen damit **nicht denselben Kontaktalgorithmus** — das steht in
+`grenzen(2)`.
+
+**Fundstelle.** `ema_kontakt.baue_eben` (neu), `ema_kontakt.schreibe_inp`
+(dimensions- und gradabhängig), `ema_kontakt._elvol` (ersetzt `_tetvol`:
+Dreiecksfläche × Paketlänge, damit `kennzahlen` in beiden Dimensionen dasselbe
+wiegt), `ema_kontakt.kennzahlen` (`stress_p99_vol_MPa`,
+`magnet.hauptzug_p99_vol_MPa`, `volumen_magnet_mm3`),
+`ema_kontakt.konvergenz(2)`, `ema_kontakt.grenzen(2)`.
+
+**Stand.** Umgesetzt. Erreichbar als `struktur --solver kontakt --modell eben`
+(mit `--ebener-zustand`, `--ordnung`), als `run analyse --set
+struct_solver=kontakt_eben` und im Browser. Der ebene Weg aus dem Modul
+reproduziert den Prototyp, an dem er gemessen wurde, **Ziffer für Ziffer**
+(368,4 / 235,3 / 13,56 bei 3,0/1,0 und so für jeden Fall). Das Gate sitzt
+weiterhin auf `stress_p99_MPa` — es zu verschieben hieße, jede gespeicherte
+Zahl zu verschieben; die volumengewichteten Größen stehen **daneben**.
+
+---
+
+## 2026-10-23 (a) · `struct_solver` stand in keinem Schema — der Mehrkörperlauf war über `run analyse` nicht erreichbar
+
+**Beobachtung.** `SKILL.md` und `CLAUDE.md` nannten beide den Weg
+„`run analyse --set struct_solver=kontakt`". Den gab es nicht.
+`cae_cli.apply_sets` prüft jeden `--set`-Schlüssel gegen `/param_schema` **und**
+den Grundpayload und weist ab, was in keinem von beiden steht
+(`cae_cli.py:578`, „steht weder im Schema noch im Grundpayload").
+`struct_solver` stand in **keinem** von beiden: nicht in
+`ema_text2ema.SCHEMA` und nicht in `frischer_payload()`. Der Agent konnte den
+Mehrkörperlauf also nur über das *eigene* Verb `struktur --solver kontakt`
+auslösen — nicht über einen Pipelinelauf, und damit nie mit Bericht, Steckbrief,
+Ablage und `sicherheit` daran.
+
+**Messung.** Nachgeprüft mit gestelltem Schema (Muster `test_cae_cli.py`):
+
+```
+struct_solver=kontakt   -> 'struct_solver' steht weder im Schema
+                           noch im Grundpayload
+```
+
+Dieselbe Lücke wie beim Fahrzyklus (2026-09-06): ein Schlüssel, den die Pipeline
+liest, aber kein Schema führt. Sie wiegt hier mehr als eine Gütestufe, denn
+`struct_solver` wählt die **Physik** und nicht die Genauigkeit — verschmiert
+gegen Mehrkörper unterscheidet sich am Tor gemessen um Faktor 1,9.
+
+**Warum es nicht auffiel.** Die übrigen Rechenknöpfe (`fdm_resolution`,
+`struct_mesh_mm`, `n_frames` …) stehen absichtlich in keinem Schema und werden
+über `--guete entwurf|detail` gesetzt — das ist dokumentiert und richtig.
+`struct_solver` sieht aus wie einer von ihnen und steht sogar in den
+`GUETE`-Voreinstellungen (`ccx` bzw. `freecad`), also wirkte die Lücke wie
+Absicht. Nur bietet `--guete` genau diese zwei Werte an; `kontakt` war über
+keinen Weg wählbar.
+
+**Fundstelle.** `ema_text2ema.SCHEMA["struct_solver"]` (neu),
+`ema_text2ema.STRUKTUR_LOESER` (die eine Liste),
+`ema_pipeline.run_pipeline` (liest sie jetzt von dort statt aus einem eigenen
+Tupel), `server.py` `enum_opts["struct_solver"]` (lesbare Beschriftung).
+
+**Stand.** Behoben. `--set struct_solver=kontakt|kontakt_eben` wird angenommen
+und geprüft; ein erfundener Wert nennt die zulässigen. Die Liste steht **einmal**
+— vorher als Tupel in `run_pipeline` und als `<option>`-Reihe in `ema.html`.
+
+---
+
+## 2026-10-22 (c) · Das Netz an den Auflagen war zu grob — und eine meiner Kennzahlen wanderte mit ihm
+
+**Beobachtung.** Gefragt wurde, ob sich das Netz im Bereich der Auflagen feiner
+auflösen lässt. Es ließ sich nicht: `ema_kontakt.baue` vernetzte mit **einer**
+Zellgröße. Eine 3-mm-Anlagefläche trägt bei 6 mm Netz nicht einmal ein Element
+in ihrer Breite — und genau dort sitzt die Spannungsspitze, um derentwillen es
+den Mehrkörperlauf gibt.
+
+**Messung.** Konvergenzreihe am frischen Payload (Grundnetz 6 mm, Anlagennetz
+6 / 3 / 2 / 1,25 mm, 12.000 1/min, vier echte Kontaktläufe à ~5 min):
+
+| Anlagennetz [mm] | 6,00 | 3,00 | 2,00 | 1,25 |
+|---|---:|---:|---:|---:|
+| Knoten | 26.214 | 35.366 | 44.149 | 50.277 |
+| σ **max** [MPa] | 527,4 | 726,2 | 851,1 | 505,0 |
+| σ **P99** [MPa] | 247,8 | 225,9 | 229,6 | 219,5 |
+| Mittel **je Element** [MPa] | 57,40 | 52,27 | 51,27 | 46,28 |
+| Mittel **je Volumen** [MPa] | 45,84 | 45,40 | 45,38 | 45,31 |
+| Magnet Zug **max** [MPa] | 46,93 | 16,19 | 24,15 | 12,71 |
+| Magnet Zug **P99** [MPa] | 8,43 | 7,63 | 7,14 | 7,18 |
+| Eisenvolumen [10⁶ mm³] | 1,741 | 1,744 | 1,743 | 1,743 |
+
+**Drei Befunde, und einer davon betrifft mich selbst.**
+
+1. **σ max konvergiert nicht** — 527 → 726 → 851 → 505, es springt. An der
+   Kante, wo die Anlage auf die Taschenwand trifft, ist die Spannung
+   theoretisch unendlich; ein feineres Netz tastet nur näher an den singulären
+   Punkt heran. Dieselbe Sorte Zahl wie das Rohmaximum an der Taschenecke, und
+   ebenso wenig als Tor tauglich. Dasselbe am Magneten (46,9 / 16,2 / 24,2 /
+   12,7).
+2. **σ P99 setzt sich** — ab 3 mm bei 225 ± 5, von 3,0 auf 1,25 mm noch
+   −2,8 %. Der **unverfeinerte** Lauf ist der Ausreißer: die Last hängt an ein
+   bis zwei Elementen und treibt die Spannung künstlich hoch. Damit ist die
+   Vorgabe `mesh_anlage = mesh/3` belegt und nicht geraten.
+3. **`stress_mean_MPa` ist mesh-abhängig** (−19 % über dieselbe Reihe), weil er
+   über **Elemente** mittelt und ein kleines wie ein großes zählt — die
+   Verfeinerung legt viele kleine in einen kleinen Bereich. Das ist eine
+   Eigenschaft der Kennzahl, nicht der Maschine: der **volumengewichtete**
+   Mittelwert steht über dieselbe Reihe auf 45,3–45,8 MPa (**−1,2 %**). Das
+   Eisenvolumen bleibt bei 1,74·10⁶ mm³ — die unabhängige Gegenprobe, dass alle
+   vier Netze denselben Körper beschreiben.
+
+**Fundstelle.** `ema_kontakt.baue` (eine Zellgröße), `ema_kontakt.kennzahlen`
+(`stress_mean_MPa`), `ema_deck.kennzahlen` (bildet denselben Mittelwert).
+
+**Status: behoben.** `baue(..., mesh_anlage_mm=…, saum_faktor=…)` verfeinert an
+den Anlageflächen (Distance → Threshold auf ihren Flächen, Auslauf über
+`saum_faktor · mesh_anlage` auf das Grundmaß — ein Sprung von 0,8 auf 6 mm auf
+einer Elementkante gäbe entartete Tetraeder). Dafür musste die Flächensuche
+**vor** das Vernetzen wandern (`_flaechen_suchen`); zweimal suchen wären zwei
+Gelegenheiten, verschiedene zu finden. `stress_mean_vol_MPa` steht neben dem
+alten Mittelwert (der bleibt, damit er mit `ema_deck` vergleichbar ist).
+`konvergenz()` sagt in jedem Ergebnis, welche Zahl belastbar ist und welche
+nicht; `test_kontakt.py` nagelt das fest, samt der Gegenprobe, dass sich das
+Volumenmittel von hundert winzigen Elementen nicht kippen lässt (10,9 gegen
+99,9 MPa).
+
+**Offen:** `ema_deck.kennzahlen` bildet denselben elementgewichteten Mittelwert
+für die drei anderen Löser. Dort ist er bisher nicht aufgefallen, weil diese
+Netze gleichmäßig sind — aber die Kennzahl hat dieselbe Eigenschaft.
+
+---
+
+## 2026-10-22 (b) · Der Magnet liegt **nicht auf der ganzen Wand** an — und die Zeichnung hält ihn in Längsrichtung gar nicht
+
+**Beobachtung.** Gefragt wurde:
+
+> kannst du auch die magnete mit reinnehmen? das wäre dann aber eine
+> Mehrkörpersimulation. In den Magnettaschen müssten dann auch kleine
+> anlagefläche definiert werden, an denen die magnete partiell anliegen
+
+Beides trifft zu. Der Vormittagsstand (`ema_magnetlast`) trägt die
+Magnetfliehkraft als Knotenkräfte **gleichmäßig über die ganze Taschenwand**
+auf. Das ist besser als nichts (vorher war die Last gar nicht da), aber es ist
+nicht, was passiert: die Tasche ist um den Klebespalt größer als der Magnet, er
+berührt sie nur dort, wo Blech ihn trägt.
+
+**Messung 1 — was die Anlageflächen ändern.** Dieselbe Geometrie, dasselbe
+Netzmaß (frischer Payload, 12.000 1/min, 6 mm), einmal verschmiert und einmal
+als Mehrkörper mit Kontakt:
+
+| | verschmiert | mit Anlageflächen |
+|---|---:|---:|
+| Eisen P99 (**das Gate**) | 127,5 MPa | **237,7 MPa** (×1,86) |
+| Eisen Median | 46,0 MPa | 39,8 MPa (×0,87) |
+| Rechenzeit | 3 s | 212 s |
+
+Beides zusammen ist das Bild: die maßgebende Spannung **steigt**, weil dieselbe
+Kraft durch rund ein Siebtel der Fläche geht (gemessen tragen die Anlagen
+**14,1 %** der Taschenwand), und der Blechkörper als Ganzes wird **entlastet**,
+weil die Magnete jetzt mittragen.
+
+**Messung 2 — die rpm²-Linearität überlebt.** Das war die Frage, an der der Weg
+hätte scheitern können: Kontakt ist eine nichtlineare Randbedingung, und die
+ganze Nachbearbeitung dieser Kette (drei Betriebspunkte aus EINER Lösung,
+Berstdrehzahl, Rampenvideo) ruht auf `σ ~ ω²`. Zwei Läufe bei exakt verdoppelter
+Drehzahl:
+
+| | 6.000 1/min | 12.000 1/min | Verhältnis |
+|---|---:|---:|---:|
+| Eisen Spitze | 131,84 MPa | 527,37 MPa | **4,0001** |
+| Eisen P99 | 61,94 MPa | 247,75 MPa | **3,9998** |
+| Eisen Mittel | 14,35 MPa | 57,40 MPa | **4,0000** |
+| Magnet Hauptzug | 11,71 MPa | 46,93 MPa | **4,0077** |
+
+Abweichung **0,19 %**. Der Grund ist benennbar und nicht Zufall: die Anlagen
+liegen **spaltfrei** an, und die Fliehkraft kann sie nur zudrücken — der
+Kontaktzustand ändert sich nie, und ein immer geschlossener Kontakt ist eine
+lineare Kopplung. `ema_kontakt.linearitaetsprobe` fährt genau das nach; wer an
+den Anlagen etwas ändert (Spalt statt Berührung), muss sie wiederholen.
+
+**Messung 3 — der Magnet selbst.** Zum ersten Mal überhaupt sagt die Kette etwas
+über ihn: größte Hauptzugspannung 46,9 MPa (P99 8,4) gegen ~80 MPa
+Zugfestigkeit, SF 9,5. Dass er dabei 64,3 MPa **Vergleichsspannung** trägt, ist
+nachrichtlich — ein gesinterter Magnet ist spröde und trägt auf Druck rund das
+Dreizehnfache dessen, was er auf Zug trägt. Wer ihn über von Mises beurteilt,
+beurteilt ihn mit dem Kriterium eines zähen Werkstoffs.
+
+**Der eigentliche Befund steckt aber in der Geometrie.** Damit ein Kontaktmodell
+überhaupt wohlgestellt ist, muss der Magnet gehalten sein. Nachgerechnet hält
+ihn in seiner **Längsrichtung nichts**: die Taschenkappe ist ein Halbzylinder
+vom Radius `dicke/2 + spalt`, der Magnet endet flach — zwischen Magnetstirn und
+Kappenkuppe stehen am Beispiel **3,1 mm Luft**. Reibung reicht nicht: die
+Längskomponente der Fliehkraft ist am V-Schenkel 0,747 davon, die Reibung an der
+Flanke höchstens `µ · 0,664`, bei µ = 0,2 also 0,133. **Der Magnet rutscht**,
+bis er irgendwo ansteht.
+
+Das ist keine Modellierungsfeinheit, sondern eine Aussage über die gezeichnete
+Maschine: *die Tasche positioniert den Magneten in Längsrichtung nicht.* In der
+Wirklichkeit hält ihn die Klebung — eine Klebung, die bei 17,5 kN je Magnet
+nirgends in dieser Kette nachgewiesen wird.
+
+**Fundstelle.** `ema_topology` (Taschenkappe), `ema_freecad`
+(build_full_motor_script, obround pocket), `ema_magnetlast` (verschmierte Last).
+
+**Status: gebaut als eigener Weg, nicht als neue Vorgabe.** `ema_kontakt.py`,
+`struct_solver="kontakt"`. Eisen und Magnete sind getrennte Körper (bewusst
+**nicht** fragmentiert, damit an der Berührfläche doppelte Knoten entstehen —
+ein konformes Netz wäre eine Verklebung, die auch Zug überträgt). Die Anlagen
+sind Parameter (`anlageBreiteMm`, `anlageProFlanke`, `anlageEndeMm`,
+`anlageReibung`) und als **Entwurfsannahme** gekennzeichnet. Dazu das Kriterium
+`magnetbruch` in `ema_sicherheit`, das Mehrkörper-Schnittbild mit **zwei**
+Farbskalen (Blech 248 MPa gegen Magnet 8,4 MPa — auf einer Skala wäre der Magnet
+schwarz wie Luft) und `test_kontakt.py` (18 Prüfungen ohne Löser, `--echt`
+rechnet zwei Läufe und fährt die Linearitätsprobe).
+
+**Offen und ausdrücklich benannt:** der **Endanschlag** ist Eisen in der
+Luftkappe und nimmt am Beispiel **31 %** davon ein — das Feldmodell dieser Kette
+weiß davon nichts (`ema_topology` zeichnet keine Anlagen). Wer ihn baut, hat dort
+einen magnetischen Nebenschluss, den niemand rechnet; wer ihn wegläßt
+(`anlageEndeMm = 0`), hat einen Magneten, den nur Reibung hält. Ebenfalls offen:
+die Klebung trägt im Modell nichts, der Reibbeiwert 0,2 ist eine Annahme, und
+E/ν/Festigkeiten des Magneten sind Literaturgrößen der Werkstoffklasse
+(`MAGNETS[...]["mech_beleg"] == "annahme"`), keine Messung.
+
+---
+
+## 2026-10-22 · Die Struktur-FEM rechnete die Magnete **nicht mit** — und am Steg sind sie der größere Posten
+
+**Beobachtung.** Gemeldet als:
+
+> ich möchte die fem berechnung vertiefen. die gewichte der magnete sollen auch
+> berücksichtigt werden. auch die darstellung der FE Analyse gefällt mir nicht.
+
+Beide Hälften stimmten. `ema_freecad.build_rotor_fem_script` vernetzt
+ausdrücklich **nur das Rotoreisen** („the magnets must NOT be part of the
+centrifugal FEM") und lädt es mit `*DLOAD CENTRIF` — einer Volumenkraft über die
+Dichte des **Blechs**. Die Magnettaschen sind in diesem Modell Luft. Gerechnet
+wurde also die Fliehkraft des Eisens und **keine einzige Newton** der Magnete,
+obwohl der Magnet das schwerste Einzelteil im Läufer ist und sein ganzes Gewicht
+an der dünnsten Stelle hängt, die es dort gibt. Dasselbe im eigenen Rechensatz
+(`ema_deck.baue` schneidet die Taschen als Löcher, `zentrifugal_lasten` kennt nur
+`dichte_kg_m3` des Blechs).
+
+**Warum es nicht auffiel.** Beide Vergleichswerte teilen den Fehler: die
+analytische Ringspannung (`ema_rotorcheck._bore_hoop_mpa`) ist die eines
+**glatten** rotierenden Ringes, und `KT_POCKET = 1.5` darüber ist ein Kerbfaktor
+für die scharfe Taschenecke — kein Zuschlag für eine zusätzliche Last. Das
+Tier-2-Tor verglich also eine Spannung ohne Magnete mit einer Spannung ohne
+Magnete, und die FEM bestätigte sie. `ema_radien.magnethaltung` nennt den
+Blechsteg seit jeher „das bindende Bauteil" — gerechnet hat die Last auf ihn
+niemand.
+
+**Messung 1 — die Größenordnung** (frischer Payload, V-Form, 2p = 6, Läufer
+Ø 188,6 mm, L = 80 mm, Magnet 42,2 × 6,0 mm, Schwerpunkt r = 72,9 mm, NdFeB):
+
+| Drehzahl | je Magnet | je Pol | alle Pole |
+|---|---:|---:|---:|
+| 12.000 1/min | 17,5 kN | 35,0 kN | 210,1 kN |
+| 20.000 1/min | 48,6 kN | 97,3 kN | 583,7 kN |
+
+Der Steg darunter ist `ema_topology.BRIDGE_MM` = **1,3 mm** breit. Zwei davon je
+Pol tragen bei L = 80 mm zusammen 208 mm²; 35 kN darauf sind **168 MPa** neben
+einer Ringspannung von **93,6 MPa** bei derselben Drehzahl. Die vergessene Last
+ist also kein Zuschlag, sondern der **größere** Posten an der bindenden Stelle.
+
+**Messung 2 — was die FEM damit anders sagt.** Dieselbe Geometrie
+(`smoke_test.GEOM`, 16.000 1/min, Netz 4 mm, 307.000 Tet4), einmal ohne und
+einmal mit der Magnetlast, sonst Zeichen für Zeichen derselbe Lauf:
+
+| | ohne Magnetlast | mit Magnetlast | Faktor |
+|---|---:|---:|---:|
+| σ_v Rohmaximum | 2983,8 MPa | 4311,3 MPa | ×1,44 |
+| **σ_v P99 (das GATE)** | **582,0 MPa** | **893,0 MPa** | **×1,53** |
+| u_max | 108,9 µm | 157,1 µm | ×1,44 |
+
+Am Vorgabe-Payload bei 12.000 1/min fällt die maximale sichere Drehzahl dadurch
+von 12.000 auf **9951 1/min** (SF_FEM 0,89 statt bestanden). **Jedes gespeicherte
+Projekt mit eingelassenen Magneten ist davon betroffen** — seine
+`safety_factor_fem` und `max_safe_rpm` sind ohne diese Last entstanden und mit
+den neuen nicht vergleichbar.
+
+**Zweiter Befund, beim Rechnen gefunden: die Magnetdichte stand an zwei Stellen
+und in der Werkstofftabelle gar nicht.** `ema_screen.MAG_DICHTE_KG_M3` = 7600,
+`ema_thermal` = 7500 als Literal, `MAGNETS` ohne `density`. Damit war **Ferrit
+genauso schwer wie NdFeB**, obwohl es rund 35 % leichter ist — und seit die
+Magnetmasse über eine Spannung entscheidet, ist das keine Frage der Stückliste
+mehr. Gemessen am frischen Payload: Magnetmasse Ferrit 1,849 → **1,192 kg**,
+Kosten 102 → 66 €; NdFeB N35 1,849 → 1,825 kg (7600 → 7500).
+
+**Fundstelle.** `ema_freecad.build_rotor_fem_script` · `ema_deck.schreibe_inp` ·
+`ema_rotorcheck.rotor_stress_check` · `ema_screen.MAG_DICHTE_KG_M3` ·
+`ema_thermal.compute_capacities`.
+
+**Status: behoben.** Neu `ema_magnetlast.py` als die eine Quelle: die
+Fliehkraft jedes eingelassenen Magneten wird exakt in die Taschenbasis zerlegt
+(Flanke + Endkappe, Vektorsumme = Fliehkraft) und als **Knotenkräfte** auf die
+Wandknoten gelegt — in allen vier Lösern dieser Kette (CalculiX über
+`*CLOAD`, Z88 über `Art 1`, Code Aster über `FORCE_NODALE` auf einer
+`GROUP_NO`). Nur in einem von ihnen wäre schlimmer als in keinem: der
+Löservergleich nennt die Differenz sonst eine Löserabweichung. Der
+Knotenauswahl-Kern steht **einmal** (`ema_magnetlast.KERN`, per `exec` geladen
+und wörtlich ins FreeCAD-Skript geschrieben), die Dichte je Sorte in `MAGNETS`.
+Dazu der analytische Richtwert `stegspannung` (mit benannter Annahme über die
+Zahl der tragenden Stege), das Kriterium `magnetsteg` in `ema_sicherheit`
+(Schwere `hinweis`, denn ein Richtwert darf kein Tor schließen) und die Zeile im
+`rotor-check`. Test: `test_magnetlast.py`.
+
+**Offen geblieben, ausdrücklich:** Käfigstäbe, Ankerwicklung und Erregerspulen
+tragen dieselbe Lücke in ihren eigenen Bauteilen (ihre Prüfungen
+`ema_asm.steg_check` / `ema_schenkelpol.befestigung` rechnen die Masse, die
+Struktur-FEM nicht); die Klebung gilt als nicht tragend; und der **Schrumpfsitz**
+bringt eine Ringvorspannung mit, die `connection_assessment` analytisch rechnet
+und die FEM nach wie vor nicht sieht.
+
+---
+
+## 2026-10-22 · Die FE-Darstellung war eine Punktwolke, keine Schnittfläche — und zeigte die falsche Größe
+
+**Beobachtung.** Zweite Hälfte derselben Meldung („auch die darstellung der FE
+Analyse gefällt mir nicht"). `ema_pipeline._render_deform_single` zeichnete
+`ax.scatter(xs, ys, c=um, s=3)` — **alle** Knoten des Volumennetzes, auf die
+xy-Ebene projiziert.
+
+**Messung.** Drei Mängel, jeder einzeln ausreichend:
+
+1. **Projektion statt Schnitt.** Über die ganze Paketlänge liegen die Knoten
+   übereinander; sichtbar ist der zuletzt gezeichnete. Die Magnettaschen — die
+   Stelle, auf die es ankommt — sind von Stirnflächenknoten zugedeckt und als
+   Löcher nicht erkennbar.
+2. **Falsche Größe.** Gezeigt wurde die **Verschiebung** (am gemessenen Lauf
+   28,6 µm). Die Vergleichsspannung lag im `.frd`, wurde geparst (`_stress_vm`)
+   und in **kein** Bild gezeichnet.
+3. **Es sah aus wie ein Netz und war keines.** Genau diese Verwechslung steht
+   schon im Kopf von `_render_deform_analytical` („got mistaken for a mesh");
+   dort wurde sie für den analytischen Rückfall behoben, für das **echte**
+   FEM-Ergebnis blieb die Punktwolke stehen.
+
+Dahinter lag der eigentliche Grund: `_parse_frd_full` las Knoten, Verschiebungen
+und Spannungen — aber **nicht die Elementtabelle**. Ohne Knotenverbindungen gibt
+es keine Fläche, keinen Schnitt und kein Loch an der Stelle der Tasche. Der Block
+steht in jeder `.frd` (`    3C`), er wurde nur übersprungen.
+
+**Fundstelle.** `ema_pipeline._render_deform_single` · `_parse_frd_full`.
+
+**Status: behoben.** `_parse_frd_full` liest die Elemente mit; neu
+`ema_struktbild.py` schneidet das Tetraedernetz bei halber Paketlänge (je
+Tetraeder das Schnittpolygon aus den Kantenschnittpunkten, Feldwert entlang der
+Kante interpoliert) und zeichnet **drei** Größen statt einer: Spannung,
+**Sicherheit** (R_e/σ, mit roter SF-1-Marke) und Verformung, jede bei Nennlast /
+Maximaldrehzahl / Berstdrehzahl. Gemessen am Beispiellauf: 7050 Schnittflächen,
+0,3 s für den Schnitt, der über alle neun Bilder **einmal** gerechnet und nur
+skaliert wird. Die Farbskala hängt am 99,5. Hundertstel und nicht am Maximum —
+das sitzt an einer scharfen Taschenecke und ist eine Gitter-Singularität
+(gemessen 4311 MPa Rohmax gegen 893 MPa P99 am selben Lauf); daran skaliert wäre
+das halbe Blech schwarz. Das Rampenvideo läuft über denselben Schnitt, sonst
+zeigten Video und Standbild desselben Laufs zwei Darstellungen derselben Zahlen.
+Ohne Elementtabelle bleibt die Punktwolke und **sagt es im Untertitel**.
+
+---
+
 ## 2026-10-17 · Die Eingaben entstanden erst am Lauf**ende** — 224 von 369 Projekten haben keine
 
 **Beobachtung.** Gemeldet als:

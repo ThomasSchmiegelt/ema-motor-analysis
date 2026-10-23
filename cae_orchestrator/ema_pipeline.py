@@ -1064,11 +1064,29 @@ def rho_bei(mat: dict, t_c: float) -> float:
 # base "N" grade); T_curie = Curie temperature (magnet destroyed above).
 # rho_el: electrical resistivity [Ω·m] (drives magnet-eddy skin depth);
 # alpha_Br: remanence temperature coefficient [1/K] (Br(T) = Br·(1+alpha_Br·(T-20)))
+# ``E``/``nu``/``zug_mpa``/``druck_mpa`` kamen am 22.10.2026 dazu, als die
+# Struktur-FEM die Magnete als eigene KOERPER zu rechnen begann (``ema_kontakt``).
+# Sie sind mit ``mech_beleg: "annahme"`` gekennzeichnet und NICHT gemessen:
+# Groessenordnung der Werkstoffklasse aus der Literatur, so wie
+# ``ema_referenz.GETRIEBE_WERKSTOFF`` es fuer die Verzahnung haelt. Entscheidend
+# ist das Verhaeltnis -- gesinterte Magnete sind **sproede**: NdFeB traegt auf
+# Druck rund das Dreizehnfache dessen, was es auf Zug traegt, und genau deshalb
+# ist die groesste HauptZUGspannung im Magneten die Zahl, auf die es ankommt
+# (nicht seine Vergleichsspannung).
+#
+# ``density`` [kg/m^3] ist seit dem 22.10.2026 Teil der Tabelle. Sie stand
+# vorher an ZWEI Stellen als Konstante -- 7600 in ``ema_screen``, 7500 in
+# ``ema_thermal`` -- und hier gar nicht; damit war **Ferrit genauso schwer wie
+# NdFeB**, obwohl es rund 35 % leichter ist. Das war nicht nur eine Frage der
+# Masse und des Preises: genau diese Masse haengt im Laeufer am Blechsteg, und
+# seit ``ema_magnetlast`` die Fliehkraft der Magnete in die Struktur-FEM
+# eintraegt, entscheidet sie ueber eine Spannung. Gelesen wird sie ueber
+# ``ema_magnetlast.dichte`` -- eine Quelle, kein Literal daneben.
 MAGNETS = {
-    "ndfeb_n35": {"label": "NdFeB N35", "Br": 1.15, "mu_r": 1.05, "T_op_max": 80,  "T_curie": 310, "rho_el": 1.4e-6, "alpha_Br": -0.0012},
-    "ndfeb_n42": {"label": "NdFeB N42", "Br": 1.28, "mu_r": 1.05, "T_op_max": 80,  "T_curie": 310, "rho_el": 1.4e-6, "alpha_Br": -0.0012},
-    "ndfeb_n50": {"label": "NdFeB N50", "Br": 1.40, "mu_r": 1.05, "T_op_max": 80,  "T_curie": 310, "rho_el": 1.4e-6, "alpha_Br": -0.0012},
-    "ferrite":   {"label": "Ferrit Y30","Br": 0.40, "mu_r": 1.07, "T_op_max": 250, "T_curie": 450, "rho_el": 1.0e4,  "alpha_Br": -0.0020},
+    "ndfeb_n35": {"label": "NdFeB N35", "Br": 1.15, "mu_r": 1.05, "T_op_max": 80,  "T_curie": 310, "rho_el": 1.4e-6, "alpha_Br": -0.0012, "density": 7500, "E": 160000, "nu": 0.24, "zug_mpa": 80,  "druck_mpa": 1050, "mech_beleg": "annahme"},
+    "ndfeb_n42": {"label": "NdFeB N42", "Br": 1.28, "mu_r": 1.05, "T_op_max": 80,  "T_curie": 310, "rho_el": 1.4e-6, "alpha_Br": -0.0012, "density": 7500, "E": 160000, "nu": 0.24, "zug_mpa": 80,  "druck_mpa": 1050, "mech_beleg": "annahme"},
+    "ndfeb_n50": {"label": "NdFeB N50", "Br": 1.40, "mu_r": 1.05, "T_op_max": 80,  "T_curie": 310, "rho_el": 1.4e-6, "alpha_Br": -0.0012, "density": 7550, "E": 160000, "nu": 0.24, "zug_mpa": 80,  "druck_mpa": 1050, "mech_beleg": "annahme"},
+    "ferrite":   {"label": "Ferrit Y30","Br": 0.40, "mu_r": 1.07, "T_op_max": 250, "T_curie": 450, "rho_el": 1.0e4,  "alpha_Br": -0.0020, "density": 4900, "E": 150000, "nu": 0.28, "zug_mpa": 40,  "druck_mpa":  700, "mech_beleg": "annahme"},
 }
 
 # Backward-compat alias for the structural FEM helper
@@ -1157,6 +1175,23 @@ def _parse_frd(frd_path: str, yield_mpa: float = 0.0) -> dict:
     }
 
 
+def _magnetlast_aus_stdout(stdout: str) -> dict:
+    """Die ``MAGNETLAST:``-Marke des FreeCAD-Laufs — die LETZTE gilt.
+
+    Das FEM-Skript faehrt eine Netzleiter (Grundmass → feiner → groeber) und
+    traegt die Magnetlast je Versuch neu auf, weil ein anderes Netz andere
+    Wandknoten hat. Gemeldet werden muss der Versuch, der GELOEST hat, also der
+    letzte — die erste Marke gehoert zu einem Netz, das verworfen wurde.
+    """
+    treffer = re.findall(r"^MAGNETLAST:(\{.*\})\s*$", stdout or "", re.M)
+    if not treffer:
+        return {}
+    try:
+        return json.loads(treffer[-1])
+    except (ValueError, TypeError):
+        return {}
+
+
 def _parse_frd_full(frd_path: str, yield_mpa: float = 0.0) -> dict:
     """Extended FRD parser — also returns per-node coords and displacements for plotting."""
     import math as _m
@@ -1165,6 +1200,15 @@ def _parse_frd_full(frd_path: str, yield_mpa: float = 0.0) -> dict:
     disp_vec: dict[int, tuple[float,float,float]] = {} # nid → (dx, dy, dz) [mm]
     disp_mag: dict[int, float] = {}
     stress_vm: dict[int, float] = {}
+    # Elementtabelle. Sie stand bis zum 22.10.2026 nicht in diesem Parser, und
+    # deshalb konnte das Ergebnis nur als PUNKTWOLKE gezeichnet werden: ohne
+    # Knotenverbindungen gibt es keine Flaeche, keinen Schnitt und kein Loch an
+    # der Stelle, wo die Magnettasche ist. Der Block steht in jeder .frd
+    # ("    3C"), er wurde nur uebersprungen.
+    elems: dict[int, tuple] = {}
+    in_el_block = False
+    el_offen = 0
+    el_knoten: list = []
     mode = None
     header_skip = 0
     in_node_block = False
@@ -1188,6 +1232,37 @@ def _parse_frd_full(frd_path: str, yield_mpa: float = 0.0) -> dict:
                 nodes[nid] = (x, y, z)
             except (ValueError, IndexError):
                 pass
+            continue
+
+        # Elementblock: "-1 <eid> <typ> <grp> <mat>", danach "-2"-Zeilen mit den
+        # Knoten (Tet10 braucht zwei). Die Knotenzahl haengt am Typ: 3 = Tet4,
+        # 6 = Tet10 (CalculiX-FRD-Elementtypen).
+        if ln.startswith("    3C") or ln.startswith("  3C"):
+            in_el_block = True; continue
+        if in_el_block and ln.startswith(" -3"):
+            in_el_block = False; el_offen = 0; continue
+        if in_el_block:
+            if ln.startswith(" -1"):
+                w = ln.split()
+                try:
+                    eid = int(w[1]); typ = int(w[2])
+                except (ValueError, IndexError):
+                    el_offen = 0; continue
+                el_offen = {3: 4, 6: 10, 1: 8, 4: 20, 2: 6, 5: 15}.get(typ, 0)
+                el_knoten = []
+                if el_offen:
+                    elems[eid] = ()
+                    el_aktuell = eid
+                continue
+            if ln.startswith(" -2") and el_offen:
+                try:
+                    el_knoten += [int(x) for x in ln.split()[1:]]
+                except ValueError:
+                    el_offen = 0; continue
+                if len(el_knoten) >= el_offen:
+                    elems[el_aktuell] = tuple(el_knoten[:el_offen])
+                    el_offen = 0
+                continue
             continue
 
         if " -4  DISP" in ln:
@@ -1224,6 +1299,7 @@ def _parse_frd_full(frd_path: str, yield_mpa: float = 0.0) -> dict:
     if not valid:
         return {"solver_status": "NO_VALID_NODES",
                 "nodes": nodes, "disp_mag": disp_mag}
+    elems = {e: ids for e, ids in elems.items() if ids}
 
     max_vm = max(valid.values())
     max_d  = max(disp_mag.values()) if disp_mag else 0.0
@@ -1243,9 +1319,11 @@ def _parse_frd_full(frd_path: str, yield_mpa: float = 0.0) -> dict:
         "max_displacement_mm": round(max_d, 4),
         "max_displacement_um": round(max_d * 1e3, 3),
         "node_count":          len(valid),
+        "element_count":       len(elems),
         "safety_factor":       sf,
         # Geometry data for plotting (not serialised to JSON)
         "_nodes":     nodes,
+        "_elems":     elems,
         "_disp_vec":  disp_vec,
         "_disp_mag":  disp_mag,
         "_stress_vm": valid,
@@ -1510,19 +1588,45 @@ def _deformation_video(arrays, geom: dict, rpm_max: float, rpm_solve: float,
                        sigma_solve_mpa: float, yield_mpa: float, exagg: float,
                        max_um_clip: float, frames_dir: str, n_frames: int = 30,
                        title_prefix: str = "FEM-Verformung",
-                       smooth_mat: dict | None = None) -> str | None:
+                       smooth_mat: dict | None = None,
+                       netz: dict | None = None) -> str | None:
     """Render an rpm 0→rpm_max deformation ramp (fixed exaggeration) → anim.mp4.
 
     The displacement grows with rpm² at the fixed exaggeration, so the rotor is
     seen visibly bulging out as speed rises — a feel for where/how it deforms.
     ``smooth_mat`` set → use the smooth analytical (Lamé) renderer instead of the
     FEM point-scatter (so the analytical video is a clean filled annulus too).
+
+    ``netz`` (Knoten/Elemente/Werte aus dem ``.frd``) → die Rampe wird mit
+    DEMSELBEN Schnitt gezeichnet wie die Standbilder. Sie dafuer bei der
+    Punktwolke zu lassen waere der schlechtere von zwei Fehlern: dann zeigten
+    Video und Standbild desselben Laufs zwei verschiedene Darstellungen
+    derselben Zahlen, und man sucht den Unterschied in der Physik.
     """
     os.makedirs(frames_dir, exist_ok=True)
     # subsample nodes for speed (video frames are small); keep >= ~6k points
     npts = len(arrays[0])
     sub  = max(1, npts // 6000)
     rpms = np.linspace(0.0, rpm_max, max(2, n_frames))
+    if netz:
+        import ema_struktbild as _sbv
+        for i, rpm in enumerate(rpms):
+            _sk = ((float(rpm) / rpm_solve) ** 2) if rpm_solve > 0 else 0.0
+            _sig = sigma_solve_mpa * _sk
+            _sf = (yield_mpa / _sig) if _sig > 1e-6 else None
+            b64, _st = _sbv.feldbild(
+                netz["knoten"], netz["elemente"], geom, groesse="verformung",
+                wert_knoten=netz["u_um"], verschiebung=netz["u_vec"],
+                z=netz.get("z"), skal=_sk, exagg=exagg,
+                vmin=0.0, vmax=max_um_clip, yield_mpa=yield_mpa,
+                titel=(f"Verformung im Schnitt  |  {float(rpm):,.0f} U/min  |  "
+                       f"σ_v,max = {_sig:.0f} MPa  |  "
+                       + (f"SF = {_sf:.2f}" if _sf else "SF = –")
+                       + f"  |  Überhöhung ×{exagg:.0f}").replace(",", "."),
+                px=700)
+            if b64:
+                _save_png_b64(b64, os.path.join(frames_dir, f"frame_{i:04d}.png"))
+        return _make_video(frames_dir, fps=12)
     for i, rpm in enumerate(rpms):
         if smooth_mat is not None:
             b64, _ = _render_deform_analytical(
@@ -3327,7 +3431,8 @@ SF_TARGET = 1.3
 
 
 def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
-                           solver: str, mesh_mm: float, state: dict) -> dict:
+                           solver: str, mesh_mm: float, state: dict,
+                           magnet_code: str | None = None) -> dict:
     """Rotor-Festigkeit ueber ``ema_deck`` statt ueber FreeCAD — mit bis zu DREI Loesern.
 
     Gibt einen Ergebnisblock in DERSELBEN Form zurueck wie der FreeCAD-Pfad, damit das
@@ -3341,8 +3446,16 @@ def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
     volle Rotor vernetzt, und dann rechnen alle bitgleich dasselbe Netz.
 
     ``solver``: ``ccx`` · ``z88`` · ``aster`` · ``beide`` (ccx+z88) · ``alle``.
+
+    **Die Magnetfliehkraft laeuft mit** (``ema_deck.magnet_knotenlasten``), und
+    zwar in ALLEN gewaehlten Loesern. Nur in einem von ihnen waere schlimmer als
+    in keinem: der Loeservergleich stellt dieselben Kennzahlen nebeneinander und
+    nennt die Differenz eine Loeserabweichung -- aus 0,01 % wuerden zweistellige
+    Prozente, und die Aussage „zwei korrekte Direktloeser muessen auf einem Netz
+    auf Rundungsniveau uebereinstimmen" waere zerstoert.
     """
     import ema_deck as _deck
+    import ema_magnetlast as _ml
 
     gewuenscht = {"ccx": ("ccx",), "z88": ("z88",), "aster": ("aster",),
                   "beide": ("ccx", "z88"),
@@ -3359,11 +3472,38 @@ def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
                  "netz_knoten": netz.n_knoten, "netz_elemente": netz.n_elemente,
                  "netz_sektor": bool(sektor), "struct_mesh_mm": mesh_mm}
 
+    # ── Magnetfliehkraft auf die Taschenwaende ────────────────────────────────
+    maglast, magbericht, magwaende = {}, [], []
+    try:
+        maglast, magbericht, magwaende = _deck.magnet_knotenlasten(
+            netz, geom, rpm, magnet_code=magnet_code)
+    except Exception as _mle:                            # noqa: BLE001
+        _log(state, f"   ⚠ Magnetlast nicht aufgetragen ({_mle}) — die FEM "
+                    f"rechnet dann NUR die Fliehkraft des Blechs", 79)
+    if magwaende:
+        _ms = _ml.summe(magwaende,
+                        poles=max(2, int(geom.get("p", 3)) * 2))
+        _fehlt = _ml.fehlende_waende(magbericht)
+        aus["magnetlast"] = {
+            **_ms, "n_lastknoten": len(maglast),
+            "n_waende_ohne_knoten": len(_fehlt),
+            "nur_pol_0": bool(sektor),
+            "grenzen": _ml.grenzen(),
+        }
+        _log(state, f"   Magnetfliehkraft: {_ms['n_magnete']} Magnete "
+                    f"({_ms['magnet_kg']:.3f} kg), {_ms['kraft_je_pol_kN']:.1f} kN "
+                    f"je Pol auf {len(maglast)} Knoten von {_ms['n_waende']} "
+                    f"Taschenwaenden" + (" (Polsektor: nur Pol 0)" if sektor else ""), 79)
+        if _fehlt:
+            _log(state, f"   ⚠ {len(_fehlt)} Taschenwaende haben KEINEN Netzknoten "
+                        f"getroffen — diese Last fehlt im Modell", 79)
+
     # Reihenfolge ist die Rangfolge: der erste, der Zahlen liefert, fuehrt.
     k: dict = {}
 
     if "ccx" in gewuenscht:
-        pfad = _deck.schreibe_inp(netz, mat, rpm, os.path.join(arbeit, "rotor.inp"))
+        pfad = _deck.schreibe_inp(netz, mat, rpm, os.path.join(arbeit, "rotor.inp"),
+                                  zusatzlasten=maglast)
         r = _deck.loese_ccx(pfad)
         if r["solver_status"] != "OK":
             return {"solver_status": "FAILED", "rechensatz": "eigen", "rpm": rpm,
@@ -3378,7 +3518,7 @@ def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
             _log(state, f"⚠ Z88 nicht einsatzbereit ({warum}) — uebersprungen", 79)
         else:
             zp = os.path.join(arbeit, "z88")
-            _z88.schreibe_satz(netz, mat, rpm, zp)
+            _z88.schreibe_satz(netz, mat, rpm, zp, zusatzlasten=maglast)
             rz = _z88.loese(zp, netz=netz)
             if rz["solver_status"] == "OK":
                 kz = _z88.kennzahlen_aus_lauf(netz, zp, mat["yield_mpa"])
@@ -3394,7 +3534,8 @@ def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
             _log(state, f"⚠ Code Aster nicht einsatzbereit ({warum}) — uebersprungen", 79)
         else:
             ra = _aster.loese(netz, mat, rpm,
-                              ordner=os.path.join(arbeit, "aster"))
+                              ordner=os.path.join(arbeit, "aster"),
+                              zusatzlasten=maglast)
             if ra["solver_status"] == "OK":
                 k["code_aster"] = _aster.kennzahlen_aus_lauf(netz, ra,
                                                              mat["yield_mpa"])
@@ -3441,6 +3582,171 @@ def _struktur_eigener_satz(geom: dict, mat: dict, rpm: float, proj: str,
         _log(state, f"✓ {len(k)} Loeser auf demselben Netz ({', '.join(k)}): "
                     f"hoechste Abweichung {schlimmste:.3f} %", 87)
     return aus
+
+
+def _struktur_kontakt(geom: dict, mat: dict, mag: dict, rpm: float, proj: str,
+                      mesh_mm: float, axial_mm: float, state: dict,
+                      eben: bool = False) -> dict:
+    """Mehrkoerper-Rotor ueber ``ema_kontakt`` -- Eisen UND Magnete.
+
+    Gibt denselben Ergebnisblock zurueck wie die anderen Rechensaetze
+    (``max_von_mises_MPa`` + ``notch_peak_MPa``), damit das Tier-2-Tor darunter
+    unveraendert weiterlaeuft -- und zusaetzlich einen ``magnet``-Block, den
+    vorher kein Weg liefern konnte: was im MAGNETEN los ist.
+
+    Die Magnetlast aus ``ema_magnetlast`` wird hier ausdruecklich **nicht**
+    aufgetragen. Die Magnete sind Koerper mit eigener Dichte; ``*DLOAD CENTRIF``
+    wirkt auf sie wie auf das Blech. Beides zugleich waere die doppelte Last --
+    und zwar eine, die man dem Ergebnis nicht ansieht.
+    """
+    import time
+
+    import ema_deck as _deck
+    import ema_kontakt as _kt
+
+    t0 = time.time()
+    if eben:
+        # EBENE Scheibe. Der Lastfall ist planar, und der raeumliche Lauf
+        # haelt ohnehin beide Stirnflaechen in z -- das IST der ebene
+        # Verzerrungszustand. Gemessen kostet er 12 s statt 286 s und erlaubt
+        # dafuer ein Anlagennetz, das die Spitze wirklich aufloest. Das
+        # Grundnetz wird dabei auf die Haelfte genommen: in einer Scheibe ist
+        # das bezahlbar, und `struct_mesh_mm` ist auf den raeumlichen Lauf
+        # geeicht.
+        netz = _kt.baue_eben(geom, axial_mm, mesh_mm=max(1.0, mesh_mm / 2.0))
+    else:
+        netz = _kt.baue(geom, axial_mm, mesh_mm=mesh_mm)
+    kenn_anlage = _kt.anlage_kennzahlen(geom, axial_mm)
+    _log(state, f"   Netz: {netz.n_knoten:,} Knoten / {netz.n_elemente:,} "
+                f"{'Dreiecke' if eben else 'Tet4'}, "
+                f"{netz.n_magnete} Magnetkoerper, {len(netz.kontakte)} "
+                f"Kontaktpaare ueber {kenn_anlage['n_anlagen']} Anlageflaechen "
+                f"({_t_s(time.time() - t0)})".replace(",", "."), 79)
+    _log(state, f"   Anlagen tragen {kenn_anlage['anteil_an_der_wand_pct']:.1f} % "
+                f"der Taschenwand" +
+         (f"; der Endanschlag nimmt {kenn_anlage['endanschlag_anteil_luftkappe_pct']:.0f} % "
+          f"der Luftkappe ein — das Feldmodell weiss davon NICHTS"
+          if kenn_anlage.get("endanschlag") else
+          "; ohne Endanschlag haelt den Magneten in Laengsrichtung nur Reibung"), 79)
+
+    arbeit = os.path.join(proj, "mehrkoerper")
+    os.makedirs(arbeit, exist_ok=True)
+    pfad = _kt.schreibe_inp(netz, mat, mag, rpm,
+                            os.path.join(arbeit, "kontakt.inp"),
+                            reibung=_kt.anlage_vorgaben(geom)["reibung"],
+                            mesh_mm=netz.netz_grund_mm or mesh_mm)
+    t1 = time.time()
+    r = _deck.loese_ccx(pfad, timeout=5400)
+    if r["solver_status"] != "OK":
+        return {"solver_status": "FAILED", "rechensatz": "kontakt", "rpm": rpm,
+                "modell": ("eben" if eben else "raeumlich"),
+                "log": str(r.get("meldung", ""))[:1500],
+                "anlagen": kenn_anlage, "grenzen": _kt.grenzen(netz.dim)}
+    k = _kt.kennzahlen(netz, _deck.lies_dat_spannungen(r["dat"]), mat, mag)
+    _log(state, f"   geloest in {_t_s(time.time() - t1)} "
+                f"(verschmiert braeuchte Sekunden — der Kontakt ist der Preis "
+                f"fuer die oertliche Lastuebertragung)", 87)
+    aus = {"solver_status": "OK", "rechensatz": "kontakt", "rpm": rpm,
+           # Der Pfad bleibt im Ergebnis: Stufe 5b braucht die KNOTEN-Ergebnisse
+           # aus der .frd (die .dat traegt Elementspannungen). Er liegt im
+           # Projekt und nicht in einem transienten Arbeitsordner.
+           "frd_datei": r.get("frd", ""),
+           "netz_knoten": netz.n_knoten, "netz_elemente": netz.n_elemente,
+           "n_magnetkoerper": netz.n_magnete,
+           "n_kontaktpaare": len(netz.kontakte),
+           "struct_mesh_mm": netz.netz_grund_mm or mesh_mm,
+           # WELCHE Dimension gerechnet wurde. Ohne das liest sich eine ebene
+           # Zahl wie eine raeumliche, und die beiden unterscheiden sich am
+           # Blech-P99 gemessen um Faktor 1,7 -- nicht weil eine falsch ist,
+           # sondern weil die ebene Scheibe die Spitze wirklich aufloest.
+           "modell": ("eben" if eben else "raeumlich"),
+           "ebener_zustand": (netz.ebener_zustand or None),
+           "elementgrad": netz.ordnung,
+           "max_von_mises_MPa": k["stress_peak_MPa"],
+           "notch_peak_MPa": k["stress_p99_MPa"],
+           "mean_von_mises_MPa": k["stress_mean_MPa"],
+           "node_count": netz.n_knoten,
+           "solver_verwendet": "CalculiX (Kontakt)",
+           "anlagen": kenn_anlage,
+           # WELCHE dieser Zahlen belastbar ist -- gemessen an einer
+           # Konvergenzreihe ueber das Anlagennetz. `stress_peak_MPa` ist es
+           # ausdruecklich NICHT (Singularitaet an der Anlagenkante).
+           "konvergenz": _kt.konvergenz(netz.dim),
+           # Warum die rpm²-Skalierung der Kette auch hier gelten DARF -- die
+           # Frage stellt sich bei einem Kontaktproblem, und die Antwort ist
+           # gemessen und nicht angenommen.
+           "linearitaet": {
+               "gilt": True,
+               "grund": ("Die Anlagen liegen spaltfrei an, und die Fliehkraft "
+                         "kann sie nur zudruecken -- der Kontaktzustand aendert "
+                         "sich nicht, und ein immer geschlossener Kontakt ist "
+                         "eine lineare Kopplung."),
+               "gemessen": ("4,0001 / 3,9998 / 4,0000 / 4,0077 (Eisen Spitze / "
+                            "P99 / Mittel / Magnet-Hauptzug) bei verdoppelter "
+                            "Drehzahl, Abweichung 0,19 %"),
+               "nachpruefen": "test_kontakt.py --echt"},
+           "grenzen": _kt.grenzen(netz.dim)}
+    # Das Schnittbild gehoert hierher und nicht in Stufe 5b: dort gibt es kein
+    # `.frd` mit Knotenkoordinaten (der Kontaktlauf schreibt seine Spannungen
+    # elementweise in die `.dat`), und das Netz samt Koerperzuordnung liegt nur
+    # an dieser Stelle vor.
+    try:
+        import ema_struktbild as _sb
+        _sg = _deck.lies_dat_spannungen(r["dat"])
+        _vm = {e: _deck.von_mises(*v) for e, v in _sg.items()
+               if netz.ist_eisen.get(e, True)}
+        _zg = {e: _kt._hauptzug(v) for e, v in _sg.items()
+               if not netz.ist_eisen.get(e, True)}
+        _b64, _kb = _sb.feldbild_mehrkoerper(
+            netz.knoten, netz.elemente, netz.ist_eisen, geom, _vm, _zg,
+            yield_mpa=float(mat["yield_mpa"]),
+            zug_grenze=float(mag.get("zug_mpa", 0.0)),
+            titel=(f"Mehrkoerper: Blech + Magnete  |  {rpm:,.0f} U/min  |  "
+                   f"Kontakt an {kenn_anlage['n_anlagen']} Anlageflaechen"
+                   ).replace(",", "."))
+        if _b64:
+            _save_png_b64(_b64, os.path.join(proj, "charts", "mehrkoerper.png"))
+            aus["bild"] = "mehrkoerper.png"
+            aus["bild_kennzahlen"] = _kb
+            _log(state, f"✓ Mehrkoerper-Schnitt: {_kb['n_polygone_eisen']} Blech- "
+                        f"und {_kb['n_polygone_magnet']} Magnetflaechen", 88)
+    except Exception as _be:                             # noqa: BLE001
+        _log(state, f"   (Mehrkoerperbild uebersprungen: {_be})", 88)
+
+    if k.get("magnet"):
+        aus["magnet"] = dict(k["magnet"])
+        m = aus["magnet"]
+        # Der MAGNETKOERPER ist im raeumlichen Lauf kaum aufgeloest: das
+        # Verfeinerungsfeld sitzt auf den Anlagen, und die liegen auf der
+        # Eisenseite -- bei 6 mm Netz traegt ein 6 mm dicker Magnet etwa zwei
+        # Elemente. Gemessen steigt `hauptzug_p99_MPa` von 7,18 auf 11,01 MPa
+        # (+53 %), wenn nur das Magnetnetz auf 3 mm geht, waehrend sich das
+        # Eisen um 0,07 % bewegt; der ebene Lauf belegt ~16,4 MPa auf drei
+        # unabhaengigen Wegen. Die Zahl hier ist also zu OPTIMISTISCH, und das
+        # muss an ihr stehen -- sonst liest sie sich wie ein Messwert.
+        if netz.dim != 2 and netz.netz_magnet_mm >= netz.netz_grund_mm:
+            m["aufloesung"] = (
+                f"Magnetnetz {netz.netz_magnet_mm:.1f} mm = Grundnetz: der "
+                f"Magnetkoerper ist kaum aufgeloest, und diese Zahl ist "
+                f"deshalb zu OPTIMISTISCH (gemessen +53 % bei halbem "
+                f"Magnetnetz, der ebene Lauf belegt ~16,4 MPa auf drei "
+                f"Wegen). Fuer eine Aussage ueber den Magneten den ebenen "
+                f"Lauf nehmen (struct_solver='kontakt_eben') oder "
+                f"mesh_magnet_mm setzen.")
+            _log(state, f"   ⚠ Magnetnetz = Grundnetz ({netz.netz_grund_mm:.1f} mm) "
+                        f"— die Magnetspannung ist damit zu optimistisch; fuer "
+                        f"den Magneten taugt der EBENE Lauf "
+                        f"(struct_solver='kontakt_eben')", 87)
+        _log(state, f"   Magnet ({m['werkstoff']}): groesste Hauptzugspannung "
+                    f"{m['hauptzug_max_MPa']:.1f} MPa (P99 {m['hauptzug_p99_MPa']:.1f}) "
+                    f"gegen {m['zug_grenze_MPa']:.0f} MPa Zugfestigkeit "
+                    f"→ SF {m['sf_zug_p99']} — gesinterte Magnete sind sproede, "
+                    f"massgebend ist der ZUG und nicht die Vergleichsspannung", 87)
+    return aus
+
+
+def _t_s(sek: float) -> str:
+    return f"{sek:.0f} s" if sek < 90 else f"{sek / 60.0:.1f} min"
 
 
 def _saettigung_summary(geom, axial_mm, perf, st_mat, rpm, last, rpm_base):
@@ -3608,7 +3914,12 @@ def run_pipeline(data: dict, state: dict, frames: list,
     #   "beide"   – eigener Rechensatz, voller Rotor, BEIDE Loeser und die
     #               Gegenueberstellung in results["structural_fem"]["loeservergleich"].
     struct_solver  = str(data.get("struct_solver", "freecad")).lower()
-    if struct_solver not in ("freecad", "ccx", "z88", "aster", "beide", "alle"):
+    # Die Liste steht in ``ema_text2ema.STRUKTUR_LOESER`` -- derselben Quelle,
+    # aus der ``/param_schema`` und damit ``cae_cli --set`` sie lesen. Zwei
+    # Listen waeren die Stelle, an der ein Wert gesetzt und stillschweigend
+    # verworfen wird.
+    from ema_text2ema import STRUKTUR_LOESER as _LOESER
+    if struct_solver not in _LOESER:
         struct_solver = "freecad"
     struct_video   = bool(data.get("struct_video",   True))    # render deformation ramp video
     struct_frames  = int(data.get("struct_frames",   30))      # video frame count
@@ -4394,13 +4705,69 @@ def run_pipeline(data: dict, state: dict, frames: list,
         # structural_fem result; frd_full is then unavailable so 5b uses the analytical
         # fallback (or, if a real FEM image already exists, 5b is skipped too).
         frd_full = None
-        if _do("structural") and struct_solver != "freecad":
+        if _do("structural") and struct_solver in ("kontakt", "kontakt_eben"):
+            # Mehrkoerper: Eisen UND Magnete gerechnet, verbunden ueber
+            # Anlageflaechen. Die Magnetlast aus `ema_magnetlast` wird hier
+            # NICHT aufgetragen -- die Magnete sind Koerper und bringen ihre
+            # Fliehkraft selbst mit. Beides zugleich waere die doppelte Last.
+            _eben = struct_solver == "kontakt_eben"
+            _log(state, f"🏗 Strukturanalyse bei {rpm_fem:.0f} U/min "
+                        f"(Mehrkoerper mit Kontakt, "
+                        f"{'EBEN' if _eben else 'raeumlich'}, "
+                        f"Netz {struct_mesh_mm:.1f} mm)...",
+                 78)
+            try:
+                fem_r = _struktur_kontakt(geom, mat, mag, rpm_fem, proj,
+                                          struct_mesh_mm, axial, state,
+                                          eben=_eben)
+            except Exception as _e:
+                fem_r = {"solver_status": "FAILED", "rechensatz": "kontakt",
+                         "rpm": rpm_fem, "log": f"{type(_e).__name__}: {_e}"}
+                _log(state, f"⚠ Mehrkoerperlauf gescheitert: {_e}", 88)
+            # Die KNOTEN-Ergebnisse des Kontaktlaufs an Stufe 5b weiterreichen.
+            # Sie auf None zu lassen war ein Fehler der Verdrahtung: der Lauf
+            # hat sehr wohl ein Ergebnis, und das Protokoll meldete trotzdem
+            # „FEM ohne Ergebnis -- analytische Verformung wird dargestellt".
+            # Das Netz traegt hier die MAGNETE mit, der Schnitt zeigt sie also
+            # als Koerper statt als Loecher.
+            frd_full = None
+            _frd_k = fem_r.get("frd_datei") or ""
+            if _frd_k and os.path.isfile(_frd_k):
+                try:
+                    frd_full = _parse_frd_full(_frd_k,
+                                               yield_mpa=mat["yield_mpa"])
+                    if frd_full.get("solver_status") != "OK":
+                        frd_full = None
+                except Exception as _fe:                 # noqa: BLE001
+                    _log(state, f"   (.frd des Kontaktlaufs nicht lesbar: {_fe})", 88)
+                    frd_full = None
+            if fem_r.get("max_von_mises_MPa"):
+                _notch = fem_r.get("notch_peak_MPa")
+                _st5   = rotor_stress_check(geom, mat, {"n_max": rpm_fem})
+                _pk_an = float(_st5["sigma_peak_MPa"])
+                _pk_fm = float(_notch) if _notch else 0.0
+                peak   = max(_pk_fm, _pk_an)
+                sf_v   = mat["yield_mpa"] / peak if peak > 0 else None
+                fem_r.update({"safety_factor": round(sf_v, 3) if sf_v else None,
+                              "yield_mpa": mat["yield_mpa"],
+                              "material":  mat["label"],
+                              "stress_peak_gate_MPa": round(peak, 1),
+                              "stress_peak_fem_p99_MPa": round(_pk_fm, 1),
+                              "stress_peak_analytic_MPa": round(_pk_an, 1),
+                              "structural_sf_target": SF_TARGET})
+                _log(state,
+                     f"✓ FEM (Tier-2, Mehrkoerper): Peak = max(P99 {_pk_fm:.1f}, "
+                     f"Ring×Kt {_pk_an:.1f}) = {peak:.1f} MPa → SF = {sf_v:.2f} "
+                     f"(Ziel ≥ {SF_TARGET})", 88)
+            results["structural_fem"] = fem_r
+        elif _do("structural") and struct_solver != "freecad":
             _log(state, f"🏗 Strukturanalyse bei {rpm_fem:.0f} U/min "
                         f"(eigener Rechensatz, {struct_solver}, "
                         f"Netz {struct_mesh_mm:.1f} mm)...", 78)
             try:
                 fem_r = _struktur_eigener_satz(geom, mat, rpm_fem, proj, struct_solver,
-                                               struct_mesh_mm, state)
+                                               struct_mesh_mm, state,
+                                               magnet_code=mag_key)
             except Exception as _e:
                 fem_r = {"solver_status": "FAILED", "rechensatz": "eigen",
                          "rpm": rpm_fem, "log": f"{type(_e).__name__}: {_e}"}
@@ -4430,8 +4797,26 @@ def run_pipeline(data: dict, state: dict, frames: list,
         elif _do("structural"):
             _log(state, f"🏗 Strukturanalyse bei {rpm_fem:.0f} U/min "
                         f"(FreeCAD + CalculiX, Netz {struct_mesh_mm:.1f} mm)...", 78)
+            # Die Magnetfliehkraft auf die Taschenwaende. Ohne sie rechnet die
+            # FEM nur das Blech -- und die Magnete sind das schwerste Einzelteil
+            # im Laeufer, das am duennsten Steg haengt (s. ema_magnetlast).
+            import ema_magnetlast as _ml
+            try:
+                _mwaende = _ml.waende(geom, axial, rpm_fem, magnet_code=mag_key)
+                _msumme  = _ml.summe(_mwaende,
+                                     poles=max(2, int(geom.get("p", 3)) * 2))
+            except Exception as _mwe:                    # noqa: BLE001
+                _mwaende, _msumme = [], {}
+                _log(state, f"   ⚠ Magnetlast nicht bestimmbar ({_mwe}) — die FEM "
+                            f"rechnet dann NUR die Fliehkraft des Blechs", 78)
+            if _mwaende:
+                _log(state, f"   Magnetfliehkraft: {_msumme['n_magnete']} Magnete "
+                            f"({_msumme['magnet_kg']:.3f} kg), "
+                            f"{_msumme['kraft_je_pol_kN']:.1f} kN je Pol auf "
+                            f"{_msumme['n_waende']} Taschenwaende", 78)
             code_fem = build_rotor_fem_script(fcstd, rpm_fem, _mat_fc(mat), proj,
-                                              mesh_mm=struct_mesh_mm)
+                                              mesh_mm=struct_mesh_mm,
+                                              magnet_walls=_mwaende)
             # Finer meshes (2nd-order) take longer to mesh + solve — allow up to 20 min.
             res_fem  = run_freecad_script(code_fem, timeout=1200)
             fem_r    = res_fem.get("fem_result", {})
@@ -4465,6 +4850,29 @@ def run_pipeline(data: dict, state: dict, frames: list,
                                         f"und {_tc['abw_zu_ring_pct']:.1f} % vom vollen Ring ab", 87)
                 except Exception as _tce:                # noqa: BLE001
                     _log(state, f"   (Taschenpruefung uebersprungen: {_tce})", 87)
+
+            # Was von der Magnetlast WIRKLICH im Modell gelandet ist -- aus der
+            # Marke des Laufs gelesen, nicht aus dem, was mitgegeben wurde. Eine
+            # Wand ohne Netzknoten ist eine verlorene Last, und ein Lauf mit
+            # halber Magnetlast sieht aus wie einer mit voller.
+            if _mwaende:
+                _mmark = _magnetlast_aus_stdout(res_fem.get("stdout", ""))
+                _mblock = {**_msumme, **_mmark, "grenzen": _ml.grenzen()}
+                if fem_r is not None:
+                    fem_r["magnetlast"] = _mblock
+                if not _mmark:
+                    _log(state, "   ⚠ keine MAGNETLAST-Marke im Lauf — die "
+                                "Magnetfliehkraft ist womoeglich NICHT "
+                                "aufgetragen worden", 87)
+                elif _mmark.get("n_ohne_knoten"):
+                    _log(state, f"   ⚠ {_mmark['n_ohne_knoten']} von "
+                                f"{_mmark.get('n_waende', '?')} Taschenwaenden ohne "
+                                f"Netzknoten: {_mmark.get('F_verloren_N', 0):.0f} N "
+                                f"Magnetlast fehlen im Modell", 87)
+                else:
+                    _log(state, f"✓ Magnetlast aufgetragen: "
+                                f"{_mmark.get('F_summe_N', 0) / 1e3:.1f} kN auf "
+                                f"{_mmark.get('n_lastknoten', 0)} Knoten", 87)
 
             if fem_r and fem_r.get("max_von_mises_MPa"):
                 # Tier-2-Gate (bindend): Peak = max(FEM-P99, 2D-Ring x Kt).
@@ -4553,7 +4961,8 @@ def run_pipeline(data: dict, state: dict, frames: list,
                             "CalculiX, Sekunden) statt sofort auf Lamé…", 88)
                 try:
                     _zweit = _struktur_eigener_satz(geom, mat, rpm_fem, proj, "ccx",
-                                                    struct_mesh_mm, state)
+                                                    struct_mesh_mm, state,
+                                                    magnet_code=mag_key)
                 except Exception as _e2:
                     _zweit = {"solver_status": "FAILED",
                               "log": f"{type(_e2).__name__}: {_e2}"}
@@ -4570,6 +4979,12 @@ def run_pipeline(data: dict, state: dict, frames: list,
                                 f"({_zweit.get('log', '')[:120]})", 88)
                     _log(state, "   → Verformung und Spannung kommen aus der analytischen "
                                 "Naeherung (Lamé), NICHT aus der FEM.", 88)
+            # Der Fehlschlagzweig legt `fem_r` neu an; die Magnetlast gehoert
+            # auch dorthin -- sonst sieht ein gescheiterter FreeCAD-Lauf aus, als
+            # waere sie nie gerechnet worden. Ein eingesprungener eigener Satz
+            # bringt seine eigene mit und behaelt sie.
+            if _mwaende and isinstance(fem_r, dict) and "magnetlast" not in fem_r:
+                fem_r["magnetlast"] = _mblock
             results["structural_fem"] = fem_r
         else:
             fem_r = results.get("structural_fem", {}) or {}
@@ -4624,29 +5039,126 @@ def run_pipeline(data: dict, state: dict, frames: list,
                        ("max",      "Maximaldrehzahl",          rpm_fem)]
                 if burst:
                     pts.append(("burst", "Berstdrehzahl (SF→1)", burst))
-                # Analytical (Lamé) is axisymmetric → smooth filled-annulus render;
-                # FEM keeps the per-node scatter (irregular mesh nodes, real pockets).
-                _smooth = mat if deform_result.get("source") == "analytical" else None
-                for tag, label, rpm_t in pts:
-                    if _smooth is not None:
-                        b64, st = _render_deform_analytical(
-                            geom, _smooth, float(rpm_t), rpm_fem, sigma_solve, yld,
-                            exagg, px=struct_img_px, max_um_clip=um_clip,
-                            title_prefix=title_pref)
-                    else:
-                        b64, st = _render_deform_single(
-                            arrays, geom, float(rpm_t), rpm_fem, sigma_solve, yld,
-                            exagg, px=struct_img_px, max_um_clip=um_clip,
-                            title_prefix=title_pref)
-                    fname = f"deformation_{tag}.png"
-                    _save_png_b64(b64, os.path.join(proj, "charts", fname))
-                    deform_result["images"].append(
-                        {"tag": tag, "label": label, "file": fname, "stats": st})
+                # ── Darstellung: SCHNITT durch das Netz, wenn es eines gibt ──
+                #
+                # Die Punktwolke (`_render_deform_single`) zeichnet ALLE Knoten
+                # des Volumennetzes auf die xy-Ebene projiziert -- nicht einen
+                # Schnitt. Die Magnettaschen, also die Stelle, auf die es
+                # ankommt, sind darin von Stirnflaechenknoten zugedeckt, und
+                # gezeigt wurde die Verschiebung (Mikrometer) statt der
+                # Spannung, obwohl die im `.frd` steht. Liegt die Elementtabelle
+                # vor, wird deshalb wirklich GESCHNITTEN und es gibt drei
+                # Groessen statt einer. Ohne Elemente bleibt alles wie bisher --
+                # die Punktwolke ist dann immer noch besser als nichts, und sie
+                # sagt es im Untertitel.
+                _hat_netz = bool(fem_ok and frd_full.get("_elems")
+                                 and frd_full.get("_stress_vm"))
+                deform_result["darstellung"] = (
+                    "schnitt" if _hat_netz
+                    else ("analytisch" if deform_result.get("source") == "analytical"
+                          else "punktwolke"))
+                if _hat_netz:
+                    import ema_struktbild as _sb
+                    _kn = frd_full["_nodes"]
+                    _el = frd_full["_elems"]
+                    _vm = frd_full["_stress_vm"]
+                    _du = {k: v * 1e3 for k, v in frd_full["_disp_mag"].items()}
+                    _zs = _sb.z_mitte(_kn)
+                    # EINMAL schneiden, dann nur noch skalieren (s. feldbild).
+                    _vorab_s = _sb.schnittpolygone(_kn, _el, _zs, wert_knoten=_vm)
+                    _vorab_u = _sb.schnittpolygone(_kn, _el, _zs, wert_knoten=_du)
+                    _s_worst = s_worst
+                    # Die Farbskala haengt am 99,5. Hundertstel, NICHT am
+                    # Maximum: das sitzt an einer scharfen Taschenecke und ist
+                    # eine Gitter-Singularitaet (gemessen 4311 MPa Rohmax gegen
+                    # 893 MPa P99 am selben Lauf). Daran skaliert waere das
+                    # halbe Blech schwarz und die Stelle, auf die es ankommt --
+                    # der Steg -- nicht zu unterscheiden. Dieselbe Begruendung,
+                    # aus der das TOR auf P99 stellt und nicht auf das Rohmax.
+                    _sig_hi = (float(np.percentile(_vorab_s[1], 99.5)) * _s_worst
+                               if _vorab_s[1] else 1.0)
+                    _u_hi = (max(_vorab_u[1]) * _s_worst) if _vorab_u[1] else 1.0
+                    _groessen = [
+                        ("spannung",  "Spannung",   _vorab_s, 0.0, _sig_hi),
+                        ("sicherheit", "Sicherheit", _vorab_s, 0.0, 3.0),
+                        ("verformung", "Verformung", None,     0.0, _u_hi),
+                    ]
+                    for _gk, _glabel, _vb, _lo, _hi in _groessen:
+                        for tag, label, rpm_t in pts:
+                            _sk = ((float(rpm_t) / rpm_fem) ** 2) if rpm_fem > 0 else 0.0
+                            _sig_t = sigma_solve * _sk
+                            _sf_t = (yld / _sig_t) if _sig_t > 1e-6 else None
+                            _kopf = (f"{_glabel} im Schnitt  |  {float(rpm_t):,.0f} U/min"
+                                     f"  |  σ_v,max = {_sig_t:.0f} MPa  |  "
+                                     + (f"SF = {_sf_t:.2f}" if _sf_t else "SF = –")
+                                     ).replace(",", ".")
+                            if _gk == "verformung":
+                                _kopf += f"  |  Überhöhung ×{exagg:.0f}"
+                            b64, st = _sb.feldbild(
+                                _kn, _el, geom, groesse=_gk,
+                                wert_knoten=(_du if _gk == "verformung" else _vm),
+                                verschiebung=(frd_full["_disp_vec"]
+                                              if _gk == "verformung" else None),
+                                z=_zs, skal=_sk,
+                                exagg=(exagg if _gk == "verformung" else 0.0),
+                                vmin=_lo, vmax=_hi, yield_mpa=yld,
+                                titel=_kopf, px=struct_img_px, vorab=_vb)
+                            if not b64:
+                                continue
+                            fname = f"struktur_{_gk}_{tag}.png"
+                            _save_png_b64(b64, os.path.join(proj, "charts", fname))
+                            st.update({"rpm": round(float(rpm_t)),
+                                       "sigma_max_MPa": round(_sig_t, 1),
+                                       "safety_factor": (round(_sf_t, 2)
+                                                         if _sf_t else None),
+                                       "scale_factor": round(exagg)})
+                            if _gk == "verformung":
+                                st["u_max_um"] = round(float(np.max(dmag)) * _sk * 1e3, 3)
+                            deform_result["images"].append(
+                                {"tag": tag, "label": label, "file": fname,
+                                 "stats": st, "groesse": _gk,
+                                 "groesse_label": _glabel})
+                    deform_result["groessen"] = [
+                        {"key": g[0], "label": g[1]} for g in _groessen]
+                    _log(state, f"✓ Schnittbilder aus dem Rechennetz: "
+                                f"{len(_vorab_s[0])} Schnittflaechen bei "
+                                f"z = {_zs:.1f} mm, {len(deform_result['images'])} "
+                                f"Bilder (Spannung / Sicherheit / Verformung)", 89)
+                else:
+                    # Analytical (Lamé) is axisymmetric → smooth filled-annulus render;
+                    # FEM without an element table keeps the per-node scatter.
+                    _smooth = mat if deform_result.get("source") == "analytical" else None
+                    for tag, label, rpm_t in pts:
+                        if _smooth is not None:
+                            b64, st = _render_deform_analytical(
+                                geom, _smooth, float(rpm_t), rpm_fem, sigma_solve, yld,
+                                exagg, px=struct_img_px, max_um_clip=um_clip,
+                                title_prefix=title_pref)
+                        else:
+                            b64, st = _render_deform_single(
+                                arrays, geom, float(rpm_t), rpm_fem, sigma_solve, yld,
+                                exagg, px=struct_img_px, max_um_clip=um_clip,
+                                title_prefix=title_pref)
+                        fname = f"deformation_{tag}.png"
+                        _save_png_b64(b64, os.path.join(proj, "charts", fname))
+                        deform_result["images"].append(
+                            {"tag": tag, "label": label, "file": fname, "stats": st,
+                             "groesse": "verformung", "groesse_label": "Verformung"})
+                    deform_result["groessen"] = [{"key": "verformung",
+                                                  "label": "Verformung"}]
                 # Keep chart_b64 + charts/deformation.png as the max-speed image
                 # for back-compat (PDF report [BILD:deformation], quick view).
                 if deform_result["images"]:
-                    mx = next((im for im in deform_result["images"] if im["tag"] == "max"),
-                              deform_result["images"][0])
+                    # `[BILD:deformation]` im Bericht und die Schnellansicht
+                    # erwarten EIN Bild -- es bleibt die Verformung bei
+                    # Maximaldrehzahl, damit kein Altprojekt und kein
+                    # Berichtsbaustein auf eine andere Groesse umspringt.
+                    mx = next((im for im in deform_result["images"]
+                               if im["tag"] == "max"
+                               and im.get("groesse", "verformung") == "verformung"),
+                              None) or next(
+                        (im for im in deform_result["images"] if im["tag"] == "max"),
+                        deform_result["images"][0])
                     mx_path = os.path.join(proj, "charts", mx["file"])
                     deform_result["chart_b64"] = base64.b64encode(
                         open(mx_path, "rb").read()).decode()
@@ -4660,14 +5172,56 @@ def run_pipeline(data: dict, state: dict, frames: list,
                     _log(state, f"🎞 Verformungs-Video (0→{rpm_fem:.0f} U/min, "
                                 f"{struct_frames} Frames)...", 90)
                     vdir = os.path.join(proj, "frames_struct")
+                    _netzv = None
+                    if _hat_netz:
+                        _netzv = {"knoten": frd_full["_nodes"],
+                                  "elemente": frd_full["_elems"],
+                                  "u_um": {k: v * 1e3
+                                           for k, v in frd_full["_disp_mag"].items()},
+                                  "u_vec": frd_full["_disp_vec"],
+                                  "z": _zs}
                     vid = _deformation_video(arrays, geom, rpm_fem, rpm_fem, sigma_solve,
                                              yld, exagg, um_clip, vdir, n_frames=struct_frames,
-                                             title_prefix=title_pref, smooth_mat=_smooth)
+                                             title_prefix=title_pref,
+                                             smooth_mat=(None if _hat_netz else _smooth),
+                                             netz=_netzv)
                     deform_result["video"] = bool(vid)
                     _log(state, f"✓ Verformungs-Video: {'erstellt' if vid else 'ffmpeg fehlt'}", 91)
             except Exception as _de:
                 _log(state, f"⚠ Verformungsdarstellung fehlgeschlagen: {_de}", 91)
             results["deformation"] = deform_result
+
+            # ── Das Lastbild: WO die Magnetfliehkraft angreift ───────────────
+            # „Die Magnetlast ist jetzt drin" ist eine Behauptung, solange
+            # niemand sieht, wo sie angreift und wie gross sie ist. Gezeichnet
+            # wird genau die Liste, die in den Loeser gegangen ist -- eine Wand,
+            # die hier fehlt, fehlt auch im Modell.
+            try:
+                import ema_magnetlast as _ml2
+                import ema_struktbild as _sb2
+                _wl2 = _ml2.waende(geom, axial, rpm_fem, magnet_code=mag_key)
+                if _wl2:
+                    _steg2 = _ml2.stegspannung(geom, mat, rpm_fem, axial,
+                                               magnet_code=mag_key,
+                                               sf_ziel=SF_TARGET)
+                    _b2, _s2 = _sb2.lastbild(geom, _wl2, axial, rpm_fem,
+                                             steg=_steg2,
+                                             px=min(2400, struct_img_px))
+                    _save_png_b64(_b2, os.path.join(proj, "charts",
+                                                    "magnetlast.png"))
+                    results["magnetlast"] = {**_s2, "rpm": rpm_fem,
+                                             "steg": _steg2,
+                                             "bild": "magnetlast.png",
+                                             "grenzen": _ml2.grenzen()}
+                    if _steg2.get("sigma_steg_MPa"):
+                        _log(state,
+                             f"   Steg-Richtwert: {_steg2['sigma_steg_MPa']:.0f} MPa "
+                             f"aus der Magnetlast + {_steg2.get('sigma_ring_MPa') or 0:.0f} MPa "
+                             f"Ringspannung = {_steg2.get('sigma_ueberlagert_MPa') or 0:.0f} MPa "
+                             f"(SF {_steg2.get('sf_ueberlagert')}) bei "
+                             f"{_steg2['s_rand_mm']:.2f} mm Randsteg", 91)
+            except Exception as _mbe:                    # noqa: BLE001
+                _log(state, f"   (Magnetlastbild uebersprungen: {_mbe})", 91)
         else:
             _log(state, "↩ Verformung übersprungen (bestehende Ergebnisse)", 91)
 
@@ -5131,6 +5685,21 @@ def run_pipeline(data: dict, state: dict, frames: list,
             "structural_basis": ("scheibe" if _axial_lauf
                                  else "fem" if fem_r.get("max_von_mises_MPa")
                                  else "analytisch"),
+            # Die Magnetfliehkraft im summary — daran haengen Steckbrief,
+            # Bericht, Ergebnisreiter und ema_db auf einmal (dasselbe Argument
+            # wie bei der Saettigung und den drei Zahlen der Scheibe).
+            **({"magnet_kraft_je_pol_kN":
+                    (results.get("magnetlast") or {}).get("kraft_je_pol_kN"),
+                "magnet_steg_sigma_MPa":
+                    ((results.get("magnetlast") or {}).get("steg") or {})
+                    .get("sigma_steg_MPa"),
+                "magnet_steg_sigma_ueberlagert_MPa":
+                    ((results.get("magnetlast") or {}).get("steg") or {})
+                    .get("sigma_ueberlagert_MPa"),
+                "magnet_steg_sf":
+                    ((results.get("magnetlast") or {}).get("steg") or {})
+                    .get("sf_ueberlagert"),
+                } if results.get("magnetlast") else {}),
             # ⊙ Die drei Zahlen der Scheibe im summary — denn daran haengen
             # Steckbrief, Bericht, Ergebnisreiter und `ema_db` auf einmal; ein
             # Kennwert, der nur in `results["axial_struktur"]` steht, ist fuer

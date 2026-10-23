@@ -79,7 +79,7 @@ python3 cae_cli.py auftrag --projekt <id> --ergaenzen entscheidungen \
 | `screen` | **Bauformen vorauswählen**, bevor eine teuer gerechnet wird: Polzahl, Nutzahl, Magnetanordnung, Leiter je Nut. 384 Konfigurationen in ~20 s, rein analytisch. Erkennt aus `--auftrag` das Ziel (günstig / Leistung) |
 | `bilddaten <was>` | **Bilddatensatz zum optischen Bewerten**: `erzeugen` · `seite` · `einlesen` · `regel` · `stand`. Zieht zufaellige Rotorquerschnitte, behaelt nur die, die das Layouttor bestehen, und zeichnet sie. **Die Bewertung macht ein Mensch** — du kannst sie nur vorbereiten und hinterher auswerten |
 | `feldbild` | **Magnetfeldlinien zum Ansehen** in den Projektordner legen: `linien` (Durchsicht) · `schnitt` (Stator ueber einen Sektor weggenommen) · `pol` (ein Polsektor gross) · `laengs` (Achsschnitt, gerechnetes Feld nur mit 3-D-Lauf). Durchsichtige PNG, ein FDM-Lauf, Sekunden bis Minuten — **kein** Pipelinelauf |
-| `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver aster` (Code Aster) · `--solver beide` (ccx+z88) · `--solver alle` (alle drei, Vollrotor, mit Gegenüberstellung). Nur `ccx` kann den Polsektor; alles andere braucht `--voll` |
+| `struktur` | Rotor-Festigkeit auf dem **eigenen Rechensatz**, ohne FreeCAD. `--solver ccx` (Polsektor, ~2 s) · `--solver z88` · `--solver aster` (Code Aster) · `--solver beide` (ccx+z88) · `--solver alle` (alle drei, Vollrotor, mit Gegenüberstellung) · **`--solver kontakt`** (MEHRKÖRPER: Blech UND Magnete als eigene Körper, gekoppelt über kleine Anlageflächen — ~4 min, nur CalculiX, und der einzige Weg, der etwas über den Magneten selbst sagt) · dazu **`--modell eben`** (derselbe Mehrkörperfall als Scheibe: der Lastfall ist planar und der räumliche Lauf hält ohnehin beide Stirnflächen — gemessen 29 s statt 286 s und dafür ein Anlagennetz von 0,3 statt 1,25 mm) mit `--ebener-zustand dehnung|spannung` und `--ordnung 1|2`. Nur `ccx` kann den Polsektor; alles andere braucht `--voll` |
 | `topopt` | Topologieoptimierung des Rotorblechs. `--verfahren sko` (Vorgabe) oder `simp`. 20–60 s. Ergebnis ist ein **Dichtefeld, kein Bauteil** |
 | `db <was>` | **Rechnungsdatenbank**: `import` · `liste` · `zeige --lauf X` · `guete --lauf X` · `vergleich`. Kennwerte **mit Herkunft je Größe** |
 | `lernen <was>` | **was aus dem eigenen Bestand folgt**: `zeige` · `merke --regel … --beleg …` · `pruefe` · **`probieren`** = geplanter Versuch: jede Bauform ueber jede Polzahl, mit `--merken` landen die Befunde als belegte Regeln im Speicher |
@@ -226,6 +226,38 @@ zeichnet gegen das, was der Löser rastert. Zwei Unterschiede sind gewollt und s
 solche da (die Nut ist im CAD ein Rechteck, im Feld ein Winkelsektor; die 3-D-Stufe zeichnet
 keinen Wickelkopf). Taucht dort etwas anderes auf, ist es ein Befund.
 
+### Die Fliehkraft der MAGNETE — seit dem 22.10.2026 in jedem Lauf
+
+Die Struktur-FEM vernetzt **nur das Rotoreisen**; die Magnettaschen sind darin
+Luft. Bis zum 22.10.2026 rechnete sie deshalb die Fliehkraft des Blechs und
+**keine einzige Newton** der Magnete — obwohl der Magnet das schwerste
+Einzelteil im Läufer ist und sein Gewicht an der dünnsten Stelle hängt, die es
+dort gibt. Gemessen am frischen Payload: **17,5 kN je Magnet / 35,0 kN je Pol
+bei 12.000 1/min** auf einen 1,3-mm-Steg — das sind **168 MPa** neben **93,6 MPa**
+Ringspannung. Die vergessene Last war der *größere* Posten.
+
+Jetzt trägt `ema_magnetlast` sie als Knotenkräfte auf die Taschenwände auf, in
+**jedem** Rechensatz. Was du daraus wissen musst:
+
+* **`safety_factor_fem` und `max_safe_rpm` älterer Projekte sind damit nicht
+  vergleichbar.** Der Gate-Wert P99 steigt gemessen um **53 %** (582 → 893 MPa).
+  Wer einen alten Lauf neben einen neuen stellt, sagt das dazu.
+* Im `summary` stehen `magnet_kraft_je_pol_kN`, `magnet_steg_sigma_MPa`,
+  `magnet_steg_sigma_ueberlagert_MPa` und `magnet_steg_sf`; das Bild liegt in
+  `charts/magnetlast.png`.
+* `rotor-check` zeigt den **Steg-Richtwert** ohne Lauf (Mittelwert über zwei
+  angenommene Stege je Pol — **keine** Spitzenspannung; bindend ist die FEM).
+  Er geht **nicht** in den Exit-Code ein: ein Richtwert mit einer Annahme darf
+  kein Tor schließen.
+* `sicherheit` hat dafür das Kriterium **`magnetsteg`** (Schwere `hinweis`
+  oberhalb der Fließgrenze, `versagen` darunter).
+* Beim **Außenläufer** gibt es die Last nicht: dort drückt die Fliehkraft die
+  Magnete gegen den Ring, und der Steg trägt sie nicht (`steg_traegt: false`,
+  und dann steht dort **keine Zahl** statt einer erfundenen).
+
+Was diese Stufe annimmt: der Magnet liege auf der **ganzen** Taschenwand an. Das
+tut er nicht — wie weit das trägt, sagt `--solver kontakt` unten.
+
 ### `struktur` und `topopt` — wann welches
 
 Beide rechnen **lokal**, ohne den Server und ohne FreeCAD; sie bauen das Netz selbst
@@ -235,6 +267,7 @@ Beide rechnen **lokal**, ohne den Server und ohne FreeCAD; sie bauen das Netz se
 python3 cae_cli.py struktur --from-project last --solver ccx            # ~2 s
 python3 cae_cli.py struktur --from-project last --solver beide --voll   # ~7 s
 python3 cae_cli.py struktur --from-project last --solver alle  --voll   # + Code Aster
+python3 cae_cli.py struktur --from-project last --solver kontakt        # ~4 min
 python3 cae_cli.py topopt   --from-project last --iterationen 25        # ~20 s
 ```
 
@@ -245,6 +278,174 @@ python3 cae_cli.py topopt   --from-project last --iterationen 25        # ~20 s
   Modell. Ein Netz, das beide gleich falsch sehen, sehen beide gleich falsch.
 * **Z88 kann keinen Polsektor** — es kennt weder zyklische Symmetrie noch schiefe
   Symmetrieebenen. Bei `--solver z88` und `beide` deshalb `--voll` angeben.
+* **`--solver kontakt` ist die tiefste Stufe und die einzige, die etwas über
+  den MAGNETEN sagt.** Die drei anderen vernetzen nur das Rotoreisen; die
+  Fliehkraft der Magnete trägt dort `ema_magnetlast` als Last auf die
+  Taschenwand — **verschmiert über die ganze Wand**. Der Magnet liegt aber nicht
+  überall an: die Tasche ist um den Klebespalt größer als er. Hier sind Blech
+  und Magnete **getrennte Körper**, gekoppelt über kleine **Anlageflächen**.
+  Gemessen an derselben Geometrie und demselben Netzmaß (12.000 1/min, 6 mm):
+
+  | | verschmiert | mit Anlageflächen |
+  |---|---:|---:|
+  | Eisen P99 (das Gate) | 127,5 MPa | **237,7 MPa** (×1,86) |
+  | Eisen Median | 46,0 MPa | 39,8 MPa (×0,87) |
+  | Rechenzeit | 3 s | 212 s |
+
+  Die Anlagen tragen gemessen **14,1 %** der Taschenwand. Die maßgebende
+  Spannung steigt, weil dieselbe Kraft durch ein Siebtel der Fläche geht — und
+  der Blechkörper als Ganzes wird *entlastet*, weil die Magnete mittragen.
+
+  **Den Magneten beurteilst du am ZUG, nicht an von Mises.** Ein gesinterter
+  Magnet ist spröde und trägt auf Druck rund das Dreizehnfache dessen, was er
+  auf Zug trägt; `sf_zug_p99` ist die Zahl, `von_mises_max_MPa` steht nur
+  nachrichtlich daneben. E, ν und die Festigkeiten sind Literaturgrößen der
+  Werkstoffklasse (`mech_beleg: "annahme"`) — sag das dazu.
+
+  **Die Anlageflächen sind eine ENTWURFSANNAHME, keine Messung**
+  (`--anlage-breite`, `--anlage-je-flanke`, `--anlage-ende`, `--reibung`) — und
+  seit dem 22.10.2026 **je Magnet zeichenbar**: im Designer setzt das Werkzeug
+  **⊥ Anlage** sie einzeln, und sie reisen als `geom.customAnlagen` mit (eine
+  Liste parallel zu `customLegs`; `null` für einen Magneten heißt „nimm die
+  parametrischen", eine **leere** Liste heißt „dieser Magnet hat keine" — und
+  das weist der Lauf ab, weil ein Magnet ohne Anlage in seiner Tasche
+  schwimmt). Du setzt sie nicht mit `--set` (das kann keine Liste), sondern
+  bekommst sie über `--from-project` aus einer Designer-Übergabe, oder du
+  schreibst sie mit `--payload-file`. Steht im Payload ein `customAnlagen`,
+  sagt die Ausgabe `quelle: "gezeichnet"` statt `"parametrisch"` — prüf das,
+  bevor du über die Anlagen redest. Und
+  der **Endanschlag** hat einen Preis, der im Ergebnis steht: er ist Eisen in
+  der Luftkappe am Magnetende und nimmt davon gemessen **31 %** ein — das
+  FELDMODELL dieser Kette weiß nichts von ihm (`ema_topology` zeichnet keine
+  Anlagen). Wer ihn baut, hat dort einen magnetischen Nebenschluss, den niemand
+  rechnet; `--anlage-ende 0` läßt ihn weg, dann hält den Magneten in seiner
+  Längsrichtung nur Reibung — und die reicht nachgerechnet nicht (Längsanteil
+  0,747 der Fliehkraft gegen höchstens µ·0,664 = 0,133 bei µ = 0,2). **Das ist
+  ein Befund über die gezeichnete Maschine**, nicht über das Modell: die Tasche
+  positioniert den Magneten in Längsrichtung nicht.
+
+  **`--mesh-anlage`** setzt die Netzweite AN den Auflagen (Vorgabe: ein Drittel
+  von `--mesh`). Dort sitzt die Spitze, um derentwillen es den Lauf gibt — eine
+  3-mm-Anlage trägt bei 6 mm Netz nicht einmal ein Element in ihrer Breite.
+
+  **`--mesh-magnet` ist der zweite, und er betrifft die Magnetzahl direkt.** Das
+  Anlagenfeld sitzt auf den Anlagen, und die liegen auf der **Eisenseite** — der
+  Magnetkörper selbst blieb auf dem Grundmaß, also bei 6 mm Netz mit etwa ZWEI
+  Elementen über seine 6 mm Dicke. Gemessen am räumlichen Lauf (Anlagen
+  konstant 1,25 mm, nur das Magnetnetz verfeinert):
+
+  | Magnetnetz [mm] | 6,0 | 3,0 | 2,0 |
+  |---|---:|---:|---:|
+  | Elemente im Magneten | 33.153 | 64.768 | 172.932 |
+  | **Magnet Zug P99** [MPa] | 7,18 | 11,01 | **13,46** |
+  | Eisen Mittel je Volumen [MPa] | 45,31 | 45,34 | 45,39 |
+  | ccx [s] | 309 | 344 | 528 |
+
+  Das Eisen bewegt sich über die ganze Reihe um **0,18 %** und das
+  Magnetvolumen um keine Stelle — die Kontrolle, dass die Verfeinerung genau
+  das tut, was sie behauptet. Die Magnetzahl steigt monoton um **87 %** und
+  läuft gegen die ~16,4 MPa, die der ebene Lauf auf drei Wegen belegt — **ist
+  aber auch bei 2 mm noch 18 % davon entfernt**, bei 5,2-facher Elementzahl und
+  528 s. **Die Vorgabe (`None` = wie `--mesh`) gibt am Magneten also einen zu
+  OPTIMISTISCHEN Wert** (gemessen SF 11 statt ~5), und räumlich ist die Zahl
+  auf dieser Maschine nicht bezahlbar zu konvergieren. Wer über den Magneten
+  redet, nimmt den **ebenen** Lauf — dort steht sie in Sekunden und ist
+  dreifach belegt.
+
+  Die **rpm²-Skalierung gilt auch hier**, und das ist bei einem Kontaktproblem
+  nicht selbstverständlich: gemessen 4,0001 / 3,9998 / 4,0000 / 4,0077 bei
+  verdoppelter Drehzahl, weil die Anlagen spaltfrei anliegen und die Fliehkraft
+  sie nur zudrücken kann. Wer an den Anlagen etwas ändert, prüft es nach
+  (`test_kontakt.py --echt`).
+
+  Im Lauf wählst du es mit `run analyse --set struct_solver=kontakt`; das
+  Ergebnis steht in `structural_fem` (`rechensatz: "kontakt"`, Block `magnet`,
+  Block `anlagen`), das Bild in `charts/mehrkoerper.png`, und `sicherheit`
+  bekommt das Kriterium **`magnetbruch`**.
+* **`--modell eben` rechnet denselben Mehrkörperfall als Scheibe — und ist der
+  Weg, den du normalerweise nimmst.** Der Lastfall ist planar: die Fliehkraft
+  liegt im Querschnitt, und der räumliche Lauf hält ohnehin **beide
+  Stirnflächen in z** fest — das *ist* der ebene Verzerrungszustand. Die dritte
+  Dimension kostet ~126.000 Tetraeder und trägt nichts bei, was die Scheibe
+  nicht auch sagt. Gemessen an derselben Geometrie, 12.000 1/min:
+
+  | | räumlich (6/1,25 mm) | eben (1,0/0,3 mm) |
+  |---|---:|---:|
+  | Knoten | 50.277 | 34.391 |
+  | Rechenzeit (ccx) | ~286 s | **29 s** |
+  | Eisen, Mittel je Volumen | 45,31 MPa | 49,25 MPa |
+  | Eisenvolumen | 1,743·10⁶ mm³ | 1,739·10⁶ mm³ |
+
+  Das Eisenvolumen auf 0,2 % ist die unabhängige Gegenprobe, dass beide
+  denselben Körper beschreiben. **Der Gewinn ist nicht die Zeit, sondern die
+  Auflösung:** eben ist ein Anlagennetz von 0,3 mm bezahlbar, räumlich war bei
+  1,25 mm Schluss — und die Anlagen sind die Stelle, um derentwillen es den
+  Lauf gibt.
+
+  **Beide ebenen Zustände lassen sich rechnen und klammern die Antwort ein**
+  (`--ebener-zustand dehnung|spannung`), so wie `rotor-check` es analytisch
+  schon tut. Vorgabe ist `dehnung` (CPE3, ε_z = 0 — der Fall, den der räumliche
+  Lauf mit seinen gehaltenen Stirnflächen rechnet). **Wie viel die Wahl
+  austrägt, hängt an der Kennzahl**: gemessen bewegt sie das Blech-P99 um 3,2 %
+  (220,4 gegen 227,4 MPa) und den Magnet-Zug um 1,4 %, das volumengewichtete
+  **Mittel** aber um **22 %** (48,73 gegen 59,48 MPa). Für das Gate entscheidet
+  sie wenig, für eine Aussage über den Blechkörper viel — sag also dazu, welchen
+  Zustand du gerechnet hast.
+
+  **Was die Scheibe NICHT sagt, steht in `grenzen`:** keinen Verlauf über der
+  Baulänge, also nichts über die Stirnseiten und nichts über eine Schrägung.
+  Die Anlagen dieser Kette laufen über die ganze Paketlänge, deshalb trifft die
+  Scheibe sie exakt — wer eine axial **geteilte** Anlage baut, braucht den
+  räumlichen Lauf.
+
+  **Und die wichtigste Lehre daraus betrifft, WELCHE Zahl du nennst.** Die
+  ebene Reihe (fünf Netze, 3.061 bis 34.391 Knoten) zeigt etwas, das die
+  räumliche mit ihren vier Punkten verdeckte:
+
+  | Netz (Grund/Anlage) [mm] | 6,0/1,25 | 3,0/1,0 | 2,0/0,6 | 1,5/0,4 | 1,0/0,3 |
+  |---|---:|---:|---:|---:|---:|
+  | σ P99 **je Element** [MPa] | 237,6 | 235,3 | 220,4 | 215,8 | 212,5 |
+  | σ P99 **je Volumen** [MPa] | 181,8 | 173,9 | 185,3 | 189,2 | 197,3 |
+  | Mittel **je Volumen** [MPa] | 46,98 | 48,27 | 48,73 | 49,01 | 49,25 |
+  | Magnet Zug P99 [MPa] | 11,43 | 13,56 | 15,56 | 16,01 | 16,50 |
+
+  Die beiden P99 **laufen gegeneinander** — der elementgewichtete fällt, weil
+  die Verfeinerung viele kleine Elemente in die heiße Zone legt und sie dadurch
+  übervertreten ist; der volumengewichtete steigt, weil er die Spitze erst
+  auflöst. Belastbar ist deshalb die **Klammer** (am feinsten Netz 197…213 MPa),
+  nicht eine der beiden Zahlen. Konvergiert ist das **Mittel je Volumen**
+  (+0,5 % im letzten Schritt). Wenn du über die Blechspannung redest, nenn die
+  Klammer und sag, dass das Gate auf dem elementgewichteten P99 sitzt.
+
+  **`--ordnung 2`** rechnet CPE6/CPS6 und ist die unabhängige Gegenprobe zum
+  Netz: am **groben** Netz (3,0/1,0) liefert sie Magnet-Zug P99 **16,07 MPa**,
+  wofür die erste Ordnung ein sechsfach feineres Netz braucht (16,50) — die
+  Magnetzahl ist damit konvergiert und kein Netzartefakt. Das Blech-P99
+  dagegen steigt mit dem Elementgrad (235 → 263 MPa am selben Netz), weil ein
+  besseres Element die Singularität an der Anlagenkante **besser auflöst**
+  statt sie wegzurechnen: es ist keine konvergierte Größe, und der
+  Sicherheitsfaktor kippt dadurch gemessen von 1,54 auf 1,29. Zwei Dinge
+  dazu, beide gemessen: die Mittenknoten müssen auf der Sehne bleiben (sonst
+  bricht ccx mit *nonpositive jacobian* ab), und zweite Ordnung braucht
+  **Knoten-zu-Fläche**-Kontakt (mit Fläche-zu-Fläche bricht die
+  Kontaktiteration nach 288 s mit *too many cutbacks* ab). `schreibe_inp`
+  schaltet beides selbst um — die zwei Grade rechnen damit nicht denselben
+  Kontaktalgorithmus, und das steht in `grenzen`. **Auf einem feineren Netz
+  trägt die zweite Ordnung nur im ebenen SPANNUNGSzustand**: bei 2,0/0,6 mm
+  erreichte CPE6 nur 0,136 der Last (Teillast — der Wächter fängt es), CPS6
+  lief am selben Netz durch. Plane stress ist weicher, dort konvergiert der
+  Kontakt.
+
+  **Die Magnetzahl ist dadurch dreifach belegt** — CPE3 fein 16,50, CPE6 grob
+  16,07, CPS6 mittel 16,55 MPa: drei Wege, die sich in Elementgrad, Netz und
+  Zustand unterscheiden, auf 3 %. Wenn du über die Magnetspannung redest, ist
+  das die Zahl, und sie ist belegt und nicht geschätzt.
+
+  Im Lauf: `run analyse --set struct_solver=kontakt_eben`. **`struct_solver`
+  stand bis zum 23.10.2026 in keinem Schema** — `--set struct_solver=…` wurde
+  abgewiesen, der Mehrkörperlauf war über `run analyse` also überhaupt nicht
+  erreichbar (s. `BEFUNDE.md`). Jetzt ist er eine geprüfte Auswahl, und ein
+  erfundener Wert nennt die zulässigen.
 * **`topopt` liefert ein Dichtefeld, kein Bauteil.** Die `ableseempfehlung` im
   Ergebnis nennt den Radialbereich, in dem das Eisen mechanisch wenig trägt. Das ist
   ein Hinweis, wo eine Flussbarriere vertretbar *wäre* — **nach** einer EM-Rechnung,

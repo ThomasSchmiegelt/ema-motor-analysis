@@ -27,7 +27,8 @@ function dsnDims() {
 }
 function dsnSetTool(t) {
   _dsnTool = t; _dsnBar = null; _dsnDrag = null;
-  for (const [k, id] of [['select','dsn_tool_sel'],['magnet','dsn_tool_mag'],['barrier','dsn_tool_bar']]) {
+  for (const [k, id] of [['select','dsn_tool_sel'],['magnet','dsn_tool_mag'],
+                        ['barrier','dsn_tool_bar'],['anlage','dsn_tool_anl']]) {
     const b = document.getElementById(id); if (b) b.style.background = (k === t) ? '#3a6' : '#444';
   }
   _dsnCanvas.style.cursor = t === 'select' ? 'default' : 'crosshair';
@@ -83,6 +84,7 @@ function _evMM(e) { const r = _dsnCanvas.getBoundingClientRect(); const p = _s2m
 function dsnMouseDown(e) {
   const [x, y] = _evMM(e);
   if (_dsnTool === 'magnet') { _dsnDrag = { x0: x, y0: y, x1: x, y1: y }; }
+  else if (_dsnTool === 'anlage') { dsnAnlKlick(x, y); }
   else if (_dsnTool === 'barrier') {
     if (!_dsnBar) _dsnBar = { pts: [[x, y]], width: +document.getElementById('dsn_barwidth').value };
     else _dsnBar.pts.push([x, y]);
@@ -128,6 +130,103 @@ function _dsnMagCorners(m, pa) {
   const a = (m.ang) * Math.PI / 180, c = Math.cos(a), s = Math.sin(a), h = m.thick / 2;
   const P = (l, t) => _rot(pa, m.r + l * c - t * s, m.off + l * s + t * c);
   return [P(0, -h), P(m.len, -h), P(m.len, h), P(0, h)];
+}
+// ── Anlageflächen ───────────────────────────────────────────────────────────
+// Die Stellen, an denen der Magnet wirklich am Blech anliegt. Sie sind im
+// Mehrkörperlauf (struct_solver="kontakt") die Last-Übertragungsflächen —
+// gemessen tragen sie ~14 % der Taschenwand, und die maßgebende Blechspannung
+// hängt daran um Faktor 1,9. Bis hierher waren sie für ALLE Magnete gleich
+// (anlageBreiteMm/anlageProFlanke/anlageEndeMm); hier werden sie je Magnet
+// zeichenbar.
+//
+// `u` wird von der Magnet-MITTE gemessen (−len/2 … +len/2), weil ema_kontakt
+// es so liest. Der Designer rechnet sonst ab dem Magnet-ANFANG (`m.r`) — wer
+// die beiden verwechselt, legt jede Anlage um eine halbe Magnetlänge daneben.
+const ANL_FLAECHEN = ['flanke+', 'flanke-', 'kappe+', 'kappe-'];
+
+// Pol-lokale Koordinaten eines Punktes IM Magnetsystem: l ab Magnetanfang, t quer.
+function _dsnLokal(m, x, y) {
+  const a = m.ang * Math.PI / 180, c = Math.cos(a), si = Math.sin(a);
+  const dx = x - m.r, dy = y - m.off;
+  return [dx * c + dy * si, -dx * si + dy * c];
+}
+// Die parametrische Vorgabe als Startpunkt — damit ein Magnet, den man zum
+// ersten Mal anfasst, nicht mit EINER Anlage dasteht und im Löser schwimmt.
+function _dsnAnlVorgabe(m) {
+  const b = +(document.getElementById('dsn_anl_breite')?.value || 3);
+  const n = Math.max(1, Math.min(6, +(document.getElementById('dsn_anl_je')?.value || 2)));
+  const e = +(document.getElementById('dsn_anl_ende')?.value || 1.5);
+  const out = [];
+  for (const sg of ['+', '-']) {
+    for (let k = 0; k < n; k++) {
+      out.push({ f: 'flanke' + sg, u: +((k - (n - 1) / 2) * (m.len * 0.5)).toFixed(2),
+                 b: Math.min(b, m.len / (2 * n)) });
+    }
+    if (e > 0) out.push({ f: 'kappe' + sg, u: 0, b: Math.min(e, m.thick * 0.9) });
+  }
+  return out;
+}
+function _dsnAnlListe(m) { return m.anlagen || _dsnAnlVorgabe(m); }
+// Welche Anlagefläche trifft ein Klick? Gibt [magnetIndex, flaeche, u] oder null.
+function _dsnAnlTreffer(x, y) {
+  let best = null, bd = 1e9;
+  for (let i = 0; i < DESIGN.magnets.length; i++) {
+    const m = DESIGN.magnets[i], h = m.thick / 2;
+    const [l, t] = _dsnLokal(m, x, y);
+    if (l < -h * 2 || l > m.len + h * 2) continue;
+    const dFl = Math.abs(Math.abs(t) - h);                 // Abstand zur Flanke
+    const dKa = Math.min(Math.abs(l), Math.abs(l - m.len));// Abstand zum Ende
+    if (dKa < dFl && dKa < h && Math.abs(t) < h) {
+      if (dKa < bd) { bd = dKa; best = [i, 'kappe' + (l > m.len / 2 ? '+' : '-'), 0]; }
+    } else if (dFl < h && l >= 0 && l <= m.len) {
+      if (dFl < bd) { bd = dFl; best = [i, 'flanke' + (t > 0 ? '+' : '-'),
+                                        +(l - m.len / 2).toFixed(2)]; }
+    }
+  }
+  return bd < 4 ? best : null;
+}
+// Klick: vorhandene Anlage in der Nähe entfernen, sonst eine setzen.
+function dsnAnlKlick(x, y) {
+  const tr = _dsnAnlTreffer(x, y);
+  if (!tr) return false;
+  const [i, f, u] = tr, m = DESIGN.magnets[i];
+  if (!m.anlagen) m.anlagen = _dsnAnlVorgabe(m);   // vom Vorgabestand aus weiter
+  const nah = m.anlagen.findIndex(a => a.f === f &&
+        (f.startsWith('kappe') || Math.abs(a.u - u) < Math.max(2, a.b)));
+  if (nah >= 0) m.anlagen.splice(nah, 1);
+  else {
+    const br = f.startsWith('flanke')
+      ? +(document.getElementById('dsn_anl_breite')?.value || 3)
+      : +(document.getElementById('dsn_anl_ende')?.value || 1.5);
+    m.anlagen.push({ f, u, b: br });
+  }
+  dsnSync();
+  return true;
+}
+function dsnAnlZurueck(i) { delete DESIGN.magnets[i].anlagen; dsnSync(); }
+
+function _dsnZeichneAnlagen(m, pa, hervor) {
+  const a = m.ang * Math.PI / 180, c = Math.cos(a), si = Math.sin(a), h = m.thick / 2;
+  const P = (l, t) => _rot(pa, m.r + l * c - t * si, m.off + l * si + t * c);
+  const eigen = !!m.anlagen;
+  _dsnCtx.lineCap = 'round';
+  for (const al of _dsnAnlListe(m)) {
+    const sg = al.f.endsWith('+') ? 1 : -1;
+    let p0, p1;
+    if (al.f.startsWith('flanke')) {
+      const l0 = m.len / 2 + al.u - al.b / 2, l1 = m.len / 2 + al.u + al.b / 2;
+      p0 = P(l0, sg * h); p1 = P(l1, sg * h);
+    } else {
+      const l = sg > 0 ? m.len : 0;
+      p0 = P(l, -al.b / 2); p1 = P(l, al.b / 2);
+    }
+    const [x0, y0] = _mm2s(p0[0], p0[1]), [x1, y1] = _mm2s(p1[0], p1[1]);
+    _dsnCtx.beginPath(); _dsnCtx.moveTo(x0, y0); _dsnCtx.lineTo(x1, y1);
+    _dsnCtx.strokeStyle = eigen ? '#32d74b' : '#9aa5b1';
+    _dsnCtx.lineWidth = hervor ? 5 : 3.5;
+    _dsnCtx.stroke();
+  }
+  _dsnCtx.lineCap = 'butt';
 }
 function _dsnFillPoly(corners, fill, stroke, lw) {
   _dsnCtx.beginPath();
@@ -177,6 +276,10 @@ function dsnDraw() {
         const mm = { r: m.r, off: -m.off, ang: -m.ang, len: m.len, thick: m.thick };
         _dsnFillPoly(_dsnMagCorners(mm, pa), col + 'cc', '#0008', 0.5);
       }
+      // Anlageflächen. NICHT maßstäblich in der Dicke: sie ist der Klebespalt
+      // (0,1 mm) und bei Läuferdurchmessern hier unter einem Bildpunkt. Länge
+      // und Lage sind maßstäblich, die Strichstärke ist eine Marke.
+      if (master) _dsnZeichneAnlagen(m, pa, mi === _dsnSel);
     }
     for (const b of DESIGN.barriers) {
       _dsnDrawBar(b.pts, pa, '#cbd5e1', b.width);
@@ -202,6 +305,8 @@ function dsnSync() {
     `<div style="display:flex;gap:5px;align-items:center;padding:2px 0;${i === _dsnSel ? 'background:#2a2f3a;border-radius:3px' : ''}">
        <span style="color:${m.pol > 0 ? '#e74c3c' : '#3498db'}">${m.pol > 0 ? 'N' : 'S'}</span>
        <span style="flex:1">r=${m.r.toFixed(0)} off=${m.off.toFixed(0)} ${m.ang.toFixed(0)}° L=${m.len.toFixed(0)} t=${m.thick}</span>
+       <span title="Anlageflächen — ⊥-Werkzeug setzt/entfernt sie" style="color:${m.anlagen ? '#32d74b' : '#8a93a0'};font-size:.7rem">⊥${_dsnAnlListe(m).length}${m.anlagen ? '' : '·V'}</span>
+       ${m.anlagen ? `<button onclick="dsnAnlZurueck(${i})" title="Anlagen zurück auf die Vorgabe" style="background:#3a4a5a;width:auto;padding:1px 6px;font-size:.7rem">↺</button>` : ''}
        <button onclick="DESIGN.magnets.splice(${i},1);_dsnSel=null;dsnSync()" style="background:#7a3030;width:auto;padding:1px 7px;font-size:.7rem">✕</button>
      </div>`).join('') : '<span style="color:#777">Keine Magnete. Werkzeug „Magnet" wählen und im grauen Sektor aufziehen.</span>';
   bl.innerHTML = DESIGN.barriers.length ? DESIGN.barriers.map((b, i) =>
@@ -214,6 +319,7 @@ function dsnSync() {
 function dsnClear() {
   if (!confirm('Designer leeren?')) return;
   DESIGN.magnets = []; DESIGN.barriers = []; _dsnSel = null; _dsnBar = null;
+  // `anlagen` hängt an den Magneten und geht mit ihnen
   _importedActive = false;   // hand-geleerte Geometrie ist nicht mehr der STEP-Import
   dsnSync();
 }
@@ -222,16 +328,26 @@ function dsnClear() {
 async function _dsnBuildPayload() {
   const d = dsnDims();
   // half-pole → full pole (master + mirror across d-axis); dedup coincident legs
-  const legs = [], onAxis = m => Math.abs(m.off) < 0.5 && Math.abs(m.ang) < 2;
+  const legs = [], anl = [], onAxis = m => Math.abs(m.off) < 0.5 && Math.abs(m.ang) < 2;
   const _seen = new Set();
-  const _addLeg = (r, off, ang, len, thick, sign) => {
+  const _addLeg = (r, off, ang, len, thick, sign, anlagen) => {
     const k = `${r.toFixed(1)}|${off.toFixed(1)}|${ang.toFixed(1)}|${len.toFixed(1)}`;
     if (_seen.has(k)) return; _seen.add(k);
     legs.push({ r_pos: r, offset: off, tilt_deg: ang, length: len, thickness: thick, mag_sign: sign });
+    anl.push(anlagen || null);   // null = parametrische Vorgaben, NICHT "keine"
   };
+  // Spiegelung an der d-Achse: (x,y)→(x,−y) und tilt→−tilt. Die Längsachse u
+  // bleibt dabei erhalten, die Querachse v kippt — also tauschen flanke+ und
+  // flanke−, während u und die Kappen stehen bleiben. Wer das verwechselt,
+  // legt die Anlagen der gespiegelten Hälfte auf die falsche Flanke, und das
+  // sieht man im Ergebnis nicht.
+  const _spiegel = as => as && as.map(a => ({
+    f: a.f.startsWith('flanke') ? (a.f.endsWith('+') ? 'flanke-' : 'flanke+') : a.f,
+    u: a.u, b: a.b }));
   for (const m of DESIGN.magnets) {
-    _addLeg(m.r, m.off, m.ang, m.len, m.thick, m.pol);
-    if (!onAxis(m)) _addLeg(m.r, -m.off, -m.ang, m.len, m.thick, m.pol);
+    _addLeg(m.r, m.off, m.ang, m.len, m.thick, m.pol, m.anlagen || null);
+    if (!onAxis(m)) _addLeg(m.r, -m.off, -m.ang, m.len, m.thick, m.pol,
+                            _spiegel(m.anlagen));
   }
   const bars = [];
   for (const b of DESIGN.barriers) {
@@ -253,7 +369,10 @@ async function _dsnBuildPayload() {
     // must NOT bleed into a custom design (they'd add unrelated slots/holes on top
     // of the drawn geometry).
     genFluxBarrierQ: false, genFluxBarrierD: false, genBalanceBolts: false,
-    magShape: 'custom', customLegs: legs, customBarriers: bars, axialLen: d.axial };
+    magShape: 'custom', customLegs: legs, customBarriers: bars, axialLen: d.axial,
+    // Nur mitschicken, wenn wirklich etwas gezeichnet wurde — ein Feld voller
+    // `null` hiesse dasselbe wie keins und stuende nur im Payload herum.
+    ...(anl.some(a => a) ? { customAnlagen: anl } : {}) };
   payload.axial_len = d.axial;
   payload.project_name = document.getElementById('project_name')?.value || 'Designer';
   // KI-Auslegung: Aufgabe/Begründung/Quelle ins Trainingsfile durchreichen.

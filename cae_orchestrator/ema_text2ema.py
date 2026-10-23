@@ -65,6 +65,19 @@ _THREAD = ["M4", "M5", "M6", "M8", "M10", "M12", "M16", "M20"]
 #         genau das ist der Zweck, denn ungepruefte Schluessel sind schlimmer als
 #         abgewiesene — bisher nahm ``--set`` alles an, was zufaellig schon im
 #         Grundpayload stand, ohne Grenzen und ohne Typ.
+# ── Die Strukturloeser: EINE Liste ───────────────────────────────────────────
+#
+# Sie stand als Tupel in ``ema_pipeline.run_pipeline`` und als
+# ``<option>``-Reihe in ``ema.html`` -- und in KEINEM Schema. Damit war
+# ``--set struct_solver=kontakt`` abgewiesen ("steht weder im Schema noch im
+# Grundpayload"), obwohl die Pipeline den Wert kennt: der Mehrkoerperlauf war
+# fuer einen Agenten durch ``run analyse`` **ueberhaupt nicht erreichbar**.
+# Dieselbe Luecke wie beim Fahrzyklus, der im Grundpayload fehlte, und sie
+# wiegt hier mehr als eine Guetestufe: der Loeser waehlt die PHYSIK, und
+# verschmiert gegen Mehrkoerper unterscheidet sich am Tor um Faktor 1,9.
+STRUKTUR_LOESER = ("freecad", "ccx", "z88", "aster", "beide", "alle",
+                   "kontakt", "kontakt_eben")
+
 SCHEMA = {
     "statorOD":   {"kind": "num", "lo": 80,  "hi": 600, "def": 280, "geom": True, "desc": "Stator-Außendurchmesser [mm]"},
     "statorID":   {"kind": "num", "lo": 50,  "hi": 500, "def": 190, "geom": True, "desc": "Stator-Innendurchmesser [mm]"},
@@ -428,6 +441,20 @@ SCHEMA = {
     "magAsym":             {"kind": "num", "lo": -60,  "hi": 60,   "def": 0,    "geom": True, "adv": True, "desc": "Asymmetrie der V-Schenkel [°], 0 = symmetrisch (nur vasym)"},
     "magTangLen":          {"kind": "num", "lo": 0,    "hi": 200,  "def": 0,    "geom": True, "adv": True, "desc": "Tangentialmagnet-Länge [mm], 0 = automatisch (nur u, delta)"},
     "magGapMm":            {"kind": "num", "lo": 0.05, "hi": 0.3,  "def": 0.1,  "geom": True, "adv": True, "desc": "Klebespalt Magnet↔Tasche je Seite [mm]"},
+    "struct_solver": {"kind": "enum", "opts": list(STRUKTUR_LOESER),
+                      "def": "freecad", "geom": False, "adv": True,
+                      "desc": "Rechensatz der Festigkeit: freecad/ccx/z88/aster"
+                              " = nur Rotoreisen (Magnetlast verschmiert), "
+                              "kontakt = MEHRKÖRPER räumlich, kontakt_eben = "
+                              "Mehrkörper als ebene Scheibe"},
+    # Die Anlageflaechen des MEHRKOERPER-Laufs (``struct_solver="kontakt"``).
+    # Sie sind eine Entwurfsannahme und gehoeren deshalb in den Payload und
+    # nicht als Konstante in den Code: wer eine Maschine mit anderen Anlagen
+    # baut, setzt sie. Ohne Mehrkoerperlauf wirken sie nirgends.
+    "anlageBreiteMm":      {"kind": "num", "lo": 0.5,  "hi": 20.0, "def": 3.0,  "geom": True, "adv": True, "desc": "Breite einer Flanken-Anlagefläche [mm] (Mehrkörper)"},
+    "anlageProFlanke":     {"kind": "num", "lo": 1,    "hi": 6,    "def": 2,    "geom": True, "adv": True, "int": True, "desc": "Anlageflächen je Taschenflanke (Mehrkörper)"},
+    "anlageEndeMm":        {"kind": "num", "lo": 0.0,  "hi": 20.0, "def": 1.5,  "geom": True, "adv": True, "desc": "Höhe des Endanschlags [mm]; 0 = keiner (Mehrkörper)"},
+    "anlageReibung":       {"kind": "num", "lo": 0.0,  "hi": 0.6,  "def": 0.2,  "geom": True, "adv": True, "desc": "Reibbeiwert Blech↔Magnet — ANNAHME (Mehrkörper)"},
     "magTascheOffen": {"kind": "enum", "opts": ["nein", "aussen", "innen", "beide"],
                        "def": "nein", "geom": True, "adv": True,
                        "desc": "Magnettasche offen (nein/aussen=zum Luftspalt/innen=zur Welle/beide)"},

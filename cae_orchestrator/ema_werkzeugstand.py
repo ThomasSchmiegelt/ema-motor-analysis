@@ -104,6 +104,16 @@ PHYSIK: tuple[str, ...] = (
     "ema_fluss.py",         # Flussweg: die zwei Integrale der Luftspaltflaeche
                             # (r^1 fuer psi_pm, r^2 fuer das Moment). Eine
                             # Aenderung daran bewegt Kt UND das Dauermoment.
+    # Die Fliehkraft der MAGNETE. Sie bewegt den Gate-Wert der Struktur-FEM
+    # gemessen um 53 % (582 -> 893 MPa P99) und den Steg-Richtwert, auf den
+    # `sicherheit` stellt -- wer an der Zerlegung, der Dichte oder der
+    # Knotenauswahl dreht, bewegt eine ausgewiesene Zahl.
+    "ema_magnetlast.py",
+    # Der Mehrkoerperlauf. Er traegt eigene Kennwerte (`magnet`-Block,
+    # `anlagen`) und entscheidet ueber das Kriterium `magnetbruch`; seine
+    # Anlagenmasse bewegen die Blechspannung um Faktor 1,9 gegenueber dem
+    # verschmierten Modell.
+    "ema_kontakt.py",
     "ema_grenzen.py",       # die Tore, die immer gelten
     "ema_schenkelpol.py",   # Polbefestigung (Fliehkraft am Polfuss) + Daempferkaefig
     "ema_eesm_cad.py",      # Schenkelpolgeometrie -- Quelle fuer CAD, Bild und Tor

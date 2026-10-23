@@ -98,7 +98,8 @@ def _aster_python() -> str:
 
 # ── Netz schreiben: Asters eigenes Textformat ───────────────────────────────
 
-def schreibe_mail(netz: _deck.Netz, pfad: str) -> dict:
+def schreibe_mail(netz: _deck.Netz, pfad: str,
+                 zusatzlasten: dict | None = None) -> dict:
     """``Netz`` → ``.mail`` (``FORMAT='ASTER'``). Gibt die Gruppennamen zurueck.
 
     Der Aufbau ist schlicht: ``COOR_3D`` mit den Knoten, dann ein Block je
@@ -147,11 +148,37 @@ def schreibe_mail(netz: _deck.Netz, pfad: str) -> dict:
         name = f"FESSEL{k}"
         gruppen[name] = 1
         z += ["GROUP_NO", f"  {name}", f"  N{knoten}", "FINSF", ""]
+
+    # Zusatzlasten (Magnetfliehkraft) brauchen GRUPPEN: ``FORCE_NODALE`` kennt in
+    # Aster 17 nur ``GROUP_NO``, nicht mehr ``NOEUD``. Gruppiert wird nach dem
+    # KRAFTVEKTOR -- alle Knoten einer Taschenwand tragen denselben Anteil, also
+    # entsteht je Wand (und je Knoten, der zu zwei Waenden gehoert) genau eine
+    # Gruppe statt einer Zeile je Knoten.
+    kraefte = []
+    for i, f in sorted((zusatzlasten or {}).items()):
+        schl = tuple(round(v, 9) for v in f)
+        if not any(abs(v) > 1e-12 for v in schl):
+            continue
+        kraefte.append((schl, i))
+    nach_kraft: dict = {}
+    for schl, i in kraefte:
+        nach_kraft.setdefault(schl, []).append(i)
+    lastgruppen = []
+    for k, (schl, ids) in enumerate(sorted(nach_kraft.items())):
+        name = f"MAGLAST{k}"
+        gruppen[name] = len(ids)
+        z += ["GROUP_NO", f"  {name}"]
+        z += [f"  N{i}" for i in ids]
+        z += ["FINSF", ""]
+        lastgruppen.append({"gruppe": name, "fx": schl[0], "fy": schl[1],
+                            "fz": schl[2], "n_knoten": len(ids)})
+
     z.append("FIN")
     with open(pfad, "w", encoding="utf-8") as f:
         f.write("\n".join(z) + "\n")
     return {"typ": typ, "gruppen": gruppen,
-            "fesseln": [(k, fg) for k, fg in fesseln]}
+            "fesseln": [(k, fg) for k, fg in fesseln],
+            "lastgruppen": lastgruppen}
 
 
 # ── Der Rechensatz als Python -- Aster 17 wird als Bibliothek gefahren ──────
@@ -185,6 +212,19 @@ def schreibe_skript(netz: _deck.Netz, mat: dict, rpm: float, ordner: str,
     if "STIRN_B" in info["gruppen"]:
         stirn.append("        _F(GROUP_NO='STIRN_B', DZ=0.0),")
 
+    # Magnetfliehkraft: je Gruppe gleicher Knotenkraft eine Zeile. Fehlt sie,
+    # rechnet Aster einen anderen Lastfall als der ccx-Satz daneben -- und der
+    # Loeservergleich schriebe die Differenz dem Loeser zu.
+    maglast = []
+    for g in info.get("lastgruppen") or []:
+        teile = [f"GROUP_NO='{g['gruppe']}'"]
+        for name, wert in (("FX", g["fx"]), ("FY", g["fy"]), ("FZ", g["fz"])):
+            if abs(wert) > 1e-12:
+                teile.append(f"{name}={wert!r}")
+        maglast.append("        _F(" + ", ".join(teile) + "),")
+    maglast_block = ("\n    FORCE_NODALE=(\n" + chr(10).join(maglast) + "\n    ),"
+                     if maglast else "")
+
     quelle = f'''# Erzeugt von ema_aster -- nicht von Hand aendern.
 import json
 import code_aster
@@ -208,7 +248,7 @@ CHMAT = AFFE_MATERIAU(MAILLAGE=MA, AFFE=_F(TOUT='OUI', MATER=ACIER))
 # Fliehkraft um die z-Achse -- derselbe Lastfall wie im ccx- und im Z88-Satz.
 CHAR = AFFE_CHAR_MECA(
     MODELE=MO,
-    ROTATION=_F(VITESSE={omega!r}, AXE=(0.0, 0.0, 1.0), CENTRE=(0.0, 0.0, 0.0)),
+    ROTATION=_F(VITESSE={omega!r}, AXE=(0.0, 0.0, 1.0), CENTRE=(0.0, 0.0, 0.0)),{maglast_block}
     DDL_IMPO=(
 {chr(10).join(stirn)}
 {chr(10).join(fessel_zeilen)}
@@ -291,7 +331,7 @@ FIN()
 
 
 def loese(netz: _deck.Netz, mat: dict, rpm: float, ordner: str = "",
-          timeout: int = 3600) -> dict:
+          timeout: int = 3600, zusatzlasten: dict | None = None) -> dict:
     """Netz schreiben, Aster fahren, Ergebnis einlesen.
 
     Der Loeser laeuft in einem Unterprozess mit der Umgebung aus
@@ -313,7 +353,7 @@ def loese(netz: _deck.Netz, mat: dict, rpm: float, ordner: str = "",
     os.makedirs(ordner, exist_ok=True)   # ein vorgegebener Ordner muss nicht da sein
     try:
         mail = os.path.join(ordner, "fort.20")     # UNITE=20
-        info = schreibe_mail(netz, mail)
+        info = schreibe_mail(netz, mail, zusatzlasten=zusatzlasten)
         skript = schreibe_skript(netz, mat, rpm, ordner, mail, info)
 
         py = _aster_python()

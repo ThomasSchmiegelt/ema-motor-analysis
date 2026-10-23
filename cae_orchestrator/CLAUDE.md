@@ -99,7 +99,7 @@ server, skipped when `:5000` is down), `test_paarvergleich.py` (Paarvergleich:
 Magnetwerkstoff wirkt UND wird zurückgesetzt — auch nach einem Fehler mittendrin —,
 die dokumentierten Invarianten halten (Leiterzahl/Kühlung/Blech bewegen Kt nicht),
 jede baubar gemeldete Option besteht das echte Layouttor, Skalierung geometrisch
-ähnlich bei stehendem Luftspalt), `test_zyklen.py` (Fahrzyklus-Wahl und Sicherheitskriterien: der frische Payload waehlt den Zyklus NICHT selbst, eigene Zyklen ueberleben in der DB, `anwenden` setzt Zyklus UND Fahrzeug, die Zyklustemperaturen zaehlen mit, die Magnetgrenze kommt aus der Werkstofftabelle, Bericht und Werkzeug faellen EIN Urteil), `test_maschinenart.py` (Maschinenart als Tor und die ASM analytisch: eine nicht getragene Art wird ABGEWIESEN statt ersetzt — in Pipeline, Vorauswahl und Paarvergleich; die Normierungsbruecke `ema_asm.k_norm` wird ueber die **Momenterhaltung** nachgerechnet, der Magnetisierungsstrom gegen `_analytical_Barm` zurueckgeprueft; Kaefigauswahlregel, Tiefe/Breite-Deckel, Schlupf im Nennbereich, quadratische Stegspannung; und die 14. Achse liefert alle gezaehlten Kennzahlen, laesst `T_rel_pct` weg und `magnet_kg` stehen), `test_feldbild.py` (Feldlinienbilder: Alphakanal im fertigen PNG, Deckkraft steigt streng mit |B|, EIN Löserlauf für alle Querschnitte, der Schnitt nimmt Material WEG statt es zu übermalen, der Längsschnitt ohne 3-D-Ergebnis sagt es im Bild, und die Kachel im Agentenreiter bekommt das Schachbrett), `test_steckbrief.py` (Steckbrief, Ablage und der Rueckweg in fruehere Laeufe: ein Verbergebnis ueberlebt das Fenster und traegt seinen Aufruf mit, zwei Rechnungen in derselben Sekunde ueberschreiben sich nicht, der Steckbrief rechnet NICHTS und fuehrt die Herkunft aus `ema_db.HERKUNFT` mit, die Laufuebersicht liefert dasselbe wie das volle Einlesen ohne es zu tun, `lauf_lesen` deckelt und weist Kennungen aus der URL ab, eine abgelegte Rechnung erscheint in der rechten Spalte OHNE Zutun des Agentenkopfs, und der gemessene ACP-Fehler wird benannt statt ueberspielt), `test_studio.py` (der dritte Kopf und die Beitraege: drei Koepfe in der Registrierung, der Auslegungsauftrag liegt bei PI und NICHT beim Studio-Kopf, die Projektakte des laufenden Kopfes wird nicht ueberschrieben, die Tokenwache schuetzt genau `/studio` und `kopf=studio` und laesst `pi`/`hermes` offen, Schnittvorschlaege und `schnitt.sh` zeigen dieselben Sekunden, gerundete Zahlen sind gedeckt und erfundene werden gemeldet, X bricht um statt abzuschneiden, und beide Agentenseiten benutzen `agent_gemein.js` statt einer Abschrift — samt `node --check` ueber geteilte Datei plus Seite zusammen; die Fussleiste traegt keinen Ablagepfad mehr und zeigt acht Lampen), `test_werkzeugstand.py` (der Werkzeug-Fingerabdruck: stabil ueber zwei Abrufe, ein Byte in einer `PHYSIK`-Datei bewegt ihn und eine Datei ausserhalb nicht, `abweichung` NENNT die Datei, der Kopf meldet eine Aenderung waehrend des Laufs genau einmal in den Strom, und die Regel steht in `AGENTS.md`, `SKILL.md` und im stehenden Auftrag aller drei Koepfe), `test_asm_grenze.py` (das Recht auf „Nein": der Ventilatorfall liefert `erreichbar=False` mit den gemessenen 1686 A gegen 800 A statt 2,8e20 W, die abgeleiteten Groessen sind `None` und nicht 0,0, der Kaefig faellt nicht auf den Fertigungsboden zurueck, die Traktionsklasse bleibt Ziffer fuer Ziffer unberuehrt, und der Geltungsbereich benennt Speisung und Leistungsband), `test_bruecke.py` (die Bruecke Agentenkopf ↔ Geometrie-Reiter und die Abzweige: die Marke sieht `vehicle.getriebe`/`customLegs` und kommt aus `meta.json`, eine Notiz oder eine andere Schluesselreihenfolge bewegt sie NICHT, das Formular des Menschen hat Vorrang, und zurueckgehen loescht die Stufen dazwischen nicht), `test_laeufer_cad.py` (die Laeufer im CAD, OHNE FreeCAD: das erzeugte Skript wird mit einem Stellvertreter-FreeCAD wirklich AUSGEFUEHRT und gezaehlt, was dabei entsteht — eine Bauart ohne Magnete bekommt keine Magnetkoerper und keine Taschenschnitte, der Kaefig traegt `n_stab x Schraegungssegmente` Staebe und zwei Ringe, die Segmentwinkel mitteln sich zu 0, der Schleifringlaeufer traegt Wicklung + drei Ringe + drei Buersten und KEINEN Kaefig daneben, ein nicht auslegbarer Kaefig wird abgewiesen, die Nuttiefe trifft die Stromdichtevorgabe, der Anlasswiderstand verdoppelt den Schlupf ohne die Laeuferwicklung zu heizen, und CAD und Querschnittsbild lesen dieselbe `ema_asm.kaefig` Ziffer fuer Ziffer), `test_bilddaten.py` (Bilddatensatz: Zeichner-
+ähnlich bei stehendem Luftspalt), `test_zyklen.py` (Fahrzyklus-Wahl und Sicherheitskriterien: der frische Payload waehlt den Zyklus NICHT selbst, eigene Zyklen ueberleben in der DB, `anwenden` setzt Zyklus UND Fahrzeug, die Zyklustemperaturen zaehlen mit, die Magnetgrenze kommt aus der Werkstofftabelle, Bericht und Werkzeug faellen EIN Urteil), `test_maschinenart.py` (Maschinenart als Tor und die ASM analytisch: eine nicht getragene Art wird ABGEWIESEN statt ersetzt — in Pipeline, Vorauswahl und Paarvergleich; die Normierungsbruecke `ema_asm.k_norm` wird ueber die **Momenterhaltung** nachgerechnet, der Magnetisierungsstrom gegen `_analytical_Barm` zurueckgeprueft; Kaefigauswahlregel, Tiefe/Breite-Deckel, Schlupf im Nennbereich, quadratische Stegspannung; und die 14. Achse liefert alle gezaehlten Kennzahlen, laesst `T_rel_pct` weg und `magnet_kg` stehen), `test_feldbild.py` (Feldlinienbilder: Alphakanal im fertigen PNG, Deckkraft steigt streng mit |B|, EIN Löserlauf für alle Querschnitte, der Schnitt nimmt Material WEG statt es zu übermalen, der Längsschnitt ohne 3-D-Ergebnis sagt es im Bild, und die Kachel im Agentenreiter bekommt das Schachbrett), `test_steckbrief.py` (Steckbrief, Ablage und der Rueckweg in fruehere Laeufe: ein Verbergebnis ueberlebt das Fenster und traegt seinen Aufruf mit, zwei Rechnungen in derselben Sekunde ueberschreiben sich nicht, der Steckbrief rechnet NICHTS und fuehrt die Herkunft aus `ema_db.HERKUNFT` mit, die Laufuebersicht liefert dasselbe wie das volle Einlesen ohne es zu tun, `lauf_lesen` deckelt und weist Kennungen aus der URL ab, eine abgelegte Rechnung erscheint in der rechten Spalte OHNE Zutun des Agentenkopfs, und der gemessene ACP-Fehler wird benannt statt ueberspielt), `test_studio.py` (der dritte Kopf und die Beitraege: drei Koepfe in der Registrierung, der Auslegungsauftrag liegt bei PI und NICHT beim Studio-Kopf, die Projektakte des laufenden Kopfes wird nicht ueberschrieben, die Tokenwache schuetzt genau `/studio` und `kopf=studio` und laesst `pi`/`hermes` offen, Schnittvorschlaege und `schnitt.sh` zeigen dieselben Sekunden, gerundete Zahlen sind gedeckt und erfundene werden gemeldet, X bricht um statt abzuschneiden, und beide Agentenseiten benutzen `agent_gemein.js` statt einer Abschrift — samt `node --check` ueber geteilte Datei plus Seite zusammen; die Fussleiste traegt keinen Ablagepfad mehr und zeigt acht Lampen), `test_werkzeugstand.py` (der Werkzeug-Fingerabdruck: stabil ueber zwei Abrufe, ein Byte in einer `PHYSIK`-Datei bewegt ihn und eine Datei ausserhalb nicht, `abweichung` NENNT die Datei, der Kopf meldet eine Aenderung waehrend des Laufs genau einmal in den Strom, und die Regel steht in `AGENTS.md`, `SKILL.md` und im stehenden Auftrag aller drei Koepfe), `test_asm_grenze.py` (das Recht auf „Nein": der Ventilatorfall liefert `erreichbar=False` mit den gemessenen 1686 A gegen 800 A statt 2,8e20 W, die abgeleiteten Groessen sind `None` und nicht 0,0, der Kaefig faellt nicht auf den Fertigungsboden zurueck, die Traktionsklasse bleibt Ziffer fuer Ziffer unberuehrt, und der Geltungsbereich benennt Speisung und Leistungsband), `test_bruecke.py` (die Bruecke Agentenkopf ↔ Geometrie-Reiter und die Abzweige: die Marke sieht `vehicle.getriebe`/`customLegs` und kommt aus `meta.json`, eine Notiz oder eine andere Schluesselreihenfolge bewegt sie NICHT, das Formular des Menschen hat Vorrang, und zurueckgehen loescht die Stufen dazwischen nicht), `test_laeufer_cad.py` (die Laeufer im CAD, OHNE FreeCAD: das erzeugte Skript wird mit einem Stellvertreter-FreeCAD wirklich AUSGEFUEHRT und gezaehlt, was dabei entsteht — eine Bauart ohne Magnete bekommt keine Magnetkoerper und keine Taschenschnitte, der Kaefig traegt `n_stab x Schraegungssegmente` Staebe und zwei Ringe, die Segmentwinkel mitteln sich zu 0, der Schleifringlaeufer traegt Wicklung + drei Ringe + drei Buersten und KEINEN Kaefig daneben, ein nicht auslegbarer Kaefig wird abgewiesen, die Nuttiefe trifft die Stromdichtevorgabe, der Anlasswiderstand verdoppelt den Schlupf ohne die Laeuferwicklung zu heizen, und CAD und Querschnittsbild lesen dieselbe `ema_asm.kaefig` Ziffer fuer Ziffer), `test_kontakt.py` (der Mehrkoerperlauf, ohne Loeser und ohne gmsh: jede Anlage liegt IN der Magnetflaeche die sie traegt, eine Anlage ist ein Bruchteil der Wand und nicht die Wand, die Anlagenbreite wird am Magneten geklemmt, was der Endanschlag magnetisch kostet wird benannt, die geschlossene Hauptspannungsformel trifft die Eigenwertzerlegung, ein GEDRUECKTER Magnet macht keinen Bruchbefund obwohl von Mises gross ist, im Satz steht kein `*CLOAD` neben den Magnetkoerpern — das waere die doppelte Last —, und die Linearitaetsprobe meldet eine Nichtlinearitaet statt sie durchzuwinken; `--echt` rechnet zwei wirkliche Kontaktlaeufe), `test_magnetlast.py` (die Magnetfliehkraft und das Schnittbild, ohne Loeser und ohne FreeCAD: die Summe der Wandreaktionen IST die Fliehkraft, vierfache Drehzahl vierfache Kraft, die Magnetmasse zaehlt je MAGNET und nicht je Wand, Speiche laedt die Kappe und der Balken die Flanke, der Rechenkern steht woertlich im FreeCAD-Skript, eine Wand ohne Knoten wird GEMELDET, alle drei Loeserformate tragen dieselbe Summe, ohne Magnetlast bleibt jeder Altlauf Ziffer fuer Ziffer derselbe, der Schnitt deckt eine bekannte Querschnittsflaeche lueckenlos ab und gibt ein lineares Feld exakt wieder), `test_bilddaten.py` (Bilddatensatz: Zeichner-
 Refactor bitgleich, Ziehung in den Schemagrenzen, jeder abgelegte Satz gegen das echte
 Layouttor, Regelsuche gegen eine gelegte Schranke UND gegen Münzwürfe — ohne FreeCAD,
 in einem temporären Ablageort).
@@ -305,8 +305,17 @@ calc can be (re)configured first; `loadProjectById` now also repopulates the for
    with stator currents (`estimate_dq_currents`); frames go to `_frames` (base64)
    **and** disk (`frames/frame_XXXX.png`).
 5. **EM speed sweep** — analytical `compute_performance()` across the RPM range.
-6. **Structural FEM** — `build_rotor_fem_script(..., mesh_mm=struct_mesh_mm)` →
-   CalculiX **once** at max RPM (worst-case centrifugal). Meshes **only** the `"Rotor"`
+6. **Structural FEM** — `build_rotor_fem_script(..., mesh_mm=struct_mesh_mm,
+   magnet_walls=…)` → CalculiX **once** at max RPM (worst-case centrifugal).
+   **Die Magnete werden nicht vernetzt — ihre Fliehkraft wird seit dem 22.10.2026
+   trotzdem gerechnet** (`ema_magnetlast`, s. eigener Abschnitt unten). Bis dahin
+   fehlte sie vollstaendig: vernetzt wird nur das Rotoreisen, die Taschen sind
+   darin Luft, und `*DLOAD CENTRIF` wirkt ueber die Dichte des BLECHS. Gemessen
+   war die vergessene Last am Steg der **groessere** Posten (168 MPa gegen 94 MPa
+   Ringspannung bei 12.000 1/min), und der Gate-Wert P99 steigt mit ihr um
+   **53 %** (582 → 893 MPa an `smoke_test.GEOM`, 16.000 1/min). **Gespeicherte
+   Projekte sind davon betroffen** — ihre `safety_factor_fem`/`max_safe_rpm`
+   kennen diese Last nicht. Meshes **only** the `"Rotor"`
    solid (rotor iron) — the stator, magnets and **hairpin winding heads are excluded**
    from the strength calc by construction (separate `Coils_A/B/C` / `Stator` objects);
    the part selection requires `"Rotor"` and never falls back to another body. Mesh
@@ -2340,6 +2349,400 @@ nachgebaut, damit die Zahl aus derselben Quelle kommt wie der Lauf),
 Video ueber `video_subdirs["fx3d"]`. UI: Reiter **🌀 FluidX3D (LBM)**. Test:
 `test_fluidx3d.py` (14 Pruefungen, ohne GPU, ohne Uebersetzer, ohne FreeCAD).
 
+### Die Fliehkraft der MAGNETE (`ema_magnetlast.py`, seit 22.10.2026)
+
+**Die Last, die der Struktur-FEM gefehlt hat.** Sie vernetzt nur das Rotoreisen
+(ausdruecklich: „the magnets must NOT be part of the centrifugal FEM"), die
+Magnettaschen sind darin Luft, und die Volumenlast wirkt ueber die Dichte des
+Blechs. Der Magnet ist aber das schwerste Einzelteil im Laeufer, und sein ganzes
+Gewicht haengt an der duennsten Stelle: dem Blechsteg zum Luftspalt. Gemessen am
+frischen Payload (V-Form, 2p = 6, Ø 188,6, L = 80, NdFeB): **17,5 kN je Magnet /
+35,0 kN je Pol bei 12.000 1/min**, gegen einen Steg von 1,3 mm — das sind
+**168 MPa** neben **93,6 MPa** Ringspannung. Der Gate-Wert der FEM (P99) steigt
+mit dieser Last um **53 %** (gemessen 582 → 893 MPa). Voller Befund samt der
+Begruendung, warum es nicht auffiel, in `BEFUNDE.md`.
+
+**Wie sie ins Modell kommt — drei Entscheidungen mit Grund:**
+
+* **Nicht als Koerper.** Die Magnete mitzuvernetzen hiesse Kontakt zu rechnen
+  (sie sind geklebt, und Klebstoff traegt keinen Zug) — ein anderes Problem.
+  Gerechnet wird die **Reaktion** auf die Taschenwand, gegen die der Magnet
+  gedrueckt wird.
+* **BEIDE Waende, und die Aufteilung ist exakt.** Der erste Entwurf nahm die
+  Wand mit dem groessten `n·e_r` und trug den ganzen Vektor dort auf — am
+  V-Schenkel ist das die **Endkappe** (`u·e_r = 0,747`) und nicht die lange
+  Flanke (`v·e_r = −0,664`), einer der beiden erheblichen Anteile waere
+  verschwunden. `u`/`v` sind orthonormal, also ist die Zerlegung in beide
+  Komponenten **exakt** (Vektorsumme = Fliehkraft) und erledigt zugleich die
+  Bauformfrage ohne Fallunterscheidung: beim **Speichenmagneten** faellt fast
+  alles auf die Kappe am Rotorrand, beim flachen Balken fast alles auf die
+  Flanke (im Test nachgemessen: 1,000 bzw. 0,941).
+* **Gleichanteilige KNOTENkraefte, keine Flaechenlast.** Eine Knotenkraft laesst
+  sich in **jedem** der vier Loeser dieser Kette in einer Zeile ausdruecken
+  (CalculiX `*CLOAD`, Z88 `Art 1`, Code Aster `FORCE_NODALE` auf einer
+  `GROUP_NO`); eine Druckrandbedingung braeuchte in jedem Elementflaechen aus
+  einem anderen Netzschreiber. **Alle gewaehlten Loeser bekommen sie** — nur
+  einer waere schlimmer als keiner, weil der Loeservergleich die Differenz dann
+  dem LOESER zuschriebe und seine Aussage („zwei korrekte Direktloeser muessen
+  auf einem Netz auf Rundungsniveau uebereinstimmen") zerstoert waere.
+
+**Der Rechenkern steht EINMAL.** `KERN` ist der Quelltext der Knotenauswahl, wird
+mit `exec` in das Modul geladen **und** woertlich in das FreeCAD-Skript
+geschrieben (das laeuft in einem fremden Prozess und kann nichts importieren —
+derselbe Fall wie `ema_purge._STANDALONE` und `ema_wicklung.hairpin_radien`, nur
+ohne die zweite Abschrift, die auseinanderlaufen koennte). `test_magnetlast.py`
+prueft, dass er woertlich im erzeugten Skript steht.
+
+**Eine Wand ohne Netzknoten ist eine VERLORENE Last** und wird benannt
+(`fehlende_waende`, Marke `MAGNETLAST:` im Lauf, Zeile im Protokoll). Ein Lauf
+mit halber Magnetlast sieht sonst aus wie einer mit voller.
+
+**Die Magnetdichte steht seit demselben Tag in `MAGNETS`** (`density`). Sie lag
+vorher an zwei Stellen als Literal — 7600 in `ema_screen`, 7500 in `ema_thermal` —
+und in der Werkstofftabelle gar nicht; damit war **Ferrit genauso schwer wie
+NdFeB**, obwohl es rund 35 % leichter ist (gemessen: Magnetmasse 1,849 →
+1,192 kg, Kosten 102 → 66 €). Gelesen wird sie ueber `ema_magnetlast.dichte`.
+
+**`stegspannung()` ist ein RICHTWERT und sagt das.** Mittlere Zugspannung
+`F_pol / (2 · gemessener Randsteg · L)` plus die Ringspannung derselben Drehzahl
+als obere Schaetzung. Keine Spitzenspannung, keine Mittelsteg-Entlastung; bindend
+ist die FEM. Erreichbar ueber `cae_cli.py rotor-check` (geht **nicht** in dessen
+Exit-Code ein — ein Richtwert mit einer Annahme darf kein Tor schliessen) und als
+Kriterium `magnetsteg` in `ema_sicherheit` (Schwere `hinweis` oberhalb der
+Fliessgrenze, `versagen` darunter). Beim **Aussenlaeufer** gibt es die Last
+nicht (`ema_radien.magnethaltung`): dann kommt `steg_traegt = False` heraus und
+keine Zahl.
+
+**Was NICHT drin ist, steht in `grenzen()`** und haengt an jedem Ergebnis:
+Kaefigstaebe/Ankerwicklung/Erregerspulen (eigene Pruefungen), Klebung und
+Reibung (der Magnet gilt als lose anliegend — die unsicherere Richtung),
+Schrumpfsitz und Waermedehnung.
+
+### Mehrkoerper: Blech UND Magnete (`ema_kontakt.py`, seit 22.10.2026)
+
+**Die dritte Stufe derselben Frage.** `rotor_stress_check` kennt weder Taschen
+noch Magnete (Ringformel, Millisekunden). `ema_magnetlast` traegt die
+Magnetfliehkraft als Knotenkraefte **verschmiert ueber die ganze Taschenwand**
+(Sekunden bis Minuten). Hier sind Eisen und Magnete **getrennte Koerper**,
+gekoppelt ueber **kleine Anlageflaechen** — Minuten.
+
+Gemessen an derselben Geometrie und demselben Netzmass (frischer Payload,
+12.000 1/min, 6 mm):
+
+| | verschmiert | mit Anlageflaechen |
+|---|---:|---:|
+| Eisen P99 (**das Gate**) | 127,5 MPa | **237,7 MPa** (x1,86) |
+| Eisen Median | 46,0 MPa | 39,8 MPa (x0,87) |
+| Rechenzeit | 3 s | 212 s |
+
+Die massgebende Spannung steigt, weil dieselbe Kraft durch **14,1 %** der
+Taschenwand geht statt durch 100 % — und der Blechkoerper als Ganzes wird
+entlastet, weil die Magnete mittragen.
+
+**Die rpm²-Linearitaet ueberlebt, und das ist nicht selbstverstaendlich.**
+Kontakt ist eine nichtlineare Randbedingung, und die ganze Nachbearbeitung
+dieser Kette (drei Betriebspunkte aus EINER Loesung, Berstdrehzahl, Rampenvideo)
+ruht auf `σ ~ ω²`. Gemessen bei exakt verdoppelter Drehzahl: **4,0001 / 3,9998 /
+4,0000 / 4,0077** (Eisen Spitze / P99 / Mittel / Magnet-Hauptzug), Abweichung
+0,19 %. Der Grund ist benennbar: die Anlagen liegen **spaltfrei** an, die
+Fliehkraft kann sie nur zudruecken, der Kontaktzustand aendert sich nie — ein
+immer geschlossener Kontakt ist eine lineare Kopplung. `linearitaetsprobe()`
+faehrt das nach; wer an den Anlagen etwas aendert, muss sie wiederholen.
+
+**Der Magnet wird am ZUG beurteilt, nicht an der Vergleichsspannung.** Zum
+ersten Mal sagt die Kette etwas ueber ihn: gemessen 46,9 MPa groesste
+Hauptzugspannung (P99 8,4) gegen ~80 MPa Zugfestigkeit. Dass dabei 64,3 MPa von
+Mises herauskommen, ist nachrichtlich — ein gesinterter Magnet ist **sproede**
+und traegt auf Druck rund das Dreizehnfache dessen, was er auf Zug traegt; von
+Mises ist das Kriterium eines zaehen Werkstoffs. Kriterium `magnetbruch` in
+`ema_sicherheit`. `E`/`nu`/`zug_mpa`/`druck_mpa` stehen seit demselben Tag in
+`MAGNETS`, ausdruecklich als `mech_beleg: "annahme"`.
+
+**Was die Zeichnung NICHT hergibt — der eigentliche Befund.** Damit ein
+Kontaktmodell wohlgestellt ist, muss der Magnet gehalten sein. In seiner
+**Laengsrichtung** haelt ihn nichts: die Taschenkappe ist ein Halbzylinder vom
+Radius `dicke/2 + spalt`, der Magnet endet flach — dazwischen stehen am Beispiel
+**3,1 mm Luft**. Reibung reicht nicht (Laengskomponente 0,747 der Fliehkraft
+gegen hoechstens `µ·0,664` = 0,133 bei µ = 0,2): **der Magnet rutscht**. Das
+Modell setzt deshalb einen **Endanschlag** — und sagt, was er kostet: er ist
+Eisen in der Luftkappe und nimmt davon gemessen **31 %** ein, waehrend das
+Feldmodell dieser Kette nichts von ihm weiss (`ema_topology` zeichnet keine
+Anlagen). `anlageEndeMm = 0` laesst ihn weg; dann haelt nur Reibung, und das
+steht im Ergebnis.
+
+**Drei Dinge, die beim Bauen gemessen und nicht angenommen wurden:**
+
+* **Nicht fragmentieren.** Eisen und Magnete bleiben getrennte OCC-Koerper,
+  damit gmsh an der Beruehrflaeche **doppelte Knoten** erzeugt. Ein
+  `occ.fragment` gaebe ein konformes Netz — also eine Verklebung, die auch ZUG
+  uebertraegt, und ein Klebespalt tut das nicht.
+* **Der Endanschlag muss die Kappenkuppe erreichen.** Ein duennes Plaettchen im
+  Klebespalt beruehrt den Magneten, aber nicht das Eisen: gemessen zerfiel das
+  Modell in **25 Koerper** (1 Eisen + 24 schwebende Anschlaege) statt in einen.
+* **Die Kontaktpaare werden beim BAUEN gemerkt, nicht hinterher gesucht.** Ein
+  erster Entwurf suchte Flaechen mit gleichem Schwerpunkt auf zwei Koerpern —
+  das findet nur die Endanschlaege und keine einzige Flankenanlage, weil das Pad
+  kleiner ist als die Magnetflanke: **24 von 72**.
+
+**An den Anlagen wird VERFEINERT** (`mesh_anlage_mm`, Vorgabe `mesh_mm/3`,
+Auslauf ueber `saum_faktor * mesh_anlage` auf das Grundmass). Dort sitzt die
+Spitze, um derentwillen es den Lauf gibt, und dort ist eine gleichmaessige
+Zellgroesse am ungeeignetsten: eine 3-mm-Anlage traegt bei 6 mm Netz nicht
+einmal ein Element in ihrer Breite. Gemessen kostet 2 mm an den Anlagen
+44.149 statt 26.214 Knoten (x1,68) und 16 s statt 5 s Netzbau. Der Saum ist
+nicht verhandelbar: ein Sprung von 0,8 auf 6 mm auf einer Elementkante gibt
+entartete Tetraeder, und die bringt CalculiX nicht durch. Dafuer musste die
+**Flaechensuche vor das Vernetzen** wandern (`_flaechen_suchen`) -- das
+Verfeinerungsfeld braucht die Pad-Flaechen, und zweimal suchen waeren zwei
+Gelegenheiten, verschiedene zu finden.
+
+**Die Anlagen sind seit dem 22.10.2026 je Magnet ZEICHENBAR.** Im Designer
+setzt das Werkzeug **⊥ Anlage** sie einzeln auf Flanke oder Ende (Klick setzt,
+Klick auf eine vorhandene entfernt); sie reisen als `geom.customAnlagen` mit --
+eine Liste **parallel zu `customLegs`**. Drei Zustaende, und sie bedeuten
+Verschiedenes: kein Eintrag bzw. `null` heisst „nimm die parametrischen",
+eine gefuellte Liste schlaegt sie, und eine **leere** Liste heisst „dieser
+Magnet hat keine" -- das weist `baue` ab, weil ein Magnet ohne Anlage in seiner
+Tasche schwimmt und CalculiX daran mit einem Starrkoerpermodus abbricht.
+
+**Die gefaehrlichste Stelle ist die Spiegelung an der d-Achse.** Der Designer
+zeichnet einen Halbpol und spiegelt ihn; dabei bleibt die **Laengs**achse `u`
+erhalten und die **Quer**achse kippt -- also tauschen `flanke+` und `flanke-`,
+waehrend `u` und die Kappen stehenbleiben. Wer das verwechselt, legt die
+Anlagen der gespiegelten Haelfte auf die falsche Flanke, und **im Ergebnis
+sieht man das nicht**. `test_kontakt.py` prueft es doppelt: in Python, dass
+Beruehrpunkt UND Pad-Mitte des Spiegelmagneten Spiegelbilder sind (mit
+Gegenprobe, dass eine falsche Spiegelung 5,2 mm danebenlaegt), und mit `node`,
+dass die Regel im Designer genau das tut. **Achtung beim Lesen der Zahlen:**
+`anlagen()["magnet"]` zaehlt (Leg x Pol), nicht die Legs -- bei 2 Polen ist der
+gespiegelte Leg die Nummer 2, Nummer 1 ist derselbe Leg am naechsten Pol.
+
+Die Dicke einer Anlage IST der Klebespalt (0,1 mm) und damit bei diesen
+Laeuferdurchmessern unter einem Bildpunkt -- gezeichnet wird sie deshalb als
+**Marke** fester Strichstaerke, waehrend Lage und Breite massstaeblich sind.
+
+**Welche Zahl des Laufs belastbar ist, steht gemessen in `konvergenz()`** und
+reist mit jedem Ergebnis. Konvergenzreihe ueber das Anlagennetz (6 / 3 / 2 /
+1,25 mm, vier echte Laeufe): **`stress_peak_MPa` konvergiert NICHT** (527 ->
+726 -> 851 -> 505 MPa -- Singularitaet an der Anlagenkante, dieselbe Sorte Zahl
+wie das Rohmaximum an der Taschenecke), **`stress_p99_MPa` setzt sich** (ab
+3 mm 225 +- 5, von 3,0 auf 1,25 noch -2,8 %), und **`stress_mean_MPa` ist
+mesh-abhaengig** (-19 %), weil er ueber ELEMENTE mittelt -- der neue
+`stress_mean_vol_MPa` steht ueber dieselbe Reihe auf 45,3...45,8 MPa (-1,2 %).
+Dasselbe am Magneten: `hauptzug_max_MPa` springt (46,9 / 16,2 / 24,2 / 12,7),
+`hauptzug_p99_MPa` setzt sich bei ~7,2 -- deshalb heisst die Sicherheit
+`sf_zug_p99`. Das Eisenvolumen steht ueber alle vier Netze auf 1,74e6 mm³, die
+unabhaengige Gegenprobe, dass sie denselben Koerper beschreiben.
+
+**Ueberall angeschlossen, nicht nur im Browser.** Agentenweg
+`cae_cli.py struktur --solver kontakt` (mit `--mesh-anlage`, `--anlage-breite`,
+`--anlage-je-flanke`, `--anlage-ende`, `--reibung`, `--magnet`; Exit 1, wenn
+SF < 1,3), Lauf ueber `--set struct_solver=kontakt`, Bericht mit
+`charts/mehrkoerper.png` und zwei eigenen Tabellen (die Festigkeitstabelle nennt
+seither den **Rechensatz** — ohne das liest sich eine Mehrkoerperzahl wie eine
+verschmierte, und die beiden unterscheiden sich am Gate um Faktor 1,9),
+Ergebnisreiter mit der Karte 🧲, `SKILL.md` mit beiden Stufen, und
+`ema_magnetlast`/`ema_kontakt` im **Werkzeug-Fingerabdruck** (`PHYSIK`): wer an
+der Zerlegung oder den Anlagenmassen dreht, bewegt eine ausgewiesene Zahl.
+`ema_struktbild` steht dort ausdruecklich NICHT — es zeichnet nur, und eine
+geaenderte Farbleiste darf den Fingerabdruck der Physik nicht bewegen.
+
+**Die Lastkarte daneben sagt im Mehrkoerpermodus, dass sie NICHT aufgetragen
+wurde.** `results["magnetlast"]` entsteht weiter (das Bild zeigt richtig, wo die
+Kraft angreift), aber im Kontaktlauf bringen die Magnete ihre Fliehkraft als
+Koerper selbst mit — beides zugleich waere die doppelte Last. Ohne diesen Satz
+liest man die Karte als die Last, mit der gerechnet wurde.
+
+**Nur CalculiX.** `*CONTACT PAIR` gibt es in Z88 nicht und in der `.mail`, die
+`ema_aster` schreibt, auch nicht — der Loeservergleich (`beide`/`alle`) bleibt
+beim verschmierten Modell. Test: `test_kontakt.py` (35 Pruefungen ohne Loeser;
+`--echt` rechnet zwei echte Laeufe und faehrt die Linearitaetsprobe).
+
+### Derselbe Fall EBEN (`ema_kontakt.baue_eben`, `struct_solver="kontakt_eben"`, seit 23.10.2026)
+
+**Der Lastfall ist planar, und der raeumliche Lauf sagt das selbst.** Die
+Fliehkraft liegt im Querschnitt, und `schreibe_inp` haelt **beide
+Stirnflaechen in z** fest (`Nstirn, 3, 3`) — das IST der ebene
+Verzerrungszustand. Die dritte Dimension kostet damit ~126.000 Tetraeder und
+traegt nichts bei, was eine Scheibe nicht auch sagt. Gemessen an derselben
+Geometrie, 12.000 1/min:
+
+| | raeumlich (6/1,25 mm) | eben (1,0/0,3 mm) |
+|---|---:|---:|
+| Knoten | 50.277 | 34.391 |
+| ccx | ~286 s | **29 s** |
+| Mittel je Volumen | 45,31 MPa | 49,25 MPa |
+| Eisenvolumen | 1,743e6 mm³ | 1,739e6 mm³ |
+
+Das Eisenvolumen auf **0,2 %** ist die unabhaengige Gegenprobe, dass beide
+denselben Koerper beschreiben. **Der Gewinn ist nicht die Zeit, sondern die
+Aufloesung**: eben ist ein Anlagennetz von 0,3 mm bezahlbar, raeumlich war bei
+1,25 mm Schluss — und die Anlagen sind die Stelle, um derentwillen es den Lauf
+gibt.
+
+**Verdoppelt wird nur, was die zweite Dimension IST.** Anlagen (`anlagen`),
+Magnetflaechen (`magnetflaechen`), Reib- und Steifigkeitsgroessen, die drei
+Starrkoerperfesseln an der Bohrung und die **Auswertung** (`kennzahlen`) sind
+dieselben Funktionen; eigen sind der OCC-Aufbau aus Rechtecken statt Kaesten,
+die Suche der Beruehr-KURVEN statt -flaechen und der Elementtyp. Dafuer wurde
+`_tetvol` zu **`_elvol`**: raeumlich das Tetraedervolumen, eben die
+Dreiecksflaeche mal der Scheibendicke — beides ein mm³, also wiegt `kennzahlen`
+in beiden Dimensionen dasselbe und die Zahlen sind gegeneinander lesbar. Eine
+zweite Auswertung haette zwei Zahlen geliefert, ohne dass die Dimension daran
+schuld sein muesste — genau die Frage, die der ebene Lauf beantworten soll.
+Der Weg aus dem Modul reproduziert den Prototyp, an dem er vermessen wurde,
+**Ziffer fuer Ziffer** (368,4 / 235,3 / 13,56 bei 3,0/1,0 und so fuer jeden
+Fall).
+
+**Beide ebenen Zustaende klammern die Antwort ein** (`ebener_zustand`), wie
+`rotor_stress_check` es analytisch schon tut. Vorgabe ist `dehnung` (CPE3,
+eps_z = 0 — der Fall, den der raeumliche Lauf mit seinen gehaltenen
+Stirnflaechen rechnet), `spannung` ist CPS3. **Wie viel die Wahl austraegt,
+haengt an der Kennzahl**: gemessen bei 2,0/0,6 mm bewegt sie das Blech-P99 um
+3,2 % (220,4 gegen 227,4 MPa) und die Magnet-Hauptzugspannung um 1,4 % (15,56
+gegen 15,34), das volumengewichtete **Mittel** aber um **22 %** (48,73 gegen
+59,48 MPa). Fuer das Tor entscheidet sie also wenig, fuer eine Aussage ueber
+den Blechkoerper viel — und sie ist gemacht, nicht eine Eigenschaft der
+Maschine.
+
+**Der eigentliche Ertrag ist ein Befund ueber die KENNZAHL** (voll in
+`BEFUNDE.md` 23.10.2026 (b)). Die ebene Reihe ueber fuenf Netze zeigt, was die
+raeumliche mit vier Punkten verdeckte: **die beiden P99 laufen gegeneinander**
+— `stress_p99_MPa` (je Element) faellt 237,6 -> 212,5, `stress_p99_vol_MPa`
+(je Volumen, neu) steigt 181,8 -> 197,3. Der elementgewichtete faellt, weil die
+Verfeinerung viele kleine Elemente in die heisse Zone legt und sie dadurch
+UEBERvertreten ist; der volumengewichtete steigt, weil er die Spitze erst
+aufloest. Belastbar ist die **Klammer** (am feinsten Netz 197...213 MPa), nicht
+eine der beiden Zahlen; konvergiert ist das Mittel je Volumen (+0,5 % im
+letzten Schritt). Dass `konvergenz(3)` den elementgewichteten P99 als „gesetzt"
+auswies, war deshalb zum Teil die **Aufhebung zweier Netzeffekte**.
+
+**Und der ELEMENTGRAD bewegt das Gate staerker als das Netz.** `ordnung=2`
+schreibt CPE6/CPS6; am selben Netz (3,0/1,0) gibt CPE6 `stress_p99_MPa`
+**263,2** gegen 235,3 MPa — der Sicherheitsfaktor kippt von 1,54 auf **1,29**,
+also ueber die Gate-Schwelle. Das Blech-P99 ist damit **keine konvergierte
+Groesse**: es haengt zum Teil an der Singularitaet an der Anlagenkante, und ein
+besseres Element loest die BESSER auf statt sie wegzurechnen. Konvergiert sind
+das volumengewichtete Mittel (1,5 % ueber beide Grade) und der **Magnet**: CPE6
+am groben Netz liefert Hauptzug P99 16,07 MPa, wofuer CPE3 ein sechsfach
+feineres Netz braucht (16,50) — zwei unabhaengige Wege auf dieselbe Zahl, und
+damit ist die Magnetzahl belegt und kein Netzartefakt.
+
+**Zwei Fallen bei der zweiten Ordnung, beide gemessen.** Gmsh projiziert die
+Mittenknoten auf die Geometrie, und auf den gekruemmten Taschenkappen kippt
+dabei ein Element um (`nonpositive jacobian determinant in element 7760` — das
+sah wie ein Kontaktproblem aus und war ein Netzproblem;
+`Mesh.SecondOrderLinear = 1`). Danach brach die **Kontaktiteration** nach 288 s
+mit `too many cutbacks` ab: die Mittenknoten einer quadratischen Kante tragen
+eine andere Lastaufteilung als die Ecken. `schreibe_inp` schaltet deshalb bei
+`ordnung == 2` auf `TYPE=NODE TO SURFACE` um — die beiden Grade rechnen damit
+**nicht denselben Kontaktalgorithmus**, und das steht in `grenzen(2)`. **Wie
+weit die zweite Ordnung traegt, haengt am ebenen ZUSTAND**: bei 2,0/0,6 mm
+erreichte CPE6 (Dehnung) nur 0,136 von 1,0 Lastschritt — Teillast, s. unten —,
+waehrend CPS6 (Spannung) am selben Netz in 242 s durchlief (487,1 / 247,8 /
+60,68 MPa, Magnet Zug P99 16,55). Der ebene Spannungszustand ist weicher (kein
+eps_z = 0), und die Kontaktiteration konvergiert dort. Wer zweite Ordnung auf
+einem feineren Netz braucht, nimmt also `spannung` — und sagt dazu, dass das
+ein anderer Zustand ist.
+
+**Die Magnetzahl ist damit DREIFACH belegt**, auf Wegen, die sich in
+Elementgrad, Netz UND ebenem Zustand unterscheiden: CPE3 bei 1,0/0,3 = 16,50,
+CPE6 bei 3,0/1,0 = 16,07, CPS6 bei 2,0/0,6 = **16,55** MPa — drei Verfahren auf
+3 %. Das ist der Beleg, dass ~16,4 MPa die Zahl der Maschine ist und kein
+Artefakt eines Weges (`konvergenz(2)["magnet_belegt"]`).
+
+**Was die Scheibe NICHT sagt, steht in `grenzen(2)`:** keinen Verlauf ueber der
+Baulaenge, also nichts ueber die Stirnseiten und nichts ueber eine Schraegung.
+Die Anlagen dieser Kette laufen ueber die ganze Paketlaenge
+(`magnetflaechen`), deshalb trifft die Scheibe sie exakt — wer eine axial
+GETEILTE Anlage baut, braucht den raeumlichen Lauf.
+
+Erreichbar als `cae_cli.py struktur --solver kontakt --modell eben`
+(`--ebener-zustand`, `--ordnung`), als `run analyse --set
+struct_solver=kontakt_eben`, im Browser als eigener Eintrag im Feld
+„Rechensatz & Loeser", und im Bericht nennt die Festigkeitstabelle die
+**Dimension** samt Zustand und Elementgrad — ohne das liest sich eine ebene
+Zahl wie eine raeumliche, und die beiden liegen am Blech-P99 um Faktor 1,7
+auseinander.
+
+**`mesh_magnet_mm`: der Magnetkoerper war nie aufgeloest.** Das
+Verfeinerungsfeld sitzt auf den **Anlagen**, und die liegen auf der
+Eisenseite — der Magnet selbst blieb auf dem Grundmass, also bei 6 mm Netz
+etwa zwei Elemente ueber seine 6 mm Dicke, und ein C3D4 ist ein Element
+konstanter Dehnung (zu steif heisst zu wenig Spannung). Gemessen, Anlagennetz
+konstant 1,25 mm und NUR der Magnet verfeinert (6,0 / 3,0 / 2,0 mm):
+Magnet-Zug P99 **7,18 / 11,01 / 13,46 MPa** bei 33.153 / 64.768 / 172.932
+Magnetelementen und 309 / 344 / 528 s — waehrend das Eisen um **0,18 %**
+(45,31 / 45,34 / 45,39) und das Magnetvolumen um keine Stelle wandert. Das ist
+die Kontrolle, dass die Verfeinerung nur das tut, was sie behauptet; und es
+**erklaert die 2-D/3-D-Abweichung am Magneten** (7,18 gegen ~16,4) als
+Aufloesung und nicht als Modellunterschied. Raeumlich ist die Zahl auf dieser
+Maschine aber **nicht bezahlbar zu konvergieren** (bei 2 mm fehlen noch 18 %);
+belastbar ist sie nur eben, und `konvergenz(3)["magnet_nicht_belastbar"]` sagt
+das an der Kennzahl. `None` (Vorgabe) laesst jeden Altlauf Ziffer fuer Ziffer
+stehen — nachgeprueft reproduziert die Reihe bei 6,0 die dokumentierten
+219,5 / 45,31 / 12,71 / 7,18 und 158.676 Tetraeder exakt.
+
+**Und der Waechter, der aus dem ebenen Lauf fiel** (`ema_deck.loese_ccx`,
+`_ccx_schrittzeit`): ccx halbiert das Inkrement, wenn die Kontaktiteration
+nicht konvergiert, laeuft in das Inkrementlimit und **beendet sich mit 0** —
+mit gueltiger `.frd` und einer `.dat`, in der die Spannungen des erreichten
+Teils der Last stehen. Gemessen 0,136 von 1,0 und Kennzahlen um **Faktor 8** zu
+niedrig, der Form nach vollkommen plausibel: es sieht nicht wie ein Fehlschlag
+aus, sondern wie eine besonders gute Maschine (SF 12 statt 1,5). `loese_ccx`
+meldet jetzt `TEILLAST` samt erreichtem Anteil, und `schrittzeit` reist bei
+jedem Lauf mit. Das betrifft **alle** Aufrufer (`ema_deck`, `ema_kontakt`,
+`ema_topopt`); bei einem linearen Lauf ohne Kontakt laeuft der Schritt in einem
+Inkrement durch, und genau deshalb hat die Luecke bis hierher ueberlebt. Voller
+Befund und der offene Punkt dazu (die raeumliche Reihe vom 22.10. wurde ohne
+den Waechter gemessen) in `BEFUNDE.md` 23.10.2026 (c).
+
+### Die FE-Darstellung: SCHNITT durch das Netz (`ema_struktbild.py`)
+
+`_render_deform_single` zeichnete **alle** Knoten des Volumennetzes auf die
+xy-Ebene projiziert — keinen Schnitt. Die Magnettaschen waren darin von
+Stirnflaechenknoten zugedeckt, gezeigt wurde die **Verschiebung** (Mikrometer)
+statt der Spannung, obwohl die im `.frd` steht, und es sah aus wie ein Netz und
+war keines (dieselbe Verwechslung, die im Kopf von `_render_deform_analytical`
+schon benannt ist — dort fuer den analytischen Rueckfall behoben, fuer das echte
+FEM-Ergebnis nicht). Der Grund dahinter: **`_parse_frd_full` las die
+Elementtabelle nicht.** Ohne Knotenverbindungen gibt es keine Flaeche, keinen
+Schnitt und kein Loch an der Stelle der Tasche; der Block steht in jeder `.frd`
+(`    3C`), er wurde nur uebersprungen.
+
+Jetzt: je Tetraeder das Schnittpolygon aus den Kantenschnittpunkten (drei oder
+vier Punkte, immer konvex), der Feldwert entlang der Kante interpoliert — eine
+geschlossene Flaeche aus den wirklichen Elementen, mit den Taschen als Loechern.
+**Drei Groessen statt einer**: `spannung`, `sicherheit` (R_e/σ mit roter
+SF-1-Marke in der Farbleiste) und `verformung`, jede bei Nennlast /
+Maximaldrehzahl / Berstdrehzahl — zwei Knopfreihen im Verformungsreiter, weil es
+zwei Achsen sind. Dazu `lastbild()`: der Querschnitt mit genau den Waenden, die
+in den Loeser gegangen sind.
+
+Drei Dinge, die gemessen und nicht angenommen sind:
+
+* **Der Schnitt wird EINMAL gerechnet und dann nur skaliert.** Er haengt am
+  Netz, und das ist ueber alle Drehzahlen dasselbe (Spannung und Verschiebung
+  wachsen mit ω², die Geometrie nicht). Gemessen 7050 Schnittflaechen in 0,3 s
+  gegen neun Bilder — ihn je Bild neu zu schneiden waere die teuerste Stelle der
+  Darstellung und umsonst. Fuer die VERFORMTE Darstellung gilt das nicht, dort
+  wandern die Polygone mit.
+* **Die Farbskala haengt am 99,5. Hundertstel, nicht am Maximum.** Das sitzt an
+  einer scharfen Taschenecke und ist eine Gitter-Singularitaet (gemessen 4311
+  MPa Rohmax gegen 893 MPa P99 am selben Lauf); daran skaliert waere das halbe
+  Blech schwarz und der Steg nicht zu unterscheiden — dieselbe Begruendung, aus
+  der das TOR auf P99 stellt.
+* **Das Rampenvideo laeuft ueber denselben Schnitt.** Es bei der Punktwolke zu
+  lassen hiesse, dass Video und Standbild desselben Laufs zwei Darstellungen
+  derselben Zahlen zeigen, und man sucht den Unterschied in der Physik.
+
+Ohne Elementtabelle bleibt die Punktwolke und **sagt es im Untertitel**
+(`deformation.darstellung` = `schnitt` | `punktwolke` | `analytisch`).
+Test: `test_magnetlast.py` (25 Pruefungen ohne Loeser und ohne FreeCAD; die
+Flaechenprobe gegen einen Quader mit bekanntem Querschnitt, ein lineares Feld,
+das der Schnitt exakt wiedergeben muss, und die Gleichheit der Lastsumme in
+allen drei Loeserformaten).
+
 ### Materials
 
 All material tables are dicts at the top of `ema_pipeline.py:50-78`: `LAMINATES`
@@ -2389,6 +2792,9 @@ dict passed to the FEM script.
 | `ema_axial_thermik.py` | **Das LPTN der SCHEIBE — ein eigenes Netz, nicht das radiale mit anderen Zahlen.** `ema_thermal.conductances` ist ein Schalennetz von innen nach aussen (Welle → Laeufer → Spalt → Staender → Gehaeuse), und jede Flaeche darin ist ein Zylindermantel `2πRL`. Das ist nicht die falsche Parametrierung einer Scheibe, sondern die falsche TOPOLOGIE — deshalb hat `run_thermal_analysis` den Axialfluss bis zum 06.10.2026 ausdruecklich ABGEWIESEN: am Vorgabe-Payload lief die radiale Rechnung sonst klaglos durch und meldete 68,2 / 81,8 °C fuer eine Maschine, die es nicht gibt. **Drei Dinge sind wirklich anders, und sie sind der ganze Grund:** (1) der Staender hat **keinen** langen Zylindermantel nach aussen — beim YASA nur ein schmales Band `2πRo·(Zahn+Joch)`, bei jochlosem Bau fast nichts, der radiale HAUPTweg ist hier also der schwache (gemessen 30,6 W/K jochlos gegen 45,3 mit 12 mm Joch); (2) dafuer liegt die **Wicklung frei** — die Wickelkoepfe stehen innen UND aussen am Ringraum und sind vergossen, und das ist beim YASA der Hauptweg, den es radial so nicht gibt (`G_w_h`); (3) die **Laeuferscheiben sind hervorragende Konvektoren** — ihre Rueckseite ist eine frei rotierende Scheibe, fuer die es eine der bestbelegten Korrelationen ueberhaupt gibt (Cobb/Saunders, Dorfman: `Nu = 0,015·Re^0,8` turbulent, `0,36·Re^0,5` laminar, Umschlag bei Re = 2,4e5; gemessen 13 W/m²K bei 300 1/min, 128 bei 6000). Radial ist der Laeufer eingeschlossen, `build_GA` hatte deshalb gar keine Kante Laeufer→Gehaeuse. **GETEILT wird der LOESER**: `build_GA`/`solve_steady`/`solve_transient` kennen nur Leitwerte und Kapazitaeten, keine Geometrie — das ist die saubere Nahtstelle, und ein zweiter Loeser waere die Stelle, an der die beiden Wege beim naechsten Fehlerbericht auseinanderlaufen. Die zwei neuen Kanten `G_w_h`/`G_ri_h` tragen **Vorgabe 0,0**, damit der radiale Weg Ziffer fuer Ziffer derselbe bleibt (Muster `G_w_cool` der CFD-Kopplung, im Test gegen `np.array_equal` festgenagelt). Ebenso geteilt wird das **Verlustmodell**: `compute_losses`/`design_point_losses`/`cycle_loss_series` nehmen jetzt `massen_vorgabe` (Staender-/Laeufereisen, Kupfervolumen) — dieselbe Formel, andere Koerper, und `None` heisst radial wie bisher. **`ema_thermal.netz()` ist die EINE Stelle**, an der sich die beiden Topologien unterscheiden; ohne sie stuende derselbe Zweig in `run_thermal_analysis`, in `thermal_for_cycle` UND in `solve_transient_series`, und der dritte waere der, den beim naechsten Mal jemand vergisst. **Was NICHT gerechnet wird, steht an jedem Ergebnis** (`grenzen()` haengt an `warnings`): ein Netz aus Korrelationen statt eines geloesten Feldes; `H_VERGUSS` (Wickelkopf→Gehaeuse) ist eine **Annahme** und der empfindlichste Wert ueberhaupt; EIN Wicklungsknoten, also kein Verlauf ueber dem Radius — der Innenrand WIRD waermer sein als der Aussenrand (schmalerer Zahn bei gleicher Nutbreite), und das sagt dieses Netz nicht. `R_phase_mOhm` wird axial auf **None** gesetzt: `ema_wicklung` legt einen axial liegenden Leiter zugrunde, die Scheibe hat radiale Leiter und zwei Wickelkoepfe — eine falsche Zahl waere schlechter als keine (`P_Cu` haengt nicht daran, es kommt aus Stromdichte × Kupfervolumen). Gemessen am Beispiel (Ro 130, λ 0,577, 2p 16, Q 48, YASA, 100 Nm @ 3000 1/min): Wasser 45,4 °C Wicklung / 188 W, freie Luft 203,9 °C / 285 W; WLTP 23,3 km bei 13,7 kWh/100 km mit Dauer-T_Wick 44 °C und Spitze 57 °C. **Die SCHICHTUNG kommt seit dem 16.10.2026 aus `ema_axial_fdm`** (`_dicken` → `zahnlaenge`/`_jochhoehe`/`_rueckenhoehe`, `stapelhoehe` → `ema_axial_fdm.stapelhoehe`) und nicht mehr aus eigenen Vorgabezahlen. Dieses Modul fragte die Bauform nicht: ein jochloser YASA-Staender bekam 12 mm Eisen, das es nicht gibt; wo die Bauform ein Joch braucht, wird es aus dem Fluss bemessen (10,92 mm) statt gesetzt; und beidseitig genutet heisst **zwei Zahnbaender** (TORUS-NN), also doppeltes Zahneisen UND doppeltes Nutkupfer. Gemessen meldeten Feld und Masse fuer dieselbe Maschine 100,92 gegen 65,00 mm (torus_nn), 98,84 gegen 71,00 (afir), 55,92 gegen 45,00 (einseitig) — **nur YASA stimmte ueberein, die Bauform, an der entwickelt wurde**; zwei Bauhoehen sind zwei Maschinen, und die Bauhoehe traegt Wellen- und Gehaeusemasse. Danach Randband Staender→Gehaeuse 30,6 / 74,6 / 88,0 / 44,0 W/K und Gesamtmasse 25,4 / 36,4 / 30,0 / 21,7 kg (s. `BEFUNDE.md`). Test: `test_axial_thermik.py` (27 Pruefungen gegen Invarianten statt gegen festgenagelte Zahlen — darunter: Thermik und Feldmodell meinen fuer JEDE Bauform dieselbe Bauhoehe) |
 | `ema_axial_vergleich.py` | **Paarvergleich fuer den SCHEIBENLAEUFER — die Entscheidungen VOR der Zeichnung.** Ein eigenes Modul, und beide Gruende sind inhaltlich: **die Achsen sind andere** (eine Scheibe hat keine Magnetanordnung, keine Taschenoeffnung, keinen V-Oeffnungswinkel, keine Wellenverbindung — dafuer `bauform`, `lambda = Ri/Ro`, `zahnform`, `rueckenblech`, `stapel`), und **der Bewerter ist ein anderer** (`ema_paarvergleich` rechnet ueber `ema_optimize._eval_geom`, also Zylinderringe mal Blechpaketlaenge). Vierzehn Achsen, Stufe 1 analytisch, 0,8 s fuer alle — und **keine eigene Physik**: jede Zahl kommt aus `ema_axial.auslegung/anzug/ruecken/bandage/zahnform/lambda_grenze`, `ema_thermal.rated_torque` und `ema_axial_thermik.masse`, die Tore sind die vorhandenen. **Das VERB bleibt dasselbe** (`cae_cli.py paarvergleich`) und verzweigt nach `ema_fluss.flussweg` — Muster `feld2d`/`ema_maschinenart.Art.feldweg`; `ema_paarvergleich` wirft weiterhin `AxialNichtVerglichen` und nennt jetzt den Weg hierher. **Fuenf Spalten sind LASTEN und keine Guete** (Anzug, Rueckenblech-Soll, Durchbiegung, Magnetkraft, Kleber): „mehr Anzug“ ist weder besser noch schlechter, sondern eine Anforderung an den Staender — sie gehen in die Spannweiten-Rangliste nicht ein. **Eine Achse, die nichts Gezaehltes bewegt, wird BENANNT** (dieselbe Regel wie `ema_paramstudy.wirkungslos_grund`): eine Tabelle mit sechs gleichen Zeilen sieht nach einem Rechenfehler aus und ist meistens keiner — und wo doch, soll es auffallen. Beim ersten Lauf waren es drei Achsen, und **zwei davon zu Unrecht**: der Magnetwerkstoff wirkt ueber die Modul-Globalen `ema_analysis.Br_NdFeB`/`MU_R_MAG` (Muster `run_pipeline`, viermal dasselbe `B_gap` von N35 bis Ferrit, jetzt 0,9573 gegen 0,3319 T), und die Blechsorte ueber ein `b_sat_t`, das niemand uebergab (`zahnform` fiel auf seine Modulvorgabe 1,70 T zurueck — die Achse wirkt aber AUSSCHLIESSLICH ueber diese Zahl). Die dritte, die Nutzahl, ist nur **bedingt** flach, weshalb ihr Grund eine Funktion des Payloads ist: mit abgeleiteter Nutbreite kuerzt sich die Teilung heraus (`B_zahn = B_gap/((1-swr)*k_fe)`), mit einem Millimetermass bewegt sie den Zahn von 1,211 auf 1,653 T. Dafuer musste `_spannweite` Spannen von 0,0 % **weglassen** — eingetragen war das Dict nie leer und die Erkennung blind. **Zwei Luecken der TABELLEN stehen als Notiz unter ihrer Achse statt erfunden zu werden:** `MAGNETS` fuehrt weder Dichte noch Preis je Sorte und `PREISE_EUR_KG["magnet"]` ist EIN Betrag fuer alle (Ferrit kommt genauso schwer und teuer heraus wie NdFeB — und gerade der Preis ist sein Grund), `LAMINATES` fuehrt keine Dichte. Auf dieser Stufe bekommen alle vier Bauformen **dasselbe B_gap** (Arbeitsgerade); im Feld trennen sie sich (YASA 1,1234 · TORUS-NN 0,9733 · AFIR 1,1105 · einseitig 1,1011 T), und das sagt `axial --stufe feld`. Test: `test_axial_vergleich.py` (27 Pruefungen ohne Loeser, gegen Invarianten: jede Achse bewegt das, wofuer es sie gibt, die Globalen stehen danach wieder, und „keine Option baubar“ heisst NICHT „bewegt nichts“) |
 | `ema_mobil.py` / `ema_mobil.html` / `mobil/` | **Handy-Pfad** (Routen `/m…`): Maße → Halbpol zeichnen → vier Betriebspunkte mit dem 2D-FDM-Löser, als installierbare Web-App (PWA). Token-geschützt (einzige Routengruppe), QR-Code beim Serverstart. `rechne_punkte` streamt NDJSON (erste Kachel nach ~3 s statt ~12 s), reicht `out_px` durch (gegen den 1000-px-Boden von `render_preview_frame`) und rechnet EINEN `B_gap`-Vorlauf für alle Punkte. `legs_aus_halbpol` ist die Python-Zwillingsfassung der JS-Umrechnung in der Seite — `test_mobil.py` hält beide über `node` bitgleich. `basis_geom()` füllt die dünne Client-Geometrie aus `ema_text2ema.SCHEMA` auf (sonst `KeyError: 'magThick'`). Details + die vier gemessenen Entwurfsentscheidungen im Abschnitt „Handy-Pfad" |
+| `ema_magnetlast.py` | **Die Fliehkraft der MAGNETE — die Last, die der Struktur-FEM gefehlt hat.** `waende()` zerlegt sie je Magnet exakt in die zwei Taschenwaende, an denen er anliegt (Vektorsumme = Fliehkraft), `knotenlasten()` legt sie als Knotenkraefte auf die Wandknoten, `stegspannung()` gibt den analytischen Richtwert dazu, `grenzen()` sagt, was die Rechnung NICHT ist. `KERN` ist der Quelltext der Knotenauswahl — per `exec` geladen UND woertlich im FreeCAD-Skript, also EINE Quelle statt zweier Abschriften. `dichte()` liest die Magnetdichte je Sorte aus `MAGNETS` (sie stand vorher an zwei Stellen als Literal und in der Tabelle gar nicht). Details im Abschnitt „Die Fliehkraft der MAGNETE"; Befund in `BEFUNDE.md` |
+| `ema_kontakt.py` | **Mehrkoerper-Rotor: Eisen UND Magnete, gekoppelt ueber kleine Anlageflaechen** (`struct_solver="kontakt"`). `anlagen()` legt sie fest (reine Zahlen, ohne gmsh pruefbar), `baue()` vernetzt beide Koerper **getrennt** (nicht fragmentiert — sonst waere es eine Verklebung), `schreibe_inp()` schreibt `*CONTACT PAIR` samt Reibung, `kennzahlen()` wertet je Koerper aus und beurteilt den Magneten an der groessten **Hauptzugspannung** statt an von Mises (er ist sproede), `linearitaetsprobe()` misst nach, ob die rpm²-Skalierung der Kette hier ueberhaupt gilt, `grenzen()` sagt, was der Lauf NICHT ist. Details im Abschnitt „Mehrkoerper"; Befund in `BEFUNDE.md` |
+| `ema_struktbild.py` | **Die FEM-Ergebnisse als SCHNITT durch das Netz statt als Punktwolke.** `schnittpolygone()` schneidet das Tetraedernetz bei halber Paketlaenge (Kantenschnittpunkte je Tetraeder, Feldwert entlang der Kante interpoliert), `feldbild()` zeichnet daraus Spannung / Sicherheit / Verformung, `lastbild()` den Querschnitt mit den belasteten Taschenwaenden und ihren Kraftpfeilen. Es rechnet NICHTS — es bekommt Knoten, Elemente und Werte und sagt, WO sie sitzen. Details im Abschnitt „Die FE-Darstellung" |
 | `ema_deck.py` | **Eigener Rechensatz ohne FreeCAD.** Gmsh-Python-API vernetzt Polsektor oder Vollrotor aus `ema_topology.magnet_legs`; schreibt den CalculiX-Satz selbst (zyklische Symmetrie als `*EQUATION`, `*DLOAD CENTRIF`, `*EL PRINT` für den Vergleich, Materialstufen je relativer Dichte), fährt `ccx` ohne Unterprozess und wertet `.dat`/`.frd` aus. `zentrifugal_lasten` integriert die Volumenkraft isoparametrisch mit echter Jacobi-Determinante — für Z88, das keine Rotationslast kennt. Details im Modulkopf und im Abschnitt „Eigener Rechensatz" |
 | `ema_z88.py` | **Z88Aurora V5 im Stapelbetrieb** (`/opt/z88aurora`, kein GUI, kein `z88inp`). Schreibt `Z88I1/I2/I5/MAT/ELP/INT/MAN.TXT` + `z88.dyn`, fährt `z88r -t` dann `-c` (der Prüflauf schreibt `Z88R.DYN`), liest `Z88O2/O3/O4`. `spannungen_je_element` bringt die Spalten auf die Reihenfolge der CalculiX-`.dat` — die eine Stelle, an der sich die beiden Löser vertauschen ließen. Drei nirgends dokumentierte Formate sind im Modulkopf festgehalten |
 | `ema_aster.py` | **Code Aster 17.4.0 als DRITTER Löser auf demselben Netz** — aus einem ausgepackten Salome-Meca-SIF-Abbild unter `~/aster-build` (`CAE_ASTER_HEIM`), dessen `env_aster.sh` `LD_LIBRARY_PATH`/`PYTHONPATH`/`ASTER_*` setzt. **Aster 17 läuft als BIBLIOTHEK** (`import code_aster`, `code_aster.Commands`), nicht über `as_run` und nicht über eine `.export` — es gibt in diesem Abbild kein `as_run`. `loese` fährt deshalb `bash -lc 'source env_aster.sh; exec "$ASTER_PYTHON" rechnung.py'` in einem Arbeitsverzeichnis; `_aster_python()` liest den Interpreterpfad AUS dem env-Skript statt ihn nachzubauen, sonst laufen die beiden beim nächsten Abbild auseinander. Geschrieben wird Asters **eigenes** `.mail`-Format (`FORMAT='ASTER'`, `UNITE=20`) und nicht MED — `medcoupling` gibt es im System-Python nicht. Knoten heißen `N<i>`, Elemente `M<i>`, **die Nummern bleiben die des `Netz`**, sonst ließe sich ein Befund zwischen den drei Lösern nicht zuordnen. **Drei gemessene Fallen:** (1) **Aster dualisiert Dirichlet-Randbedingungen mit Lagrange-Multiplikatoren**, und die stehen im selben Vektor wie die Verschiebungen — ein `getValues().reshape(-1,3)` lieferte gemessen eine „Verschiebung" von **1397 mm**, während die Spannungen mit 157,6 MPa völlig plausibel waren; das war eine Reaktionskraft. Gelesen wird über `toSimpleFieldOnNodes()` samt Gültigkeitsmaske, und bei einer Fassungsabweichung bleibt das Feld LEER statt halb gefüllt. (2) Die **Dichte geht in t/mm³** hinein (`density/1e12`) — mit kg/m³ rechnet Aster klaglos weiter. (3) Ein **vorgegebener Arbeitsordner muss nicht existieren**; `loese` legt ihn an und räumt ihn ausdrücklich NICHT weg, weil bei einem Fehlschlag die `.mess` die einzige Spur ist. Der **Sektorlauf bleibt CalculiX** (`NUR_VOLLROTOR` statt einer Näherung). `kennzahlen_aus_lauf` delegiert an `ema_deck.kennzahlen` — eine zweite Auswertung wäre die Stelle, an der drei Löser drei Zahlen liefern, ohne dass der Löser schuld wäre. Test: `test_aster.py` (ohne Aster; `--echt` rechnet zusätzlich gegen CalculiX) |

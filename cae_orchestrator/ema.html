@@ -1385,6 +1385,8 @@
         <option value="aster">Eigener Satz, Vollrotor, Code Aster</option>
         <option value="beide">Eigener Satz, Vollrotor, CalculiX <b>und</b> Z88 — mit Gegenüberstellung</option>
         <option value="alle">Eigener Satz, Vollrotor, <b>alle drei</b> Löser — CalculiX, Z88, Code Aster</option>
+        <option value="kontakt">🧲 Mehrkörper räumlich: Blech <b>und</b> Magnete, Kontakt an Anlageflächen — Minuten</option>
+        <option value="kontakt_eben">🧲 Mehrkörper <b>eben</b> (ein Querschnitt, Dicke = Paketlänge) — Sekunden, löst die Anlagen wirklich auf</option>
       </select>
       <small style="grid-column:1/-1;font-size:.7rem;color:#666">
         <b>FreeCAD + CalculiX</b> ist der gewachsene Weg und der einzige, der die
@@ -1392,6 +1394,14 @@
         aus der .frd. Die drei anderen bauen das Netz selbst (Gmsh, aus derselben
         Magnetgeometrie wie das 2D-Feld) und rechnen in Sekunden, liefern dafür keine
         Verformungsbilder; Stufe 5b fällt dann auf die analytische Näherung zurück.
+        <b>Mehrkörper</b> ist die tiefste Stufe: die Magnete werden als eigene Körper
+        vernetzt und über kleine <b>Anlageflächen</b> an das Blech gekoppelt, statt
+        ihre Fliehkraft über die ganze Taschenwand zu verschmieren. Gemessen geht
+        dieselbe Kraft dann durch rund ein Siebtel der Fläche, und die maßgebende
+        Blechspannung steigt um Faktor 1,9 — dafür sagt der Lauf als einziger etwas
+        über den <b>Magneten selbst</b> (er ist spröde: maßgebend ist die größte
+        Hauptzugspannung, nicht die Vergleichsspannung). Preis: Minuten statt
+        Sekunden, und die Anlageflächen sind eine Entwurfsannahme, keine Messung.
         <b>Beide</b> rechnet dasselbe Netz zweimal — das prüft Löser und Rechensatz,
         nicht das Netz und nicht das Modell. Z88 kann keinen Polsektor (weder zyklische
         Symmetrie noch schiefe Symmetrieebenen), deshalb dort der volle Rotor.
@@ -1533,6 +1543,7 @@
           <button id="dsn_tool_sel" class="dsn-tool" onclick="dsnSetTool('select')" style="flex:1;background:#3a6;font-size:.74rem;padding:7px">▭ Auswahl</button>
           <button id="dsn_tool_mag" class="dsn-tool" onclick="dsnSetTool('magnet')" style="flex:1;background:#444;font-size:.74rem;padding:7px">🧲 Magnet</button>
           <button id="dsn_tool_bar" class="dsn-tool" onclick="dsnSetTool('barrier')" style="flex:1;background:#444;font-size:.74rem;padding:7px">〰 Barriere</button>
+          <button id="dsn_tool_anl" class="dsn-tool" onclick="dsnSetTool('anlage')" style="flex:1;background:#444;font-size:.74rem;padding:7px">⊥ Anlage</button>
         </div>
         <div style="display:flex;gap:6px;align-items:center;font-size:.76rem;margin-bottom:4px">
           <label>Magnet-Dicke</label><input type="number" id="dsn_magthick" value="6" min="1" max="80" step="0.5" style="width:60px"><span>mm</span>
@@ -1543,10 +1554,30 @@
           <label>Magnet-Luftspalt</label><input type="number" id="dsn_maggap" value="0.1" min="0.05" max="0.3" step="0.01" style="width:60px"><span>mm</span>
           <label style="margin-left:6px">Barriere-Breite</label><input type="number" id="dsn_barwidth" value="3" min="0.5" max="40" step="0.5" style="width:60px"><span>mm</span>
         </div>
+        <!-- Anlageflächen: die Stellen, an denen der Magnet wirklich am Blech
+             anliegt. Sie wirken NUR im Mehrkörperlauf (Rechensatz „Mehrkörper"
+             im Berechnungs-Tab) — dort sind sie die Lastübertragungsflächen. -->
+        <div style="display:flex;gap:6px;align-items:center;font-size:.76rem;margin-top:4px">
+          <label>⊥ Flanke</label><input type="number" id="dsn_anl_breite" value="3" min="0.5" max="20" step="0.5" style="width:52px"><span>mm</span>
+          <label style="margin-left:4px">je Flanke</label><input type="number" id="dsn_anl_je" value="2" min="1" max="6" step="1" style="width:44px">
+          <label style="margin-left:4px">Ende</label><input type="number" id="dsn_anl_ende" value="1.5" min="0" max="20" step="0.5" style="width:52px"><span>mm</span>
+        </div>
         <small style="display:block;font-size:.7rem;color:#666;margin-top:5px">
           Magnet: Linie aufziehen (Innen→Außen) = Lage+Länge+Winkel, Dicke aus Feld.
           Barriere: Punkte klicken, Doppelklick/Enter beendet. Du zeichnest EINEN halben
           Pol; er wird an der d-Achse gespiegelt und über alle Pole gemustert (Polung alterniert).
+        </small>
+        <small style="display:block;font-size:.7rem;color:#8a93a0;margin-top:5px;
+               border-left:2px solid #3a5a8c;padding-left:7px">
+          <b>⊥ Anlage:</b> auf eine Magnetflanke oder ein Magnetende klicken setzt
+          dort eine Anlagefläche, ein Klick auf eine vorhandene entfernt sie. Grau
+          mit <b>·V</b> heißt „Vorgabe" (die Felder oben, für alle Magnete gleich);
+          sobald du einen Magneten anfasst, bekommt er seine <b>eigene</b> Liste
+          (grün) — <b>↺</b> setzt ihn zurück. Die Dicke einer Anlage IST der
+          Klebespalt und deshalb nicht maßstäblich gezeichnet, Lage und Breite
+          schon. Sie wirken nur im <b>Mehrkörper</b>-Rechensatz; dort tragen sie
+          gemessen rund 14 % der Taschenwand, und die maßgebende Blechspannung
+          hängt daran um Faktor 1,9.
         </small>
       </div>
 
@@ -3876,6 +3907,45 @@
           </div>
         </div>
         </div><!-- /radstr-wrap -->
+        <!-- Die Fliehkraft der MAGNETE. Sie fehlte in der Struktur-FEM
+             vollstaendig (vernetzt wird nur das Rotoreisen, die Taschen sind
+             Luft) -- und sie ist am Steg der groessere Posten als die
+             Ringspannung. Hier steht, was aufgetragen wurde und was der Steg
+             davon sieht. -->
+        <!-- Mehrkörper: Blech UND Magnete gerechnet. Es gibt diesen Block
+             nur bei struct_solver="kontakt" — nur dort ist der Magnet ein
+             gerechneter Körper und kein Ersatzlastvektor. -->
+        <div id="mk-wrap" style="margin-top:16px;display:none">
+          <div class="section-h">🧲 Mehrkörper: Blech und Magnete im Kontakt</div>
+          <img id="mk-img" class="chart-img" src="" alt="Mehrkörper-Schnitt"
+               style="max-width:900px;margin-bottom:10px"/>
+          <div class="two-col">
+            <div>
+              <div class="section-h">Anlageflächen</div>
+              <div class="fem-box" id="mk-anlagen"></div>
+            </div>
+            <div>
+              <div class="section-h">Der Magnet selbst</div>
+              <div class="fem-box" id="mk-magnet"></div>
+            </div>
+          </div>
+          <div id="mk-grenzen" style="margin-top:10px;font-size:.73rem;
+               color:#8a93a0;line-height:1.5"></div>
+        </div>
+        <div id="maglast-wrap" style="margin-top:16px;display:none">
+          <div class="section-h">🧲 Magnetfliehkraft auf die Taschenwände</div>
+          <div id="maglast-modus" style="display:none;margin-bottom:10px"></div>
+          <div class="two-col">
+            <img id="maglast-img" class="chart-img" src="" alt="Magnetfliehkraft"
+                 style="max-width:560px"/>
+            <div>
+              <div class="fem-box" id="maglast-box"></div>
+              <div id="maglast-steg" class="fem-box" style="margin-top:10px"></div>
+            </div>
+          </div>
+          <div id="maglast-grenzen" style="margin-top:10px;font-size:.73rem;
+               color:#8a93a0;line-height:1.5"></div>
+        </div>
         <div id="conn-wrap" style="margin-top:16px;display:none">
           <div class="section-h">🔗 Wellenverbindung (Blechpaket–Welle)</div>
           <div class="two-col">
@@ -3891,11 +3961,16 @@
           <div id="deform-source-note" style="display:none"></div>
           <div id="deform-burst-banner" style="display:none"></div>
           <div>
-            <div class="section-h">Verformung bei ausgewählter Drehzahl</div>
+            <div class="section-h">FE-Ergebnis im Schnitt</div>
+            <!-- ZWEI Reihen, weil es zwei Achsen sind: WAS gezeigt wird
+                 (Spannung / Sicherheit / Verformung) und BEI WELCHER Drehzahl.
+                 In einer Reihe gemischt liest sich die zweite Achse wie eine
+                 Fortsetzung der ersten. -->
+            <div id="deform-groesse-tabs" style="display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap"></div>
             <div id="deform-img-tabs" style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap"></div>
-            <img id="deform-img" class="chart-img" src="" alt="FEM Verformung" style="max-width:900px"/>
-            <div style="font-size:.74rem;color:#666;margin-top:5px">
-              Verschiebung farbcodiert in µm; Geometrie mit fester Überhöhung dargestellt (gleiche Überhöhung für alle Drehzahlen, damit das Anwachsen sichtbar ist). Eine FEM-Lösung bei Maximaldrehzahl, andere Drehzahlen über rpm²-Skalierung.
+            <img id="deform-img" class="chart-img" src="" alt="FE-Ergebnis" style="max-width:900px"/>
+            <div id="deform-darst-note" style="font-size:.74rem;color:#666;margin-top:5px">
+              Eine FEM-Lösung bei Maximaldrehzahl, andere Drehzahlen über rpm²-Skalierung (Fliehkraft ∝ ω², lineare Elastizität).
             </div>
           </div>
           <div id="deform-video-wrap" style="display:none">
