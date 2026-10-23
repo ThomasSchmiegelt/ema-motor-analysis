@@ -427,8 +427,16 @@ def compute_capacities(geom: dict, axial: float,
     else:
         m_ri = max(0.01, (V_rot_ring - V_mag_total) * mat["density"])
 
-    # Magnets (NdFeB density ~7500 kg/m³)
-    m_mag = V_mag_total * 7500
+    # Die Magnetdichte kommt aus der WERKSTOFFTABELLE. ``mag`` liegt hier
+    # laengst vor -- benutzt wurde es bis zum 22.10.2026 nur fuer Br und die
+    # Grenztemperatur, waehrend die Dichte als Literal 7500 danebenstand (und
+    # in ``ema_screen`` als 7600). Damit hatte ein Ferritlaeufer dieselbe
+    # Waermekapazitaet wie ein NdFeB-Laeufer, obwohl Ferrit rund 35 % leichter
+    # ist. Der Rueckfall ist derselbe Wert wie vorher, also aendert sich ohne
+    # Werkstoffangabe keine Ziffer.
+    import ema_magnetlast as _mld
+    m_mag = V_mag_total * float((mag or {}).get("density")
+                                or _mld.DICHTE_VORGABE_KG_M3)
 
     # Shaft (steel) — hollow if shaftBoreD > 0
     R_bore = _z(geom, "shaftBoreD", 0.0) / 2 / 1000

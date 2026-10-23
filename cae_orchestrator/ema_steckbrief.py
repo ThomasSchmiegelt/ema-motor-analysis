@@ -331,6 +331,13 @@ KENNWERTE = ["B_gap_T", "Kt_Nm_per_A", "T_maxwell_Nm", "T_peak_max_Nm",
              # darueber nichts, obwohl es die Grenze ist, die am staerksten mit
              # der Geometrie wandert.
              "B_zahn_T", "B_joch_T", "B_eisen_T", "saettigung_pct",
+             # Die Fliehkraft der Magnete und was der Blechsteg davon sieht.
+             # Sie fehlte der Struktur-FEM bis zum 22.10.2026 vollstaendig und
+             # ist am Steg der groessere Posten als die Ringspannung — ein
+             # Steckbrief ohne sie zeigte eine Festigkeit, die die schwerste
+             # Last des Laeufers nicht kannte.
+             "magnet_kraft_je_pol_kN", "magnet_steg_sigma_ueberlagert_MPa",
+             "magnet_steg_sf",
              # ⊙ Die Scheibe traegt andere Lasten als der Zylinder, und bis zum
              # 09.10.2026 stand im Steckbrief darueber nichts: `max_safe_rpm`
              # und `safety_factor_fem` sind bei ihr beide `None`, der Abschnitt

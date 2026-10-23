@@ -62,6 +62,80 @@ records why `T_maxwell` was always 0.0 (the tangential air-gap fit falls back to
 zero below a 2.5-pixel air band — true at every resolution this chain uses) and
 now reports `None` with a reason instead.
 
+**Die Struktur-FEM rechnete die MAGNETE nicht mit** (behoben 22.10.2026,
+`cae_orchestrator/ema_magnetlast.py`). Sie vernetzt ausdruecklich nur das
+Rotoreisen — die Magnettaschen sind darin Luft, und `*DLOAD CENTRIF` wirkt ueber
+die Dichte des Blechs. Der Magnet ist aber das schwerste Einzelteil im Laeufer,
+und sein Gewicht haengt am duennsten Steg, den die Maschine hat: gemessen am
+frischen Payload **17,5 kN je Magnet / 35,0 kN je Pol bei 12.000 1/min** auf
+einen 1,3-mm-Steg, also **168 MPa** neben **93,6 MPa** Ringspannung — die
+vergessene Last war der groessere Posten. Unauffaellig blieb es, weil beide
+Vergleichswerte denselben Fehler teilen: die analytische Ringspannung ist die
+eines GLATTEN Ringes, und der Kerbfaktor darueber ist ein Zuschlag fuer die
+scharfe Taschenecke, keiner fuer eine zusaetzliche Last. Jetzt wird die
+Fliehkraft jedes Magneten exakt in die Taschenbasis zerlegt (Flanke + Endkappe,
+Vektorsumme = Fliehkraft) und als Knotenkraefte aufgetragen — in **allen vier**
+Loesern der Kette, denn nur in einem waere schlimmer als in keinem: der
+Loeservergleich nennt die Differenz sonst eine Loeserabweichung. Der Gate-Wert
+P99 steigt damit um **53 %** (582 → 893 MPa an derselben Geometrie), und
+**gespeicherte Projekte sind davon betroffen**. Dieselbe Gelegenheit schloss die
+dokumentierte Luecke, dass `MAGNETS` keine Dichte fuehrte (Ferrit kam genauso
+schwer heraus wie NdFeB). Und die FE-DARSTELLUNG war eine auf die xy-Ebene
+projizierte Punktwolke, in der die Magnettaschen zugedeckt waren, und zeigte die
+Verschiebung statt der Spannung — jetzt ein echter Schnitt durch das Netz mit
+Spannung, Sicherheit und Verformung (`ema_struktbild.py`). Beides in
+`cae_orchestrator/BEFUNDE.md`.
+
+**Und seit demselben Tag gibt es die dritte Stufe: den MEHRKOERPER-Lauf**
+(`cae_orchestrator/ema_kontakt.py`, `struct_solver="kontakt"`). Die
+verschmierte Magnetlast nimmt an, der Magnet liege auf der ganzen Taschenwand
+an; das tut er nicht — die Tasche ist um den Klebespalt groesser als er.
+Gerechnet werden jetzt Eisen UND Magnete als **getrennte Koerper**, gekoppelt
+ueber kleine **Anlageflaechen**. Gemessen an derselben Geometrie tragen die
+Anlagen **14,1 %** der Wand, die massgebende Blechspannung steigt um **Faktor
+1,86** (127,5 → 237,7 MPa P99) und der Blechkoerper als Ganzes wird entlastet,
+weil die Magnete mittragen; Preis 212 s statt 3 s. **Die rpm²-Linearitaet
+ueberlebt** (gemessen 4,0001 / 3,9998 / 4,0000 / 4,0077 bei verdoppelter
+Drehzahl), weil die Anlagen spaltfrei anliegen und die Fliehkraft sie nur
+zudrueckt — damit bleiben Berstdrehzahl, die drei Betriebspunkte aus EINER
+Loesung und das Video gueltig. Zum ersten Mal sagt die Kette etwas ueber den
+**Magneten selbst**, und zwar am ZUG und nicht an von Mises: ein gesinterter
+Magnet ist sproede. Der eigentliche Befund dabei ist einer ueber die ZEICHNUNG:
+in seiner Laengsrichtung haelt den Magneten nichts (3,1 mm Luft zur Kappenkuppe,
+Reibung reicht nachgerechnet nicht) — das Modell setzt deshalb einen
+Endanschlag und sagt, dass er 31 % der Luftkappe einnimmt und das Feldmodell
+nichts von ihm weiss.
+
+**Seit dem 23.10.2026 laeuft derselbe Fall auch EBEN** (`baue_eben`,
+`struct_solver="kontakt_eben"`), und der Grund stand im Modell schon: der
+Lastfall ist planar, und der raeumliche Lauf haelt ohnehin **beide
+Stirnflaechen in z** — das IST der ebene Verzerrungszustand. Gemessen **29 s
+gegen 286 s** bei gleichem Koerper (Eisenvolumen auf 0,2 %), und der Gewinn ist
+nicht die Zeit, sondern die Aufloesung: eben ist ein Anlagennetz von 0,3 mm
+bezahlbar, raeumlich war bei 1,25 mm Schluss. Geteilt werden Anlagen,
+Magnetflaechen, Fesseln und die **Auswertung** (`_tetvol` wurde zu `_elvol`:
+Dreiecksflaeche mal Scheibendicke ist auch ein mm³, also wiegt `kennzahlen` in
+beiden Dimensionen dasselbe) — eigen ist nur, was die zweite Dimension IST.
+
+Daraus fielen **drei Befunde**, alle in `cae_orchestrator/BEFUNDE.md`:
+**(a)** `struct_solver` stand in **keinem Schema** — `--set
+struct_solver=kontakt` wurde abgewiesen, der Mehrkoerperlauf war ueber `run
+analyse` also nie erreichbar, obwohl beide Dokumentationen den Weg nannten.
+**(b)** Die beiden P99 **laufen gegeneinander** (je Element 237,6 -> 212,5, je
+Volumen 181,8 -> 197,3 ueber fuenf Netze): belastbar ist die Klammer, nicht
+eine der Zahlen — und der **Elementgrad** bewegt das Gate staerker als das Netz
+(CPE6 am selben Netz 263,2 statt 235,3 MPa, SF 1,29 statt 1,54), weil ein
+besseres Element die Singularitaet an der Anlagenkante besser AUFLOEST statt
+sie wegzurechnen. **(c)** Und der gefaehrlichste: **CalculiX meldet eine
+TEILLAST als Ergebnis.** Konvergiert die Kontaktiteration nicht, halbiert ccx
+das Inkrement, laeuft in das Inkrementlimit und beendet sich **mit 0** — mit
+gueltiger `.frd` und Spannungen bei 13,6 % der Last, also um Faktor 8 zu
+niedrig und der Form nach vollkommen plausibel: es sieht nicht wie ein
+Fehlschlag aus, sondern wie eine besonders gute Maschine (SF 12 statt 1,5).
+`ema_deck.loese_ccx` prueft jetzt die Schrittzeit aus der `.sta` und meldet
+`TEILLAST`; das gilt fuer **alle** Aufrufer, und weil ein linearer Lauf ohne
+Kontakt in einem Inkrement durchlaeuft, hat die Luecke bis hierher ueberlebt.
+
 **The tool is the yardstick, not the object** (`cae_orchestrator/ema_werkzeugstand.py`).
 The heads are coding agents with write access to this repo, and the browser path asks for
 no permission — so in a target-value search the shortest route to the number is to edit

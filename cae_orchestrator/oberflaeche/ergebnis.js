@@ -19,6 +19,8 @@ async function loadResults() {
   renderStress(data.structural_fem, data.structural_sweep, data.structural_sweep_chart_b64);
   renderAxialStruktur(data.axial_struktur, data.axial_struktur_chart_b64);
   renderConnection(data.connection);
+  renderMehrkoerper(data.structural_fem);
+  renderMagnetlast(data.magnetlast, data.structural_fem);
   renderDeformation(data.deformation, data.structural_fem);
   renderThermal(data.thermal);
   renderDriveCycle(data.drivecycle);
@@ -629,16 +631,41 @@ function renderDeformation(deform, fem) {
 
   const imgEl = document.getElementById('deform-img');
   const images = deform.images || [];
-  if (images.length && tabs) {
-    // image-per-RPM selector; default to "max"
-    let active = images.find(i => i.tag === 'max') || images[0];
+  // Seit dem 22.10.2026 zwei Achsen: WAS (Spannung/Sicherheit/Verformung) und
+  // BEI WELCHER Drehzahl. Altprojekte tragen kein `groesse` — dann gibt es nur
+  // die Verformung, und die Größenreihe bleibt leer statt eine Wahl
+  // vorzutäuschen, die es nicht gibt.
+  const gTabs = document.getElementById('deform-groesse-tabs');
+  const note  = document.getElementById('deform-darst-note');
+  const gList = (deform.groessen && deform.groessen.length)
+    ? deform.groessen
+    : [...new Set(images.map(i => i.groesse || 'verformung'))]
+        .map(k => ({ key: k, label: k.charAt(0).toUpperCase() + k.slice(1) }));
+  let aktiveGroesse = gList.find(g => g.key === 'spannung') ? 'spannung'
+                                                            : (gList[0] || {}).key;
+  const DARST_TEXT = {
+    schnitt: 'Echter Schnitt durch das Rechennetz bei halber Paketlänge — die Magnettaschen sind Löcher, weil dort keine Elemente sind. Eine FEM-Lösung bei Maximaldrehzahl, alle anderen Drehzahlen über rpm²-Skalierung (Fliehkraft ∝ ω², lineare Elastizität).',
+    punktwolke: 'Projizierte Knotenwolke (keine Elementtabelle im .frd) — über die ganze Paketlänge übereinander, deshalb sind die Magnettaschen darin nicht als Löcher zu sehen.',
+    analytisch: 'Analytische rotierende Vollscheibe (Lamé) — glatter Ring ohne Magnete und ohne Magnettaschen.'
+  };
+  if (note) {
+    note.textContent = DARST_TEXT[deform.darstellung]
+      || 'Eine FEM-Lösung bei Maximaldrehzahl, andere Drehzahlen über rpm²-Skalierung.';
+  }
+
+  const zeichneRpm = () => {
+    if (!tabs) return;
+    tabs.innerHTML = '';
+    const pass = images.filter(i => (i.groesse || 'verformung') === aktiveGroesse);
+    if (!pass.length) return;
+    let active = pass.find(i => i.tag === 'max') || pass[0];
     const setActive = (im, btn) => {
       imgEl.src = _deformImgUrl(im.file);
       _renderDeformStats(im.stats);
       [...tabs.children].forEach(c => c.style.background = '#2a2a3e');
       btn.style.background = '#3a5a8c';
     };
-    images.forEach(im => {
+    pass.forEach(im => {
       const btn = document.createElement('button');
       btn.className = 'rtab-btn'; btn.textContent = im.label;
       btn.style.cssText = 'padding:5px 10px;font-size:.74rem;background:#2a2a3e';
@@ -646,6 +673,28 @@ function renderDeformation(deform, fem) {
       tabs.appendChild(btn);
       if (im === active) setActive(im, btn);
     });
+  };
+
+  if (images.length && tabs) {
+    if (gTabs) {
+      gTabs.innerHTML = '';
+      if (gList.length > 1) {
+        gList.forEach(g => {
+          const btn = document.createElement('button');
+          btn.className = 'rtab-btn'; btn.textContent = g.label;
+          btn.style.cssText = 'padding:5px 12px;font-size:.76rem;font-weight:600;background:#2a2a3e';
+          btn.onclick = () => {
+            aktiveGroesse = g.key;
+            [...gTabs.children].forEach(c => c.style.background = '#2a2a3e');
+            btn.style.background = '#2e6b4f';
+            zeichneRpm();
+          };
+          gTabs.appendChild(btn);
+          if (g.key === aktiveGroesse) btn.style.background = '#2e6b4f';
+        });
+      }
+    }
+    zeichneRpm();
   } else if (deform.chart_b64) {
     imgEl.src = 'data:image/png;base64,' + deform.chart_b64;
     _renderDeformStats(deform.stats);
@@ -906,6 +955,148 @@ function renderLoeservergleich(v) {
   html += `</table><div style="font-size:.7rem;color:#666;margin-top:6px">
     ${v.hinweis || ''}</div></div>`;
   return html;
+}
+
+// ── 🧲 Mehrkörper (struct_solver = "kontakt") ──────────────────────────────
+// Der einzige Weg, der etwas über den MAGNETEN sagt: dort ist er ein
+// gerechneter Körper. Beurteilt wird er am ZUG und nicht an der
+// Vergleichsspannung — ein gesinterter Magnet ist spröde.
+function renderMehrkoerper(fem) {
+  const wrap = document.getElementById('mk-wrap');
+  if (!wrap) return;
+  if (!fem || fem.rechensatz !== 'kontakt') { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  const img = document.getElementById('mk-img');
+  if (img) { if (fem.bild) img.src = _deformImgUrl(fem.bild); else img.removeAttribute('src'); }
+
+  const z = (k, v) => `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  const a = fem.anlagen || {};
+  const box = document.getElementById('mk-anlagen');
+  if (box) {
+    box.innerHTML =
+      z('Rechensatz', `Mehrkörper ${fem.modell === 'eben' ? 'EBEN' : 'räumlich'}`
+          + (fem.modell === 'eben'
+             ? ` (${fem.ebener_zustand === 'spannung' ? 'ebene Spannung' : 'ebene Dehnung'}`
+               + `${fem.elementgrad === 2 ? ', 2. Ordnung' : ''})`
+             : '')
+          + `, ${fem.n_magnetkoerper || 0} Magnetkörper`) +
+      z('Kontaktpaare', `${fem.n_kontaktpaare || 0} über ${a.n_anlagen || 0} Anlageflächen`) +
+      z('je Magnet', `${a.n_anlagen_je_magnet || 0} Anlagen, ${(+(a.flaeche_je_magnet_mm2 || 0)).toFixed(0)} mm²`) +
+      `<div class="row"><span class="k"><b>tragender Anteil der Wand</b></span><span class="v"><b>${(+(a.anteil_an_der_wand_pct || 0)).toFixed(1)} %</b></span></div>` +
+      z('Flankenanlagen', `${a.je_flanke || 0} je Flanke, ${(+(a.breite_mm || 0)).toFixed(1)} mm breit`) +
+      z('Endanschlag', a.endanschlag
+          ? `${(+(a.ende_mm || 0)).toFixed(1)} mm — nimmt ${(+(a.endanschlag_anteil_luftkappe_pct || 0)).toFixed(0)} % der Luftkappe ein`
+          : 'keiner — in Längsrichtung hält nur Reibung') +
+      z('Reibbeiwert', `${a.reibung} (Annahme)`) +
+      z('Netz', `${(fem.netz_knoten || 0).toLocaleString('de-DE')} Knoten / `
+          + `${(fem.netz_elemente || 0).toLocaleString('de-DE')} `
+          + (fem.modell === 'eben' ? 'Dreiecke' : 'Tet4'));
+  }
+
+  const m = fem.magnet || {};
+  const mb = document.getElementById('mk-magnet');
+  if (mb) {
+    if (!m.hauptzug_p99_MPa) { mb.innerHTML = '<div style="color:#9ab;font-size:.8rem">keine Magnetspannungen im Ergebnis</div>'; }
+    else {
+      const sf = m.sf_zug_p99;
+      const warn = (sf != null && sf < 1.3) ? ' style="color:#ff6b6b"' : '';
+      mb.innerHTML =
+        z('Werkstoff', `${escHtml(m.werkstoff || '?')} (Beleg: ${escHtml(m.beleg || '?')})`) +
+        z('größte Hauptzugspannung', `${(+m.hauptzug_max_MPa).toFixed(1)} MPa`) +
+        `<div class="row"><span class="k"><b>P99 (maßgebend)</b></span><span class="v"${warn}><b>${(+m.hauptzug_p99_MPa).toFixed(1)} MPa</b></span></div>` +
+        z('Zugfestigkeit', `${(+m.zug_grenze_MPa).toFixed(0)} MPa`) +
+        `<div class="row"><span class="k">Sicherheit gegen Bruch</span><span class="v"${warn}>${sf == null ? '–' : (+sf).toFixed(2)}</span></div>` +
+        z('von Mises (nachrichtlich)', `${(+m.von_mises_max_MPa).toFixed(1)} MPa`) +
+        z('Druckfestigkeit', `${(+m.druck_grenze_MPa).toFixed(0)} MPa`) +
+        `<div style="margin-top:7px;font-size:.72rem;color:#8a93a0;line-height:1.45">${escHtml(m.hinweis || '')}</div>`
+        // Ein zu optimistischer Wert muss das AN SICH tragen, sonst liest er
+        // sich wie ein Messwert (gemessen +53 % bei halbem Magnetnetz).
+        + (m.aufloesung
+           ? `<div style="margin-top:6px;font-size:.72rem;color:#e8b339;line-height:1.45">⚠ ${escHtml(m.aufloesung)}</div>`
+           : '');
+    }
+  }
+
+  const g = document.getElementById('mk-grenzen');
+  if (g) {
+    const liste = (fem.grenzen || []).map(t => `<li>${escHtml(t)}</li>`).join('');
+    g.innerHTML = liste
+      ? `<b>Was dieser Lauf nicht ist:</b><ul style="margin:5px 0 0 16px;padding:0">${liste}</ul>` : '';
+  }
+}
+
+// ── 🧲 Magnetfliehkraft ────────────────────────────────────────────────────
+// Die Last, die der Struktur-FEM gefehlt hat: vernetzt wird nur das
+// Rotoreisen, die Magnettaschen sind darin Luft. Hier steht, was statt dessen
+// aufgetragen wurde und was der Blechsteg davon sieht — samt dem, was die
+// Rechnung NICHT ist (ema_magnetlast.grenzen).
+function renderMagnetlast(ml, fem) {
+  const wrap = document.getElementById('maglast-wrap');
+  if (!wrap) return;
+  if (!ml || !ml.n_magnete) { wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  // Im MEHRKÖRPER-Lauf wird diese Last NICHT aufgetragen — dort sind die
+  // Magnete Körper und bringen ihre Fliehkraft selbst mit. Das Bild bleibt
+  // richtig (es zeigt, wo die Kraft angreift), aber wer es ohne diesen Satz
+  // liest, hält es für die Last, mit der gerechnet wurde.
+  const mk = fem && fem.rechensatz === 'kontakt';
+  const hin = document.getElementById('maglast-modus');
+  if (hin) {
+    hin.style.display = mk ? '' : 'none';
+    if (mk) hin.innerHTML = `<div class="fem-box" style="border-left:3px solid #4fc3f7">
+      <div style="color:#9ad;font-size:.8rem;line-height:1.5">ℹ Dieser Lauf rechnet
+      <b>Mehrkörper</b>: die Magnete sind eigene Körper und bringen ihre Fliehkraft
+      selbst mit. Die Kräfte unten zeigen also, <b>wo</b> sie angreift — aufgetragen
+      als verschmierte Wandlast wurde sie <b>nicht</b> (das wäre die doppelte Last).
+      Was das Blech davon sieht, steht oben unter 🧲 Mehrkörper.</div></div>`;
+  }
+  const img = document.getElementById('maglast-img');
+  if (img && ml.bild) img.src = _deformImgUrl(ml.bild);
+
+  const z = (k, v) => `<div class="row"><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  const box = document.getElementById('maglast-box');
+  if (box) {
+    box.innerHTML =
+      z('Drehzahl', (+(ml.rpm || 0)).toLocaleString('de-DE') + ' U/min') +
+      z('Magnete', `${ml.n_magnete} Stück, ${(+ml.magnet_kg).toFixed(3)} kg`) +
+      z('Kraft je Magnet', (+ml.kraft_je_magnet_kN).toFixed(1) + ' kN') +
+      z('Kraft je Pol', (+ml.kraft_je_pol_kN).toFixed(1) + ' kN') +
+      z('Kraft gesamt', (+ml.kraft_gesamt_kN).toFixed(0) + ' kN') +
+      z('Flächenlast max.', (+ml.druck_max_MPa).toFixed(1) + ' MPa') +
+      z('belastete Wände', `${ml.n_waende} (${(ml.arten || []).join(' + ')})`);
+  }
+
+  const st = ml.steg || {};
+  const sbox = document.getElementById('maglast-steg');
+  if (sbox) {
+    if (!st.steg_traegt) {
+      sbox.innerHTML = `<div style="color:#9ab;font-size:.8rem;line-height:1.5">
+        ${escHtml(st.grund || 'Der Blechsteg trägt die Magnete hier nicht.')}</div>`;
+    } else if (st.sigma_steg_MPa == null) {
+      sbox.innerHTML = `<div style="color:#e0c090;font-size:.8rem;line-height:1.5">
+        ⚠ ${escHtml(st.grund || 'Stegspannung nicht bestimmbar.')}</div>`;
+    } else {
+      const sf = st.sf_ueberlagert;
+      const warn = (sf != null && sf < (st.sf_ziel || 1.3)) ? ' style="color:#ff6b6b"' : '';
+      sbox.innerHTML =
+        `<div class="row"><span class="k"><b>Steg-Richtwert</b></span><span class="v"></span></div>` +
+        z('Randsteg (gemessen)', (+st.s_rand_mm).toFixed(2) + ' mm') +
+        z('tragender Querschnitt', `${st.n_stege_je_pol} × ${(+st.s_rand_mm).toFixed(2)} mm → ${(+st.flaeche_steg_mm2).toFixed(0)} mm²`) +
+        z('σ aus Magnetlast', (+st.sigma_steg_MPa).toFixed(0) + ' MPa') +
+        z('σ Ringspannung', (st.sigma_ring_MPa == null ? '–' : (+st.sigma_ring_MPa).toFixed(0) + ' MPa')) +
+        `<div class="row"><span class="k"><b>σ überlagert</b></span><span class="v"${warn}><b>${st.sigma_ueberlagert_MPa == null ? '–' : (+st.sigma_ueberlagert_MPa).toFixed(0) + ' MPa'}</b></span></div>` +
+        `<div class="row"><span class="k">Sicherheit (Ziel ≥ ${st.sf_ziel})</span><span class="v"${warn}>${sf == null ? '–' : (+sf).toFixed(2)}</span></div>` +
+        `<div style="margin-top:7px;font-size:.72rem;color:#8a93a0;line-height:1.45">${escHtml(st.annahme || '')}</div>`;
+    }
+  }
+
+  const g = document.getElementById('maglast-grenzen');
+  if (g) {
+    const liste = (ml.grenzen || []).map(t => `<li>${escHtml(t)}</li>`).join('');
+    g.innerHTML = liste
+      ? `<b>Was diese Last nicht ist:</b><ul style="margin:5px 0 0 16px;padding:0">${liste}</ul>`
+      : '';
+  }
 }
 
 function renderStress(fem, sweep, chartB64) {

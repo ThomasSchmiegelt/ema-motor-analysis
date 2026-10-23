@@ -54,6 +54,8 @@ async function loadProjectById(pid) {
     renderStress(data.structural_fem, data.structural_sweep, data.structural_sweep_chart_b64);
     renderAxialStruktur(data.axial_struktur, data.axial_struktur_chart_b64);
     renderConnection(data.connection);
+    renderMehrkoerper(data.structural_fem);
+    renderMagnetlast(data.magnetlast, data.structural_fem);
     renderDeformation(data.deformation, data.structural_fem);
     renderThermal(data.thermal);
     renderDriveCycle(data.drivecycle);

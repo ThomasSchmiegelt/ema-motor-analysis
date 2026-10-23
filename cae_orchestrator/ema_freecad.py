@@ -4,6 +4,7 @@ import math
 import json
 
 from ema_topology import magnet_legs, leg_records
+import ema_magnetlast
 import ema_purge
 
 
@@ -2105,7 +2106,9 @@ except Exception as _se:
 
 def build_rotor_fem_script(fcstd_path: str, rpm: float,
                             material_props: dict, save_dir: str,
-                            mesh_mm: float = 4.0) -> str:
+                            mesh_mm: float = 4.0,
+                            magnet_walls: list | None = None,
+                            magnet_tol_mm: float = 0.12) -> str:
     """Return FreeCAD Python code for centrifugal structural FEM of the rotor.
 
     mesh_mm : Gmsh CharacteristicLengthMax [mm] — smaller = finer mesh = higher
@@ -2113,9 +2116,22 @@ def build_rotor_fem_script(fcstd_path: str, rpm: float,
               stress concentrates). Default 4.0. The element ORDER is left at
               FreeCAD's default (2nd-order tets); setting it explicitly was found to
               make CalculiX emit a results-less .frd.
+
+    magnet_walls : die belasteten Magnettaschenwaende aus
+              ``ema_magnetlast.waende(geom, axial, rpm)``. **Ohne sie rechnet die
+              FEM nur die Fliehkraft des BLECHS** — die Magnete sind in diesem
+              Modell Luft, obwohl der Magnet das schwerste Einzelteil im Laeufer
+              ist und sein Gewicht am duennsten Steg haengt (gemessen am frischen
+              Payload: 17,5 kN je Magnet bei 12.000 1/min gegen eine
+              Ringspannung von 93,6 MPa — die vergessene Last ist der groessere
+              Posten). Die Knotenauswahl laeuft mit DEMSELBEN Quelltext wie im
+              Hauptprozess (``ema_magnetlast.KERN``, hier woertlich eingesetzt);
+              eine Abschrift waere die Stelle, an der die beiden Rechensaetze
+              auseinanderlaufen, ohne dass es jemand merkt.
     """
     mat_json = json.dumps(material_props)
     mesh_mm  = max(0.8, min(8.0, float(mesh_mm)))   # clamp to a sane build range
+    walls_json = json.dumps(magnet_walls or [])
     # Density in t/mm³ for CalculiX (mm/N/MPa unit system)
     density_str = material_props.get("Density", "7700 kg/m^3")
     density_kg_m3 = float(str(density_str).split()[0])
@@ -2186,7 +2202,55 @@ _omega2 = _omega ** 2                  # rad²/s² (CalculiX CENTRIF unit)
 _rho    = {density_t_mm3:.6e}          # t/mm³  (CalculiX density unit)
 _work   = os.path.join(r"{save_dir}", "ccx_rotor")
 os.makedirs(_work, exist_ok=True)
+_ml_tol = {magnet_tol_mm!r}
+_ml_lasten = {{}}
+_ml_bericht = []
 """ + ema_purge._STANDALONE
+        + "\n_ML_WAENDE = " + walls_json + "\n"
+        + ema_magnetlast.KERN
+        + '''
+
+def _ml_auftragen():
+    """Magnetfliehkraft auf die Taschenwaende legen -- Knotenkraefte sammeln."""
+    global _ml_lasten, _ml_bericht
+    _ml_lasten = {}
+    _ml_bericht = []
+    if not _ML_WAENDE:
+        return
+    _kn = {}
+    try:
+        for _nid, _v in mesh.FemMesh.Nodes.items():
+            _kn[_nid] = (_v.x, _v.y, _v.z)
+    except Exception as _e:
+        print("MAGNETLAST_KEINE_KNOTEN: " + repr(_e))
+        return
+    for _w in _ML_WAENDE:
+        _ids = _ml_wandknoten(_kn, _w, _ml_tol)
+        _fx, _fy = _ml_knotenkraft(_w, len(_ids))
+        for _i in _ids:
+            _p = _ml_lasten.get(_i)
+            if _p is None:
+                _p = [0.0, 0.0]
+                _ml_lasten[_i] = _p
+            _p[0] += _fx
+            _p[1] += _fy
+        _ml_bericht.append({"pol": _w["pol"], "leg": _w["leg"], "art": _w["art"],
+                            "n_knoten": len(_ids), "F_N": round(_w["F_N"], 1)})
+
+
+def _ml_cload_zeilen():
+    """Die *CLOAD-Zeilen -- leer, wenn keine Magnetlast aufzutragen ist."""
+    if not _ml_lasten:
+        return []
+    _z = ["*CLOAD\\n"]
+    for _i in sorted(_ml_lasten):
+        _fx, _fy = _ml_lasten[_i]
+        if abs(_fx) > 1e-12:
+            _z.append("%d, 1, %.9g\\n" % (_i, _fx))
+        if abs(_fy) > 1e-12:
+            _z.append("%d, 2, %.9g\\n" % (_i, _fy))
+    return _z
+'''
         + f"""
 
 def _set_opts(_cl):
@@ -2206,6 +2270,9 @@ def _set_opts(_cl):
 
 def _patch_inp(_inp):
     # FreeCAD 1.x omits *DENSITY and the centrifugal *DLOAD — inject both.
+    # Dazu die MAGNETFLIEHKRAFT als Knotenkraefte auf den Taschenwaenden: die
+    # Magnete sind in diesem Modell Luft (nur das Rotoreisen ist vernetzt), ihr
+    # Gewicht haengt aber am duennsten Steg der ganzen Maschine.
     if not (_inp and os.path.exists(_inp)):
         print("CENTRIF_INP_MISSING:", _inp); return
     with open(_inp) as _f: _lines = _f.readlines()
@@ -2214,6 +2281,7 @@ def _patch_inp(_inp):
         if _ln.strip().upper() == '*END STEP':
             _out.append('*DLOAD\\n')
             _out.append(f'Evolumes, CENTRIF, {{_omega2:.3f}}, 0., 0., 0., 0., 0., 1.\\n')
+            _out.extend(_ml_cload_zeilen())
         _out.append(_ln)
         if _ae:
             _out.append('*DENSITY\\n'); _out.append(f'{{_rho}},\\n'); _ae = False
@@ -2242,6 +2310,17 @@ for _ai, _cl0 in enumerate(_ladder):
         print(f"MESH_TRY[{{_ai}}] clmax={{_cl:.2f}} -> {{_nodes}} Knoten" + (f" warn={{_warn}}" if _warn else ""))
         if _nodes < 50:
             _attempts.append(f"clmax={{_cl:.2f}}: nur {{_nodes}} Knoten"); continue
+        # Magnetlast NACH dem Vernetzen (sie braucht die Knoten) und VOR dem
+        # Schreiben der .inp (sie steht darin). Je Netzversuch neu — ein anderes
+        # Netz hat andere Wandknoten.
+        _ml_auftragen()
+        _ml_fehlt = [_b for _b in _ml_bericht if _b["n_knoten"] == 0]
+        print("MAGNETLAST:" + json.dumps({{
+            "n_waende": len(_ml_bericht), "n_ohne_knoten": len(_ml_fehlt),
+            "n_lastknoten": len(_ml_lasten),
+            "F_summe_N": round(sum(_b["F_N"] for _b in _ml_bericht), 1),
+            "F_verloren_N": round(sum(_b["F_N"] for _b in _ml_fehlt), 1),
+            "tol_mm": _ml_tol, "clmax": round(_cl, 3)}}))
         doc.recompute()
         fea = FemToolsCcx(analysis, solver)
         fea.update_objects(); fea.setup_working_dir(_work)

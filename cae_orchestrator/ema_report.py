@@ -84,6 +84,14 @@ def build_context(project_dir: str) -> dict:
         ("em_curve",      "charts/em_curve.png",                 "EM-Kennlinie über Drehzahl"),
         ("structural",    "charts/structural_sweep.png",         "Strukturkennlinie"),
         ("deformation",   "charts/deformation.png",              "FEM-Verformung"),
+        ("struktur_spannung",  "charts/struktur_spannung_max.png",
+         "Vergleichsspannung im Schnitt durch das Rechennetz"),
+        ("struktur_sicherheit", "charts/struktur_sicherheit_max.png",
+         "Sicherheit gegen Fliessen im Schnitt"),
+        ("magnetlast",    "charts/magnetlast.png",
+         "Fliehkraft der Magnete auf die Taschenwaende"),
+        ("mehrkoerper",   "charts/mehrkoerper.png",
+         "Mehrkoerper-Schnitt: Blech und Magnete im Kontakt"),
         # ⊙ Nur bei einem Axiallauf vorhanden: die Scheibe hat keine
         # Strukturkennlinie und keine FEM-Verformung, sondern Durchbiegung
         # unter dem axialen Anzug und die Magnetfliehkraft in ihrer Ebene.
@@ -195,7 +203,31 @@ def build_context(project_dir: str) -> dict:
             "safety_factor":  fem.get("safety_factor"),
             "u_max_um":       fem.get("max_displacement_um"),
             "max_safe_rpm":   summary.get("max_safe_rpm"),
+            # WOMIT gerechnet wurde. Ohne das liest sich eine Zahl aus dem
+            # Mehrkoerperlauf wie eine aus dem verschmierten Modell, und die
+            # beiden unterscheiden sich am Gate um Faktor 1,9.
+            "rechensatz":     fem.get("rechensatz") or "freecad",
+            # Und in WELCHER Dimension. Eine ebene Zahl liest sich sonst wie
+            # eine raeumliche; am Blech-P99 liegen die beiden gemessen um
+            # Faktor 1,7 auseinander, weil die Scheibe die Spitze an der
+            # Anlagenkante wirklich aufloest.
+            "modell":         fem.get("modell"),
+            "ebener_zustand": fem.get("ebener_zustand"),
+            "elementgrad":    fem.get("elementgrad"),
         },
+        # Mehrkoerper: nur dort gibt es Zahlen ueber den MAGNETEN selbst.
+        "mehrkoerper": ({"anlagen": fem.get("anlagen") or {},
+                         # `magnet.aufloesung` reist mit: im raeumlichen Lauf
+                         # ist die Magnetspannung zu optimistisch, und das
+                         # gehoert in den Bericht und nicht nur ins Protokoll.
+                         "magnet": fem.get("magnet") or {},
+                         "n_kontaktpaare": fem.get("n_kontaktpaare"),
+                         "n_magnetkoerper": fem.get("n_magnetkoerper"),
+                         "linearitaet": fem.get("linearitaet") or {},
+                         "grenzen": fem.get("grenzen") or []}
+                        if fem.get("rechensatz") == "kontakt" else None),
+        # Die Magnetfliehkraft auf die Taschenwaende (verschmiertes Modell).
+        "magnetlast": results.get("magnetlast") or None,
         # ⊙ Die Festigkeitszahlen der Scheibe stehen im `summary` (dort holen
         # sie Steckbrief, Sicherheit und der Ergebnisreiter ebenfalls). Der
         # Bericht bekommt es deshalb als Ganzes durchgereicht, statt die sieben
@@ -1541,13 +1573,70 @@ def _single_md_tables(ctx: dict) -> str:
             ("Wirbelstromverlust segm.",   seg.get("P_Mag_segm_W"),   "W", 1),
             ("Skintiefe",             seg.get("skintiefe_mm"),   "mm", 2),
         ]))
+    _rs = {"freecad": "FreeCAD + CalculiX, nur Rotoreisen",
+           "eigen": "eigener Rechensatz, nur Rotoreisen",
+           "kontakt": "MEHRKÖRPER: Blech und Magnete, Kontakt an Anlageflächen"}
+    _satz = _rs.get(st.get("rechensatz"), st.get("rechensatz"))
+    if st.get("modell") == "eben":
+        _zust = ("ebene Spannung" if st.get("ebener_zustand") == "spannung"
+                 else "ebene Dehnung")
+        _satz = (f"{_satz} — EBEN, ein Querschnitt mit der Paketlänge als "
+                 f"Dicke ({_zust}"
+                 + (", 2. Ordnung" if st.get("elementgrad") == 2 else "")
+                 + ")")
+    elif st.get("modell") == "raeumlich":
+        _satz = f"{_satz} — räumlich (Tet4)"
     blocks.append(_tbl("Festigkeit (Fliehkraft-FEM)", [
+        ("Rechensatz", _satz, "", 0),
         ("Vergleichsspannung σ_v,max", st.get("sigma_v_max_MPa"), "MPa", 1),
         ("Sicherheitsfaktor",          st.get("safety_factor"),   "",    2),
         ("Max. Verschiebung",          st.get("u_max_um"),        "µm",  1),
         ("FEM-Drehzahl",               st.get("rpm_fem"),         "U/min", 0),
         ("Max. sichere Drehzahl",      st.get("max_safe_rpm"),    "U/min", 0),
     ]))
+    # Die Fliehkraft der MAGNETE. Sie fehlte der FEM bis zum 22.10.2026 ganz;
+    # am Blechsteg ist sie der groessere Posten als die Ringspannung, und ein
+    # Bericht ohne sie zeigt eine Festigkeit, die die schwerste Last des
+    # Laeufers nicht kennt.
+    _ml = ctx.get("magnetlast") or {}
+    _mlst = _ml.get("steg") or {}
+    blocks.append(_tbl("Magnetfliehkraft auf die Taschenwände", [
+        ("Magnete",                 _ml.get("n_magnete"),          "",   0),
+        ("Magnetmasse gesamt",      _ml.get("magnet_kg"),          "kg", 3),
+        ("Fliehkraft je Magnet",    _ml.get("kraft_je_magnet_kN"), "kN", 1),
+        ("Fliehkraft je Pol",       _ml.get("kraft_je_pol_kN"),    "kN", 1),
+        ("Flächenlast max.",        _ml.get("druck_max_MPa"),      "MPa", 1),
+        ("gemessener Randsteg",     _mlst.get("s_rand_mm"),        "mm", 2),
+        ("σ aus der Magnetlast (Richtwert)", _mlst.get("sigma_steg_MPa"), "MPa", 0),
+        ("σ Ringspannung",          _mlst.get("sigma_ring_MPa"),   "MPa", 0),
+        ("σ überlagert",            _mlst.get("sigma_ueberlagert_MPa"), "MPa", 0),
+        ("Sicherheit am Steg",      _mlst.get("sf_ueberlagert"),   "",   2),
+    ]))
+    # Mehrkoerper: die einzigen Zahlen ueber den MAGNETEN selbst.
+    _mk = ctx.get("mehrkoerper") or {}
+    if _mk:
+        _an, _mg = _mk.get("anlagen") or {}, _mk.get("magnet") or {}
+        blocks.append(_tbl("Mehrkörper: Anlageflächen und Magnet", [
+            ("Magnetkörper im Netz",     _mk.get("n_magnetkoerper"),       "", 0),
+            ("Kontaktpaare",             _mk.get("n_kontaktpaare"),        "", 0),
+            ("Anlageflächen",            _an.get("n_anlagen"),             "", 0),
+            ("davon je Magnet",          _an.get("n_anlagen_je_magnet"),   "", 0),
+            ("tragender Anteil der Taschenwand", _an.get("anteil_an_der_wand_pct"), "%", 1),
+            ("Endanschlag nimmt von der Luftkappe",
+             _an.get("endanschlag_anteil_luftkappe_pct"), "%", 0),
+            ("Reibbeiwert (Annahme)",    _an.get("reibung"),               "", 2),
+            ("Magnetwerkstoff",          _mg.get("werkstoff"),             "", 0),
+            ("größte Hauptzugspannung im Magneten", _mg.get("hauptzug_max_MPa"), "MPa", 1),
+            ("davon P99 (maßgebend)",    _mg.get("hauptzug_p99_MPa"),      "MPa", 1),
+            ("Zugfestigkeit (Annahme)",  _mg.get("zug_grenze_MPa"),        "MPa", 0),
+            ("Sicherheit gegen Bruch",   _mg.get("sf_zug_p99"),            "",   2),
+            ("von Mises im Magneten (nachrichtlich)",
+             _mg.get("von_mises_max_MPa"), "MPa", 1),
+            # Wenn die Magnetzahl zu optimistisch ist, steht das IN der
+            # Tabelle und nicht in einer Fussnote: sie wird sonst gelesen wie
+            # jede andere gerechnete Zahl daneben.
+            ("Vorbehalt zur Magnetspannung", _mg.get("aufloesung"), "", 0),
+        ]))
     # ⊙ Die SCHEIBE hat eine eigene Festigkeitstabelle, weil sie andere Lasten
     # traegt: axialer Anzug (Kreisringplatte) und Fliehkraft der Magnete IN der
     # Scheibenebene. Sie unter „Fliehkraft-FEM" zu mischen hiesse, zwei Modelle
@@ -1938,6 +2027,7 @@ _VARIANT_IMG_SRC = [
     ("airgap",        "charts/airgap.png",                  "Luftspaltflussdichte"),
     ("em_curve",      "charts/em_curve.png",                "EM-Kennlinie"),
     ("deformation",   "charts/deformation.png",             "Verformung (FEM)"),
+    ("struktur_sicherheit", "charts/struktur_sicherheit_max.png", "Sicherheit (FEM-Schnitt)"),
     ("connection",    "charts/connection.png",              "Welle-Nabe-Verbindung"),
     ("thermal",       "charts/thermal.png",                 "Thermik (LPTN)"),
 ]
@@ -1984,6 +2074,18 @@ _GALLERY_DESC = {
                      "Der Knick markiert die Eckdrehzahl, ab der Feldschwächung einsetzt.",
     "deformation":   "Fliehkraftbedingte radiale Aufweitung des Rotors (überhöht dargestellt) "
                      "bei Maximaldrehzahl. Die Verformung skaliert quadratisch mit der Drehzahl.",
+    "struktur_spannung": "Vergleichsspannung in einem Schnitt durch das Rechennetz bei halber "
+                     "Paketlänge. Die Magnettaschen sind Löcher, weil dort keine Elemente "
+                     "sind; die Spitzen sitzen an den Blechstegen über den Taschen.",
+    "struktur_sicherheit": "Dasselbe als Sicherheit Fließgrenze/Vergleichsspannung — rot heißt, "
+                     "dass das Blech dort rechnerisch fließt.",
+    "mehrkoerper":   "Schnitt durch den Mehrkörper-Rotor: Blech und Magnete sind getrennte "
+                     "Körper, gekoppelt über kleine Anlageflächen. Zwei Farbskalen, weil es "
+                     "zwei Größen sind — das zähe Blech fließt (Vergleichsspannung), der "
+                     "spröde Magnet reißt (größte Hauptzugspannung).",
+    "magnetlast":    "Wo die Fliehkraft der Magnete angreift: je Magnet die beiden Taschenwände, "
+                     "an denen er anliegt, mit ihrem Anteil der Kraft. Diese Last trägt die "
+                     "Struktur-FEM als Knotenkräfte — die Magnete selbst werden nicht vernetzt.",
     "connection":    "Kennfeld der Welle-Nabe-Verbindung: Fugendruck und übertragbares Moment "
                      "bzw. Lösedrehzahl, bei der die Fliehkraft den Pressverband löst.",
     "thermal":       "Stationäre Knotentemperaturen (Wicklung, Eisen, Magnet, Gehäuse) und der "

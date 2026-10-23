@@ -100,9 +100,17 @@ def test_analytisch_vs_feld():
           DB.HERKUNFT["T_maxwell_Nm"]["methode"] == "fdm2d")
     check("und nennt seine Fundstelle",
           "ema_analysis" in (DB.HERKUNFT["T_maxwell_Nm"].get("quelle") or ""))
-    check("Festigkeitswerte sind fem3d",
-          all(DB.HERKUNFT[k]["methode"] == "fem3d"
+    check("Festigkeitswerte kommen aus der FEM",
+          all(DB.HERKUNFT[k]["methode"] in DB.FEM_METHODEN
               for k in ("safety_factor_fem", "fem_sigma_vm_MPa", "fem_rpm")))
+    # Der Torwert traegt die DIMENSIONSOFFENE Marke: `kontakt_eben` rechnet eine
+    # ebene Scheibe, und `fem3d` daran waere ein Etikett, das nicht widerspricht
+    # und falsch ist. Welche es war, steht in `structural_fem.modell`.
+    check("und der Torwert nennt die Dimension nicht selbst",
+          DB.HERKUNFT["safety_factor_fem"]["methode"] == "fem"
+          and "structural_fem.modell" in DB.HERKUNFT["safety_factor_fem"]["detail"])
+    check("beide FEM-Marken stehen im Vokabular",
+          all(m in DB.METHODEN for m in DB.FEM_METHODEN))
 
 
 def test_import_wiederholbar():

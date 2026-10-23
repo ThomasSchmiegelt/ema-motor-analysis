@@ -59,7 +59,12 @@ PREISE_EUR_KG = {"magnet": 55.0, "kupfer": 10.0, "stahl": 1.6,
                  # Aluminium: Kaefiglaeufer-Druckguss (ema_asm).
                  "alu": 3.0}
 
-# NdFeB-Dichte; steht so nicht in der MAGNETS-Tabelle (Literaturwert N42–N52).
+# NdFeB-Dichte als RUECKFALL. Sie stand hier als einzige Quelle, solange die
+# ``MAGNETS``-Tabelle keine fuehrte -- und war damit fuer JEDE Sorte dieselbe:
+# Ferrit kam genauso schwer (und genauso teuer) heraus wie NdFeB, obwohl es rund
+# 35 % leichter ist. Seit dem 22.10.2026 steht die Dichte je Sorte in der
+# Tabelle und wird ueber ``ema_magnetlast.dichte`` gelesen; dieser Wert gilt nur
+# noch, wenn kein Werkstoff angegeben ist.
 MAG_DICHTE_KG_M3 = 7600.0
 
 # Die Achsen, ueber die vorausgewaehlt wird. Bewusst grob gerastert — eine Vorauswahl
@@ -633,7 +638,10 @@ def massen_und_kosten(payload: dict) -> dict:
     # sitzen aussen auf. Der geparkte Vorgaenger hatte hier ein "or True" stehen und
     # zaehlte damit immer alle — der Filter war wirkungslos.
     flaeche_mm2 = sum(l.length * l.thickness for l in legs)
-    m_mag = flaeche_mm2 * poles * L * 1e-9 * MAG_DICHTE_KG_M3
+    import ema_magnetlast as _mld
+    _rho_mag = (_mld.dichte(payload.get("magnet")) if payload.get("magnet")
+                else MAG_DICHTE_KG_M3)
+    m_mag = flaeche_mm2 * poles * L * 1e-9 * _rho_mag
 
     m_rot_fe = math.pi / 4 * (d_rot**2 - d_wel**2) * L * 1e-9 * float(lam_rot["density"])
     # Flussbarrieren und Wuchtbohrungen nehmen Rotoreisen weg. Ohne diesen Abzug

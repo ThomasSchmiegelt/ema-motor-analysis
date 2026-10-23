@@ -101,7 +101,7 @@ def _umgebung() -> dict:
 
 def schreibe_satz(netz: _deck.Netz, mat: dict, rpm: float, pfad: str,
                   rho_je_element: dict | None = None, simp_p: float = 1.0,
-                  kerne: int = 4) -> str:
+                  kerne: int = 4, zusatzlasten: dict | None = None) -> str:
     """Vollständigen Z88-Satz in ``pfad`` schreiben; gibt ``pfad`` zurück.
 
     ``rho_je_element`` ordnet Elementnummern eine **relative Dichte** zu (Topologie-
@@ -109,6 +109,11 @@ def schreibe_satz(netz: _deck.Netz, mat: dict, rpm: float, pfad: str,
     Z88s Materialdatei gar keine Dichte kennt, zusätzlich eine **Skalierung der
     Fliehkraft-Knotenkräfte** mit demselben ``rho``. Nur den E-Modul zu senken wäre
     bei einer Volumenlast falsch (s. ``ema_deck.zentrifugal_lasten``).
+
+    ``zusatzlasten`` sind Knotenkräfte ``{knoten: (fx, fy, fz)}`` in N neben der
+    Fliehkraft des Blechs — hier die Magnetfliehkraft auf die Taschenwände. Sie
+    MUSS mit, sobald der ccx-Satz sie trägt: sonst vergleicht der Löservergleich
+    zwei verschiedene Lastfälle und nennt die Differenz eine Löserabweichung.
 
     Die Stufen kommen aus ``ema_deck._materialstufen``; je Stufe entsteht eine
     Materialdatei, und ``Z88MAT.TXT`` fasst aufeinanderfolgende Elemente derselben
@@ -121,7 +126,8 @@ def schreibe_satz(netz: _deck.Netz, mat: dict, rpm: float, pfad: str,
     os.makedirs(pfad, exist_ok=True)
 
     _schreibe_i1(netz, os.path.join(pfad, "z88i1.txt"))
-    _schreibe_i2(netz, mat, rpm, os.path.join(pfad, "z88i2.txt"), rho_je_element)
+    _schreibe_i2(netz, mat, rpm, os.path.join(pfad, "z88i2.txt"), rho_je_element,
+                 zusatzlasten=zusatzlasten)
     with open(os.path.join(pfad, "z88i5.txt"), "w") as f:
         f.write("0\n")                                   # keine Flächenlasten
 
@@ -157,14 +163,20 @@ def _schreibe_i1(netz: _deck.Netz, datei: str) -> None:
 
 
 def _schreibe_i2(netz: _deck.Netz, mat: dict, rpm: float, datei: str,
-                 rho_je_element: dict | None = None) -> None:
+                 rho_je_element: dict | None = None,
+                 zusatzlasten: dict | None = None) -> None:
     """Randbedingungen: ``Knoten FG Art Wert`` — Art 1 = Kraft, Art 2 = Verschiebung.
 
     Fliehkraft als konsistente Knotenkräfte, ebener Verzerrungszustand über beide
-    Stirnflächen, dazu die drei Starrkörperfesseln aus ``ema_deck``.
+    Stirnflächen, dazu die drei Starrkörperfesseln aus ``ema_deck``. ``zusatzlasten``
+    (Magnetfliehkraft) werden auf dieselben Knoten ADDIERT — Z88 kennt je Knoten und
+    Freiheitsgrad nur eine Zeile, zwei Zeilen für denselben Freiheitsgrad wären kein
+    Fehler mit Meldung, sondern eine still halbierte Last.
     """
     lasten = _deck.zentrifugal_lasten(netz, float(mat["density"]), rpm,
                                       rho_je_element=rho_je_element)
+    if zusatzlasten:
+        lasten = _deck.lasten_addieren(lasten, zusatzlasten)
     z = []
     for kn in sorted(set(netz.nset_stirn_a) | set(netz.nset_stirn_b)):
         z.append(f"{kn} 3 2 0")

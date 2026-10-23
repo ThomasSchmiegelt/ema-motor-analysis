@@ -1039,6 +1039,118 @@ def _geom_und_material(args):
     return geom, mat, rpm
 
 
+def _struktur_kontakt_verb(args, geom, mat, rpm) -> int:
+    """``struktur --solver kontakt`` -- Mehrkoerper: Blech UND Magnete.
+
+    Der einzige Weg, der etwas ueber den MAGNETEN sagt; die drei anderen
+    vernetzen nur das Blech. Er kostet Minuten statt Sekunden, und seine
+    Anlageflaechen sind eine ENTWURFSANNAHME -- beides steht in der Ausgabe,
+    damit niemand die Zahl fuer teurer haelt, als sie ist.
+    """
+    import tempfile
+
+    import ema_deck as D
+    import ema_kontakt as K
+    from ema_pipeline import MAGNETS
+
+    mag = MAGNETS.get(args.magnet or "ndfeb_n35", MAGNETS["ndfeb_n35"])
+    axial = float(geom.get("axialLen") or 80.0)
+    if args.anlage_breite is not None:
+        geom["anlageBreiteMm"] = args.anlage_breite
+    if args.anlage_je_flanke is not None:
+        geom["anlageProFlanke"] = args.anlage_je_flanke
+    if args.anlage_ende is not None:
+        geom["anlageEndeMm"] = args.anlage_ende
+    if args.reibung is not None:
+        geom["anlageReibung"] = args.reibung
+
+    kenn = K.anlage_kennzahlen(geom, axial)
+    print(f"  Anlagen: {kenn['n_anlagen']} ({kenn['n_anlagen_je_magnet']} je "
+          f"Magnet), sie tragen {kenn['anteil_an_der_wand_pct']:.1f} % der "
+          f"Taschenwand")
+    if kenn.get("endanschlag"):
+        print(f"  Endanschlag {kenn['ende_mm']:.1f} mm — nimmt "
+              f"{kenn['endanschlag_anteil_luftkappe_pct']:.0f} % der Luftkappe "
+              f"ein; das FELDMODELL weiss davon nichts")
+    else:
+        print("  ohne Endanschlag — in Laengsrichtung haelt nur Reibung "
+              "(nachgerechnet reicht sie am V-Schenkel NICHT)")
+    try:
+        if args.modell == "eben":
+            netz = K.baue_eben(geom, axial, mesh_mm=args.mesh,
+                               mesh_anlage_mm=args.mesh_anlage,
+                               ebener_zustand=args.ebener_zustand,
+                               ordnung=args.ordnung)
+        else:
+            netz = K.baue(geom, axial, mesh_mm=args.mesh,
+                          mesh_anlage_mm=args.mesh_anlage,
+                          mesh_magnet_mm=args.mesh_magnet)
+    except K.KontaktFehler as e:
+        return _die(str(e), EXIT_USAGE)
+    except Exception as e:                                  # gmsh meldet vielerlei
+        return _oertlicher_fehlschlag(e, "Vernetzung")
+    if netz.dim == 2:
+        print(f"  Netz EBEN ({netz.ebener_zustand}): {netz.n_knoten:,} Knoten "
+              f"/ {netz.n_elemente:,} Dreiecke, {netz.n_magnete} "
+              f"Magnetflaechen, {len(netz.kontakte)} Kontaktpaare; Grundmass "
+              f"{netz.netz_grund_mm:.1f} mm, an den Anlagen "
+              f"{netz.netz_anlage_mm:.2f} mm, Dicke {netz.axial_len:.0f} mm"
+              .replace(",", "."))
+    else:
+        print(f"  Netz: {netz.n_knoten:,} Knoten / {netz.n_elemente:,} Tet4, "
+              f"{netz.n_magnete} Magnetkoerper, {len(netz.kontakte)} "
+              f"Kontaktpaare; Grundmass {netz.netz_grund_mm:.1f} mm, an den "
+              f"Anlagen {netz.netz_anlage_mm:.2f} mm, im Magneten "
+              f"{netz.netz_magnet_mm:.2f} mm".replace(",", "."))
+
+    ordner = args.out or tempfile.mkdtemp(prefix="cae_kontakt_")
+    os.makedirs(ordner, exist_ok=True)
+    pfad = K.schreibe_inp(netz, mat, mag, rpm, os.path.join(ordner, "kontakt.inp"),
+                          reibung=K.anlage_vorgaben(geom)["reibung"],
+                          mesh_mm=args.mesh)
+    print(f"  CalculiX rechnet (Kontakt — Minuten, nicht Sekunden) …")
+    r = D.loese_ccx(pfad, kerne=args.kerne, timeout=5400)
+    if r["solver_status"] != "OK":
+        return _die(f"CalculiX: {r.get('meldung', r['solver_status'])}", EXIT_REMOTE)
+    k = K.kennzahlen(netz, D.lies_dat_spannungen(r["dat"]), mat, mag)
+    ergebnis = {"rechensatz": "kontakt", "rpm": rpm, "werkstoff": mat["label"],
+                "magnetwerkstoff": mag["label"], "ordner": ordner,
+                "modell": ("eben" if netz.dim == 2 else "raeumlich"),
+                "ebener_zustand": (netz.ebener_zustand or None),
+                "netz": {"knoten": netz.n_knoten, "elemente": netz.n_elemente,
+                         "grundmass_mm": netz.netz_grund_mm,
+                         "anlagennetz_mm": netz.netz_anlage_mm,
+                         "magnetnetz_mm": netz.netz_magnet_mm,
+                         "magnetkoerper": netz.n_magnete,
+                         "kontaktpaare": len(netz.kontakte)},
+                "anlagen": kenn, "eisen": k,
+                "grenzen": K.grenzen(netz.dim)}
+    emit(ergebnis, args)
+
+    sigy = float(mat["yield_mpa"])
+    sf = sigy / k["stress_p99_MPa"] if k["stress_p99_MPa"] else None
+    print("")
+    if sf:
+        print(f"  Blech  : max {k['stress_peak_MPa']:.1f} | P99 "
+              f"{k['stress_p99_MPa']:.1f} | Mittel {k['stress_mean_MPa']:.1f} "
+              f"MPa gegen {sigy:.0f} MPa -> SF {sf:.2f}")
+    m = k.get("magnet") or {}
+    if m:
+        print(f"  Magnet : groesste HauptZUGspannung {m['hauptzug_max_MPa']:.1f} "
+              f"(P99 {m['hauptzug_p99_MPa']:.1f}) gegen "
+              f"{m['zug_grenze_MPa']:.0f} MPa -> SF {m['sf_zug_p99']}")
+        print(f"           von Mises {m['von_mises_max_MPa']:.1f} MPa — "
+              f"NACHRICHTLICH: ein gesinterter Magnet ist sproede, massgebend "
+              f"ist der Zug")
+    print("")
+    print("  Was dieser Lauf NICHT ist:")
+    for t in K.grenzen():
+        print(f"    • {t}")
+    _ablegen(args, "struktur-kontakt", "", daten=ergebnis,
+             ok=bool(sf and sf >= 1.3))
+    return 0 if (sf and sf >= 1.3) else 1
+
+
 def cmd_struktur(args) -> int:
     """Rotor-Festigkeit auf dem EIGENEN Rechensatz — ohne FreeCAD, in Sekunden.
 
@@ -1051,6 +1163,9 @@ def cmd_struktur(args) -> int:
 
     geom, mat, rpm = _geom_und_material(args)
     import ema_deck as D
+
+    if args.solver == "kontakt":
+        return _struktur_kontakt_verb(args, geom, mat, rpm)
 
     LOESER = {"ccx": ("ccx",), "z88": ("z88",), "aster": ("aster",),
               "beide": ("ccx", "z88"), "alle": ("ccx", "z88", "aster")}
@@ -3132,6 +3247,58 @@ def cmd_rotor_check(args) -> int:
         zeilen.append(f"Laeufertor: NICHT geprueft ({e}) — das ist keine "
                       f"Aussage ueber die Bauart.")
 
+    # ── Was die MAGNETE dem Steg zumuten ─────────────────────────────────────
+    #
+    # Das Fliehkrafttor darueber rechnet die Ringspannung eines GLATTEN
+    # rotierenden Ringes und gibt ihr einen Kerbfaktor fuer die scharfe
+    # Taschenecke mit. Was darin nicht vorkommt, ist das GEWICHT der Magnete --
+    # und das haengt an der duennsten Stelle des Laeufers. Gemessen am frischen
+    # Payload ist es dort der GROESSERE Posten (168 MPa aus der Magnetlast gegen
+    # 94 MPa Ringspannung bei 12.000 1/min). Es ist ein Richtwert und sagt das;
+    # bindend ist die FEM des Laufs. In den Exit-Code geht er NICHT ein: ein
+    # Richtwert mit einer Annahme ueber die Stegzahl darf ein Tor nicht
+    # schliessen, das die FEM anders beurteilen kann.
+    magsteg_ok = None
+    try:
+        import ema_magnetlast as _ML
+        from ema_pipeline import LAMINATES as _LAM
+        _mat = _LAM.get(payload.get("rotor_lam", "m270_35a"), _LAM["m270_35a"])
+        _axl = float(geom.get("axialLen") or payload.get("axial_len") or 80.0)
+        _nmax = float((payload.get("target") or {}).get("n_max")
+                      or payload.get("rpm_to") or 0.0)
+        if _nmax > 0:
+            _stg = _ML.stegspannung(geom, _mat, _nmax, _axl,
+                                    magnet_code=payload.get("magnet"))
+            chk["magnetsteg"] = _stg
+            zeilen.append("")
+            zeilen.append(f"Magnetfliehkraft auf den Blechsteg (bei {_nmax:.0f} 1/min):")
+            if not _stg.get("steg_traegt"):
+                zeilen.append(f"  ℹ {_stg.get('grund', '')}")
+            elif _stg.get("sigma_steg_MPa") is None:
+                zeilen.append(f"  ⚠ {_stg.get('grund', '')}")
+            else:
+                magsteg_ok = bool(_stg.get("ok"))
+                zeilen.append(
+                    f"  {_stg['n_magnete']} Magnete ({_stg['magnet_kg']:.3f} kg), "
+                    f"{_stg['kraft_je_pol_kN']:.1f} kN je Pol")
+                zeilen.append(
+                    f"  Randsteg {_stg['s_rand_mm']:.2f} mm x "
+                    f"{_stg['n_stege_je_pol']} je Pol = "
+                    f"{_stg['flaeche_steg_mm2']:.0f} mm²")
+                zeilen.append(
+                    f"  {'✓' if magsteg_ok else '✗'} sigma = "
+                    f"{_stg['sigma_steg_MPa']:.0f} MPa (Magnet) + "
+                    f"{_stg['sigma_ring_MPa']:.0f} MPa (Ring) = "
+                    f"{_stg['sigma_ueberlagert_MPa']:.0f} MPa gegen "
+                    f"{_stg['yield_mpa']:.0f} MPa -> SF "
+                    f"{_stg['sf_ueberlagert']} (Ziel {_stg['sf_ziel']})")
+                zeilen.append(f"  Annahme: {_stg['annahme']}")
+    except Exception as e:                                   # noqa: BLE001
+        chk["magnetsteg"] = {"ok": None, "grund": f"nicht geprueft: {e}"}
+        zeilen.append("")
+        zeilen.append(f"Magnetsteg: NICHT geprueft ({e}) — das ist keine Aussage "
+                      f"ueber die Magnethaltung.")
+
     chk["grenzen"] = gr
     # ``layout_ok is None`` heisst „nicht zustaendig" und zaehlt wie jedes
     # andere nicht gefuehrte Tor hier weder dafuer noch dagegen.
@@ -5038,14 +5205,60 @@ def build_parser() -> argparse.ArgumentParser:
                    help="einzelnen Parameter aendern, mehrfach angebbar")
     s.add_argument("--force", action="store_true", help="Schemagrenzen nicht pruefen")
     s.add_argument("--solver",
-                   choices=["ccx", "z88", "aster", "beide", "alle"], default="ccx",
+                   choices=["ccx", "z88", "aster", "beide", "alle", "kontakt"],
+                   default="ccx",
                    help="Loeser. 'beide' = ccx+z88, 'alle' = ccx+z88+Code Aster: "
-                        "dasselbe Netz mehrfach gerechnet und gegenuebergestellt")
+                        "dasselbe Netz mehrfach gerechnet und gegenuebergestellt. "
+                        "'kontakt' = MEHRKOERPER: Blech UND Magnete als eigene "
+                        "Koerper, gekoppelt ueber kleine Anlageflaechen — der "
+                        "einzige Weg, der etwas ueber den Magneten sagt. Kostet "
+                        "Minuten statt Sekunden; nur CalculiX")
+    s.add_argument("--mesh-anlage", dest="mesh_anlage", type=float, default=None,
+                   help="Netzweite AN den Anlageflaechen [mm] (nur --solver "
+                        "kontakt). Vorgabe: ein Drittel von --mesh. Dort sitzt "
+                        "die Spannungsspitze, deretwegen es den Lauf gibt")
+    s.add_argument("--modell", choices=("raeumlich", "eben"),
+                   default="raeumlich",
+                   help="Mehrkoerperlauf raeumlich (Tet4, Vorgabe) oder EBEN "
+                        "(Dreiecke, ein Querschnitt mit der Paketlaenge als "
+                        "Dicke). Der Lastfall ist planar und der raeumliche "
+                        "Lauf haelt ohnehin beide Stirnflaechen in z -- eben "
+                        "kostet gemessen 12 s statt 286 s und erlaubt dafuer "
+                        "ein Anlagennetz von 0,4 statt 1,25 mm. Keine Aussage "
+                        "ueber die Stirnseiten und keine Schraegung")
+    s.add_argument("--ebener-zustand", dest="ebener_zustand",
+                   choices=("dehnung", "spannung"), default="dehnung",
+                   help="nur --modell eben: 'dehnung' (CPE3, eps_z = 0 — der "
+                        "Fall, den der raeumliche Lauf rechnet, Vorgabe) oder "
+                        "'spannung' (CPS3, sig_z = 0, duenne Scheibe). Beide "
+                        "klammern die Antwort ein")
+    s.add_argument("--mesh-magnet", dest="mesh_magnet", type=float, default=None,
+                   help="Netzweite IM MAGNETKOERPER [mm] (nur --solver "
+                        "kontakt). Vorgabe: wie --mesh. Das Anlagenfeld sitzt "
+                        "auf den Anlagen, und die liegen auf der Eisenseite — "
+                        "der Magnet selbst bleibt sonst auf dem Grundmass, "
+                        "also bei 6 mm Netz etwa EIN Element ueber seine 6 mm "
+                        "Dicke")
+    s.add_argument("--anlage-breite", dest="anlage_breite", type=float, default=None,
+                   help="Breite einer Flanken-Anlageflaeche [mm] (kontakt)")
+    s.add_argument("--anlage-je-flanke", dest="anlage_je_flanke", type=int,
+                   default=None, help="Anlageflaechen je Taschenflanke (kontakt)")
+    s.add_argument("--anlage-ende", dest="anlage_ende", type=float, default=None,
+                   help="Hoehe des Endanschlags [mm]; 0 = keiner (kontakt)")
+    s.add_argument("--reibung", type=float, default=None,
+                   help="Reibbeiwert Blech/Magnet — ANNAHME (kontakt)")
+    s.add_argument("--magnet", default=None,
+                   help="Magnetwerkstoff fuer den Mehrkoerperlauf "
+                        "(ndfeb_n35 | ndfeb_n42 | ndfeb_n50 | ferrite)")
     s.add_argument("--voll", action="store_true",
                    help="voller Rotor statt Polsektor (ausser bei reinem ccx zwingend)")
     s.add_argument("--mesh", type=float, default=6.0, help="Netzweite in mm (Vorgabe 6)")
     s.add_argument("--ordnung", type=int, choices=[1, 2], default=1,
-                   help="1 = Tet4 (schnell), 2 = Tet10 (genauer, nur ccx)")
+                   help="1 = Tet4 (schnell), 2 = Tet10 (genauer, nur ccx). "
+                        "Bei --modell eben: CPE3/CPS3 gegen CPE6/CPS6 — die "
+                        "zweite Ordnung erreicht am GROBEN Netz, was die "
+                        "erste erst sechsfach feiner erreicht (Magnet-Zug "
+                        "P99 16,07 gegen 13,56 MPa am selben Netz)")
     s.add_argument("--rpm", type=float, default=None,
                    help="Drehzahl (Vorgabe: target.n_max aus dem Payload)")
     s.add_argument("--kerne", type=int, default=4, help="CPU-Kerne")

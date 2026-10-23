@@ -236,6 +236,63 @@ def pruefen(results: dict, meta: dict | None = None) -> dict:
                        f"kennt", None, SF_ZIEL, schwere="hinweis",
                        quelle="summary.structural_basis"))
 
+    # ── Der MAGNET selbst ────────────────────────────────────────────────────
+    #
+    # Nur der Mehrkoerperlauf (`struct_solver="kontakt"`) liefert das: dort ist
+    # der Magnet ein gerechneter Koerper und kein Ersatzlastvektor. Geprueft
+    # wird die groesste HauptZUGspannung und NICHT die Vergleichsspannung --
+    # ein gesinterter Magnet ist sproede und traegt auf Druck rund das
+    # Dreizehnfache dessen, was er auf Zug traegt; von Mises ist das Kriterium
+    # eines zaehen Werkstoffs und waere hier das falsche.
+    _fem = results.get("structural_fem") or {}
+    _mag = _fem.get("magnet") or {}
+    _sfz = _mag.get("sf_zug_p99")
+    # In WELCHER Dimension gerechnet wurde. Die beiden Wege unterscheiden sich
+    # am Magneten gemessen um mehr als Faktor 2 (raeumlich 7,2 gegen eben 16,5
+    # MPa Hauptzug P99) -- und der raeumliche Wert ist der optimistischere,
+    # weil sein Netz den Magnetkoerper kaum aufloest. Ohne diese Angabe liest
+    # sich die eine Zahl wie die andere.
+    _dim = {"eben": " [EBEN gerechnet]",
+            "raeumlich": " [raeumlich gerechnet]"}.get(_fem.get("modell"), "")
+    if isinstance(_sfz, (int, float)):
+        krit.append(_k("magnetbruch", _sfz >= SF_ZIEL,
+                       f"{_mag.get('werkstoff', 'Magnet')}{_dim}: groesste "
+                       f"Hauptzugspannung {_mag.get('hauptzug_p99_MPa', '?')} MPa "
+                       f"(P99, Spitze {_mag.get('hauptzug_max_MPa', '?')}) gegen "
+                       f"{_mag.get('zug_grenze_MPa', '?')} MPa Zugfestigkeit — "
+                       f"sproeder Werkstoff, massgebend ist der ZUG. Die "
+                       f"Festigkeit ist eine Literaturannahme der Werkstoffklasse "
+                       f"(MAGNETS[...]['mech_beleg'] = "
+                       f"'{_mag.get('beleg', '?')}')",
+                       _sfz, SF_ZIEL,
+                       schwere=("versagen" if _sfz < SF_VERSAGEN else "verletzt"),
+                       quelle="structural_fem.magnet.sf_zug_p99"))
+
+    # ── Der Blechsteg unter der Magnetfliehkraft ─────────────────────────────
+    #
+    # Eigenes Kriterium und nicht Teil von `festigkeit`: das FEM-Tor stellt auf
+    # die Vergleichsspannung im ganzen Blech, hier geht es um die EINE Stelle,
+    # an der ein Versagen die Magnete freisetzt. Und es ist ausdruecklich ein
+    # RICHTWERT (Mittelwert ueber einen angenommenen Stegquerschnitt, keine
+    # Spitzenspannung), deshalb unterhalb der Fliessgrenze nur ein `hinweis`:
+    # eine harte Absage auf eine Zahl mit Annahme waere eine Ueberforderung des
+    # Richtwerts. Faellt er UNTER 1,0, hilft keine Annahme mehr -- dann steht
+    # schon der Mittelwert ueber der Fliessgrenze.
+    _steg = (results.get("magnetlast") or {}).get("steg") or {}
+    _sfs = _steg.get("sf_ueberlagert")
+    if _steg.get("steg_traegt") and isinstance(_sfs, (int, float)):
+        _ml = results.get("magnetlast") or {}
+        _txt = (f"Der Blechsteg haelt {_ml.get('kraft_je_pol_kN', '?')} kN je Pol "
+                f"Magnetfliehkraft bei {_steg.get('s_rand_mm', '?')} mm Randsteg: "
+                f"{_steg.get('sigma_steg_MPa', '?')} MPa daraus plus "
+                f"{_steg.get('sigma_ring_MPa', '?')} MPa Ringspannung = "
+                f"{_steg.get('sigma_ueberlagert_MPa', '?')} MPa gegen "
+                f"{_steg.get('yield_mpa', '?')} MPa Fliessgrenze (Richtwert, "
+                f"bindend ist die FEM)")
+        krit.append(_k("magnetsteg", _sfs >= SF_ZIEL, _txt, _sfs, SF_ZIEL,
+                       schwere=("versagen" if _sfs < SF_VERSAGEN else "hinweis"),
+                       quelle="magnetlast.steg.sf_ueberlagert"))
+
     # ── Drehzahlreserve ──────────────────────────────────────────────────────
     msr, rpm_to = s.get("max_safe_rpm"), payload.get("rpm_to")
     if isinstance(msr, (int, float)) and isinstance(rpm_to, (int, float)):

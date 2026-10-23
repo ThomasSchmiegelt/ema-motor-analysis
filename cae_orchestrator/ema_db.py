@@ -64,6 +64,10 @@ METHODEN = {
     "analytisch":   "geschlossene Formel (kalibriert), kein Feld- oder Netzlauf",
     "fdm2d":        "aus dem geloesten 2D-FDM-Feld",
     "fem3d":        "3D-FEM (CalculiX bzw. Z88Aurora)",
+    # Die Dimension haengt am `struct_solver` und nicht an der Kennzahl:
+    # `kontakt_eben` rechnet eine EBENE Scheibe. Welche es war, steht in
+    # `structural_fem.modell`; hier stuende sonst `fem3d` an einer 2-D-Zahl.
+    "fem":          "FEM — Dimension je struct_solver (structural_fem.modell)",
     "lptn":         "6-Knoten-Waermenetzwerk, stationaer/transient",
     "zyklus":       "Fahrzyklus-Integration ueber Betriebspunkte",
     "geometrisch":  "reine Geometrie, kein Loeser",
@@ -77,6 +81,15 @@ METHODEN = {
     "abgeleitet":   "aus anderen Kennwerten gerechnet",
     "unbekannt":    "nicht zugeordnet — Register ergaenzen",
 }
+
+# Welche Marken eine FEM-Rechnung bedeuten -- EINE Liste, weil sie an zwei
+# Stellen gelesen wird (`importiere_projekt` schreibt Loeser und Status nur an
+# FEM-Kennwerte, `guete` zaehlt „erwartet gegen geliefert"). Als Vergleich auf
+# eine Zeichenkette geschrieben hat die zweite Stelle die Umbenennung von
+# `safety_factor_fem` auf `fem` nicht mitbekommen: `fem_erwartet` fiel von 2 auf
+# 1, und das ist genau die Zahl, an der ein Lauf OHNE Festigkeit von einem mit
+# unterschieden wird.
+FEM_METHODEN = ("fem3d", "fem")
 
 # ── Herkunftsregister ─────────────────────────────────────────────────────────
 # Je Kennwert: Einheit, Methode, Kurzbegruendung und (wo zutreffend) die Fundstelle.
@@ -101,6 +114,18 @@ HERKUNFT: dict[str, dict] = {
                       quelle="ema_saettigung.eisenwege"),
     "saettigung_pct": dict(einheit="%", methode="analytisch",
                       detail="B_Eisen gegen B_sat des Blechs (LAMINATES)",
+                      quelle="ema_saettigung.eisenwege"),
+    # Nicht dasselbe wie `B_gap_T`, und die Verwechslung waere teuer: jenes ist
+    # das LEERLAUFfeld der Magnete, dieses das resultierende am Betriebspunkt
+    # (Magnet + Ankerrueckwirkung). Die Saettigungsaussage haengt an diesem.
+    "B_gap_last_T": dict(einheit="T", methode="analytisch",
+                      detail="Luftspaltfeld AM BETRIEBSPUNKT (Magnet + "
+                             "Ankerrueckwirkung aus i_q/i_d) — Eingang der "
+                             "Saettigungsrechnung, nicht das Leerlauffeld",
+                      quelle="ema_saettigung.gap_resultierend"),
+    "saettigung_engstelle": dict(einheit="", methode="analytisch",
+                      detail="welcher Eisenweg bindet: 'zahn' oder 'joch' — ein "
+                             "Textwert, kein Mass",
                       quelle="ema_saettigung.eisenwege"),
     "Kt_Nm_per_A":      dict(einheit="Nm/A",  methode="analytisch",
                              detail="dq-Modell auf derselben Luftspaltformel",
@@ -127,6 +152,33 @@ HERKUNFT: dict[str, dict] = {
                                     "'analytisch' = die FEM lieferte nichts, es gilt die "
                                     "Ringformel, 'scheibe' = Axialfluss, es gelten "
                                     "Kreisringplatte + Magnetfliehkraft in der Scheibenebene"),
+
+    # Die Fliehkraft der MAGNETE. Zwei verschiedene Herkuenfte unter einem
+    # Thema, und sie auseinanderzuhalten ist der Sinn dieser Tabelle: die Kraft
+    # selbst ist Mechanik aus der Geometrie (m*omega^2*r, exakt), die
+    # Stegspannung daraus ein RICHTWERT mit einer Annahme ueber die Zahl der
+    # tragenden Stege -- bindend ist die FEM, die dieselbe Last als
+    # Knotenkraefte auf den Taschenwaenden traegt.
+    "magnet_kraft_je_pol_kN": dict(einheit="kN", methode="analytisch",
+                             detail="Fliehkraft aller Magnete EINES Pols "
+                                    "(m*omega^2*r je Magnet, Masse aus der "
+                                    "Werkstoffdichte) — sie geht als Flaechenlast "
+                                    "auf die Taschenwaende auch in die Struktur-FEM",
+                             quelle="ema_magnetlast.waende"),
+    "magnet_steg_sigma_MPa": dict(einheit="MPa", methode="analytisch",
+                             detail="RICHTWERT: Magnetkraft je Pol / (2 Stege x "
+                                    "gemessener Randsteg x Baulaenge). Mittelwert, "
+                                    "keine Spitzenspannung",
+                             quelle="ema_magnetlast.stegspannung"),
+    "magnet_steg_sigma_ueberlagert_MPa": dict(einheit="MPa", methode="analytisch",
+                             detail="dieselbe plus die Ringspannung derselben "
+                                    "Drehzahl — obere Schaetzung (gleiche Richtung "
+                                    "am Steg angenommen)",
+                             quelle="ema_magnetlast.stegspannung"),
+    "magnet_steg_sf":   dict(einheit="",      methode="analytisch",
+                             detail="Fliessgrenze / ueberlagerte Stegspannung; "
+                                    "Richtwert, bindend ist die FEM",
+                             quelle="ema_magnetlast.stegspannung"),
 
     # ⊙ Festigkeit der SCHEIBE. Eigene Methode `axial1d`, weil es weder eine
     # FEM noch die Ringformel ist: die Kreisringplatte ist achssymmetrisch
@@ -165,8 +217,21 @@ HERKUNFT: dict[str, dict] = {
     "axial_klebe_zul_MPa": dict(einheit="MPa", methode="tabelle",
                              detail="vom Menschen angegebene zulaessige Scherspannung der "
                                     "Magnetklebung — keine Tabelle des Werkzeugs"),
-    "safety_factor_fem":dict(einheit="",      methode="fem3d",
-                             detail="Fliessgrenze / max(FEM-P99, Ringformel*Kt) — der bindende Torwert"),
+    # Die METHODE haengt hier am `struct_solver` und kann in einer statischen
+    # Tabelle nicht stehen: `kontakt_eben` rechnet eine EBENE Scheibe, und sie
+    # `fem3d` zu nennen waere genau die Sorte Etikett, das nicht widerspricht
+    # und falsch ist. Welche Dimension es war, steht in
+    # `structural_fem.modell` -- und der Bericht nennt sie in der
+    # Festigkeitstabelle.
+    "safety_factor_fem":dict(einheit="",      methode="fem",
+                             detail="Fliessgrenze / max(FEM-P99, Ringformel*Kt) — der "
+                                    "bindende Torwert. Die Dimension haengt am "
+                                    "struct_solver und steht in structural_fem.modell "
+                                    "(raeumlich = Tet4, eben = ein Querschnitt mit der "
+                                    "Paketlaenge als Dicke); am Blech-P99 liegen die "
+                                    "beiden gemessen um Faktor 1,7 auseinander, weil die "
+                                    "Scheibe die Spitze an der Anlagenkante wirklich "
+                                    "aufloest"),
     "fem_rpm":          dict(einheit="1/min", methode="fem3d",   detail="Drehzahl, bei der die FEM gerechnet hat"),
     "fem_sigma_vm_MPa": dict(einheit="MPa",   methode="fem3d",   detail="Rohmaximum der Vergleichsspannung"),
 
@@ -404,7 +469,11 @@ def importiere_projekt(conn: sqlite3.Connection, projektpfad: str,
     for k, v in (results.get("summary") or {}).items():
         h = HERKUNFT.get(k, {})
         n, t = _zahl(v)
-        ist_fem = h.get("methode") == "fem3d"
+        # Beide FEM-Marken zaehlen: `fem3d` und das dimensionsoffene `fem`.
+        # Ein Vergleich auf die eine Zeichenkette liess den Loeser und seinen
+        # Status bei `safety_factor_fem` wegfallen, sobald die Methode umbenannt
+        # wurde — und das ist genau die Spalte, die sagt, WOMIT gerechnet wurde.
+        ist_fem = h.get("methode") in FEM_METHODEN
         conn.execute("INSERT OR REPLACE INTO kennwerte VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                      (lauf_id, k, n, t, h.get("einheit"),
                       h.get("methode", "unbekannt"), h.get("detail"), h.get("quelle"),
@@ -526,7 +595,7 @@ def guete(conn: sqlite3.Connection, lauf: str | int) -> dict:
     nach_methode = {}
     for k in d["kennwerte"]:
         nach_methode.setdefault(k["methode"], []).append(k["groesse"])
-    fem = [k for k in d["kennwerte"] if k["methode"] == "fem3d"]
+    fem = [k for k in d["kennwerte"] if k["methode"] in FEM_METHODEN]
     return {
         "projekt":        d["lauf"]["projekt_id"],
         "stufen":         d["lauf"]["stufen"].split(",") if d["lauf"]["stufen"] else [],
@@ -608,6 +677,7 @@ _METHODE_KURZ = {
     "analytisch":  "analytische Formel",
     "fdm2d":       "2D-FDM-Feld",
     "fem3d":       "3D-FEM",
+    "fem":         "FEM (Dimension je Loeser)",
     "lptn":        "Waermenetzwerk",
     "zyklus":      "Fahrzyklus",
     "geometrisch": "Geometrie",

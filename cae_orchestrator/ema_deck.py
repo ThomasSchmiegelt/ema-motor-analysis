@@ -416,6 +416,46 @@ def zentrifugal_lasten(netz: Netz, dichte_kg_m3: float, rpm: float,
     return {i: tuple(v) for i, v in lasten.items()}
 
 
+def magnet_knotenlasten(netz: Netz, geom: dict, rpm: float,
+                        magnet_code: str | None = None,
+                        rho_mag: float | None = None,
+                        tol: float | None = None) -> tuple[dict, list, list]:
+    """Die Fliehkraft der MAGNETE als Knotenkräfte — ``(lasten, bericht, waende)``.
+
+    Das Netz ist das Rotor**eisen**; die Magnettaschen sind darin Luft. Ohne diese
+    Last rechnet der Satz die Fliehkraft des Blechs und keine einzige Newton der
+    Magnete — und die hängt am dünnsten Steg, den der Läufer hat (gemessen am
+    frischen Payload: 17,5 kN je Magnet bei 12.000 1/min, Steg 1,3 mm). Welche
+    Wand wie viel davon trägt, entscheidet ``ema_magnetlast`` an EINER Stelle für
+    alle vier Löser dieser Kette.
+
+    **Beim Polsektor zählen nur die Magnete des Pols 0.** Der Rest des Läufers ist
+    im Netz nicht da; die zyklische Symmetrie trägt ihn. Die Wände der anderen
+    Pole würden keinen Knoten finden und als verlorene Last gemeldet — richtig
+    gemeldet, aber eine Meldung über ein Modell, das es so nicht gibt.
+    """
+    import ema_magnetlast as _ml
+
+    wl = _ml.waende(dict(geom, axialLen=netz.axial_len), netz.axial_len, rpm,
+                    magnet_code=magnet_code, rho_mag=rho_mag)
+    if netz.sektoren:
+        wl = [w for w in wl if w["pol"] < netz.sektoren]
+    lasten, bericht = _ml.knotenlasten(netz.knoten, wl,
+                                       tol if tol is not None else _ml.TOLERANZ_MM)
+    return lasten, bericht, wl
+
+
+def lasten_addieren(*mengen: dict) -> dict:
+    """Mehrere ``{knoten: (fx, fy, fz)}`` zu einer zusammenlegen."""
+    aus: dict = {}
+    for m in mengen:
+        for i, f in (m or {}).items():
+            v = aus.setdefault(i, [0.0, 0.0, 0.0])
+            for k in range(3):
+                v[k] += f[k]
+    return {i: tuple(v) for i, v in aus.items()}
+
+
 def zentrifugal_arbeit(netz: Netz, lasten: dict) -> float:
     """``Σ f_i · x_i`` [N·mm] — das ordnungsunabhängige Prüfmaß der Quadratur.
 
@@ -460,8 +500,15 @@ def zentrifugal_summe_analytisch(netz: Netz, dichte_kg_m3: float, rpm: float) ->
 # ── CalculiX-Schreiber ────────────────────────────────────────────────────────
 
 def schreibe_inp(netz: Netz, mat: dict, rpm: float, pfad: str,
-                 rho_je_element: dict | None = None, simp_p: float = 1.0) -> str:
+                 rho_je_element: dict | None = None, simp_p: float = 1.0,
+                 zusatzlasten: dict | None = None) -> str:
     """CalculiX-Rechensatz schreiben; gibt den Dateipfad zurück.
+
+    ``zusatzlasten`` (optional) sind Knotenkräfte ``{knoten: (fx, fy, fz)}`` in N,
+    die ZUSÄTZLICH zur Fliehkraft des Blechs wirken — hier die Reaktion der
+    Magnetfliehkraft auf die Taschenwände (``magnet_knotenlasten``). Sie gehen als
+    ``*CLOAD`` in denselben Step; damit bleibt die rpm²-Linearität erhalten, denn
+    beide Lasten wachsen mit ω².
 
     ``rho_je_element`` (optional) ordnet Elementnummern eine **relative Dichte**
     ``rho ∈ (0, 1]`` zu — der Zugang für die Topologieoptimierung. Daraus folgen
@@ -547,6 +594,14 @@ def schreibe_inp(netz: Netz, mat: dict, rpm: float, pfad: str,
     z.append("*STATIC")
     z.append("*DLOAD")
     z.append(f"Eall, CENTRIF, {omega * omega:.9g}, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0")
+    if zusatzlasten:
+        z.append("** Magnetfliehkraft auf die Taschenwaende (ema_magnetlast)")
+        z.append("*CLOAD")
+        for i in sorted(zusatzlasten):
+            fx, fy, fz = zusatzlasten[i]
+            for fg, f in ((1, fx), (2, fy), (3, fz)):
+                if abs(f) > 1e-12:
+                    z.append(f"{i}, {fg}, {f:.9g}")
     z.append("*NODE FILE")
     z.append("U, RF")
     z.append("*EL FILE")
@@ -680,8 +735,52 @@ def loese_ccx(pfad: str, kerne: int = 4, timeout: int = 3600) -> dict:
         hinweis = [z for z in (r.stdout or "").splitlines() if "ERROR" in z.upper()]
         return {"solver_status": "KEINE_ERGEBNISSE", "returncode": r.returncode,
                 "meldung": " | ".join(hinweis[:3]) or (r.stdout or "")[-300:]}
+    # Hat der Lastschritt die GANZE Last erreicht? Bei einem Kontaktproblem
+    # nicht selbstverstaendlich: ccx halbiert das Inkrement, wenn die
+    # Kontaktiteration nicht konvergiert, laeuft in das Inkrementlimit
+    # (`*STEP, INC=…`) und **beendet sich mit 0** -- mit einer gueltigen `.frd`
+    # und einer `.dat`, in der die Spannungen des erreichten Teils der Last
+    # stehen. Gemessen am ebenen Lauf 2. Ordnung (2,0/0,6 mm): Schrittzeit
+    # 0,136 von 1,0, und die Kennzahlen kamen um **Faktor 8** zu niedrig heraus
+    # -- der Form nach plausibel, der Groesse nach falsch, und nichts sagte es.
+    # Siehe BEFUNDE.md 2026-10-23 (c).
+    erreicht = _ccx_schrittzeit(os.path.join(ordner, name + ".sta"))
+    if erreicht is not None and erreicht < 0.999:
+        return {"solver_status": "TEILLAST", "returncode": r.returncode,
+                "schrittzeit": erreicht,
+                "meldung": (f"der Lastschritt erreichte nur {erreicht:.3f} von "
+                            f"1,0 — ccx ist in das Inkrementlimit gelaufen "
+                            f"(Kontaktiteration nicht konvergiert) und hat "
+                            f"trotzdem mit 0 beendet. Die Spannungen in der "
+                            f".dat gehoeren zu {erreicht * 100:.1f} % der Last "
+                            f"und sind KEIN Ergebnis.")}
     return {"solver_status": "OK", "returncode": r.returncode,
+            "schrittzeit": erreicht,
             "frd": frd, "dat": os.path.join(ordner, name + ".dat")}
+
+
+def _ccx_schrittzeit(sta: str):
+    """Welchen Anteil der Last der letzte Schritt erreicht hat (oder ``None``).
+
+    Spalte 6 der ``.sta`` ist die STEP TIME; ein durchgelaufener Schritt endet
+    bei 1,0. ``None`` heisst „keine Auskunft" (keine Datei, kein lesbarer
+    Eintrag) und wird ausdruecklich NICHT als Fehlschlag gewertet -- nicht
+    jeder Satz schreibt eine `.sta`, und ein Wert, den es nicht gibt, darf
+    keinen gueltigen Lauf abweisen.
+    """
+    try:
+        with open(sta) as f:
+            zeilen = [z.split() for z in f if z.strip()]
+    except OSError:
+        return None
+    for teile in reversed(zeilen):
+        if len(teile) < 6:
+            continue
+        try:
+            return float(teile[5])
+        except ValueError:
+            continue
+    return None
 
 
 def _frd_hat_disp(frd: str) -> bool:
