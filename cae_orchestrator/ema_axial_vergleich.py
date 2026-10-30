@@ -166,8 +166,10 @@ def bewerte(payload: dict, rpm: float) -> dict:
     m_fe = float(m.get("rotoreisen", 0.0)) + float(m.get("statoreisen", 0.0))
     m_cu = float(m.get("kupfer", 0.0))
     masse = sum(v for v in m.values() if isinstance(v, (int, float)))
-    kosten = (m_mag * PREISE_EUR_KG["magnet"] + m_cu * PREISE_EUR_KG["kupfer"]
-              + m_fe * PREISE_EUR_KG["stahl"])
+    import ema_screen as _scr
+    kosten = (m_mag * _scr.preis(payload, "magnet") + m_cu * _scr.preis(payload, "kupfer")
+              + float(m.get("rotoreisen", 0.0)) * _scr.preis(payload, "stahl_rotor")
+              + float(m.get("statoreisen", 0.0)) * _scr.preis(payload, "stahl_stator"))
 
     return {
         "ok": not gruende,
@@ -322,12 +324,10 @@ ACHSEN = {
         "werte": lambda b: list(ema_pipeline.MAGNETS),
         "beschriften": lambda w: ema_pipeline.MAGNETS.get(w, {}).get("label", w),
         "schluessel": "magnet", "ebene": EBENE_OBEN,
-        "notiz": "Vorsicht bei den Spalten Masse und Kosten: `MAGNETS` fuehrt "
-                 "weder eine Dichte noch einen Preis je Sorte, und "
-                 "`PREISE_EUR_KG['magnet']` ist EIN Betrag fuer alle. Ferrit "
-                 "kommt hier also genauso schwer und genauso teuer heraus wie "
-                 "NdFeB — und gerade der Preis ist sein Grund. Was diese Achse "
-                 "belastbar sagt, ist B_gap und ob der Zahn dabei saettigt.",
+        "notiz": "Der Preis je kg haengt seit dem 30.10.2026 an der Sorte "
+                 "(`ema_screen.PREIS_FAKTOR`, Platzhalter zum Rangieren: Ferrit "
+                 "rund ein Zehntel von NdFeB). Zahlen darueber hinaus: B_gap und "
+                 "ob der Zahn dabei saettigt.",
     },
     "magnetdicke": {
         "titel": "Magnetdicke",

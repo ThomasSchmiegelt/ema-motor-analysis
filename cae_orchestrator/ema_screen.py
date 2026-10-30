@@ -59,6 +59,46 @@ PREISE_EUR_KG = {"magnet": 55.0, "kupfer": 10.0, "stahl": 1.6,
                  # Aluminium: Kaefiglaeufer-Druckguss (ema_asm).
                  "alu": 3.0}
 
+# Preise je WERKSTOFF. ``PREISE_EUR_KG`` war EIN Betrag je Bauteil -- Ferrit kostete
+# damit je kg dasselbe wie NdFeB N50, und eine Preisvariante ueber den Magnetwerkstoff
+# konnte nur ueber die Masse etwas zeigen. Gebraucht wird nur die RANGFOLGE
+# (teurer/billiger), deshalb Faktoren auf den Grundpreis und keine Angebotspreise:
+# NdFeB nach Gueteklasse (N50 hat mehr Dy/Tb-freie Remanenz, aber engere Ausbeute),
+# Ferrit rund ein Zehntel; Blech nach Verlustguete (duenner und verlustaermer = teurer),
+# Vollstahl billiger; Kupfer-Legierungen teurer, Aluminium rund ein Drittel.
+# Unbekannter Schluessel = Faktor 1,0 (der alte Preis), nie ein Fehler.
+PREIS_FAKTOR = {
+    "magnet": {"ndfeb_n35": 0.85, "ndfeb_n42": 1.0, "ndfeb_n50": 1.30, "ferrite": 0.10},
+    "blech":  {"m250_35a": 1.25, "m270_35a": 1.0, "m400_50a": 0.85, "m800_65a": 0.70,
+               "steel_s235": 0.55, "steel_42crmo4": 1.10},
+    "leiter": {"cu_etp": 1.0, "cu_crZr": 1.40, "cu_ag01": 1.30, "al_1350": 0.30,
+               "al_guss": 0.30, "cu_guss": 0.90},
+}
+
+
+def preis(payload: dict, teil: str) -> float:
+    """Preis [EUR/kg] eines Bauteils im Payload: ``magnet``, ``kupfer``, ``stahl_rotor``,
+    ``stahl_stator``, ``stahl_welle``. Der Werkstoff steht im Payload; fehlt er, gilt
+    der Grundpreis -- jede Rechnung ohne Werkstoffangabe bleibt Ziffer fuer Ziffer."""
+    f = PREIS_FAKTOR
+    if teil == "magnet":
+        return PREISE_EUR_KG["magnet"] * f["magnet"].get(payload.get("magnet"), 1.0)
+    if teil == "kupfer":
+        return PREISE_EUR_KG["kupfer"] * f["leiter"].get(payload.get("hairpin_mat"), 1.0)
+    if teil == "stahl_rotor":
+        return PREISE_EUR_KG["stahl"] * f["blech"].get(payload.get("rotor_lam"), 1.0)
+    if teil == "stahl_stator":
+        return PREISE_EUR_KG["stahl"] * f["blech"].get(payload.get("stator_lam"), 1.0)
+    return PREISE_EUR_KG["stahl"]
+
+
+def stahl_eur(payload: dict, m_rotor: float, m_stator: float, m_welle: float) -> float:
+    """Eisenkosten nach Bauteil -- die EINE Rechnung, die jede Bauart benutzt."""
+    return round(m_rotor * preis(payload, "stahl_rotor")
+                 + m_stator * preis(payload, "stahl_stator")
+                 + m_welle * preis(payload, "stahl_welle"), 0)
+
+
 # NdFeB-Dichte als RUECKFALL. Sie stand hier als einzige Quelle, solange die
 # ``MAGNETS``-Tabelle keine fuehrte -- und war damit fuer JEDE Sorte dieselbe:
 # Ferrit kam genauso schwer (und genauso teuer) heraus wie NdFeB, obwohl es rund
@@ -665,9 +705,9 @@ def massen_und_kosten(payload: dict) -> dict:
     m_cu     = v_st_m3 * 0.30 * 0.55 * float(cu.get("density", 8900.0))
 
     kosten = {
-        "magnet_EUR": round(m_mag * PREISE_EUR_KG["magnet"], 0),
-        "kupfer_EUR": round(m_cu * PREISE_EUR_KG["kupfer"], 0),
-        "stahl_EUR":  round((m_rot_fe + m_st_fe + m_welle) * PREISE_EUR_KG["stahl"], 0),
+        "magnet_EUR": round(m_mag * preis(payload, "magnet"), 0),
+        "kupfer_EUR": round(m_cu * preis(payload, "kupfer"), 0),
+        "stahl_EUR":  stahl_eur(payload, m_rot_fe, m_st_fe, m_welle),
     }
     kosten["gesamt_EUR"] = round(sum(kosten.values()), 0)
     return {"magnet_kg": round(m_mag, 3), "rotoreisen_kg": round(m_rot_fe, 2),

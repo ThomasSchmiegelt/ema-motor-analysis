@@ -481,13 +481,12 @@ def massen_und_kosten(payload: dict) -> dict:
         except Exception:                                    # noqa: BLE001
             m_daempfer = 0.0
 
-    preis_cu = ema_screen.PREISE_EUR_KG["kupfer"]
+    preis_cu = ema_screen.preis(payload, "kupfer")
     kosten = dict(basis["kosten"])
     kosten["magnet_EUR"] = 0.0
     kosten["erreger_EUR"] = round((m_erreger + m_daempfer) * preis_cu, 0)
-    kosten["stahl_EUR"] = round(
-        (m_rot_fe + float(basis["statoreisen_kg"]) + float(basis["welle_kg"]))
-        * ema_screen.PREISE_EUR_KG["stahl"], 0)
+    kosten["stahl_EUR"] = ema_screen.stahl_eur(
+        payload, m_rot_fe, float(basis["statoreisen_kg"]), float(basis["welle_kg"]))
     kosten["gesamt_EUR"] = round(sum(v for k, v in kosten.items()
                                      if k != "gesamt_EUR"), 0)
 

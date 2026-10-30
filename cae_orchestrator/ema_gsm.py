@@ -742,9 +742,8 @@ def massen_und_kosten(payload: dict) -> dict:
 
     kosten = {
         "magnet_EUR": 0.0,
-        "kupfer_EUR": round(m_cu * ema_screen.PREISE_EUR_KG["kupfer"], 0),
-        "stahl_EUR": round((m_anker_fe + m_st_fe + m_welle)
-                           * ema_screen.PREISE_EUR_KG["stahl"], 0),
+        "kupfer_EUR": round(m_cu * ema_screen.preis(payload, "kupfer"), 0),
+        "stahl_EUR": ema_screen.stahl_eur(payload, m_anker_fe, m_st_fe, m_welle),
     }
     kosten["gesamt_EUR"] = round(sum(kosten.values()), 0)
 

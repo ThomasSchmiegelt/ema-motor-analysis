@@ -4198,11 +4198,26 @@ def cmd_paarvergleich(args) -> int:
         if unbekannt:
             return _die(f"Unbekannte Achse(n): {', '.join(unbekannt)}. "
                         f"Bekannt: {', '.join(PV.ACHSEN)}", EXIT_USAGE)
+    preis = getattr(args, "preis", False)
+    if preis and achsen is None:
+        import ema_preistabelle as PT
+        achsen = list(PT.PREIS_ACHSEN)
     try:
         erg = PV.vergleiche(payload, achsen=achsen, n_max=args.n_max, rpm=args.rpm,
                             last_nm=args.last, min_web=args.web)
     except ValueError as e:
         return _die(str(e), EXIT_USAGE)
+
+    if preis:
+        import ema_preistabelle as PT
+        t = PT.tabelle(erg, payload)
+        text = PT.als_text(t)
+        if getattr(args, "json", False):
+            emit(t, args)
+        else:
+            print(text)
+        _ablegen(args, "paarvergleich", text, daten=t, ok=bool(t.get("ok") and t["zeilen"]))
+        return EXIT_OK if t.get("ok") and t["zeilen"] else EXIT_REMOTE
 
     text = PV.als_text(erg, paare=not args.ohne_paare, max_paare=args.max_paare)
     if getattr(args, "json", False):
@@ -5185,6 +5200,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Moment des gemeinsamen Betriebspunkts in Nm (Vorgabe: load_nm)")
     s.add_argument("--web", type=float, default=None,
                    help="Mindeststege in mm fuer die Einpassung (Vorgabe: BRIDGE_MM)")
+    s.add_argument("--preis", action="store_true",
+                   help="statt der Achsen-Tabellen EINE grosse Preistabelle: alle Material- und "
+                        "Bauartoptionen (alle Maschinenarten) nach Kosten sortiert, teurer/billiger "
+                        "gegen die Grundgeometrie, Kosten nach Magnet/Leiter/Eisen, EUR je Nm "
+                        "Dauermoment, und ob die Zeile im Eisen gilt (radial)")
     s.add_argument("--ohne-paare", dest="ohne_paare", action="store_true",
                    help="nur die Tabellen zeigen, die Paarliste weglassen")
     s.add_argument("--max-paare", dest="max_paare", type=int, default=10,

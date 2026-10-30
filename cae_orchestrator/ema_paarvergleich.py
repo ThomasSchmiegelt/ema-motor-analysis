@@ -791,6 +791,15 @@ def _dauer(t) -> dict:
             "T_umrichter_Nm": float("inf"), "begrenzt_durch": "Kuehlung"}
 
 
+def _kosten_teile(mk: dict) -> dict:
+    """Die Kosten nach Bauteilgruppe -- fuer die Preistabelle (``ema_preistabelle``)."""
+    k = mk["kosten"]
+    leiter = sum(v for n, v in k.items() if n not in ("gesamt_EUR", "magnet_EUR", "stahl_EUR"))
+    return {"kosten_magnet_EUR": k.get("magnet_EUR", 0.0),
+            "kosten_leiter_EUR": round(leiter, 0),
+            "kosten_eisen_EUR": k.get("stahl_EUR", 0.0)}
+
+
 def _gemeinsam(payload, ctx, bp, verl, t_dauer, mk, kt, extra: dict) -> dict:
     """Die Kennzahlen, die ALLE Bauarten in derselben Bedeutung haben."""
     geom, axial = ctx["geom"], ctx["axial"]
@@ -812,7 +821,7 @@ def _gemeinsam(payload, ctx, bp, verl, t_dauer, mk, kt, extra: dict) -> dict:
         "P_Cu_W": verl["P_Cu"], "J_Apmm2": verl["J_Apmm2"],
         "R_phase_mOhm": verl["R_phase_mOhm"],
         "gesamt_kg": mk["gesamt_kg"], "magnet_kg": 0.0,
-        "kosten_EUR": mk["kosten"]["gesamt_EUR"],
+        "kosten_EUR": mk["kosten"]["gesamt_EUR"], **_kosten_teile(mk),
         "kt_je_kg": round(kt / max(mk["gesamt_kg"], 1e-6), 6),
         "kt_je_EUR": round(kt / max(mk["kosten"]["gesamt_EUR"], 1e-6), 8),
     }
@@ -1062,7 +1071,7 @@ def _bewerte_asm(payload: dict, n_max: float, rpm: float, last_nm: float) -> dic
         "R_phase_mOhm": verl["R_phase_mOhm"],
         "gesamt_kg":    mk["gesamt_kg"],
         "magnet_kg":    0.0,
-        "kosten_EUR":   mk["kosten"]["gesamt_EUR"],
+        "kosten_EUR":   mk["kosten"]["gesamt_EUR"], **_kosten_teile(mk),
         "kt_je_kg":     round(kt / max(mk["gesamt_kg"], 1e-6), 6),
         "kt_je_EUR":    round(kt / max(mk["kosten"]["gesamt_EUR"], 1e-6), 8),
     }
@@ -1189,7 +1198,7 @@ def _bewerte_pmsm(payload: dict, n_max: float, rpm: float, last_nm: float) -> di
         "R_phase_mOhm": verl["R_phase_mOhm"],
         "gesamt_kg":    mk["gesamt_kg"],
         "magnet_kg":    mk["magnet_kg"],
-        "kosten_EUR":   mk["kosten"]["gesamt_EUR"],
+        "kosten_EUR":   mk["kosten"]["gesamt_EUR"], **_kosten_teile(mk),
         "kt_je_kg":     round(kt / max(mk["gesamt_kg"], 1e-6), 6),
         "kt_je_EUR":    round(kt / max(mk["kosten"]["gesamt_EUR"], 1e-6), 8),
     }

@@ -581,6 +581,13 @@ Modell viel redet und nicht verlaesslich bewertet:
   EIN Ziel (`leistungsdichte|moment|leicht`), Abstand; unter 5 % „kein klarer Sieger" (Exit 3), besteht keiner,
   nennt es das bindende Tor (Exit 1). Beide Module stehen im Werkzeug-Fingerabdruck.
 
+* **Preisvariante** (`ema_preistabelle.py`, `paarvergleich --preis`, `ema_screen.PREIS_FAKTOR`) — eine große
+  Tabelle über alle Material- und Bauartoptionen aller Maschinenarten, nach Kosten sortiert. Der Preis je kg hing bis
+  dahin am Bauteil, nicht am Werkstoff: Ferrit kostete je kg wie N50. Jetzt Faktoren auf den Grundpreis (Platzhalter,
+  nur die Rangfolge zählt); ohne Werkstoffangabe gilt der alte Preis. `entscheide --ziel guenstig` nutzt dieselben
+  Preise. Die Spalte `gilt` übernimmt `ema_entscheidung.SAETTIGUNG_ABWEISEN`; axial führt `ema_axial_vergleich` seine
+  Kosten selbst. Test: `test_preistabelle.py`.
+
 Test: `test_pi_aufsicht.py`. Ereignisse dazu: `protokoll/ereignisprotokoll.md` (E-27 ff.).
 
 ### Handy-Pfad (`ema_mobil.py` / `ema_mobil.html`, Routen `/m…`)

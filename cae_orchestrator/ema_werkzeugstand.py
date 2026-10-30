@@ -133,6 +133,7 @@ PHYSIK: tuple[str, ...] = (
     "ema_pipeline.py",      # die Reihenfolge, in der all das laeuft
     "ema_magnetschluss.py", # Streuanteil und seine Schwellen: ein Urteil, das
                             # einen Entwurf abweist
+    "ema_preistabelle.py",  # die Preisvariante des Paarvergleichs
     "ema_entscheidung.py",  # die Entscheidungsregel zwischen Entwuerfen --
                             # ihre Tore und ihre Knapp-Schwelle bestimmen, wer
                             # gewinnt
