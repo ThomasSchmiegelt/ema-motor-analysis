@@ -55,6 +55,38 @@ python3 cae_cli.py auftrag --projekt <id> --ergaenzen entscheidungen \
 
 ## Verben
 
+### `entscheide` — zwischen gerechneten Entwürfen wählen (statt selbst zu bewerten)
+
+Bewerte Entwürfe **nicht** nach Gefühl und nicht im Text. Gib die Projekte hinein:
+
+```bash
+python3 cae_cli.py entscheide <projekt-a> <projekt-b> --ziel leistungsdichte
+```
+
+Das Verb lässt jeden Entwurf durch die Sicherheitstore (`sicherheit`) und die
+Magnetschlussmessung laufen, rankt nur die Bestandenen nach EINEM Ziel
+(`leistungsdichte` | `moment` | `leicht`) und nennt den Abstand. Exit `0` = klarer
+Sieger · `1` = kein Entwurf besteht (das ist ein Ergebnis: das bindende Tor steht
+dabei) · `3` = kein klarer Sieger (unter 5 % Abstand). Bei `3` nimm **nicht**
+einfach den Ersten: sag es so, oder rechne genauer. Das Ziel steht im Auftrag —
+such es dir nicht selbst aus.
+
+### `magnetschluss` — schließt sich der Magnetfluss im Läufer kurz?
+
+```bash
+python3 cae_cli.py magnetschluss --from-project <id>      # Zahl + Bildgegenlese
+python3 cae_cli.py magnetschluss --from-project <id> --ohne-bild   # nur die Zahl, ~6 s
+```
+
+Die ZAHL (`Streuanteil`) entscheidet; ein Sehmodell liest das gezeichnete Bild nur
+gegen und kann sie nie ersetzen. `ok` unter 35 %, `auffaellig` ab 35 %,
+`kurzschluss` ab 50 % (Exit 1); ohne Magnete „nicht messbar“ (Exit 2). **Geprüft ist die
+Zahl nur für V-Anordnungen und Oberflächenmagnete.** Bei Speichen- und Balkenmagneten
+(`spoke`, `bar`) ist ein „Kurzschluss“ ein Hinweis, kein Beleg: sag das so und
+verwirf die Bauform nicht allein deswegen. Steiler V-Winkel und dünne Stege treiben
+die Zahl hoch.
+
+
 | Verb | Zweck |
 |---|---|
 | `health` | Erreichbarkeit, Pipeline-Zustand, Projektanzahl |

@@ -560,6 +560,29 @@ für Detail** an der Standard-Drehzahlspanne.
 obwohl `buildPayload` ihn schickt — „Projekt als Vorlage" holte also stillschweigend
 den Löser des zuletzt angesehenen Formulars statt den des Projekts.
 
+### Aufsicht ueber PI und algorithmische Entscheidung (30.10.2026)
+
+Drei Module, **ohne Sprachmodell im Urteil**, entstanden aus der Beobachtung, dass PI mit dem lokalen
+Modell viel redet und nicht verlaesslich bewertet:
+
+* **`ema_pi_waechter.py`** — liest PIs Sitzungsdatei (`~/.pi/agent/sessions/<cwd>/*.jsonl`) und rechnet
+  Denkzeichen je Werkzeugaufruf, identische/hintereinander gleiche Aufrufe, Fehler in Folge und
+  **ungedeckte Zahlen** (im Text, in keinem Werkzeugergebnis). Urteil `ok|warnen|eingreifen` mit Satz,
+  der PI zu sagen waere. Greift selbst nie ein. Schwellen an PIs eigenen Sitzungen geeicht
+  (`--eichung`): zwei von acht Laeufen hatten 31 k / 81 k Denkzeichen am Stueck ohne Aufruf; die
+  „zehn identischen Wiederholungen" aus einer ersten Zaehlung waren ein Kuerzungsartefakt (exakt: 0).
+* **`ema_magnetschluss.py`** (`cae_cli.py magnetschluss`) — Streuanteil aus der Flussbilanz des
+  Vektorpotentials (`1 - A_Spalt/A_Magnet`). **Die Zahl entscheidet; ein Sehmodell liest nur das eigens
+  gezeichnete Bild (rot = bleibt im Laeufer) gegen.** Gemessen: auf dem normalen Feldbild antworten beide
+  getesteten Sehmodelle dreimal dasselbe; auf dem eigenen Bild ordnen sie richtig, nennen aber die Stufe nie
+  richtig. **`N_MIN = 300`**: bei N=240 kommt 0,03 statt 0,40 heraus. Schwellen (0,35 / 0,50) sind an drei
+  Beispielgeometrien geeicht, und der Wert fuer „Kurzschluss" liegt ausserhalb des Schemas (`magAngle` >= 40).
+* **`ema_entscheidung.py`** (`cae_cli.py entscheide`) — Tore (`ema_sicherheit.pruefen` + Magnetschluss),
+  EIN Ziel (`leistungsdichte|moment|leicht`), Abstand; unter 5 % „kein klarer Sieger" (Exit 3), besteht keiner,
+  nennt es das bindende Tor (Exit 1). Beide Module stehen im Werkzeug-Fingerabdruck.
+
+Test: `test_pi_aufsicht.py`. Ereignisse dazu: `protokoll/ereignisprotokoll.md` (E-27 ff.).
+
 ### Handy-Pfad (`ema_mobil.py` / `ema_mobil.html`, Routen `/m…`)
 
 Zweiter, bewusst schmaler Bedienweg: **Maße → Halbpol zeichnen → vier Betriebspunkte

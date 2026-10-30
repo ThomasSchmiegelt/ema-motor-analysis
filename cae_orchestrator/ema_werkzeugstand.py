@@ -131,6 +131,11 @@ PHYSIK: tuple[str, ...] = (
     "ema_z88.py",           # zweite Meinung zur Struktur
     "ema_aster.py",         # dritte Meinung zur Struktur (Code Aster)
     "ema_pipeline.py",      # die Reihenfolge, in der all das laeuft
+    "ema_magnetschluss.py", # Streuanteil und seine Schwellen: ein Urteil, das
+                            # einen Entwurf abweist
+    "ema_entscheidung.py",  # die Entscheidungsregel zwischen Entwuerfen --
+                            # ihre Tore und ihre Knapp-Schwelle bestimmen, wer
+                            # gewinnt
 )
 
 # Die Dateien der Oberflaeche. GETRENNT von PHYSIK, und zwar mit Absicht: eine

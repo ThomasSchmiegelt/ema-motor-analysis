@@ -3091,6 +3091,78 @@ def cmd_umrichter(args) -> int:
     return EXIT_OK if ok else 1
 
 
+def cmd_entscheide(args) -> int:
+    """Zwischen gerechneten Projekten entscheiden -- Tore, ein Ziel, ein Abstand.
+
+    Kein Sprachmodell im Weg (``ema_entscheidung``). Exit: 0 = klarer Sieger,
+    1 = kein Entwurf besteht, 3 = kein klarer Sieger (Abstand unter der Schwelle)."""
+    import ema_entscheidung as EE
+    ordner = []
+    for k in args.projekte:
+        pid = _newest_project() if k == "last" else k
+        ordner.append(pid if os.path.isabs(pid) else os.path.join(os.path.expanduser("~/cae_projekte"), pid))
+    try:
+        e = EE.entscheide(ordner, args.ziel, mit_magnetschluss=not args.ohne_magnetschluss)
+    except ValueError as ex:
+        return _die(str(ex), EXIT_USAGE)
+    emit(e, args)
+    text = EE.als_text(e)
+    print("ERGEBNIS:")
+    print(text)
+    _ablegen(args, "entscheide", text, daten=e, ok=e["gewinner"] is not None)
+    if e["gewinner"] is None:
+        return 1
+    return 0 if e["klar"] else 3
+
+
+def cmd_magnetschluss(args) -> int:
+    """Magnetischer Kurzschluss im Laeufer: Zahl aus der Flussbilanz, Bild als Gegenlese.
+
+    Die ZAHL entscheidet (``ema_magnetschluss.messen``); das Sehmodell liest das
+    eigens gezeichnete Bild nur gegen und kann sie nie ersetzen. Exit: 0 = ok oder
+    auffaellig, 1 = Kurzschluss, 2 = nicht messbar (keine Magnete im Raster)."""
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    echo_sets(applied)
+    geom = payload.get("geom") or {}
+    if not geom:
+        return _die("Keine Geometrie im Payload — magnetschluss braucht geom.", EXIT_USAGE)
+
+    import ema_magnetschluss as MS
+    ziel = getattr(args, "bild_dir", None) or os.path.join(
+        os.path.expanduser("~/cae_projekte"), "_magnetschluss")
+    os.makedirs(ziel, exist_ok=True)
+    m = MS.urteil(geom, ziel_dir=ziel, mit_bild=not getattr(args, "ohne_bild", False),
+                  N=getattr(args, "n", 300) or 300)
+    emit(m, args)
+    if not m.get("ok"):
+        text = f"Magnetschluss: NICHT messbar — {m.get('grund')}"
+        print("ERGEBNIS:\n" + text)
+        _ablegen(args, "magnetschluss", text, daten=m, ok=True)
+        return 2
+    zeilen = [f"Magnetschluss: {m['stufe'].upper()} — {m['grund']}",
+              f"  A_Magnet {m['A_magnet']} · A_Spalt {m['A_spalt']} · Streuanteil {m['streuanteil']:.1%} "
+              f"(auffaellig ab {MS.STREU_AUFFAELLIG:.0%}, Kurzschluss ab {MS.STREU_KURZ:.0%})"]
+    s = m.get("sehen")
+    if s is not None:
+        if s.get("ok"):
+            zeilen.append(f"  Gegenlese ({s['modell']}): rot {s['anteil_rot']:.0%}, "
+                          f"\"{s['urteil']}\"" + ("  ← WEICHT AB, die Messung gilt" if m.get("uneins") else ""))
+        else:
+            zeilen.append(f"  Gegenlese NICHT moeglich: {s.get('grund')}")
+    zeilen.append("  Die Schwellen sind an drei Beispielgeometrien geeicht, nicht an einer gebauten Maschine.")
+    text = "\n".join(zeilen)
+    print("ERGEBNIS:")
+    print(text)
+    _ablegen(args, "magnetschluss", text, daten=m, ok=m["stufe"] != "kurzschluss")
+    return 1 if m["stufe"] == "kurzschluss" else 0
+
+
 def cmd_rotor_check(args) -> int:
     """Die Stufe-0-Tore lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
 
@@ -4819,6 +4891,36 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_welle)
+
+    s = sub.add_parser("entscheide",
+                       help="Zwischen gerechneten Projekten entscheiden: Tore (Sicherheit, Magnetschluss), "
+                            "EIN Ziel, Abstand — deterministisch, mit Begruendung")
+    s.add_argument("projekte", nargs="+", help="Projektkennungen ('last' = juengstes)")
+    s.add_argument("--ziel", default="leistungsdichte",
+                   help="leistungsdichte (Vorgabe) | moment | leicht — gehoert in AUFTRAG.md")
+    s.add_argument("--ohne-magnetschluss", dest="ohne_magnetschluss", action="store_true",
+                   help="Streuanteil nicht mitmessen (spart ~6 s je Projekt)")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_entscheide)
+
+    s = sub.add_parser("magnetschluss",
+                       help="Magnetischer Kurzschluss im Laeufer: Streuanteil gemessen (Flussbilanz), "
+                            "Feldlinienbild vom Sehmodell gegengelesen — die Zahl entscheidet")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project", help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    g.add_argument("--frisch", action="store_true", help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--set", action="append", metavar="KEY=WERT", help="einzelnen Parameter aendern")
+    s.add_argument("--force", action="store_true", help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--ohne-bild", dest="ohne_bild", action="store_true",
+                   help="nur die Zahl, kein Sehmodell (Sekunden statt einer halben Minute)")
+    s.add_argument("--n", type=int, default=300, help="FDM-Aufloesung (Vorgabe 300; darunter wird die Welle ungenau)")
+    s.add_argument("--bild-dir", dest="bild_dir", default=None, help="wohin das Bild kommt")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_magnetschluss)
 
     s = sub.add_parser("rotor-check",
                        help="2D Rotorlayout-Check (Taschen: Kollision/Stege/Containment) — ohne CAD, in ms")
