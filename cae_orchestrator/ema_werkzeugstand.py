@@ -134,6 +134,7 @@ PHYSIK: tuple[str, ...] = (
     "ema_magnetschluss.py", # Streuanteil und seine Schwellen: ein Urteil, das
                             # einen Entwurf abweist
     "ema_montage.py",  # Montagekosten je Handgriff
+    "ema_bearbeitung.py",  # Bearbeitungsaufwand (Schnitt, Bohrung, Zuschnitt)
     "ema_preistabelle.py",  # die Preisvariante des Paarvergleichs
     "ema_entscheidung.py",  # die Entscheidungsregel zwischen Entwuerfen --
                             # ihre Tore und ihre Knapp-Schwelle bestimmen, wer

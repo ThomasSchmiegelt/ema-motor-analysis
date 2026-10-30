@@ -52,8 +52,8 @@ fer = next(v for n, v in mw.items() if n.startswith("Ferrit"))
 n50 = next(v for n, v in mw.items() if "N50" in n)
 pruefe(fer < n50, f"Ferrit billiger als N50 ({fer:.0f} < {n50:.0f} EUR)")
 pruefe(all(z["urteil"] in ("teurer", "billiger", "gleich") for z in t["zeilen"]), "jede Zeile teurer/billiger/gleich")
-pruefe(all(abs(z["magnet_EUR"] + z["leiter_EUR"] + z["eisen_EUR"] + z["montage_EUR"] - z["kosten_EUR"]) <= 2
-           for z in t["zeilen"]), "Magnet + Leiter + Eisen + Montage = Summe (Rundung)")
+pruefe(all(abs(z["magnet_EUR"] + z["leiter_EUR"] + z["eisen_EUR"] + z["montage_EUR"] + z["bearbeitung_EUR"] - z["kosten_EUR"]) <= 2
+           for z in t["zeilen"]), "Magnet + Leiter + Eisen + Montage + Bearbeitung = Summe (Rundung)")
 import ema_montage as MO
 g0 = MO.montage(BASIS)["gesamt_EUR"]
 seg = MO.montage(dict(BASIS, geom=dict(BASIS["geom"], skew_segments=6, skew_deg=15)))["gesamt_EUR"]
@@ -78,6 +78,16 @@ with tempfile.TemporaryDirectory() as d:
     pruefe("Montage" in md and "Summe" in md and "Platzhalter" in md, "Berichtsabschnitt nennt Montage, Summe und Platzhalter")
     pruefe("| Achse | Option |" in md, "Berichtsabschnitt fuehrt die Alternativen auf")
     pruefe(ema_report.kosten_alternativen_md(tempfile.gettempdir() + "/gibt_es_nicht") == "", "ohne Eingaben: leer, kein Absturz")
+
+import ema_bearbeitung as BE
+b0 = BE.bearbeitung(BASIS)["gesamt_EUR"]
+bz = BE.bearbeitung(dict(BASIS, geom=dict(BASIS["geom"], shaftBoreD=40)))
+pruefe(bz["gesamt_EUR"] > b0 and "welle_bohren" in bz["positionen"], "Hohlwelle kostet Bearbeitung (Bohrung)")
+bb = BE.bearbeitung(dict(BASIS, geom=dict(BASIS["geom"], genFluxBarrierQ=True, genFluxBarrierD=True)))
+pruefe(bb["gesamt_EUR"] > b0, "Flussbarrieren erhoehen die Schnittarbeit")
+bd = BE.bearbeitung(dict(BASIS, geom=dict(BASIS["geom"], magThick=2.0)))["positionen"]["magnet_zuschnitt"]
+bn = BE.bearbeitung(dict(BASIS, geom=dict(BASIS["geom"], magThick=6.0)))["positionen"]["magnet_zuschnitt"]
+pruefe(bd > bn, "duenner Magnet: teurerer Zuschnitt")
 
 print(f"\n{ok} bestanden, {fehl} fehlgeschlagen")
 sys.exit(1 if fehl else 0)

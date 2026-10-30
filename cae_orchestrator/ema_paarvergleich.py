@@ -795,8 +795,9 @@ def _kosten_teile(mk: dict) -> dict:
     """Die Kosten nach Bauteilgruppe -- fuer die Preistabelle (``ema_preistabelle``)."""
     k = mk["kosten"]
     leiter = sum(v for n, v in k.items()
-                 if n not in ("gesamt_EUR", "magnet_EUR", "stahl_EUR", "montage_EUR"))
+                 if n not in ("gesamt_EUR", "magnet_EUR", "stahl_EUR", "montage_EUR", "bearbeitung_EUR"))
     return {"kosten_montage_EUR": k.get("montage_EUR", 0.0),
+            "kosten_bearbeitung_EUR": k.get("bearbeitung_EUR", 0.0),
             "kosten_magnet_EUR": k.get("magnet_EUR", 0.0),
             "kosten_leiter_EUR": round(leiter, 0),
             "kosten_eisen_EUR": k.get("stahl_EUR", 0.0)}

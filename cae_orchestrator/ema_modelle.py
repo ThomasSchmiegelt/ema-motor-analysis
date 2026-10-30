@@ -330,7 +330,15 @@ def katalog(pfad: str = "", url: str = OLLAMA_URL,
                 "grund": f"in {os.path.basename(pfad)} steht kein Modell"}
     # Erst die lokalen, und Fehlendes ganz nach unten: wer ein API-Modell will,
     # soll es ausdruecklich waehlen statt es versehentlich zu treffen.
-    aus.sort(key=lambda m: (not m["da"], not m["lokal"], m["anbieter"],
+    # Das Vorgabemodell (das grosse, ``ema_report.DEFAULT_MODEL``) steht ZUOBERST und
+    # ist als ``standard`` markiert: vorher stand dort alphabetisch ein Rollenspiel-Modell.
+    try:
+        from ema_report import DEFAULT_MODEL as _std
+    except Exception:                                             # noqa: BLE001
+        _std = ""
+    for m in aus:
+        m["standard"] = (m["modell"] == _std)
+    aus.sort(key=lambda m: (not m["da"], not m["standard"], not m["lokal"], m["anbieter"],
                             m["modell"]))
     return {"ok": True, "modelle": aus, "anbieter": anbieter,
             "grund": "", "ollama_grund": ollama_grund}

@@ -588,6 +588,8 @@ Modell viel redet und nicht verlaesslich bewertet:
   Preise. Die Spalte `gilt` übernimmt `ema_entscheidung.SAETTIGUNG_ABWEISEN`; axial führt `ema_axial_vergleich` seine
   Kosten selbst. **Montage** (`ema_montage.py`) ist ein eigener Kostenposten `montage_EUR` und steht in `gesamt_EUR` jeder Bauart: je Handgriff (Magnetstück setzen, Hairpin formen + schweißen, Nut wickeln, Blechpaket, Welle fügen, Wuchten; ASM Käfig, EESM Spulen, GSM Kommutator). Gestaffelte Schrägung und mehr Magnetstücke/Leiter kosten dadurch Geld; vorher war eine 72-Stück-Maschine so billig wie eine mit 12. Platzhalter, ca. ein Drittel der Materialkosten. Axial führt die Montage noch nicht. Test: `test_preistabelle.py`.
 
+* **Bearbeitung** (`ema_bearbeitung.py`, `kosten["bearbeitung_EUR"]`, eigene Spalte in der Preistabelle): Schnittlänge je Blech (Nuten, Magnettaschen, Barrieren, Wuchtbohrungen) mal Blechzahl plus Werkzeugzuschlag je Kontur, Welle drehen/bohren (eine Hohlwelle kostet damit Geld, spart nur Masse), Magnetzuschnitt (dünner als 4 mm teurer). Platzhalter, nur die Ordnung zählt. Axial führt sie noch nicht. Der Modellkatalog (`ema_modelle`) stellt das Vorgabemodell nach oben (`standard`).
+
 Test: `test_pi_aufsicht.py`. Ereignisse dazu: `protokoll/ereignisprotokoll.md` (E-27 ff.).
 
 ### Handy-Pfad (`ema_mobil.py` / `ema_mobil.html`, Routen `/m…`)
