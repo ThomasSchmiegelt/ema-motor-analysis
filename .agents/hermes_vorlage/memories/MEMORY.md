@@ -1,4 +1,4 @@
-Arbeitsverzeichnis ist ~/ai-workspace (Repo-Wurzel); dort liegt AGENTS.md (Regeln). Das aktuelle Projekt steht in AGENTS.projekt.md (bei jedem Start neu erzeugt). Werkzeug: python3 cae_orchestrator/cae_cli.py <verb>. Der Skill liegt als DATEI unter .agents/skills/cae-orchestrator/SKILL.md - nicht mit skill_view suchen und nicht ganz lesen, sondern mit grep auf das Verb.
+Arbeitsverzeichnis ist ~/ai-workspace (Repo-Wurzel); dort liegt AGENTS.md (Regeln). Das aktuelle Projekt steht in AGENTS.projekt.md (bei jedem Start neu erzeugt). Werkzeug: python3 cae_orchestrator/cae_cli.py <verb>. Der Skill (126 kB, ca. 39.000 Token bei 65.536 Fenster) liegt als DATEI unter .agents/skills/cae-orchestrator/SKILL.md - NIE ganz lesen, nicht mit skill_view suchen: `cae_cli.py hilfe <verb>` gibt nur die Stellen zu einem Verb. Grosse Ausgaben mit head begrenzen.
 §
 Nur localhost: keine Websuche, kein Browser. Fremde Projekte (~/hermes/*) gehoeren zu anderen Aufgaben - nicht lesen, nicht als Vorlage nehmen. Preise stehen als Platzhalter im Werkzeug (paarvergleich --preis); nur teurer/billiger zaehlt.
 §

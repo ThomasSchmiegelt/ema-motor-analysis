@@ -84,6 +84,28 @@ with tempfile.TemporaryDirectory() as t:
 
 pruefe(W.pruefen("/gibt/es/nicht")["stufe"] == "unbekannt", "fehlende Datei: unbekannt, kein Absturz")
 
+print("— Kontextfenster —")
+with tempfile.TemporaryDirectory() as t:
+    pf = os.path.join(t, "s.jsonl")
+    def _zug(token):
+        return {"type": "message", "message": {"role": "assistant", "content": [
+            {"type": "toolCall", "name": "bash", "arguments": {"command": f"echo {token}"}}],
+            "usage": {"input": token, "output": 10, "cacheRead": 0}}}
+    with open(pf, "w") as f:
+        for tk in (8000, 30000, 50000):
+            f.write(json.dumps(_zug(tk)) + "\n")
+    k = W.kennzahlen(pf)
+    pruefe(k["kontext_token"] == 50000 and k["kontext_max_token"] == 50000, "Fuellung aus der Eingabelaenge des letzten Zugs")
+    pruefe(W.urteil(k)["stufe"] == "warnen" and "Kontextfenster" in W.urteil(k)["befunde"][0], "ab 70 %: warnen")
+    with open(pf, "a") as f:
+        f.write(json.dumps(_zug(60000)) + "\n")
+    pruefe(W.urteil(W.kennzahlen(pf))["stufe"] == "eingreifen", "ab 85 %: eingreifen")
+import cae_cli
+h = cae_cli.hilfe_text("paarvergleich")
+pruefe(0 < len(h) <= 7000 and "paarvergleich" in h, f"hilfe <verb>: nur die Stellen zum Verb ({len(h)} statt 126000 Zeichen)")
+pruefe("entscheide" in cae_cli.hilfe_text(None) or "health" in cae_cli.hilfe_text(None), "hilfe ohne Verb: Verbliste")
+pruefe("nichts im Skill" in cae_cli.hilfe_text("gibtsnicht"), "unbekanntes Verb: ehrliche Auskunft")
+
 print("— Entscheidung —")
 
 

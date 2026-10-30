@@ -101,6 +101,7 @@ def kennzahlen(pfad: str, letzte_zuege: int | None = None) -> dict:
     zuege: list[dict] = []        # je Assistentenzug: denken, text, aufrufe[(name,args)]
     ergebnisse: list[tuple[str, bool, str]] = []   # (werkzeug, isError, text)
     nutzer = 0
+    eingabe_token: list[int] = []     # Eingabelaenge je Zug = so voll war das Fenster
     erster = letzter = None
     for e in _ereignisse(pfad):
         t = e.get("timestamp")
@@ -113,6 +114,9 @@ def kennzahlen(pfad: str, letzte_zuege: int | None = None) -> dict:
             nutzer += 1
         elif rolle == "assistant":
             z = {"denken": 0, "text": "", "aufrufe": []}
+            u = m.get("usage") or {}
+            if isinstance(u.get("input"), int):
+                eingabe_token.append(u["input"] + int(u.get("cacheRead") or 0))
             inhalt = m.get("content")
             if isinstance(inhalt, str):
                 z["text"] = inhalt
@@ -191,6 +195,9 @@ def kennzahlen(pfad: str, letzte_zuege: int | None = None) -> dict:
         "fehler_in_folge": fehler_folge,
         "ungedeckte_zahlen": ungedeckt[:12], "ungedeckt_n": len(ungedeckt),
         "nutzer_nachrichten": nutzer,
+        "kontext_token": eingabe_token[-1] if eingabe_token else None,
+        "kontext_max_token": max(eingabe_token) if eingabe_token else None,
+        "kontext_anteil": (round(eingabe_token[-1] / KONTEXT_FENSTER, 2) if eingabe_token else None),
         "sekunden": _spanne(erster, letzter),
     }
 
@@ -244,6 +251,15 @@ def urteil(k: dict, max_laeufe: int | None = None) -> dict:
         warnen.append((f"{k['ungedeckt_n']} Zahlen im Text stehen in keinem Werkzeugergebnis: "
                        f"{', '.join(k['ungedeckte_zahlen'][:5])}",
                        "Nenne nur Zahlen, die ein Werkzeug geliefert hat, mit Quelle."))
+    ka = k.get("kontext_anteil")
+    if ka is not None and ka >= KONTEXT_EINGREIFEN:
+        eingreifen.append((f"Kontextfenster zu {ka:.0%} voll ({k['kontext_token']} von {KONTEXT_FENSTER} Token)",
+                           "Dein Kontext ist fast voll; was darueber liegt, wird still abgeschnitten. Schreib "
+                           "auf, was feststeht (`auftrag`), lies nichts Grosses mehr (Skill nur ueber `hilfe <verb>`) "
+                           "und schliesse ab oder starte frisch."))
+    elif ka is not None and ka >= KONTEXT_WARNEN:
+        warnen.append((f"Kontextfenster zu {ka:.0%} voll ({k['kontext_token']} von {KONTEXT_FENSTER} Token)",
+                       "Lies nichts Grosses mehr; Skill-Stellen nur ueber `cae_cli.py hilfe <verb>`."))
     stufe = "eingreifen" if eingreifen else "warnen" if warnen else "ok"
     return {"stufe": stufe,
             "befunde": [b for b, _ in eingreifen + warnen],
@@ -262,6 +278,12 @@ def pruefen(pfad: str | None = None, letzte_zuege: int | None = None,
 #: Phasen aus den Messwerten. Gemessen am 30.10.2026: das 17-GB-Modell liegt
 #: dauerhaft im VRAM (21 GB belegt), die GPU-AUSLASTUNG zeigt aber nur, ob gerade
 #: Token entstehen -- 11 % heisst "rechnet nicht", nicht "kaputt".
+#: Das Kontextfenster des Modells (Token) -- dieselbe Quelle wie die Berichte und Chats.
+#: Ollama schneidet still ab, was darueber liegt; der Agent merkt es nicht.
+KONTEXT_FENSTER = int(os.environ.get("CAE_LLM_NUM_CTX", "65536"))
+KONTEXT_WARNEN = 0.70
+KONTEXT_EINGREIFEN = 0.85
+
 GPU_AKTIV_PROZENT = 30
 CPU_AKTIV_PROZENT = 35
 

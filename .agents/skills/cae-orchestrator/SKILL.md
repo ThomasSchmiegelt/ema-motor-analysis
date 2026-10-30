@@ -8,6 +8,8 @@ description: Bedient die CAE-Toolchain für E-Maschinen (Geometrie, 2D-Feld, 3D-
 Rechnet IPM-E-Maschinen: Geometrie (FreeCAD) → EM-Feld 2D/3D (FDM/Elmer) →
 Struktur-FEM (CalculiX) → Thermik → Fahrzyklus → PDF-Bericht.
 
+**Diese Datei ist groß (rund 39.000 Token) — das Kontextfenster des Modells hat 65.536.** Lies sie nie ganz. `python3 cae_cli.py hilfe` listet alle Verben mit einem Satz, `python3 cae_cli.py hilfe <verb>` gibt nur die Stellen zu diesem Verb (meist 1–2 k Token), `cae_cli.py <verb> --help` die Optionen.
+
 **Alles läuft über ein CLI, nicht über HTTP von Hand:**
 
 ```bash

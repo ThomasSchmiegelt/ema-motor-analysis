@@ -29,6 +29,7 @@ import argparse
 import json
 import math
 import os
+import re
 import sys
 import time
 import urllib.error
@@ -168,6 +169,84 @@ def cmd_status(args) -> int:
     for line in (st.get("log") or [])[-args.log_lines:]:
         print(f"  {line}")
     return EXIT_OK if code < 400 else EXIT_REMOTE
+
+
+def _skill_pfad() -> str:
+    return os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".agents", "skills",
+                        "cae-orchestrator", "SKILL.md")
+
+
+def hilfe_text(verb: str | None, max_zeichen: int = 6000) -> str:
+    """Die Stellen des Skills zu EINEM Verb -- statt der ganzen Datei.
+
+    SKILL.md ist rund 126 kB (etwa 39.000 Token); bei einem Kontextfenster von 65.536 Token
+    waere ein einziges Lesen mehr als die Haelfte des Fensters, und gemessen sprang PIs
+    Eingabe nach dem Skill von 8.000 auf 25.000 Token. Hier kommt nur, was zum Verb gehoert:
+    zuerst seine Tabellenzeile, dann Ueberschriften, die es nennen, dann Absaetze mit
+    ``cae_cli.py <verb>``. Ohne Verb: die Verbliste mit je einem Satz.
+    """
+    try:
+        with open(_skill_pfad(), encoding="utf-8") as f:
+            zeilen = f.read().split("\n")
+    except OSError as e:
+        return f"Skill nicht lesbar: {e}"
+    if not verb:
+        out = ["Verben (Details: cae_cli.py hilfe <verb>; Optionen: cae_cli.py <verb> --help):"]
+        for z in zeilen:
+            m = re.match(r"^\| `([a-z0-9_-]+)[^`]*` \| (.*)", z)
+            if m and not z.startswith("| `pmsm") and len(out) < 80:
+                satz = re.sub(r"[*`]", "", m.group(2)).split(". ")[0][:110]
+                out.append(f"  {m.group(1):<14} {satz}")
+        return "\n".join(out)
+    v = verb.strip().lower()
+    treffer: list[tuple[int, str]] = []
+    # Absaetze: durch Leerzeilen getrennt; Tabellenzeilen zaehlen einzeln
+    bloecke, akt = [], []
+    for z in zeilen:
+        if z.startswith("|") or not z.strip():
+            if akt:
+                bloecke.append("\n".join(akt)); akt = []
+            if z.startswith("|"):
+                bloecke.append(z)
+        else:
+            akt.append(z)
+    if akt:
+        bloecke.append("\n".join(akt))
+    # Ueberschrift-Abschnitte: von der Ueberschrift bis zur naechsten gleicher oder hoeherer Stufe
+    for i, z in enumerate(zeilen):
+        m = re.match(r"^(#+) .*" + re.escape(v) + r"\b", z, re.I)
+        if m:
+            ende = len(zeilen)
+            for j in range(i + 1, len(zeilen)):
+                m2 = re.match(r"^(#+) ", zeilen[j])
+                if m2 and len(m2.group(1)) <= len(m.group(1)):
+                    ende = j
+                    break
+            treffer.append((1, "\n".join(zeilen[i:ende]).strip()))
+    for b in bloecke:
+        if re.match(rf"^\| `{re.escape(v)}[ `\]]", b):
+            treffer.append((0, b))
+        elif b.startswith("#"):
+            continue
+        elif f"cae_cli.py {v}" in b or re.search(rf"`{re.escape(v)}`", b):
+            treffer.append((2, b))
+    treffer.sort(key=lambda t: t[0])
+    out, n = [], 0
+    for _rang, b in treffer:
+        b = b if len(b) <= 2500 else b[:2500] + " [...]"
+        if n + len(b) > max_zeichen:
+            break
+        out.append(b); n += len(b)
+    if not out:
+        return f"Zu '{verb}' steht nichts im Skill. Verben: cae_cli.py hilfe — Optionen: cae_cli.py {verb} --help"
+    out.append(f"\n(Optionen und Argumente: cae_cli.py {v} --help)")
+    return "\n\n".join(out)
+
+
+def cmd_hilfe(args) -> int:
+    """Skill-Auszug zu einem Verb -- der Weg, den Skill NICHT ganz zu lesen."""
+    print(hilfe_text(args.verb, max_zeichen=args.max))
+    return EXIT_OK
 
 
 def cmd_health(args) -> int:
@@ -4473,6 +4552,12 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("status", help="Zustand der laufenden Pipeline")
     _add_globals(s)
     s.set_defaults(fn=cmd_status)
+
+    s = sub.add_parser("hilfe", help="Skill-Auszug zu EINEM Verb (statt der ganzen 126-kB-Datei zu lesen); "
+                                      "ohne Verb: Liste aller Verben")
+    s.add_argument("verb", nargs="?", help="Verb, z.B. paarvergleich")
+    s.add_argument("--max", type=int, default=6000, help="hoechstens so viele Zeichen (Vorgabe 6000)")
+    s.set_defaults(fn=cmd_hilfe)
 
     s = sub.add_parser("health", help="Was ist erreichbar und rechenbar?")
     _add_globals(s)
