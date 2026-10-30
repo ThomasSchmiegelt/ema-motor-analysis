@@ -102,6 +102,18 @@ with tempfile.TemporaryDirectory() as t:
     with open(pf, "a") as f:
         f.write(json.dumps(_zug(T90)) + "\n")
     pruefe(W.urteil(W.kennzahlen(pf))["stufe"] == "eingreifen", "ab 85 %: eingreifen")
+with tempfile.TemporaryDirectory() as t:
+    pf = os.path.join(t, "h.jsonl")
+    def _cli(n):
+        return {"type": "message", "message": {"role": "assistant", "content": [
+            {"type": "toolCall", "name": "bash", "arguments": {"command": f"python3 cae_cli.py magnetschluss --set magWidth={n}"}}],
+            "usage": {"input": 1000, "output": 10, "cacheRead": 0}}}
+    with open(pf, "w") as f:
+        for n in range(31):
+            f.write(json.dumps(_cli(20 + n)) + "\n")
+    u = W.urteil(W.kennzahlen(pf))
+    pruefe(u["stufe"] == "eingreifen" and "zielwert" in json.dumps(u, ensure_ascii=False),
+           "dasselbe Verb 31x mit wechselnden Argumenten: eingreifen, nennt zielwert")
 import cae_cli
 h = cae_cli.hilfe_text("paarvergleich")
 pruefe(0 < len(h) <= 7000 and "paarvergleich" in h, f"hilfe <verb>: nur die Stellen zum Verb ({len(h)} statt 126000 Zeichen)")

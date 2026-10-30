@@ -56,6 +56,15 @@ STUMM_DENKEN_EINGREIFEN = 12000
 DOPPELT_ANTEIL_WARNEN = 0.20
 DOPPELT_ANTEIL_EINGREIFEN = 0.35
 HINTEREINANDER_EINGREIFEN = 3
+#: Dasselbe Verb hintereinander mit WECHSELNDEN Argumenten -- Handsuche: gemessen 46 mal
+#: ``magnetschluss`` mit anderen ``--set``-Werten, in 90 Minuten ein Rechenlauf. Die
+#: Identitaetspruefung oben sieht das nicht, jeder Aufruf ist ein anderer.
+SERIE_VERB_WARNEN = 8
+SERIE_VERB_EINGREIFEN = 14
+#: Dasselbe Verb INSGESAMT sehr oft (zwischendurch unterbrochen): 44 magnetschluss-Rechnungen.
+VERB_GESAMT_WARNEN = 20
+VERB_GESAMT_EINGREIFEN = 30
+LESEND = {"hilfe", "geom", "status", "health", "results", "steckbrief", "projects", "routes", "aufgabe", "wait"}
 FEHLER_IN_FOLGE_EINGREIFEN = 3
 #: Mehr als so viele ungedeckte Zahlen im Antworttext -> warnen.
 UNGEDECKT_WARNEN = 3
@@ -147,6 +156,17 @@ def kennzahlen(pfad: str, letzte_zuege: int | None = None) -> dict:
     text = sum(len(z["text"]) for z in zuege)
     doppelt = n - len(set(aufrufe))
 
+    serie, ser, vorher, zaehl = 0, 0, None, {}
+    for a in aufrufe:
+        # Ein Aufruf kann mehrere Verben tragen (Schleife, &&); jedes zaehlt. Aufrufe ohne
+        # cae_cli (lesen, ls) unterbrechen die Serie nicht -- sie suchen nichts.
+        for v in re.findall(r"cae_cli\.py\s+([a-z][\w-]*)", str(a)):
+            ser = ser + 1 if v == vorher else 1
+            vorher = v
+            serie = max(serie, ser)
+            zaehl[v] = zaehl.get(v, 0) + 1
+    serie_verb = vorher if ser == serie else None
+
     hint = lauf = 1
     for a, b in zip(aufrufe, aufrufe[1:]):
         lauf = lauf + 1 if a == b else 1
@@ -189,6 +209,8 @@ def kennzahlen(pfad: str, letzte_zuege: int | None = None) -> dict:
         "doppelte_aufrufe": doppelt,
         "doppelt_anteil": round(doppelt / n, 3) if n else 0.0,
         "hintereinander_gleich": hint,
+        "verb_serie": serie,
+        "verb_oft": max(((v, c) for v, c in zaehl.items() if v not in LESEND), key=lambda x: x[1], default=("", 0)),
         "mehrfach_gelesen": mehrfach_gelesen,
         "rechenlaeufe": laeufe,
         "stumm_denken": stumm,
@@ -239,6 +261,19 @@ def urteil(k: dict, max_laeufe: int | None = None) -> dict:
     if k["hintereinander_gleich"] >= HINTEREINANDER_EINGREIFEN:
         eingreifen.append((f"derselbe Aufruf {k['hintereinander_gleich']}x hintereinander",
                            "Du wiederholst denselben Aufruf. Das Ergebnis aendert sich nicht: werte es aus oder waehle einen anderen Schritt."))
+    vo, vn = k.get("verb_oft") or ("", 0)
+    if vn >= VERB_GESAMT_EINGREIFEN:
+        eingreifen.append((f"`{vo}` {vn}x aufgerufen",
+                           "Du suchst von Hand: dieses Verb wurde immer wieder mit anderen Werten gerufen. Das ist Aufgabe von zielwert "
+                           "(Parametervektoren, geklammert und gerankt) oder paarvergleich -- stelle die Suche dort auf."))
+    elif vn >= VERB_GESAMT_WARNEN:
+        warnen.append((f"`{vo}` {vn}x aufgerufen (Handsuche?)", ""))
+    if k.get("verb_serie", 0) >= SERIE_VERB_EINGREIFEN:
+        eingreifen.append((f"dasselbe Verb {k['verb_serie']}x hintereinander mit wechselnden Argumenten",
+                           "Du suchst von Hand. Das ist Aufgabe von zielwert (Parametervektoren, geklammert und gerankt) oder paarvergleich: "
+                           "stelle die Suche dort auf, statt Werte einzeln durchzuprobieren."))
+    elif k.get("verb_serie", 0) >= SERIE_VERB_WARNEN:
+        warnen.append((f"dasselbe Verb {k['verb_serie']}x hintereinander (Handsuche?)", ""))
     if k["doppelt_anteil"] >= DOPPELT_ANTEIL_EINGREIFEN:
         eingreifen.append((f"{k['doppelt_anteil']:.0%} identische Aufrufe",
                            "Du rufst vieles mehrfach auf. Notiere, was du schon weisst, und frage nichts zweimal."))
