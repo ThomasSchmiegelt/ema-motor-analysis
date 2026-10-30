@@ -51,7 +51,7 @@ ZIELE = {
     "leistungsdichte": ("P_je_kg", "max", "Spitzenleistung je kg Gesamtmasse (P_max_kW / mass_g)"),
     "moment":          ("T_peak_max_Nm", "max", "Spitzenmoment"),
     "leicht":          ("mass_g", "min", "geringste Gesamtmasse"),
-    "guenstig":        ("kosten_EUR", "min", "geringste Materialkosten (nur teurer/billiger: Platzhalterpreise aus ema_screen, kein Angebot)"),
+    "guenstig":        ("eur_je_kW", "min", "geringste Materialkosten je kW Spitzenleistung (relativ: ein absolut billiger Entwurf, der nichts leistet, ist nicht guenstig; Platzhalterpreise aus ema_screen, kein Angebot)"),
 }
 
 
@@ -66,9 +66,14 @@ def _lesen(pfad: str) -> dict:
 def _kennwert(ziel: str, s: dict, payload: dict | None = None):
     if ziel == "guenstig":
         # Nur die Rangfolge zaehlt: dieselben Platzhalterpreise fuer alle Entwuerfe.
+        # Relativ, nicht absolut: Kosten je kW Spitzenleistung. Der absolute Preis
+        # belohnt die schwaechste Maschine.
+        p = s.get("P_max_kW")
+        if not isinstance(p, (int, float)) or p <= 0:
+            return None
         try:
             import ema_screen
-            return ema_screen.massen_und_kosten(payload or {})["kosten"]["gesamt_EUR"]
+            return round(ema_screen.massen_und_kosten(payload or {})["kosten"]["gesamt_EUR"] / p, 3)
         except Exception:                                         # noqa: BLE001
             return None
     if ziel == "leistungsdichte":

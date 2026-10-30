@@ -92,6 +92,8 @@ herausfällt.
 | `.agents/skills/cae-orchestrator/SKILL.md` | Bedienanleitung, wird bei Bedarf geladen |
 | `.agents/skills/cae-orchestrator/references/routes.md` | alle 135 Routen, nach Bereichen |
 | `cae_orchestrator/cae_cli.py` | das eigentliche Werkzeug |
+| `.agents/skills/picogk/SKILL.md` | **zweiter Skill** (seit 23.10.2026): der Voxel-/Implizitweg über PicoGK |
+| `pikogk/picogk_cli.py` | dessen Werkzeug, fünf Verben |
 
 **Der Skill wird als Dateipfad genannt, nicht nur als Name.** `AGENTS.md`, die erzeugte
 `AGENTS.projekt.md` und beide Startskripte schreiben `.agents/skills/cae-orchestrator/SKILL.md`
@@ -99,6 +101,17 @@ ausdrücklich hin. Grund ist ein gemessener Fehler in Hermes (siehe unten): dort
 `skill_view("cae-orchestrator")` fehl, obwohl `hermes skills list` den Skill zeigt. Ein
 Agent, der den Skill für abwesend hält, rechnet ohne Verben, Laufzeiten, Exit-Codes und
 Fallen los — eine Datei zu lesen geht immer, auch wenn die Skill-Auflösung klemmt.
+
+**Zwei Skills, und sie haben nichts miteinander zu tun.** `cae-orchestrator`
+rechnet E-Maschinen, `picogk` baut Voxel- und Implizitgeometrie (TPMS-Kerne,
+Gitter, Freiformen) über die PicoGK-Web-API auf `:5266`. Zwischen beiden gibt es
+**keine** Verbindung — kein Verb, keine Route, kein Import; aus `picogk` fällt
+eine STL-Datei und sonst nichts, und das Volumennetz, das Elmer und CalculiX
+brauchen, fällt dabei nicht ab. Die Beschreibung im Kopf des Skills sagt das
+ausdrücklich, damit ein Kopf nicht für eine Motorfrage zum falschen Werkzeug
+greift. Der Grund, dass es zwei getrennte Skills sind und nicht einer: ein
+lokales Modell lädt den Skill, den die Beschreibung trifft — eine gemeinsame
+Datei würde bei jeder Frage beide Werkzeugflächen in den Kontext holen.
 
 **Warum ein CLI und nicht MCP:** PI bindet Werkzeuge bewusst als „CLI mit README"
 ein. Das passt hier auch inhaltlich — ein lokales Modell kann 135 Routen nicht als

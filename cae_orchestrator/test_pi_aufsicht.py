@@ -121,7 +121,18 @@ with tempfile.TemporaryDirectory() as t:
         pruefe(True, "unbekanntes Ziel wird abgewiesen")
 
     e = E.entscheide([a, b], "guenstig", mit_magnetschluss=False)
-    pruefe(all(z.get("kennwert") is not None for z in e["zeilen"]) or True, "guenstig rechnet ohne Absturz")
+    # gleiche Maschine (gleiche Kosten), b leistet 40 % mehr: nach EUR/kW gewinnt b,
+    # obwohl beide gleich viel kosten -- ein absoluter Preis haette sie nicht getrennt
+    pl = {"geom": {}}
+    import ema_screen as _S
+    _echt = _S.massen_und_kosten
+    _S.massen_und_kosten = lambda payload: {"kosten": {"gesamt_EUR": 100.0}}
+    try:
+        e = E.entscheide([a, b], "guenstig", mit_magnetschluss=False)
+    finally:
+        _S.massen_und_kosten = _echt
+    pruefe(e["gewinner"] == "b" and e["zeilen"][0]["kennwert"] == 1.0,
+           f"guenstig ist relativ (EUR/kW): leistungsstaerkere gewinnt bei gleichem Preis ({e['gewinner']})")
     # Saettigung: darunter Hinweis, darueber Tor (Moment/Leistung zu optimistisch)
     orig = E.ema_sicherheit.pruefen
     def _mit(wert):

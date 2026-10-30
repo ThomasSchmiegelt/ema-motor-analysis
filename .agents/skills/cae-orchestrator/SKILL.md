@@ -65,7 +65,7 @@ python3 cae_cli.py entscheide <projekt-a> <projekt-b> --ziel leistungsdichte
 
 Das Verb lässt jeden Entwurf durch die Sicherheitstore (`sicherheit`) und die
 Magnetschlussmessung laufen, rankt nur die Bestandenen nach EINEM Ziel
-(`leistungsdichte` | `moment` | `leicht` | `guenstig` — nur teurer/billiger, Platzhalterpreise) und nennt den Abstand. Exit `0` = klarer
+(`leistungsdichte` | `moment` | `leicht` | `guenstig` — Kosten je kW Spitzenleistung, relativ, Platzhalterpreise) und nennt den Abstand. Exit `0` = klarer
 Sieger · `1` = kein Entwurf besteht (das ist ein Ergebnis: das bindende Tor steht
 dabei) · `3` = kein klarer Sieger (unter 5 % Abstand). Bei `3` nimm **nicht**
 einfach den Ersten: sag es so, oder rechne genauer. Das Ziel steht im Auftrag —
