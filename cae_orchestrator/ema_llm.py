@@ -34,7 +34,7 @@ Was beim Uebersetzen VERLOREN geht -- und darum gesagt wird
 -----------------------------------------------------------
 
 * ``num_ctx`` gibt es in keiner OpenAI- oder Anthropic-API. Lokal ist es
-  tragend (``ema_report.DEFAULT_NUM_CTX`` = 65536, und ein fehlender Wert
+  tragend (``ema_report.DEFAULT_NUM_CTX`` = 98304, und ein fehlender Wert
   klemmt das Modell auf den Modelfile-Wert zurueck); bei einer API bestimmt
   der Anbieter das Kontextfenster. Es wird fallengelassen, und ``letzte_info``
   sagt es.

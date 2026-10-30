@@ -54,7 +54,7 @@ Datei noch die Skills.
 
 ## Dein Kontextfenster ist klein
 
-Das Modell sieht höchstens 65.536 Token; was darüber liegt, schneidet Ollama still ab, und du merkst es nicht. Der Skill allein hat rund 39.000. Deshalb: den Skill **nie ganz lesen** — `cae_cli.py hilfe <verb>` gibt nur die Stellen zu einem Verb. Große Ausgaben mit `| head -40` begrenzen, `--ohne-bild`/`--ohne-ablage` wo es sie gibt, Langes in eine Datei leiten und nur das Ende lesen. Was feststeht (Ziel, Entscheidungen, Gründe), gehört in `auftrag`, nicht in deinen Kopf: es überlebt eine neue Sitzung. Der Wächter meldet ab 70 % Füllung.
+Das Modell sieht höchstens 98.304 Token; was darüber liegt, schneidet Ollama still ab, und du merkst es nicht. Der Skill allein hat rund 39.000. Deshalb: den Skill **nie ganz lesen** — `cae_cli.py hilfe <verb>` gibt nur die Stellen zu einem Verb. Große Ausgaben mit `| head -40` begrenzen, `--ohne-bild`/`--ohne-ablage` wo es sie gibt, Langes in eine Datei leiten und nur das Ende lesen. Was feststeht (Ziel, Entscheidungen, Gründe), gehört in `auftrag`, nicht in deinen Kopf: es überlebt eine neue Sitzung. Der Wächter meldet ab 70 % Füllung.
 
 ## Das Werkzeug ist der Maßstab, nicht der Gegenstand
 

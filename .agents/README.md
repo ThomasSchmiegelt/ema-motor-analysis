@@ -236,7 +236,7 @@ curl -fsSL https://hermes-agent.nousresearch.com/install.sh | bash -s -- \
 hermes config set model.provider   ollama
 hermes config set model.base_url   http://localhost:11434/v1
 hermes config set model.default    qwen-gross:latest
-hermes config set model.context_length 65536
+hermes config set model.context_length 98304
 hermes skills trust ~/ai-workspace
 ```
 

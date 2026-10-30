@@ -40,7 +40,7 @@ DEFAULT_MODEL = os.environ.get("CAE_LLM_MODEL", "qwen-gross:latest")
 # auf der GPU (die qwen3.5-Architektur ist hybrid: nur jede 4. Lage ist volle
 # Attention, ``full_attention_interval=4``, der Rest SSM mit konstantem Zustand —
 # deshalb kostet der KV-Cache nur ~64 kB/Token statt ~260 kB).
-DEFAULT_NUM_CTX = int(os.environ.get("CAE_LLM_NUM_CTX", "65536"))
+DEFAULT_NUM_CTX = int(os.environ.get("CAE_LLM_NUM_CTX", "98304"))
 
 
 # ── Context extraction ──────────────────────────────────────────────────────

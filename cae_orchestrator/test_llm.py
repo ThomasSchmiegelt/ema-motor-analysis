@@ -83,7 +83,7 @@ ANFRAGE = {"model": "", "messages": [
                {"role": "system", "content": "Du bist knapp."},
                {"role": "user", "content": "Hallo"}],
            "stream": False, "think": False, "format": "json",
-           "options": {"temperature": 0.3, "num_ctx": 65536, "num_predict": 999}}
+           "options": {"temperature": 0.3, "num_ctx": 98304, "num_predict": 999}}
 
 _echt = urllib.request.urlopen
 tmp = tempfile.mkdtemp()

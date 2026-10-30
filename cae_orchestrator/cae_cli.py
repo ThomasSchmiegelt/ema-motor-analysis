@@ -179,7 +179,7 @@ def _skill_pfad() -> str:
 def hilfe_text(verb: str | None, max_zeichen: int = 6000) -> str:
     """Die Stellen des Skills zu EINEM Verb -- statt der ganzen Datei.
 
-    SKILL.md ist rund 126 kB (etwa 39.000 Token); bei einem Kontextfenster von 65.536 Token
+    SKILL.md ist rund 126 kB (etwa 39.000 Token); bei einem Kontextfenster von 98.304 Token
     waere ein einziges Lesen mehr als die Haelfte des Fensters, und gemessen sprang PIs
     Eingabe nach dem Skill von 8.000 auf 25.000 Token. Hier kommt nur, was zum Verb gehoert:
     zuerst seine Tabellenzeile, dann Ueberschriften, die es nennen, dann Absaetze mit

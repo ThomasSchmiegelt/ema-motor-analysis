@@ -14,7 +14,7 @@
 set -euo pipefail
 
 MODEL="qwen-gross:latest"
-MODEL_ID="1bb3a46c5021"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
+MODEL_ID="fad97b5f2f75"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
 # Der Anbieter stand bis hierher als Literal in der letzten Zeile. `pi` kann
 # laengst andere (die Anbieter stehen in ~/.pi/agent/models.json mit baseUrl,
 # api und apiKey) — nur angeben liess es sich nicht. Vorgabe bleibt ollama:
@@ -24,6 +24,7 @@ PROVIDER="ollama"
 # (identische Blobs, nur num_ctx 65536 ergaenzt). Der Wechsel ist geprueft und
 # gewollt: MTP-Spekulativdekodierung, warm gemessen 93,1 statt 86,7 tok/s bei
 # 65536 Kontext, und jetzt 100 % GPU statt 94 %. Vorher: 6b9d840acbf5.
+# 30.10.2026: num_ctx 98304 (gemessen 22,6 GB von 24 GB bei 100k, 21,8 bei 80k); Vorher: 1bb3a46c5021 (= qwen-gross:ctx64k).
 PORT=5000
 OLLAMA_URL="http://localhost:11434"
 

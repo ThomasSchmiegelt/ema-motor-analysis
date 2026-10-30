@@ -16,9 +16,9 @@ code (numpy + external solvers). Ollama is only invoked for report prose, with t
 model from **`ema_report.DEFAULT_MODEL`** — the single source for the whole toolchain
 (`ema_chat`, `ema_text2ema`, `ema_optimize`, `ema_design_ai` and `server.py` import it,
 `ema_experts.EXPERT_MODEL` derives from it). Default `qwen-gross:latest` (Qwen3.5 27B
-Q4_K_M, 64k context baked into the Modelfile), switchable per environment via
+Q4_K_M, 96k context baked into the Modelfile), switchable per environment via
 `CAE_LLM_MODEL` / `CAE_EXPERT_MODEL` without touching code. **`ema_report.DEFAULT_NUM_CTX`
-(65536, env `CAE_LLM_NUM_CTX`) is the matching single source for `num_ctx`** — an explicit
+(98304 since 30.10.2026, env `CAE_LLM_NUM_CTX`; 80k–100k measured on the 24 GB card: 21,8–22,6 GB) is the matching single source for `num_ctx`** — an explicit
 `num_ctx` in the request options overrides the Modelfile, so leaving the old per-caller
 values (8192…14336) in place would have silently clamped the model back down; and Ollama
 reloads the 17 GB model on every `num_ctx` change (measured 7.1 s vs 0.5 s), so one value

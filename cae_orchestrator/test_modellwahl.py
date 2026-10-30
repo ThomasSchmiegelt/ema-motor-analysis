@@ -49,7 +49,7 @@ GESTELLT = {
             "baseUrl": "http://localhost:11434/v1", "api": "openai-completions",
             "apiKey": "ollama",
             "models": [{"id": "qwen-gross:latest", "name": "Qwen lokal",
-                        "contextWindow": 65536,
+                        "contextWindow": 98304,
                         "cost": {"input": 0, "output": 0}}]},
         "anthropic": {
             "baseUrl": "https://api.anthropic.com/v1", "api": "anthropic",

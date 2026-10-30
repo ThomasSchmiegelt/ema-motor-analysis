@@ -280,7 +280,10 @@ def pruefen(pfad: str | None = None, letzte_zuege: int | None = None,
 #: Token entstehen -- 11 % heisst "rechnet nicht", nicht "kaputt".
 #: Das Kontextfenster des Modells (Token) -- dieselbe Quelle wie die Berichte und Chats.
 #: Ollama schneidet still ab, was darueber liegt; der Agent merkt es nicht.
-KONTEXT_FENSTER = int(os.environ.get("CAE_LLM_NUM_CTX", "65536"))
+try:
+    from ema_report import DEFAULT_NUM_CTX as KONTEXT_FENSTER      # EINE Quelle
+except Exception:                                                  # noqa: BLE001
+    KONTEXT_FENSTER = int(os.environ.get("CAE_LLM_NUM_CTX", "98304"))
 KONTEXT_WARNEN = 0.70
 KONTEXT_EINGREIFEN = 0.85
 

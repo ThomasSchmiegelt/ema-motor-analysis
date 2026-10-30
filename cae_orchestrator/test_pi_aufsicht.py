@@ -92,13 +92,15 @@ with tempfile.TemporaryDirectory() as t:
             {"type": "toolCall", "name": "bash", "arguments": {"command": f"echo {token}"}}],
             "usage": {"input": token, "output": 10, "cacheRead": 0}}}
     with open(pf, "w") as f:
-        for tk in (8000, 30000, 50000):
+        F = W.KONTEXT_FENSTER
+        T70, T90 = int(F * 0.75), int(F * 0.92)
+        for tk in (8000, int(F * 0.4), T70):
             f.write(json.dumps(_zug(tk)) + "\n")
     k = W.kennzahlen(pf)
-    pruefe(k["kontext_token"] == 50000 and k["kontext_max_token"] == 50000, "Fuellung aus der Eingabelaenge des letzten Zugs")
+    pruefe(k["kontext_token"] == T70 and k["kontext_max_token"] == T70, "Fuellung aus der Eingabelaenge des letzten Zugs")
     pruefe(W.urteil(k)["stufe"] == "warnen" and "Kontextfenster" in W.urteil(k)["befunde"][0], "ab 70 %: warnen")
     with open(pf, "a") as f:
-        f.write(json.dumps(_zug(60000)) + "\n")
+        f.write(json.dumps(_zug(T90)) + "\n")
     pruefe(W.urteil(W.kennzahlen(pf))["stufe"] == "eingreifen", "ab 85 %: eingreifen")
 import cae_cli
 h = cae_cli.hilfe_text("paarvergleich")
