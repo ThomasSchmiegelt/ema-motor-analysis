@@ -590,6 +590,8 @@ Modell viel redet und nicht verlaesslich bewertet:
 
 * **Bearbeitung** (`ema_bearbeitung.py`, `kosten["bearbeitung_EUR"]`, eigene Spalte in der Preistabelle): Schnittlänge je Blech (Nuten, Magnettaschen, Barrieren, Wuchtbohrungen) mal Blechzahl plus Werkzeugzuschlag je Kontur, Welle drehen/bohren (eine Hohlwelle kostet damit Geld, spart nur Masse), Magnetzuschnitt (dünner als 4 mm teurer). Platzhalter, nur die Ordnung zählt. Axial führt sie noch nicht. Der Modellkatalog (`ema_modelle`) stellt das Vorgabemodell nach oben (`standard`).
 
+* **Bericht: „Wie es zu dieser Auslegung kam“** (`ema_entstehung.py`, `test_entstehung.py`) — Auftrag/Entscheidungen mit Gründen, Verlauf aus `project.json` `evolution` mit dem Befund jeder abgelegten Rechnung, Beanstandungen der Prüfungen, Herkunft, Werkzeugstand-Wechsel. Ohne Sprachmodell, fehlende Ablage steht als fehlend da (ältere Projekte haben keine). Der Prompt verbietet dem Modell, den Weg selbst nachzuerzählen.
+
 Test: `test_pi_aufsicht.py`. Ereignisse dazu: `protokoll/ereignisprotokoll.md` (E-27 ff.).
 
 ### Handy-Pfad (`ema_mobil.py` / `ema_mobil.html`, Routen `/m…`)

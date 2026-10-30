@@ -518,7 +518,7 @@ Schreibe einen strukturierten, sachlichen Bericht in Markdown mit genau diesen A
 {fahrzyklus_section}
 7. **Empfehlungen** — 3–5 konkrete Verbesserungsvorschläge basierend auf den Zahlen (inkl. Topologie-/Segmentierungs-Eignung)
    KOSTEN: Der Abschnitt „Kosten und Alternativen“ (Material, Montage, billigere/teurere Maschinenart und Werkstoffe) wird AUTOMATISCH angehängt. Triff in den Empfehlungen KEINE Aussage über Kosten, Preis, Montage oder Wirtschaftlichkeit und empfiehl keinen Werkstoff oder keine Maschinenart mit Kostenbegründung — die Alternativen stehen dort, mit Rechnung. Verweise höchstens dorthin.
-   SÄTTIGUNG: Die Zahnsättigung bewegt sich in diesem Werkzeug nur über die Nutbreite je Nutteilung (Zahnanteil). Länge, Nutzahl und Kühlung ändern sie nicht; empfiehl dazu nichts anderes.
+   WEG: Der Abschnitt „Wie es zu dieser Auslegung kam“ (Auftrag, Entscheidungen mit Gründen, Verlauf der Prüfungen) wird AUTOMATISCH angehängt. Erzähle den Entwicklungsweg nicht selbst nach und erfinde keine Schritte.\n   SÄTTIGUNG: Die Zahnsättigung bewegt sich in diesem Werkzeug nur über die Nutbreite je Nutteilung (Zahnanteil). Länge, Nutzahl und Kühlung ändern sie nicht; empfiehl dazu nichts anderes.
 {drei_d_section}
 
 BEBILDERUNG: Füge Platzhalter `[BILD:KEY]` an sinnvollen Stellen im Fließtext ein.
@@ -1108,6 +1108,13 @@ def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
     _kosten = kosten_alternativen_md(project_dir)
     if _kosten and not re.search(r"(?im)^#{1,3}\s.*kosten", md_final):
         md_final = md_final.rstrip() + "\n\n## Kosten und Alternativen\n\n" + _kosten.split("\n", 2)[2] + "\n"
+    try:
+        import ema_entstehung
+        _weg = ema_entstehung.entstehung_md(project_dir)
+    except Exception as _e:                                       # noqa: BLE001
+        _weg = f"## Wie es zu dieser Auslegung kam\n\n_Nicht erstellbar: {type(_e).__name__}_\n"
+    if _weg and not re.search(r"(?im)^#{1,3}\s.*(wie es zu|entstehung)", md_final):
+        md_final = md_final.rstrip() + "\n\n" + _weg
     md_final = insert_tables(md_final, {"kennwerte": _single_md_tables(ctx),
                                         "herkunft":  _herkunft_tabelle(project_dir),
                                         "quellen":   _quellen_tabelle(project_dir)})
