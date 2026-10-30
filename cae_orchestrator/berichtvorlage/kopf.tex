@@ -1,0 +1,34 @@
+% Berichtsvorlage -- Layout. Wird vor die pandoc-Standardvorlage gehaengt (--include-in-header).
+% Anpassen: Farben und Abstaende hier; die Titelseite steht in titelseite.tex.
+\usepackage[document]{ragged2e}
+\setlength{\RaggedRightParindent}{0pt}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.55em}
+\setlength{\emergencystretch}{3em}
+\usepackage{float}
+\let\origfigure\figure
+\let\endorigfigure\endfigure
+\renewenvironment{figure}[1][]{\origfigure[H]}{\endorigfigure}
+
+\usepackage{xcolor}
+\definecolor{cae-blau}{HTML}{1F4E79}
+\definecolor{cae-grau}{HTML}{5A5A5A}
+\definecolor{cae-hell}{HTML}{EEF3F8}
+\usepackage{titlesec}
+\titleformat{\section}{\Large\bfseries\color{cae-blau}}{\thesection}{0.6em}{}[\vspace{-0.4em}{\color{cae-blau}\titlerule}]
+\titleformat{\subsection}{\large\bfseries\color{cae-blau}}{\thesubsection}{0.6em}{}
+\titlespacing*{\section}{0pt}{1.6em}{0.6em}
+\usepackage{fancyhdr}
+\usepackage{lastpage}
+\pagestyle{fancy}
+\fancyhf{}
+\renewcommand{\headrulewidth}{0.3pt}
+\renewcommand{\footrulewidth}{0.3pt}
+\fancyhead[L]{\small\color{cae-grau}\textsc{E-Maschinen-Auslegung}}
+\fancyhead[R]{\small\color{cae-grau}@@PROJEKT@@}
+\fancyfoot[L]{\small\color{cae-grau}Werkzeugstand @@WERKZEUG@@}
+\fancyfoot[R]{\small\color{cae-grau}Seite \thepage{} von \pageref{LastPage}}
+\usepackage{booktabs}
+\renewcommand{\arraystretch}{1.15}
+\usepackage{tcolorbox}
+\newtcolorbox{kennbox}{colback=cae-hell,colframe=cae-blau,boxrule=0.4pt,arc=1.5pt,left=6pt,right=6pt,top=4pt,bottom=4pt}

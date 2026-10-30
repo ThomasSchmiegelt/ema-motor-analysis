@@ -1,0 +1,32 @@
+% Titelseite -- Felder in doppelten At-Zeichen fuellt ema_report.titelseite_tex (LaTeX-sicher maskiert).
+\begin{titlepage}
+\thispagestyle{empty}
+\vspace*{2.2cm}
+{\color{cae-blau}\rule{\linewidth}{1.6pt}}\\[1.2em]
+{\fontsize{26}{30}\selectfont\bfseries\color{cae-blau} @@TITEL@@\par}
+\vspace{0.4em}
+{\Large\color{cae-grau} @@UNTERTITEL@@\par}
+\vspace{0.6em}
+{\color{cae-blau}\rule{\linewidth}{0.6pt}}
+
+\vspace{2.0em}
+\begin{kennbox}
+\begin{tabular}{@{}p{3.6cm}p{11cm}@{}}
+\textbf{Projekt}      & \texttt{@@PROJEKT@@}\\
+\textbf{Datum}        & @@DATUM@@\\
+\textbf{Maschine}     & @@MASCHINE@@\\
+\textbf{Aufgabe}      & @@AUFGABE@@\\
+\textbf{Werkzeugstand}& \texttt{@@WERKZEUG@@}\\
+\textbf{Sprachmodell} & @@MODELL@@\\
+\end{tabular}
+\end{kennbox}
+
+@@KENNZAHLEN@@
+
+\vfill
+{\small\color{cae-grau}
+Alle Zahlen stammen aus Rechnungen dieses Werkzeugs (2D-FDM, FEM, LPTN); Kosten sind Platzhalter
+zum Rangieren, kein Angebot. Der Abschnitt „Wie es zu dieser Auslegung kam“ nennt den Weg dorthin.}
+\end{titlepage}
+\tableofcontents
+\newpage

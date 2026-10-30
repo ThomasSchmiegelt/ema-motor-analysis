@@ -592,6 +592,8 @@ Modell viel redet und nicht verlaesslich bewertet:
 
 * **Bericht: „Wie es zu dieser Auslegung kam“** (`ema_entstehung.py`, `test_entstehung.py`) — Auftrag/Entscheidungen mit Gründen, Verlauf aus `project.json` `evolution` mit dem Befund jeder abgelegten Rechnung, Beanstandungen der Prüfungen, Herkunft, Werkzeugstand-Wechsel. Ohne Sprachmodell, fehlende Ablage steht als fehlend da (ältere Projekte haben keine). Der Prompt verbietet dem Modell, den Weg selbst nachzuerzählen.
 
+* **Berichtsvorlage (LaTeX)** (`berichtvorlage/kopf.tex` + `titelseite.tex`, `ema_report.titelseite_felder/titelseite_tex/_render_mit_vorlage`): Titelseite mit Eckdaten und Kennzahlen, Inhaltsverzeichnis, Kopf-/Fußzeile (Projekt, Werkzeugstand, Seite x von y), Überschriftenfarben. Gilt für Einzel- und agentischen Bericht (`render_pdf(titelseite=…)`); bricht sie ab, rendert `render_pdf` im bisherigen Layout. Test: `test_berichtvorlage.py`.
+
 Test: `test_pi_aufsicht.py`. Ereignisse dazu: `protokoll/ereignisprotokoll.md` (E-27 ff.).
 
 ### Handy-Pfad (`ema_mobil.py` / `ema_mobil.html`, Routen `/m…`)

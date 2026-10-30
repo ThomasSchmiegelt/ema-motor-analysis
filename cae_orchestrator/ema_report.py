@@ -1006,9 +1006,84 @@ _LATEX_HEADER = r"""\usepackage[document]{ragged2e}
 """
 
 
+VORLAGE_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "berichtvorlage")
+
+
+def _tex(s) -> str:
+    """Text LaTeX-sicher machen (Werte aus Projekten koennen alles enthalten)."""
+    s = str(s if s not in (None, "") else "—")
+    tab = {"\\": r"\textbackslash{}", "&": r"\&", "%": r"\%", "$": r"\$", "#": r"\#", "_": r"\_",
+           "{": r"\{", "}": r"\}", "~": r"\textasciitilde{}", "^": r"\textasciicircum{}"}
+    s = re.sub(r"[\\&%$#_{}~^]", lambda m: tab[m.group(0)], s)
+    return s.replace("\n", " ")
+
+
+def titelseite_felder(project_dir: str, model: str = "", untertitel: str = "Auslegungsbericht") -> dict:
+    """Die Felder der Titelseite -- nur aus dem Projekt gelesen, nichts erfunden."""
+    import datetime
+    f = {"TITEL": "Elektrische Maschine", "UNTERTITEL": untertitel,
+         "PROJEKT": os.path.basename(os.path.normpath(project_dir)),
+         "DATUM": datetime.date.today().strftime("%d.%m.%Y"), "MODELL": model or "—",
+         "MASCHINE": "—", "AUFGABE": "—", "WERKZEUG": "—", "KENNZAHLEN": ""}
+    try:
+        import ema_werkzeugstand
+        f["WERKZEUG"] = ema_werkzeugstand.kurz(ema_werkzeugstand.stand())
+    except Exception:                                             # noqa: BLE001
+        pass
+    try:
+        with open(os.path.join(project_dir, "meta.json"), encoding="utf-8") as fh:
+            payload = json.load(fh).get("payload") or {}
+        g = payload.get("geom") or {}
+        import ema_maschinenart
+        art = ema_maschinenart.art_code(payload)
+        f["MASCHINE"] = (f"{art.upper()}, {int(g.get('p', 0)) * 2 or '?'} Pole, {g.get('slots', '?')} Nuten, "
+                         f"Stator-Außen-Ø {g.get('statorOD', '?')} mm, Länge {g.get('axialLen') or payload.get('axial_len') or '?'} mm")
+        f["TITEL"] = f"{art.upper()} {g.get('statorOD', '')} mm".strip()
+    except Exception:                                             # noqa: BLE001
+        pass
+    try:
+        with open(os.path.join(project_dir, "project.json"), encoding="utf-8") as fh:
+            akte = json.load(fh)
+        f["AUFGABE"] = str(((akte.get("design") or {}).get("brief") or akte.get("notes") or "—")).strip()[:300]
+    except Exception:                                             # noqa: BLE001
+        pass
+    try:
+        with open(os.path.join(project_dir, "results.json"), encoding="utf-8") as fh:
+            sm = (json.load(fh).get("summary") or {})
+        zeilen = [(n, k, e) for n, k, e in (("Spitzenleistung", "P_max_kW", "kW"), ("Spitzenmoment", "T_peak_max_Nm", "Nm"),
+                                            ("Dauerleistung", "P_cont_max_kW", "kW"), ("Masse", "mass_g", "g"),
+                                            ("Sicherheit FEM", "safety_factor_fem", ""), ("sichere Drehzahl", "max_safe_rpm", "1/min"))
+                  if isinstance(sm.get(k), (int, float))]
+        if zeilen:
+            f["KENNZAHLEN"] = ("\\vspace{1.4em}\\begin{kennbox}\\textbf{Kennzahlen}\\\\[0.3em]\\begin{tabular}{@{}lr@{\\,}l@{}}"
+                               + "".join(f"{_tex(n)} & {sm[k]:.4g} & {_tex(e)}\\\\" for n, k, e in zeilen)
+                               + "\\end{tabular}\\end{kennbox}")
+    except Exception:                                             # noqa: BLE001
+        pass
+    return f
+
+
+def titelseite_tex(felder: dict) -> str:
+    """``berichtvorlage/titelseite.tex`` mit den Feldern gefuellt (KENNZAHLEN ist fertiges LaTeX)."""
+    with open(os.path.join(VORLAGE_DIR, "titelseite.tex"), encoding="utf-8") as fh:
+        t = fh.read()
+    for k, v in felder.items():
+        t = t.replace(f"@@{k}@@", v if k == "KENNZAHLEN" else _tex(v))
+    return t
+
+
 def render_pdf(md: str, project_dir: str, out_filename: str = "bericht.pdf",
-               md_filename: str = "bericht.md", page_numbers: bool = True) -> str:
-    """Write the markdown + PDF into project_dir. Returns PDF path."""
+               md_filename: str = "bericht.md", page_numbers: bool = True,
+               titelseite: dict | None = None) -> str:
+    """Write the markdown + PDF into project_dir. Returns PDF path.
+
+    ``titelseite`` (Felder aus ``titelseite_felder``) schaltet die LaTeX-Vorlage ``berichtvorlage/``
+    ein; bricht sie ab, wird mit dem bisherigen Layout nochmals gerendert."""
+    if titelseite is not None:
+        try:
+            return _render_mit_vorlage(md, project_dir, out_filename, md_filename, titelseite)
+        except Exception as e:                                    # noqa: BLE001
+            print(f"[bericht] Vorlage fehlgeschlagen ({type(e).__name__}: {str(e)[:200]}) -- bisheriges Layout")
     md_path  = os.path.join(project_dir, md_filename)
     pdf_path = os.path.join(project_dir, out_filename)
     hdr_path = os.path.join(project_dir, "_report_header.tex")
@@ -1057,6 +1132,32 @@ def render_pdf(md: str, project_dir: str, out_filename: str = "bericht.pdf",
             raise RuntimeError(f"pandoc failed:\n"
                                 f"first attempt: {res.stderr[-400:]}\n"
                                 f"fallback:      {res2.stderr[-400:]}")
+    return pdf_path
+
+
+def _render_mit_vorlage(md, project_dir, out_filename, md_filename, felder) -> str:
+    md_path = os.path.join(project_dir, md_filename)
+    pdf_path = os.path.join(project_dir, out_filename)
+    with open(md_path, "w", encoding="utf-8") as f:
+        f.write(md)
+    with open(os.path.join(VORLAGE_DIR, "kopf.tex"), encoding="utf-8") as f:
+        kopf = f.read()
+    for k in ("PROJEKT", "WERKZEUG"):
+        kopf = kopf.replace(f"@@{k}@@", _tex(felder.get(k)))
+    hdr = os.path.join(project_dir, "_report_header.tex")
+    tit = os.path.join(project_dir, "_report_titel.tex")
+    with open(hdr, "w", encoding="utf-8") as f:
+        f.write(kopf)
+    with open(tit, "w", encoding="utf-8") as f:
+        f.write(titelseite_tex(felder))
+    cmd = ["pandoc", md_path, "--from", "markdown-yaml_metadata_block", "--pdf-engine=xelatex",
+           "-V", "geometry:margin=22mm", "-V", "mainfont=DejaVu Serif", "-V", "monofont=DejaVu Sans Mono",
+           "-V", "colorlinks=true", "-V", "linkcolor=cae-blau", "-V", "urlcolor=cae-blau", "-V", "lang=de",
+           "-V", "linestretch=1.08", "--include-in-header", hdr, "--include-before-body", tit,
+           "--resource-path", project_dir, "-o", pdf_path]
+    res = subprocess.run(cmd, cwd=project_dir, capture_output=True, text=True, timeout=240)
+    if res.returncode != 0 or not os.path.exists(pdf_path):
+        raise RuntimeError(res.stderr[-400:])
     return pdf_path
 
 
@@ -1123,7 +1224,7 @@ def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
         md_final = md_final.rstrip() + "\n\n" + _evo + "\n"
 
     _log("Rendere PDF (pandoc + xelatex)…", 85)
-    pdf_path = render_pdf(md_final, project_dir)
+    pdf_path = render_pdf(md_final, project_dir, titelseite=titelseite_felder(project_dir, model))
     rag_md_path = _write_rag_markdown(project_dir, _prose_vf, ctx, _log)
     _log(f"✓ Bericht: {os.path.basename(pdf_path)}", 100)
 
@@ -1200,7 +1301,8 @@ def generate_report_agentic(
         md_final = md_final.rstrip() + "\n\n" + _evo + "\n"
 
     _log("Rendere PDF (pandoc + xelatex)…", 85)
-    pdf_path = render_pdf(md_final, project_dir, out_filename="bericht_agentisch.pdf")
+    pdf_path = render_pdf(md_final, project_dir, out_filename="bericht_agentisch.pdf",
+                         titelseite=titelseite_felder(project_dir, model, "Auslegungsbericht (Expertenrecherche)"))
     rag_md_path = _write_rag_markdown(project_dir, _prose_vf, ctx, _log)
     _log(f"✓ Agentischer Bericht: {os.path.basename(pdf_path)}", 100)
 
