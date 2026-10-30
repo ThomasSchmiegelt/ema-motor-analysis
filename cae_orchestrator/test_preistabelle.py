@@ -52,8 +52,17 @@ fer = next(v for n, v in mw.items() if n.startswith("Ferrit"))
 n50 = next(v for n, v in mw.items() if "N50" in n)
 pruefe(fer < n50, f"Ferrit billiger als N50 ({fer:.0f} < {n50:.0f} EUR)")
 pruefe(all(z["urteil"] in ("teurer", "billiger", "gleich") for z in t["zeilen"]), "jede Zeile teurer/billiger/gleich")
-pruefe(all(abs(z["magnet_EUR"] + z["leiter_EUR"] + z["eisen_EUR"] - z["kosten_EUR"]) <= 2
-           for z in t["zeilen"]), "Magnet + Leiter + Eisen = Summe (Rundung)")
+pruefe(all(abs(z["magnet_EUR"] + z["leiter_EUR"] + z["eisen_EUR"] + z["montage_EUR"] - z["kosten_EUR"]) <= 2
+           for z in t["zeilen"]), "Magnet + Leiter + Eisen + Montage = Summe (Rundung)")
+import ema_montage as MO
+g0 = MO.montage(BASIS)["gesamt_EUR"]
+seg = MO.montage(dict(BASIS, geom=dict(BASIS["geom"], skew_segments=6, skew_deg=15)))["gesamt_EUR"]
+pruefe(seg > g0, f"gestaffelte Schraegung kostet Montage ({g0:.0f} -> {seg:.0f} EUR)")
+h4 = MO.montage(dict(BASIS, geom=dict(BASIS["geom"], conductorsPerSlot=4)))["gesamt_EUR"]
+h8 = MO.montage(dict(BASIS, geom=dict(BASIS["geom"], conductorsPerSlot=8)))["gesamt_EUR"]
+pruefe(h8 > h4, f"mehr Hairpins = mehr Montage ({h4:.0f} -> {h8:.0f} EUR)")
+asm = MO.montage(dict(BASIS, geom=dict(BASIS["geom"], machineType="asm")))["positionen"]
+pruefe("kaefig" in asm and "magnete_setzen" not in asm, "ASM: Kaefig ja, Magnete setzen nein")
 pruefe("Kaefig" in " ".join(t["ohne_preiswirkung"]) or t["ohne_preiswirkung"],
        "Achsen ohne Preiswirkung werden genannt statt als Nullzeilen aufgefuehrt")
 text = PT.als_text(t)

@@ -586,7 +586,7 @@ Modell viel redet und nicht verlaesslich bewertet:
   dahin am Bauteil, nicht am Werkstoff: Ferrit kostete je kg wie N50. Jetzt Faktoren auf den Grundpreis (Platzhalter,
   nur die Rangfolge zählt); ohne Werkstoffangabe gilt der alte Preis. `entscheide --ziel guenstig` nutzt dieselben
   Preise. Die Spalte `gilt` übernimmt `ema_entscheidung.SAETTIGUNG_ABWEISEN`; axial führt `ema_axial_vergleich` seine
-  Kosten selbst. Test: `test_preistabelle.py`.
+  Kosten selbst. **Montage** (`ema_montage.py`) ist ein eigener Kostenposten `montage_EUR` und steht in `gesamt_EUR` jeder Bauart: je Handgriff (Magnetstück setzen, Hairpin formen + schweißen, Nut wickeln, Blechpaket, Welle fügen, Wuchten; ASM Käfig, EESM Spulen, GSM Kommutator). Gestaffelte Schrägung und mehr Magnetstücke/Leiter kosten dadurch Geld; vorher war eine 72-Stück-Maschine so billig wie eine mit 12. Platzhalter, ca. ein Drittel der Materialkosten. Axial führt die Montage noch nicht. Test: `test_preistabelle.py`.
 
 Test: `test_pi_aufsicht.py`. Ereignisse dazu: `protokoll/ereignisprotokoll.md` (E-27 ff.).
 

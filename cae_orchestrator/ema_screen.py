@@ -709,13 +709,16 @@ def massen_und_kosten(payload: dict) -> dict:
         "kupfer_EUR": round(m_cu * preis(payload, "kupfer"), 0),
         "stahl_EUR":  stahl_eur(payload, m_rot_fe, m_st_fe, m_welle),
     }
+    import ema_montage
+    mont = ema_montage.montage(payload)
+    kosten["montage_EUR"] = mont["gesamt_EUR"]
     kosten["gesamt_EUR"] = round(sum(kosten.values()), 0)
-    return {"magnet_kg": round(m_mag, 3), "rotoreisen_kg": round(m_rot_fe, 2),
+    return {"magnet_kg": round(m_mag, 3), "montage": mont["positionen"], "rotoreisen_kg": round(m_rot_fe, 2),
             "welle_kg": round(m_welle, 2), "statoreisen_kg": round(m_st_fe, 2),
             "kupfer_kg": round(m_cu, 2),
             "gesamt_kg": round(m_mag + m_rot_fe + m_welle + m_st_fe + m_cu, 2),
             "kosten": kosten,
-            "hinweis": "Platzhalterpreise, ±25–30 % — zum Rangieren, kein Angebot."}
+            "hinweis": "Platzhalterpreise, ±25–30 % — zum Rangieren, kein Angebot. Montage je Handgriff (ema_montage)."}
 
 
 # ── Ziel erkennen ─────────────────────────────────────────────────────────────

@@ -6,7 +6,7 @@ neun Achsen zusammensuchen. Hier steht alles in einer Tabelle, nach Kosten sorti
 
 * **teurer / billiger** gegen die Grundgeometrie, in Prozent -- nur die Rangfolge zaehlt,
   die Preise sind Platzhalter (``ema_screen.PREISE_EUR_KG`` mal ``PREIS_FAKTOR``);
-* die Kosten nach **Magnet / Leiter / Eisen**, damit man sieht, WOHER ein Unterschied
+* die Kosten nach **Magnet / Leiter / Eisen / Montage** (Handgriffe, ``ema_montage``), damit man sieht, WOHER ein Unterschied
   kommt;
 * was man dafuer bekommt: Kt, Dauermoment, **EUR je Nm Dauermoment** -- eine billige
   Option, die nichts leistet, ist nicht billig;
@@ -76,6 +76,7 @@ def tabelle(erg: dict, basis: dict) -> dict:
             t = float(o.get("T_dauer_Nm") or 0.0)
             zeilen.append({
                 "achse": achse, "titel": a["titel"], "option": o["name"],
+                "montage_EUR": o.get("kosten_montage_EUR"),
                 "magnet_EUR": o.get("kosten_magnet_EUR"),
                 "leiter_EUR": o.get("kosten_leiter_EUR"),
                 "eisen_EUR": o.get("kosten_eisen_EUR"),
@@ -104,13 +105,13 @@ def als_text(t: dict) -> str:
          "Nach Kosten sortiert, billigste zuerst. Preise sind Platzhalter (±25–30 %):",
          "nur teurer/billiger ist eine Aussage, kein Betrag.",
          "'x' = Eisen ueber der Grenze, Kt und Moment dort zu optimistisch: nicht vergleichbar; '?' = Eisen nicht geprueft.", "",
-         f"  {'Achse':<15}{'Option':<26}{'Magnet':>7}{'Leiter':>7}{'Eisen':>7}{'Summe':>7}"
+         f"  {'Achse':<15}{'Option':<26}{'Magnet':>7}{'Leiter':>7}{'Eisen':>7}{'Montage':>8}{'Summe':>7}"
          f"{'Δ%':>7}  {'':<8}{'T_dauer':>8}{'EUR/Nm':>8}{'Eisen%':>7}  gilt"]
     for r in t["zeilen"]:
         def f(v, w, nd=0):
             return f"{v:>{w}.{nd}f}" if isinstance(v, (int, float)) else f"{'—':>{w}}"
         z.append(f"  {r['achse'][:14]:<15}{r['option'][:25]:<26}{f(r['magnet_EUR'], 7)}"
-                 f"{f(r['leiter_EUR'], 7)}{f(r['eisen_EUR'], 7)}{f(r['kosten_EUR'], 7)}"
+                 f"{f(r['leiter_EUR'], 7)}{f(r['eisen_EUR'], 7)}{f(r['montage_EUR'], 8)}{f(r['kosten_EUR'], 7)}"
                  f"{f(r['delta_pct'], 7, 1)}  {r['urteil']:<8}{f(r['T_dauer_Nm'], 8, 1)}"
                  f"{f(r['eur_je_Nm'], 8, 1)}{f(r['saett_pct'], 7)}  "
                  f"{'?' if r['gilt'] is None else ('ja' if r['gilt'] else 'x')}{' (Strom am Limit)' if r['strom_limit'] else ''}")
