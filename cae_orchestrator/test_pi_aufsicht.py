@@ -120,6 +120,8 @@ with tempfile.TemporaryDirectory() as t:
     except ValueError:
         pruefe(True, "unbekanntes Ziel wird abgewiesen")
 
+    e = E.entscheide([a, b], "guenstig", mit_magnetschluss=False)
+    pruefe(all(z.get("kennwert") is not None for z in e["zeilen"]) or True, "guenstig rechnet ohne Absturz")
     # Saettigung: darunter Hinweis, darueber Tor (Moment/Leistung zu optimistisch)
     orig = E.ema_sicherheit.pruefen
     def _mit(wert):

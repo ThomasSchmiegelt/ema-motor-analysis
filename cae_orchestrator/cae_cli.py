@@ -4897,7 +4897,7 @@ def build_parser() -> argparse.ArgumentParser:
                             "EIN Ziel, Abstand — deterministisch, mit Begruendung")
     s.add_argument("projekte", nargs="+", help="Projektkennungen ('last' = juengstes)")
     s.add_argument("--ziel", default="leistungsdichte",
-                   help="leistungsdichte (Vorgabe) | moment | leicht — gehoert in AUFTRAG.md")
+                   help="leistungsdichte (Vorgabe) | moment | leicht | guenstig (teurer/billiger, Platzhalterpreise) — gehoert in AUFTRAG.md")
     s.add_argument("--ohne-magnetschluss", dest="ohne_magnetschluss", action="store_true",
                    help="Streuanteil nicht mitmessen (spart ~6 s je Projekt)")
     _add_ablage(s)

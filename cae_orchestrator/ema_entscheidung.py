@@ -50,7 +50,8 @@ SAETTIGUNG_ABWEISEN = 1.15
 ZIELE = {
     "leistungsdichte": ("P_je_kg", "max", "Spitzenleistung je kg Gesamtmasse (P_max_kW / mass_g)"),
     "moment":          ("T_peak_max_Nm", "max", "Spitzenmoment"),
-    "leicht":          ("mass_g", "min", "geringste Gesamtmasse (Stellvertreter fuer Kosten: keine Preise im Lauf)"),
+    "leicht":          ("mass_g", "min", "geringste Gesamtmasse"),
+    "guenstig":        ("kosten_EUR", "min", "geringste Materialkosten (nur teurer/billiger: Platzhalterpreise aus ema_screen, kein Angebot)"),
 }
 
 
@@ -62,7 +63,14 @@ def _lesen(pfad: str) -> dict:
         return {}
 
 
-def _kennwert(ziel: str, s: dict):
+def _kennwert(ziel: str, s: dict, payload: dict | None = None):
+    if ziel == "guenstig":
+        # Nur die Rangfolge zaehlt: dieselben Platzhalterpreise fuer alle Entwuerfe.
+        try:
+            import ema_screen
+            return ema_screen.massen_und_kosten(payload or {})["kosten"]["gesamt_EUR"]
+        except Exception:                                         # noqa: BLE001
+            return None
     if ziel == "leistungsdichte":
         p, m = s.get("P_max_kW"), s.get("mass_g")
         return round(p / (m / 1000.0), 3) if isinstance(p, (int, float)) and isinstance(m, (int, float)) and m > 0 else None
@@ -108,7 +116,7 @@ def bewerten(ordner: str, ziel: str, mit_magnetschluss: bool = True) -> dict:
                 notiz.append(f"magnetschluss nicht gemessen: {type(e).__name__}")
 
     s = r.get("summary") or {}
-    wert = _kennwert(ziel, s)
+    wert = _kennwert(ziel, s, m.get("payload"))
     zeile = {"projekt": name, "status": "abgewiesen" if abweisung else "bestanden",
              "abweisungen": abweisung, "hinweise": notiz, "kennwert": wert}
     if not abweisung and wert is None:
