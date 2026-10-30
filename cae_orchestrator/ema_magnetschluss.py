@@ -112,8 +112,20 @@ def messen(geom: dict, N: int = 300, f: dict | None = None) -> dict:
         from ema_rotorcheck import rotor_layout_check
         lay = rotor_layout_check(geom)
         if lay.get("ok") is False:
-            return {"ok": False, "grund": "Layout ungueltig, Streuanteil sinnlos: "
-                    + str(lay.get("fatal") or lay.get("findings") or lay)[:200]}
+            grund = ("Layout ungueltig, Streuanteil sinnlos: "
+                     + str(lay.get("fatal") or lay.get("findings") or lay)[:200])
+            out = {"ok": False, "grund": grund}
+            try:
+                import ema_magnetheilung
+                h = ema_magnetheilung.heile(geom)
+                out["heilung"] = {k: h[k] for k in ("set", "hinweis") if k in h}
+                if h["set"]:
+                    out["grund"] += " -> naechste gueltige Einstellung: " + " ".join(f"--set {x}" for x in h["set"])
+                else:
+                    out["grund"] += " -> " + h["hinweis"]
+            except Exception:                                    # noqa: BLE001
+                pass
+            return out
     except Exception:                                            # noqa: BLE001
         pass
     f = f or FB.feld_rechnen(geom, N=max(int(N), N_MIN))

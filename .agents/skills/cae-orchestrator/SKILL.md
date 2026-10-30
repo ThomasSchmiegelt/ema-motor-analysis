@@ -89,6 +89,26 @@ verwirf die Bauform nicht allein deswegen. Steiler V-Winkel und dünne Stege tre
 die Zahl hoch.
 
 
+### `magnetsuche` — Magnetanordnung SYSTEMATISCH suchen, nicht von Hand probieren
+
+```bash
+python3 cae_cli.py magnetsuche --from-project <id> --set magShape=v --nur-planen   # ziehen + Layouttor, nichts messen
+python3 cae_cli.py magnetsuche --from-project <id> --set magShape=v                 # 8 Messungen parallel, ~2,5 min
+python3 cae_cli.py magnetsuche --frisch --set magShape=u --bereich magWidth=20:40 --wellen 3
+```
+
+Zieht Kandidaten aus Bereichen, weist die mit ungültigem Layout in Millisekunden ab, misst die am
+weitesten auseinanderliegenden **parallel** und ordnet nach Stufe (ok zuerst), dann nach `B_gap`.
+Exit 0 = mindestens eine Anordnung mit Stufe ok, 1 = keine (die beste steht trotzdem da), 2 = im Bereich
+kein gültiges Layout. **Das ersetzt das Durchprobieren mit `magnetschluss --set …`** (gemessen: 46 Aufrufe in
+90 Minuten ohne Ergebnis). Es sagt nur etwas über Magnetschluss und Layout — danach `run analyse`,
+`sicherheit`, `entscheide`. Bei `spoke`/`bar` ist die Streuzahl ungeprüft (Warnung steht dabei).
+
+Meldet `magnetschluss` oder `rotor-check` ein **ungültiges Layout**, steht dort jetzt die kleinste
+Änderung, mit der es besteht (`→ naechste gueltige Einstellung: --set magWidth=29.08`). Das ist nur eine
+Geometrieprüfung (0,4 ms), kein Urteil über den Magnetschluss.
+
+
 | Verb | Zweck |
 |---|---|
 | `health` | Erreichbarkeit, Pipeline-Zustand, Projektanzahl |

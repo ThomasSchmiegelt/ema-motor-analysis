@@ -3242,6 +3242,68 @@ def cmd_magnetschluss(args) -> int:
     return 1 if m["stufe"] == "kurzschluss" else 0
 
 
+def cmd_magnetsuche(args) -> int:
+    """Magnetanordnung systematisch suchen statt von Hand probieren.
+
+    Zieht Kandidaten aus Bereichen, filtert sie mit dem Layouttor (ms), misst die am weitesten
+    auseinanderliegenden parallel (``ema_magnetschluss``) und ordnet nach Stufe, dann ``B_gap``.
+    Exit: 0 = mindestens eine Anordnung mit Stufe ok, 1 = keine ok (beste steht trotzdem da),
+    2 = kein gueltiges Layout im Bereich. Sagt NICHTS ueber Sicherheit, Leistung oder Kosten."""
+    payload = _load_payload(args)
+    applied, errors = apply_sets(payload, getattr(args, "set", None) or [],
+                                 args.url, force=getattr(args, "force", False))
+    if errors:
+        for e in errors:
+            print(f"FEHLER: {e}", file=sys.stderr)
+        return _die(f"{len(errors)} Zuweisung(en) abgewiesen.", EXIT_USAGE)
+    echo_sets(applied)
+    geom = payload.get("geom") or {}
+    if not geom:
+        return _die("Keine Geometrie im Payload — magnetsuche braucht geom.", EXIT_USAGE)
+    bereiche = {}
+    for b in getattr(args, "bereich", None) or []:
+        m = re.fullmatch(r"(\w+)=(-?[\d.]+):(-?[\d.]+)", b.strip())
+        if not m:
+            return _die(f"--bereich '{b}': erwartet KEY=VON:BIS (z. B. magWidth=20:40).", EXIT_USAGE)
+        bereiche[m.group(1)] = (float(m.group(2)), float(m.group(3)))
+    import ema_magnetsuche as MSU
+    r = MSU.suche(geom, bereiche or None, kandidaten=args.kandidaten, messen=args.messen, wellen=args.wellen,
+                  seed=args.seed, prozesse=args.prozesse, n=args.n, nur_planen=args.nur_planen,
+                  log=lambda t: print(t, flush=True))
+    if getattr(args, "json", False):
+        emit({k: v for k, v in r.items() if k != "ergebnisse"} | {"n_ergebnisse": len(r.get("ergebnisse", []))}, args)
+    p = r["plan"]
+    z = [f"Magnetsuche ({geom.get('magShape')}): {p['gezogen']} gezogen, {p['gueltig']} mit gueltigem Layout, "
+         f"{p['abgelehnt_layout']} am Layouttor abgewiesen; geplant {p['messungen_geplant']} Messungen (~{p['geschaetzt_min']} min).",
+         "  Bereiche: " + ", ".join(f"{k} {v[0]}…{v[1]}" for k, v in p["bereiche"].items())]
+    if p.get("warnung"):
+        z.append("  ⚠ " + p["warnung"])
+    if not r["ok"]:
+        z.append("  Kein gueltiges Layout in diesen Bereichen: Bereiche aendern oder Polzahl/Bauform wechseln.")
+        text = "\n".join(z)
+        print("ERGEBNIS:\n" + text)
+        _ablegen(args, "magnetsuche", text, daten=p, ok=False)
+        return 2
+    if args.nur_planen:
+        print("ERGEBNIS (nur Plan):\n" + "\n".join(z))
+        return 0
+    z.append(f"  {'Stufe':<12}{'Streu':>7}{'B_gap':>8}  Einstellung")
+    for e in r["ergebnisse"][:12]:
+        z.append(f"  {e['stufe']:<12}{(e['streu'] or 0):>7.0%}{(e['B_gap_T'] or 0):>8.3f}  "
+                 + " ".join(f"--set {k}={v}" for k, v in e["set"].items()))
+    if r.get("nicht_messbar"):
+        z.append(f"  {len(r['nicht_messbar'])} Kandidat(en) nicht messbar.")
+    b = r["beste"]
+    ok = bool(b and b["stufe"] == "ok")
+    z.append("  " + ("Beste (Stufe ok, hoechstes B_gap): " if ok else "KEINE Anordnung mit Stufe ok — beste verfuegbare: ")
+             + (" ".join(f"--set {k}={v}" for k, v in b["set"].items()) if b else "—"))
+    z.append("  Das ist nur Magnetschluss + Layout. Danach: run analyse, sicherheit, entscheide.")
+    text = "\n".join(z)
+    print("ERGEBNIS:\n" + text)
+    _ablegen(args, "magnetsuche", text, daten={"plan": p, "beste": b and {k: v for k, v in b.items() if k != "geom"}}, ok=ok)
+    return 0 if ok else 1
+
+
 def cmd_rotor_check(args) -> int:
     """Die Stufe-0-Tore lokal ausfuehren — ohne CAD, ohne serverseitige Pipeline.
 
@@ -3305,6 +3367,14 @@ def cmd_rotor_check(args) -> int:
         layout_ok = False
         zeilen.append("Layout ABGELEHNT:")
         zeilen += ["  ✗ " + m for m in chk["fatal"]]
+        try:
+            import ema_magnetheilung
+            _h = ema_magnetheilung.heile(geom)
+            zeilen.append("  → " + (("naechste gueltige Einstellung: " + " ".join(f"--set {x}" for x in _h["set"]))
+                                    if _h["set"] else _h["hinweis"])
+                          + ("  (nur Geometrie geprueft)" if _h["set"] else ""))
+        except Exception:                                         # noqa: BLE001
+            pass
 
     if getattr(args, "cad_feld", False):
         axial = float(getattr(args, "axial_mm", 0) or geom.get("axialLen")
@@ -5021,6 +5091,29 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_magnetschluss)
+
+    s = sub.add_parser("magnetsuche",
+                       help="Magnetanordnung SYSTEMATISCH suchen: ziehen, am Layouttor filtern, die besten parallel "
+                            "messen (Magnetschluss), ordnen — statt von Hand zu probieren")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project", help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    g.add_argument("--frisch", action="store_true", help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--set", action="append", metavar="KEY=WERT", help="Parameter FEST setzen (z. B. magShape=v, p=5)")
+    s.add_argument("--force", action="store_true", help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--bereich", action="append", metavar="KEY=VON:BIS",
+                   help="Suchbereich eines Parameters (mehrfach); Vorgabe: Schemagrenzen der Magnetparameter")
+    s.add_argument("--kandidaten", type=int, default=400, help="wie viele gezogen werden (Vorgabe 400)")
+    s.add_argument("--messen", type=int, default=8, help="Messungen je Welle (Vorgabe 8)")
+    s.add_argument("--wellen", type=int, default=1, help="hoechstens so viele Wellen; endet frueher, sobald eine Stufe ok da ist")
+    s.add_argument("--seed", type=int, default=1)
+    s.add_argument("--prozesse", type=int, default=8)
+    s.add_argument("--n", type=int, default=300, help="FDM-Aufloesung (Vorgabe 300)")
+    s.add_argument("--nur-planen", dest="nur_planen", action="store_true", help="nur ziehen und filtern, nichts messen")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_magnetsuche)
 
     s = sub.add_parser("rotor-check",
                        help="2D Rotorlayout-Check (Taschen: Kollision/Stege/Containment) — ohne CAD, in ms")

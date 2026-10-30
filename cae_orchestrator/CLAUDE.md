@@ -594,6 +594,8 @@ Modell viel redet und nicht verlaesslich bewertet:
 
 * **Berichtsvorlage (LaTeX)** (`berichtvorlage/kopf.tex` + `titelseite.tex`, `ema_report.titelseite_felder/titelseite_tex/_render_mit_vorlage`): Titelseite mit Eckdaten und Kennzahlen, Inhaltsverzeichnis, Kopf-/Fußzeile (Projekt, Werkzeugstand, Seite x von y), Überschriftenfarben. Gilt für Einzel- und agentischen Bericht (`render_pdf(titelseite=…)`); bricht sie ab, rendert `render_pdf` im bisherigen Layout. Test: `test_berichtvorlage.py`.
 
+* **Magnetsuche und Layout-Heilung** (`ema_magnetsuche.py`, `ema_magnetheilung.py`, Verb `magnetsuche`, `test_magnetsuche.py`): Auslöser war ein PI-Lauf mit 46 handgesetzten `magnetschluss`-Aufrufen ohne Ergebnis. Die Suche zieht aus Bereichen, filtert am Layouttor (0,4 ms/Kandidat), misst die `messen` am weitesten auseinanderliegenden parallel (8 Messungen ≈ 2,5 min) und ordnet nach Stufe, dann `B_gap`. Die Heilung sucht per Raster (1–3 Parameter, kleinste Änderung in Schemabruchteilen) die nächste gültige Einstellung und steht in der Meldung von `magnetschluss`/`rotor-check`. Eine Vorhersage der Streuzahl gibt es **absichtlich nicht**: an 40 Messungen erreichte die beste Formel r=0,5 und die Stufe in 40–60 %. Surrogat erst, wenn die Suche genug Messungen gesammelt hat.
+
 Test: `test_pi_aufsicht.py`. Ereignisse dazu: `protokoll/ereignisprotokoll.md` (E-27 ff.).
 
 ### Handy-Pfad (`ema_mobil.py` / `ema_mobil.html`, Routen `/m…`)

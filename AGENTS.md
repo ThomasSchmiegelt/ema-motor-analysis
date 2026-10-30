@@ -56,6 +56,10 @@ Datei noch die Skills.
 
 Das Modell sieht höchstens 98.304 Token; was darüber liegt, schneidet Ollama still ab, und du merkst es nicht. Der Skill allein hat rund 39.000. Deshalb: den Skill **nie ganz lesen** — `cae_cli.py hilfe <verb>` gibt nur die Stellen zu einem Verb. Große Ausgaben mit `| head -40` begrenzen, `--ohne-bild`/`--ohne-ablage` wo es sie gibt, Langes in eine Datei leiten und nur das Ende lesen. Was feststeht (Ziel, Entscheidungen, Gründe), gehört in `auftrag`, nicht in deinen Kopf: es überlebt eine neue Sitzung. Der Wächter meldet ab 70 % Füllung.
 
+## Parameter nie von Hand durchprobieren
+
+Wer dasselbe Verb mehr als etwa acht Mal mit anderen `--set`-Werten ruft, sucht von Hand — das ist Aufgabe des Werkzeugs. Magnetanordnung: `cae_cli.py magnetsuche` (zieht, filtert, misst parallel, ordnet). Ein Zielwert über viele Parameter: `zielwert`. Eine Auswahl über Werkstoffe und Bauarten: `paarvergleich`. Meldet ein Tor „Layout ungültig", steht die nächste gültige Einstellung in der Meldung. Der Wächter zählt mit und meldet ab 20 Aufrufen.
+
 ## Das Werkzeug ist der Maßstab, nicht der Gegenstand
 
 Die Rechenmodule unter `cae_orchestrator/ema_*.py` **werden nicht geändert, damit
