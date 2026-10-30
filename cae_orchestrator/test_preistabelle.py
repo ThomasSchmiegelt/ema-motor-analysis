@@ -70,5 +70,14 @@ pruefe("Platzhalter" in text and "teurer" in text, "Text nennt die Platzhalterpr
 gsm = [z for z in t["zeilen"] if z["option"].startswith("GSM")]
 pruefe(not gsm or gsm[0]["gilt"] is None, "GSM ohne Eisenpruefung: 'gilt' ist unbekannt, nicht ja")
 
+print("— Bericht —")
+import json, tempfile, ema_report
+with tempfile.TemporaryDirectory() as d:
+    json.dump({"payload": BASIS}, open(os.path.join(d, "meta.json"), "w"))
+    md = ema_report.kosten_alternativen_md(d)
+    pruefe("Montage" in md and "Summe" in md and "Platzhalter" in md, "Berichtsabschnitt nennt Montage, Summe und Platzhalter")
+    pruefe("| Achse | Option |" in md, "Berichtsabschnitt fuehrt die Alternativen auf")
+    pruefe(ema_report.kosten_alternativen_md(tempfile.gettempdir() + "/gibt_es_nicht") == "", "ohne Eingaben: leer, kein Absturz")
+
 print(f"\n{ok} bestanden, {fehl} fehlgeschlagen")
 sys.exit(1 if fehl else 0)

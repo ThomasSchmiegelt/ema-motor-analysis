@@ -517,6 +517,8 @@ Schreibe einen strukturierten, sachlichen Bericht in Markdown mit genau diesen A
 5. **Thermisches Verhalten** — Kühlung, Endtemperaturen, Gesamtverluste, ggf. Warnungen; falls `em_erweitert.demag` vorhanden: Demagnetisierungs-Reserve bei Magnettemperatur (Risiko ja/nein)
 {fahrzyklus_section}
 7. **Empfehlungen** — 3–5 konkrete Verbesserungsvorschläge basierend auf den Zahlen (inkl. Topologie-/Segmentierungs-Eignung)
+   KOSTEN: Der Abschnitt „Kosten und Alternativen“ (Material, Montage, billigere/teurere Maschinenart und Werkstoffe) wird AUTOMATISCH angehängt. Triff in den Empfehlungen KEINE Aussage über Kosten, Preis, Montage oder Wirtschaftlichkeit und empfiehl keinen Werkstoff oder keine Maschinenart mit Kostenbegründung — die Alternativen stehen dort, mit Rechnung. Verweise höchstens dorthin.
+   SÄTTIGUNG: Die Zahnsättigung bewegt sich in diesem Werkzeug nur über die Nutbreite je Nutteilung (Zahnanteil). Länge, Nutzahl und Kühlung ändern sie nicht; empfiehl dazu nichts anderes.
 {drei_d_section}
 
 BEBILDERUNG: Füge Platzhalter `[BILD:KEY]` an sinnvollen Stellen im Fließtext ein.
@@ -817,6 +819,80 @@ def _ensure_kuehlung_section(md: str, ctx: dict) -> str:
     return md.rstrip() + "\n" + "\n".join(block) + "\n"
 
 
+def kosten_alternativen_md(project_dir: str, max_zeilen: int = 14) -> str:
+    """Abschnitt „Kosten und Alternativen“ -- deterministisch, ohne Sprachmodell.
+
+    Zwei Dinge, die im Bericht fehlten: WAS die Maschine kostet (Material und Montage) und
+    was eine andere Wahl bei Maschinenart, Magnet-, Blech- und Leiterwerkstoff bedeutet --
+    teurer oder billiger, und was man dafuer an Dauermoment bekommt. Die Alternativen kommen
+    aus ``ema_preistabelle`` (also demselben Paarvergleich wie ``paarvergleich --preis``);
+    Zeilen, deren Eisen ueber der Saettigungsgrenze liegt, stehen als nicht vergleichbar da.
+    Ohne gespeicherte Eingaben oder bei Axialfluss entfaellt der Abschnitt (leer).
+    """
+    if not os.path.isfile(os.path.join(project_dir, "meta.json")):
+        return ""
+    try:
+        with open(os.path.join(project_dir, "meta.json"), encoding="utf-8") as f:
+            payload = json.load(f).get("payload") or {}
+        geom = payload.get("geom") or {}
+        if not geom:
+            return ""
+        import ema_fluss
+        if ema_fluss.flussweg(geom) == "axial":
+            return ""
+        import ema_paarvergleich as PV
+        import ema_preistabelle as PT
+        import ema_screen
+        import ema_maschinenart
+        art = ema_maschinenart.art_code(payload)
+        mk = ema_screen.massen_und_kosten(payload)
+        if art != "pmsm":
+            import importlib
+            mod = {"asm": "ema_asm", "synrm": "ema_synrm", "eesm": "ema_eesm", "gsm": "ema_gsm"}.get(art)
+            if mod:
+                mk = importlib.import_module(mod).massen_und_kosten(payload)
+        erg = PV.vergleiche(payload, achsen=[a for a in PT.PREIS_ACHSEN if a != "bauform"])
+        t = PT.tabelle(erg, payload)
+    except Exception as e:                                            # noqa: BLE001
+        return f"### Kosten und Alternativen\n\n*Nicht berechnet: {type(e).__name__}.*\n"
+
+    k = mk["kosten"]
+    out = ["### Kosten und Alternativen", "",
+           "Alle Beträge sind **Platzhalterpreise** (±25–30 %). Belastbar ist nur die Rangfolge "
+           "teurer/billiger, kein Angebot.", "",
+           "| Posten | EUR |", "|---|---|"]
+    for lbl, key in (("Magnete", "magnet_EUR"), ("Kupfer / Leiter", "kupfer_EUR"),
+                     ("Eisen (Bleche, Welle)", "stahl_EUR"), ("Rotorkäfig", "kaefig_EUR"),
+                     ("Erregerwicklung", "erreger_EUR"), ("Montage", "montage_EUR")):
+        if k.get(key) not in (None, 0, 0.0):
+            out.append(f"| {lbl} | {k[key]:.0f} |")
+    out.append(f"| **Summe** | **{k['gesamt_EUR']:.0f}** |")
+    pos = mk.get("montage") or {}
+    if pos:
+        out += ["", "Montage nach Handgriffen: " + ", ".join(
+            f"{n.replace('_', ' ')} {v:.0f} €" for n, v in pos.items() if v) + "."]
+
+    zeilen = [z for z in t.get("zeilen", []) if z["urteil"] != "gleich" or z["delta_pct"] not in (0, 0.0)]
+    zeilen = [z for z in zeilen if z["gilt"] is not False][:max_zeilen]
+    if zeilen:
+        out += ["", "**Alternativen** (nach Kosten sortiert; nur Zeilen, deren Eisen nicht über der "
+                "Sättigungsgrenze liegt):", "",
+                "| Achse | Option | Summe EUR | gegen diese Maschine | Dauermoment Nm | EUR je Nm |",
+                "|---|---|---|---|---|---|"]
+        for z in zeilen:
+            dm = f"{z['delta_pct']:+.0f} % ({z['urteil']})" if z["delta_pct"] is not None else "—"
+            out.append(f"| {_mdesc(z['achse'])} | {_mdesc(z['option'][:48])} | {z['kosten_EUR']:.0f} | {dm} "
+                       f"| {_fmt_val(z['T_dauer_Nm'], 1)} | {_fmt_val(z['eur_je_Nm'], 1)} |")
+        t0 = t.get("basis_T_dauer_Nm")
+        billiger = [z for z in zeilen if z["urteil"] == "billiger" and z["T_dauer_Nm"]
+                    and t0 and z["T_dauer_Nm"] >= 0.9 * float(t0)]
+        if billiger:
+            b = billiger[0]
+            out += ["", f"Günstigere Wahl mit mindestens {0.9 * 100:.0f} % des Dauermoments dieser Maschine: "
+                        f"**{b['achse']} / {b['option']}** ({b['kosten_EUR']:.0f} EUR, {b['delta_pct']:+.0f} %)."]
+    return "\n".join(out) + "\n"
+
+
 def _ensure_getriebe_section(md: str, ctx: dict) -> str:
     """Garantiert einen eigenen Getriebe-Abschnitt, wenn eine Auslegung vorliegt.
 
@@ -1029,6 +1105,9 @@ def generate_report(project_dir: str, model: str = DEFAULT_MODEL,
     md_raw   = _ensure_kuehlung_section(md_raw, ctx)       # Spritzöl-Kühlung + Bilder
     md_raw   = _ensure_getriebe_section(md_raw, ctx)       # Getriebe + Bild
     md_final = insert_images(md_raw, ctx["_img_map"])
+    _kosten = kosten_alternativen_md(project_dir)
+    if _kosten and not re.search(r"(?im)^#{1,3}\s.*kosten", md_final):
+        md_final = md_final.rstrip() + "\n\n## Kosten und Alternativen\n\n" + _kosten.split("\n", 2)[2] + "\n"
     md_final = insert_tables(md_final, {"kennwerte": _single_md_tables(ctx),
                                         "herkunft":  _herkunft_tabelle(project_dir),
                                         "quellen":   _quellen_tabelle(project_dir)})

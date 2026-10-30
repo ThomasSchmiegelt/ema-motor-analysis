@@ -10,6 +10,8 @@
 #   ./start_hermes.sh --nur-server        nur den Orchestrator, kein Hermes
 #   ./start_hermes.sh --projekt <id>      an ein CAE-Projekt binden ('letztes' = juengstes)
 #   ./start_hermes.sh --kein-projekt      ohne Projektbindung (gemeinsamer Speicher)
+#   ./start_hermes.sh --neu-projekt[=Name]  frisches Projekt anlegen, Start-Speicher + Werkzeugsaetze aus
+#                                         .agents/hermes_vorlage/ (auch ohne Terminal; fuer Vergleichslaeufe)
 #   ./start_hermes.sh --neu               ohne Rueckfrage eine neue Sitzung
 #   ./start_hermes.sh --weiter            ohne Rueckfrage die letzte Sitzung fortsetzen
 #   ./start_hermes.sh --nur-vorbereiten   Projektbindung + Kontext erzeugen, dann Ende
@@ -43,7 +45,7 @@ LOG="${TMPDIR:-/tmp}/cae_server_$USER.log"
 
 export PATH="$HOME/.local/bin:$PATH"   # hermes liegt hier (Installation ohne sudo)
 
-BROWSER=1; NUR_SERVER=0; NUR_PRUEFEN=0; NUR_VORB=0; PROJEKT=""; OHNE_PROJEKT=0
+NEU_PROJEKT=0; NEU_NAME=""; BROWSER=1; NUR_SERVER=0; NUR_PRUEFEN=0; NUR_VORB=0; PROJEKT=""; OHNE_PROJEKT=0
 SITZUNGSWAHL=""; ARGS=(); erwarte_projekt=""
 for a in "$@"; do
     if [ -n "$erwarte_projekt" ]; then PROJEKT="$a"; erwarte_projekt=""; continue; fi
@@ -54,6 +56,8 @@ for a in "$@"; do
         --nur-vorbereiten) NUR_VORB=1 ;;
         --kein-projekt) OHNE_PROJEKT=1 ;;
         --projekt)      erwarte_projekt=1 ;;
+        --neu-projekt)  NEU_PROJEKT=1 ;;
+        --neu-projekt=*) NEU_PROJEKT=1; NEU_NAME="${a#--neu-projekt=}" ;;
         --projekt=*)    PROJEKT="${a#--projekt=}" ;;
         --neu)          SITZUNGSWAHL="neu" ;;
         --weiter)       SITZUNGSWAHL="weiter" ;;
@@ -242,7 +246,9 @@ projekt_pfad() {
 # Der Server muss dafuer nicht laufen; die Funktion ist reines Dateisystem.
 projekt_anlegen() {
     local name pfad
-    read -r -p "Name des neuen Projekts (leer = nur Zeitstempel): " name || name=""
+    if [ $# -ge 1 ]; then name="$1"; else
+        read -r -p "Name des neuen Projekts (leer = nur Zeitstempel): " name || name=""
+    fi
     # Aus $ORCH heraus, damit ema_pipeline seine Nachbarmodule findet -- kein
     # sys.path-Gebastel und keine zweite Vorstellung davon, wo der Code liegt.
     pfad="$(cd "$ORCH" && ./venv/bin/python -c '
@@ -309,6 +315,12 @@ projekt_menue() {
     esac
 }
 
+# Frisches Projekt auf Zuruf, auch ohne Terminal (Skript, Cron, Vergleichslauf):
+# jede Auslegung beginnt mit EIGENEM Speicher aus der Vorlage -- siehe unten.
+if [ "$NEU_PROJEKT" -eq 1 ] && [ "$OHNE_PROJEKT" -eq 0 ]; then
+    projekt_anlegen "$NEU_NAME" || die "--neu-projekt: Projekt konnte nicht angelegt werden."
+fi
+
 if [ "$OHNE_PROJEKT" -eq 0 ] && [ -z "$PROJEKT" ] && [ "$NUR_SERVER" -eq 0 ] \
    && [ -t 0 ] && [ -t 1 ]; then
     projekt_menue
@@ -333,6 +345,15 @@ if [ -n "$PROJ_DIR" ] && [ -d "$PROJ_DIR" ]; then
         [ -e "$HOME/.hermes/$geteilt" ] || continue
         ln -sfn "$HOME/.hermes/$geteilt" "$HH/$geteilt"
     done
+    # Start-Speicher aus der Vorlage -- EINMAL, nur wenn dieses Projekt noch keinen hat.
+    # Der gemeinsame Maschinenspeicher (~/.hermes/memories) traegt sonst Erinnerungen aus
+    # fremden Aufgaben in jede Auslegung; gemessen: ein Lauf ohne Projektbindung las die
+    # AGENTS.md eines Buchprojekts und suchte im Netz nach Magnetpreisen.
+    VORLAGE="$ROOT/.agents/hermes_vorlage"
+    if [ -f "$VORLAGE/memories/MEMORY.md" ] && [ ! -s "$HH/memories/MEMORY.md" ]; then
+        cp "$VORLAGE/memories/MEMORY.md" "$HH/memories/MEMORY.md"
+        ok "Start-Speicher aus der Vorlage (.agents/hermes_vorlage/)"
+    fi
     export HERMES_HOME="$HH"
     ok "Projekt: $(basename "$PROJ_DIR")  (Erinnerungen + Sitzungen unter _agent/hermes/)"
 
@@ -515,4 +536,13 @@ if [ "$NUR_VORB" -eq 1 ]; then
 fi
 
 echo
-exec hermes --model "$MODEL" ${ARGS[@]+"${ARGS[@]}"}
+# Werkzeugsaetze aus der Vorlage (ohne web/browser), ausser der Aufrufer waehlt selbst.
+TOOLSETS_ARG=()
+eigene_ts=0
+for a in ${ARGS[@]+"${ARGS[@]}"}; do
+    case "$a" in -t|--toolsets|--toolsets=*) eigene_ts=1 ;; esac
+done
+if [ "$eigene_ts" -eq 0 ] && [ -n "${PROJ_DIR:-}" ] && [ -f "$ROOT/.agents/hermes_vorlage/toolsets" ]; then
+    TOOLSETS_ARG=(-t "$(tr -d '[:space:]' < "$ROOT/.agents/hermes_vorlage/toolsets")")
+fi
+exec hermes --model "$MODEL" ${TOOLSETS_ARG[@]+"${TOOLSETS_ARG[@]}"} ${ARGS[@]+"${ARGS[@]}"}

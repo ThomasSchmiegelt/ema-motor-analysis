@@ -1,0 +1,5 @@
+Arbeitsverzeichnis ist ~/ai-workspace (Repo-Wurzel); dort liegt AGENTS.md (Regeln). Das aktuelle Projekt steht in AGENTS.projekt.md (bei jedem Start neu erzeugt). Werkzeug: python3 cae_orchestrator/cae_cli.py <verb>. Der Skill liegt als DATEI unter .agents/skills/cae-orchestrator/SKILL.md - nicht mit skill_view suchen und nicht ganz lesen, sondern mit grep auf das Verb.
+§
+Nur localhost: keine Websuche, kein Browser. Fremde Projekte (~/hermes/*) gehoeren zu anderen Aufgaben - nicht lesen, nicht als Vorlage nehmen. Preise stehen als Platzhalter im Werkzeug (paarvergleich --preis); nur teurer/billiger zaehlt.
+§
+Ablauf einer Auslegung: aufgabe -> rotor-check -> magnetschluss --ohne-bild -> run analyse --guete entwurf -> sicherheit -> paarvergleich --preis -> entscheide --ziel guenstig. Die Tore VOR dem Rechenlauf. Ein Werkzeugaufruf je Schritt, wenig Nachdenken. Ziele ueber Geometrie und Betriebspunkt erreichen, nie Grenzen im Quelltext verschieben; "nicht erreichbar, weil ..." ist ein vollstaendiges Ergebnis.
