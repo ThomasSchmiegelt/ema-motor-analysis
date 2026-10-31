@@ -1428,6 +1428,28 @@ im Modell zu verschieben. Findet die Suche keinen zulässigen Entwurf, sagt sie 
 **samt der Randbedingung, die bindet** und wie weit sie verletzt ist. Der
 am-wenigsten-schlechte Entwurf als Sieger wäre die gefährlichere Antwort.
 
+## Die Rechenphase ohne Sprachmodell: `auslegen`
+
+PIs Fehler in Rechenläufen waren Prozessfehler, keine schlechten Entscheidungen:
+46 von Hand gesetzte `magnetschluss`-Aufrufe, die Grundgeometrie verändert statt der
+Magnetparameter, gar kein Lauf. `cae_cli.py auslegen` fährt deshalb Phase 1 einer
+Auslegung **ohne Modell** in fester Reihenfolge: (1) die Vortore (Grenzen, Layout,
+Fliehkraft) -- ein kaputtes Layout wird mit der kleinsten Änderung an den
+Magnetparametern geheilt; ein gerissenes Fliehkrafttor wird nur über das
+Rotorblech (`rotor_lam`) entlastet, denn Drehzahl, Außen- und Wellendurchmesser sind
+Vorgaben des Menschen und werden benannt, nie gewählt; (2) der Magnetschluss wird
+gemessen, `magnetsuche` läuft nur, wenn er nicht „ok“ ist, und berührt nur
+Magnetparameter; (3) EIN Entwurfslauf in ein eigenes neues Projekt
+`ausgelegt_<Basis>` (das Ausgangsprojekt wird nie überschrieben); (4) `entscheide`
+auf diesem Projekt. Wo eine Auslegungsentscheidung fällig ist, hält es mit
+begründetem Nein an. Nicht getan, und in der Ausgabe gesagt: Kostenoptimierung (der
+schnelle Auswerter hat keinen Kostenwert) und Reparatur nach einem im Lauf
+gerissenen Tor. Gedachte Aufteilung: Einstieg und Klärung mit Modelldenken,
+Rechenphase über `auslegen`, Deutung danach. Das Ergebnis wird in beiden Projekten
+abgelegt, im Ausgangsprojekt zusätzlich ein datierter Eintrag in `AUFTRAG.md` unter
+„Entscheidungen“. Exit `0` gerechnet und bestanden (oder mit `--ohne-lauf`
+vorbereitet), `1` begründet angehalten, `2` Bedienfehler. Test: `test_auslegen.py`.
+
 ## Das Werkzeug ist der Maßstab, nicht der Gegenstand
 
 Bei einer Zielwertoptimierung stellt sich eine unangenehme Frage: was hindert den

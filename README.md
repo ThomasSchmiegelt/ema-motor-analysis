@@ -1218,6 +1218,27 @@ finds no feasible design it says so, **naming the constraint that binds** and by
 how much it is violated. Declaring the least-bad candidate the winner would be the
 more dangerous answer.
 
+## The computation phase without a language model: `auslegen`
+
+PI's failures in computation runs were process failures, not poor decisions: 46
+hand-set `magnetschluss` calls, the base geometry changed instead of the magnet
+parameters, no run at all. `cae_cli.py auslegen` therefore runs phase 1 of a design
+**without a model**, in a fixed order: (1) the pre-gates (limits, layout,
+centrifugal) -- a broken layout is healed with the smallest change to the magnet
+parameters; a broken centrifugal gate is relieved only via the rotor lamination
+(`rotor_lam`), because speed, outer and shaft diameter are the human's requirements
+and are named, never chosen; (2) the magnetic short-circuit is measured, and
+`magnetsuche` runs only if it is not "ok", touching magnet parameters only; (3) ONE
+draft run into its own new project `ausgelegt_<base>` (the source is never
+overwritten); (4) `entscheide` on that project. It stops with a reasoned no wherever
+a design decision is due. Not done, and stated in the output: cost optimisation (the
+fast evaluator has no cost value) and repair after a gate that tore in the run.
+Intended split: entry and clarification with LLM thinking, computation via
+`auslegen`, interpretation afterwards. The result is filed in both projects and a
+dated entry goes to the source project's `AUFTRAG.md` under "Entscheidungen". Exit
+`0` computed and passed (or prepared with `--ohne-lauf`), `1` stopped with a reason,
+`2` usage error. Test: `test_auslegen.py`.
+
 ## The tool is the yardstick, not the object
 
 Target-value optimisation raises an uncomfortable question: what stops the agent from

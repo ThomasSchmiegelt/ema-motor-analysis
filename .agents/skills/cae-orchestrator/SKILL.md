@@ -108,6 +108,32 @@ Meldet `magnetschluss` oder `rotor-check` ein **ungültiges Layout**, steht dort
 Änderung, mit der es besteht (`→ naechste gueltige Einstellung: --set magWidth=29.08`). Das ist nur eine
 Geometrieprüfung (0,4 ms), kein Urteil über den Magnetschluss.
 
+### `auslegen` — die RECHENPHASE einer Auslegung, ohne dich
+
+```bash
+python3 cae_cli.py auslegen --from-project <id> --ziel leistungsdichte
+python3 cae_cli.py auslegen --frisch --set magShape=v --ohne-lauf    # nur Tore + Magnetprüfung
+```
+
+**Nimm dieses Verb, sobald die Aufgabe geklärt ist und gerechnet werden soll — statt von Hand zu suchen**
+(`magnetschluss --set …` reihenweise, Grundgeometrie ändern, gar nicht rechnen: genau daran sind
+Rechenläufe bisher gescheitert, nicht an der Urteilskraft). Feste Reihenfolge, ohne Sprachmodell:
+(1) Vortore (Grenzen, Layout, Fliehkraft) — kaputtes Layout wird mit der kleinsten Änderung an den
+Magnetparametern geheilt; ein gerissenes Fliehkrafttor wird nur über das Rotorblech (`rotor_lam`)
+entlastet, denn Drehzahl, Außen- und Wellendurchmesser sind Vorgaben des Menschen — sie werden benannt,
+nie gewählt; (2) Magnetschluss messen, `magnetsuche` nur wenn nicht `ok`, nur an Magnetparametern;
+(3) EIN Entwurfslauf (`run analyse --guete entwurf`) in ein neues Projekt `ausgelegt_<basis>` — das
+Ausgangsprojekt bleibt unberührt; (4) `entscheide` darauf. Weitere Schalter: `--set`, `--ziel`
+(`leistungsdichte`|`moment`|`leicht`|`guenstig`, steht im Auftrag), `--guete entwurf|detail`, `--messen`,
+`--prozesse`, `--timeout`, `--ohne-ablage`.
+
+Exit `0` = gerechnet und bestanden (oder mit `--ohne-lauf` vorbereitet) · `1` = begründet angehalten
+(das ist ein Ergebnis: die fällige Auslegungsentscheidung steht dabei — triff sie nicht stillschweigend,
+sondern leg sie dem Menschen vor) · `2` = Bedienfehler. **Nicht getan** (steht in der Ausgabe):
+Kostenoptimierung (der schnelle Auswerter kennt keinen Kostenwert) und Reparatur nach einem im Lauf
+gerissenen Tor. Das Ergebnis liegt in `rechnungen/` beider Projekte, im Ausgangsprojekt steht zusätzlich
+ein datierter Eintrag in `AUFTRAG.md` unter „Entscheidungen“. Danach deutest du — das Rechnen ist erledigt.
+
 
 | Verb | Zweck |
 |---|---|

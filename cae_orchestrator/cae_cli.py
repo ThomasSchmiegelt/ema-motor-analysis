@@ -3242,6 +3242,63 @@ def cmd_magnetschluss(args) -> int:
     return 1 if m["stufe"] == "kurzschluss" else 0
 
 
+def cmd_auslegen(args) -> int:
+    """Phase 1 der Auslegung ohne Sprachmodell (``ema_auslegen``): Tore vorab mit
+    Heilung, Magnetschluss/-suche nur an Magnetparametern, EIN Entwurfslauf,
+    ``entscheide``. Haelt an, sobald eine Auslegungsentscheidung faellig ist.
+
+    Exit: 0 = gerechnet und bestanden (oder mit --ohne-lauf vorbereitet),
+    1 = begruendet angehalten, 2 = Bedienfehler."""
+    payload, rc = _payload_fuer_lauf(args)
+    if payload is None:
+        return rc
+    import ema_auslegen as AU
+    basis = getattr(args, "_pid", "") or ""
+
+    def _lauf(p):
+        p = dict(p)
+        p["project_name"] = ("ausgelegt_" + basis)[:60] if basis else "ausgelegt"
+        p.pop("project_id", None)              # nie das Ausgangsprojekt ueberschreiben
+        code, body = request("POST", "/analyse", p, url=args.url)
+        if code >= 400:
+            return None, f"/analyse antwortet {code}: {(body or {}).get('error', body)}"
+        if _wait(args, status_path="/status") != EXIT_OK:
+            return None, "Lauf mit Fehler beendet (s. Protokoll oben)"
+        _c, st = request("GET", "/status", url=args.url)
+        pid = (st or {}).get("project_id")
+        if not pid:
+            return None, "/status nennt kein Projekt"
+        return os.path.join(PROJECTS_ROOT, pid), ""
+
+    try:
+        e = AU.auslegen(payload, ziel=args.ziel, guete=args.guete,
+                        lauf=None if args.ohne_lauf else _lauf,
+                        suche_kw={"messen": args.messen, "prozesse": args.prozesse},
+                        log=lambda t: print(t, flush=True))
+    except ValueError as ex:
+        return _die(str(ex), EXIT_USAGE)
+    text = AU.als_text(e)
+    if getattr(args, "json", False):
+        emit({k: v for k, v in e.items() if k != "payload"}, args)
+    print("ERGEBNIS:")
+    print(text)
+    daten = {k: v for k, v in e.items() if k != "payload"}
+    _ablegen(args, "auslegen", text, daten=daten, ok=e["ok"] is not False)
+    if e.get("projekt"):
+        _ablegen(args, "auslegen", text, daten=daten, ok=e["ok"] is not False, pid=e["projekt"])
+    if basis and not getattr(args, "ohne_ablage", False):
+        pdir = _projekt_pfad(basis)
+        if pdir:
+            import ema_auftrag
+            ergebnis = ("bestanden in " + e["projekt"]) if e["ok"] else \
+                       ("vorbereitet" if e["ok"] is None else f"angehalten bei {e['angehalten_bei']}")
+            ema_auftrag.ergaenzen(pdir, "entscheidungen",
+                                  f"auslegen (Ziel {e['ziel']}): {ergebnis}. "
+                                  + "; ".join(s["text"] for s in e["schritte"] if s["ok"] is not None)[:1500],
+                                  quelle="auslegen")
+    return EXIT_OK if e["ok"] is not False else 1
+
+
 def cmd_magnetsuche(args) -> int:
     """Magnetanordnung systematisch suchen statt von Hand probieren.
 
@@ -5091,6 +5148,28 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_magnetschluss)
+
+    s = sub.add_parser("auslegen",
+                       help="Phase 1 ohne Sprachmodell: Tore (mit Heilung), Magnetschluss/-suche, EIN Entwurfslauf, "
+                            "entscheide — haelt an, wo eine Auslegungsentscheidung faellig ist")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project", help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    g.add_argument("--frisch", action="store_true", help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--set", action="append", metavar="KEY=WERT", help="Parameter vorab setzen")
+    s.add_argument("--force", action="store_true", help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--ziel", default="leistungsdichte", help="Ziel fuer entscheide (leistungsdichte|moment|leicht|guenstig)")
+    s.add_argument("--guete", default="entwurf", choices=["entwurf", "detail"], help="Rechenguete des Laufs")
+    s.add_argument("--ohne-lauf", dest="ohne_lauf", action="store_true",
+                   help="nur Tore und Magnetschluss, keinen Rechenlauf starten")
+    s.add_argument("--messen", type=int, default=8, help="Messungen der Magnetsuche (Vorgabe 8)")
+    s.add_argument("--prozesse", type=int, default=8)
+    s.add_argument("--timeout", type=float, default=14400, help="Wartezeit auf den Lauf in s")
+    s.add_argument("--poll", type=float, default=10.0)
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_auslegen)
 
     s = sub.add_parser("magnetsuche",
                        help="Magnetanordnung SYSTEMATISCH suchen: ziehen, am Layouttor filtern, die besten parallel "
