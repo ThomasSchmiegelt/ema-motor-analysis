@@ -61,9 +61,19 @@ pikogk/dotnet-install.sh
 # nicht in den Monorepo einbetten; behalten ihre .git-Historie auf der Platte.
 pikogk/PicoGK/
 pikogk/PicoGKRuntime/
-pikogk/PicoGKWebApi/
 pikogk/PicoGK_Examples/
 pikogk/c-blosc/
+pikogk/PicoGKWebApi/
+# Dieselbe Behandlung fuer die LEAP-71-Bibliotheken ueber PicoGK (Apache-2.0,
+# eigene Repos, am 23.10.2026 dazugekommen): ShapeKernel und LatticeLibrary
+# werden in PicoGKWebApi hineinkompiliert, QuasiCrystals und HelixHeatX liegen
+# als Bibliothek bzw. als Beispiel daneben. Zusammen 100 MB, davon das meiste
+# Bilder in Documentation/ — und fremder Quelltext samt fremder Lizenz, der
+# nicht in dieses Repo gehoert (s. THIRD-PARTY-NOTICES.md).
+pikogk/LEAP71_ShapeKernel/
+pikogk/LEAP71_LatticeLibrary/
+pikogk/LEAP71_QuasiCrystals/
+pikogk/LEAP71_HelixHeatX/
 
 # lego: Laufzeitdaten (LDraw-Bibliothek, Kollisionsnetze, Wine-Prefix, Downloads)
 lego/data/
@@ -128,3 +138,6 @@ fehlermeldung
 # Sitzungskennung bzw. den eigenen FluidX3D-Fall des Menschen (Laval-Duese).
 restartlaval.sh
 restopen.sh
+
+# Ereignisprotokoll der Sitzungen: bleibt lokal, nie ins Repo
+protokoll/

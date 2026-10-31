@@ -22,6 +22,28 @@ CalculiX · Z88Aurora · FreeCAD · Gmsh · Elmer · OpenFOAM · Elektromagnetik
 Wärmenetzwerk · Fahrzyklus (WLTP) · lokales Sprachmodell · Ollama · Agenten-Skill ·
 PI · Hermes Agent · Herkunftsnachweis · SQLite
 
+## Was dabei herauskommt
+
+<p align="center">
+  <img src="docs/bilder/querschnitt_psm.png" width="46%" alt="Querschnitt einer PSM mit 6 Polen und 54 Nuten, von der Toolchain erzeugt">
+  <img src="docs/bilder/magnetfeld_psm.png" width="52%" alt="2D-Magnetfeld derselben Maschine: Flussdichte und Feldlinien">
+</p>
+
+*Links: der Querschnitt, den die CAD-Stufe für eine 250-mm-PSM zeichnet (6 Pole,
+54 Nuten, dreilagige Wicklung). Rechts: das 2D-Feld derselben Maschine bei
+Rotorwinkel 0° — Flussdichte als Farbe, Linien des Vektorpotentials darüber. Beides
+stammt aus einem Lauf (Projekt `20261030_202321`), nicht aus einem Zeichenprogramm.*
+
+<p align="center">
+  <img src="docs/bilder/magnetschluss_feldlinien.png" width="55%" alt="Feldlinien nach Weg: rot bleibt im Läufer, cyan geht durch den Luftspalt">
+</p>
+
+*Das Bild hinter `magnetschluss`: Feldlinien nach Weg sortiert — rot bleibt im Läufer
+(magnetischer Kurzschluss), cyan geht durch den Luftspalt. Es ist dafür gezeichnet,
+dass ein Sehmodell es gegen die gemessene Zahl liest; **die Zahl entscheidet**, das
+Bild liest nur gegen. Gezeigt ist eine Testgeometrie aus der Eichung, keine gebaute
+Maschine.*
+
 ## Teilprojekte
 
 | Ordner | Was | Stack | Start |
@@ -117,7 +139,7 @@ nicht antwortet, und wartet auf dessen Erreichbarkeit, bevor PI läuft.
 | `start_agent.sh` | Wurzel | Startkette + Sitzungsverwaltung (mit Sitzungsmenü) |
 | `.agents/projektstand.py` | Wurzel | erzeugt den Projektblock für `AGENTS.projekt.md` — beide Köpfe benutzen denselben Erzeuger, sehen also denselben Stand |
 | `.agents/` | Wurzel | Skill-Definition für PI (`skills/cae-orchestrator/SKILL.md`) und Einrichtung |
-| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — **achtzehn Verben**: neun über HTTP auf `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), neun lokal (`paarvergleich`, `rotor-check`, `screen`, `bilddaten`, `struktur`, `topopt`, `db`, `lernen`, `recherche`) |
+| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — **vierundvierzig Verben**: neun über HTTP auf `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), fünfunddreißig lokal — u. a. `steckbrief`, `paarvergleich`, `rotor-check`, `sicherheit`, `entscheide`, `magnetsuche`, `auslegen`, `studie`, `zielwert`, `screen`, `struktur`, `topopt`, `db`, `lernen`, `recherche`; die vollständige Liste gibt `cae_cli.py --help` |
 | `start_hermes.sh` | Wurzel | zweiter Agentenkopf: **Hermes Agent**, gleiches Modell, gleicher Skill, mit gemessenem Netznachweis; Projektbindung über `HERMES_HOME` |
 
 **Warum eine CLI und kein MCP-Server:** ein lokales Modell kann die ~135 HTTP-Routen des
