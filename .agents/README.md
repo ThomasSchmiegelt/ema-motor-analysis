@@ -120,8 +120,8 @@ Antwort lesen. Der Alltagspfad hat zehn Verben, `raw` deckt den Rest ab.
 
 ## Was der Agent rechnet — und was davon bleibt
 
-`cae_cli.py` hat **vierundvierzig** Verben: neun über HTTP auf `:5000`
-(`status/health/geom/run/wait/results/projects/raw/routes`) und fünfunddreißig, die **lokal**
+`cae_cli.py` hat **sechsundvierzig** Verben: neun über HTTP auf `:5000`
+(`status/health/geom/run/wait/results/projects/raw/routes`) und siebenunddreißig, die **lokal**
 rechnen — ohne Server, ohne FreeCAD, in Sekunden. Die vier, die im Alltag am meisten
 tragen:
 

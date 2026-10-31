@@ -108,6 +108,18 @@ Meldet `magnetschluss` oder `rotor-check` ein **ungültiges Layout**, steht dort
 Änderung, mit der es besteht (`→ naechste gueltige Einstellung: --set magWidth=29.08`). Das ist nur eine
 Geometrieprüfung (0,4 ms), kein Urteil über den Magnetschluss.
 
+### `erfahrung` — erst frei denken, dann gegen die Erfahrung pruefen
+
+Wenn ein Entwurf saettigt oder du eine Idee hast, frag die Erfahrungsdatenbank, statt eine Faustregel aus dem Gedaechtnis zu nehmen:
+
+```bash
+python3 cae_cli.py erfahrung pruefe --from-project last --fest statorOD     # was sagt die Erfahrung zu DIESER Maschine?
+python3 cae_cli.py erfahrung pruefe --from-project last --set rotorOD=175   # eigene Idee vorher setzen
+python3 cae_cli.py erfahrung liste                                          # welche Erfahrungen es gibt, mit Zaehlern
+```
+
+Jede Erfahrung nennt Symptom, Grund und **Hebel, an dieser Maschine nachgerechnet**: die kleinste wirksame Aenderung, was sie kostet (Momentmass, Nuttiefe) und ob sie ein anderes Symptom ausloest (⚠ Konflikt). Was der Auftrag festlegt, gehoert in `--fest` — dieser Hebel wird dann genannt, nicht gerechnet. **Kein Tor:** Exit 0, auch wenn etwas anschlaegt. Erst PSM; bisher eine Erfahrung (Statorjoch). `lernprogramm` fuellt die Zaehler ueber viele gezogene Entwuerfe (analytisch, Sekunden) — das ruft normalerweise der Mensch, nicht du.
+
 ### `auslegen` — die RECHENPHASE einer Auslegung, ohne dich
 
 ```bash

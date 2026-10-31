@@ -204,7 +204,7 @@ nicht antwortet, und wartet auf dessen Erreichbarkeit, bevor PI läuft.
 | `start_agent.sh` | Wurzel | Startkette + Sitzungsverwaltung (mit Sitzungsmenü) |
 | `.agents/projektstand.py` | Wurzel | erzeugt den Projektblock für `AGENTS.projekt.md` — beide Köpfe benutzen denselben Erzeuger, sehen also denselben Stand |
 | `.agents/` | Wurzel | Skill-Definition für PI (`skills/cae-orchestrator/SKILL.md`) und Einrichtung |
-| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — **vierundvierzig Verben**: neun über HTTP auf `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), fünfunddreißig lokal — u. a. `steckbrief`, `paarvergleich`, `rotor-check`, `sicherheit`, `entscheide`, `magnetsuche`, `auslegen`, `studie`, `zielwert`, `screen`, `struktur`, `topopt`, `db`, `lernen`, `recherche`; die vollständige Liste gibt `cae_cli.py --help` |
+| `cae_orchestrator/cae_cli.py` | Teilprojekt | die Kommandozeile, die beide Agenten benutzen — **sechsundvierzig Verben**: neun über HTTP auf `:5000` (`status/health/geom/run/wait/results/projects/raw/routes`), siebenunddreißig lokal — u. a. `steckbrief`, `erfahrung`, `lernprogramm`, `paarvergleich`, `rotor-check`, `sicherheit`, `entscheide`, `magnetsuche`, `auslegen`, `studie`, `zielwert`, `screen`, `struktur`, `topopt`, `db`, `lernen`, `recherche`; die vollständige Liste gibt `cae_cli.py --help` |
 | `start_hermes.sh` | Wurzel | zweiter Agentenkopf: **Hermes Agent**, gleiches Modell, gleicher Skill, mit gemessenem Netznachweis; Projektbindung über `HERMES_HOME` |
 
 **Warum eine CLI und kein MCP-Server:** ein lokales Modell kann die ~135 HTTP-Routen des

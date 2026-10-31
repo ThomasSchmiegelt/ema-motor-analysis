@@ -3299,6 +3299,51 @@ def cmd_auslegen(args) -> int:
     return EXIT_OK if e["ok"] is not False else 1
 
 
+def cmd_erfahrung(args) -> int:
+    """Erfahrungsdatenbank abfragen (``ema_erfahrung``): Symptom -> Hebel, an DIESER
+    Geometrie nachgerechnet und gegeneinander gewichtet. Kein Tor: Exit 0, auch
+    wenn eine Erfahrung anschlaegt; 2 nur bei Bedienfehlern."""
+    import ema_erfahrung as E
+    if args.was == "liste":
+        for eid, e in E.ERFAHRUNGEN.items():
+            print(f"{eid}  [{', '.join(e['gilt_fuer'])}]  {e['symptom']}")
+            print("    Hebel: " + ", ".join(h["id"] for h in e["hebel"]))
+            z = E.zaehler(eid)
+            if z:
+                print("    bisher: " + "; ".join(f"{h} hilft {c['hilft']}/Konflikt {c['konflikt']}/reicht nicht {c['reicht_nicht']}"
+                                              for h, c in z.items()))
+            print(f"    Beleg: {e['beleg_start']}")
+        return EXIT_OK
+    payload, rc = _payload_fuer_lauf(args)
+    if payload is None:
+        return rc
+    fest = [f for f in (args.fest or "").split(",") if f.strip()]
+    try:
+        r = E.pruefe(payload, fest=fest, merken=args.merken, quelle="cae_cli erfahrung")
+    except ValueError as ex:
+        return _die(str(ex), EXIT_USAGE)
+    if getattr(args, "json", False):
+        emit(r, args)
+    text = E.als_text(r)
+    print("ERGEBNIS:")
+    print(text)
+    _ablegen(args, "erfahrung", text, daten=r, ok=True)
+    return EXIT_OK
+
+
+def cmd_lernprogramm(args) -> int:
+    """Lernprogramm Stufe 1 (``ema_lernprogramm``): viele gueltige PSM-Entwuerfe
+    ziehen, jede Erfahrung mit allen Hebeln daran pruefen, Belege schreiben.
+    Analytisch, ohne Server und ohne Sprachmodell."""
+    import ema_lernprogramm as LP
+    r = LP.lauf(n=args.n, seed=args.seed, minuten=args.minuten, log=lambda t: print(t, flush=True))
+    if getattr(args, "json", False):
+        emit(r, args)
+    print("ERGEBNIS:")
+    print(LP.als_text(r))
+    return EXIT_OK
+
+
 def cmd_magnetsuche(args) -> int:
     """Magnetanordnung systematisch suchen statt von Hand probieren.
 
@@ -5170,6 +5215,32 @@ def build_parser() -> argparse.ArgumentParser:
     _add_ablage(s)
     _add_globals(s)
     s.set_defaults(fn=cmd_auslegen)
+
+    s = sub.add_parser("erfahrung",
+                       help="Erfahrungsdatenbank: welches Symptom zeigt diese Geometrie, welche Hebel helfen HIER "
+                            "(nachgerechnet, gewichtet, mit Preis) — Hinweis, kein Tor; erst PSM")
+    s.add_argument("was", choices=["pruefe", "liste"])
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--payload", help="JSON direkt")
+    g.add_argument("--payload-file", help="Datei mit JSON (meta.json wird erkannt)")
+    g.add_argument("--from-project", help="Payload aus ~/cae_projekte/<id>/meta.json ('last' = juengstes)")
+    g.add_argument("--frisch", action="store_true", help="neutraler Grundpayload aus den Schemavorgaben")
+    s.add_argument("--set", action="append", metavar="KEY=WERT", help="eigene Idee vorher setzen, dann pruefen")
+    s.add_argument("--force", action="store_true", help="Grenzen und Typen aus dem Schema nicht pruefen")
+    s.add_argument("--fest", default="", help="Parameter, die der Auftrag festlegt (Komma), z. B. statorOD,axialLen")
+    s.add_argument("--merken", action="store_true", help="Ergebnis je Hebel als Beleg in den Laufzeitspeicher")
+    _add_ablage(s)
+    _add_globals(s)
+    s.set_defaults(fn=cmd_erfahrung)
+
+    s = sub.add_parser("lernprogramm",
+                       help="Erfahrungen an vielen gezogenen PSM-Entwuerfen pruefen und Belege sammeln "
+                            "(Stufe 1, analytisch, Minuten) — fuellt die Gewichtung von 'erfahrung'")
+    s.add_argument("--n", type=int, default=300, help="so viele GUELTIGE Entwuerfe (Vorgabe 300)")
+    s.add_argument("--seed", type=int, default=1)
+    s.add_argument("--minuten", type=float, default=None, help="hoechstens so lange")
+    _add_globals(s)
+    s.set_defaults(fn=cmd_lernprogramm)
 
     s = sub.add_parser("magnetsuche",
                        help="Magnetanordnung SYSTEMATISCH suchen: ziehen, am Layouttor filtern, die besten parallel "
