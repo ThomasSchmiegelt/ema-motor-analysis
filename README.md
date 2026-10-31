@@ -40,6 +40,29 @@ rotor (magnetic short circuit), cyan crosses the air gap. It is drawn for a visi
 model to read against the measured number; **the number decides**, the picture only
 cross-checks it. Shown for a test geometry from the calibration, not for a built machine.*
 
+### More from the same chain
+
+<p align="center">
+  <img src="docs/bilder/cad_freecad.jpg" width="49%" alt="Generated CAD model opened in FreeCAD: rotor, magnets and hairpin winding heads">
+  <img src="docs/bilder/feld3d_viewer.jpg" width="49%" alt="3D field in the browser viewer: field lines coloured by flux density over the mesh">
+</p>
+
+*Left: the generated CAD model opened in FreeCAD (shaft, rotor with balance bolts, magnets, stator, three coil groups with hairpin winding heads). Right: the 3D field (Elmer) in the browser viewer — field lines coloured by |B| (log), the mesh switched on.*
+
+<p align="center">
+  <img src="docs/bilder/magnetfliehkraft.png" width="49%" alt="Centrifugal force of the magnets on the pocket walls">
+  <img src="docs/bilder/eisenausnutzung.png" width="49%" alt="Iron utilisation: tooth at 598 % of the 1.70 T limit">
+</p>
+
+*Left: the centrifugal force of the magnets on the pocket walls — a load the structural FEM used to leave out. Right: a design the tool **refuses**: flux conservation puts the tooth at 598 % and the yoke at 473 % of the 1.70 T lamination limit. This is computed from flux balance, not from a solved field, and the picture says so at the bottom.*
+
+<p align="center">
+  <img src="docs/bilder/thermik.png" width="49%" alt="End temperatures and heat-up curve of the lumped thermal network">
+  <img src="docs/bilder/ki_training.jpg" width="49%" alt="Training tab of the surrogate: loss, RMSE against the acceptance gate, learning rate">
+</p>
+
+*Left: the lumped thermal network — end temperatures against the magnet and winding limits. Right: the **stalled** surrogate (`physics_surrogate`): best RMSE 0.054 against a 0.03 acceptance gate, and the learning-rate panel is there because runs with a cosine schedule must never be compared at the same epoch.*
+
 ## Subprojects
 
 | Folder | What | Stack | Start |

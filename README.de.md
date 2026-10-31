@@ -44,6 +44,29 @@ dass ein Sehmodell es gegen die gemessene Zahl liest; **die Zahl entscheidet**, 
 Bild liest nur gegen. Gezeigt ist eine Testgeometrie aus der Eichung, keine gebaute
 Maschine.*
 
+### Mehr aus derselben Kette
+
+<p align="center">
+  <img src="docs/bilder/cad_freecad.jpg" width="49%" alt="Erzeugtes CAD-Modell in FreeCAD: Rotor, Magnete und Hairpin-Wickelköpfe">
+  <img src="docs/bilder/feld3d_viewer.jpg" width="49%" alt="3D-Feld im Browser-Betrachter: Feldlinien nach Flussdichte gefärbt über dem Netz">
+</p>
+
+*Links: das erzeugte CAD-Modell in FreeCAD (Welle, Rotor mit Wuchtschrauben, Magnete, Stator, drei Spulengruppen mit Hairpin-Wickelköpfen). Rechts: das 3D-Feld (Elmer) im Browser-Betrachter — Feldlinien nach |B| (log) gefärbt, das Netz eingeblendet.*
+
+<p align="center">
+  <img src="docs/bilder/magnetfliehkraft.png" width="49%" alt="Fliehkraft der Magnete auf die Taschenwände">
+  <img src="docs/bilder/eisenausnutzung.png" width="49%" alt="Eisenausnutzung: Zahn bei 598 % der 1,70-T-Grenze">
+</p>
+
+*Links: die Fliehkraft der Magnete auf die Taschenwände — eine Last, die die Struktur-FEM früher ausließ. Rechts: ein Entwurf, den das Werkzeug **abweist**: nach der Flusserhaltung steht der Zahn bei 598 % und das Joch bei 473 % der 1,70-T-Blechgrenze. Gerechnet ist das aus der Flussbilanz, nicht aus einem gelösten Feld, und das Bild sagt es unten selbst.*
+
+<p align="center">
+  <img src="docs/bilder/thermik.png" width="49%" alt="Endtemperaturen und Aufheizverlauf des Wärmenetzes">
+  <img src="docs/bilder/ki_training.jpg" width="49%" alt="Trainings-Reiter des Surrogats: Verlust, RMSE gegen das Abnahme-Tor, Lernrate">
+</p>
+
+*Links: das Wärmenetz — Endtemperaturen gegen die Grenzen von Magnet und Wicklung. Rechts: das **angehaltene** Surrogat (`physics_surrogate`): bester RMSE 0,054 gegen ein Abnahme-Tor von 0,03; das Lernratenfeld ist da, weil Läufe mit Kosinus-Lernrate nie bei gleicher Epoche verglichen werden dürfen.*
+
 ## Teilprojekte
 
 | Ordner | Was | Stack | Start |
