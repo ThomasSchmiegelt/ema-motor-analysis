@@ -3339,17 +3339,42 @@ def cmd_lernprogramm(args) -> int:
     Gewichte beenden frueher. Qwen kommentiert jede Runde und deutet den Bericht in der
     Restzeit (``deutung_qwen.md``), ``--ohne-qwen`` laesst das weg."""
     import ema_lernprogramm as LP
+    v = LP.naechster_vorschlag()
+    if args.bereich is None:
+        # „Was soll ich heute lernen?" -- gefragt nur am Terminal; ein Agent (ohne TTY)
+        # bekommt den gespeicherten Vorschlag, sonst „bauformen".
+        vorgabe = (v or {}).get("bereich", "bauformen")
+        if sys.stdin.isatty():
+            print("Was soll ich heute lernen?")
+            for k, txt in LP.BEREICHE.items():
+                print(f"  {k:12s} {txt}" + ("   <- Vorschlag" if k == vorgabe else ""))
+            if v:
+                for g in v["gruende"]:
+                    print(f"     · {g}")
+            antwort = input(f"Bereich [{vorgabe}]: ").strip() or vorgabe
+            if antwort not in LP.BEREICHE:
+                print(f"unbekannt: {antwort}")
+                return EXIT_USAGE
+            args.bereich = antwort
+            if args.zeit is None and args.n is None and args.bereich != "bericht":
+                z = input(f"Dauer in Minuten [{(v or {}).get('minuten', 60):g}]: ").strip()
+                args.zeit = float(z) if z else float((v or {}).get("minuten", 60))
+        else:
+            args.bereich = vorgabe
     if args.zeit is None and args.n is None:
         args.n = LP.MIN_ENTWUERFE
     r = LP.lauf(minuten=args.zeit, auswertung_anteil=args.auswertung / 100.0, n=args.n,
                 seed=args.seed, preisprobe=not args.ohne_preisprobe,
                 kombinieren=not args.ohne_kombinationen, deuten_mit_qwen=not args.ohne_qwen,
-                log=lambda t: print(t, flush=True))
+                bereich=args.bereich, log=lambda t: print(t, flush=True))
     if getattr(args, "json", False):
         emit(r, args)
     print("ERGEBNIS:")
-    print(LP.als_text(r))
+    print(r["text"] if r.get("bereich") == "bericht" else LP.als_text(r))
     print(f"\nabgelegt: {r['ordner']}/bericht.md")
+    if r.get("vorschlag"):
+        print(f"Naechstes Training: {r['vorschlag']['bereich']}, {r['vorschlag']['minuten']:g} min "
+              f"(gespeichert in naechster_vorschlag.json)")
     if r.get("deutung"):
         print(f"Deutung durch qwen: {r['ordner']}/deutung_qwen.md")
     return EXIT_OK
@@ -5256,6 +5281,8 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Kt und Spitzenmoment nicht gegeneinander ordnen")
     s.add_argument("--ohne-kombinationen", dest="ohne_kombinationen", action="store_true",
                    help="nur Einzelhebel, keine Hebelpaare")
+    s.add_argument("--bereich", choices=("bauformen", "materialien", "bericht"), default=None,
+                   help="was gelernt wird; ohne Angabe fragt es am Terminal (Vorschlag des letzten Laufs vorbelegt)")
     s.add_argument("--ohne-qwen", dest="ohne_qwen", action="store_true",
                    help="keine Rundenkommentare und keine Deutung durch das lokale Modell")
     _add_globals(s)

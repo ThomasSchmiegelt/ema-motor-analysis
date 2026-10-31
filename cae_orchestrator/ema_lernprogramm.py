@@ -66,8 +66,14 @@ STABIL_PP = 0.5
 ABLAGE = os.path.expanduser("~/cae_projekte/_lernen/lernlaeufe")
 
 
-def entwurf(basis: dict, rng: random.Random, zelle: tuple | None = None) -> dict:
-    """Ein gezogener PSM-Entwurf auf Grundlage eines vollstaendigen Payloads (``zelle`` = (Bauform, p))."""
+def entwurf(basis: dict, rng: random.Random, zelle: dict | tuple | None = None) -> dict:
+    """Ein gezogener PSM-Entwurf auf Grundlage eines vollstaendigen Payloads.
+
+    ``zelle`` legt fest, was der Trainingsplan an dieser Stelle vorgibt: ``magShape``,
+    ``p`` und/oder ``stator_lam`` (Tupel ``(Bauform, p)`` wie bisher)."""
+    if isinstance(zelle, tuple):
+        zelle = {"magShape": zelle[0], "p": zelle[1]}
+    zelle = zelle or {}
     import ema_text2ema as T2E
     S = T2E.SCHEMA
     p = {**basis, "geom": dict(basis["geom"])}
@@ -78,8 +84,10 @@ def entwurf(basis: dict, rng: random.Random, zelle: tuple | None = None) -> dict
     sid = od * ratio
     g.update(statorOD=round(od, 1), statorID=round(sid, 1), rotorOD=round(sid - 2 * spalt, 1),
              shaftD=round(max(S["shaftD"]["lo"], (sid - 2 * spalt) * rng.uniform(0.25, 0.4)), 1),
-             p=zelle[1] if zelle else rng.choice(POLPAARE),
-             magShape=zelle[0] if zelle else rng.choice(BAUFORMEN))
+             p=zelle.get("p") or rng.choice(POLPAARE),
+             magShape=zelle.get("magShape") or rng.choice(BAUFORMEN))
+    if zelle.get("stator_lam"):
+        p["stator_lam"] = zelle["stator_lam"]
     # Die Magnetmasze folgen dem Laeufer: Laenge als Anteil der Polteilung, Dicke und
     # Abstaende mit dem Durchmesser. Fest aus dem Grundentwurf (42 mm Magnet an jeder
     # Maschine) blieben 11 von 30 Zellen ohne einen einzigen gueltigen Entwurf --
@@ -142,9 +150,29 @@ class _QwenWaechter:
             self.faden.join(s)
 
 
-def trainingsplan() -> list:
-    """Die Zellen, die reihum drankommen: jede Bauform mit jeder Polpaarzahl."""
-    return [(b, p) for b in BAUFORMEN for p in POLPAARE]
+# Die Elektrobleche aus ``ema_pipeline.LAMINATES``; Vollmaterial (S235, 42CrMo4) ist
+# kein Statorblech und bleibt draussen.
+BLECHE = ("m250_35a", "m270_35a", "m400_50a", "m800_65a")
+
+# Was „heute lernen" heissen kann. ``bericht`` lernt nichts: es fasst alle bisherigen
+# Belege und Laeufe zusammen, und qwen schreibt die Deutung dazu.
+BEREICHE = {
+    "bauformen": "jede Magnetbauform mit jeder Polpaarzahl (6 x 5 Zellen)",
+    "materialien": "jedes Elektroblech (M250 … M800, Knie 1,65 … 1,85 T) mit jeder Polpaarzahl (4 x 5 Zellen)",
+    "bericht": "nichts lernen, sondern einen Gesamtbericht ueber alle bisherigen Laeufe schreiben",
+}
+VORSCHLAG = os.path.expanduser("~/cae_projekte/_lernen/naechster_vorschlag.json")
+
+
+def trainingsplan(bereich: str = "bauformen") -> list:
+    """Die Zellen, die reihum drankommen -- je Bereich ein anderes Raster."""
+    if bereich == "materialien":
+        return [{"stator_lam": b, "p": p} for b in BLECHE for p in POLPAARE]
+    return [{"magShape": b, "p": p} for b in BAUFORMEN for p in POLPAARE]
+
+
+def zellname(z: dict) -> str:
+    return "/".join(str(z[k]) for k in ("magShape", "stator_lam", "p") if k in z)
 
 
 def _quoten(zaehler: dict) -> dict:
@@ -160,7 +188,8 @@ def _quoten(zaehler: dict) -> dict:
 def lauf(minuten: float | None = None, auswertung_anteil: float = 0.25, n: int | None = None,
          seed: int | None = None, basis: dict | None = None, preisprobe: bool = True,
          ablage: str | None = None, log=print, abbrechen=lambda: False,
-         kombinieren: bool = True, fortschritt=None, deuten_mit_qwen: bool = False) -> dict:
+         kombinieren: bool = True, fortschritt=None, deuten_mit_qwen: bool = False,
+         bereich: str = "bauformen") -> dict:
     """Ein Lernlauf nach Zeitplan (``minuten``) oder Anzahl (``n``); mit beidem gilt, was zuerst eintritt."""
     import ema_maschinenart as MA
     from ema_rotorcheck import rotor_layout_check
@@ -193,7 +222,11 @@ def lauf(minuten: float | None = None, auswertung_anteil: float = 0.25, n: int |
         + (f"Zeitplan {minuten:g} min ({int(100 * auswertung_anteil)} % Auswertung)" if minuten is not None else f"n={n}")
         + f", Kombinationen {'an' if kombinieren else 'aus'}, qwen {'an' if deuten_mit_qwen else 'aus'}")
     _waechter = _QwenWaechter(log) if deuten_mit_qwen else None
-    plan = trainingsplan()
+    if bereich not in BEREICHE:
+        raise ValueError(f"unbekannter Bereich {bereich!r} -- {', '.join(BEREICHE)}")
+    if bereich == "bericht":
+        return gesamtbericht(ablage=ablage, log=log, deuten_mit_qwen=deuten_mit_qwen)
+    plan = trainingsplan(bereich)
     zeiger = 0
     leer: set = set()
     zellen: dict = {}                 # "bauform/p" -> {gueltig, symptom, hilft: {hebel: n}}
@@ -229,7 +262,7 @@ def lauf(minuten: float | None = None, auswertung_anteil: float = 0.25, n: int |
             break
         zelle = plan[zeiger % len(plan)]
         zeiger += 1
-        zname = f"{zelle[0]}/{zelle[1]}"
+        zname = zellname(zelle)
         if zname in leer:
             continue
         zk = zellen.setdefault(zname, {"gueltig": 0, "symptom": 0, "hilft": {}, "versuche": 0})
@@ -335,10 +368,9 @@ def lauf(minuten: float | None = None, auswertung_anteil: float = 0.25, n: int |
                 "vorher": zaehler_vorher, "preise": preise, "rangfolge": rangfolge,
                 "konflikte": konflikte, "zellen": zellen,
                 "qwen_runden": _waechter.kommentare if _waechter else [], "kombinationen": kombi,
-                "plan": [f"{b}/{q}" for b, q in plan],
+                "plan": [zellname(z) for z in plan], "bereich": bereich,
                 "ziehung": "Stator 120–400 mm, Bohrung/Aussen 0,55–0,72, Spalt 0,5–1,5 mm, "
-                           "Nuttiefe 45–92 % der Statorwand; Bauform x p reihum nach Trainingsplan (" + "/".join(BAUFORMEN)
-                           + " x p " + "/".join(map(str, POLPAARE)) + ")"}
+                           "Nuttiefe 45–92 % der Statorwand; Trainingsplan " + bereich + ": " + BEREICHE[bereich]}
     ergebnis["erkenntnisse"] = erkenntnisse(ergebnis)
     ergebnis["auswertung_sekunden"] = round(time.time() - lern_ende, 2)
     if minuten is not None:
@@ -348,6 +380,9 @@ def lauf(minuten: float | None = None, auswertung_anteil: float = 0.25, n: int |
     if deuten_mit_qwen:
         frist = None if minuten is None else max(60.0, 60.0 * minuten - (time.time() - t0))
         ergebnis["deutung"] = deuten(ergebnis, log=log, frist_s=frist)
+    ergebnis["vorschlag"] = vorschlag(ergebnis, ablage or ABLAGE)
+    log(f"  Vorschlag fuer das naechste Training: {ergebnis['vorschlag']['bereich']}, "
+        f"{ergebnis['vorschlag']['minuten']:g} min -- {ergebnis['vorschlag']['gruende'][0]}")
     return ergebnis
 
 
@@ -428,7 +463,7 @@ def als_text(r: dict) -> str:
             z.append(f"- {eid}/{h}: hilft {100 * c['hilft'] / ges:.1f} %, Konflikt {100 * c['konflikt'] / ges:.1f} %, "
                      f"reicht nicht {100 * c['reicht_nicht'] / ges:.1f} % (n={ges})")
     if r.get("zellen"):
-        z += ["", "## Trainingsplan: was je Zelle hilft (Bauform/p: gueltig, mit Symptom, helfende Hebel)", ""]
+        z += ["", "## Trainingsplan: was je Zelle hilft (gueltig, mit Symptom, helfende Hebel)", ""]
         for k in r["plan"]:
             v = r["zellen"].get(k) or {"gueltig": 0, "symptom": 0, "hilft": {}}
             h = ", ".join(f"{a} {n}" for a, n in sorted(v["hilft"].items(), key=lambda kv: -kv[1])) or "—"
@@ -461,13 +496,15 @@ def ablegen(r: dict, wurzel: str) -> str:
         json.dump(r, f, ensure_ascii=False, indent=1, default=str)
     with open(os.path.join(wurzel, "index.jsonl"), "a", encoding="utf-8") as f:
         f.write(json.dumps({"marke": r["marke"], "ende": r["ende"], "gueltig": r["gueltig"],
+                            "bereich": r.get("bereich", "bauformen"),
                             "mit_symptom": r["mit_symptom"], "lern_sekunden": r["lern_sekunden"]},
                            ensure_ascii=False) + "\n")
     r["ordner"] = ordner
     return ordner
 
 
-def deuten(r: dict, modell: str | None = None, log=print, frist_s: float | None = None) -> dict | None:
+def deuten(r: dict, modell: str | None = None, log=print, frist_s: float | None = None,
+           bericht: str | None = None) -> dict | None:
     """Die Deutung durch das LOKALE Sprachmodell (qwen), in der reservierten Auswertungszeit.
 
     Der Bericht bleibt die Quelle: er entsteht ohne Sprachmodell aus den Zahlen. Qwen
@@ -477,7 +514,7 @@ def deuten(r: dict, modell: str | None = None, log=print, frist_s: float | None 
     Satz im Protokoll, der Lauf ist trotzdem fertig."""
     import ema_chat
     import ema_report as R
-    bericht = als_text(r)
+    bericht = bericht or als_text(r)
     prompt = ("Du wertest einen Lernlauf einer Erfahrungsdatenbank fuer E-Maschinen (PSM) aus. "
               "Der Bericht unten ist ohne Sprachmodell aus Zahlen entstanden und ist massgebend. "
               "Schreibe auf Deutsch, knapp, in drei Abschnitten: 1. Was der Lauf zeigt (nur Zahlen "
@@ -503,6 +540,116 @@ def deuten(r: dict, modell: str | None = None, log=print, frist_s: float | None 
             f.write("\n---\n**Ungedeckte Zahlen** (stehen nicht im Bericht): " + ", ".join(map(str, ungedeckt)) + "\n")
     log(f"  Deutung durch {out['modell']} in {out['sekunden']} s, {len(ungedeckt)} ungedeckte Zahl(en).")
     return out
+
+
+def vorschlag(r: dict, wurzel: str) -> dict:
+    """Was als Naechstes gelernt werden sollte -- aus den Zahlen, ohne Sprachmodell.
+
+    Abgelegt im Laufordner (``vorschlag.json``) und als ``naechster_vorschlag.json``
+    unter ``_lernen/``; dort liest ihn der Knopf als Vorauswahl und ``--bereich``
+    ohne Angabe als Vorgabe. Qwens Vorschlaege (Abschnitt 3 seiner Deutung) stehen
+    daneben, entscheiden aber nicht."""
+    bisher = {x.get("bereich", "bauformen") for x in laeufe(wurzel)}
+    gruende, bereich, minuten = [], r.get("bereich", "bauformen"), 60.0
+    nie = [b for b in BEREICHE if b != "bericht" and b not in bisher]
+    if nie:
+        bereich = nie[0]
+        gruende.append(f"Bereich {bereich} wurde noch nie gelernt ({BEREICHE[bereich]}).")
+    duenn = [k for k, v in (r.get("zellen") or {}).items() if 0 < v["symptom"] < 10]
+    if duenn and not nie:
+        minuten = max(30.0, 2 * float((r.get("zeitplan") or {}).get("minuten") or 30))
+        gruende.append(f"{len(duenn)} Zellen mit weniger als 10 Symptomfaellen ({', '.join(duenn[:5])}) -- "
+                       f"laenger lernen, {minuten:g} min.")
+    leer = [k for k, v in (r.get("zellen") or {}).items() if v["gueltig"] == 0]
+    if leer:
+        gruende.append(f"{len(leer)} Zellen ohne gueltigen Entwurf ({', '.join(leer[:5])}): "
+                       "die Ziehung trifft dort nie das Layouttor -- erst die Ziehung ansehen.")
+    strittig = []
+    for eid, hebel in (r.get("dieser_lauf") or {}).items():
+        for h, c in hebel.items():
+            ges = sum(c.values())
+            if ges >= 10 and c["konflikt"] / ges > 0.05:
+                strittig.append(f"{eid}/{h} ({100 * c['konflikt'] / ges:.0f} % Konflikt)")
+    if strittig:
+        gruende.append("Stufe 2 (echte Laeufe, noch nicht gebaut) gehoert an: " + ", ".join(strittig[:4]) + ".")
+    if not gruende:
+        gruende.append("Quoten stabil, keine duennen oder leeren Zellen -- naechster Bereich oder ein Gesamtbericht.")
+        if bereich == r.get("bereich"):
+            bereich = "bericht"
+    qwen = None
+    d = r.get("deutung") or {}
+    if d.get("text"):
+        t = d["text"]
+        i = max(t.find("3."), 0)
+        qwen = t[i:i + 1200].strip()
+    v = {"von": r["marke"], "bereich": bereich, "minuten": minuten, "gruende": gruende,
+         "qwen": qwen, "zeit": time.strftime("%Y-%m-%d %H:%M")}
+    try:
+        with open(os.path.join(r["ordner"], "bericht.md"), "a", encoding="utf-8") as f:
+            f.write("\n## Vorschlag fuer das naechste Training\n\n"
+                    f"Bereich **{bereich}**, {minuten:g} min.\n\n" + "".join(f"- {g}\n" for g in gruende)
+                    + (f"\nqwen schlaegt vor (entscheidet nicht):\n\n> " + qwen.replace("\n", "\n> ") + "\n" if qwen else ""))
+    except (OSError, KeyError):
+        pass
+    for pfad in (os.path.join(r.get("ordner") or wurzel, "vorschlag.json"),
+                 os.path.join(os.path.dirname(wurzel.rstrip("/")), "naechster_vorschlag.json")):
+        try:
+            with open(pfad, "w", encoding="utf-8") as f:
+                json.dump(v, f, ensure_ascii=False, indent=1)
+        except OSError:
+            pass
+    return v
+
+
+def naechster_vorschlag(wurzel: str | None = None) -> dict | None:
+    pfad = os.path.join(os.path.dirname((wurzel or ABLAGE).rstrip("/")), "naechster_vorschlag.json")
+    try:
+        with open(pfad, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def gesamtbericht(ablage: str | None = None, log=print, deuten_mit_qwen: bool = True) -> dict:
+    """Bereich ``bericht``: nichts lernen, sondern alle bisherigen Laeufe zusammenfassen."""
+    wurzel = ablage or ABLAGE
+    marke = time.strftime("%Y%m%d_%H%M%S") + "_bericht"
+    ordner = os.path.join(wurzel, marke)
+    os.makedirs(ordner, exist_ok=True)
+    alle = laeufe(wurzel)
+    z = [f"# Gesamtbericht {marke}", "", f"{len(alle)} Lernlaeufe bisher.", "", "## Laeufe", ""]
+    for x in alle[:30]:
+        z.append(f"- {x['marke']}: Bereich {x.get('bereich', 'bauformen')}, {x['gueltig']} Entwuerfe, "
+                 f"{x['mit_symptom']} mit Symptom, Ende {x['ende']}")
+    z += ["", "## Gewichtung je Hebel, alle Belege", ""]
+    for eid in E.ERFAHRUNGEN:
+        for h, c in sorted(E.zaehler(eid).items(), key=lambda kv: -kv[1]["hilft"]):
+            ges = sum(c.values()) or 1
+            z.append(f"- {eid}/{h}: hilft {100 * c['hilft'] / ges:.1f} %, Konflikt {100 * c['konflikt'] / ges:.1f} %, "
+                     f"reicht nicht {100 * c['reicht_nicht'] / ges:.1f} % (n={ges})")
+    z += ["", "## Erkenntnisse der letzten Laeufe", ""]
+    for x in alle[:5]:
+        try:
+            with open(os.path.join(wurzel, x["marke"], "daten.json"), encoding="utf-8") as f:
+                d = json.load(f)
+        except (OSError, ValueError):
+            continue
+        z.append(f"### {x['marke']} ({d.get('bereich', 'bauformen')})")
+        z += [f"- {e}" for e in d.get("erkenntnisse", [])[:12]]
+        z.append("")
+    text = "\n".join(z)
+    with open(os.path.join(ordner, "bericht.md"), "w", encoding="utf-8") as f:
+        f.write(text + "\n")
+    r = {"marke": marke, "ordner": ordner, "bereich": "bericht", "ende": "bericht", "gueltig": 0,
+         "mit_symptom": 0, "lern_sekunden": 0.0, "erkenntnisse": [f"{len(alle)} Laeufe zusammengefasst."],
+         "text": text}
+    with open(os.path.join(wurzel, "index.jsonl"), "a", encoding="utf-8") as f:
+        f.write(json.dumps({"marke": marke, "ende": "bericht", "gueltig": 0, "bereich": "bericht",
+                            "mit_symptom": 0, "lern_sekunden": 0.0}, ensure_ascii=False) + "\n")
+    log(f"Gesamtbericht ueber {len(alle)} Laeufe: {ordner}/bericht.md")
+    if deuten_mit_qwen:
+        r["deutung"] = deuten(r, log=log, bericht=text)
+    return r
 
 
 def laeufe(wurzel: str | None = None) -> list:

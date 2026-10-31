@@ -5488,6 +5488,9 @@ def lernprogramm_start():
     if not (0.5 <= minuten <= 24 * 60) or not (0.0 <= anteil < 0.9):
         return jsonify({"error": "minuten 0,5 … 1440, auswertung 0 … 89 %"}), 400
     kombinieren = bool(d.get("kombinieren", True))
+    bereich = str(d.get("bereich") or "bauformen")
+    if bereich not in LP.BEREICHE:
+        return jsonify({"error": f"Bereich {bereich!r} unbekannt"}), 400
     _lern_state.update(status="running", log=[], fortschritt=None, ergebnis=None,
                        fehler=None, abbrechen=False, start=time.time(),
                        minuten=minuten, auswertung=anteil)
@@ -5499,11 +5502,13 @@ def lernprogramm_start():
         try:
             r = LP.lauf(minuten=minuten, auswertung_anteil=anteil, log=log,
                         kombinieren=kombinieren, deuten_mit_qwen=bool(d.get("qwen", True)),
+                        bereich=bereich,
                         abbrechen=lambda: _lern_state["abbrechen"],
                         fortschritt=lambda f: _lern_state.update(fortschritt=f))
             _lern_state["ergebnis"] = {"marke": r["marke"], "ordner": r["ordner"], "ende": r["ende"],
                                        "gueltig": r["gueltig"], "mit_symptom": r["mit_symptom"],
                                        "deutungszeit_min": r.get("deutungszeit_min"),
+                                       "vorschlag": r.get("vorschlag"), "bereich": r.get("bereich"),
                                        "erkenntnisse": r["erkenntnisse"],
                                        "deutung": r.get("deutung")}
             _lern_state["status"] = "done"
@@ -5525,6 +5530,13 @@ def lernprogramm_status():
 def lernprogramm_abbrechen():
     _lern_state["abbrechen"] = True
     return jsonify({"ok": True})
+
+
+@app.route("/lernprogramm/frage")
+def lernprogramm_frage():
+    """„Was soll ich heute lernen?" -- die Bereiche und der gespeicherte Vorschlag."""
+    import ema_lernprogramm as LP
+    return jsonify({"bereiche": LP.BEREICHE, "vorschlag": LP.naechster_vorschlag()})
 
 
 @app.route("/lernprogramm/laeufe")

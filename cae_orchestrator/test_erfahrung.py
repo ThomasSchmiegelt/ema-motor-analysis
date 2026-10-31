@@ -101,6 +101,29 @@ def test_zeitplan_haelt_auswertung_frei():
     assert "deutungszeit_min" in r
 
 
+def test_materialien_rechnen_mit_dem_gewaehlten_blech():
+    p = _gesaettigt()
+    knie = {}
+    for b in ("m250_35a", "m800_65a"):
+        p["stator_lam"] = b
+        knie[b] = E.pruefe(p)["messung"]["B_sat"]
+    assert knie["m250_35a"] < knie["m800_65a"], knie
+    plan = LP.trainingsplan("materialien")
+    assert {z["stator_lam"] for z in plan} == set(LP.BLECHE)
+
+
+def test_vorschlag_wird_gespeichert_und_bericht_lernt_nichts():
+    wurzel = os.path.join(_TMP, "laeufe")
+    r = LP.lauf(n=30, seed=2, log=lambda t: None, ablage=wurzel, kombinieren=False)
+    v = LP.naechster_vorschlag(wurzel)
+    assert v and v["von"] == r["marke"] and v["bereich"] in LP.BEREICHE and v["gruende"]
+    assert "materialien" == v["bereich"], "ein nie gelernter Bereich wird vorgeschlagen"
+    with open(os.path.join(r["ordner"], "bericht.md"), encoding="utf-8") as f:
+        assert "Vorschlag fuer das naechste Training" in f.read()
+    g = LP.lauf(bereich="bericht", ablage=wurzel, log=lambda t: None)
+    assert g["gueltig"] == 0 and r["marke"] in g["text"]
+
+
 if __name__ == "__main__":
     for name, f in list(globals().items()):
         if name.startswith("test_"):

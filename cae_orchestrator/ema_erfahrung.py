@@ -62,7 +62,12 @@ ZIEL_AUSNUTZUNG = 0.95
 # ── Messung ──────────────────────────────────────────────────────────────────
 
 def _messen(geom: dict, axial_mm: float, blech: str = "m270_35a") -> dict:
-    """Eisenwege und Kt (ungerundet) einer Geometrie."""
+    """Eisenwege und Kt (ungerundet) einer Geometrie.
+
+    Das Blech kommt aus ``geom["_blech"]``, wenn ``pruefe`` es dort hinterlegt hat
+    (aus ``payload["stator_lam"]``) -- bis zum 31.10.2026 rechnete jede Pruefung mit
+    M270, gleich welches Blech gewaehlt war, und das Knie ist der Ausloeser."""
+    blech = geom.get("_blech") or blech
     import ema_analysis as A
     import ema_saettigung as S
     bg = A._analytical_Bgap(geom)
@@ -218,6 +223,8 @@ def pruefe(payload: dict, fest=(), merken: bool = False, quelle: str = "pruefe")
     geom = dict(payload.get("geom") or {})
     if not geom:
         raise ValueError("Keine Geometrie im Payload.")
+    if payload.get("stator_lam"):
+        geom["_blech"] = payload["stator_lam"]
     axial = float(geom.get("axialLen") or payload.get("axial_len") or 80.0)
     art = MA.art_code(geom)
     m0 = _messen(geom, axial)
@@ -303,6 +310,8 @@ def kombinationen(payload: dict, treffer: dict, fest=(), anteil: float = 0.5) ->
     Jedes Paar traegt ``pareto``: kein helfender Einzelhebel ist in Kt, Nuttiefe UND
     Aussendurchmesser mindestens so gut."""
     geom = dict(payload["geom"])
+    if payload.get("stator_lam"):
+        geom["_blech"] = payload["stator_lam"]
     axial = float(geom.get("axialLen") or payload.get("axial_len") or 80.0)
     e = ERFAHRUNGEN[treffer["id"]]
     fest = {f.strip() for f in fest if f and f.strip()}

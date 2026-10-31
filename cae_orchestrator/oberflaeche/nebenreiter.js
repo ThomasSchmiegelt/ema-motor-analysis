@@ -21,13 +21,28 @@ async function lpStart() {
   const body = {minuten: +document.getElementById('lp_minuten').value,
                 auswertung: +document.getElementById('lp_auswertung').value,
                 kombinieren: document.getElementById('lp_kombi').checked,
-                qwen: document.getElementById('lp_qwen').checked};
+                qwen: document.getElementById('lp_qwen').checked,
+                bereich: (document.querySelector('input[name=lp_bereich]:checked') || {}).value || 'bauformen'};
   const r = await fetch('/lernprogramm', {method: 'POST', headers: {'Content-Type': 'application/json'},
                                           body: JSON.stringify(body)});
   const d = await r.json().catch(() => ({}));
   if (!r.ok) { msg.textContent = d.error || ('Fehler ' + r.status); return; }
   msg.textContent = 'läuft …';
   lpPoll();
+}
+
+async function lpFrage() {
+  const d = await fetch('/lernprogramm/frage').then(r => r.json()).catch(() => null);
+  if (!d) return;
+  const v = d.vorschlag || {}, vor = v.bereich || 'bauformen';
+  document.getElementById('lp_bereiche').innerHTML = Object.entries(d.bereiche).map(([k, t]) =>
+    `<label style="display:block"><input type="radio" name="lp_bereich" value="${escHtml(k)}" ${k === vor ? 'checked' : ''}>
+     <b>${escHtml(k)}</b> — ${escHtml(t)}${k === vor && d.vorschlag ? ' <span style="color:#8a7">(Vorschlag)</span>' : ''}</label>`).join('');
+  if (v.minuten) document.getElementById('lp_minuten').value = v.minuten;
+  document.getElementById('lp_vorschlag').textContent = d.vorschlag
+    ? `Vorschlag aus Lauf ${v.von}:\n` + (v.gruende || []).map(g => '· ' + g).join('\n')
+      + (v.qwen ? `\n\nqwen meint (entscheidet nicht):\n${v.qwen}` : '')
+    : 'Noch kein Vorschlag gespeichert — der erste Lauf legt einen an.';
 }
 
 async function lpAbbrechen() {
@@ -52,6 +67,7 @@ async function lpPoll() {
       (e.deutungszeit_min != null ? ` · Deutungszeit ${e.deutungszeit_min} min` : '') +
       (e.deutung ? ' · qwen hat gedeutet' : '');
     await lpLaeufe(e.marke);
+    lpFrage();
   } else if (d.status === 'error') {
     msg.textContent = 'Fehler: ' + (d.fehler || '');
   }
@@ -75,7 +91,7 @@ async function lpBericht() {
 }
 
 async function kiActivate() {
-  lpLaeufe(); lpPoll();
+  lpFrage(); lpLaeufe(); lpPoll();
   const box = document.getElementById('ki-runs');
   try {
     const d = await fetch('/ki_training/runs').then(r => r.json());
