@@ -14,7 +14,7 @@
 set -euo pipefail
 
 MODEL="qwen-gross:latest"
-MODEL_ID="fad97b5f2f75"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
+MODEL_ID="e12191d1240c"          # aus `ollama list` — pinnt das Modell, nicht nur den Namen
 # Der Anbieter stand bis hierher als Literal in der letzten Zeile. `pi` kann
 # laengst andere (die Anbieter stehen in ~/.pi/agent/models.json mit baseUrl,
 # api und apiKey) — nur angeben liess es sich nicht. Vorgabe bleibt ollama:
