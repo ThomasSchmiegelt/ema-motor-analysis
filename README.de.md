@@ -24,48 +24,90 @@ PI · Hermes Agent · Herkunftsnachweis · SQLite
 
 ## Was dabei herauskommt
 
+Alle Bilder bis auf die letzten drei stammen aus **einem** gerechneten Beispiel,
+Projekt `20261030_212617`: eine permanenterregte Maschine (PSM) mit 6 Polen und 54
+Nuten, V-förmige Ferritmagnete, Stator 280 mm, Rotor 188,6 mm, Welle 60 mm,
+Paketlänge 140 mm, Rotorblech 42CrMo4, gerechnet bis 16.350 1/min. Der Lauf liefert
+61,8 kW Spitzenleistung (bei 1.839 1/min), 358,9 Nm Spitzenmoment, eine
+Struktur-FEM-Sicherheit von 3,36, Magnet 50,3 °C und Wicklung 53,9 °C. **Und das
+Entscheidungswerkzeug weist sie ab** (`cae_cli.py entscheide`): der Zahn liegt bei
+589 % der 1,70-T-Blechgrenze, und der Arbeitspunkt der Magnete liegt unter dem
+Entmagnetisierungsknie. Das ist mit Absicht gezeigt: ein Entwurf, der sauber rechnet
+und trotzdem abgewiesen wird, ist genau das, wofür die Kette da ist.
+
 <p align="center">
-  <img src="docs/bilder/querschnitt_psm.png" width="46%" alt="Querschnitt einer PSM mit 6 Polen und 54 Nuten, von der Toolchain erzeugt">
+  <img src="docs/bilder/querschnitt_psm.png" width="46%" alt="Querschnitt der Maschine mit 6 Polen und 54 Nuten: Statornuten mit drei Phasen, Rotor mit V-Magneten">
   <img src="docs/bilder/magnetfeld_psm.png" width="52%" alt="2D-Magnetfeld derselben Maschine: Flussdichte und Feldlinien">
 </p>
 
-*Links: der Querschnitt, den die CAD-Stufe für eine 250-mm-PSM zeichnet (6 Pole,
-54 Nuten, dreilagige Wicklung). Rechts: das 2D-Feld derselben Maschine bei
-Rotorwinkel 0° — Flussdichte als Farbe, Linien des Vektorpotentials darüber. Beides
-stammt aus einem Lauf (Projekt `20261030_202321`), nicht aus einem Zeichenprogramm.*
+*Links: der Querschnitt, den die CAD-Stufe zeichnet — Statorblech mit den drei
+Wicklungssträngen A/B/C in 54 Nuten, Rotorblech, Nord- (rot) und Südmagnete (blau) in
+V-Paaren, Welle. Rechts: das 2D-Feld derselben Maschine bei Rotorwinkel 0° (statisches Feld):
+Flussdichte als Farbe, Linien des Vektorpotentials darüber; das Feld konzentriert
+sich an den Magnetenden und den Stegen — dort beginnen die Probleme der nächsten
+Bilder.*
+
+<p align="center">
+  <img src="docs/bilder/magnetfliehkraft.png" width="49%" alt="Fliehkraft der Magnete auf die Taschenwände bei 16.350 1/min">
+  <img src="docs/bilder/eisenausnutzung.png" width="49%" alt="Eisenausnutzung: Zahn bei 598 % der 1,70-T-Grenze, Joch bei 473 %">
+</p>
+
+*Links: bei 16.350 1/min zieht jeder Magnet mit 37,2 kN (74,3 kN je Pol) an seinen
+Taschenwänden — Flanke orange, Endkappe grün. Die Struktur-FEM ließ diese Last früher
+aus; sie geht jetzt in die Stegprüfung ein (Richtwert 204 MPa am 1,30-mm-Steg:
+Ringspannung 178 MPa, überlagert 383 MPa). Rechts: die Eisenausnutzung aus der
+Flusserhaltung — Zahn 10,16 T = 598 %, Statorjoch 473 %, Rotorjoch 330 % der
+1,70-T-Grenze. Das ist aus der Flussbilanz gerechnet, **nicht** aus einem gelösten
+Feld, und das Bild sagt es unten selbst. Die Zahl stammt aus einem früheren
+Werkzeugstand; ein späterer `entscheide`-Lauf am selben Projekt gibt 589 % — sie
+hat sich mit dem Werkzeug bewegt, und deshalb trägt jede abgelegte Zahl den
+Fingerabdruck des Werkzeugs.*
+
+<p align="center">
+  <img src="docs/bilder/thermik.png" width="70%" alt="Endtemperaturen je Bauteil und Aufheizverlauf über 30 Minuten">
+</p>
+
+*Das Wärmenetz desselben Laufs (Wassermantel um den Stator, 25 °C Umgebung):
+Endtemperaturen je Bauteil — Wicklung 54 °C, Magnet 50 °C — gegen die Magnetgrenze
+(150 °C) und Isolierklasse H (180 °C), dazu der Aufheizverlauf über 30 Minuten. Die
+Temperatur hat reichlich Reserve; gebunden wird die Auslegung vom Eisen, nicht von
+der Wärme.*
 
 <p align="center">
   <img src="docs/bilder/magnetschluss_feldlinien.png" width="55%" alt="Feldlinien nach Weg: rot bleibt im Läufer, cyan geht durch den Luftspalt">
 </p>
 
-*Das Bild hinter `magnetschluss`: Feldlinien nach Weg sortiert — rot bleibt im Läufer
-(magnetischer Kurzschluss), cyan geht durch den Luftspalt. Es ist dafür gezeichnet,
-dass ein Sehmodell es gegen die gemessene Zahl liest; **die Zahl entscheidet**, das
-Bild liest nur gegen. Gezeigt ist eine Testgeometrie aus der Eichung, keine gebaute
-Maschine.*
+*Das Bild hinter `magnetschluss`, gezeichnet für eine **Testgeometrie** aus der
+Eichung (ein Läufer mit radialen Stabmagneten), nicht für die Maschine oben: Feldlinien nach
+Weg sortiert — rot bleibt im Läufer (magnetischer Kurzschluss), cyan geht durch den
+Luftspalt. Ein Sehmodell liest es gegen den gemessenen Streuanteil; **die Zahl
+entscheidet**, das Bild liest nur gegen.*
 
-### Mehr aus derselben Kette
-
-<p align="center">
-  <img src="docs/bilder/cad_freecad.jpg" width="49%" alt="Erzeugtes CAD-Modell in FreeCAD: Rotor, Magnete und Hairpin-Wickelköpfe">
-  <img src="docs/bilder/feld3d_viewer.jpg" width="49%" alt="3D-Feld im Browser-Betrachter: Feldlinien nach Flussdichte gefärbt über dem Netz">
-</p>
-
-*Links: das erzeugte CAD-Modell in FreeCAD (Welle, Rotor mit Wuchtschrauben, Magnete, Stator, drei Spulengruppen mit Hairpin-Wickelköpfen). Rechts: das 3D-Feld (Elmer) im Browser-Betrachter — Feldlinien nach |B| (log) gefärbt, das Netz eingeblendet.*
+Die nächsten drei sind **Bildschirmfotos aus Arbeitssitzungen** und gehören nicht zum
+Beispiel oben.
 
 <p align="center">
-  <img src="docs/bilder/magnetfliehkraft.png" width="49%" alt="Fliehkraft der Magnete auf die Taschenwände">
-  <img src="docs/bilder/eisenausnutzung.png" width="49%" alt="Eisenausnutzung: Zahn bei 598 % der 1,70-T-Grenze">
+  <img src="docs/bilder/cad_freecad.jpg" width="49%" alt="Erzeugtes CAD-Modell in FreeCAD">
+  <img src="docs/bilder/feld3d_viewer.jpg" width="49%" alt="3D-Feld im Browser-Betrachter">
 </p>
 
-*Links: die Fliehkraft der Magnete auf die Taschenwände — eine Last, die die Struktur-FEM früher ausließ. Rechts: ein Entwurf, den das Werkzeug **abweist**: nach der Flusserhaltung steht der Zahn bei 598 % und das Joch bei 473 % der 1,70-T-Blechgrenze. Gerechnet ist das aus der Flussbilanz, nicht aus einem gelösten Feld, und das Bild sagt es unten selbst.*
+*Links: ein von der Toolchain erzeugtes CAD-Modell, in FreeCAD geöffnet — Modellbaum
+mit Welle, Rotor, Wuchtschrauben, Nord- und Südmagneten, Stator und den drei
+Spulengruppen; Hairpin-Wickelköpfe an beiden Enden, ein gebohrter Rotor mit
+Wuchtschrauben-Löchern. Rechts: das 3D-Feld (Elmer) im Browser-Betrachter —
+Feldlinien nach |B| auf logarithmischer Skala (0,01 bis 2,40 T) über dem
+eingeblendeten Netz; die roten Zonen sind die höchste Flussdichte (um 2,4 T).*
 
 <p align="center">
-  <img src="docs/bilder/thermik.png" width="49%" alt="Endtemperaturen und Aufheizverlauf des Wärmenetzes">
-  <img src="docs/bilder/ki_training.jpg" width="49%" alt="Trainings-Reiter des Surrogats: Verlust, RMSE gegen das Abnahme-Tor, Lernrate">
+  <img src="docs/bilder/ki_training.jpg" width="80%" alt="Trainings-Reiter des Surrogats: Verlust, RMSE gegen das Abnahme-Tor, Lernrate, Protokoll">
 </p>
 
-*Links: das Wärmenetz — Endtemperaturen gegen die Grenzen von Magnet und Wicklung. Rechts: das **angehaltene** Surrogat (`physics_surrogate`): bester RMSE 0,054 gegen ein Abnahme-Tor von 0,03; das Lernratenfeld ist da, weil Läufe mit Kosinus-Lernrate nie bei gleicher Epoche verglichen werden dürfen.*
+*Das **angehaltene** Surrogat (`physics_surrogate`), Trainings-Reiter: vier Läufe,
+relativer L2-Fehler auf dem Vektorpotential (links), RMSE des radialen
+Luftspaltfelds gegen das Abnahme-Tor von 0,03 (Mitte; bestenfalls 0,054, das Tor ist
+nicht erreicht) und die Lernraten (rechts). Die Raten stehen dabei, weil Läufe mit
+Kosinus-Lernrate nie bei gleicher Epoche verglichen werden dürfen. Diese Stufe ist
+nicht in die Kette verdrahtet (siehe „Zusammenspiel“).*
 
 ## Teilprojekte
 
