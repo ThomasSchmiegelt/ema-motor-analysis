@@ -6914,3 +6914,64 @@ Ein **netzgespeister Betriebspunkt ohne Stromrichter**. Das ist eine eigene
 Stufe im Modell (Spannungs- statt Stromeinprägung, Schlupf als Unbekannte), kein
 Justierstich an einer Grenze. Bis es sie gibt, ist die richtige Antwort auf eine
 solche Maschine ein begründetes Nein — und das gibt das Werkzeug jetzt.
+
+---
+
+## 2026-10-30 — `magnetschluss` ist nicht reproduzierbar; Schwelle liegt im Rauschen
+
+**Beobachtet:** gleicher Payload, gleiche Maschine (Projekt `20261030_140522`,
+`pocketMode=position, magWidth=30–34, magThick=4, magLayers=2, magAngle=120,
+rotorOD=146`) liefert je Lauf **streuanteil 0.355 (N400) und 0.438 (N400)**,
+beide deterministisch in sich, aber nicht übereinander wiederholbar.
+`N=300`/`N=400` unterscheiden sich um 0.06–0.10 — exakt die Größe, auf der
+`STABIL_TOL = 0.08` ("unsicher") greift.
+
+**Wo gemessen:** `cae_cli.py magnetschluss` (FDM-Feld, `ema_magnetschluss.messen`),
+Ring ±0.4 mm um die Spaltmitte, `A_spalt = peak|A|`. Der Peak von A sitzt auf
+einem Pixelrand; numerische Rauschen im Relaxationslauf verschiebt ihn, und ein
+Rauschen von 0,5 % des Feldes schmeißt 0.355 auf 0.35 — die Schwelle.
+
+**Folge fürs Auslegungswerkzeug:** Ob eine Maschine bei D ≤ 200 mm "stufe ok"
+(<35 %, stabil) oder "auffaellig" ist, kann nicht aus der Abweichung um
+±0.02–0.05 gefolgert werden. Jede Entscheidung, die auf dieser Größe steht,
+braucht einen zweiten Lauf zur Bestätigung — und die beiden Läufe können
+widersprüchen. Das ist kein Einstellfehler, sondern die Eigentliche Auflösung
+der Messung.
+
+**Gemessen an dem Tag:** D = 200 mm, p = 5, 24 Nuten: keine Konfiguration
+(V-Wand, V-Position, Spoke, SPM, Balken, U, Doppel-U, Delta, V-asym) unter
+0.35 stabil; SPM 0.038 "ok" aber Sättigung 207 % im Leerlauf (Eisentor 115 %);
+Spoke 0.327 "ok" bei N=400 aber 0.58 bei N=300; V 0.44–0.52 "auffaellig/kurzschluss".
+D = 280 mm (Frisch-Vorgabe) 0.32/0.33 "ok". Der Konflikt Magnetfluss-Schließung
+und Eisen-Sättigung bei OD ≤ 200 mm ist geometrisch (Magnetquerschnitt /
+Spalt-Ringfläche), nicht parametrisch.
+
+---
+
+## Befund 31.10.2026 — Leistungszile Zeigt Drehzahlen, die nicht zum Punkt passen (umrichterBezug=wicklung)
+
+**Was beobachtet:** In den Auslegungslaufen vom 30.10.2026 (Entwurfsmodus, Projekt
+20261030_203841 und 20261030_205253 mit `umrichterBezug=wicklung`) zeigt die
+Zile "Leistung" Drehzahlen, die weder mit der Motor-Drehzahl noch mit sich selbst
+konsequent sind:
+- 20261030_203841: `P_max ~ 59 kW @ 409 U/min | T_max ~ 1411 Nm bis 204 U/min`
+- 20261030_205253: `P_max ~ 62 kW @ 1839 U/min | T_max ~ 359 Nm bis 1431 U/min`
+- Vergleich 20261030_202321 (gleiche Maschine, `umrichterBezug=einwindung`):
+  `P_max ~ 58 kW @ 10500 U/min | T_max ~ 53 Nm` — hier ist das "@-Drehzahl"
+  die zul. Betriebsmax.
+
+Rechnung: 62 kW / 1839 U/min entspraeche 323 Nm (anstatt 359), und 1839 U/min
+= 16350 / 8,9, also die **Felddrehzahl** des Zyklusfahrzeugs (Uebersetzung 8,9)
+— die Zile mischt Motorleistung mit Felddrehzahl und ist intern nicht
+konstant. Die Sicherheitswerte und die thermische Leistung (755 W am Punkt)
+sind davon nicht betroffen; die Zile darf nicht ins Protokoll.
+
+**Wo gemessen:** Laufende Zeile nach `run analyse --wait`, Ausgabe der
+Pipeline-Stufe "Leistung" (Ausbau bei `ema_pipeline.py` Zeile ~5446,
+`Demag-Reserve` auf der Zeile; die "Leistung"-Zeile davor im selben Block).
+Alle drei Laeufe Entwurfsmodul, gleiche Geometrie, nur umrichterBezug/
+turnsPerSlot/Skew/Rotorblech geaendert.
+
+**Fundstelle:** `ema_pipeline.py` (Leistungszile im Analyse-Ausbau),
+eingespielt gegen `ema_analysis.power_envelope` / `umrichter`-Referenz
+(`ema_analysis.py` ~Z1850-1900, "auf EINE Windung je Nut bezogen").

@@ -25,6 +25,12 @@ if [ ! -f "$HOME/.dotnet/dotnet" ]; then
   exit 1
 fi
 
+# PicoGK legt sein Protokoll in ~/Documents ab und bricht beim Start mit
+# SIGABRT ab, wenn der Ordner fehlt (DirectoryNotFoundException, Huerde 3 im
+# EXPERIENCE_REPORT). Das trifft jedes neue Benutzerkonto, auf dem noch nie ein
+# Dateimanager lief, und die Meldung sieht nach einem Fehler in PicoGK aus.
+mkdir -p "$HOME/Documents"
+
 if [ ! -f "$SCRIPT_DIR/PicoGKRuntime/Dist/picogk.so" ]; then
   echo "Fehler: native PicoGK-Runtime (picogk.so) nicht gefunden." >&2
   echo "Siehe EXPERIENCE_REPORT.md, Abschnitt 4, um sie zu bauen." >&2

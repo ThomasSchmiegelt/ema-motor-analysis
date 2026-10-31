@@ -50,6 +50,10 @@ baut sie selbst (s. `pikogk/EXPERIENCE_REPORT.md` und die `install.sh`-Skripte).
 |---|---|---|
 | PicoGK / PicoGKRuntime — [LEAP 71](https://leap71.com/) | Geometriekernel des `pikogk`-Subprojekts | Apache-2.0 |
 | PicoGK Examples | Beispielcode | CC0-1.0 |
+| LEAP71_ShapeKernel — [LEAP 71](https://github.com/leap71/LEAP71_ShapeKernel) | Grundformen und Modulationen über PicoGK; wird in `PicoGKWebApi` **hineinkompiliert** (s. Abschnitt unten) | Apache-2.0 |
+| LEAP71_LatticeLibrary — [LEAP 71](https://github.com/leap71/LEAP71_LatticeLibrary) | Gitter und implizite TPMS-Flächen (Gyroid, Schwarz, Lidinoid); ebenfalls hineinkompiliert | Apache-2.0 |
+| LEAP71_QuasiCrystals — [LEAP 71](https://github.com/leap71/LEAP71_QuasiCrystals) | aperiodische Parkettierungen (Penrose, Quasikristalle); hineinkompiliert, aber noch von keinem Skill benutzt | Apache-2.0 |
+| LEAP71_HelixHeatX — [LEAP 71](https://github.com/leap71/LEAP71_HelixHeatX) | Beispielprojekt (Wärmetauscher); liegt als Nachschlagewerk daneben und wird **nicht** mitkompiliert | Apache-2.0 |
 | FreeCAD | CAD-Geometrie, Vernetzung | LGPL-2.1-or-later |
 | CalculiX (`ccx`) | Struktur-FEM | GPL-2.0-or-later |
 | Elmer FEM | 3D-Magnetostatik | LGPL-2.1 (Solver: GPL) |
@@ -63,13 +67,28 @@ baut sie selbst (s. `pikogk/EXPERIENCE_REPORT.md` und die `install.sh`-Skripte).
 | .NET 9 Runtime/SDK | Laufzeit des `pikogk`-Dienstes | MIT |
 
 **Zu PicoGK im Besonderen:** Die Unterverzeichnisse `pikogk/PicoGK/`,
-`PicoGKRuntime/`, `PicoGKWebApi/`, `PicoGK_Examples/` und `c-blosc/` sind eigene
-Git-Repositories und über die Wurzel-`.gitignore` von der Versionierung
-ausgenommen. Dieses Repository enthält also **keinen PicoGK-Quellcode**;
+`PicoGKRuntime/`, `PicoGKWebApi/`, `PicoGK_Examples/`, `c-blosc/` und seit dem
+23.10.2026 `LEAP71_ShapeKernel/`, `LEAP71_LatticeLibrary/`,
+`LEAP71_QuasiCrystals/` und `LEAP71_HelixHeatX/` sind eigene Git-Repositories
+und über die Wurzel-`.gitignore` von der Versionierung ausgenommen. Dieses
+Repository enthält also **keinen PicoGK- und keinen ShapeKernel-Quellcode**;
 mitverbreitet wird lediglich das oben genannte, aus c-blosc gebaute Binärartefakt.
 Sollte PicoGK künftig doch mit ausgeliefert werden (Quellcode oder `picogk.so`),
 greift Apache-2.0 §4 vollständig: Lizenz beilegen, `NOTICE` weiterreichen und
 Änderungen kennzeichnen.
+
+**Die vier LEAP-71-Bibliotheken stehen dabei näher an diesem Repo als PicoGK
+selbst, und das ist der Grund für die eigenen Zeilen oben.** Drei von ihnen
+werden nicht als Programm aufgerufen, sondern als Quelltext in `PicoGKWebApi`
+**hineinkompiliert** (`<Compile Include="../LEAP71_ShapeKernel/…">`), also im
+selben Prozess und in derselben Assembly wie der eigene Code — dieselbe Nähe wie
+Gmsh im Orchestrator, nur mit einer Lizenz, die das ohne Weiteres erlaubt.
+Mitverbreitet aus diesem Repo sind allein `pikogk/picogk_cli.py` und
+`.agents/skills/picogk/SKILL.md`, die die Formen über HTTP bedienen. Wer
+`PicoGKWebApi` künftig doch veröffentlicht, trägt die Bibliotheken dort unter
+„Mitverbreitet" ein, legt die vier `LICENSE`-Dateien bei und kennzeichnet
+Änderungen — in `PicoGKWebApi/TpmsRingGeometry.cs` steht bereits im Kopf, welche
+Teile von LEAP 71 kommen und was eigen ist.
 
 ### Z88Aurora V5 (Universität Bayreuth)
 

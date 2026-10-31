@@ -248,6 +248,126 @@ Größter Einzelschritt bisher. Leitprinzip laut Auftrag: nichts, was das LLM er
 
 **UI** (bewusst minimalistisch, Textblöcke statt Chat-Design): "Neuen Skill vorschlagen"-Button erscheint bei "kein Treffer"; Plan wird als Klartext angezeigt mit "Plan bestätigen & Code generieren"; danach Code + Testergebnis + verwendete Operationen mit "Freigeben"/"Verwerfen".
 
+## 15. Zusatz: LEAP 71s eigene Bibliotheken über PicoGK (23.10.2026)
+
+PicoGK ist nur die unterste Schicht. LEAP 71 veröffentlicht darüber drei
+Bibliotheken und ein Beispielprojekt, alle Apache-2.0, und alle als
+**Quellordner** — kein NuGet-Paket, keine `.csproj`, sie sind dazu gedacht, in
+das eigene Projekt hineingezogen zu werden:
+
+| Repo | Stand | Rolle |
+|---|---|---|
+| `LEAP71_ShapeKernel` | `827fb6e`, 2026-10-23 | Grundformen (`BaseBox`, `BaseCylinder`, `BasePipe`, `BaseRing`, `BaseRevolve`, `BaseLens`, `LatticePipe`), Modulationen, Splines, `LocalFrame`/`Frames` |
+| `LEAP71_LatticeLibrary` | `81c3c7b`, 2025-07-27 | Gitter + `ImplicitLibrary`: TPMS-Flächen (Gyroid, radiales Gyroid, Schwarz-D, Schwarz-P, Lidinoid) und die modularen Teile dahinter |
+| `LEAP71_QuasiCrystals` | `685e62a`, 2025-07-25 | aperiodische Parkettierungen (Penrose, 3D-Quasikristalle) |
+| `LEAP71_HelixHeatX` | `a0a0234`, 2026-03-23 | Beispielprojekt Wärmetauscher — Nachschlagewerk, wird nicht mitkompiliert |
+
+Eingebunden sind die drei Bibliotheken über `<Compile Include="…">` in
+`PicoGKWebApi.csproj`, jeweils nur der Bibliotheksordner: jedes Repo führt
+daneben ein `Examples/` mit eigenen Einstiegspunkten, die mit `Program.cs`
+kollidieren würden. **Gegen die hier gebaute PicoGK-Fassung (2.2.0, Runtime
+26.2.0) übersetzen alle drei ohne Änderung** — 0 Fehler, 112 Warnungen, alle aus
+dem Fremdcode (veraltete `VecOperations`-Aufrufe, Nullable-Felder).
+
+### Erster eigener Skill darauf: `tpmsring`
+
+Ein ringförmiger Wärmetauscherkern (`PicoGKWebApi/TpmsRingGeometry.cs`): der Ring
+kommt aus ShapeKernels `BasePipe`, die Fläche aus der LatticeLibrary, und eigen
+ist nur, wie beides zusammenkommt und was vorher geprüft wird. Fünf Muster,
+Parameter Innen-/Außenradius, Höhe, Zellgröße, Wandstärke.
+
+Zwei Dinge daran sind gemessen und nicht angenommen:
+
+* **In einen Ring gehört das radiale Gyroid.** Ein kartesisches wird von der
+  Bohrung beliebig angeschnitten — die Zellenzahl pro Umlauf fällt aus dem
+  x/y-Gitter, das Muster schließt sich nicht. `ImplicitRadialGyroid` nimmt
+  dagegen eine ganze Zahl Zellen pro Umlauf; die wird hier aus der Zellgröße am
+  mittleren Radius abgeleitet, damit `unitSize` in beiden Fällen dasselbe meint.
+* **Eine Wand unter zwei Voxeln kommt nicht dünn heraus, sondern als Löcher.**
+  Bei 0,25 mm Voxelgröße sind das 0,5 mm; darunter wird abgewiesen, und die
+  Meldung nennt die Voxelgröße, weil die Grenze eine Eigenschaft des Gitters
+  ist und keine des Bauteils.
+
+### Hürde 4: `voxIntersectImplicit` beendet den ganzen Serverprozess
+
+Der naheliegende Aufruf — Ring voxelisieren, dann mit der impliziten Fläche
+schneiden — **killt den Prozess**, ohne HTTP-Antwort, ohne 500, ohne Eintrag im
+PicoGK-Log außer einer Zeile auf stderr:
+
+```
+terminate called after throwing an instance of 'openvdb::v13_0::ValueError'
+  what():  ValueError: expected grid A outside value > 0, got 0
+```
+
+Ursache, gefunden in `PicoGKRuntime/Source/PicoGKVdbVoxels.h:390`:
+
+```cpp
+void IntersectImplicit(PKPFnfSdf pfn)
+{
+    Voxels oVox(oVoxelSize(), fBackgroundMM());   // <-- mm in einen Voxelzähler
+```
+
+Der zweite Parameter dieses Konstruktors ist `int nNarrowBand` und zählt
+**Voxel**; `fBackgroundMM()` liefert den Hintergrund in **Millimetern**. Bei
+0,25 mm Voxelgröße und einem Band von 3 Voxeln sind das 0,75 mm, die Umwandlung
+nach `int` macht daraus **0**, das neue Gitter bekommt einen Hintergrund von 0 —
+und OpenVDBs `csgIntersection` lehnt genau das ab (`validateLevelSet` in
+`tools/Composite.h`). Die C++-Ausnahme fängt im C-API niemand auf, also landet
+sie bei `std::terminate`.
+
+**Warum das oben nicht auffällt:** bei 1 mm Voxelgröße ist der Hintergrund 3 mm,
+und die Umwandlung landet zufällig auf der richtigen 3. Der Fehler zeigt sich
+erst unter 0,33 mm — und die Beispiele arbeiten gröber. Es ist genau eine Stelle
+im ganzen Runtime, die so rechnet (`grep` über `Source/`).
+
+Richtig wäre `Voxels oVox(oVoxelSize(), m_nSdfNarrowBand);` — ein Wort, aber im
+**nativen** Teil, also mit Neubau von `picogk.so` und in fremdem Code. Deshalb
+hier nicht gepatcht, sondern umgangen: `TpmsRingGeometry.voxBuild` macht von Hand
+das, was `IntersectImplicit` sonst tut, nur ohne diesen Konstruktor — die
+implizite Fläche über den Hüllquader des Rings in ein eigenes Feld rendern (der
+Weg baut sein Gitter über `Voxels(Library)` und damit mit richtigem Band) und
+dann zwei gesunde Gitter schneiden. Gemessen danach: 0,7 s für den kleinen Ring,
+Server lebt.
+
+Gehört als Fehlerbericht nach oben. **Wer am `pikogk`-Baum arbeitet, sollte
+`voxIntersectImplicit` bis dahin meiden** — ein Aufruf, der den Server ohne
+Fehlermeldung verschwinden lässt, ist der erste Verdacht.
+
+### Was das kostet
+
+Gemessen bei 0,25 mm Voxelgröße, Muster „Gyroid radial" wo nicht anders genannt:
+
+| Ring | Hüllquader | Zeit | Dreiecke | STL |
+|---|---|---|---|---|
+| Ri 10 / Ro 20 / h 10, Zelle 5 | 2,6 Mio Voxel | 0,7 s | 0,6 Mio | 31 MB |
+| Ri 30 / Ro 50 / h 15, Zelle 8 (Vorgabe) | 9,6 Mio Voxel | 3,7 s | 2,9 Mio | 146 MB |
+| Ri 40 / Ro 70 / h 25, Zelle 8 | 31 Mio Voxel | 9,2 s (kartesisch) … 16,1 s (radial) | 5,8 … 10,2 Mio je Muster | 290 … 509 MB |
+| Ri 60 / Ro 110 / h 50, Zelle 10 | 96 Mio Voxel | 50,2 s | 39,0 Mio | **1,95 GB** |
+
+**Es bindet die Datei, nicht die Zeit.** Der letzte Lauf lief in 50 s durch und
+schrieb 1,9 GB; aufgeräumt wird in `output/` nichts. Deshalb prüft `Validate`
+nicht die Voxelzahl, sondern schätzt Dreiecke und Dateigröße und nennt sie in der
+Ablehnung. Die Schätzung ist eine Messung: Dreiecke je
+`V_Ring / (Zellgröße · Voxelgröße²)` kamen über zwei Ringgrößen und alle fünf
+Muster bei 19,5 … 20,4 für die beiden Gyroide und 11,2 … 14,9 für Schwarz-D,
+Schwarz-P und Lidinoid heraus — angesetzt ist die Gyroid-Zahl, also eine obere
+Grenze. Am 1,9-GB-Fall geprüft: geschätzt 43,6 Mio, gemessen 39,0 Mio.
+
+### Bedienbar für die Agentenköpfe
+
+Dazu kam `pikogk/picogk_cli.py` (fünf Verben, nur stdlib, Exit-Codes wie
+`cae_cli.py`) und `.agents/skills/picogk/SKILL.md`. Damit erreichen PI und Hermes
+diesen Geometrieweg über dieselbe Werkzeugform wie die Rechenkette — Skill = CLI
++ README. **Eine Verbindung zum Orchestrator ist das nicht**: es entsteht eine
+STL-Datei und sonst nichts, und das Volumennetz, das Elmer und CalculiX brauchen,
+fällt dabei weiterhin nicht ab.
+
+Nebenbei zwei Kleinigkeiten am Server: das Ollama-Modell steht nicht mehr fest im
+Code, sondern kommt aus `CAE_LLM_MODEL` (der verdrahtete Tag `qwen3.6-16k:latest`
+existierte nicht mehr, und der Warmup meldete nur „HTTP 404" ohne den Namen), und
+`/skills` gibt bei Auswahlfeldern die Bedeutung der Werte mit heraus — vorher
+stand dort `[0 .. 4]` und was 0 bis 4 heißen, nur im Quelltext.
+
 ## 8. Offene Punkte für einen evtl. Erfahrungsbericht
 - PR #90 (vorkompilierte Community-`.so`) wurde bewusst nicht genutzt/verifiziert — könnte als Vergleich interessant sein ("Community-Binary vs. selbst kompiliert").
 - Die drei gefundenen, voneinander unabhängigen Linux-Portierungsversuche (Discussion #77, `CorrieVS/PicoGK_Docker`, `michaelp91-dev/PicoGK-Colab`) zeigen erhebliche, aber komplett unkoordinierte Community-Nachfrage nach offizieller Linux-Unterstützung — die Maintainer haben mehrfach explizit gesagt, dass ihnen dafür die Kapazität fehlt ("If someone wants to volunteer...").

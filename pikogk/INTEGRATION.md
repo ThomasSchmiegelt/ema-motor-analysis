@@ -27,7 +27,11 @@ Der Server bindet aktuell explizit an `http://localhost:5266` (siehe `PicoGKWebA
 
 ## 3. Endpunkt: Geometrie erzeugen
 
-Der Server unterstützt vier eingebaute parametrische Grundformen: `box`, `cylinder`, `nozzle` (Laval-Düse), `screw` (Schraube, vereinfacht ohne Gewinde) — plus alle über das Skill-System erzeugten und freigegebenen Formen. Die aktuelle Liste inkl. Parameterschema (Name, Label, Einheit, Default, Min/Max) liefert `GET /skills`.
+Der Server unterstützt sechs eingebaute parametrische Grundformen: `box`, `cylinder`, `nozzle` (Laval-Düse), `screw` (Schraube, vereinfacht ohne Gewinde), `stellarator` und `tpmsring` — plus alle über das Skill-System erzeugten und freigegebenen Formen. Die aktuelle Liste inkl. Parameterschema (Name, Label, Einheit, Default, Min/Max und bei Auswahlfeldern `options`) liefert `GET /skills`. **Die Liste nicht abschreiben, sondern abfragen** — ein freigegebener Skill kommt zur Laufzeit dazu.
+
+`tpmsring` ist der erste Typ, der nicht auf eigener Geometrie steht, sondern auf LEAP 71s **ShapeKernel** und **LatticeLibrary** (ringförmiger Wärmetauscherkern aus einer TPMS-Fläche, fünf Muster). Zwei Dinge, die ein aufrufendes Programm dazu wissen muss: `pattern` ist ein Auswahlfeld, dessen Bedeutung in `options` steht, und das Ergebnis ist **groß** — die Vorgabewerte liefern 2,9 Mio Dreiecke und eine STL-Datei von 146 MB, oberhalb geschätzter 8 Mio Dreiecke lehnt der Server mit `400` ab und nennt die Schätzung. Einzelheiten und Messwerte in `EXPERIENCE_REPORT.md`, Abschnitt 15.
+
+**Es gibt auch ein CLI.** `pikogk/picogk_cli.py` (nur stdlib, Exit-Codes 0/1/2/3/4) bedient genau diese Schnittstelle und ist der Weg, den die Agentenköpfe nehmen (`.agents/skills/picogk/SKILL.md`). Für ein Programm, das sowieso HTTP spricht, bleibt der Vertrag unten der richtige Einstieg.
 
 ```
 POST /generate-shape
