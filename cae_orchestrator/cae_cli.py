@@ -3319,7 +3319,7 @@ def cmd_erfahrung(args) -> int:
         return rc
     fest = [f for f in (args.fest or "").split(",") if f.strip()]
     try:
-        r = E.pruefe(payload, fest=fest, merken=args.merken, quelle="cae_cli erfahrung")
+        r = E.ohne_intern(E.pruefe(payload, fest=fest, merken=args.merken, quelle="cae_cli erfahrung"))
     except ValueError as ex:
         return _die(str(ex), EXIT_USAGE)
     if getattr(args, "json", False):
@@ -3332,15 +3332,26 @@ def cmd_erfahrung(args) -> int:
 
 
 def cmd_lernprogramm(args) -> int:
-    """Lernprogramm Stufe 1 (``ema_lernprogramm``): viele gueltige PSM-Entwuerfe
-    ziehen, jede Erfahrung mit allen Hebeln daran pruefen, Belege schreiben.
-    Analytisch, ohne Server und ohne Sprachmodell."""
+    """Lernprogramm (``ema_lernprogramm``): nach Zeitplan oder Anzahl PSM-Entwuerfe
+    ziehen (Trainingsplan Bauform x Polpaare reihum), jede Erfahrung mit allen Hebeln
+    und allen Hebelpaaren pruefen, Bericht nach ``~/cae_projekte/_lernen/lernlaeufe/<marke>/``.
+    ``--zeit 60`` lernt hoechstens 45 min und haelt 15 fuer die Auswertung frei; stabile
+    Gewichte beenden frueher. Qwen kommentiert jede Runde und deutet den Bericht in der
+    Restzeit (``deutung_qwen.md``), ``--ohne-qwen`` laesst das weg."""
     import ema_lernprogramm as LP
-    r = LP.lauf(n=args.n, seed=args.seed, minuten=args.minuten, log=lambda t: print(t, flush=True))
+    if args.zeit is None and args.n is None:
+        args.n = LP.MIN_ENTWUERFE
+    r = LP.lauf(minuten=args.zeit, auswertung_anteil=args.auswertung / 100.0, n=args.n,
+                seed=args.seed, preisprobe=not args.ohne_preisprobe,
+                kombinieren=not args.ohne_kombinationen, deuten_mit_qwen=not args.ohne_qwen,
+                log=lambda t: print(t, flush=True))
     if getattr(args, "json", False):
         emit(r, args)
     print("ERGEBNIS:")
     print(LP.als_text(r))
+    print(f"\nabgelegt: {r['ordner']}/bericht.md")
+    if r.get("deutung"):
+        print(f"Deutung durch qwen: {r['ordner']}/deutung_qwen.md")
     return EXIT_OK
 
 
@@ -5234,11 +5245,19 @@ def build_parser() -> argparse.ArgumentParser:
     s.set_defaults(fn=cmd_erfahrung)
 
     s = sub.add_parser("lernprogramm",
-                       help="Erfahrungen an vielen gezogenen PSM-Entwuerfen pruefen und Belege sammeln "
-                            "(Stufe 1, analytisch, Minuten) — fuellt die Gewichtung von 'erfahrung'")
-    s.add_argument("--n", type=int, default=300, help="so viele GUELTIGE Entwuerfe (Vorgabe 300)")
-    s.add_argument("--seed", type=int, default=1)
-    s.add_argument("--minuten", type=float, default=None, help="hoechstens so lange")
+                       help="Trainingsplan: Erfahrungen an vielen PSM-Entwuerfen pruefen (Bauform x p reihum, Einzelhebel "
+                            "und Paare), Bericht mitschreiben, qwen deutet — nach Zeitplan (--zeit 60 = 45 min "
+                            "lernen, 15 auswerten) oder Anzahl")
+    s.add_argument("--zeit", type=float, default=None, help="Zeitplan in Minuten (endet frueher, wenn die Gewichte stabil sind)")
+    s.add_argument("--auswertung", type=float, default=25.0, help="Anteil der Zeit fuer die Auswertung in %% (Vorgabe 25)")
+    s.add_argument("--n", type=int, default=None, help="so viele GUELTIGE Entwuerfe (ohne --zeit: 1000)")
+    s.add_argument("--seed", type=int, default=None, help="Vorgabe: aus der Uhrzeit, steht im Bericht")
+    s.add_argument("--ohne-preisprobe", dest="ohne_preisprobe", action="store_true",
+                   help="Kt und Spitzenmoment nicht gegeneinander ordnen")
+    s.add_argument("--ohne-kombinationen", dest="ohne_kombinationen", action="store_true",
+                   help="nur Einzelhebel, keine Hebelpaare")
+    s.add_argument("--ohne-qwen", dest="ohne_qwen", action="store_true",
+                   help="keine Rundenkommentare und keine Deutung durch das lokale Modell")
     _add_globals(s)
     s.set_defaults(fn=cmd_lernprogramm)
 

@@ -13,7 +13,69 @@
 // deshalb hält der Client nur die Auswahl.
 let _kiRuns = [], _kiSel = new Set();
 
+// ── 📚 Lernprogramm (Erfahrungsdatenbank) ── Start, Fortschritt, Berichte ──
+let _lpTimer = null;
+
+async function lpStart() {
+  const msg = document.getElementById('lp_msg');
+  const body = {minuten: +document.getElementById('lp_minuten').value,
+                auswertung: +document.getElementById('lp_auswertung').value,
+                kombinieren: document.getElementById('lp_kombi').checked,
+                qwen: document.getElementById('lp_qwen').checked};
+  const r = await fetch('/lernprogramm', {method: 'POST', headers: {'Content-Type': 'application/json'},
+                                          body: JSON.stringify(body)});
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) { msg.textContent = d.error || ('Fehler ' + r.status); return; }
+  msg.textContent = 'läuft …';
+  lpPoll();
+}
+
+async function lpAbbrechen() {
+  await fetch('/lernprogramm/abbrechen', {method: 'POST'});
+  document.getElementById('lp_msg').textContent = 'Abbruch angefordert — der Bericht wird trotzdem geschrieben.';
+}
+
+async function lpPoll() {
+  clearTimeout(_lpTimer);
+  let d;
+  try { d = await fetch('/lernprogramm/status').then(r => r.json()); } catch (e) { return; }
+  const log = document.getElementById('lp_log'), msg = document.getElementById('lp_msg');
+  if (d.log && d.log.length) { log.style.display = ''; log.textContent = d.log.join('\n'); log.scrollTop = log.scrollHeight; }
+  document.getElementById('lp_start').disabled = d.status === 'running';
+  if (d.status === 'running') {
+    const f = d.fortschritt || {};
+    msg.textContent = `läuft · ${f.gueltig || 0} Entwürfe, ${f.mit_symptom || 0} mit Symptom · ${Math.round(d.sekunden || 0)} s`;
+    _lpTimer = setTimeout(lpPoll, 3000);
+  } else if (d.status === 'done' && d.ergebnis) {
+    const e = d.ergebnis;
+    msg.textContent = `fertig (${e.ende}) · ${e.gueltig} Entwürfe` +
+      (e.deutungszeit_min != null ? ` · Deutungszeit ${e.deutungszeit_min} min` : '') +
+      (e.deutung ? ' · qwen hat gedeutet' : '');
+    await lpLaeufe(e.marke);
+  } else if (d.status === 'error') {
+    msg.textContent = 'Fehler: ' + (d.fehler || '');
+  }
+}
+
+async function lpLaeufe(waehle) {
+  const sel = document.getElementById('lp_laeufe');
+  const d = await fetch('/lernprogramm/laeufe').then(r => r.json()).catch(() => ({laeufe: []}));
+  sel.innerHTML = (d.laeufe || []).map(l =>
+    `<option value="${escHtml(l.marke)}">${escHtml(l.marke)} · ${l.gueltig} Entwürfe · ${escHtml(l.ende)}</option>`).join('');
+  if (waehle) sel.value = waehle;
+  if (sel.value) lpBericht();
+}
+
+async function lpBericht() {
+  const m = document.getElementById('lp_laeufe').value, box = document.getElementById('lp_bericht');
+  if (!m) return;
+  const d = await fetch('/lernprogramm/bericht/' + encodeURIComponent(m)).then(r => r.json()).catch(() => ({}));
+  box.style.display = '';
+  box.textContent = d.text || d.error || '';
+}
+
 async function kiActivate() {
+  lpLaeufe(); lpPoll();
   const box = document.getElementById('ki-runs');
   try {
     const d = await fetch('/ki_training/runs').then(r => r.json());

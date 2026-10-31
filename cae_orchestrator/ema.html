@@ -3583,11 +3583,42 @@
 <!-- Bericht-Tab entfernt → Bericht-Karte lebt jetzt in Tab ① Projekt (#pj-report-card) -->
 
 <!-- ════════ TAB: 🧠 KI-Training (Physik-Surrogat, physics_surrogate/) ════════ -->
-<!-- NUR Betrachter: das Training läuft in einer eigenen venv (Torch/CUDA) und einem
-     eigenen Dienst auf :5300. Hier werden die Trainingsverläufe gesichtet und der
-     Zustand des Dienstes gezeigt — gestartet wird von hier nichts. -->
+<!-- Zwei Teile: oben das LERNPROGRAMM der Erfahrungsdatenbank (ema_lernprogramm,
+     analytisch, startbar, qwen kommentiert und deutet); darunter der reine BETRACHTER
+     des Surrogats — das läuft in einer eigenen venv (Torch/CUDA) und einem eigenen
+     Dienst auf :5300, gestartet wird es von hier nicht. -->
 <div class="tab-panel" id="panel-ki">
-  <h3 style="margin-top:0">🧠 KI-Training (Physik-Surrogat)</h3>
+  <h3 style="margin-top:0">📚 Lernprogramm (Erfahrungsdatenbank, PSM)</h3>
+  <div style="font-size:.78rem;color:#9ab;max-width:860px;margin-bottom:10px;line-height:1.5">
+    Trainingsplan: jede Bauform mit jeder Polpaarzahl reihum, an jedem Entwurf mit Symptom
+    jeder Hebel einzeln <b>und jedes Hebelpaar</b>. Analytisch, kein Löser — blockiert
+    keinen anderen Lauf. Ein Teil der Zeit bleibt für die Auswertung; darin
+    <b>deutet qwen</b> den Bericht (jede Zahl wird gegen den Bericht geprüft). Endet früher,
+    wenn die Quoten stabil sind. Mitschrift: <code>~/cae_projekte/_lernen/lernlaeufe/&lt;marke&gt;/</code>
+    (<code>bericht.md</code>, <code>protokoll.log</code>, <code>deutung_qwen.md</code>).
+  </div>
+  <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px;font-size:.78rem;color:#aaa">
+    <label>Dauer [min] <input id="lp_minuten" type="number" min="0.5" max="1440" step="1" value="60"
+           style="width:70px;background:#3c3c3c;color:#fff;border:1px solid #555;border-radius:3px;padding:3px"></label>
+    <label>davon Auswertung [%] <input id="lp_auswertung" type="number" min="0" max="89" step="5" value="25"
+           style="width:55px;background:#3c3c3c;color:#fff;border:1px solid #555;border-radius:3px;padding:3px"></label>
+    <label><input id="lp_kombi" type="checkbox" checked> Kombinationen</label>
+    <label><input id="lp_qwen" type="checkbox" checked> qwen kommentiert + deutet</label>
+    <button id="lp_start" onclick="lpStart()" style="padding:5px 12px;font-size:.78rem;text-transform:none">▶ Lernen starten</button>
+    <button onclick="lpAbbrechen()" style="padding:5px 12px;font-size:.78rem;text-transform:none">⏹ Abbrechen</button>
+    <span id="lp_msg" style="font-size:.75rem;color:#888"></span>
+  </div>
+  <pre id="lp_log" style="background:#0d0d15;border:1px solid #333;border-radius:5px;padding:10px;
+       max-height:220px;overflow:auto;font-size:.72rem;color:#9ab;white-space:pre-wrap;display:none"></pre>
+  <div style="display:flex;gap:8px;align-items:center;margin:6px 0">
+    <select id="lp_laeufe" onchange="lpBericht()"
+            style="background:#3c3c3c;color:#fff;border:1px solid #555;border-radius:3px;padding:4px;font-size:.78rem"></select>
+    <span style="font-size:.74rem;color:#777">frühere Lernläufe — Bericht</span>
+  </div>
+  <pre id="lp_bericht" style="background:#0d0d15;border:1px solid #333;border-radius:5px;padding:10px;
+       max-height:360px;overflow:auto;font-size:.72rem;color:#cdd;white-space:pre-wrap;display:none"></pre>
+
+  <h3 style="margin-top:18px">🧠 KI-Training (Physik-Surrogat)</h3>
   <div style="font-size:.78rem;color:#9ab;max-width:860px;margin-bottom:12px;line-height:1.5">
     Ein neuronales Netz lernt das <b>2D-Magnetfeld</b> des FDM-Lösers nach, um die
     Hoch-N-Vorschau von Sekunden/Minuten auf Millisekunden zu bringen. Der Tab zeigt die

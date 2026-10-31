@@ -5466,6 +5466,90 @@ def ki_training_log(name: str):
     return jsonify({"log": kt.log_tail(name)})
 
 
+# ── Lernprogramm (Erfahrungsdatenbank, ema_lernprogramm) ─────────────────────
+# Ein Knopf im KI-Training-Reiter: „mach mal eine Stunde" mit einem Viertel fuer die
+# Auswertung. Analytisch, kein Loeser -- belegt also weder FreeCAD noch die FDM und
+# blockiert keinen anderen Lauf. EIN Lernlauf zur Zeit (die Belege sind eine Datei).
+_lern_state = {"status": "idle", "log": [], "fortschritt": None, "ergebnis": None,
+               "fehler": None, "abbrechen": False}
+
+
+@app.route("/lernprogramm", methods=["POST"])
+def lernprogramm_start():
+    import ema_lernprogramm as LP
+    if _lern_state["status"] == "running":
+        return jsonify({"error": "Ein Lernlauf laeuft schon."}), 409
+    d = request.get_json(silent=True) or {}
+    try:
+        minuten = float(d.get("minuten", 60))
+        anteil = float(d.get("auswertung", 25)) / 100.0
+    except (TypeError, ValueError):
+        return jsonify({"error": "minuten/auswertung muessen Zahlen sein"}), 400
+    if not (0.5 <= minuten <= 24 * 60) or not (0.0 <= anteil < 0.9):
+        return jsonify({"error": "minuten 0,5 … 1440, auswertung 0 … 89 %"}), 400
+    kombinieren = bool(d.get("kombinieren", True))
+    _lern_state.update(status="running", log=[], fortschritt=None, ergebnis=None,
+                       fehler=None, abbrechen=False, start=time.time(),
+                       minuten=minuten, auswertung=anteil)
+
+    def log(t):
+        _lern_state["log"] = (_lern_state["log"] + [t])[-200:]
+
+    def lauf():
+        try:
+            r = LP.lauf(minuten=minuten, auswertung_anteil=anteil, log=log,
+                        kombinieren=kombinieren, deuten_mit_qwen=bool(d.get("qwen", True)),
+                        abbrechen=lambda: _lern_state["abbrechen"],
+                        fortschritt=lambda f: _lern_state.update(fortschritt=f))
+            _lern_state["ergebnis"] = {"marke": r["marke"], "ordner": r["ordner"], "ende": r["ende"],
+                                       "gueltig": r["gueltig"], "mit_symptom": r["mit_symptom"],
+                                       "deutungszeit_min": r.get("deutungszeit_min"),
+                                       "erkenntnisse": r["erkenntnisse"],
+                                       "deutung": r.get("deutung")}
+            _lern_state["status"] = "done"
+        except Exception as e:                                       # noqa: BLE001
+            _lern_state.update(status="error", fehler=f"{type(e).__name__}: {e}"[:400])
+    threading.Thread(target=lauf, daemon=True).start()
+    return jsonify({"ok": True}), 202
+
+
+@app.route("/lernprogramm/status")
+def lernprogramm_status():
+    st = {k: v for k, v in _lern_state.items() if k != "abbrechen"}
+    if st.get("start"):
+        st["sekunden"] = round(time.time() - st["start"], 1)
+    return jsonify(st)
+
+
+@app.route("/lernprogramm/abbrechen", methods=["POST"])
+def lernprogramm_abbrechen():
+    _lern_state["abbrechen"] = True
+    return jsonify({"ok": True})
+
+
+@app.route("/lernprogramm/laeufe")
+def lernprogramm_laeufe():
+    import ema_lernprogramm as LP
+    return jsonify({"laeufe": LP.laeufe()[:30]})
+
+
+@app.route("/lernprogramm/bericht/<marke>")
+def lernprogramm_bericht(marke: str):
+    import ema_lernprogramm as LP
+    if not _safe_name(marke):
+        return jsonify({"error": "ungueltige Marke"}), 403
+    pfad = os.path.join(LP.ABLAGE, marke, "bericht.md")
+    if not os.path.isfile(pfad):
+        return jsonify({"error": "kein Bericht"}), 404
+    with open(pfad, encoding="utf-8") as fh:
+        text = fh.read()
+    deutung = os.path.join(LP.ABLAGE, marke, "deutung_qwen.md")
+    if os.path.isfile(deutung):
+        with open(deutung, encoding="utf-8") as fh:
+            text += "\n\n" + fh.read()
+    return jsonify({"marke": marke, "pfad": pfad, "text": text})
+
+
 # ── Job-Warteschlange (persistente Server-Jobs, s. ema_jobs) ──────────────────
 # Jobs laufen server-seitig weiter, wenn der Browser geschlossen wird; Job-Reihen
 # (Varianten/Param-Tabelle/KI-Entwürfe) werden hier statt in Client-JS-Schleifen

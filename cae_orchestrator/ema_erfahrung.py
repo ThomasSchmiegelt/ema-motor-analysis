@@ -28,8 +28,22 @@ Der Agent bekommt davon nichts in den Kontext gelegt. Er denkt zuerst frei und
 fragt dann gezielt: ``cae_cli.py erfahrung pruefe --from-project X``.
 
 Rechenweg: die Flusserhaltung aus ``ema_saettigung.eisenwege`` (analytisch, ms).
-Das Momentmass ist ``B_gap * D_r^2 * L`` bei gleichem Strombelag -- ein Vergleichs-
-mass zwischen den Hebeln, kein gerechnetes Moment; das steht in jeder Ausgabe.
+Der Preis eines Hebels steht in drei Groessen, die nicht gegeneinander verrechnet
+werden -- vier eigentlich: das **Spitzenmoment** an Strom- und Spannungsgrenze
+(``moment_erreichbar``, mit Reluktanzanteil, danach wird geordnet), ``Kt`` (geschlossene Formel wie ``compute_performance``, aber UNgerundet),
+Nuttiefe (Kupferquerschnitt) und Aussendurchmesser (Bauraum). Bis zum 31.10.2026
+stand hier ein Momentmass ``B_gap * D_r^2 * L`` (gleicher Strombelag); das
+Lernprogramm hat es widerlegt: bei festen Magneten bleibt der Fluss je Pol
+erhalten, ``B_gap * D_r`` ist konstant (gemessen 188,6/175/165 mm: B_gap
+0,630/0,679/0,719 T, Kt 0,04100/0,04099/0,04098). Das Momentmass meldete -4,7 %,
+Kt bewegt sich um -0,05 %. Der wirkliche Preis eines kleineren Laeufers ist das
+hoehere Luftspalt- und Zahnfeld -- es steht als ``nachher`` mit da, und wo der
+Zahn darueber saettigt, ist der Hebel ein Konflikt. S. ``BEFUNDE.md``.
+
+**Kombinationen** (``kombinationen``): Hebel A zur Haelfte, dann Hebel B so weit
+wie noetig. Ob ein Paar billiger ist als der beste Einzelhebel, wird NICHT mit
+einer Gewichtung entschieden, sondern nach Pareto ueber die drei Preise: ein Paar
+zaehlt, wenn kein helfender Einzelhebel in allen dreien mindestens so gut ist.
 Nur PSM (``maschinenart == pmsm``) im ersten Schritt.
 """
 
@@ -48,7 +62,7 @@ ZIEL_AUSNUTZUNG = 0.95
 # ── Messung ──────────────────────────────────────────────────────────────────
 
 def _messen(geom: dict, axial_mm: float, blech: str = "m270_35a") -> dict:
-    """Eisenwege und Momentmass einer Geometrie."""
+    """Eisenwege und Kt (ungerundet) einer Geometrie."""
     import ema_analysis as A
     import ema_saettigung as S
     bg = A._analytical_Bgap(geom)
@@ -58,7 +72,47 @@ def _messen(geom: dict, axial_mm: float, blech: str = "m270_35a") -> dict:
     return {"B_gap": round(bg, 4), "B_joch": e["B_joch_T"], "B_zahn": e["B_zahn_T"],
             "B_rotorjoch": e["B_rotorjoch_T"], "B_sat": bsat,
             "joch_mm": e["joch_hoehe_mm"], "zahn_mm": e["zahn_breite_mm"],
-            "moment_mass": round(bg * (float(geom["rotorOD"]) / 100.0) ** 2 * axial_mm / 100.0, 5)}
+            "kt": _kt(geom, axial_mm, bg), "T_spitze": _spitzenmoment(geom, axial_mm, bg)}
+
+
+def _kt(geom: dict, axial_mm: float, bg: float) -> float:
+    """``Kt`` wie ``ema_analysis.compute_performance``, ohne Rundung und durch ``p^2`` geteilt.
+
+    Ungerundet, weil gerundet die Hebel nicht zu unterscheiden sind. Durch ``p^2``,
+    weil die Hausformel ``1,5 p^2 (2/pi) B A`` auf eine Windung je Nut normiert ist
+    und ueber die Polzahl NICHT vergleichbar: die Bruecke zur physikalischen
+    Flussverkettung ist ``ema_asm.k_norm = pi k_w N_ph / p^2``. Ohne den Faktor meldete
+    „mehr Pole" +309 % Kt -- bei gleichen Magneten. Fuer Hebel bei fester Polzahl
+    aendert der Faktor nichts. Wicklungsfaktor und Nutzahl bleiben aussen vor."""
+    import math
+    import ema_fluss
+    a = ema_fluss.flaechen(geom, axial_mm)["a_fluss_m2"]
+    return 1.5 * (2 / math.pi) * bg * a
+
+
+def _spitzenmoment(geom: dict, axial_mm: float, bg: float):
+    """Spitzenmoment an der Strom- und Spannungsgrenze bei 1000 1/min (Konstantmomentbereich),
+    ueber ``ema_analysis.moment_erreichbar`` -- dieselbe Kennfeldrechnung wie die Leistungskurve,
+    also MIT Reluktanzanteil. ``Kt`` allein ist nur das Magnetmoment, und gerade das bleibt
+    beim kleineren Laeufer stehen (gemessen 188,6 -> 175 mm: Kt -0,02 %, Spitze -6,5 %)."""
+    import ema_analysis as A
+    try:
+        perf = A.compute_performance(geom, bg, 1000.0, axial_mm)
+        r = A.moment_erreichbar(geom, perf, axial_mm, 1000.0, 0.0, 1000.0, 1000.0)
+        return r.get("T_moeglich_Nm")
+    except Exception:                                  # noqa: BLE001 -- dann fehlt der Preis, nicht die Pruefung
+        return None
+
+
+def _preise(geom: dict, g1: dict, m0: dict, m1: dict) -> dict:
+    """Die drei Preise einer Aenderung, in Prozent vom Ausgangsstand."""
+    def pct(a, b):
+        return round(100.0 * (float(b) / float(a) - 1.0), 2)
+    sp = (pct(m0["T_spitze"], m1["T_spitze"])
+          if m0.get("T_spitze") and m1.get("T_spitze") is not None else None)
+    return {"moment_pct": sp, "kt_pct": pct(m0["kt"], m1["kt"]),
+            "nuttiefe_pct": pct(geom["slotDepth"], g1["slotDepth"]),
+            "aussen_pct": pct(geom["statorOD"], g1["statorOD"])}
 
 
 def _symptome(m: dict) -> list:
@@ -66,7 +120,7 @@ def _symptome(m: dict) -> list:
     s = []
     for name, key in (("statorjoch_saettigt", "B_joch"), ("zahn_saettigt", "B_zahn"),
                       ("rotorjoch_saettigt", "B_rotorjoch")):
-        if m[key] / m["B_sat"] > 1.0:
+        if m.get(key) is not None and m[key] / m["B_sat"] > 1.0:   # None: Weg nicht bestimmbar
             s.append(name)
     return s
 
@@ -132,14 +186,14 @@ ERFAHRUNGEN = {
         "warum": "Der Polfluss teilt sich im Joch auf zwei Wege; B_joch ~ Phi_Pol / (2 * h_joch * L * k_Fe). "
                  "Halbes Restjoch, doppelte Induktion -- unter dem Mindestjoch geht es steil nach oben.",
         "gilt_fuer": ("pmsm",),
-        "ausloeser": lambda m: m["B_joch"] / m["B_sat"] > 1.0,
-        "behoben": lambda m: m["B_joch"] / m["B_sat"] <= ZIEL_AUSNUTZUNG,
+        "ausloeser": lambda m: m["B_joch"] is not None and m["B_joch"] / m["B_sat"] > 1.0,
+        "behoben": lambda m: m["B_joch"] is not None and m["B_joch"] / m["B_sat"] <= ZIEL_AUSNUTZUNG,
         "kennwert": "B_joch",
         "hebel": [
             {"id": "stator_groesser", "param": "statorOD", "fn": _hebel_stator_groesser,
              "preis": "Bauraum und Masse; oft durch den Auftrag festgelegt"},
             {"id": "rotor_kleiner", "param": "rotorOD", "fn": _hebel_rotor_kleiner,
-             "preis": "weniger Moment (~ D_r^2 * L), Statorbohrung zieht mit; Zahn und B_gap aendern sich"},
+             "preis": "Statorbohrung zieht mit; bei festen Magneten bleibt Kt fast stehen, B_gap und Zahnfeld steigen"},
             {"id": "nut_flacher", "param": "slotDepth", "fn": _hebel_nut_flacher,
              "preis": "weniger Kupferquerschnitt: hoehere Stromdichte und Kupferverluste"},
             {"id": "mehr_pole", "param": "p", "fn": _hebel_mehr_pole,
@@ -159,7 +213,7 @@ def pruefe(payload: dict, fest=(), merken: bool = False, quelle: str = "pruefe")
     ``fest``: Parameter, die der Auftrag festlegt -- deren Hebel werden genannt,
     aber nicht gerechnet. Liefert ``{"art", "messung", "treffer": [...]}``; jeder
     Treffer traegt seine Hebel, je Hebel die kleinste wirksame Aenderung, die
-    Nebenwirkungen (neue Symptome = Konflikt) und die Aenderung des Momentmasses."""
+    Nebenwirkungen (neue Symptome = Konflikt) und die Aenderung von Kt."""
     import ema_maschinenart as MA
     geom = dict(payload.get("geom") or {})
     if not geom:
@@ -197,17 +251,17 @@ def pruefe(payload: dict, fest=(), merken: bool = False, quelle: str = "pruefe")
                         if g1.get(k) != geom.get(k)}
                 z.update(status="reicht_nicht" if kein else ("konflikt" if neu else "hilft"),
                          aenderung=aend, nachher=m1, neue_symptome=neu,
-                         moment_mass_pct=round(100.0 * (m1["moment_mass"] / m0["moment_mass"] - 1.0), 1),
-                         nuttiefe_pct=round(100.0 * (float(g1["slotDepth"]) / float(geom["slotDepth"]) - 1.0), 1))
+                         **_preise(geom, g1, m0, m1),
+                         _geom=g1)          # intern (Lernprogramm); fuer Ausgaben: ohne_intern()
             tr["hebel"].append(z)
         # Gewichtung AN DIESER MASCHINE: hilft vor Konflikt vor reicht nicht vor fest;
-        # innerhalb „hilft" der kleinste Momentverlust zuerst, dann der kleinste
-        # Verlust an Nuttiefe (Kupferquerschnitt).
+        # innerhalb „hilft" der kleinste Verlust an Spitzenmoment, dann an Kt, dann an
+        # Nuttiefe (Kupferquerschnitt).
         rang = {"hilft": 0, "konflikt": 1, "reicht_nicht": 2, "fest": 3}
         def _verlust(z, k):
             v = z.get(k)
             return -v if v is not None else 0.0
-        tr["hebel"].sort(key=lambda z: (rang[z["status"]], _verlust(z, "moment_mass_pct"),
+        tr["hebel"].sort(key=lambda z: (rang[z["status"]], _verlust(z, "moment_pct"), _verlust(z, "kt_pct"),
                                         _verlust(z, "nuttiefe_pct")))
         out["treffer"].append(tr)
         if merken:
@@ -216,8 +270,89 @@ def pruefe(payload: dict, fest=(), merken: bool = False, quelle: str = "pruefe")
                     beleg(eid, z["id"], z["status"], quelle=quelle,
                           daten={"vorher": m0[e["kennwert"]], "nachher": (z.get("nachher") or {}).get(e["kennwert"]),
                                  "neue_symptome": z.get("neue_symptome", []),
-                                 "moment_mass_pct": z.get("moment_mass_pct"), "aenderung": z.get("aenderung")})
+                                 "kt_pct": z.get("kt_pct"), "moment_pct": z.get("moment_pct"), "aenderung": z.get("aenderung")})
     return out
+
+
+def _teilweise(geom: dict, g1: dict, anteil: float) -> dict:
+    """``geom`` um ``anteil`` des Weges zu ``g1`` geschoben (Polpaare ganzzahlig, mindestens +1)."""
+    g = dict(geom)
+    for k in ("statorOD", "statorID", "rotorOD", "slotDepth"):
+        if g1.get(k) != geom.get(k):
+            g[k] = round(float(geom[k]) + anteil * (float(g1[k]) - float(geom[k])), 2)
+    if g1.get("p") != geom.get("p"):
+        dp = int(g1["p"]) - int(geom["p"])
+        g["p"] = int(geom["p"]) + max(1, round(anteil * dp))
+    return g
+
+
+def _dominiert(a: dict, b: dict) -> bool:
+    """``b`` ist in allen drei Preisen mindestens so gut wie ``a`` (und damit ``a`` nicht noetig)."""
+    ma, mb = a.get("moment_pct"), b.get("moment_pct")
+    if ma is not None and mb is not None and mb < ma - 1e-9:
+        return False
+    return (b["kt_pct"] >= a["kt_pct"] - 1e-9 and b["nuttiefe_pct"] >= a["nuttiefe_pct"] - 1e-9
+            and b["aussen_pct"] <= a["aussen_pct"] + 1e-9)
+
+
+def kombinationen(payload: dict, treffer: dict, fest=(), anteil: float = 0.5) -> list:
+    """Jedes geordnete Hebelpaar (A, B): A zu ``anteil`` seines Einzelweges, dann B so weit wie noetig.
+
+    ``treffer`` ist ein Eintrag aus ``pruefe(...)["treffer"]``. A braucht einen Einzelweg
+    (Status hilft oder Konflikt); B wird an der vorgeschobenen Geometrie neu gesucht.
+    Jedes Paar traegt ``pareto``: kein helfender Einzelhebel ist in Kt, Nuttiefe UND
+    Aussendurchmesser mindestens so gut."""
+    geom = dict(payload["geom"])
+    axial = float(geom.get("axialLen") or payload.get("axial_len") or 80.0)
+    e = ERFAHRUNGEN[treffer["id"]]
+    fest = {f.strip() for f in fest if f and f.strip()}
+    m0 = _messen(geom, axial)
+    einzeln = {z["id"]: z for z in treffer["hebel"]}
+    helfer = [z for z in treffer["hebel"] if z["status"] == "hilft"]
+    out = []
+    for ha in e["hebel"]:
+        za = einzeln.get(ha["id"]) or {}
+        if ha["param"] in fest or za.get("status") not in ("hilft", "konflikt") or "_geom" not in za:
+            continue
+        ga = _teilweise(geom, za["_geom"], anteil)
+        for hb in e["hebel"]:
+            if hb["id"] == ha["id"] or hb["param"] in fest:
+                continue
+            k = {"id": f"{ha['id']}+{hb['id']}", "a": ha["id"], "b": hb["id"], "anteil_a": anteil}
+            r = hb["fn"](ga, axial, e["behoben"])
+            kein = isinstance(r, dict) and r.get("_kein_treffer")
+            g1 = None if kein else r
+            if g1 is None:
+                k["status"] = "reicht_nicht"
+            else:
+                m1 = _messen(g1, axial)
+                neu = [s for s in _symptome(m1) if s not in _symptome(m0)]
+                k.update(status="konflikt" if neu else "hilft", neue_symptome=neu, nachher=m1,
+                         aenderung={x: (geom.get(x), g1.get(x)) for x in ("statorOD", "statorID", "rotorOD", "slotDepth", "p")
+                                    if g1.get(x) != geom.get(x)},
+                         **_preise(geom, g1, m0, m1), _geom=g1)
+                if k["status"] == "hilft":
+                    k["pareto"] = not any(_dominiert(k, h) for h in helfer)
+                    # Wie viel von B noch noetig ist, gemessen an B allein: 0,5 heisst
+                    # „die Haelfte A ersetzt die Haelfte B" (linear), darunter ergaenzen
+                    # sich die beiden, darueber stehen sie sich im Weg.
+                    zb = einzeln.get(hb["id"]) or {}
+                    if zb.get("status") in ("hilft", "konflikt") and hb["param"] != "p":
+                        d1 = float(zb["_geom"][hb["param"]]) - float(geom[hb["param"]])
+                        d2 = float(g1[hb["param"]]) - float(ga[hb["param"]])
+                        if abs(d1) > 1e-6:
+                            k["bedarf_b"] = round(d2 / d1, 3)
+            out.append(k)
+    return out
+
+
+def ohne_intern(x):
+    """Interne Schluessel (``_geom``) fuer Ausgabe und Ablage entfernen."""
+    if isinstance(x, dict):
+        return {k: ohne_intern(v) for k, v in x.items() if not str(k).startswith("_")}
+    if isinstance(x, list):
+        return [ohne_intern(v) for v in x]
+    return x
 
 
 # ── Belege und Zaehler (Laufzeitdaten) ───────────────────────────────────────
@@ -273,7 +408,7 @@ def als_text(r: dict) -> str:
             elif h.get("aenderung") is not None:
                 zeile += " ".join(f"{k} {a}→{b}" for k, (a, b) in h["aenderung"].items())
                 n = h["nachher"]
-                zeile += f"  | B_joch {n['B_joch']} T, B_zahn {n['B_zahn']} T, Momentmass {h['moment_mass_pct']:+.1f} %, Nuttiefe {h['nuttiefe_pct']:+.1f} %"
+                zeile += f"  | B_joch {n['B_joch']} T, B_zahn {n['B_zahn']} T, Spitzenmoment {h['moment_pct']:+.1f} %, Kt {h['kt_pct']:+.2f} %, Nuttiefe {h['nuttiefe_pct']:+.1f} %, Aussen {h['aussen_pct']:+.1f} %"
                 if h["neue_symptome"]:
                     zeile += "  | NEU: " + ", ".join(h["neue_symptome"])
                 if h["status"] == "reicht_nicht":
@@ -285,5 +420,5 @@ def als_text(r: dict) -> str:
             erf = t["erfahrung"].get(h["id"])
             if erf:
                 z.append(f"        bisher: hilft {erf['hilft']}× · Konflikt {erf['konflikt']}× · reicht nicht {erf['reicht_nicht']}×")
-    z.append("  Kein Tor: das sind Hinweise. Momentmass = B_gap·D_r²·L bei gleichem Strombelag, kein gerechnetes Moment.")
+    z.append("  Kein Tor: das sind Hinweise. Spitzenmoment an Strom-/Spannungsgrenze bei 1000 1/min (mit Reluktanz), Kt = Magnetanteil (1 Wdg/Nut, /p²).")
     return "\n".join(z)

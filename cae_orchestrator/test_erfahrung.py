@@ -65,10 +65,40 @@ def test_merken_zaehlt_je_hebel():
 
 def test_lernprogramm_schreibt_nur_belege_und_zaehlt():
     os.path.exists(E.BELEGE) and os.remove(E.BELEGE)
-    r = LP.lauf(n=40, seed=3, log=lambda t: None)
+    r = LP.lauf(n=40, seed=3, log=lambda t: None, ablage=_TMP, kombinieren=False)
     assert r["gueltig"] == 40 and r["gezogen"] >= 40
-    n = sum(sum(c.values()) for c in r["zaehler"]["statorjoch_saettigt"].values())
-    assert n == 4 * r["ausloeser"].get("statorjoch_saettigt", 0)
+    n = sum(sum(c.values()) for c in r["dieser_lauf"].get("statorjoch_saettigt", {}).values())
+    assert n == 4 * r["mit_symptom"]
+    assert os.path.exists(os.path.join(r["ordner"], "bericht.md"))
+
+
+def test_trainingsplan_kommt_reihum_an_jede_zelle():
+    r = LP.lauf(n=len(LP.trainingsplan()), seed=5, log=lambda t: None, ablage=_TMP, kombinieren=False)
+    assert all(v["gueltig"] == 1 for v in r["zellen"].values()), r["zellen"]
+    assert len(r["zellen"]) == len(LP.trainingsplan())
+
+
+def test_preis_ist_das_spitzenmoment_nicht_ein_momentmass():
+    """Kleinerer Laeufer bei festen Magneten: Kt bleibt fast stehen, das Spitzenmoment nicht."""
+    t = E.pruefe(_gesaettigt())["treffer"][0]
+    h = next(h for h in t["hebel"] if h["id"] == "rotor_kleiner")
+    assert abs(h["kt_pct"]) < 0.5 and h["moment_pct"] < -1.0, h
+
+
+def test_kombination_halb_und_halb():
+    p = _gesaettigt()
+    t = E.pruefe(p)["treffer"][0]
+    k = {x["id"]: x for x in E.kombinationen(p, t)}
+    sn = k["stator_groesser+nut_flacher"]
+    assert sn["status"] == "hilft" and 0.4 < sn["bedarf_b"] < 0.6
+    allein = next(h for h in t["hebel"] if h["id"] == "stator_groesser")
+    assert sn["aussen_pct"] < allein["aussen_pct"], "die Haelfte Nut spart Aussendurchmesser"
+
+
+def test_zeitplan_haelt_auswertung_frei():
+    r = LP.lauf(minuten=0.05, auswertung_anteil=0.5, seed=1, log=lambda t: None, ablage=_TMP, kombinieren=False)
+    assert r["ende"] in ("zeit", "stabil") and r["lern_sekunden"] <= 0.05 * 60 * 0.5 + 2.0
+    assert "deutungszeit_min" in r
 
 
 if __name__ == "__main__":

@@ -17,6 +17,16 @@ kann.
 
 ---
 
+## 2026-10-31 · Das Momentmaß der Erfahrungsdatenbank war falsch — der Fluss je Pol bleibt erhalten
+
+**Gefunden von der Preisprobe des Lernprogramms**, nicht beim Lesen: `ema_erfahrung` ordnete die Hebel nach einem Momentmaß `B_gap·D_r²·L` (gleicher Strombelag). Für „Rotor kleiner“ meldete es median −4,7 %, das nachgerechnete Kt +0,0 % (n=166), und die Rangfolge stimmte „zu 100 %“ — weil gerundet alle Kt gleich waren.
+
+**Gemessen** (frischer Payload, Restjoch 9 mm, Statorbohrung zieht mit): rotorOD 188,6 / 175 / 165 mm → `_analytical_Bgap` 0,630 / 0,679 / 0,719 T, Flussradius 94,65 / 87,85 / 82,85 mm, Kt ungerundet 0,04100 / 0,04099 / 0,04098. `B_gap·r` ist konstant: bei festen Magneten bleibt der Fluss je Pol erhalten, und Kt (1 Wdg/Nut) ist genau dieser Fluss. Das ist eine Eigenschaft des Modells und kein Rechenfehler; falsch war das Maß, das D² annahm. Was sich wirklich bewegt, ist das **Spitzenmoment** an der Strom-/Spannungsgrenze mit Reluktanzanteil (`moment_erreichbar`): 280,9 / 262,5 / 248,8 Nm.
+
+**Zwei Nebenbefunde.** (a) Kt aus `compute_performance` ist auf drei Stellen gerundet (`_eval_geom` auf vier) — für Hebelvergleiche unbrauchbar, `ema_erfahrung._kt` rechnet ungerundet. (b) Über die Polzahl ist das Haus-Kt nicht vergleichbar: es trägt `p²` (Brücke `ema_asm.k_norm = π k_w N_ph / p²`); ohne Teilung meldete „mehr Pole“ +309 % Kt bei gleichen Magneten.
+
+**Folge:** Preis ist jetzt Spitzenmoment (danach wird geordnet), Kt /p² ungerundet, Nuttiefe, Außendurchmesser. Gleichstände unter 0,1 % werden ausgewiesen statt einem Hebel zugeschlagen. Belege vor der Umstellung liegen in `~/cae_projekte/_lernen/erfahrung_belege_vor_kt.jsonl`.
+
 ## 2026-10-23 (e) · Die Umbenennung einer Methode liess `guete` die halbe FEM nicht mehr sehen
 
 **Beobachtung.** `test_db.py` wurde rot, nachdem `safety_factor_fem` von der
